@@ -2316,7 +2316,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
     script = step->StepToCtld().batch_meta().sh_script();
   else if (step->type == crane::grpc::Container &&
            step->StepToCtld().has_batch_meta())
-    // Container job primary step submitted via cbatch --container
+    // Container job primary step submitted via cbatch --pod
     script = step->StepToCtld().batch_meta().sh_script();
 
   std::optional<PodMetaInTask> pod_meta{std::nullopt};

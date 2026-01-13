@@ -317,6 +317,22 @@ cacct -t failed,cancelled
 cacct -t time-limit-exceeded
 ```
 
+**按作业类型过滤：**
+
+```bash
+# 仅查看容器作业
+cacct --type Container
+
+# 查看批处理作业
+cacct --type Batch
+
+# 查看交互式作业
+cacct --type Interactive
+```
+
+!!! tip "容器作业管理"
+    除基本查询外，更多容器专用操作参见 [ccon 命令手册](ccon.md)。
+
 ### 输出控制
 
 **限制输出到10行：**
@@ -392,3 +408,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [crun](crun.md) - 运行交互式作业和作业步
 - [ccancel](ccancel.md) - 取消作业和作业步
 - [ceff](ceff.md) - 查看作业效率统计
+- [ccon](ccon.md) - 容器作业管理

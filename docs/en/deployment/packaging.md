@@ -246,8 +246,6 @@ sudo apt install ./cranesched-plugin_*.deb
 - Plugin shared objects in `/usr/lib/crane/plugin/`:
 
     - `dummy.so` - Test plugin
-    - `energy.so` - Power consumption monitoring
-    - `event.so` - Node state event recording
     - `mail.so` - Job email notifications
     - `monitor.so` - Resource usage metrics collection
     - `powerControl.so` - Power management

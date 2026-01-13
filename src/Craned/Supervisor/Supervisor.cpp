@@ -18,7 +18,6 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include <fcntl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 
 #include <cxxopts.hpp>
@@ -138,6 +137,7 @@ int InitFromStdin(int argc, char** argv) {
       g_config.Container.BindFs.BindfsBinary = bindfs_conf.bindfs_binary();
       g_config.Container.BindFs.FusermountBinary =
           bindfs_conf.fusermount_binary();
+      g_config.Container.BindFs.MountBaseDir = bindfs_conf.mount_base_dir();
     }
   }
 

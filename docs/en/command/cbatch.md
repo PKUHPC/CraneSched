@@ -1,14 +1,14 @@
-# cbatch - Submit Batch Job
+# cbatch - Submit Batch Jobs
 
-**cbatch submits a batch script describing the entire computation process to the job scheduling system, assigns a job ID, and waits for the scheduler to allocate resources and execute it.**
+**cbatch primarily passes a script describing the entire computation process to the job scheduling system, assigns a job ID, and waits for the scheduler to allocate resources and execute it.**
 
-The CraneSched system requires users and accounts before submitting jobs. Please refer to the [cacctmgr tutorial](cacctmgr.md) for adding users and accounts.
+The CraneSched system requires users and accounts before submitting jobs. For adding users and accounts, see the [cacctmgr tutorial](cacctmgr.md).
 
 ## Quick Start
 
-Here's a simple single-node job example:
+First, let's introduce a simple single-node job example:
 
-The following job requests one node, one CPU core, and runs `hostname` on the compute node before exiting:
+The following job will request one node, one CPU core, and run `hostname` on the compute node before exiting:
 
 ```bash
 #!/bin/bash
@@ -30,7 +30,7 @@ Assuming the job script is saved as `cbatch_test.sh`, submit it using:
 cbatch cbatch_test.sh
 ```
 
-**cbatch Execution Results**
+**cbatch execution results:**
 
 ![cbatch](../../images/cbatch/cbatch_run1.png)
 
@@ -79,10 +79,18 @@ cbatch cbatch_test.sh
 - **--mail-user string**: Mail address of notification receiver
 
 ### Container Support
-- **--container string**: Path to container image
-- **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
+
+Container-related options are used to create Pod jobs that support container execution. For detailed usage, see [ccon Command Manual](ccon.md) and [Container Quick Start](../reference/container/quickstart.md).
+
+- **--pod**: Enable container mode, creating the job as a Pod job. Once enabled, use `ccon run` within the script to start containers
+- **--pod-name string**: Pod name (defaults to job name)
+- **--pod-port string**: Pod port mapping, format: `HOST:CONTAINER` or `PORT`. Can be used multiple times
+- **--pod-user string**: Run Pod as specified UID[:GID] (default: current user when `--pod-userns=false`)
+- **--pod-userns**: Enable Pod user namespace (default: `true`, maps container user to root)
+- **--pod-host-network**: Use host network namespace (default: `false`)
 
 ### Miscellaneous
+- **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
 - **-D, --chdir string**: Working directory of the job
 - **--extra-attr string**: Extra attributes of the job (JSON format)
 - **--repeat uint32**: Submit job multiple times (default: 1)
@@ -287,13 +295,6 @@ mpirun -n 13 -machinefile crane.hosts helloWorld > log
 
 ## Advanced Features
 
-### Container Support
-
-Submit a job that runs in a container:
-```bash
-cbatch --container /path/to/container.sif my_script.sh
-```
-
 ### Delayed Start
 
 Schedule a job to start at a specific time:
@@ -308,7 +309,7 @@ Submit a job in held state:
 cbatch --hold my_script.sh
 ```
 
-Release the held job using `ccontrol release <job_id>`.
+Use `ccontrol release <job_id>` to release held jobs.
 
 ### Email Notifications
 
@@ -331,9 +332,40 @@ Submit a simple command without creating a script file:
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
 
+### Container Jobs
+
+Use the `--pod` option to create Pod jobs that support containers:
+
+```bash
+#!/bin/bash
+#CBATCH --pod
+#CBATCH -N 2
+#CBATCH -c 4
+#CBATCH --mem 8G
+#CBATCH -p GPU
+#CBATCH --gres gpu:1
+#CBATCH -J container_training
+
+# Start containers within the Pod
+ccon run -d -v /data:/data pytorch/pytorch:latest -- python /data/train.py
+
+# Wait for all containers to complete
+ccon wait
+```
+
+Or specify container options via command line:
+
+```bash
+cbatch --pod --pod-name my-training --pod-host-network train_job.sh
+```
+
+For more container usage examples, see [Container Usage Examples](../reference/container/examples.md).
+
 ## See Also
 
 - [cqueue](cqueue.md) - View job queue
 - [ccancel](ccancel.md) - Cancel jobs
 - [cacct](cacct.md) - View job accounting information
 - [ccontrol](ccontrol.md) - Control jobs and system resources
+- [ccon](ccon.md) - Container job management
+- [Container Overview](../reference/container/index.md) - Container feature introduction

@@ -190,7 +190,7 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
   }
 
-  // cbatch --container: Pod
+  // cbatch --pod: Pod
   // ccon (standalone): Pod + Container
   // ccon (nested): Container (StepToCtld only)
   optional PodTaskAdditionalMeta pod_meta = 23;

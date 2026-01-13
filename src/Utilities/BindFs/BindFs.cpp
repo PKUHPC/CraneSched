@@ -6,6 +6,7 @@
 #include <sys/statfs.h>
 #include <unistd.h>
 
+#include <array>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -189,7 +190,7 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
 
   if (!lock_exists) {
     // Create parent directories if not exist
-    // e.g., /mnt/crane (root, 700)
+    // e.g., <mount_base_dir> (root, 700)
     //           - <uid> (user, 700)
     //             - <hash> (mount point)
     fs::create_directories(m_target_, ec);
@@ -210,7 +211,7 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
                                          strerror(errno)));
     }
 
-    parent_path = parent_path.parent_path();  // /mnt/crane
+    parent_path = parent_path.parent_path();  // <mount_base_dir>
     fs::permissions(parent_path, fs::perms::owner_all, ec);
     if (ec) {
       return std::unexpected(std::format("Failed to chmod directory {}: {}",
@@ -397,7 +398,8 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
                                const PasswordEntry& pwd, uid_t kuid, gid_t kgid,
                                uid_t uid_offset, gid_t gid_offset,
                                std::filesystem::path bindfs_bin,
-                               std::filesystem::path fusermount_bin)
+                               std::filesystem::path fusermount_bin,
+                               std::filesystem::path mount_base_dir)
     : m_kuid_(kuid),
       m_kgid_(kgid),
       m_uid_offset_(uid_offset),
@@ -405,6 +407,7 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
       m_user_(pwd.Username()),
       m_bindfs_bin_(std::move(bindfs_bin)),
       m_fusermount_bin_(std::move(fusermount_bin)),
+      m_mount_base_dir_(std::move(mount_base_dir)),
       m_source_(std::move(source)) {
   // bindfs only support directory.
   if (!std::filesystem::exists(m_source_) ||
@@ -418,17 +421,27 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
     throw std::runtime_error("Invalid PasswordEntry");
   }
 
-  struct group* grp = getgrgid(kgid);
-  if (grp != nullptr) {
-    m_group_ = std::string(grp->gr_name);
-  } else {
+  if (m_mount_base_dir_.empty())
+    m_mount_base_dir_ = std::filesystem::path(kBindFsMountBaseDir);
+  if (m_mount_base_dir_.is_relative()) {
+    throw std::runtime_error(
+        std::format("Bindfs mount base dir must be absolute: {}",
+                    m_mount_base_dir_.string()));
+  }
+
+  struct group grp{};
+  std::array<char, 4096> buf{};
+  struct group* grpp = nullptr;
+  if (getgrgid_r(kgid, &grp, buf.data(), buf.size(), &grpp) != 0 ||
+      grpp == nullptr) {
     throw std::runtime_error(
         std::format("Failed to get group name for gid: {}", kgid));
   }
+  m_group_ = std::string(grp.gr_name);
 
-  // e.g., /mnt/crane/1000/9f8b7c6d5e4f3a2b
-  m_target_ = std::filesystem::path(kBindFsMountBaseDir) /
-              std::to_string(m_kuid_) / GetHashedMountPoint_();
+  // e.g., <mount_base_dir>/1000/9f8b7c6d5e4f3a2b
+  m_target_ =
+      m_mount_base_dir_ / std::to_string(m_kuid_) / GetHashedMountPoint_();
   m_target_lock_ = std::filesystem::path(m_target_.string() + ".lock");
 
   auto result = CreateMountPoint_();

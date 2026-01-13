@@ -189,3 +189,4 @@ Container:
     Enabled: false
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
+    MountBaseDir: /mnt/crane

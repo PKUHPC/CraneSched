@@ -58,6 +58,7 @@ nav:
       - CentOS 7: deployment/backend/CentOS7.md
       - eBPF Support: deployment/backend/eBPF.md
     - Packaging Guide: deployment/packaging.md
+    - Container Deployment: deployment/container.md
     - Configuration:
       - Cluster Configuration: deployment/configuration/config.md
       - Database Configuration: deployment/configuration/database.md
@@ -77,6 +78,8 @@ nav:
     - Job Control:
         - ccancel: command/ccancel.md
         - ccontrol: command/ccontrol.md
+    - Container:
+        - ccon: command/ccon.md
     - Account Management:
         - cacctmgr: command/cacctmgr.md
   - Reference:
@@ -89,6 +92,12 @@ nav:
     - License Usage Guide: reference/license_guide.md
     - Keepalived Guide: reference/keepalived.md
     - Lua Guide: reference/lua_guide.md
+    - Container Support:
+        - Overview: reference/container/index.md
+        - Concepts: reference/container/concepts.md
+        - Quick Start: reference/container/quickstart.md
+        - Examples: reference/container/examples.md
+        - Troubleshooting: reference/container/troubleshooting.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -116,10 +125,11 @@ plugins:
             Frontend: 前端
             Backend: 后端
             Configuration: 配置
-            Commands: 命令参考
+            Commands: 命令手册
             Job Submission: 作业提交
             Job Monitoring: 作业查询
             Job Control: 作业控制
+            Container: 容器
             Account Management: 账户管理
             Reference: 参考文档
             Exit Codes: 退出代码
@@ -134,6 +144,10 @@ plugins:
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
+            Concepts: 核心概念
+            Quick Start: 快速上手
+            Examples: 使用示例
+            Troubleshooting: 故障排除
             # Parameter Sweep with Job Arrays: 参数扫描作业数组
             # Chained Jobs with Dependencies: 带依赖的作业链
             Rocky Linux 9: Rocky Linux 9
@@ -147,6 +161,7 @@ plugins:
             Multi-node Deployment: 多节点部署
             PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
+            Container Deployment: 容器功能部署
             Plugins: 插件
         - locale: en
           name: English

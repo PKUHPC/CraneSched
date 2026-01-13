@@ -90,6 +90,21 @@ option(CRANE_WITH_LUA "Enable lua" OFF)
 
 # Options end here -------------------------------------------------------------------------------
 
+# Default install prefix to /usr when not explicitly provided so the generated
+# systemd units and packaged binaries resolve to the same absolute paths.
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
+    message(WARNING "CMAKE_INSTALL_PREFIX not set; defaulting to ${CMAKE_INSTALL_PREFIX}. Pass -DCMAKE_INSTALL_PREFIX=... to override.")
+endif ()
+message(STATUS "Installation prefix: ${CMAKE_INSTALL_PREFIX}")
+
+# Keep CPack packaging prefix aligned with the install prefix so RPM/DEB
+# packaging does not diverge from the configured paths.
+if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif ()
+message(STATUS "CPack packaging installation prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}")
+
 if (CRANE_ENABLE_BPF AND NOT CRANE_ENABLE_CGROUP_V2)
     message(FATAL_ERROR "CRANE_ENABLE_BPF requires CRANE_ENABLE_CGROUP_V2 to be enabled.")
 endif ()
@@ -135,11 +150,6 @@ else ()
 endif ()
 
 set(CMAKE_CXX_STANDARD 23)
-
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/usr/local" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
-endif ()
-message(STATUS "Install prefix is set to ${CMAKE_INSTALL_PREFIX}")
 
 # Set the minimal log level based on the build type if it has not been explicitly set by the user
 if (CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
