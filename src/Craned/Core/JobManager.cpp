@@ -55,12 +55,31 @@ EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
+  auto nodelist = daemon_step_to_d.nodelist();
+  auto node_id_to_str = [nodelist]() -> std::string {
+    auto it = std::ranges::find(nodelist, g_config.Hostname);
+    if (it == nodelist.end()) {
+      return "-1";
+    }
+    return std::to_string(static_cast<uint32_t>(it - nodelist.begin()));
+  };
+
+  auto alloc_node_num = daemon_step_to_d.nodelist().size();
+  auto mem_in_node =
+      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
+      (static_cast<uint64_t>(1024 * 1024));
+
+  auto cpus_on_node =
+      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
+  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
+                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
+                         : 0.0;
+
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 
   auto time_limit_dur =
       std::chrono::seconds(daemon_step_to_d.time_limit().seconds()) +
       std::chrono::nanoseconds(daemon_step_to_d.time_limit().nanos());
-
   env_map.emplace(
       "CRANE_JOB_END_TIME",
       std::to_string((std::chrono::system_clock::now() + time_limit_dur)
@@ -74,7 +93,22 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
-
+  env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.submit_dir());
+  env_map.emplace("CRANE_CPUS_PER_TASK",
+                  std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
+  env_map.insert_or_assign("CRANE_MEM_PER_NODE",
+                           std::format("{}M", mem_in_node));
+  env_map.emplace("CRANE_NTASKS_PER_NODE",
+                  std::to_string(daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
+  env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
+  env_map.emplace(
+      "CRANE_NTASKS",
+      std::to_string(alloc_node_num * daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
+  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  env_map.emplace("CRANE_NODEID", node_id_to_str());
+  env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
   return env_map;
 }
 
@@ -111,7 +145,7 @@ JobManager::JobManager() {
         EvCheckSupervisorRunning_();
       });
   m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0ms},
-                                          std::chrono::milliseconds{500ms});
+                                          std::chrono::milliseconds{1000ms});
 
   // gRPC Alloc step Event
   m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -283,7 +317,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
   CRANE_TRACE("Allocating step [{}].",
               absl::StrJoin(steps | std::views::transform(GetStepIdStr), ","));
 
-  for (const auto& step : steps) {
+  for (auto& step : steps) {
     auto job_ptr = m_job_map_.GetValueExclusivePtr(step.job_id());
     if (!job_ptr) {
       CRANE_WARN("Try to allocate step for nonexistent job#{}, ignoring it.",
@@ -458,15 +492,13 @@ CraneErrCode JobManager::KillPid_(pid_t pid, int signum) {
   CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
 
   // Send the signal to the whole process group.
-  int err = kill(-pid, signum);
-
-  if (err == 0)
+  if (int err = kill(-pid, signum); err == 0) {
     return CraneErrCode::SUCCESS;
-  else {
-    std::error_code ec(errno, std::system_category());
-    CRANE_TRACE("kill failed. error: {}", ec.message());
-    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
+
+  std::error_code ec(errno, std::system_category());
+  CRANE_TRACE("kill failed. error: {}", ec.message());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 void JobManager::SetSigintCallback(std::function<void()> cb) {
@@ -555,6 +587,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(job_id);
+    init_req.set_job_name(job->job_to_d.name());
     init_req.set_step_id(step_id);
     init_req.set_debug_level(g_config.Supervisor.DebugLevel);
     init_req.set_craned_id(g_config.CranedIdOfThisNode);
@@ -591,6 +624,15 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
+      if (g_config.Container.BindFs.Enabled) {
+        auto* bindfs_conf = container_conf->mutable_bindfs();
+        bindfs_conf->set_bindfs_binary(
+            g_config.Container.BindFs.BindfsBinary.string());
+        bindfs_conf->set_fusermount_binary(
+            g_config.Container.BindFs.FusermountBinary.string());
+        bindfs_conf->set_mount_base_dir(
+            g_config.Container.BindFs.MountBaseDir.string());
+      }
     }
 
     if (g_config.Plugin.Enabled) {
@@ -659,60 +701,28 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
 
-    // Message will send to stdin of Supervisor for its init.
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(craned_supervisor_fd, STDIN_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdin: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdin: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(supervisor_craned_fd, STDOUT_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdout: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdout: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-    close(craned_supervisor_fd);
-    close(supervisor_craned_fd);
-
-    util::os::CloseFdFrom(3);
+    util::os::CloseFdFromExcept(3,
+                                {craned_supervisor_fd, supervisor_craned_fd});
 
     // Prepare the command line arguments.
+    std::vector<std::string> string_argv;
     std::vector<const char*> argv;
 
     // Argv[0] is the program name which can be anything.
     auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
-    argv.emplace_back(supv_name.c_str());
-    argv.push_back(nullptr);
-    fmt::print(
-        stderr, "[{}] [Step #{}.{}]: Executing supervisor\n",
-        std::chrono::current_zone()->to_local(std::chrono::system_clock::now()),
-        job_id, step_id);
+    string_argv.emplace_back(supv_name.c_str());
+    string_argv.push_back("--input-fd");
+    string_argv.push_back(std::to_string(craned_supervisor_fd));
+    string_argv.push_back("--output-fd");
+    string_argv.push_back(std::to_string(supervisor_craned_fd));
+    argv.reserve(string_argv.size());
+    for (auto& arg : string_argv) {
+      argv.push_back(arg.c_str());
+    }
+    argv.push_back(nullptr);  // argv must be null-terminated.
+    fmt::print(stderr,
+               "[{:%Y-%m-%d %H:%M:%S}] [Step #{}.{}]: Executing supervisor\n",
+               std::chrono::system_clock::now(), job_id, step_id);
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),
@@ -916,7 +926,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_ptr.get();
 
   // Check if the step is acceptable.
-  // TODO: Is this check necessary?
+  // We keep this container check here in case we support enabling/disabling
+  // container functionality on parts of nodes in the future.
   if (step->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
@@ -966,11 +977,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
-    // process. Now we put the child pid into index maps. SIGCHLD sent just
-    // after fork() and before putting pid into maps will repeatedly be sent
-    // by timer and eventually be handled once the SIGCHLD processing callback
-    // sees the pid in index maps. Now we do not support launch multiple tasks
-    // in a job.
+    // process.
     CRANE_TRACE("[Step #{}.{}] Supervisor spawned successfully.", job_id,
                 step_id);
   }
@@ -1002,7 +1009,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
 void JobManager::ActivateTaskStatusChangeAsync_(
     job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
     uint32_t exit_code, std::optional<std::string> reason,
-    google::protobuf::Timestamp timestamp) {
+    const google::protobuf::Timestamp& timestamp) {
   StepStatusChangeQueueElem status_change{.job_id = job_id,
                                           .step_id = step_id,
                                           .new_status = new_status,
@@ -1250,8 +1257,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
                     step->step_id);
       } else {
-        CRANE_TRACE("[Step #{}.{}] Shutting down supervisor.", step->job_id,
-                    step->step_id);
+        CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
+                    step->job_id, step->step_id);
         auto err = stub->ShutdownSupervisor();
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR(
@@ -1294,11 +1301,10 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
   }
 }
 
-void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                                       crane::grpc::TaskStatus new_status,
-                                       uint32_t exit_code,
-                                       std::optional<std::string> reason,
-                                       google::protobuf::Timestamp timestamp) {
+void JobManager::StepStatusChangeAsync(
+    job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+    uint32_t exit_code, std::optional<std::string> reason,
+    const google::protobuf::Timestamp& timestamp) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,

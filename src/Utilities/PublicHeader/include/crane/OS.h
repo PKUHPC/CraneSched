@@ -18,15 +18,12 @@
 
 #pragma once
 
+#include <absl/time/time.h>
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <filesystem>
-
-#include "crane/Logger.h"
-#include "crane/OS.h"
 
 struct SystemRelInfo {
   std::string name;
@@ -40,15 +37,15 @@ struct NodeSpecInfo {
   double memory_gb;
 };
 
-namespace util {
-
-namespace os {
+namespace util::os {
 
 bool GetNodeInfo(NodeSpecInfo* info);
 
 bool DeleteFile(std::string const& p);
 
 bool DeleteFolders(std::string const& p);
+
+bool CreateFile(std::string const& p);
 
 bool CreateFolders(std::string const& p);
 
@@ -66,6 +63,10 @@ void CloseFdRange(int fd_begin, int fd_end);
 // This may be slow if fd_max is too large.
 void CloseFdFrom(int fd_begin);
 
+// Close file descriptors from fd_begin to the max fd except for `skip_fds`.
+// This may be slow if fd_max is too large.
+void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds);
+
 // Set close-on-exec flag on [fd_begin, fd_end).
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 
@@ -73,14 +74,15 @@ void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 // This may be slow if fd_max is too large.
 void SetCloseOnExecFromFd(int fd_begin);
 
-bool SetMaxFileDescriptorNumber(unsigned long num);
+bool SetMaxFileDescriptorNumber(uint64_t num);
 
 bool GetSystemReleaseInfo(SystemRelInfo* info);
 
 bool CheckProxyEnvironmentVariable();
 
+bool CheckUserHasPermission(uid_t uid, gid_t gid,
+                            std::filesystem::path const& p);
+
 absl::Time GetSystemBootTime();
 
-}  // namespace os
-
-}  // namespace util
+}  // namespace util::os

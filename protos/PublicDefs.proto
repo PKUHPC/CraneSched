@@ -132,6 +132,35 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+enum DependencyType {
+  AFTER = 0;
+  AFTER_ANY = 1;
+  AFTER_OK = 2;
+  AFTER_NOT_OK = 3;
+}
+
+message DependencyCondition {
+  uint32 job_id = 1;
+  DependencyType type = 2;
+  uint64 delay_seconds = 3;
+}
+
+message Dependencies {
+  repeated DependencyCondition deps = 1;
+  bool is_or = 2;
+}
+
+message DependencyStatus {
+  repeated DependencyCondition pending = 1;
+  bool is_or = 2;
+
+  oneof ready_time_type {
+    google.protobuf.Timestamp ready_time = 3;
+    bool infinite_future = 4;
+    bool infinite_past = 5;
+  }
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -154,11 +183,18 @@ message TaskToCtld {
 
   uint32 gid = 14;  // egid
 
+  Dependencies dependencies = 15;
+
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
-    ContainerTaskAdditionalMeta container_meta = 23;
   }
+
+  // cbatch --pod: Pod
+  // ccon (standalone): Pod + Container
+  // ccon (nested): Container (StepToCtld only)
+  optional PodTaskAdditionalMeta pod_meta = 23;
+  optional ContainerTaskAdditionalMeta container_meta = 24;
 
   string extra_attr = 30;
 
@@ -181,6 +217,10 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+  optional string wckey = 42;
+  string submit_hostname = 43;
+  string submit_dir = 44;
+  optional uint64 mem_per_cpu = 45;
 }
 
 message TaskInEmbeddedDb {
@@ -234,8 +274,10 @@ message StepToCtld {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
-    ContainerTaskAdditionalMeta container_meta = 23;
   }
+
+  // Step <-> Container
+  optional ContainerTaskAdditionalMeta container_meta = 24;
 
   string extra_attr = 30;
 
@@ -245,7 +287,7 @@ message StepToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
+  optional uint64 mem_per_cpu = 36;
 }
 
 message RuntimeAttrOfStep {
@@ -293,6 +335,8 @@ message JobToD {
   string account = 6;
   string qos = 7;
   StepToD daemon_step = 8;
+
+  string name = 9;
 }
 
 enum StepType {
@@ -315,7 +359,8 @@ message StepToD {
   // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;
   optional InteractiveTaskAdditionalMeta interactive_meta = 10;
-  optional ContainerTaskAdditionalMeta container_meta = 11;
+  optional PodTaskAdditionalMeta pod_meta = 11;
+  optional ContainerTaskAdditionalMeta container_meta = 12;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -335,6 +380,9 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  string submit_hostname = 26;
+  uint32 total_gpus = 27;
+  string submit_dir = 28;
 
   // Not used now.
   string extra_attr = 29;
@@ -381,7 +429,60 @@ message InteractiveTaskAdditionalMeta {
   optional uint32 input_task_id = 8;
 }
 
+message PodTaskAdditionalMeta {
+  string name = 1;  // Pod name, will use to generate hostname
+
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  enum NamespaceMode {
+    POD = 0;
+    CONTAINER = 1;
+    NODE = 2;
+    TARGET = 3;
+  }
+
+  message NamespaceOption {
+    NamespaceMode network = 1;
+    NamespaceMode pid = 2;
+    NamespaceMode ipc = 3;
+    string target_id = 4;
+    // UserNamespace userns_options = 5;
+    // NOTE: UserNamespace is handled by backend only.
+  }
+
+  NamespaceOption namespace = 4;
+
+  // Runtimes only support userns in Pod level.
+  // RunAsUser and RunAsGroup is also limited to Pod.
+  // (But can be extended to Container level)
+  bool userns = 5;
+  uint32 run_as_user = 6;
+  uint32 run_as_group = 7;
+
+  message PortMapping {
+    enum Protocol {
+      TCP = 0;
+      UDP = 1;
+      SCTP = 2;
+    }
+
+    Protocol protocol = 1;
+    int32 container_port = 2;
+    int32 host_port = 3;
+    string host_ip = 4;
+  }
+
+  repeated PortMapping ports = 11;
+  // DNSConfig dns_config = 12;
+  // NOTE: DNSConfig is handled by backend only.
+}
+
 message ContainerTaskAdditionalMeta {
+  string name = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
   message ImageInfo {
     string image = 1;
     string username = 2;
@@ -389,10 +490,6 @@ message ContainerTaskAdditionalMeta {
     string server_address = 4;
     string pull_policy = 5;
   }
-
-  string name = 1;
-  map<string, string> labels = 2;
-  map<string, string> annotations = 3;
 
   ImageInfo image = 6;
 
@@ -406,12 +503,7 @@ message ContainerTaskAdditionalMeta {
   bool stdin = 17;
   bool stdin_once = 18;
 
-  bool userns = 21;
-  uint32 run_as_user = 22;
-  uint32 run_as_group = 23;
-
   map<string, string> mounts = 24;
-  map<int32, int32> ports = 25;
 }
 
 message TaskInfo {
@@ -445,11 +537,12 @@ message TaskInfo {
 
   // This is only used when querying Container tasks.
   // For other types of tasks, this field is ignored.
-  optional ContainerTaskAdditionalMeta container_meta = 23;
+  optional PodTaskAdditionalMeta pod_meta = 23;
   repeated StepInfo step_info_list = 24;
-  /* 25-29 Reserved */
+  /* 25-28 Reserved */
 
   // Dynamic task information
+  optional DependencyStatus dependency_status = 29;
   bool held = 30;
   TaskStatus status = 31;
 
@@ -468,6 +561,8 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  string wckey = 41;
+  map<string, string> env = 42;
 }
 
 message StepInfo {
@@ -689,9 +784,21 @@ enum ErrCode {
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
-  ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
-  ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
-  ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
+  ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
+
+  ERR_INVALID_MEM_FORMAT = 84;  // Invalid mem format when parsing mem
+  ERR_STEP_RES_BEYOND = 85;     // Step resource request exceeds job resource.
+
+  ERR_INVALID_WCKEY = 86;
+  ERR_WCKEY_ALREADY_EXISTS = 87;
+  ERR_INVALID_CLUSTER = 88;
+  ERR_DEL_DEFAULT_WCKEY = 89;
+  ERR_NO_DEFAULT_WCKEY = 90;
+
+  ERR_MISSING_DEPENDENCY = 91;
+  ERR_DB_INSERT_FAILED = 92;
+  ERR_LUA_FAILED = 93;
 }
 
 enum EntityType {
@@ -720,6 +827,8 @@ enum ModifyField {
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  // wckey
+  DefaultWckey = 40;
 }
 
 message AccountInfo {
@@ -775,6 +884,19 @@ message QosInfo {
   uint64 max_time_limit_per_task = 6;
 }
 
+message QueryWckeyInfo {
+  string name = 1;
+  string cluster = 2;
+  string user_name = 3;
+  bool is_default = 4;
+}
+
+message WckeyInfo {
+  string name = 1;
+  string user_name = 2;
+  bool is_default = 3;
+}
+
 message TimeInterval {
   google.protobuf.Timestamp lower_bound = 1;
   google.protobuf.Timestamp upper_bound = 2;
@@ -819,6 +941,7 @@ enum TxnAction {
   ModifyQos = 7;
   DeleteQos = 8;
 }
+
 message LicenseInfo {
   string name = 1;
   uint32 total = 2;

@@ -407,6 +407,16 @@ void ParseConfig(int argc, char** argv) {
       g_config.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("Cluster name is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("Cluster name is empty.");
+        std::exit(1);
+      }
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -652,6 +662,24 @@ void ParseConfig(int argc, char** argv) {
                 fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
+
+            if (container_config["BindFs"]) {
+              const auto& bindfs_config = container_config["BindFs"];
+              g_config.Container.BindFs.Enabled =
+                  YamlValueOr<bool>(bindfs_config["Enabled"], false);
+              g_config.Container.BindFs.BindfsBinary =
+                  bindfs_config["BindfsBinary"].as<std::string>();
+              g_config.Container.BindFs.FusermountBinary =
+                  bindfs_config["FusermountBinary"].as<std::string>();
+              std::filesystem::path mount_base_dir =
+                  YamlValueOr(bindfs_config["MountBaseDir"],
+                              g_config.Container.BindFs.MountBaseDir.string());
+              if (mount_base_dir.is_relative()) {
+                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+              }
+              g_config.Container.BindFs.MountBaseDir =
+                  std::move(mount_base_dir);
+            }
           }
         }
       }
@@ -927,8 +955,9 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
   // It is always ok to create thread pool first.
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+  g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("BsThreadPool"); });
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
@@ -1061,8 +1090,6 @@ void StartServer() {
 
   GlobalVariableInit();
 
-  // Set FD_CLOEXEC on stdin, stdout, stderr
-  util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
   g_ctld_client->StartGrpcCtldConnection();

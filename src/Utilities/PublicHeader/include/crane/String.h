@@ -94,9 +94,9 @@ void SetCurrentThreadName(const std::string& name);
 
 bool ConvertStringToInt64(const std::string& s, int64_t* val);
 
+std::string ReadableResourceView(const ResourceView& resource);
 std::string ReadableTypedDeviceMap(const DeviceMap& dedicated_resource);
 std::string ReadableDresInNode(const ResourceInNode& dedicated_resource);
-
 std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode& dres_in_node);
 
@@ -207,4 +207,6 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
 };  // namespace Internal
 
 std::string StepStatusToString(const crane::grpc::TaskStatus& status);
+
+int TimeStr2Mins(std::string_view input);
 }  // namespace util

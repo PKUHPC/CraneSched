@@ -26,6 +26,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/Crane.pb.h"
@@ -394,6 +395,96 @@ bool TaskScheduler::Init() {
   }
   for (auto& [job_id, job] : recovered_running_tasks)
     PutRecoveredTaskIntoRunningQueueLock_(std::move(job));
+
+  {
+    std::unordered_map<
+        task_id_t,
+        std::vector<std::pair<task_id_t, crane::grpc::DependencyType>>>
+        dependee_to_dependents;
+
+    for (const auto& [job_id, job] : m_pending_task_map_) {
+      for (const auto& [dep_id, dep_info] : job->Dependencies().deps) {
+        const auto& [dep_type, delay_seconds] = dep_info;
+        dependee_to_dependents[dep_id].emplace_back(job_id, dep_type);
+      }
+    }
+
+    std::unordered_set<task_id_t> missing_dependee_ids;
+
+    for (const auto& [dependee_id, dependents] : dependee_to_dependents) {
+      if (m_pending_task_map_.contains(dependee_id)) {
+        for (const auto& dep_info : dependents) {
+          m_pending_task_map_.at(dependee_id)
+              ->AddDependent(dep_info.second, dep_info.first);
+        }
+      } else if (m_running_task_map_.contains(dependee_id)) {
+        for (const auto& dep_info : dependents) {
+          m_running_task_map_.at(dependee_id)
+              ->AddDependent(dep_info.second, dep_info.first);
+        }
+        continue;
+      } else {
+        missing_dependee_ids.insert(dependee_id);
+      }
+    }
+
+    if (!missing_dependee_ids.empty()) {
+      CRANE_INFO("Querying MongoDB for {} missing dependee job(s)",
+                 missing_dependee_ids.size());
+
+      auto dependee_status_map =
+          g_db_client->FetchJobStatus(missing_dependee_ids);
+
+      for (auto& [job_id, job] : m_pending_task_map_) {
+        for (const auto& [dep_id, dep_info] : job->Dependencies().deps) {
+          if (!missing_dependee_ids.contains(dep_id)) continue;
+
+          const auto& [dep_type, delay_seconds] = dep_info;
+          absl::Time event_time = absl::InfiniteFuture();
+          auto it = dependee_status_map.find(dep_id);
+          if (it != dependee_status_map.end()) {
+            const auto& [status, exit_code, time_end, time_start] = it->second;
+
+            switch (dep_type) {
+            case crane::grpc::DependencyType::AFTER:
+              if (time_start != 0) {
+                event_time = absl::FromUnixSeconds(time_start);
+              } else if (status == crane::grpc::Cancelled) {
+                event_time = absl::FromUnixSeconds(time_end);
+              } else {
+                CRANE_ERROR(
+                    "Dependee Job #{} ended without start or cancel time.",
+                    dep_id);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_ANY:
+              if (time_end != 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              } else {
+                event_time = absl::Now();
+                CRANE_ERROR("Dependee Job #{} ended without end time.", dep_id);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_OK:
+              if (status == crane::grpc::Completed && exit_code == 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_NOT_OK:
+              if (exit_code != 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              }
+              break;
+            }
+          } else {
+            CRANE_WARN("Dependee Job #{} not found in database.", dep_id);
+          }
+
+          AddDependencyEvent(job_id, dep_id, event_time);
+        }
+      }
+    }
+  }
 
   std::vector<step_db_id_t> purged_step_db_ids;
   for (auto& steps : invalid_steps | std::views::values) {
@@ -801,6 +892,23 @@ void TaskScheduler::ScheduleThread_() {
       // We use the time now as the base time across the whole algorithm.
       absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
+      std::vector<DependencyEvent> dep_events;
+      size_t approx_size = m_dependency_event_queue_.size_approx();
+      if (approx_size > 0) {
+        dep_events.resize(approx_size);
+        size_t actual_size = m_dependency_event_queue_.try_dequeue_bulk(
+            dep_events.begin(), approx_size);
+        dep_events.resize(actual_size);
+
+        for (const auto& event : dep_events) {
+          auto it = m_pending_task_map_.find(event.dependent_job_id);
+          if (it != m_pending_task_map_.end()) {
+            it->second->UpdateDependency(event.dependee_job_id,
+                                         event.event_time);
+          }
+        }
+      }
+
       std::vector<std::unique_ptr<PdJobInScheduler>> pending_jobs;
       pending_jobs.reserve(m_pending_task_map_.size());
       for (auto& it : m_pending_task_map_) {
@@ -811,6 +919,14 @@ void TaskScheduler::ScheduleThread_() {
         }
         if (job->begin_time > now) {
           job->pending_reason = "BeginTime";
+          continue;
+        }
+        if (!job->Dependencies().is_met(now)) {
+          if (job->Dependencies().is_failed()) {
+            job->pending_reason = "DependencyNeverSatisfied";
+          } else {
+            job->pending_reason = "Dependency";
+          }
           continue;
         }
 
@@ -1026,11 +1142,13 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
 
-      // Job primary steps
+      // Map for AllocJobs rpc.
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
+      // Map for AllocSteps rpc.
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
+
       std::vector<StepInCtld*> step_in_ctld_vec;
 
       Mutex thread_pool_mtx;
@@ -1218,6 +1336,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // Set succeed tasks status and do callbacks.
       for (auto& job : jobs_created) {
+        job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                     job->StartTime());
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
       }
@@ -1324,6 +1444,7 @@ void TaskScheduler::StepScheduleThread_() {
             CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
           }
         }
+
         for (auto job_id : jobs_to_remove) {
           m_job_pending_step_num_map_.erase(job_id);
         }
@@ -1403,10 +1524,10 @@ void TaskScheduler::StepScheduleThread_() {
   }
 }
 
-std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
+std::future<CraneExpected<task_id_t>> TaskScheduler::SubmitTaskAsync(
     std::unique_ptr<TaskInCtld> task) {
-  std::promise<task_id_t> promise;
-  std::future<task_id_t> future = promise.get_future();
+  std::promise<CraneExpected<task_id_t>> promise;
+  std::future<CraneExpected<task_id_t>> future = promise.get_future();
 
   m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
@@ -1559,8 +1680,59 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
-    std::unique_ptr<TaskInCtld> task) {
+std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(
+    TaskInCtld* task) {
+  if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
+  return g_lua_pool->ExecuteLuaScript([task]() {
+    return LuaJobHandler::JobSubmit(g_config.JobSubmitLuaScript, task);
+  });
+}
+
+void TaskScheduler::JobModifyLuaCheck(
+    const crane::grpc::ModifyTaskRequest& request,
+    crane::grpc::ModifyTaskReply* response, std::list<task_id_t>* task_ids) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  std::vector<std::pair<task_id_t, std::future<CraneRichError>>> futures;
+  futures.reserve(request.task_ids().size());
+  for (const auto task_id : request.task_ids()) {
+    auto pd_iter = m_pending_task_map_.find(task_id);
+    if (pd_iter != m_pending_task_map_.end()) {
+      auto fut = g_lua_pool->ExecuteLuaScript([pd_iter]() {
+        return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript,
+                                        pd_iter->second.get());
+      });
+      futures.emplace_back(task_id, std::move(fut));
+      continue;
+    }
+
+    auto rn_iter = m_running_task_map_.find(task_id);
+    if (rn_iter != m_running_task_map_.end()) {
+      auto fut = g_lua_pool->ExecuteLuaScript([rn_iter]() {
+        return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript,
+                                        rn_iter->second.get());
+      });
+      futures.emplace_back(task_id, std::move(fut));
+    }
+  }
+
+  for (auto& [task_id, fut] : futures) {
+    auto rich_err = fut.get();
+    if (rich_err.code() != CraneErrCode::SUCCESS) {
+      response->add_not_modified_tasks(task_id);
+      if (rich_err.description().empty())
+        response->add_not_modified_reasons(CraneErrStr(rich_err.code()));
+      else
+        response->add_not_modified_reasons(rich_err.description());
+    } else {
+      task_ids->emplace_back(task_id);
+    }
+  }
+}
+
+CraneExpected<std::future<CraneExpected<task_id_t>>>
+TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!task->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);
@@ -1620,7 +1792,7 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
       return std::unexpected(res);
     }
-    std::future<task_id_t> future =
+    std::future<CraneExpected<task_id_t>> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
@@ -1899,30 +2071,30 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
-crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
-    const crane::grpc::AttachInContainerTaskRequest& request) {
-  crane::grpc::AttachInContainerTaskReply response;
+crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
+    const crane::grpc::AttachContainerStepRequest& request) {
+  crane::grpc::AttachContainerStepReply response;
 
   CranedId target_craned_id;
   {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 
-    task_id_t task_id = request.task_id();
-    auto pd_it = m_pending_task_map_.find(task_id);
+    task_id_t job_id = request.job_id();
+    auto pd_it = m_pending_task_map_.find(job_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
-      err->set_description("Task is still pending. Try again later.");
+      err->set_description("Job is still pending. Try again later.");
       response.set_ok(false);
       return response;
     }
 
-    auto rn_it = m_running_task_map_.find(task_id);
+    auto rn_it = m_running_task_map_.find(job_id);
     if (rn_it == m_running_task_map_.end()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested task is not running.");
+      err->set_description("Requested job is not running.");
       response.set_ok(false);
       return response;
     }
@@ -1931,27 +2103,57 @@ crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
     if (!task->IsContainer()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested task is not a container task.");
+      err->set_description("Requested job is not a container job.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto* step = task->GetStep(request.step_id());
+    if (step == nullptr) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested step not running, already done?");
+      response.set_ok(false);
+      return response;
+    }
+
+    if (step->type != crane::grpc::TaskType::Container ||
+        !step->StepToCtld().has_container_meta() ||
+        !step->container_meta.has_value()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested step is not a container step.");
+      response.set_ok(false);
+      return response;
+    }
+
+    const auto& container_meta = step->container_meta.value();
+
+    if (step->Status() != crane::grpc::TaskStatus::Running &&
+        step->Status() != crane::grpc::TaskStatus::Configured) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Step is not running.");
       response.set_ok(false);
       return response;
     }
 
     // If tty is requested, tty must be enabled when creating the container
-    if (request.tty() && !std::get<ContainerMetaInTask>(task->meta).tty) {
+    if (request.tty() && !container_meta.tty) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
       err->set_description(
-          "TTY not enabled when creating this container task.");
+          "TTY not enabled when creating this container step.");
       response.set_ok(false);
       return response;
     }
 
     // If stdin is requested, stdin must be enabled when creating the container
-    if (request.stdin() && !std::get<ContainerMetaInTask>(task->meta).stdin) {
+    if (request.stdin() && !container_meta.stdin) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
       err->set_description(
-          "STDIN not opened when creating this container task.");
+          "STDIN not opened when creating this container step.");
       response.set_ok(false);
       return response;
     }
@@ -1966,16 +2168,28 @@ crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
       return response;
     }
 
-    // TODO: Handle multiple nodes after step/task is implemented.
-    if (task->executing_craned_ids.size() != 1) {
+    auto exec_nodes = step->ExecutionNodes();
+    if (request.node_name().empty()) {
+      if (exec_nodes.size() > 1) {
+        auto* err = response.mutable_status();
+        err->set_code(CraneErrCode::ERR_CRI_MULTIPLE_NODES);
+        err->set_description(
+            "Cannot attach to container running on multiple nodes without "
+            "target node name.");
+        response.set_ok(false);
+        return response;
+      }
+      // Set default node name to the only running node
+      target_craned_id = *exec_nodes.begin();
+    } else if (exec_nodes.contains(request.node_name())) {
+      target_craned_id = request.node_name();
+    } else {
       auto* err = response.mutable_status();
-      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
-      err->set_description("Multiple-node task not supported yet.");
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested node is not executing this step.");
       response.set_ok(false);
       return response;
     }
-
-    target_craned_id = task->executing_craned_ids.front();
   }
 
   auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
@@ -1987,33 +2201,33 @@ crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
     return response;
   }
 
-  return stub->AttachInContainerTask(request);
+  return stub->AttachContainerStep(request);
 }
 
-crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
-    const crane::grpc::ExecInContainerTaskRequest& request) {
-  crane::grpc::ExecInContainerTaskReply response;
+crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
+    const crane::grpc::ExecInContainerStepRequest& request) {
+  crane::grpc::ExecInContainerStepReply response;
 
   CranedId target_craned_id;
   {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 
-    task_id_t task_id = request.task_id();
-    auto pd_it = m_pending_task_map_.find(task_id);
+    task_id_t job_id = request.job_id();
+    auto pd_it = m_pending_task_map_.find(job_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
-      err->set_description("Task is still pending. Try again later.");
+      err->set_description("Job is still pending. Try again later.");
       response.set_ok(false);
       return response;
     }
 
-    auto rn_it = m_running_task_map_.find(task_id);
+    auto rn_it = m_running_task_map_.find(job_id);
     if (rn_it == m_running_task_map_.end()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested task is not running.");
+      err->set_description("Requested job is not running.");
       response.set_ok(false);
       return response;
     }
@@ -2022,7 +2236,26 @@ crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
     if (!task->IsContainer()) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested task is not a container task.");
+      err->set_description("Requested job is not a container job.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto* step = task->GetStep(request.step_id());
+    if (step == nullptr) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested step not running, already done?");
+      response.set_ok(false);
+      return response;
+    }
+
+    if (step->type != crane::grpc::TaskType::Container ||
+        !step->StepToCtld().has_container_meta() ||
+        !step->container_meta.has_value()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested step is not a container step.");
       response.set_ok(false);
       return response;
     }
@@ -2032,6 +2265,37 @@ crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
       err->set_description("Command cannot be empty.");
+      response.set_ok(false);
+      return response;
+    }
+
+    const auto& container_meta = step->container_meta.value();
+
+    if (step->Status() != crane::grpc::TaskStatus::Running &&
+        step->Status() != crane::grpc::TaskStatus::Configured) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Step is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If tty is requested, tty must be enabled when creating the container
+    if (request.tty() && !container_meta.tty) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "TTY not enabled when creating this container step.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If stdin is requested, stdin must be enabled when creating the container
+    if (request.stdin() && !container_meta.stdin) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "STDIN not opened when creating this container step.");
       response.set_ok(false);
       return response;
     }
@@ -2046,16 +2310,28 @@ crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
       return response;
     }
 
-    // TODO: Handle multiple nodes after step/task is implemented.
-    if (task->executing_craned_ids.size() != 1) {
+    auto exec_nodes = step->ExecutionNodes();
+    if (request.node_name().empty()) {
+      if (exec_nodes.size() > 1) {
+        auto* err = response.mutable_status();
+        err->set_code(CraneErrCode::ERR_CRI_MULTIPLE_NODES);
+        err->set_description(
+            "Cannot attach to container running on multiple nodes without "
+            "target node name.");
+        response.set_ok(false);
+        return response;
+      }
+      // Set default node name to the only running node
+      target_craned_id = *exec_nodes.begin();
+    } else if (exec_nodes.contains(request.node_name())) {
+      target_craned_id = request.node_name();
+    } else {
       auto* err = response.mutable_status();
-      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
-      err->set_description("Multiple-node task not supported yet.");
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested node is not executing this step.");
       response.set_ok(false);
       return response;
     }
-
-    target_craned_id = task->executing_craned_ids.front();
   }
 
   auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
@@ -2067,7 +2343,7 @@ crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
     return response;
   }
 
-  return stub->ExecInContainerTask(request);
+  return stub->ExecInContainerStep(request);
 }
 
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(
@@ -2262,55 +2538,57 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
   }
 
   const ResvId& resv_name = request.reservation_name();
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  if (resv_meta_map->contains(resv_name)) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected("Reservation name already exists");
-  }
-
-  std::vector<CranedId> affected_nodes_vec;
-  for (auto& craned_meta : craned_meta_vec) {
-    const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
-        resv_name, std::make_pair(start_time, end_time));
-    if (!ok) {
-      CRANE_ERROR("Failed to insert reservation resource to {}",
-                  craned_meta->static_meta.hostname);
-    } else {
-      affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
+    if (resv_meta_map->contains(resv_name)) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected("Reservation name already exists");
     }
-  }
-  craned_meta_vec.clear();
 
-  g_meta_container->AddResReduceEventsAndUnlock(
-      {std::make_pair(start_time, std::move(affected_nodes_vec))});
+    std::vector<CranedId> affected_nodes_vec;
+    for (auto& craned_meta : craned_meta_vec) {
+      const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
+          resv_name, std::make_pair(start_time, end_time));
+      if (!ok) {
+        CRANE_ERROR("Failed to insert reservation resource to {}",
+                    craned_meta->static_meta.hostname);
+      } else {
+        affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
+      }
+    }
+    craned_meta_vec.clear();
 
-  ResvMeta resv{.name = resv_name,
-                .part_id = partition,
-                .start_time = start_time,
-                .end_time = end_time,
-                .accounts_black_list = allowed_accounts.empty(),
-                .users_black_list = allowed_users.empty(),
-                .accounts = allowed_accounts.empty()
-                                ? std::move(denied_accounts)
-                                : std::move(allowed_accounts),
-                .users = allowed_users.empty() ? std::move(denied_users)
-                                               : std::move(allowed_users),
-                .craned_ids = {craned_ids.begin(), craned_ids.end()},
-                .res_total = allocated_res,
-                .res_avail = allocated_res,
-                .rn_job_res_map = {}};
+    g_meta_container->AddResReduceEventsAndUnlock(
+        {std::make_pair(start_time, std::move(affected_nodes_vec))});
 
-  const auto& [it, ok] = resv_meta_map->emplace(resv_name, std::move(resv));
-  if (!ok) {
-    // unreachable
-    CRANE_ERROR(
-        "Failed to insert reservation meta : Reservation name {} "
-        "already exists",
-        resv_name);
-    return std::unexpected(
-        fmt::format("Failed to insert reservation meta : Reservation name {} "
-                    "already exists",
-                    resv_name));
+    ResvMeta resv{.name = resv_name,
+                  .part_id = partition,
+                  .start_time = start_time,
+                  .end_time = end_time,
+                  .accounts_black_list = allowed_accounts.empty(),
+                  .users_black_list = allowed_users.empty(),
+                  .accounts = allowed_accounts.empty()
+                                  ? std::move(denied_accounts)
+                                  : std::move(allowed_accounts),
+                  .users = allowed_users.empty() ? std::move(denied_users)
+                                                 : std::move(allowed_users),
+                  .craned_ids = {craned_ids.begin(), craned_ids.end()},
+                  .res_total = allocated_res,
+                  .res_avail = allocated_res,
+                  .rn_job_res_map = {}};
+
+    const auto& [it, ok] = resv_meta_map->emplace(resv_name, std::move(resv));
+    if (!ok) {
+      // unreachable
+      CRANE_ERROR(
+          "Failed to insert reservation meta : Reservation name {} "
+          "already exists",
+          resv_name);
+      return std::unexpected(
+          fmt::format("Failed to insert reservation meta : Reservation name {} "
+                      "already exists",
+                      resv_name));
+    }
   }
 
   {
@@ -2354,23 +2632,26 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
 std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
     const ResvId& resv_id) {
   g_meta_container->LockResReduceEvents();
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  CRANE_TRACE("Deleting reservation {}", resv_id);
-  if (!resv_meta_map->contains(resv_id)) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected(fmt::format("Reservation {} not found", resv_id));
+  absl::flat_hash_set<CranedId> craned_ids;
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
+    CRANE_TRACE("Deleting reservation {}", resv_id);
+    if (!resv_meta_map->contains(resv_id)) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected(fmt::format("Reservation {} not found", resv_id));
+    }
+
+    const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
+
+    if (!resv_meta->rn_job_res_map.empty()) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected(fmt::format(
+          "Not allowed to delete reservation {} with running tasks", resv_id));
+    }
+
+    craned_ids = std::move(resv_meta->craned_ids);
+    resv_meta_map->erase(resv_id);
   }
-
-  const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
-
-  if (!resv_meta->rn_job_res_map.empty()) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected(fmt::format(
-        "Not allowed to delete reservation {} with running tasks", resv_id));
-  }
-
-  const auto craned_ids = std::move(resv_meta->craned_ids);
-  resv_meta_map->erase(resv_id);
   g_meta_container->AddResReduceEventsAndUnlock({resv_id});
 
   for (const auto& craned_id : craned_ids) {
@@ -2613,11 +2894,22 @@ void TaskScheduler::CleanCancelQueueCb_() {
     });
   }
 
+  absl::Time end_time = absl::Now();
+
   if (!pending_task_ptr_vec.empty()) {
     for (auto& task : pending_task_ptr_vec) {
       task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
+      task->SetEndTime(end_time);
       g_account_meta_container->FreeQosResource(*task);
+
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                    end_time);
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                                    end_time);
+      task->TriggerDependencyEvents(crane::grpc::AFTER_OK,
+                                    absl::InfiniteFuture());
+      task->TriggerDependencyEvents(crane::grpc::AFTER_NOT_OK,
+                                    absl::InfiniteFuture());
 
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMeta>(task->meta);
@@ -2692,8 +2984,8 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanSubmitQueueCb_() {
-  using SubmitQueueElem =
-      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
+  using SubmitQueueElem = std::pair<std::unique_ptr<TaskInCtld>,
+                                    std::promise<CraneExpected<task_id_t>>>;
 
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
@@ -2743,17 +3035,55 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
         g_account_meta_container->FreeQosResource(*pair.first);
-        pair.second /*promise*/.set_value(0);
+        pair.second /*promise*/.set_value(
+            std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
       break;
     }
 
     m_pending_task_map_mtx_.Lock();
 
+    std::unordered_map<job_id_t, task_db_id_t> tasks_to_purge;
+
     for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
       uint32_t pos = accepted_tasks.size() - 1 - i;
       task_id_t id = accepted_tasks[pos].first->TaskId();
       auto& task_id_promise = accepted_tasks[pos].second;
+      auto* job = accepted_tasks[pos].first.get();
+      std::vector<std::pair<crane::grpc::DependencyType, task_id_t>>
+          running_deps;
+      for (const auto& [dep_job_id, dep_info] : job->Dependencies().deps) {
+        const auto& [dep_type, delay_seconds] = dep_info;
+        auto dep_job_it = m_pending_task_map_.find(dep_job_id);
+        if (dep_job_it != m_pending_task_map_.end()) {
+          dep_job_it->second->AddDependent(dep_type, id);
+          continue;
+        }
+        running_deps.emplace_back(dep_type, dep_job_id);
+      }
+      if (!running_deps.empty()) {
+        bool missing_deps = false;
+        {
+          LockGuard running_guard(&m_running_task_map_mtx_);
+          for (const auto& [dep_type, dep_job_id] : running_deps) {
+            auto dep_job_it = m_running_task_map_.find(dep_job_id);
+            if (dep_job_it != m_running_task_map_.end()) {
+              dep_job_it->second->AddDependent(dep_type, id);
+            } else {
+              missing_deps = true;
+              break;
+            }
+          }
+        }
+        if (missing_deps) {
+          CRANE_WARN("Job #{} rejected: missing dependencies.", id);
+          g_account_meta_container->FreeQosResource(*job);
+          task_id_promise.set_value(
+              std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
+          tasks_to_purge[id] = job->TaskDbId();
+          continue;
+        }
+      }
 
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
       task_id_promise.set_value(id);
@@ -2762,6 +3092,15 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                      std::memory_order_release);
     m_pending_task_map_mtx_.Unlock();
+
+    if (!tasks_to_purge.empty()) {
+      if (!g_embedded_db_client->PurgeEndedTasks(tasks_to_purge)) {
+        CRANE_ERROR(
+            "Failed to purge {} task(s) with missing dependencies from "
+            "embedded db.",
+            tasks_to_purge.size());
+      }
+    }
   } while (false);
 
   // Reject tasks beyond queue capacity
@@ -2776,7 +3115,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
       g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
-      rejected_tasks[i].second.set_value(0);
+      rejected_tasks[i].second.set_value(
+          std::unexpected(CraneErrCode::ERR_BEYOND_TASK_ID));
     }
   } while (false);
 }
@@ -2875,8 +3215,8 @@ void TaskScheduler::StepStatusChangeAsync(
                                        .exit_code = exit_code,
                                        .new_status = new_status,
                                        .craned_index = craned_index,
-                                       .reason = reason,
-                                       .timestamp = timestamp});
+                                       .reason = std::move(reason),
+                                       .timestamp = std::move(timestamp)});
   m_task_status_change_async_handle_->send();
 }
 
@@ -2899,8 +3239,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       args.begin(), approximate_size);
   if (actual_size == 0) return;
   args.resize(actual_size);
-
-  CRANE_TRACE("Cleaning {} TaskStatusChanges...", actual_size);
+  auto begin_time = std::chrono::steady_clock::now();
 
   StepStatusChangeContext context{};
   context.rn_step_raw_ptrs.reserve(actual_size);
@@ -2919,8 +3258,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
-          "[Job #{}] Ignoring unknown job in CleanTaskStatusChangeQueueCb_.",
-          task_id);
+          "[Job #{}] Ignoring unknown job in CleanTaskStatusChangeQueueCb_ "
+          "(status: {}).",
+          task_id, util::StepStatusToString(new_status));
       continue;
     }
 
@@ -2929,7 +3269,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         job_finished_status{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
-    if (task->DaemonStep() && step_id == task->DaemonStep()->StepId()) {
+    if (task->DaemonStep() != nullptr &&
+        step_id == task->DaemonStep()->StepId()) {
       CRANE_TRACE(
           "[Step #{}.{}] Daemon step status change received, status: {}.",
           task->TaskId(), step_id, new_status);
@@ -2955,23 +3296,29 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       // Validate and adjust end_time to prevent it from exceeding time_limit
       // by too much. Allow 5 seconds of floating tolerance.
-      absl::Time reported_end_time =
-          absl::FromUnixSeconds(timestamp.seconds()) +
-          absl::Nanoseconds(timestamp.nanos());
+      absl::Time end_time = absl::FromUnixSeconds(timestamp.seconds()) +
+                            absl::Nanoseconds(timestamp.nanos());
       absl::Time expected_end_time = task->StartTime() + task->time_limit;
-      constexpr int64_t kEndTimeToleranceSec = 5;
 
-      if (reported_end_time >
-          expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
+      if (end_time > expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
         CRANE_WARN(
             "[Job #{}] Reported end_time {} exceeds expected end_time {} by "
             "more than {}s. Adjusting to expected end_time.",
-            task->TaskId(), absl::FormatTime(reported_end_time),
+            task->TaskId(), absl::FormatTime(end_time),
             absl::FormatTime(expected_end_time), kEndTimeToleranceSec);
-        task->SetEndTime(expected_end_time);
-      } else {
-        task->SetEndTime(reported_end_time);
+        end_time = expected_end_time;
       }
+      task->SetEndTime(end_time);
+
+      uint32_t task_exit_code = job_finished_status.value().second;
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                                    end_time);
+      task->TriggerDependencyEvents(
+          crane::grpc::DependencyType::AFTER_OK,
+          task_exit_code == 0 ? end_time : absl::InfiniteFuture());
+      task->TriggerDependencyEvents(
+          crane::grpc::DependencyType::AFTER_NOT_OK,
+          task_exit_code != 0 ? end_time : absl::InfiniteFuture());
 
       for (CranedId const& craned_id : task->CranedIds()) {
         auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
@@ -3199,6 +3546,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
   txn_id_t txn_id;
 
+  auto now = std::chrono::steady_clock::now();
   // When store, write step info first, then job info.
   auto ok = g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
   if (!ok) {
@@ -3219,9 +3567,19 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         "TaskScheduler failed to commit step transaction when clean step "
         "status change.");
   }
+  auto duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "Persist step status changes to embedded db cost {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+  now = std::chrono::steady_clock::now();
 
   ProcessFinalSteps_(context.step_raw_ptrs);
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "ProcessFinalSteps_ took {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
+  now = std::chrono::steady_clock::now();
   ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
   if (!ok) {
     CRANE_ERROR(
@@ -3242,7 +3600,22 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         "TaskScheduler failed to commit job transaction when clean  step "
         "status change.");
   }
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "Persist job status changes to embedded db cost {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+  now = std::chrono::steady_clock::now();
   ProcessFinalTasks_(context.job_raw_ptrs);
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "ProcessFinalTasks_ took {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+
+  auto end_time = std::chrono::steady_clock::now();
+  CRANE_TRACE("Cleaning {} StepStatusChanges cost {} ms.", actual_size,
+              std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                    begin_time)
+                  .count());
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -3399,6 +3772,7 @@ void TaskScheduler::QueryTasksInRam(
     job_info.set_status(job.Status());
     job_info.mutable_elapsed_time()->set_seconds(
         ToInt64Seconds(now - job.StartTime()));
+
     // Check if task has exceeded time limit
     if (job.Status() == crane::grpc::TaskStatus::Running ||
         job.Status() == crane::grpc::TaskStatus::Configuring) {
@@ -3415,7 +3789,7 @@ void TaskScheduler::QueryTasksInRam(
     append_step_fn(proto_steps, job.DaemonStep());
     append_step_fn(proto_steps, job.PrimaryStep());
 
-    for (auto& step : job.Steps() | std::views::values) {
+    for (const auto& step : job.Steps() | std::views::values) {
       append_step_fn(proto_steps, step.get());
     }
     job_info_map->emplace(job.TaskId(), std::move(job_info));
@@ -3543,22 +3917,26 @@ void TaskScheduler::TerminateOrphanedSteps(
         CRANE_WARN("Job {} not found in running task map.", job_id);
         continue;
       }
+
       auto& job = job_it->second;
       for (const auto& step_id : step_ids) {
         StepInCtld* step{nullptr};
-        if (auto daemon_step = job->DaemonStep();
-            daemon_step && daemon_step->StepId() == step_id) {
+        if (auto* daemon_step = job->DaemonStep();
+            daemon_step != nullptr && daemon_step->StepId() == step_id) {
           step = daemon_step;
-        } else if (auto primary_step = job->PrimaryStep();
-                   primary_step && step_id == primary_step->StepId()) {
+        } else if (auto* primary_step = job->PrimaryStep();
+                   primary_step != nullptr &&
+                   step_id == primary_step->StepId()) {
           step = primary_step;
         } else {
           step = job->GetStep(step_id);
         }
-        if (!step) {
-          CRANE_WARN("[Step #{}.{}] Step not found in job.", step_id, job_id);
+
+        if (step == nullptr) {
+          CRANE_WARN("[Step #{}.{}] Step not found in job.", job_id, step_id);
           continue;
         }
+
         for (const auto& craned_id : step->ExecutionNodes()) {
           craned_steps_map[craned_id][job_id].insert(step_id);
         }
@@ -4093,8 +4471,8 @@ CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
-    CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
-                CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
+    CRANE_ERROR("Failed to call AcquireTaskAttributes: no such partition {}",
+                task->partition_id);
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }
 
@@ -4106,23 +4484,36 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(task_alloc_res.cpu_count);
-
-  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
-  if (task_alloc_res.memory_bytes == 0) {
-    // If a task leaves its memory bytes to 0,
-    // use the partition's default value.
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
-  } else if (part_meta.max_mem_per_cpu != 0) {
-    // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
-    task_mem_per_cpu =
-        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
+  if (task_alloc_res.CpuCount() == 0) {
+    CRANE_DEBUG("Job has zero cpu request, rejected.");
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
+  double task_mem_per_cpu = 0.0;
+  if (task->TaskToCtld().has_mem_per_cpu()) {
+    task_mem_per_cpu = task->TaskToCtld().mem_per_cpu();
+  } else if (task_alloc_res.memory_bytes > 0) {
+    // Otherwise, calculate from memory_bytes and number of cores.
+    task_mem_per_cpu =
+        static_cast<double>(task_alloc_res.memory_bytes) / core_double;
+  } else {
+    // User specified memory bytes is zero, will use the partition's default
+  }
+
+  // If still zero, use the partition's default value.
+  if (task_mem_per_cpu == 0.0) {
+    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+  }
+
+  // Enforce the partition's maximum if set.
+  if (part_meta.max_mem_per_cpu > 0) {
+    task_mem_per_cpu = std::min(task_mem_per_cpu,
+                                static_cast<double>(part_meta.max_mem_per_cpu));
+  }
+
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+  task_alloc_res.memory_bytes = mem_bytes;
+  task_alloc_res.memory_sw_bytes = mem_bytes;
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);
@@ -4159,12 +4550,56 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     }
   }
 
+  if (g_config.WckeyValid) {
+    if (task->MutableTaskToCtld()->has_wckey() &&
+        !task->MutableTaskToCtld()->wckey().empty()) {
+      std::string wckey = task->MutableTaskToCtld()->wckey();
+      auto wckey_scoped_ptr =
+          g_account_manager->GetExistedWckeyInfo(wckey, task->Username());
+      if (!wckey_scoped_ptr) {
+        CRANE_DEBUG("Job wckey '{}' not found in the wckey database, rejected.",
+                    wckey);
+        return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+      }
+
+      task->wckey = wckey;
+      // Only fetch default if needed for marking purposes
+      // Prefix with "*" to indicate default wckey is in use
+      if (auto result =
+              g_account_manager->GetExistedDefaultWckeyName(task->Username());
+          result && wckey == result.value()) {
+        task->using_default_wckey = true;
+      }
+      // Note: Ignore error from GetExistedDefaultWckeyName since the user's
+      // wckey was already validated; the default check is only for marking
+    } else {
+      // No wckey provided; use the default
+      auto result =
+          g_account_manager->GetExistedDefaultWckeyName(task->Username());
+      if (!result) return std::unexpected(result.error());
+      task->wckey = result.value();
+      task->using_default_wckey = true;
+    }
+  } else {
+    task->wckey.clear();
+  }
+
   return {};
 }
 
 CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+
+  // Check res req valid
+  {
+    const auto& res = task->requested_node_res_view;
+
+    if (res.MemoryBytes() == 0) {
+      CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    }
+  }
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -4307,6 +4742,17 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
       res_step_to_ctld->mutable_allocatable_res()->set_cpu_core_limit(
           allocatable_resource.CpuCount());
     }
+    if (step_to_ctld->has_mem_per_cpu()) {
+      uint64_t mem_per_cpu = step_to_ctld->mem_per_cpu();  // in bytes
+      uint64_t mem_bytes =
+          static_cast<uint64_t>(mem_per_cpu * allocatable_resource.cpu_count);
+      allocatable_resource.memory_bytes = mem_bytes;
+      allocatable_resource.memory_sw_bytes = mem_bytes;
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
+          allocatable_resource.memory_bytes);
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_sw_limit_bytes(
+          allocatable_resource.memory_sw_bytes);
+    }
     if (allocatable_resource.memory_bytes == 0ull) {
       allocatable_resource.memory_bytes =
           step->job->requested_node_res_view.GetAllocatableRes().memory_bytes;
@@ -4345,9 +4791,21 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  if (job->uid != step->uid) {
+    return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
+  }
+
+  if (step->type == crane::grpc::TaskType::Container) {
+    // Check if step is send to a job not supporting container
+    if (job->type != crane::grpc::TaskType::Container)
+      return std::unexpected{CraneErrCode::ERR_INVALID_PARAM};
+    // Copy pod_meta for step
+    step->pod_meta = job->pod_meta;
+  }
+
   std::unordered_set<std::string> avail_nodes;
   for (const auto& craned_id : job->CranedIds()) {
-    auto& job_res = job->AllocatedRes();
+    const auto& job_res = job->AllocatedRes();
     if (step->requested_task_res_view <= job_res.at(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
@@ -4357,6 +4815,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
 
     if (avail_nodes.size() >= step->node_num) break;
   }
+
   if (step->node_num > avail_nodes.size()) {
     CRANE_TRACE(
         "Resource not enough. Step #{}.{} needs {} nodes, while only {} "
@@ -4371,6 +4830,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
+
   // mem/gres for whole step,only CPU is allocated per task, currently multiply
   // cpu by ntasks_per_node
   auto node_res_view = step->requested_task_res_view;
@@ -4378,6 +4838,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   step->requested_node_res_view = node_res_view;
   if (!(step->requested_node_res_view <= job->requested_node_res_view))
     return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
+
   return {};
 }
 

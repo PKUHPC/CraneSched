@@ -88,6 +88,9 @@ inline const char* const kDefaultCraneCtldMutexFile =
 inline const char* const kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
 inline const char* const kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
+inline const char* const kDefaultCraneCtldAlivePath =
+    "cranectld/cranectld.alive";
+
 inline const char* const kDefaultCranedScriptDir = "craned/scripts";
 inline const char* const kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* const kDefaultCranedForPamUnixSockPath =
@@ -101,6 +104,8 @@ inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
 inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
+
+inline const char* const kResourceTypeGpu = "gpu";
 
 constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
@@ -259,7 +264,19 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
-        "Invalid memory format"
+        "Invalid memory format",
+        "Step resource request exceeds job resource",
+
+
+        // 85 - 89
+       "The specified wckey does not exist",
+        "The wckey already exists in crane",
+        "The entered cluster does not exist",
+        "Cannot delete the default wckey. Please set a different default wckey first",
+        "No default wckey is set. Please specify a wckey or set a default wckey",
+
+        // 90-94
+        "Lua script validation failed"
     };
 // clang-format on
 }  // namespace Internal
@@ -276,8 +293,7 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   return rich_err;
 }
 
-[[deprecated("Use Rich Error")]] inline std::string_view CraneErrStr(
-    CraneErrCode err) {
+inline std::string_view CraneErrStr(CraneErrCode err) {
   return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
 
@@ -516,6 +532,7 @@ class ResourceView {
 
   double CpuCount() const;
   uint64_t MemoryBytes() const;
+  uint64_t GpuCount() const;
 
   AllocatableResource& GetAllocatableRes() { return allocatable_res; }
   const AllocatableResource& GetAllocatableRes() const {

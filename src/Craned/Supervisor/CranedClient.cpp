@@ -18,15 +18,9 @@
 
 #include "CranedClient.h"
 
-#include "SupervisorServer.h"
-#include "TaskManager.h"
 #include "crane/GrpcHelper.h"
-#include "crane/String.h"
 
 namespace Craned::Supervisor {
-
-using grpc::ClientContext;
-using grpc::Status;
 
 CranedClient::~CranedClient() {
   if (m_async_send_thread_.joinable()) {
@@ -56,6 +50,7 @@ void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
 }
 
 void CranedClient::AsyncSendThread_() {
+  util::SetCurrentThreadName("CrndClient");
   while (true) {
     {
       absl::MutexLock lock(&m_mutex_);
@@ -101,12 +96,12 @@ void CranedClient::AsyncSendThread_() {
         if (!status.ok()) {
           CRANE_ERROR(
               "Failed to send StepStatusChange: "
-              "NewStatus: {}, reason: {} | {}, code: {}",
+              "new_status: {}, reason: {} | {}, code: {}",
               elem.new_status, status.error_message(),
               context.debug_error_string(), int(status.error_code()));
           break;
         }
-        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
+        CRANE_TRACE("StepStatusChange sent, status={}, reply.ok={}",
                     elem.new_status, reply.ok());
         elems.pop_front();
       }

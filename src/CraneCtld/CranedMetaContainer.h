@@ -131,6 +131,8 @@ class CranedMetaContainer final {
 
   using ResvMetaMapPtr = ResvMetaAtomicMap::MapSharedPtr;
 
+  using ResvMetaMapExclusivePtr = ResvMetaAtomicMap::MapExclusivePtr;
+
   using ResvMetaPtr =
       util::ManagedScopeExclusivePtr<ResvMeta, ResvMetaAtomicMap::CombinedLock>;
 
@@ -143,6 +145,8 @@ class CranedMetaContainer final {
   ResvMetaMapConstPtr GetResvMetaMapConstPtr();
 
   ResvMetaMapPtr GetResvMetaMapPtr();
+
+  ResvMetaMapExclusivePtr GetResvMetaMapExclusivePtr();
 
   void MallocResourceFromResv(ResvId resv_id, task_id_t task_id,
                               const ResourceV2& res);

@@ -182,6 +182,12 @@ Enable GPU and device isolation with eBPF on systems using cgroup v2.
 
 - **[eBPF Support](./backend/eBPF.md)** - GRES support with eBPF device control
 
+### Container Support
+
+Run containerized jobs in the cluster with user isolation and portable environments.
+
+- **[Container Deployment](./container.md)** - Configure CRI runtime, enable container job support
+
 ---
 
 ## Getting Help

@@ -121,7 +121,7 @@ Resources are released automatically when you exit.
 
 ### Check Job History
 
-After jobs complete, use `cacct` to view job statistics:
+After jobs complete, use `cacct` to view job accounting information:
 
 ```bash
 # View your recent jobs

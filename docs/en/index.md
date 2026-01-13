@@ -97,10 +97,10 @@ hide:
 
 ![CraneSched architecture](images/Architecture.png)
 
-CraneSched introduces a Resource Manager to support both HPC and AI workloads:
+CraneSched supports both HPC and AI workloads:
 
 - HPC jobs: the Cgroup Manager allocates resources and provides cgroup-based isolation.
-- AI jobs: the Container Manager uses Kubernetes for resource allocation and container lifecycle management.
+- AI jobs: the Cgroup Manager + CRI runtime handles resource allocation and container lifecycle management.
 
 ---
 

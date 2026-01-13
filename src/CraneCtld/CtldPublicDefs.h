@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
@@ -55,6 +57,10 @@ constexpr uint32_t kSubmitTaskBatchNum = 1000;
 // Clean TaskStatusChangeQueue when timeout or exceeding batch num
 constexpr uint32_t kTaskStatusChangeTimeoutMS = 100;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
+
+// Validate and adjust end_time to prevent it from exceeding time_limit
+// by too much. Allow 5 seconds of floating tolerance.
+constexpr int64_t kEndTimeToleranceSec = 5;
 
 //*********************************************************
 
@@ -183,6 +189,8 @@ struct Config {
 
   Priority PriorityConfig;
 
+  std::string JobSubmitLuaScript;
+
   // Database config
   std::string DbUser;
   std::string DbPassword;
@@ -199,6 +207,13 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+  bool WckeyValid{false};
+
+  struct KeepalivedConfig {
+    std::filesystem::path CraneNFSBaseDir;
+    std::filesystem::path CraneCtldAliveFile;
+  };
+  KeepalivedConfig KeepalivedConfig;
 };
 
 struct RunTimeStatus {
@@ -383,7 +398,42 @@ struct InteractiveMeta {
   // (triggered by either normal shell exit or ccancel).
   std::atomic<bool> has_been_cancelled_on_front_end{false};
   std::atomic<bool> has_been_terminated_on_craned{false};
-  std::string cfored_name{};
+  std::string cfored_name;
+};
+
+struct PodMetaInTask {
+  struct NamespaceOption {
+    crane::grpc::PodTaskAdditionalMeta::NamespaceMode network{
+        crane::grpc::PodTaskAdditionalMeta::POD};
+    crane::grpc::PodTaskAdditionalMeta::NamespaceMode pid{
+        crane::grpc::PodTaskAdditionalMeta::POD};
+    crane::grpc::PodTaskAdditionalMeta::NamespaceMode ipc{
+        crane::grpc::PodTaskAdditionalMeta::POD};
+    std::string target_id;
+  };
+
+  struct PortMapping {
+    crane::grpc::PodTaskAdditionalMeta::PortMapping::Protocol protocol{
+        crane::grpc::PodTaskAdditionalMeta::PortMapping::TCP};
+    int32_t container_port{0};
+    int32_t host_port{0};
+    std::string host_ip;
+  };
+
+  std::string name;  // for hostname generation
+  std::unordered_map<std::string, std::string> labels;
+  std::unordered_map<std::string, std::string> annotations;
+  NamespaceOption namespace_option{};
+
+  bool userns{true};
+  uid_t run_as_user{0};
+  gid_t run_as_group{0};
+
+  std::vector<PortMapping> port_mappings;
+
+  PodMetaInTask() = default;
+  explicit PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs);
+  explicit operator crane::grpc::PodTaskAdditionalMeta() const;
 };
 
 struct ContainerMetaInTask {
@@ -395,12 +445,11 @@ struct ContainerMetaInTask {
     std::string pull_policy;
   };
 
-  ImageInfo image_info{};
-
   std::string name;
   std::unordered_map<std::string, std::string> labels;
   std::unordered_map<std::string, std::string> annotations;
 
+  ImageInfo image_info{};
   std::string command;
   std::vector<std::string> args;
   std::string workdir;
@@ -411,12 +460,7 @@ struct ContainerMetaInTask {
   bool stdin{false};
   bool stdin_once{false};
 
-  bool userns{true};
-  uid_t run_as_user{0};
-  gid_t run_as_group{0};
-
   std::unordered_map<std::string, std::string> mounts;
-  std::unordered_map<uint32_t, uint32_t> port_mappings;
 
  public:
   ContainerMetaInTask() = default;
@@ -424,6 +468,24 @@ struct ContainerMetaInTask {
   explicit ContainerMetaInTask(
       const crane::grpc::ContainerTaskAdditionalMeta& rhs);
   explicit operator crane::grpc::ContainerTaskAdditionalMeta() const;
+};
+
+struct DependenciesInJob {
+  std::unordered_map<task_id_t,
+                     std::pair<crane::grpc::DependencyType, uint64_t>>
+      deps;
+  bool is_or{false};
+  absl::Time ready_time{absl::InfinitePast()};
+
+  bool is_met(absl::Time now) const {
+    return (is_or || deps.empty()) && ready_time <= now;
+  }
+
+  bool is_failed() const {
+    return ready_time >= absl::InfiniteFuture() && (!is_or || deps.empty());
+  }
+
+  void update(task_id_t job_id, absl::Time event_time);
 };
 
 struct TaskInCtld;
@@ -484,9 +546,12 @@ struct StepInCtld {
   std::vector<gid_t> gids;
   std::string name;
 
+  std::string cwd;
+
   uint32_t ntasks_per_node{0};
 
   bool requeue_if_failed{false};
+
   bool get_user_env{false};
   std::unordered_map<std::string, std::string> env;
   std::string extra_attr;
@@ -503,7 +568,9 @@ struct StepInCtld {
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
-  // TODO: Find somewhere else to put this field?
+  // In daemon step of container job, only use pod_meta.
+  // In common step of container job, both are provided.
+  std::optional<PodMetaInTask> pod_meta;
   std::optional<ContainerMetaInTask> container_meta;
 
  protected:
@@ -584,7 +651,9 @@ struct StepInCtld {
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
 
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
-  std::unordered_set<CranedId> RunningNodes() const { return m_running_nodes_; }
+  const std::unordered_set<CranedId>& RunningNodes() const {
+    return m_running_nodes_;
+  }
   void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
 
@@ -650,7 +719,7 @@ struct DaemonStepInCtld : StepInCtld {
   std::optional<std::pair<crane::grpc::TaskStatus, uint32_t /*exit code*/>>
   StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
                    const std::string& reason, const CranedId& craned_id,
-                   google::protobuf::Timestamp timestamp,
+                   const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
 
   void RecoverFromDb(const TaskInCtld& job,
@@ -662,8 +731,6 @@ struct DaemonStepInCtld : StepInCtld {
 struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   std::string cmd_line;
-  std::string cwd;
-
   std::optional<StepInteractiveMeta> ia_meta;
 
   /* -----------
@@ -683,7 +750,7 @@ struct CommonStepInCtld : StepInCtld {
 
   void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         const std::string& reason, const CranedId& craned_id,
-                        google::protobuf::Timestamp timestamp,
+                        const google::protobuf::Timestamp& timestamp,
                         StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
@@ -724,7 +791,11 @@ struct TaskInCtld {
 
   std::string extra_attr;
 
-  std::variant<InteractiveMeta, ContainerMetaInTask> meta;
+  // used to construct a primary step.
+  std::variant<std::monostate, InteractiveMeta, ContainerMetaInTask> meta;
+
+  // used to construct daemon step for container enabled job.
+  std::optional<PodMetaInTask> pod_meta;
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
@@ -732,6 +803,9 @@ struct TaskInCtld {
   bool exclusive{false};
 
   std::unordered_map<std::string, uint32_t> licenses_count;
+
+  bool using_default_wckey{false};
+  std::string wckey;
 
  private:
   /* ------------- [2] -------------
@@ -741,6 +815,7 @@ struct TaskInCtld {
   task_id_t task_id{0};
   task_db_id_t task_db_id{0};
   std::string username;
+  std::vector<task_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
 
   /* ----------- [3] ----------------
    * Fields that may change at run time.
@@ -753,9 +828,10 @@ struct TaskInCtld {
   uint32_t primary_exit_code{};
   uint32_t exit_code{};
   bool held{false};
+  DependenciesInJob dependencies;
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
-  // BATCH or INTERACTIVE step
+  // BATCH or INTERACTIVE or CONTAINER step
   std::unique_ptr<CommonStepInCtld> m_primary_step_;
   // COMMON steps
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;
@@ -816,6 +892,11 @@ struct TaskInCtld {
   // =================== Get Attr ==================
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           task_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
+  }
   bool IsCalloc() const {
     return type == crane::grpc::TaskType::Interactive &&
            task_to_ctld.interactive_meta().interactive_type() ==
@@ -894,10 +975,7 @@ struct TaskInCtld {
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
-    // Common step can only be interactive step started by crun.
-    CRANE_ASSERT(step->type == crane::grpc::TaskType::Interactive);
-    CRANE_ASSERT(step->StepToCtld().interactive_meta().interactive_type() ==
-                 crane::grpc::InteractiveTaskType::Crun);
+    CRANE_ASSERT(step->type != crane::grpc::TaskType::Batch);
     step->job = this;
     pending_step_ids_.push(step->StepId());
     m_steps_.emplace(step->StepId(), std::move(step));
@@ -941,6 +1019,7 @@ struct TaskInCtld {
         pending_step_ids_.pop();
         continue;
       }
+
       ResourceV2 step_alloc_res;
       std::unordered_set<CranedId> step_craned_ids;
       for (auto const& craned_id :
@@ -964,9 +1043,11 @@ struct TaskInCtld {
           break;
         }
       }
+
       if (step_craned_ids.size() < step->node_num) {
         break;
       }
+
       step->SetAllocatedRes(step_alloc_res);
       step->SetCranedIds(step_craned_ids);
       step->allocated_craneds_regex =
@@ -975,12 +1056,17 @@ struct TaskInCtld {
       step->SetExecutionNodes(step_craned_ids);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
-      const auto& meta = step->ia_meta.value();
-      meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
-          .job_id = step->job_id,
-          .step_id = step->StepId(),
-          .allocated_nodes{std::make_pair(
-              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+
+      // Crun steps need the callback. Ccon steps do not.
+      if (step->ia_meta.has_value()) {
+        const auto& meta = step->ia_meta.value();
+        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+            .job_id = step->job_id,
+            .step_id = step->StepId(),
+            .allocated_nodes{std::make_pair(
+                util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+      }
+
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       ++popped_count;
@@ -989,14 +1075,22 @@ struct TaskInCtld {
     return popped_count;
   }
 
-  void SetCachedPriority(const double val);
+  void SetCachedPriority(double val);
   double CachedPriority() const { return cached_priority; }
 
   void SetAllocatedRes(ResourceV2&& val);
   ResourceV2 const& AllocatedRes() const { return allocated_res; }
 
+  void SetDependency(const crane::grpc::Dependencies& grpc_deps);
+  void UpdateDependency(task_id_t dep_job_id, absl::Time event_time);
+  DependenciesInJob const& Dependencies() const { return dependencies; }
+  void AddDependent(crane::grpc::DependencyType dep_type, task_id_t dep_job_id);
+  void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
+                               absl::Time event_time);
+
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val);
 
+  // Must be called after SetFieldsByTaskToCtld!
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val);
 
   // Helper function to set the fields of TaskInfo using info in
@@ -1112,6 +1206,7 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
+  std::string default_wckey;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
@@ -1166,6 +1261,18 @@ struct User {
   }
 
   bool operator<(User const& other) const { return uid < other.uid; }
+};
+
+struct Wckey {
+  bool deleted = false;
+  std::string name;
+  std::string user_name; /* user name */
+  bool is_default = false;
+
+  bool operator==(const Wckey& other) const noexcept {
+    return name == other.name && user_name == other.user_name &&
+           is_default == other.is_default && deleted == other.deleted;
+  }
 };
 
 // TODO: not use free, only total and used

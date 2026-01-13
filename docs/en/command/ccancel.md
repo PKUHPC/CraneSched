@@ -1,19 +1,22 @@
 # ccancel - Cancel Jobs
 
-**ccancel terminates running or pending jobs in the queue.**
+**ccancel terminates running or pending jobs or individual steps within jobs.**
 
-You can cancel jobs by job ID or by using filter conditions to cancel multiple jobs at once.
+You can cancel jobs by job ID, cancel individual steps using the `jobid.stepid` format, or use filter conditions to cancel multiple jobs at once.
 
 ## Command Syntax
 
 ```bash
-ccancel [job_id[,job_id...]] [OPTIONS]
+ccancel [job_id[.step_id][,job_id[.step_id]...]] [OPTIONS]
 ```
 
 ## Command Line Options
 
 ### Job Selection
-- **job_id[,job_id...]**: Job ID(s) to cancel (comma-separated list). Format: `<job_id>` or `<job_id>,<job_id>,<job_id>...`
+- **job_id[.step_id][,job_id[.step_id]...]**: Job ID(s) or step ID(s) to cancel (comma-separated list).
+  - Format for jobs: `<job_id>` or `<job_id>,<job_id>,<job_id>...`
+  - Format for steps: `<job_id>.<step_id>` or `<job_id>.<step_id>,<job_id>.<step_id>...`
+  - Mixed format: `<job_id>,<job_id>.<step_id>,<job_id>.<step_id>...`
 
 ### Filter Options
 - **-n, --name string**: Cancel jobs with the specified job name
@@ -163,6 +166,73 @@ ccancel -p GPU -t Pending --json
 
 ![ccancel](../../images/ccancel/ccancel.png)
 
+## Canceling Job Steps
+
+CraneSched supports canceling individual steps within a job using the step ID format `jobid.stepid`. This allows you to terminate specific steps while keeping the parent job and other steps running.
+
+### Step Cancellation Syntax
+
+**Cancel a specific step:**
+```bash
+ccancel 123.1      # Cancel step 1 of job 123
+```
+
+**Cancel multiple steps:**
+```bash
+ccancel 123.1,123.2,456.3
+```
+
+**Cancel entire job (all steps):**
+```bash
+ccancel 123        # Cancels job 123 and all its steps
+```
+
+### Step Cancellation Behavior
+
+When canceling steps:
+
+- **Single Step Cancellation**: Canceling a specific step (`jobid.stepid`) only affects that step
+  - The parent job continues running
+  - Other steps in the same job are not affected
+  - Resources allocated to the step are released back to the parent job
+
+- **Full Job Cancellation**: Canceling a job without specifying a step ID (`jobid`) cancels:
+  - All steps within the job
+  - The parent job itself
+  - All allocated resources are released
+
+### Step Cancellation Examples
+
+**Cancel only step 2 of job 100:**
+```bash
+ccancel 100.2
+```
+
+**Cancel steps 1 and 2 of job 100 (step 3 continues if exists):**
+```bash
+ccancel 100.1,100.2
+```
+
+**Mixed cancellation - entire job 100 and step 3 of job 200:**
+```bash
+ccancel 100,200.3
+```
+
+**Query steps before canceling:**
+```bash
+# View all steps for a job
+cqueue --step -j 123
+
+# Cancel specific steps based on status
+ccancel 123.2,123.4
+```
+
+### Step Cancellation Permissions
+
+- **Regular Users**: Can only cancel steps belonging to their own jobs
+- **Coordinators**: Can cancel steps within jobs under their account
+- **Operators/Admins**: Can cancel any step in the system
+
 ## Behavior After Cancellation
 
 After a job is cancelled:
@@ -191,7 +261,10 @@ After a job is cancelled:
 
 4. **State Filtering**: Use `-t` to target specific job states to avoid accidentally cancelling jobs in unintended states
 
-5. **Job ID Format**: Job IDs must follow the format `<job_id>` or `<job_id>,<job_id>,<job_id>...` with no spaces
+5. **Job/Step ID Format**: IDs must follow these formats with no spaces:
+   - Jobs: `<job_id>` or `<job_id>,<job_id>,<job_id>...`
+   - Steps: `<job_id>.<step_id>` or `<job_id>.<step_id>,<job_id>.<step_id>...`
+   - Mixed: `<job_id>,<job_id>.<step_id>...`
 
 ## Error Handling
 

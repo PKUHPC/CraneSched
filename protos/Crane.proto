@@ -87,6 +87,7 @@ message SubmitBatchTaskReply {
     uint32 task_id = 2;
     ErrCode code = 3;
   }
+  string reason = 4;
 }
 
 message SubmitBatchTasksRequest {
@@ -97,6 +98,19 @@ message SubmitBatchTasksRequest {
 message SubmitBatchTasksReply {
   repeated uint32 task_id_list = 1;
   repeated ErrCode code_list = 2;
+}
+
+message SubmitContainerStepRequest {
+  StepToCtld step = 1;
+}
+
+message SubmitContainerStepReply {
+  bool ok = 1;
+  uint32 job_id = 2;
+  oneof payload {
+    uint32 step_id = 3;
+    ErrCode code = 4;
+  }
 }
 
 message AllocJobsRequest {
@@ -322,6 +336,16 @@ message AddQosReply {
   ErrCode code = 2;
 }
 
+message AddWckeyRequest {
+  uint32 uid = 1;
+  WckeyInfo wckey = 2;
+}
+
+message AddWckeyReply {
+  bool ok = 1;
+  ErrCode code = 2;
+}
+
 message DeleteAccountRequest {
   uint32 uid = 1;
   repeated string account_list = 2;
@@ -352,6 +376,17 @@ message DeleteQosRequest {
 message DeleteQosReply {
   bool ok = 1;
   repeated RichError rich_error_list = 2;
+}
+
+message DeleteWckeyRequest {
+  uint32 uid = 1;
+  string name = 2;
+  string user_name = 3;
+}
+
+message DeleteWckeyReply {
+  bool ok = 1;
+  RichError rich_error = 2;
 }
 
 message ModifyAccountRequest {
@@ -396,6 +431,17 @@ message ModifyQosReply {
   ErrCode code = 2;
 }
 
+message ModifyDefaultWckeyRequest {
+  uint32 uid = 1;
+  string name = 2;
+  string user_name = 3;
+}
+
+message ModifyDefaultWckeyReply {
+  bool ok = 1;
+  ErrCode code = 2;
+}
+
 message QueryAccountInfoRequest {
   uint32 uid = 1;
   repeated string account_list = 2;
@@ -417,6 +463,17 @@ message QueryUserInfoReply {
   bool ok = 1;
   repeated UserInfo user_list = 2;
   repeated RichError rich_error_list = 3;
+}
+
+message QueryWckeyInfoRequest {
+  uint32 uid = 1;
+  repeated string wckey_list = 2;
+}
+
+message QueryWckeyInfoReply {
+  bool ok = 1;
+  repeated QueryWckeyInfo wckey_list = 2;
+  ErrCode code = 3;
 }
 
 message QueryQosInfoRequest {
@@ -539,6 +596,27 @@ message QueryTaskEfficiencyReply {
   bool ok = 1;
   string error_message = 2;
   repeated TaskEfficiencyInfo efficiency_data = 3;
+}
+
+message QueryNodeEventsRequest {
+  repeated string node_names = 1;  // Node names to query, empty means all nodes
+  uint32 uid = 2;                  // User ID for authorization
+}
+
+message NodeEventInfo {
+  string cluster_name = 1;
+  string node_name = 2;
+  uint64 uid = 3;
+  int64 start_time = 4;  // Unix timestamp in nanoseconds
+  int64 end_time = 5;    // Unix timestamp in nanoseconds
+  string state = 6;
+  string reason = 7;
+}
+
+message QueryNodeEventsReply {
+  bool ok = 1;
+  string error_message = 2;
+  repeated NodeEventInfo event_info_list = 3;
 }
 
 message CreateReservationRequest {
@@ -971,9 +1049,11 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
-message AttachInContainerTaskRequest {
+message AttachContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string node_name = 4;
 
   bool stdin = 6;
   bool tty = 7;
@@ -981,17 +1061,19 @@ message AttachInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message AttachInContainerTaskReply {
+message AttachContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
 }
 
-message ExecInContainerTaskRequest {
+message ExecInContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string node_name = 4;
 
-  repeated string command = 3;
+  repeated string command = 5;
 
   bool stdin = 6;
   bool tty = 7;
@@ -999,7 +1081,7 @@ message ExecInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message ExecInContainerTaskReply {
+message ExecInContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
@@ -1015,6 +1097,7 @@ service CraneCtld {
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
   rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+  rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1031,18 +1114,22 @@ service CraneCtld {
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
   rpc AddUser(AddUserRequest) returns (AddUserReply);
   rpc AddQos(AddQosRequest) returns (AddQosReply);
+  rpc AddWckey(AddWckeyRequest) returns (AddWckeyReply);
 
   rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
   rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
+  rpc DeleteWckey(DeleteWckeyRequest) returns (DeleteWckeyReply);
 
   rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
   rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
   rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
+  rpc QueryWckeyInfo(QueryWckeyInfoRequest) returns (QueryWckeyInfoReply);
 
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
+  rpc ModifyDefaultWckey(ModifyDefaultWckeyRequest) returns (ModifyDefaultWckeyReply);
 
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
@@ -1065,12 +1152,13 @@ service CraneCtld {
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
-service CeffQueryService {
+service PluginQueryService {
   rpc QueryTaskEfficiency(QueryTaskEfficiencyRequest) returns (QueryTaskEfficiencyReply);
+  rpc QueryNodeEvents(QueryNodeEventsRequest) returns (QueryNodeEventsReply);
 }
 
 service CraneCtldForInternal {
@@ -1106,8 +1194,8 @@ service Craned {
   /*
   Craned will proxy the following container-related RPCs to CRI Service.
   */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);

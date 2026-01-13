@@ -297,20 +297,20 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
   return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
-    const crane::grpc::AttachInContainerTaskRequest &request) {
-  using crane::grpc::AttachInContainerTaskReply;
-  using crane::grpc::AttachInContainerTaskRequest;
+crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(
+    const crane::grpc::AttachContainerStepRequest &request) {
+  using crane::grpc::AttachContainerStepReply;
+  using crane::grpc::AttachContainerStepRequest;
 
-  AttachInContainerTaskReply reply;
+  AttachContainerStepReply reply;
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
 
-  auto status = m_stub_->AttachInContainerTask(&context, request, &reply);
+  auto status = m_stub_->AttachContainerStep(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
-        "AttachInContainerTask RPC for Node {} returned with status not ok: {}",
+        "AttachContainerStep RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
@@ -325,20 +325,20 @@ crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
   return reply;
 }
 
-crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
-    const crane::grpc::ExecInContainerTaskRequest &request) {
-  using crane::grpc::ExecInContainerTaskReply;
-  using crane::grpc::ExecInContainerTaskRequest;
+crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
+    const crane::grpc::ExecInContainerStepRequest &request) {
+  using crane::grpc::ExecInContainerStepReply;
+  using crane::grpc::ExecInContainerStepRequest;
 
-  ExecInContainerTaskReply reply;
+  ExecInContainerStepReply reply;
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
 
-  auto status = m_stub_->ExecInContainerTask(&context, request, &reply);
+  auto status = m_stub_->ExecInContainerStep(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
-        "ExecInContainerTask RPC for Node {} returned with status not ok: {}",
+        "ExecInContainerStep RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
@@ -355,9 +355,10 @@ crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
 
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
-    CRANE_INFO("Craned {} reports service unavailable. Considering it down.",
-               m_craned_id_);
-    g_meta_container->CranedDown(m_craned_id_);
+    CRANE_INFO(
+        "Craned {} reports service unavailable. Maybe it is connecting to "
+        "CTLD.",
+        m_craned_id_);
   }
 }
 
@@ -538,15 +539,13 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
                          ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connect_craned_mtx_);
-      util::lock_guard guard(m_unavail_craned_set_mtx_);
       CRANE_ASSERT(
           !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
-      CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
-      CRANE_ASSERT(m_connecting_craned_set_.contains(craned->m_craned_id_));
-      token = m_unavail_craned_set_.at(craned->m_craned_id_);
-      m_unavail_craned_set_.erase(craned->m_craned_id_);
+      auto it = m_connecting_craned_set_.find(craned->m_craned_id_);
+      CRANE_ASSERT(it != m_connecting_craned_set_.end());
+      token = it->second;
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
@@ -872,7 +871,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
-          m_connecting_craned_set_.emplace(it->first);
+          m_connecting_craned_set_.emplace(*it);
           g_thread_pool->detach_task(
               [this, craned_id = it->first, token = it->second] {
                 ConnectCranedNode_(craned_id, token);
@@ -881,10 +880,10 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Craned {} is already connecting or connected, "
-                             "ignore new connection request. Token {}.",
+                             "drop new connection request. Token {}.",
                              it->first, ProtoTimestampToString(it->second));
         }
-        ++it;
+        it = m_unavail_craned_set_.erase(it);
       }
     }
 

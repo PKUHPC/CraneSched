@@ -51,7 +51,7 @@ cbatch cbatch_test.sh
 - **-A, --account string**: 提交作业的账户
 - **-p, --partition string**: 请求的分区
 - **-q, --qos string**: 作业使用的服务质量（QoS）
-- **-t, --time string**: 时间限制，格式：`day-hours:minutes:seconds`（如 `5-0:0:1` 表示 5 天 1 秒）或 `hours:minutes:seconds`（如 `10:1:2` 表示 10 小时 1 分钟 2 秒）
+- **-t, --time string**: 时间限制，格式：`[day-]hours:minutes:seconds`（如 `5-0:0:1` 表示 5 天 1 秒，或 `10:1:2` 表示 10 小时 1 分钟 2 秒）
 - **--comment string**: 作业注释
 
 ### 节点选择
@@ -69,6 +69,7 @@ cbatch cbatch_test.sh
 
 ### 调度选项
 - **--begin string**: 作业的开始时间。格式：`YYYY-MM-DDTHH:MM:SS`
+- **-d, --dependency string**: 作业依赖关系。格式：`<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` 或 `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`。支持的类型：`after`、`afterok`、`afternotok`、`afterany`。**注意**：`<delay>` 必须使用带单位的时间格式（如 `10s`、`5m`、`2h`），不要使用 `HH:MM:SS` 格式，因为 `:` 是作业 ID 分隔符。详见 [作业依赖](../reference/job_dependency.md)
 - **--exclusive**: 请求独占节点资源
 - **-H, --hold**: 以挂起状态提交作业
 - **-r, --reservation string**: 使用预留资源
@@ -78,10 +79,18 @@ cbatch cbatch_test.sh
 - **--mail-user string**: 通知接收者的邮件地址
 
 ### 容器支持
-- **--container string**: 容器镜像的路径
-- **--interpreter string**: 指定脚本解释器（如 `/bin/bash`、`/usr/bin/python3`）
+
+容器相关选项用于创建支持容器运行的 Pod 作业。详细使用方法参见 [ccon 命令手册](ccon.md) 和 [容器快速上手](../reference/container/quickstart.md)。
+
+- **--pod**: 启用容器模式，将作业创建为 Pod 作业。启用后可在脚本中使用 `ccon run` 启动容器
+- **--pod-name string**: Pod 名称（默认使用作业名）
+- **--pod-port string**: Pod 端口映射，格式：`HOST:CONTAINER` 或 `PORT`。可多次使用
+- **--pod-user string**: 以指定 UID[:GID] 运行 Pod（默认：当 `--pod-userns=false` 时使用当前用户）
+- **--pod-userns**: 启用 Pod 用户命名空间（默认：`true`，容器内用户映射为 root）
+- **--pod-host-network**: 使用宿主机网络命名空间（默认：`false`）
 
 ### 其他选项
+- **--interpreter string**: 指定脚本解释器（如 `/bin/bash`、`/usr/bin/python3`）
 - **-D, --chdir string**: 作业的工作目录
 - **--extra-attr string**: 作业的额外属性（JSON 格式）
 - **--repeat uint32**: 多次提交作业（默认值：1）
@@ -286,13 +295,6 @@ mpirun -n 13 -machinefile crane.hosts helloWorld > log
 
 ## 高级功能
 
-### 容器支持
-
-提交在容器中运行的作业：
-```bash
-cbatch --container /path/to/container.sif my_script.sh
-```
-
 ### 延迟启动
 
 将作业调度到特定时间启动：
@@ -330,9 +332,40 @@ cbatch --json my_script.sh
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
 
+### 容器作业
+
+使用 `--pod` 选项创建支持容器的 Pod 作业：
+
+```bash
+#!/bin/bash
+#CBATCH --pod
+#CBATCH -N 2
+#CBATCH -c 4
+#CBATCH --mem 8G
+#CBATCH -p GPU
+#CBATCH --gres gpu:1
+#CBATCH -J container_training
+
+# 在 Pod 内启动容器
+ccon run -d -v /data:/data pytorch/pytorch:latest -- python /data/train.py
+
+# 等待所有容器完成
+ccon wait
+```
+
+或通过命令行指定容器选项：
+
+```bash
+cbatch --pod --pod-name my-training --pod-host-network train_job.sh
+```
+
+更多容器使用示例，参见 [容器使用示例](../reference/container/examples.md)。
+
 ## 另请参阅
 
 - [cqueue](cqueue.md) - 查看作业队列
 - [ccancel](ccancel.md) - 取消作业
 - [cacct](cacct.md) - 查看作业统计信息
 - [ccontrol](ccontrol.md) - 控制作业和系统资源
+- [ccon](ccon.md) - 容器作业管理
+- [容器功能概览](../reference/container/index.md) - 容器功能介绍

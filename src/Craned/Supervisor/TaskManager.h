@@ -19,11 +19,14 @@
 #pragma once
 #include <sched.h>
 
+#include <expected>
+
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "crane/BindFs.h"
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -91,16 +94,35 @@ class StepInstance {
   StepInstance& operator=(StepInstance&&) = delete;
 
   ~StepInstance() = default;
+
+  // Do some preparation needed by all tasks.
   CraneErrCode Prepare();
   void CleanUp();
 
-  [[nodiscard]] bool IsContainer() const noexcept;
-  [[nodiscard]] bool IsBatch() const noexcept;
+  /*
+  A Step can be classified from multiple perspectives:
+
+  1. Interactivity: whether the Step is interactive (IsInteractive()), and for
+  interactive Steps, its subtypes (IsCrun / IsCalloc).
+  2. Role in a Job: whether it is a Common Step or a Daemon Step (IsDaemon()).
+  3. Container support: whether it runs as a Pod or a Container (IsPod(),
+  IsContainer()).
+
+  Across different perspectives, these Is-methods are not mutually exclusive.
+  When adding new methods, please ensure they are orthogonal to existing ones.
+  */
+
+  // Perspective 1: Interactivity
   [[nodiscard]] bool IsInteractive() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
 
-  [[nodiscard]] bool IsDaemonStep() const noexcept;
+  // Perspective 2: Role in a Job
+  [[nodiscard]] bool IsDaemon() const noexcept;
+
+  // Perspective 3: Container support
+  [[nodiscard]] bool IsPod() const noexcept;
+  [[nodiscard]] bool IsContainer() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -166,32 +188,6 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
-struct TaskInstanceMeta {
-  virtual ~TaskInstanceMeta() = default;
-
-  std::string parsed_sh_script_path;
-};
-
-struct BatchInstanceMeta : TaskInstanceMeta {
-  ~BatchInstanceMeta() override = default;
-
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
-};
-
-struct CrunInstanceMeta : TaskInstanceMeta {
-  ~CrunInstanceMeta() override = default;
-
-  int stdin_write;
-  int stdout_write;
-  int stdin_read;
-  int stdout_read;
-
-  std::string x11_target;
-  uint16_t x11_port;
-  std::string x11_auth_path;
-};
-
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
@@ -242,6 +238,57 @@ class ITaskInstance {
   EnvMap m_env_;
 };
 
+class PodInstance : public ITaskInstance {
+ public:
+  explicit PodInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  ~PodInstance() override = default;
+
+  PodInstance(const PodInstance&) = delete;
+  PodInstance(PodInstance&&) = delete;
+
+  PodInstance& operator=(PodInstance&&) = delete;
+  PodInstance& operator=(const PodInstance&) = delete;
+
+  CraneErrCode Prepare() override;
+  CraneErrCode Spawn() override;
+  CraneErrCode Kill(int signum) override;
+  CraneErrCode Cleanup() override;
+
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_pod_id_.empty()) return std::nullopt;
+    return m_pod_id_;
+  }
+
+  const TaskExitInfo& HandlePodExited();
+
+  // NOTE: These are public constants and will be used ContainerInstance.
+  // We use this to get a consistent data dir for pod/containers.
+  static constexpr std::string_view kPodLogDirPattern = "{}.out";
+  // NOTE: Should be consistent with ContainerInstance.
+  // We get PodSandboxConfig from this file in another common steps.
+  static constexpr std::string_view kPodConfigFilePattern = ".{}.bin";
+  static constexpr std::string_view kPodIdLockFilePattern = ".{}.lock";
+
+ private:
+  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
+
+  static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
+                                 const std::string& node_name);
+  static CraneErrCode ResolveUserNsMapping_(
+      const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
+
+  CraneErrCode SetPodSandboxConfig_(
+      const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+  CraneErrCode PersistPodSandboxInfo_();
+
+  cri::api::PodSandboxConfig m_pod_config_;
+  std::string m_pod_id_;
+
+  std::filesystem::path m_log_dir_;
+  std::filesystem::path m_config_file_;
+  std::filesystem::path m_lock_file_;
+};
+
 class ContainerInstance : public ITaskInstance {
  public:
   explicit ContainerInstance(StepInstance* step_spec)
@@ -270,28 +317,30 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
-  static constexpr std::string_view kContainerLogDirPattern = "{}.out";
+  // Container related constants (step_id.node_id.log)
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
 
-  static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
-  static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
-  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
+  // This is wrapper for SetupIdMappedMounts_ and SetupIdMappedBindFs_.
+  // NOTE: Must be called only after userns, run_as_* fields are set in config.
+  CraneErrCode ApplyIdMappedMounts_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config,
+                                    bool use_bindfs);
 
-  inline static cri::api::IDMapping MakeIdMapping_(uid_t kernel_id,
-                                                   uid_t userspace_id,
-                                                   size_t size);
-  inline static std::string MakeHashId_(job_id_t job_id,
-                                        const std::string& job_name,
-                                        const std::string& node_name);
+  // Setup id-mapped mounts in rootless containers.
+  // NOTE: Called only after userns, run_as_* fields are set in config.
+  CraneErrCode SetupIdMappedMounts_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config);
 
-  CraneErrCode SetPodSandboxConfig_();
-  CraneErrCode SetContainerConfig_();
+  // Setup id-mapped bindfs for a mount (workaround for no idmap fs).
+  // NOTE: Called only after userns, run_as_* fields are set in config.
+  CraneErrCode SetupIdMappedBindFs_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config);
 
-  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
-                                     cri::api::ContainerConfig* config);
-  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
-                                     cri::api::PodSandboxConfig* config);
-  CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
+  CraneErrCode LoadPodSandboxInfo_(
+      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
+  CraneErrCode SetContainerConfig_(
+      const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
+      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
 
   std::string m_image_id_;
   std::string m_pod_id_;
@@ -300,19 +349,50 @@ class ContainerInstance : public ITaskInstance {
   cri::api::PodSandboxConfig m_pod_config_;
   cri::api::ContainerConfig m_container_config_;
 
-  // These are used for keep-id mounts in rootless containers.
-  cri::api::IDMapping m_mount_uid_mapping_;
-  cri::api::IDMapping m_mount_gid_mapping_;
-
-  // This is a workaround for CRI which only supports only one id
-  // mapping in user namespace. See:
-  // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
-  // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
-  cri::api::IDMapping m_userns_uid_mapping_;
-  cri::api::IDMapping m_userns_gid_mapping_;
-
   std::filesystem::path m_log_dir_;
   std::filesystem::path m_log_file_;
+  std::vector<std::unique_ptr<bindfs::IdMappedBindFs>> m_bindfs_mounts_;
+};
+
+struct ProcInstanceMeta {
+  virtual ~ProcInstanceMeta() = default;
+  ProcInstanceMeta() = default;
+  ProcInstanceMeta(const ProcInstanceMeta&) = delete;
+  ProcInstanceMeta(ProcInstanceMeta&&) = delete;
+  ProcInstanceMeta& operator=(const ProcInstanceMeta&) = delete;
+  ProcInstanceMeta& operator=(ProcInstanceMeta&&) = delete;
+
+  std::string parsed_sh_script_path;
+};
+
+struct BatchInstanceMeta final : ProcInstanceMeta {
+  ~BatchInstanceMeta() override = default;
+  BatchInstanceMeta() = default;
+  BatchInstanceMeta(const BatchInstanceMeta&) = delete;
+  BatchInstanceMeta(BatchInstanceMeta&&) = delete;
+  BatchInstanceMeta& operator=(const BatchInstanceMeta&) = delete;
+  BatchInstanceMeta& operator=(BatchInstanceMeta&&) = delete;
+
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
+};
+
+struct CrunInstanceMeta final : ProcInstanceMeta {
+  ~CrunInstanceMeta() override = default;
+  CrunInstanceMeta() = default;
+  CrunInstanceMeta(const CrunInstanceMeta&) = delete;
+  CrunInstanceMeta(CrunInstanceMeta&&) = delete;
+  CrunInstanceMeta& operator=(const CrunInstanceMeta&) = delete;
+  CrunInstanceMeta& operator=(CrunInstanceMeta&&) = delete;
+
+  int stdin_write{};
+  int stdout_write{};
+  int stdin_read{};
+  int stdout_read{};
+
+  std::string x11_target;
+  uint16_t x11_port{};
+  std::string x11_auth_path;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -361,7 +441,7 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode SetChildProcBatchFd_();
 
   // Methods shared by Batch/Crun
-  void ResetChildProcSigHandler_();
+  static void ResetChildProcSigHandler_();
 
   CraneErrCode SetChildProcProperty_();
 
@@ -377,7 +457,7 @@ class ProcInstance : public ITaskInstance {
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
-  std::unique_ptr<TaskInstanceMeta> m_meta_;
+  std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
 
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
@@ -396,26 +476,28 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void Wait();
-  void ShutdownSupervisor();
+  void ShutdownSupervisorAsync(
+      crane::grpc::TaskStatus new_status = StepStatus::Completed,
+      uint32_t exit_code = 0, std::string reason = "");
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
   void AddTerminationTimer_(Duration duration) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+    auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handle->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
           EvTaskTimerCb_();
         });
-    termination_handel->start(
+    termination_handle->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
         std::chrono::seconds(0));
-    m_step_.termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handle;
   }
 
   void AddTerminationTimer_(int64_t secs) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
           EvTaskTimerCb_();
         });
     termination_handle->start(std::chrono::seconds(secs),
@@ -454,6 +536,8 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  void SetActivelyShutdown() { m_active_shutdown_ = true; }
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -475,6 +559,8 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  void EvShutdownSupervisorCb_();
+
   // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
@@ -495,6 +581,9 @@ class TaskManager {
   void EvGrpcQueryStepEnvCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
+  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
+      m_shutdown_status_queue_;
+  std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -528,6 +617,11 @@ class TaskManager {
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
+
+  // This is the gate for daemon step. Daemon step will not exit when all tasks
+  // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
+  // to true.
+  std::atomic_bool m_active_shutdown_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;

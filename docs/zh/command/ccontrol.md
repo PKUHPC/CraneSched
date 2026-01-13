@@ -24,6 +24,7 @@ ccontrol <操作> <实体> [选项]
 - **node** - 计算节点
 - **partition** - 节点分区
 - **job** - 作业/任务
+- **step** - 作业步骤（作业内的子执行单元）
 - **reservation** - 资源预留
 - **lic** - 许可证
 
@@ -34,7 +35,7 @@ ccontrol <操作> <实体> [选项]
 - **-J/--json**: 以JSON格式输出结果
 - **-C/--config**: 指定配置文件路径（默认："/etc/crane/config.yaml"）
 
-## 命令参考
+## 命令手册
 
 ### Show 命令
 
@@ -97,6 +98,63 @@ ccontrol show job 12345
 ```
 
 ![ccontrol](../../images/ccontrol/ccontrol_showjob2.png)
+
+#### 显示步骤
+
+显示作业步骤的详细信息。
+
+```bash
+# 显示特定步骤
+ccontrol show step <job_id>.<step_id>
+
+# 显示所有步骤（需要--all标志）
+ccontrol show step --all
+```
+
+**语法：**
+- 步骤ID格式：`jobid.stepid`（例如：`123.1`、`456.2`）
+
+**输出字段：**
+- **StepId**：步骤标识符，格式为`jobid.stepid`
+- **Name**：步骤名称
+- **Partition**：分区名称（从父作业继承）
+- **User**：用户名
+- **Account**：账户名称（从父作业继承）
+- **QoS**：服务质量（从父作业继承）
+- **State**：当前步骤状态（PENDING、RUNNING、COMPLETED、FAILED、CANCELLED）
+- **TimeLimit**：步骤的时间限制
+- **ElapsedTime**：步骤开始以来的已用时间
+- **NodeList**：分配给步骤的节点
+- **CPUs**：分配给步骤的CPU数量
+- **Memory**：分配给步骤的内存
+- **GRES**：分配给步骤的通用资源（GPU等）
+- **StartTime**：步骤开始时间
+
+**示例：**
+
+```bash
+# 显示作业123的步骤1的详细信息
+ccontrol show step 123.1
+
+# 显示作业456的步骤2的详细信息
+ccontrol show step 456.2
+```
+
+**示例输出：**
+```
+StepId=123.1 StepName=task1
+Partition=compute Account=research_group QoS=normal
+State=RUNNING TimeLimit=01:00:00 ElapsedTime=00:15:30
+NodeList=node[01-02] CPUs=8 Memory=4096MB
+GRES=gpu:2
+StartTime=2025-01-15T10:30:00
+```
+
+**使用说明：**
+- 步骤从父作业继承分区、账户和QoS
+- 使用`cqueue --step`获取所有步骤的列表视图
+- 使用`ccontrol show step`获取特定步骤的详细信息
+- 步骤状态包括：PENDING、RUNNING、COMPLETED、FAILED、CANCELLED
 
 #### 显示预留
 

@@ -22,7 +22,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **-A, --account string**: Account for job submission
 - **-p, --partition string**: Requested partition
 - **-q, --qos string**: Quality of Service (QoS) for the job
-- **-t, --time string**: Time limit, format: `day-hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days, 1 second) or `hours:minutes:seconds` (e.g., `10:1:2` for 10 hours, 1 minute, 2 seconds)
+- **-t, --time string**: Time limit, format: `[day-]hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days and 1 second, or `10:1:2` for 10 hours, 1 minute, 2 seconds)
 - **--comment string**: Job comment
 
 ### Node Selection
@@ -34,6 +34,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **--export string**: Propagate environment variables
 
 ### Scheduling Options
+- **-d, --dependency string**: Job dependency. Format: `<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` or `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`. Supported types: `after`, `afterok`, `afternotok`, `afterany`. **Note**: For `<delay>`, use time with units (e.g., `10s`, `5m`, `2h`) - do NOT use `HH:MM:SS` format as `:` is the job ID separator. See [Job Dependency](../reference/job_dependency.md) for details
 - **--exclusive**: Request exclusive node resources
 - **-H, --hold**: Submit job in held state
 - **-r, --reservation string**: Use reserved resources

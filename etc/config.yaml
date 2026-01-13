@@ -31,7 +31,7 @@ CraneCtldForInternalListenPort: 10013
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
 CraneCtldLogFile: cranectld/cranectld.log
-# file path of cranectld lock file (relative to CraneBaseDir)
+# file path of cranectld lock file (relative to CraneBaseDir, when set Keepalived, Relative to CraneNFSBaseDir)
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
@@ -42,6 +42,12 @@ CraneCtld:
   MaxLogFileSize: 50M
   # max files of cranectld log file
   MaxLogFileNum: 3
+
+Keepalived:
+  # the base directory of NFS storage
+  CraneNFSBaseDir: /var/crane/
+  # file path of cranectld alive file (relative to CraneBaseDir)
+  CraneCtldAliveFile: cranectld/cranectld.alive
 
 # Craned settings
 # the listening address of control machine
@@ -62,7 +68,7 @@ Craned:
   # ping interval in seconds
   PingInterval: 15
   # register operation timeout in seconds
-  CraneCtldTimeout: 5
+  CraneCtldTimeout: 30
   # max size of craned log file
   MaxLogFileSize: 50M
   # max files of craned log file
@@ -85,6 +91,8 @@ PriorityWeightJobSize: 0
 
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
+
+#JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
@@ -148,6 +156,9 @@ Licenses:
 # Default value is false.
 RejectJobsBeyondCapacity: false
 
+# Set the wckey
+#TrackWCKey: Yes
+
 # Set the mode for opening output and error files
 # Default value is false.
 JobFileAppend: false
@@ -174,3 +185,8 @@ Container:
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
+  BindFs:
+    Enabled: false
+    BindfsBinary: /usr/bin/bindfs
+    FusermountBinary: /usr/bin/fusermount3
+    MountBaseDir: /mnt/crane

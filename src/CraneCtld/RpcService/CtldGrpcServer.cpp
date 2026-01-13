@@ -25,6 +25,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
@@ -316,16 +317,36 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_step_completed = cb_step_completed;
           task->meta = std::move(meta);
 
-          auto submit_result =
-              g_task_scheduler->SubmitTaskToScheduler(std::move(task));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          if (submit_result.has_value()) {
-            job_id_t job_id = submit_result.value().get();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, kPrimaryStepId)};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_result.error()));
+          auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
+          if (lua_result) {
+            auto rich_err = lua_result.value().get();
+            if (rich_err.code() != CraneErrCode::SUCCESS) {
+              if (rich_err.description().empty()) {
+                result = std::unexpected(CraneErrStr(rich_err.code()));
+              } else {
+                result = std::unexpected(rich_err.description());
+              }
+            }
           }
+
+          if (result) {
+            auto submit_result =
+                g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+            if (submit_result.has_value()) {
+              CraneExpected<task_id_t> job_result = submit_result.value().get();
+              if (job_result.has_value()) {
+                result =
+                    std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                        std::pair(job_result.value(), kPrimaryStepId)};
+              } else {
+                result = std::unexpected(CraneErrStr(job_result.error()));
+              }
+            } else {
+              result = std::unexpected(CraneErrStr(submit_result.error()));
+            }
+          }
+
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -368,6 +389,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           } else {
             result = std::unexpected(CraneErrStr(submit_expt.error()));
           }
+
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -452,7 +474,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  // Check task type
+  // Check job type
   if (request->task().type() == crane::grpc::TaskType::Container &&
       !g_config.Container.Enabled) {
     response->set_ok(false);
@@ -462,20 +484,80 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
+  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
+  if (lua_result) {
+    auto rich_err = lua_result.value().get();
+    if (rich_err.code() != CraneErrCode::SUCCESS) {
+      response->set_ok(false);
+      response->set_code(rich_err.code());
+      response->set_reason(rich_err.description());
+      return grpc::Status::OK;
+    }
+  }
 
   auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
-    task_id_t id = result.value().get();
-    if (id != 0) {
+    CraneExpected<task_id_t> task_result = result.value().get();
+    if (task_result.has_value()) {
       response->set_ok(true);
-      response->set_task_id(id);
+      response->set_task_id(task_result.value());
     } else {
       response->set_ok(false);
-      response->set_code(CraneErrCode::ERR_BEYOND_TASK_ID);
+      response->set_code(task_result.error());
     }
   } else {
     response->set_ok(false);
     response->set_code(result.error());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
+    grpc::ServerContext* context,
+    const crane::grpc::SubmitContainerStepRequest* request,
+    crane::grpc::SubmitContainerStepReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->step().uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // For convenience of the CLI.
+  response->set_job_id(request->step().job_id());
+
+  // Only container steps are accepted here.
+  if (request->step().type() != crane::grpc::TaskType::Container) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  if (!request->step().has_container_meta()) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  // Check container feature flag.
+  if (!g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
+  auto step = std::make_unique<CommonStepInCtld>();
+  step->SetFieldsByStepToCtld(request->step());
+
+  auto submit_future = g_task_scheduler->SubmitStepAsync(std::move(step));
+  auto submit_result = submit_future.get();
+
+  if (submit_result.has_value()) {
+    response->set_ok(true);
+    response->set_step_id(submit_result.value());
+  } else {
+    response->set_ok(false);
+    response->set_code(submit_result.error());
   }
 
   return grpc::Status::OK;
@@ -499,7 +581,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     return grpc::Status::OK;
   }
 
-  std::vector<CraneExpected<std::future<task_id_t>>> results;
+  std::vector<CraneExpected<std::future<CraneExpected<task_id_t>>>> results;
 
   uint32_t task_count = request->count();
   const auto& task_to_ctld = request->task();
@@ -514,10 +596,18 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   }
 
   for (auto& res : results) {
-    if (res.has_value())
-      response->mutable_task_id_list()->Add(res.value().get());
-    else
-      response->mutable_code_list()->Add(std::move(res.error()));
+    if (res.has_value()) {
+      CraneExpected<task_id_t> task_result = res.value().get();
+      if (task_result.has_value()) {
+        response->mutable_task_id_list()->Add(task_result.value());
+      } else {
+        response->mutable_task_id_list()->Add(0);
+        response->mutable_code_list()->Add(task_result.error());
+      }
+    } else {
+      response->mutable_task_id_list()->Add(0);
+      response->mutable_code_list()->Add(res.error());
+    }
   }
 
   return grpc::Status::OK;
@@ -631,9 +721,17 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     return grpc::Status::OK;
   }
 
+  std::list<task_id_t> task_ids;
+
+  if (g_config.JobSubmitLuaScript.empty()) {
+    task_ids.assign(request->task_ids().begin(), request->task_ids().end());
+  } else {
+    g_task_scheduler->JobModifyLuaCheck(*request, response, &task_ids);
+  }
+
   CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       err = g_task_scheduler->ChangeTaskTimeLimit(
           task_id, request->time_limit_seconds());
       if (err == CraneErrCode::SUCCESS) {
@@ -653,7 +751,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Priority) {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       err = g_task_scheduler->ChangeTaskPriority(task_id,
                                                  request->mandated_priority());
       if (err == CraneErrCode::SUCCESS) {
@@ -671,8 +769,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
     int64_t secs = request->hold_seconds();
     std::vector<std::pair<task_id_t, std::future<CraneErrCode>>> results;
-    results.reserve(request->task_ids().size());
-    for (auto task_id : request->task_ids()) {
+    results.reserve(task_ids.size());
+    for (auto task_id : task_ids) {
       results.emplace_back(
           task_id, g_task_scheduler->HoldReleaseTaskAsync(task_id, secs));
     }
@@ -691,7 +789,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       response->add_not_modified_tasks(task_id);
       response->add_not_modified_reasons("Invalid function.");
     }
@@ -1055,6 +1153,32 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::AddWckey(
+    grpc::ServerContext* context, const crane::grpc::AddWckeyRequest* request,
+    crane::grpc::AddWckeyReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  Wckey wckey;
+  const crane::grpc::WckeyInfo& wckey_info = request->wckey();
+
+  wckey.user_name = wckey_info.user_name();
+  wckey.name = wckey_info.name();
+
+  CraneExpected<void> result =
+      g_account_manager->AddUserWckey(request->uid(), wckey);
+  if (result) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_code(result.error());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext* context,
     const crane::grpc::ModifyAccountRequest* request,
@@ -1285,6 +1409,27 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
+    grpc::ServerContext* context,
+    const crane::grpc::ModifyDefaultWckeyRequest* request,
+    crane::grpc::ModifyDefaultWckeyReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  auto modify_res = g_account_manager->ModifyDefaultWckey(
+      request->uid(), request->name(), request->user_name());
+  if (modify_res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_code(modify_res.error());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryAccountInfoRequest* request,
@@ -1440,6 +1585,40 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         coordinated_accounts->Add()->assign(coord);
       }
     }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
+    grpc::ServerContext* context,
+    const crane::grpc::QueryWckeyInfoRequest* request,
+    crane::grpc::QueryWckeyInfoReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  std::unordered_set<std::string> wckey_list{request->wckey_list().begin(),
+                                             request->wckey_list().end()};
+  std::vector<Wckey> res_wckey_list;
+  auto res = g_account_manager->QueryAllWckeyInfo(request->uid(), wckey_list);
+  if (!res) {
+    response->set_ok(false);
+    response->set_code(res.error());
+
+  } else {
+    response->set_ok(true);
+    res_wckey_list = std::move(res.value());
+  }
+
+  for (const auto& wckey : res_wckey_list) {
+    auto* wckey_info = response->mutable_wckey_list()->Add();
+    wckey_info->set_name(wckey.name);
+    wckey_info->set_cluster(g_config.CraneClusterName);
+    wckey_info->set_user_name(wckey.user_name);
+    wckey_info->set_is_default(wckey.is_default);
   }
 
   return grpc::Status::OK;
@@ -1603,6 +1782,29 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteWckey(
+    grpc::ServerContext* context,
+    const crane::grpc::DeleteWckeyRequest* request,
+    crane::grpc::DeleteWckeyReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
+                                            request->user_name());
+  if (!res) {
+    auto* new_err_record = response->mutable_rich_error();
+    new_err_record->set_description("");
+    new_err_record->set_code(res.error());
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
   }
 
   return grpc::Status::OK;
@@ -2010,19 +2212,19 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
+grpc::Status CraneCtldServiceImpl::AttachContainerStep(
     grpc::ServerContext* context,
-    const crane::grpc::AttachInContainerTaskRequest* request,
-    crane::grpc::AttachInContainerTaskReply* response) {
+    const crane::grpc::AttachContainerStepRequest* request,
+    crane::grpc::AttachContainerStepReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
   // Validate request
-  if (request->task_id() <= 0) {
+  if (request->job_id() == 0 || request->step_id() == 0) {
     auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-    err->set_description("Invalid task ID");
+    err->set_description("Invalid job id or step id");
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -2047,24 +2249,24 @@ grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->AttachInContainerTask(*request);
+  *response = g_task_scheduler->AttachContainerStep(*request);
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
+grpc::Status CraneCtldServiceImpl::ExecInContainerStep(
     grpc::ServerContext* context,
-    const crane::grpc::ExecInContainerTaskRequest* request,
-    crane::grpc::ExecInContainerTaskReply* response) {
+    const crane::grpc::ExecInContainerStepRequest* request,
+    crane::grpc::ExecInContainerStepReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
   // Validate request
-  if (request->task_id() <= 0) {
+  if (request->job_id() == 0 || request->step_id() == 0) {
     auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-    err->set_description("Invalid task ID");
+    err->set_description("Invalid job id or step id");
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -2097,7 +2299,7 @@ grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->ExecInContainerTask(*request);
+  *response = g_task_scheduler->ExecInContainerStep(*request);
 
   return grpc::Status::OK;
 }

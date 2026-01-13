@@ -1,6 +1,7 @@
 generated
 cmake-build-*
 build/
+site/
 .cache/
 
 third_party/*

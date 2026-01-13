@@ -761,9 +761,10 @@ class TaskScheduler {
 
   bool Init();
 
-  /// \return The future is set to 0 if task submission is failed.
+  /// \return The future is set to an error code if task submission failed.
   /// Otherwise, it is set to newly allocated task id.
-  std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
+  std::future<CraneExpected<task_id_t>> SubmitTaskAsync(
+      std::unique_ptr<TaskInCtld> task);
 
   std::future<CraneExpected<step_id_t>> SubmitStepAsync(
       std::unique_ptr<CommonStepInCtld> step);
@@ -778,7 +779,14 @@ class TaskScheduler {
   CraneErrCode ChangeTaskExtraAttrs(task_id_t task_id,
                                     const std::string& new_extra_attr);
 
-  CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
+  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(
+      TaskInCtld* task);
+
+  void JobModifyLuaCheck(const crane::grpc::ModifyTaskRequest& request,
+                         crane::grpc::ModifyTaskReply* response,
+                         std::list<task_id_t>* task_ids);
+
+  CraneExpected<std::future<CraneExpected<task_id_t>>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
   void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
@@ -789,7 +797,7 @@ class TaskScheduler {
                                        google::protobuf::Timestamp timestamp) {
     // TODO: Add reason implementation here!
     StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""), timestamp);
+                          reason.value_or(""), std::move(timestamp));
   }
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
@@ -814,11 +822,11 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  crane::grpc::AttachInContainerTaskReply AttachInContainerTask(
-      const crane::grpc::AttachInContainerTaskRequest& request);
+  crane::grpc::AttachContainerStepReply AttachContainerStep(
+      const crane::grpc::AttachContainerStepRequest& request);
 
-  crane::grpc::ExecInContainerTaskReply ExecInContainerTask(
-      const crane::grpc::ExecInContainerTaskRequest& request);
+  crane::grpc::ExecInContainerStepReply ExecInContainerStep(
+      const crane::grpc::ExecInContainerStepRequest& request);
 
   CraneErrCode TerminatePendingOrRunningIaStep(job_id_t job_id,
                                                step_id_t step_id) {
@@ -905,6 +913,15 @@ class TaskScheduler {
 
   crane::grpc::DeleteReservationReply DeleteResv(
       const crane::grpc::DeleteReservationRequest& request);
+
+  // For failed dependency, timestamp should be absl::InfiniteFuture()
+  void AddDependencyEvent(task_id_t dependent, task_id_t dependee,
+                          absl::Time timestamp) {
+    m_dependency_event_queue_.enqueue(
+        DependencyEvent{.dependent_job_id = dependent,
+                        .dependee_job_id = dependee,
+                        .event_time = timestamp});
+  }
 
  private:
   template <class... Ts>
@@ -1058,8 +1075,8 @@ class TaskScheduler {
   void SubmitTaskTimerCb_();
 
   std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
-  ConcurrentQueue<
-      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
+  ConcurrentQueue<std::pair<std::unique_ptr<TaskInCtld>,
+                            std::promise<CraneExpected<task_id_t>>>>
       m_submit_task_queue_;
   void SubmitTaskAsyncCb_();
 
@@ -1111,6 +1128,14 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  struct DependencyEvent {
+    task_id_t dependent_job_id;
+    task_id_t dependee_job_id;
+    absl::Time event_time;
+  };
+
+  ConcurrentQueue<DependencyEvent> m_dependency_event_queue_;
 };
 
 }  // namespace Ctld

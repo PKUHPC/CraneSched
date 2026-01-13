@@ -18,6 +18,18 @@
 
 #include "crane/OS.h"
 
+#include <grp.h>
+#include <pwd.h>
+#include <sys/types.h>
+
+#include <array>
+#include <cerrno>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "crane/Logger.h"
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -31,10 +43,10 @@
 namespace util::os {
 
 bool GetNodeInfo(NodeSpecInfo* info) {
-  if (!info) return false;
+  if (info == nullptr) return false;
 
-  char hostname[HOST_NAME_MAX + 1];
-  if (gethostname(hostname, sizeof(hostname)) != 0) {
+  std::array<char, HOST_NAME_MAX + 1> hostname{};
+  if (gethostname(hostname.data(), hostname.size()) != 0) {
     int err = errno;
     fmt::print(stderr, "gethostname failed: errno={} ({})\n", err,
                strerror(err));
@@ -54,7 +66,7 @@ bool GetNodeInfo(NodeSpecInfo* info) {
   uint64_t mem_bytes = sys_info.totalram * sys_info.mem_unit;
   double mem_gb = static_cast<double>(mem_bytes) / (1024 * 1024 * 1024);
 
-  info->name = hostname;
+  info->name = std::string(hostname.data());
   info->cpu = cpu_count;
   info->memory_gb = mem_gb;
 
@@ -78,6 +90,18 @@ bool DeleteFolders(std::string const& p) {
     return false;
   }
 
+  return true;
+}
+
+bool CreateFile(std::string const& p) {
+  if (std::filesystem::exists(p)) return true;
+
+  int fd = open(p.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd == -1) {
+    CRANE_ERROR("Create file {} failed: {}", p, std::strerror(errno));
+    return false;
+  }
+  close(fd);
   return true;
 }
 
@@ -169,6 +193,12 @@ void CloseFdFrom(int fd_begin) {
   for (int i = fd_begin; i < fd_max; i++) close(i);
 }
 
+void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
+  int fd_max = GetFdOpenMax();
+  for (int i = fd_begin; i < fd_max; i++)
+    if (!skip_fds.contains(i)) close(i);
+}
+
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end) {
   int fd_max;
   int flag;
@@ -235,6 +265,119 @@ bool CheckProxyEnvironmentVariable() {
   // NOLINTEND
 
   return has_proxy;
+}
+
+bool CheckUserHasPermission(uid_t uid, gid_t gid,
+                            std::filesystem::path const& p) {
+  // Use lstat to avoid following symlinks (prevent symlink traversal attacks)
+  // and get all information in a single syscall
+  struct stat st{};
+  if (::lstat(p.c_str(), &st) != 0) {
+    int e = errno;
+    if (e == ENOENT) {
+      CRANE_ERROR("Path {} does not exist.", p.c_str());
+    } else {
+      CRANE_ERROR("lstat({}) failed: {} ({})", p.c_str(), std::strerror(e), e);
+    }
+    return false;
+  }
+
+  const uid_t owner_uid = st.st_uid;
+  const gid_t owner_gid = st.st_gid;
+  const mode_t mode = st.st_mode;
+  const bool is_dir = S_ISDIR(mode);
+
+  if (S_ISLNK(mode)) {
+    CRANE_ERROR("Path {} is a symlink and is not allowed.", p.c_str());
+    return false;
+  }
+
+  if (uid == 0) {
+    return true;
+  }
+
+  auto user_in_group = [uid, gid](gid_t target_gid) -> bool {
+    if (gid == target_gid) {
+      return true;
+    }
+
+    struct passwd pwd{};
+    struct passwd* result = nullptr;
+    long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (buf_size < 0) {
+      buf_size = 16384;
+    }
+    std::string buf;
+    buf.resize(static_cast<size_t>(buf_size));
+
+    int rc = 0;
+    while (true) {
+      rc = getpwuid_r(uid, &pwd, buf.data(), buf.size(), &result);
+      if (rc != ERANGE) {
+        break;
+      }
+      buf.resize(buf.size() * 2);
+    }
+    if (rc != 0 || result == nullptr) {
+      if (rc != 0) {
+        CRANE_ERROR("getpwuid_r({}) failed: {} ({})", uid, std::strerror(rc),
+                    rc);
+      } else {
+        CRANE_ERROR("getpwuid_r({}) failed: user not found", uid);
+      }
+      return false;
+    }
+
+    std::vector<gid_t> groups(16);
+    int ngroups = static_cast<int>(groups.size());
+    int gl_ret = getgrouplist(pwd.pw_name, gid, groups.data(), &ngroups);
+    if (gl_ret == -1) {
+      if (ngroups <= 0) {
+        CRANE_ERROR("getgrouplist({}) failed", pwd.pw_name);
+        return false;
+      }
+      groups.resize(ngroups);
+      gl_ret = getgrouplist(pwd.pw_name, gid, groups.data(), &ngroups);
+    }
+    if (gl_ret == -1) {
+      CRANE_ERROR("getgrouplist({}) failed", pwd.pw_name);
+      return false;
+    }
+
+    for (int i = 0; i < ngroups; ++i) {
+      if (groups[i] == target_gid) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  auto has_perm_for_class = [is_dir, mode](mode_t read_bit,
+                                           mode_t exec_bit) -> bool {
+    if (is_dir) {
+      // For directory, require both read and exec bits
+      return ((mode & read_bit) != 0) && ((mode & exec_bit) != 0);
+    } else {  // NOLINT(readability-else-after-return)
+      // For file, only require read bit
+      return (mode & read_bit) != 0;
+    }
+  };
+
+  // 5. Check permissions based on POSIX rules:
+  //   - If uid matches owner uid, ONLY check owner permissions
+  //   - Else if user is in owner group (primary or supplementary), ONLY check
+  //     group permissions
+  //   - Else ONLY check others permissions
+  //   Each category is checked exclusively without fallback to lower privilege
+  //   levels.
+  if (uid == owner_uid) {
+    return has_perm_for_class(S_IRUSR, S_IXUSR);
+  } else if (user_in_group(owner_gid)) {
+    return has_perm_for_class(S_IRGRP, S_IXGRP);
+  } else {
+    return has_perm_for_class(S_IROTH, S_IXOTH);
+  }
 }
 
 bool GetSystemReleaseInfo(SystemRelInfo* info) {

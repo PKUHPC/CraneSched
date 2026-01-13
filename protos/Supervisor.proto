@@ -40,11 +40,19 @@ message InitSupervisorRequest {
   string craned_unix_socket_path = 5;
   string crane_base_dir = 6;
   string crane_script_dir = 7;
+  string job_name = 8;
 
   message ContainerConfig {
     string temp_dir = 1;
     string runtime_endpoint = 2;
     string image_endpoint = 3;
+
+    message BindFsConfig {
+      string bindfs_binary = 1;
+      string fusermount_binary = 2;
+      string mount_base_dir = 3;
+    }
+    BindFsConfig bindfs = 4;
   }
   ContainerConfig container_config = 15;
 

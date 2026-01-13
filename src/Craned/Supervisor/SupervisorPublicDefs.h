@@ -56,6 +56,13 @@ struct Config {
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    struct BindFsConfig {
+      bool Enabled{false};
+      std::filesystem::path BindfsBinary{"bindfs"};
+      std::filesystem::path FusermountBinary{"fusermount3"};
+      std::filesystem::path MountBaseDir{"/mnt/crane"};
+    };
+    BindFsConfig BindFs;
   };
   ContainerConfig Container;
 
@@ -82,6 +89,7 @@ struct Config {
   std::filesystem::path SupervisorUnixSockPath;
 
   job_id_t JobId;
+  std::string JobName;
   EnvMap JobEnv;
   step_id_t StepId;
   StepToSupv StepSpec;
@@ -98,6 +106,7 @@ struct RuntimeStatus {
   }
 };
 
+// Current supervisor status
 inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 
