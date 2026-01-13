@@ -1255,6 +1255,7 @@ void TaskInCtld::SetPrimaryStepStatus(crane::grpc::TaskStatus val) {
 void TaskInCtld::SetStatus(crane::grpc::TaskStatus val) {
   status = val;
   runtime_attr.set_status(val);
+  trace_guard.AddEvent("Status Change: " + crane::grpc::TaskStatus_Name(val));
 }
 
 void TaskInCtld::SetPrimaryStepExitCode(uint32_t val) {

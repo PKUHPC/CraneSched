@@ -40,7 +40,6 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
-#include "crane/TracingMacros.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -1126,16 +1125,7 @@ int main(int argc, char** argv) {
   auto& tracer = crane::TracerManager::GetInstance();
   std::string trace_file =
       "/nfs/home/interntwo/crane/CraneSched/output/cranectld_traces.json";
-  if (tracer.Initialize(trace_file, "cranectld")) {
-    CRANE_TRACE_BEGIN("cranectld.startup_test");
-    CRANE_TRACE_SET_ATTRIBUTE("test.type", "initialization");
-    CRANE_TRACE_SET_ATTRIBUTE("component", "cranectld");
-    CRANE_TRACE_ADD_EVENT("test.start");
-    CRANE_TRACE_ADD_EVENT("test.complete");
-    CRANE_TRACE_END("OK");
-    tracer.Shutdown();
-    CRANE_INFO("OpenTelemetry test trace written to: {}", trace_file);
-  }
+  tracer.Initialize(trace_file, "cranectld");
 
   if (g_config.CraneCtldForeground)
     StartServer();

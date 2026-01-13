@@ -23,6 +23,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include "crane/TracerManager.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -886,6 +887,8 @@ struct TaskInCtld {
   std::string pending_reason;
 
   double mandated_priority{0.0};
+
+  crane::TraceGuard trace_guard;
 
   // Helper function
  public:

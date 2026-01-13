@@ -23,8 +23,10 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #ifdef CRANE_ENABLE_TRACING
+#  include "crane/InfluxDbExporter.h"
 #  include "opentelemetry/sdk/trace/processor.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
@@ -36,6 +38,41 @@
 
 namespace crane {
 
+class TracerManager;
+
+class TraceGuard {
+ public:
+  TraceGuard() = default;
+  ~TraceGuard();
+
+  TraceGuard(TraceGuard&& other) noexcept;
+  TraceGuard& operator=(TraceGuard&& other) noexcept;
+
+  TraceGuard(const TraceGuard&) = delete;
+  TraceGuard& operator=(const TraceGuard&) = delete;
+
+  template <typename T>
+  void SetAttribute(const std::string& key, const T& value) {
+#ifdef CRANE_ENABLE_TRACING
+    if (span_) {
+      span_->SetAttribute(key, value);
+    }
+#endif
+  }
+
+  void AddEvent(const std::string& event_name);
+
+ private:
+#ifdef CRANE_ENABLE_TRACING
+  explicit TraceGuard(
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span);
+
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span_;
+  bool moved_ = false;
+#endif
+  friend class TracerManager;
+};
+
 class TracerManager {
  public:
   static TracerManager& GetInstance();
@@ -43,25 +80,25 @@ class TracerManager {
   bool Initialize(const std::string& output_file_path,
                   const std::string& service_name);
 
-  void Shutdown();
-
 #ifdef CRANE_ENABLE_TRACING
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
-      const std::string& span_name);
-
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateChildSpan(
-      const std::string& span_name,
-      const opentelemetry::trace::SpanContext& parent_context);
-
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> GetTracer();
+  bool Initialize(const InfluxDbConfig& influx_config,
+                  const std::string& service_name);
 #endif
 
-  TracerManager(const TracerManager&) = delete;
-  TracerManager& operator=(const TracerManager&) = delete;
+  void Shutdown();
 
- private:
-  TracerManager() = default;
-  ~TracerManager() = default;
+  TraceGuard StartSpan(const std::string& span_name);
+
+  template <typename T>
+  void SetAttribute(const std::string& key, const T& value) {
+#ifdef CRANE_ENABLE_TRACING
+    SetAttributeImpl(key, value);
+#endif
+  }
+
+  void AddEvent(const std::string& event_name);
+
+  void EndSpan(const std::string& status = "OK");
 
 #ifdef CRANE_ENABLE_TRACING
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>

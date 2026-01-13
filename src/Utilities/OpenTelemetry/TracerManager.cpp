@@ -32,12 +32,42 @@
 
 namespace crane {
 
-namespace _internal {
+TraceGuard::~TraceGuard() {
 #ifdef CRANE_ENABLE_TRACING
-thread_local opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-    g_current_span;
+  if (!moved_ && span_) {
+    span_->End();
+  }
 #endif
-}  // namespace _internal
+}
+
+TraceGuard::TraceGuard(TraceGuard&& other) noexcept {
+  *this = std::move(other);
+}
+
+TraceGuard& TraceGuard::operator=(TraceGuard&& other) noexcept {
+#ifdef CRANE_ENABLE_TRACING
+  if (this != &other) {
+    span_ = std::move(other.span_);
+    moved_ = other.moved_;
+    other.moved_ = true;
+  }
+#endif
+  return *this;
+}
+
+#ifdef CRANE_ENABLE_TRACING
+TraceGuard::TraceGuard(
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span)
+    : span_(span) {}
+#endif
+
+void TraceGuard::AddEvent(const std::string& event_name) {
+#ifdef CRANE_ENABLE_TRACING
+  if (span_) {
+    span_->AddEvent(event_name);
+  }
+#endif
+}
 
 TracerManager& TracerManager::GetInstance() {
   static TracerManager instance;
@@ -85,6 +115,37 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 #endif
 }
 
+#ifdef CRANE_ENABLE_TRACING
+bool TracerManager::Initialize(const InfluxDbConfig& influx_config,
+                               const std::string& service_name) {
+  namespace trace_api = opentelemetry::trace;
+  namespace trace_sdk = opentelemetry::sdk::trace;
+  namespace resource = opentelemetry::sdk::resource;
+
+  service_name_ = service_name;
+
+  auto exporter = std::make_unique<InfluxDbExporter>(influx_config);
+
+  auto processor =
+      trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));
+
+  auto resource_attributes = resource::ResourceAttributes{
+      {resource::SemanticConventions::kServiceName, service_name_}};
+  auto resource_ptr = resource::Resource::Create(resource_attributes);
+
+  auto provider = std::make_shared<trace_sdk::TracerProvider>(
+      std::move(processor), resource_ptr);
+  tracer_provider_ = provider;
+
+  trace_api::Provider::SetTracerProvider(tracer_provider_);
+
+  tracer_ = tracer_provider_->GetTracer(service_name_);
+
+  initialized_ = true;
+  return true;
+}
+#endif
+
 void TracerManager::Shutdown() {
 #ifdef CRANE_ENABLE_TRACING
   if (tracer_provider_) {
@@ -96,33 +157,36 @@ void TracerManager::Shutdown() {
 #endif
 }
 
+TraceGuard TracerManager::StartSpan(const std::string& span_name) {
 #ifdef CRANE_ENABLE_TRACING
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-TracerManager::CreateSpan(const std::string& span_name) {
   if (!tracer_) {
-    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
-        nullptr);
+    return TraceGuard(
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(nullptr));
   }
-  return tracer_->StartSpan(span_name);
+  return TraceGuard(tracer_->StartSpan(span_name));
+#else
+  return TraceGuard();
+#endif
 }
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-TracerManager::CreateChildSpan(
-    const std::string& span_name,
-    const opentelemetry::trace::SpanContext& parent_context) {
-  if (!tracer_) {
-    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
-        nullptr);
+void TracerManager::AddEvent(const std::string& event_name) {
+#ifdef CRANE_ENABLE_TRACING
+  if (g_current_span) {
+    g_current_span->AddEvent(event_name);
   }
-
-  opentelemetry::trace::StartSpanOptions options;
-  options.parent = parent_context;
-  return tracer_->StartSpan(span_name, options);
+#endif
 }
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-TracerManager::GetTracer() {
-  return tracer_;
+void TracerManager::EndSpan(const std::string& status) {
+  // Deprecated. Use TraceGuard destructors or explicit End if exposed.
+  // We don't have access to the span here anymore as g_current_span is removed.
+}
+
+#ifdef CRANE_ENABLE_TRACING
+void TracerManager::SetAttributeImpl(
+    const std::string& key,
+    const opentelemetry::common::AttributeValue& value) {
+  // Deprecated. Use TraceGuard::SetAttribute.
 }
 #endif
 
