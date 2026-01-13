@@ -2136,7 +2136,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info", 
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey","req_nodes","exclude_nodes",
-    //45-45
+    // 45 - 45
     "execution_nodes"
   };
   // clang-format on
@@ -2257,8 +2257,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
       "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info", 
-      // 40 - 46
-      "licenses_alloc", "nodename_list", "wckey","req_nodes","exclude_nodes","execution_nodes"
+      // 40 - 45
+      "licenses_alloc", "nodename_list", "wckey","req_nodes","exclude_nodes",
+      // 45 - 45
+    "execution_nodes"
   };
   // clang-format on
 
@@ -2302,10 +2304,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
              true /* Mark the document having complete job info */,
-             // 40-45
+             // 40-44
              task->licenses_count, task->CranedIds(), task->wckey,
              task->included_nodes, task->excluded_nodes,
-             // 46
+             // 45
              task->executing_craned_ids};
 
   return DocumentConstructor_(fields, values);
