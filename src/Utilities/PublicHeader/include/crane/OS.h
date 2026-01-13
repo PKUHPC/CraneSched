@@ -53,6 +53,11 @@ struct RunPrologEpilogArgs {
   std::function<bool(pid_t)> at_child_setup_cb;
 };
 
+struct RunPrologEpilogStatus {
+  int exit_code;
+  int signal_num;
+};
+
 namespace util::os {
 
 bool GetNodeInfo(NodeSpecInfo* info);
@@ -101,7 +106,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
-std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args);
+std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
+    const RunPrologEpilogArgs& args);
 
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,

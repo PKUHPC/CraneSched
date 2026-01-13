@@ -1006,7 +1006,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
     if (!job->is_prolog_run) {
       job->is_prolog_run = true;
-      CRANE_DEBUG("[Step #{}.{}] Running Prolog In AllocSteps.", job_id,
+      CRANE_TRACE("[Step #{}.{}] Running Prolog In AllocSteps.", job_id,
                   step_id);
       RunPrologEpilogArgs args{
           .scripts = g_config.JobLifecycleHook.Prologs,
@@ -1034,9 +1034,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
       else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
-      auto ok = util::os::RunPrologOrEpiLog(args);
+      auto result = util::os::RunPrologOrEpiLog(args);
       if (script_lock) m_prolog_serial_mutex_.Unlock();
-      if (!ok) {
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}", job_id, step_id, status.exit_code, status.signal_num);
         g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
         ActivateTaskStatusChangeAsync_(
             job_id, step_id, crane::grpc::TaskStatus::Failed,
@@ -1045,6 +1047,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
             google::protobuf::util::TimeUtil::GetCurrentTime());
         return;
       }
+      CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id, step_id);
     }
   }
 
@@ -1399,8 +1402,13 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
           run_epilog_args.timeout_sec =
               g_config.JobLifecycleHook.PrologEpilogTimeout;
 
-        if (!util::os::RunPrologOrEpiLog(run_epilog_args)) {
+        auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+        if (!result) {
+          auto status = result.error();
+          CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id, status.exit_code, status.signal_num);
           g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
+        } else {
+          CRANE_DEBUG("[Job #{}]: Epilog success", job_id);
         }
       });
     }

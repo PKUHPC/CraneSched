@@ -324,12 +324,16 @@ void GlobalVariableInit(int grpc_output_fd) {
       run_prolog_args.timeout_sec =
           g_config.JobLifecycleHook.PrologEpilogTimeout;
 
-    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+    auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+    if (!result) {
+      auto status = result.error();
+      CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code, status.signal_num);
       msg.set_ok(false);
       SerializeDelimitedToZeroCopyStream(msg, &ostream);
       ostream.Close();
       std::abort();
     }
+    CRANE_DEBUG("Prolog success");
   }
 
   PasswordEntry::InitializeEntrySize();

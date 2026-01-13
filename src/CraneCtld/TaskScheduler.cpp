@@ -1170,9 +1170,13 @@ void TaskScheduler::ScheduleThread_() {
             auto run_prolog_result =
                 util::os::RunPrologOrEpiLog(run_prolog_args);
             if (!run_prolog_result) {
+              auto status = run_prolog_result.error();
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}", job_id, status.exit_code, status.signal_num);
               thread_pool_mtx.Lock();
               failed_job_id_set.emplace(job_id);
               thread_pool_mtx.Unlock();
+            } else {
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
             }
             prolog_bl.DecrementCount();
           });
@@ -3395,7 +3399,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         g_licenses_manager->FreeLicense(task->licenses_count);
 
       if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
-        g_thread_pool->detach_task([env_copy = task->env]() {
+        g_thread_pool->detach_task([job_id = task->TaskId(), env_copy = task->env]() {
           RunPrologEpilogArgs run_epilog_ctld_args{
               .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
               .envs = env_copy,
@@ -3413,7 +3417,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
                       run_epilog_ctld_args.run_uid,
                       run_epilog_ctld_args.timeout_sec);
-          util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
+          auto result = util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
+          if (!result) {
+            auto status = result.error();
+            CRANE_DEBUG("Job #[{}]: CraneCtldEpilog failed status={}:{}", job_id, status.exit_code, status.signal_num);
+          } else {
+            CRANE_DEBUG("Job #[{}]: CraneCtldEpilog success", job_id);
+          }
         });
       }
 
