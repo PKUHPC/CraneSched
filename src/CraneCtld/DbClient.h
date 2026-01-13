@@ -104,10 +104,15 @@ class MongodbClient {
     };
   };
 
-  // 任务时间范围结构体，用于跨小时任务的重新聚合
   struct JobTimeRange {
-    std::chrono::sys_seconds start_time;  // 任务开始时间
-    std::chrono::sys_seconds end_time;    // 任务结束时间
+    std::chrono::sys_seconds start_time;
+    std::chrono::sys_seconds end_time;
+  };
+
+  struct MongoServerVersion {
+    int major{0};
+    int minor{0};
+    int patch{0};
   };
 
  public:
@@ -189,12 +194,6 @@ class MongodbClient {
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
 
  private:
-  struct MongoServerVersion {
-    int major{0};
-    int minor{0};
-    int patch{0};
-  };
-
   [[nodiscard]] bool MongoVersionAtLeast_(int major, int minor) const {
     if (m_mongo_server_version_.major != major)
       return m_mongo_server_version_.major > major;
