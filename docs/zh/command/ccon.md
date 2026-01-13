@@ -154,7 +154,7 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 **-v, --volume=&lt;host:container&gt;**
 
-:   绑定挂载卷。格式：`宿主机路径:容器路径[:只读]`。可多次使用。
+:   绑定挂载卷。格式：`宿主机路径:容器路径`。可多次使用。
 
 **-p, --ports=&lt;host:container&gt;**
 
