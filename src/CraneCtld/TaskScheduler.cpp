@@ -1185,6 +1185,8 @@ void TaskScheduler::ScheduleThread_() {
                 .count());
       }
 
+      begin = std::chrono::steady_clock::now();
+
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
       // Map for AllocJobs rpc.
@@ -1207,6 +1209,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
+        if (failed_job_id_set.contains(job->TaskId())) continue;
         // IMPORTANT: job must be put into running_task_map before any
         // time-consuming operation, otherwise TaskStatusChange RPC will come
         // earlier before job is put into running_task_map.
@@ -1221,6 +1224,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
+        if (failed_job_id_set.contains(job->TaskId())) continue;
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*job);
@@ -1235,6 +1239,7 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
+          if (failed_job_id_set.contains(job->TaskId())) continue;
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
             craned_alloc_job_map[craned_id].push_back(
