@@ -138,7 +138,7 @@ if (( FREE_MEM_MB < 200 )); then
     exit 1  # 非 0 → 阻止作业执行
 fi
 
-# 5. 输出结束标识
+# 输出结束标识
 echo "=== Prolog End ===" >> $LOG_FILE
 echo "" >> $LOG_FILE
 

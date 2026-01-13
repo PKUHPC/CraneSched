@@ -1013,7 +1013,6 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           .envs = job->GetJobEnvMap(),
           .run_uid = 0,
           .run_gid = 0,
-          .is_prolog = true,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
       if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
@@ -1394,7 +1393,6 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             .envs = env_map,
             .run_uid = 0,
             .run_gid = 0,
-            .is_prolog = false,
             .output_size = g_config.JobLifecycleHook.MaxOutputSize};
         if (g_config.JobLifecycleHook.EpilogTimeout > 0)
           run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;

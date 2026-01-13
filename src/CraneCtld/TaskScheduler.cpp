@@ -1155,7 +1155,6 @@ void TaskScheduler::ScheduleThread_() {
                 .envs = env,
                 .run_uid = 0,
                 .run_gid = 0,
-                .is_prolog = true,
                 .output_size = g_config.JobLifecycleHook.MaxOutputSize};
             if (g_config.JobLifecycleHook.PrologTimeout) {
               run_prolog_args.timeout_sec =
@@ -3405,7 +3404,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
               .envs = env_copy,
               .run_uid = 0,
               .run_gid = 0,
-              .is_prolog = false,
               .output_size = g_config.JobLifecycleHook.MaxOutputSize};
           if (g_config.JobLifecycleHook.EpilogTimeout) {
             run_epilog_ctld_args.timeout_sec =

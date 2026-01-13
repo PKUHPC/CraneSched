@@ -23,6 +23,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include <expected>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -48,7 +49,6 @@ struct RunPrologEpilogArgs {
   uint32_t timeout_sec;
   uid_t run_uid;
   gid_t run_gid;
-  bool is_prolog;
   uint64_t output_size;
   std::function<bool(pid_t)> at_child_setup_cb;
 };

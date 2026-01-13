@@ -316,7 +316,6 @@ void GlobalVariableInit(int grpc_output_fd) {
         .envs = g_config.JobEnv,
         .run_uid = 0,
         .run_gid = 0,
-        .is_prolog = true,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
     if (g_config.JobLifecycleHook.PrologTimeout > 0)
       run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;

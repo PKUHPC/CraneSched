@@ -49,7 +49,7 @@ echo "print This message has been printed with TaskProlog"
 - **If CranectldProlog fails** → the job is **failed**.
 - **If CranectldEpilog fails** → a **log is written**.
 - **If task prolog fails** → the **task is failed**.
-- **If crun prolog fails** → the **step will not be executed; the frontend will directly return a failure.**.
+- **If crun prolog fails** → the **step will not be executed; the frontend will directly return a failure**.
 - **If task epilog or crun epilog fails** → a **log is written**.
 
 ---

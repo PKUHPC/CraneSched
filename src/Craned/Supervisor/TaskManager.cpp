@@ -1726,7 +1726,6 @@ CraneErrCode ProcInstance::Spawn() {
           .envs = m_env_,
           .run_uid = m_parent_step_inst_->uid,
           .run_gid = m_parent_step_inst_->gids[0],
-          .is_prolog = true,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
       if (g_config.JobLifecycleHook.PrologTimeout > 0)
         run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
@@ -1751,7 +1750,6 @@ CraneErrCode ProcInstance::Spawn() {
           .envs = m_env_,
           .run_uid = m_parent_step_inst_->uid,
           .run_gid = m_parent_step_inst_->gids[0],
-          .is_prolog = true,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
       if (g_config.JobLifecycleHook.PrologTimeout > 0)
         run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
@@ -1963,7 +1961,6 @@ TaskManager::~TaskManager() {
         .envs = g_config.JobEnv,
         .run_uid = 0,
         .run_gid = 0,
-        .is_prolog = false,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
     if (g_config.JobLifecycleHook.EpilogTimeout > 0)
       run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
@@ -2306,7 +2303,6 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
                                      task->GetParentStep().env().end()},
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
-          .is_prolog = false,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
       if (g_config.JobLifecycleHook.EpilogTimeout > 0)
         run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
@@ -2330,7 +2326,6 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
                                      task->GetParentStep().env().end()},
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
-          .is_prolog = false,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
       if (g_config.JobLifecycleHook.EpilogTimeout > 0)
         run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
