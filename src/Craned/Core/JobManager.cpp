@@ -1037,7 +1037,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       if (script_lock) m_prolog_serial_mutex_.Unlock();
       if (!result) {
         auto status = result.error();
-        CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}", job_id, step_id, status.exit_code, status.signal_num);
+        CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
+                    job_id, step_id, status.exit_code, status.signal_num);
         g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
         ActivateTaskStatusChangeAsync_(
             job_id, step_id, crane::grpc::TaskStatus::Failed,
@@ -1046,7 +1047,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
             google::protobuf::util::TimeUtil::GetCurrentTime());
         return;
       }
-      CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id, step_id);
+      CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id,
+                  step_id);
     }
   }
 
@@ -1403,7 +1405,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
         if (!result) {
           auto status = result.error();
-          CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id, status.exit_code, status.signal_num);
+          CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
+                      status.exit_code, status.signal_num);
           g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
         } else {
           CRANE_DEBUG("[Job #{}]: Epilog success", job_id);

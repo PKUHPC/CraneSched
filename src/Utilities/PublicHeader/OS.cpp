@@ -18,26 +18,21 @@
 
 #include "crane/OS.h"
 
+#include <absl/cleanup/cleanup.h>
 #include <grp.h>
 #include <pwd.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <future>
 #include <string>
 #include <vector>
 
-#include "crane/Logger.h"
-
-#include <absl/cleanup/cleanup.h>
-#include <grp.h>
-#include <pwd.h>
-#include <sys/wait.h>
-
-#include <future>
-
 #include "absl/strings/str_split.h"
+#include "crane/Logger.h"
 #include "re2/re2.h"
 
 #if defined(__linux__) || defined(__unix__)
@@ -463,14 +458,16 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
       CRANE_ERROR("Total timeout ({}s) reached before running {}.",
                   args.timeout_sec, script);
-      return std::unexpected(RunPrologEpilogStatus{.exit_code=1, .signal_num=0});
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
     int stdout_pipe[2], stderr_pipe[2];
     if (pipe(stdout_pipe) == -1) {
       CRANE_ERROR("{} pipe stdout creation failed: {}", script,
                   strerror(errno));
-      return std::unexpected(RunPrologEpilogStatus{.exit_code=1, .signal_num=0});
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
     if (pipe(stderr_pipe) == -1) {
@@ -478,19 +475,20 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
                   strerror(errno));
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
-      return std::unexpected(RunPrologEpilogStatus{.exit_code=1, .signal_num=0});
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
     pid_t pid = fork();
 
     if (pid == -1) {
-      CRANE_ERROR("{} pid fork failed: {}.", script,
-                  strerror(errno));
+      CRANE_ERROR("{} pid fork failed: {}.", script, strerror(errno));
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
       close(stderr_pipe[0]);
       close(stderr_pipe[1]);
-      return std::unexpected(RunPrologEpilogStatus{.exit_code=1, .signal_num=0});
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
     if (pid > 0) {
@@ -508,19 +506,16 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       auto now = std::chrono::steady_clock::now();
       auto elapsed_now =
           std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
-      uint32_t remaining_time =
-          (args.timeout_sec > elapsed_now.count())
-              ? args.timeout_sec - elapsed_now.count()
-              : 0;
+      uint32_t remaining_time = (args.timeout_sec > elapsed_now.count())
+                                    ? args.timeout_sec - elapsed_now.count()
+                                    : 0;
       bool child_exited = false;
 
       if (args.timeout_sec == 0) {
-        if (fut.get() == pid)
-          child_exited = true;
+        if (fut.get() == pid) child_exited = true;
       } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
                  std::future_status::ready) {
-        if (fut.get() == pid)
-          child_exited = true;
+        if (fut.get() == pid) child_exited = true;
       }
 
       if (!child_exited) {
@@ -558,8 +553,10 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       auto err_str = read_stream(stderr_pipe[0], args.output_size);
 
       if (exit_code != 0) {
-        CRANE_TRACE("{} Failed (exit status {}:{}), err: {}.", script, exit_code, signal_num, err_str);
-        return std::unexpected(RunPrologEpilogStatus{.exit_code=exit_code, .signal_num=signal_num});
+        CRANE_TRACE("{} Failed (exit status {}:{}), err: {}.", script,
+                    exit_code, signal_num, err_str);
+        return std::unexpected(RunPrologEpilogStatus{.exit_code = exit_code,
+                                                     .signal_num = signal_num});
       }
 
     } else {  // child proc
@@ -575,19 +572,19 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         if (!result) {
           fmt::print(stderr,
                      "[Subprocess] Error: subprocess callback failed\n");
-           _exit(EXIT_FAILURE);
+          _exit(EXIT_FAILURE);
         }
       }
 
       if (setgid(args.run_gid) != 0) {
         fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {}\n",
                    args.run_gid, strerror(errno));
-         _exit(EXIT_FAILURE);
+        _exit(EXIT_FAILURE);
       }
       if (setuid(args.run_uid) != 0) {
         fmt::print(stderr, "[Subprocess] Error: setuid({}) failed: {}\n",
                    args.run_uid, strerror(errno));
-         _exit(EXIT_FAILURE);
+        _exit(EXIT_FAILURE);
       }
       for (const auto& [name, value] : args.envs)
         if (setenv(name.c_str(), value.c_str(), 1))
@@ -598,7 +595,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       std::vector<const char*> argv = {script.c_str(), nullptr};
       execvp(argv[0], const_cast<char* const*>(argv.data()));
       fmt::print(stderr, "[Subprocess] execvp() failed: {}\n", strerror(errno));
-       _exit(EXIT_FAILURE);
+      _exit(EXIT_FAILURE);
     }
   }
 

@@ -20,11 +20,11 @@
 
 #include <absl/strings/str_split.h>
 #include <absl/strings/strip.h>
+#include <glob.h>
 #include <pthread.h>
 
 #include <cstddef>
 #include <regex>
-#include <glob.h>
 
 #include "crane/Logger.h"
 namespace util {
