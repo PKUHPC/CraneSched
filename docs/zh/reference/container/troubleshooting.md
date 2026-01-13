@@ -99,8 +99,8 @@ Error: Failed to attach to container 123.1: connection refused
 
 1. 容器已退出
 2. 排队时间过长，CLI 端连接超时
-2. CRI 运行时（如 containerd）未配置允许远程连接
-3. 网络问题
+3. CRI 运行时（如 containerd）未配置允许远程连接
+4. 网络问题
 
 **解决方案**
 
