@@ -21,6 +21,7 @@
 #ifdef CRANE_ENABLE_TRACING
 #  include <fstream>
 
+#  include "crane/InfluxDbExporter.h"
 #  include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
@@ -116,7 +117,7 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 }
 
 #ifdef CRANE_ENABLE_TRACING
-bool TracerManager::Initialize(const InfluxDbConfig& influx_config,
+bool TracerManager::Initialize(const PluginSpanConfig& influx_config,
                                const std::string& service_name) {
   namespace trace_api = opentelemetry::trace;
   namespace trace_sdk = opentelemetry::sdk::trace;
@@ -124,7 +125,7 @@ bool TracerManager::Initialize(const InfluxDbConfig& influx_config,
 
   service_name_ = service_name;
 
-  auto exporter = std::make_unique<InfluxDbExporter>(influx_config);
+  auto exporter = std::make_unique<PluginSpanExporter>(influx_config);
 
   auto processor =
       trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));

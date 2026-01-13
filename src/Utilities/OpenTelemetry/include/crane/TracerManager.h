@@ -26,7 +26,7 @@
 #include <utility>
 
 #ifdef CRANE_ENABLE_TRACING
-#  include "crane/InfluxDbExporter.h"
+#  include "crane/PluginSpanExporter.h"
 #  include "opentelemetry/sdk/trace/processor.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
@@ -81,7 +81,7 @@ class TracerManager {
                   const std::string& service_name);
 
 #ifdef CRANE_ENABLE_TRACING
-  bool Initialize(const InfluxDbConfig& influx_config,
+  bool Initialize(const PluginSpanConfig& influx_config,
                   const std::string& service_name);
 #endif
 

@@ -1,4 +1,4 @@
-#include "crane/InfluxDbExporter.h"
+#include "crane/PluginSpanExporter.h"
 
 #ifdef CRANE_ENABLE_TRACING
 
@@ -11,41 +11,17 @@
 #  include "opentelemetry/nostd/variant.h"
 #  include "opentelemetry/sdk/trace/recordable.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
-
-// Note: In detailed implementation, we should cast Recordable to the specific
-// type we created. We will use the default SpanData recordable from the SDK.
-// Since opentelemetry-cpp doesn't expose a simple "GetAttributes" on the
-// interface easily without casting, we rely on the fact that we return a
-// SpanData object in MakeRecordable.
-
-// However, SpanData is not fully exposed as a public header in all versions or
-// requires specific includes. Let's check headers.
-#  include "opentelemetry/sdk/trace/simple_processor.h"
-
-// To access SpanData, we can use the pattern from OStreamExporter:
-// it assumes the recordable is printable or accessible.
-// Actually, standard Exporters use `opentelemetry::sdk::trace::Recordable`.
-// But to get data, we need to specific methods.
-// The standard SDK provided Recordable has methods like SetName, SetStartTime
-// etc. But to READ them, we usually need the concrete class `SpanData`. Let's
-// assume we use the default Recordable from SDK which is `SpanData`.
-
-// Since we cannot easily import SpanData definition without correct dependency
-// paths which might vary, we'll try to use the IterateAttributes if available
-// or we might need to copy necessary headers. Wait, SpanData is usually in
-// `opentelemetry/sdk/trace/span_data.h`.
-
 #  include "opentelemetry/sdk/trace/span_data.h"
 
 namespace crane {
 
-InfluxDbExporter::InfluxDbExporter(const InfluxDbConfig& config)
+PluginSpanExporter::PluginSpanExporter(const PluginSpanConfig& config)
     : config_(config) {}
 
-InfluxDbExporter::~InfluxDbExporter() {}
+PluginSpanExporter::~PluginSpanExporter() {}
 
 std::unique_ptr<opentelemetry::sdk::trace::Recordable>
-InfluxDbExporter::MakeRecordable() noexcept {
+PluginSpanExporter::MakeRecordable() noexcept {
   return std::make_unique<opentelemetry::sdk::trace::SpanData>();
 }
 
@@ -76,12 +52,12 @@ std::string EscapeStringField(const std::string& input) {
   return output;
 }
 
-bool InfluxDbExporter::Shutdown(std::chrono::microseconds timeout) noexcept {
+bool PluginSpanExporter::Shutdown(std::chrono::microseconds timeout) noexcept {
   is_shutdown_ = true;
   return true;
 }
 
-opentelemetry::sdk::common::ExportResult InfluxDbExporter::Export(
+opentelemetry::sdk::common::ExportResult PluginSpanExporter::Export(
     const opentelemetry::nostd::span<
         std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
         spans) noexcept {
@@ -103,10 +79,8 @@ opentelemetry::sdk::common::ExportResult InfluxDbExporter::Export(
     // Tags
     ss << ",service_name="
        << EscapeTag(config_.measurement.empty() ? "crane" : "crane");
-    // Note: functionality limitations in specific implementation, using
-    // hardcoded tags or extracting from somewhere else Ideally we should inject
-    // Resource tags here. SpanData has GetResource().
 
+    // Resource attributes
     const auto& resource = span_data->GetResource();
     auto resource_attr = resource.GetAttributes();
     if (resource_attr.find("service.name") != resource_attr.end()) {
@@ -176,17 +150,12 @@ opentelemetry::sdk::common::ExportResult InfluxDbExporter::Export(
   return opentelemetry::sdk::common::ExportResult::kSuccess;
 }
 
-void InfluxDbExporter::SendData(const std::string& data) {
+void PluginSpanExporter::SendData(const std::string& data) {
   if (!g_plugin_client) {
-    // Ideally we should log a warning here, but we might be in a context where
-    // logging causes recursion or is not safe. For now, we just drop the spans
-    // if plugin client is not ready. std::cerr << "[InfluxDbExporter] Plugin
-    // client not initialized; spans dropped." << std::endl;
     return;
   }
 
   std::vector<std::string> records;
-  // Splits the data by newlines
   std::stringstream ss(data);
   std::string segment;
   while (std::getline(ss, segment)) {

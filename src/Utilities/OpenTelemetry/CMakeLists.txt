@@ -1,6 +1,6 @@
 # OpenTelemetry tracing library for CraneSched
 
-add_library(crane_tracer STATIC TracerManager.cpp InfluxDbExporter.cpp)
+add_library(crane_tracer STATIC TracerManager.cpp PluginSpanExporter.cpp)
 
 target_include_directories(crane_tracer PUBLIC
                            ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -13,7 +13,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     PUBLIC opentelemetry-cpp::trace
            opentelemetry-cpp::ostream_span_exporter
            opentelemetry-cpp::resources
-           libcurl)
+           Utility_PluginClient)
   
   message(STATUS "OpenTelemetry tracing enabled (Debug build) - output to file and influxdb")
 else()

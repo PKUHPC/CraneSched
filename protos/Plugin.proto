@@ -130,4 +130,21 @@ service CranePluginD {
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
   rpc DestroyCgroupHook(DestroyCgroupHookRequest) returns (DestroyCgroupHookReply);
+
+  /* ----------------------------------- Spans ingestion (from Crane core) ------------------------------------- */
+  // Insert OpenTelemetry spans encoded as InfluxDB line protocol records.
+  // The plugin daemon will delegate to registered plugins (e.g., monitor) to persist them
+  // using the same DB client and config as other data.
+  rpc InsertSpansHook(InsertSpansHookRequest) returns (InsertSpansHookReply);
+}
+
+message InsertSpansHookRequest {
+  // Each element is a single InfluxDB line protocol record
+  // e.g. "crane_spans,service=crane span_name=\"X\",duration_ns=123i 1736760000000000000"
+  repeated string records = 1;
+}
+
+message InsertSpansHookReply {
+  bool ok = 1;
+  string failure_reason = 2;
 }

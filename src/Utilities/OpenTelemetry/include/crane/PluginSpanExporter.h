@@ -11,14 +11,14 @@
 
 namespace crane {
 
-struct InfluxDbConfig {
+struct PluginSpanConfig {
   std::string measurement = "crane_spans";
 };
 
-class InfluxDbExporter : public opentelemetry::sdk::trace::SpanExporter {
+class PluginSpanExporter : public opentelemetry::sdk::trace::SpanExporter {
  public:
-  explicit InfluxDbExporter(const InfluxDbConfig& config);
-  ~InfluxDbExporter() override;
+  explicit PluginSpanExporter(const PluginSpanConfig& config);
+  ~PluginSpanExporter() override;
 
   std::unique_ptr<opentelemetry::sdk::trace::Recordable>
   MakeRecordable() noexcept override;
@@ -32,7 +32,7 @@ class InfluxDbExporter : public opentelemetry::sdk::trace::SpanExporter {
                     std::chrono::microseconds::max()) noexcept override;
 
  private:
-  InfluxDbConfig config_;
+  PluginSpanConfig config_;
   bool is_shutdown_ = false;
 
   void SendData(const std::string& data);
