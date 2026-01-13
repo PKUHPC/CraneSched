@@ -1307,7 +1307,7 @@ struct LicenseResourceInDb {
       cluster_resources;
   uint32_t total_resource_count{
       0};         /* count of resources managed on the server */
-  uint32_t flags; /* resource attribute flags */
+  uint32_t flags{0}; /* resource attribute flags */
   absl::Time last_update;
   std::string description;
 };
