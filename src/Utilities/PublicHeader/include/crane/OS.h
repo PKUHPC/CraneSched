@@ -46,7 +46,7 @@ struct NodeSpecInfo {
 struct RunPrologEpilogArgs {
   std::vector<std::string> scripts;
   std::unordered_map<std::string, std::string> envs;
-  uint32_t timeout_sec;
+  uint32_t timeout_sec{0};
   uid_t run_uid;
   gid_t run_gid;
   uint64_t output_size;
