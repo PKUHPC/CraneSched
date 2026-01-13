@@ -152,9 +152,9 @@ These options configure container runtime parameters:
 
 :   Set environment variable. Can be used multiple times.
 
-**-v, --volume=&lt;host:container[:ro]&gt;**
+**-v, --volume=&lt;host:container&gt;**
 
-:   Bind mount volume. Format: `host_path:container_path[:readonly]`. Can be used multiple times.
+:   Bind mount volume. Format: `host_path:container_path`. Can be used multiple times.
 
 **-p, --ports=&lt;host:container&gt;**
 
@@ -219,7 +219,7 @@ ccon -p GPU --gres gpu:1 --mem 8G run pytorch/pytorch:latest -- python train.py
 Mount data directories:
 
 ```bash
-ccon -p CPU run -v /data/input:/input:ro -v /data/output:/output alpine:latest -- cp /input/file /output/
+ccon -p CPU run -v /data/input:/input -v /data/output:/output alpine:latest -- cp /input/file /output/
 ```
 
 Multi-node container job:

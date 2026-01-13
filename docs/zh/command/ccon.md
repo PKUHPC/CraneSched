@@ -152,7 +152,7 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 :   设置环境变量。可多次使用。
 
-**-v, --volume=&lt;host:container[:ro]&gt;**
+**-v, --volume=&lt;host:container&gt;**
 
 :   绑定挂载卷。格式：`宿主机路径:容器路径[:只读]`。可多次使用。
 
@@ -219,7 +219,7 @@ ccon -p GPU --gres gpu:1 --mem 8G run pytorch/pytorch:latest -- python train.py
 挂载数据目录：
 
 ```bash
-ccon -p CPU run -v /data/input:/input:ro -v /data/output:/output alpine:latest -- cp /input/file /output/
+ccon -p CPU run -v /data/input:/input -v /data/output:/output alpine:latest -- cp /input/file /output/
 ```
 
 多节点容器作业：
