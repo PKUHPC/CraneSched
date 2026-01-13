@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include <filesystem>
+#include <set>
 
 struct SystemRelInfo {
   std::string name;

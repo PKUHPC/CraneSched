@@ -64,7 +64,7 @@ ccon exec -n node01 123.1 hostname
 
 ```bash
 ccon -p GPU --gres gpu:1 run \
-    -v /shared/data:/data:ro \
+    -v /shared/data:/data \
     -v /home/user/output:/output \
     -e BATCH_SIZE=64 \
     -e NUM_WORKERS=4 \
