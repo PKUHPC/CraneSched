@@ -371,8 +371,16 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
   if (iter != m_license_resource_map_.end()) {
+    if (clusters.empty())
+      return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
     for (const auto& cluster : clusters) {
-      if (iter->second->cluster_resources.contains(cluster)) {
+      // TODO: Support multiple clusters in the future.
+      if (cluster != "local" && cluster != g_config.CraneClusterName)
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_CLUSTER,
+                          "The entered cluster {} does not exist", cluster));
+      if (iter->second->cluster_resources.contains(g_config.CraneClusterName)) {
         return std::unexpected(
             FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
       }
@@ -381,11 +389,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     is_exist = true;
   }
 
-  for (const auto& cluster : clusters) {
-    if (cluster != "local" && cluster != g_config.CraneClusterName)
-      return std::unexpected(
-          FormatRichErr(CraneErrCode::ERR_INVALID_CLUSTER,
-                        "The entered cluster {} does not exist", cluster));
+  for (const auto& _ : clusters) {
     new_lic_resource.cluster_resources.emplace(g_config.CraneClusterName, 0);
   }
 
