@@ -893,27 +893,6 @@ void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_hea
   return true;
 }
 
-void CranedMetaContainer::QueryNodeState(
-    const CranedId& craned_id, crane::grpc::QueryNodeStateReply* response) {
-  if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("Health check: unknown craned_id '{}', QueryNodeState failed.",
-                craned_id);
-    response->set_ok(false);
-    return;
-  }
-
-  auto craned_meta = craned_meta_map_[craned_id];
-  if (craned_meta->res_in_use.IsZero())
-    response->set_state(crane::grpc::CranedResourceState::CRANE_IDLE);
-  else if (craned_meta->res_avail.allocatable_res.IsAnyZero())
-    response->set_state(crane::grpc::CranedResourceState::CRANE_ALLOC);
-  else
-    response->set_state(crane::grpc::CranedResourceState::CRANE_MIX);
-
-  response->set_drain(craned_meta->drain);
-  response->set_ok(true);
-}
-
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
     const std::string& partition_name, bool is_allowed_list,
     std::unordered_set<std::string>&& accounts) {

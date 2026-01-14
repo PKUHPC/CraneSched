@@ -1141,20 +1141,6 @@ message UpdateNodeDrainStateReply {
   bool ok = 1;
 }
 
-message SendHealthCheckResultRequest {
-  string craned_id = 1;
-  bool healthy = 2;
-}
-
-message QueryNodeStateRequest {
-  string craned_id = 1;
-}
-
-message QueryNodeStateReply {
-  CranedResourceState state = 1;
-  bool drain = 2;
-  bool ok = 3;
-}
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
@@ -1242,8 +1228,7 @@ service CraneCtldForInternal {
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
-
-  rpc QueryNodeState(QueryNodeStateRequest) returns (QueryNodeStateReply);
+  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);

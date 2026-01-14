@@ -324,6 +324,7 @@ void CtldClientStateMachine::ActionDisconnected_() {
 
 void CtldClient::Shutdown() {
   m_stopping_ = true;
+  m_health_check_cv_.notify_all();
   m_step_status_change_mtx_.Lock();
   CRANE_INFO("Cleaning up status changes in CtldClient");
 
@@ -660,6 +661,7 @@ void CtldClient::Init() {
         HealthCheck_();
         if (g_config.HealthCheck.NodeState & START_ONLY) return;
         std::mt19937 rng{std::random_device{}()};
+        std::unique_lock<std::mutex> lock(m_health_check_mutex_);
         do {
           uint64_t interval = g_config.HealthCheck.Interval;
           uint64_t delay = interval;
@@ -667,9 +669,13 @@ void CtldClient::Init() {
             std::uniform_int_distribution<uint64_t> dist(1, interval);
             delay = dist(rng);
           }
-          std::this_thread::sleep_for(std::chrono::seconds(delay));
+          if (m_health_check_cv_.wait_for(
+                  lock, std::chrono::seconds(delay),
+                  [this] { return m_stopping_ || !m_stub_; })) {
+            return;
+          }
           if (m_stopping_ || !m_stub_) return;
-          if (CheckNodeState_()) HealthCheck_();
+          if (NeedHealthCheck_()) HealthCheck_();
         } while (true);
       });
     }
@@ -1012,7 +1018,7 @@ void CtldClient::HealthCheck_() {
   auto fut = std::async(std::launch::async,
                         [pid, &status]() { return waitpid(pid, &status, 0); });
 
-  if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTime)) ==
+  if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTimeMs)) ==
       std::future_status::ready) {
     if (fut.get() == pid) {
       child_exited = true;
@@ -1055,36 +1061,38 @@ void CtldClient::HealthCheck_() {
               is_success, exit_code, stdout_str, stderr_str);
 }
 
-bool CtldClient::CheckNodeState_() {
+bool CtldClient::NeedHealthCheck_() {
   if (g_config.HealthCheck.NodeState & ANY) return true;
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
-  crane::grpc::QueryNodeStateRequest req;
-  crane::grpc::QueryNodeStateReply reply;
-  req.set_craned_id(g_config.CranedIdOfThisNode);
-  auto result = m_stub_->QueryNodeState(&context, req, &reply);
-  if (!result.ok() || !reply.ok()) {
-    CRANE_ERROR("QueryNodeState failed");
+  crane::grpc::QueryCranedInfoRequest req;
+  crane::grpc::QueryCranedInfoReply reply;
+  req.set_craned_name(g_config.CranedIdOfThisNode);
+  auto result = m_stub_->QueryCranedInfo(&context, req, &reply);
+  if (!result.ok() || !reply.craned_info_list().empty()) {
+    CRANE_ERROR("QueryCranedInfo failed");
     return false;
   }
 
+  const auto craned_info = reply.craned_info_list()[0];
+
   using crane::grpc::CranedResourceState;
   if ((g_config.HealthCheck.NodeState & IDLE) &&
-      reply.state() == CranedResourceState::CRANE_IDLE)
+      craned_info.resource_state() == CranedResourceState::CRANE_IDLE)
     return true;
 
   if ((g_config.HealthCheck.NodeState & ALLOC) &&
-      reply.state() == CranedResourceState::CRANE_ALLOC)
+      craned_info.resource_state() == CranedResourceState::CRANE_ALLOC)
     return true;
 
   if ((g_config.HealthCheck.NodeState & MIXED) &&
-      reply.state() == CranedResourceState::CRANE_MIX)
+      craned_info.resource_state() == CranedResourceState::CRANE_MIX)
     return true;
 
-  if ((g_config.HealthCheck.NodeState & NONDRAINED_IDLE) && !reply.drain() &&
-      reply.state() == CranedResourceState::CRANE_IDLE)
+  if ((g_config.HealthCheck.NodeState & NONDRAINED_IDLE) && craned_info.control_state() == crane::grpc::CRANE_NONE &&
+      craned_info.resource_state() == CranedResourceState::CRANE_IDLE)
     return true;
 
   return false;

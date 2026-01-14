@@ -193,11 +193,19 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
   return grpc::Status::OK;
 }
 
-grpc::Status CtldForInternalServiceImpl::QueryNodeState(
+grpc::Status CtldForInternalServiceImpl::QueryCranedInfo(
     grpc::ServerContext* context,
-    const crane::grpc::QueryNodeStateRequest* request,
-    crane::grpc::QueryNodeStateReply* response) {
-  g_meta_container->QueryNodeState(request->craned_id(), response);
+    const crane::grpc::QueryCranedInfoRequest* request,
+    crane::grpc::QueryCranedInfoReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  if (request->craned_name().empty()) {
+    *response = g_meta_container->QueryAllCranedInfo();
+  } else {
+    *response = g_meta_container->QueryCranedInfo(request->craned_name());
+  }
 
   return grpc::Status::OK;
 }

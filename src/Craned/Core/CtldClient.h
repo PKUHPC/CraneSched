@@ -223,7 +223,7 @@ class CtldClient {
 
   void HealthCheck_();
 
-  bool CheckNodeState_();
+  bool NeedHealthCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
 
@@ -256,6 +256,8 @@ class CtldClient {
 
   std::thread m_health_check_thread_;
   std::atomic_bool m_health_check_init_{false};
+  std::mutex m_health_check_mutex_;
+  std::condition_variable m_health_check_cv_;
 };
 
 }  // namespace Craned
