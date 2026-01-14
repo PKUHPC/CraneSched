@@ -27,6 +27,9 @@
 #  include <bpf/bpf.h>
 #  include <bpf/libbpf.h>
 #  include <linux/bpf.h>
+#  include <cerrno>
+#  include <cstdarg>
+#  include <cstring>
 #endif
 
 #include "DeviceManager.h"
@@ -1117,6 +1120,38 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 
 #ifdef CRANE_ENABLE_BPF
 
+// Custom libbpf print callback that forwards logs to Crane's logging system
+static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format,
+                               va_list args) {
+  // Create a buffer for the formatted message
+  char buf[1024];
+  vsnprintf(buf, sizeof(buf), format, args);
+  
+  // Remove trailing newline if present
+  size_t len = strlen(buf);
+  if (len > 0 && buf[len - 1] == '\n') {
+    buf[len - 1] = '\0';
+  }
+  
+  // Forward to appropriate Crane log level
+  switch (level) {
+    case LIBBPF_WARN:
+      CRANE_WARN("[libbpf] {}", buf);
+      break;
+    case LIBBPF_INFO:
+      CRANE_INFO("[libbpf] {}", buf);
+      break;
+    case LIBBPF_DEBUG:
+      CRANE_DEBUG("[libbpf] {}", buf);
+      break;
+    default:
+      CRANE_TRACE("[libbpf] {}", buf);
+      break;
+  }
+  
+  return 0;
+}
+
 BpfRuntimeInfo::BpfRuntimeInfo()
     : bpf_enable_logging_(false),
       bpf_obj_(nullptr),
@@ -1138,19 +1173,19 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
   absl::MutexLock lk(bpf_mtx_.get());
 
   if (cgroup_count_ == 0) {
+    // Set up libbpf logging callback to forward logs to Crane's logging system
+    libbpf_set_print(LibbpfPrintCallback);
+    
     bpf_obj_ = bpf_object__open_file(CgConstant::kBpfObjectFilePath, nullptr);
     if (bpf_obj_ == nullptr) {
-      CRANE_ERROR("Failed to open BPF object file {}",
-                  CgConstant::kBpfObjectFilePath);
+      CRANE_ERROR("Failed to open BPF object file {}: {}",
+                  CgConstant::kBpfObjectFilePath, strerror(errno));
       return false;
     }
 
-    // ban libbpf log
-    libbpf_print_fn_t fn = libbpf_set_print(nullptr);
-
     if (bpf_object__load(bpf_obj_) != 0) {
-      CRANE_ERROR("Failed to load BPF object {}",
-                  CgConstant::kBpfObjectFilePath);
+      CRANE_ERROR("Failed to load BPF object {}: {}",
+                  CgConstant::kBpfObjectFilePath, strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }
@@ -1158,22 +1193,24 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
     bpf_prog_ =
         bpf_object__find_program_by_name(bpf_obj_, CgConstant::kBpfProgramName);
     if (bpf_prog_ == nullptr) {
-      CRANE_ERROR("Failed to find BPF program {}", CgConstant::kBpfProgramName);
+      CRANE_ERROR("Failed to find BPF program {}: {}",
+                  CgConstant::kBpfProgramName, strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }
 
     bpf_prog_fd_ = bpf_program__fd(bpf_prog_);
     if (bpf_prog_fd_ < 0) {
-      CRANE_ERROR("Failed to get BPF program file descriptor {}",
-                  CgConstant::kBpfObjectFilePath);
+      CRANE_ERROR("Failed to get BPF program file descriptor {}: {}",
+                  CgConstant::kBpfObjectFilePath, strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }
 
     dev_map_ = bpf_object__find_map_by_name(bpf_obj_, CgConstant::kBpfMapName);
     if (dev_map_ == nullptr) {
-      CRANE_ERROR("Failed to find BPF map {}", CgConstant::kBpfMapName);
+      CRANE_ERROR("Failed to find BPF map {}: {}", CgConstant::kBpfMapName,
+                  strerror(errno));
       close(bpf_prog_fd_);
       bpf_object__close(bpf_obj_);
       return false;
@@ -1190,7 +1227,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
         .type = static_cast<int16_t>(0)};
     if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
                              sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-      CRANE_ERROR("Failed to set debug log level in BPF");
+      CRANE_ERROR("Failed to set debug log level in BPF: {}", strerror(errno));
       return false;
     }
   }
@@ -1328,7 +1365,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
   cgroup_fd = open(cg_full_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
-    CRANE_ERROR("Failed to open cgroup");
+    CRANE_ERROR("Failed to open cgroup {}: {}", cg_full_path.string(),
+                strerror(errno));
     return false;
   }
 
@@ -1363,8 +1401,9 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
       if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
                                &key, sizeof(BpfKey), &bpf_device,
                                sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-        CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
-                    bpf_device.major, bpf_device.minor, key.cgroup_id);
+        CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}: {}",
+                    bpf_device.major, bpf_device.minor, key.cgroup_id,
+                    strerror(errno));
         close(cgroup_fd);
         return false;
       }
@@ -1374,7 +1413,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     if (!m_bpf_attached_) {
       if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
                           cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
-        CRANE_ERROR("Failed to attach BPF program");
+        CRANE_ERROR("Failed to attach BPF program to cgroup {}: {}",
+                    m_cgroup_info_.GetCgroupName(), strerror(errno));
         close(cgroup_fd);
         return false;
       }
@@ -1407,7 +1447,8 @@ bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
 
   cgroup_fd = open(cg_full_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
-    CRANE_ERROR("Failed to open cgroup");
+    CRANE_ERROR("Failed to open cgroup {}: {}", cg_full_path.string(),
+                strerror(errno));
     return false;
   }
 
@@ -1457,8 +1498,9 @@ bool CgroupV2::EraseBpfDeviceMap() {
                          .minor = bpf_meta.minor};
     if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(), &key,
                              sizeof(BpfKey), BPF_ANY) < 0) {
-      CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
-                  bpf_meta.major, bpf_meta.minor, key.cgroup_id);
+      CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}: {}",
+                  bpf_meta.major, bpf_meta.minor, key.cgroup_id,
+                  strerror(errno));
       return false;
     }
   }
