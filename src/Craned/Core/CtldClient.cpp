@@ -1076,7 +1076,8 @@ bool CtldClient::NeedHealthCheck_() {
       craned_info.resource_state() == CranedResourceState::CRANE_MIX)
     return true;
 
-  if ((g_config.HealthCheck.NodeState & NONDRAINED_IDLE) && craned_info.control_state() == crane::grpc::CRANE_NONE &&
+  if ((g_config.HealthCheck.NodeState & NONDRAINED_IDLE) &&
+      craned_info.control_state() == crane::grpc::CRANE_NONE &&
       craned_info.resource_state() == CranedResourceState::CRANE_IDLE)
     return true;
 
