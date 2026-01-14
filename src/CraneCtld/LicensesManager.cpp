@@ -373,7 +373,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
   if (iter != m_license_resource_map_.end()) {
     if (clusters.empty())
       return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
+          FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
     for (const auto& cluster : clusters) {
       // TODO: Support multiple clusters in the future.
       if (cluster != "local" && cluster != g_config.CraneClusterName)
