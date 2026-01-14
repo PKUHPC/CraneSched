@@ -1056,7 +1056,7 @@ bool CtldClient::NeedHealthCheck_() {
   crane::grpc::QueryCranedInfoReply reply;
   req.set_craned_name(g_config.CranedIdOfThisNode);
   auto result = m_stub_->QueryCranedInfo(&context, req, &reply);
-  if (!result.ok() || !reply.craned_info_list().empty()) {
+  if (!result.ok() || reply.craned_info_list().empty()) {
     CRANE_ERROR("QueryCranedInfo failed");
     return false;
   }
