@@ -1125,29 +1125,30 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format,
                                va_list args) {
   // Create a buffer for the formatted message - 4KB should be sufficient for most messages
-  char buf[4096];
-  int written = std::vsnprintf(buf, sizeof(buf), format, args);
+  constexpr size_t kBufferSize = 4096;
+  char buf[kBufferSize];
+  int written = std::vsnprintf(buf, kBufferSize, format, args);
   
   // Check for encoding errors or truncation
   if (written < 0) {
     CRANE_ERROR("[libbpf] Failed to format log message: encoding error");
     return 0;
   }
-  if (written >= static_cast<int>(sizeof(buf))) {
+  if (written >= static_cast<int>(kBufferSize)) {
     CRANE_WARN("[libbpf] Log message truncated (needed {} bytes, buffer is {} bytes)",
-               written + 1, sizeof(buf));
+               written + 1, kBufferSize);
   }
   
   // Use the length from vsnprintf (capped at buffer size) to avoid strlen
-  // When truncated, vsnprintf returns the would-be length (>= sizeof(buf)),
-  // but actually writes sizeof(buf)-1 characters plus null terminator
+  // When truncated, vsnprintf returns the would-be length (>= kBufferSize),
+  // but actually writes kBufferSize-1 characters plus null terminator
   size_t len = static_cast<size_t>(
-      written < static_cast<int>(sizeof(buf)) ? written : sizeof(buf) - 1);
+      written < static_cast<int>(kBufferSize) ? written : kBufferSize - 1);
   
-  // Remove trailing newline if present (update len to reflect actual content length)
+  // Remove trailing newline if present
+  // Since we use string_view with explicit length, we only need to adjust len
   if (len > 0 && buf[len - 1] == '\n') {
-    --len;  // Decrement length first, so len now points to the newline position
-    buf[len] = '\0';  // Replace newline with null terminator
+    --len;
   }
   
   // Use string_view with explicit length to avoid unnecessary copying
