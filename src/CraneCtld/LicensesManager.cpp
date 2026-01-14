@@ -677,7 +677,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
       break;
     case crane::grpc::LicenseResource_Field_Flags: {
       for (const auto& flag : absl::StrSplit(value, ',')) {
-        std::string lower_str = absl::AsciiStrToLower(flag);
+        std::string lower_str = absl::AsciiStrToLower(absl::StripAsciiWhitespace(flag));
         if (lower_str == "absolute") {
           res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
         } else if (lower_str == "none") {
