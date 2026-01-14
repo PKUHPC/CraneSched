@@ -200,10 +200,10 @@ class CtldForInternalServiceImpl final
                           const crane::grpc::CranedPingRequest *request,
                           crane::grpc::CranedPingReply *response) override;
 
-  grpc::Status QueryNodeState(
+  grpc::Status QueryCranedInfo(
       grpc::ServerContext *context,
-      const crane::grpc::QueryNodeStateRequest *request,
-      crane::grpc::QueryNodeStateReply *response) override;
+      const crane::grpc::QueryCranedInfoRequest *request,
+      crane::grpc::QueryCranedInfoReply *response) override;
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,
