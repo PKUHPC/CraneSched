@@ -1123,9 +1123,14 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 // Custom libbpf print callback that forwards logs to Crane's logging system
 static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format,
                                va_list args) {
-  // Create a buffer for the formatted message
-  char buf[1024];
-  std::vsnprintf(buf, sizeof(buf), format, args);
+  // Create a buffer for the formatted message - 4KB should be sufficient for most messages
+  char buf[4096];
+  int written = std::vsnprintf(buf, sizeof(buf), format, args);
+  
+  // Check for truncation
+  if (written >= static_cast<int>(sizeof(buf))) {
+    CRANE_WARN("[libbpf] Log message truncated (needed {} bytes)", written);
+  }
   
   // Remove trailing newline if present
   size_t len = std::strlen(buf);
@@ -1145,6 +1150,7 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
       CRANE_DEBUG("[libbpf] {}", buf);
       break;
     default:
+      // Unknown log level - use TRACE as fallback
       CRANE_TRACE("[libbpf] {}", buf);
       break;
   }
