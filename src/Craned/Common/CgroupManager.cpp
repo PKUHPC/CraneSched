@@ -1145,16 +1145,14 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
   size_t len = static_cast<size_t>(
       written < static_cast<int>(kBufferSize) ? written : kBufferSize - 1);
   
-  // Remove trailing newline if present
-  // Since we use string_view with explicit length, we only need to adjust len
-  if (len > 0 && buf[len - 1] == '\n') {
-    --len;
-  }
-  
-  // Use string_view with explicit length to avoid unnecessary copying
-  // Safe because: 1) buffer is always null-terminated by vsnprintf
-  //               2) we track exact content length in 'len'
+  // Create string_view with explicit length to avoid unnecessary copying
+  // Safe because buffer is always null-terminated by vsnprintf
   std::string_view message(buf, len);
+  
+  // Remove trailing newline if present using string_view's remove_suffix
+  if (!message.empty() && message.back() == '\n') {
+    message.remove_suffix(1);
+  }
   
   // Forward to appropriate Crane log level
   switch (level) {
