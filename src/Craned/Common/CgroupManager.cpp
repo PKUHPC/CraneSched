@@ -1127,9 +1127,14 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
   char buf[4096];
   int written = std::vsnprintf(buf, sizeof(buf), format, args);
   
-  // Check for truncation
+  // Check for encoding errors or truncation
+  if (written < 0) {
+    CRANE_ERROR("[libbpf] Failed to format log message: encoding error");
+    return 0;
+  }
   if (written >= static_cast<int>(sizeof(buf))) {
-    CRANE_WARN("[libbpf] Log message truncated (needed {} bytes)", written);
+    CRANE_WARN("[libbpf] Log message truncated (needed {} bytes, buffer is {} bytes)",
+               written + 1, sizeof(buf));
   }
   
   // Remove trailing newline if present
@@ -1150,8 +1155,8 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
       CRANE_DEBUG("[libbpf] {}", buf);
       break;
     default:
-      // Unknown log level - use TRACE as fallback
-      CRANE_TRACE("[libbpf] {}", buf);
+      // Unknown log level - use DEBUG as fallback
+      CRANE_DEBUG("[libbpf] (unknown level) {}", buf);
       break;
   }
   
