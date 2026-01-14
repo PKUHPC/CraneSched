@@ -1189,50 +1189,14 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  if (request->type() == crane::grpc::OperationType::Overwrite &&
-      request->modify_field() ==
-          crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
-    std::unordered_set<std::string> partition_list{
-        request->value_list().begin(), request->value_list().end()};
+  std::vector<crane::grpc::ModifyFieldOperation> operations(
+      request->operations().begin(), request->operations().end());
+  auto rich_error_list = g_account_manager->ModifyAccount(
+      request->uid(), request->name(), operations, request->force());
 
-    auto rich_res = g_account_manager->SetAccountAllowedPartition(
-        request->uid(), request->name(), std::move(partition_list),
-        request->force());
-    if (!rich_res) {
-      if (rich_res.error().description().empty())
-        rich_res.error().set_description(
-            absl::StrJoin(request->value_list(), ","));
-
-      response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
-    }
-
-  } else if (request->type() == crane::grpc::OperationType::Overwrite &&
-             request->modify_field() ==
-                 crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
-    std::unordered_set<std::string> qos_list{request->value_list().begin(),
-                                             request->value_list().end()};
-    std::string default_qos = "";
-    if (!request->value_list().empty()) default_qos = request->value_list()[0];
-    auto rich_res = g_account_manager->SetAccountAllowedQos(
-        request->uid(), request->name(), default_qos, std::move(qos_list),
-        request->force());
-    if (!rich_res) {
-      if (rich_res.error().description().empty())
-        rich_res.error().set_description(
-            absl::StrJoin(request->value_list(), ","));
-
-      response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
-    }
-  } else {  // other operations
-    for (const auto& value : request->value_list()) {
-      auto modify_res = g_account_manager->ModifyAccount(
-          request->type(), request->uid(), request->name(),
-          request->modify_field(), value, request->force());
-      if (!modify_res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(value);
-        new_err_record->set_code(modify_res.error());
-      }
+  if (!rich_error_list.empty()) {
+    for (const auto& rich_error : rich_error_list) {
+      response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
     }
   }
 
@@ -1255,127 +1219,16 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   CraneExpected<void> modify_res;
+  std::vector<crane::grpc::ModifyFieldOperation> operations(
+      request->operations().begin(), request->operations().end());
 
-  if (request->type() == crane::grpc::OperationType::Delete) {
-    switch (request->modify_field()) {
-    case crane::grpc::ModifyField::Partition:
-      for (const auto& value : request->value_list()) {
-        modify_res = g_account_manager->DeleteUserAllowedPartition(
-            request->uid(), request->name(), request->account(), value);
-        if (!modify_res) {
-          auto* new_err_record = response->mutable_rich_error_list()->Add();
-          new_err_record->set_description(value);
-          new_err_record->set_code(modify_res.error());
-        }
-      }
+  auto rich_error_list = g_account_manager->ModifyUser(
+      request->uid(), request->name(), request->account(), request->partition(),
+      operations, request->force());
 
-      break;
-    case crane::grpc::ModifyField::Qos:
-      for (const auto& value : request->value_list()) {
-        modify_res = g_account_manager->DeleteUserAllowedQos(
-            request->uid(), request->name(), request->partition(),
-            request->account(), value, request->force());
-        if (!modify_res) {
-          auto* new_err_record = response->mutable_rich_error_list()->Add();
-          new_err_record->set_description(value);
-          new_err_record->set_code(modify_res.error());
-        }
-      }
-      break;
-    default:
-      std::unreachable();
-    }
-  } else {
-    switch (request->modify_field()) {
-    case crane::grpc::ModifyField::AdminLevel:
-      modify_res = g_account_manager->ModifyAdminLevel(
-          request->uid(), request->name(), request->value_list()[0]);
-      if (!modify_res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(request->value_list()[0]);
-        new_err_record->set_code(modify_res.error());
-      }
-      break;
-    case crane::grpc::ModifyField::Partition:
-      if (request->type() == crane::grpc::OperationType::Add) {
-        for (const auto& partition_name : request->value_list()) {
-          modify_res = g_account_manager->AddUserAllowedPartition(
-              request->uid(), request->name(), request->account(),
-              partition_name);
-          if (!modify_res) {
-            auto* new_err_record = response->mutable_rich_error_list()->Add();
-            new_err_record->set_description(partition_name);
-            new_err_record->set_code(modify_res.error());
-          }
-        }
-      } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::unordered_set<std::string> partition_list{
-            request->value_list().begin(), request->value_list().end()};
-        auto rich_res = g_account_manager->SetUserAllowedPartition(
-            request->uid(), request->name(), request->account(),
-            partition_list);
-        if (!rich_res) {
-          if (rich_res.error().description().empty())
-            rich_res.error().set_description(
-                absl::StrJoin(request->value_list(), ","));
-
-          response->mutable_rich_error_list()->Add()->CopyFrom(
-              rich_res.error());
-        }
-      }
-      break;
-    case crane::grpc::ModifyField::Qos:
-      if (request->type() == crane::grpc::OperationType::Add) {
-        for (const auto& qos_name : request->value_list()) {
-          modify_res = g_account_manager->AddUserAllowedQos(
-              request->uid(), request->name(), request->partition(),
-              request->account(), qos_name);
-          if (!modify_res) {
-            auto* new_err_record = response->mutable_rich_error_list()->Add();
-            new_err_record->set_description(qos_name);
-            new_err_record->set_code(modify_res.error());
-          }
-        }
-      } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::unordered_set<std::string> qos_list{request->value_list().begin(),
-                                                 request->value_list().end()};
-        std::string default_qos = "";
-        if (!request->value_list().empty())
-          default_qos = request->value_list()[0];
-        auto rich_res = g_account_manager->SetUserAllowedQos(
-            request->uid(), request->name(), request->partition(),
-            request->account(), default_qos, std::move(qos_list),
-            request->force());
-        if (!rich_res) {
-          if (rich_res.error().description().empty())
-            rich_res.error().set_description(
-                absl::StrJoin(request->value_list(), ","));
-          response->mutable_rich_error_list()->Add()->CopyFrom(
-              rich_res.error());
-        }
-      }
-      break;
-    case crane::grpc::ModifyField::DefaultQos:
-      modify_res = g_account_manager->ModifyUserDefaultQos(
-          request->uid(), request->name(), request->partition(),
-          request->account(), request->value_list()[0]);
-      if (!modify_res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(request->value_list()[0]);
-        new_err_record->set_code(modify_res.error());
-      }
-      break;
-    case crane::grpc::ModifyField::DefaultAccount:
-      modify_res = g_account_manager->ModifyUserDefaultAccount(
-          request->uid(), request->name(), request->value_list()[0]);
-      if (!modify_res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(request->value_list()[0]);
-        new_err_record->set_code(modify_res.error());
-      }
-      break;
-    default:
-      std::unreachable();
+  if (!rich_error_list.empty()) {
+    for (const auto& rich_error : rich_error_list) {
+      response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
     }
   }
 
@@ -1384,6 +1237,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
   } else {
     response->set_ok(false);
   }
+
   return grpc::Status::OK;
 }
 
@@ -1395,15 +1249,23 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
 
-  if (modify_res) {
+  std::vector<crane::grpc::ModifyFieldOperation> operations(
+      request->operations().begin(), request->operations().end());
+
+  auto rich_error_list =
+      g_account_manager->ModifyQos(request->uid(), request->name(), operations);
+
+  if (!rich_error_list.empty()) {
+    for (const auto& rich_error : rich_error_list) {
+      response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
+    }
+  }
+
+  if (response->rich_error_list().empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(modify_res.error());
   }
 
   return grpc::Status::OK;
@@ -1427,6 +1289,7 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
     response->set_code(modify_res.error());
   }
 
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 

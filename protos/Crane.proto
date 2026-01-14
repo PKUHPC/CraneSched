@@ -389,13 +389,17 @@ message DeleteWckeyReply {
   RichError rich_error = 2;
 }
 
+message ModifyFieldOperation {
+  ModifyField modify_field = 1;    // modify item field
+  repeated string value_list = 2;  // new value
+  OperationType type = 3;
+}
+
 message ModifyAccountRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;    // modify item field
-  repeated string value_list = 3;  // new value
-  string name = 4;
-  OperationType type = 5;
-  bool force = 6;
+  string name = 2;
+  repeated ModifyFieldOperation operations = 3;
+  bool force = 4;
 }
 
 message ModifyAccountReply {
@@ -405,13 +409,11 @@ message ModifyAccountReply {
 
 message ModifyUserRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;    // modify item field
-  repeated string value_list = 3;  // new value
-  string name = 4;
-  string partition = 5;
-  OperationType type = 6;
-  string account = 8;
-  bool force = 9;
+  string name = 2;
+  string partition = 3;
+  string account = 4;
+  repeated ModifyFieldOperation operations = 5;
+  bool force = 6;
 }
 
 message ModifyUserReply {
@@ -421,14 +423,13 @@ message ModifyUserReply {
 
 message ModifyQosRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;  // modify item field
-  string value = 3;              // new value
-  string name = 4;
+  string name = 2;
+  repeated ModifyFieldOperation operations = 3;
 }
 
 message ModifyQosReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyDefaultWckeyRequest {
