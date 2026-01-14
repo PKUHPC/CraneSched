@@ -30,6 +30,7 @@
 #  include <cerrno>
 #  include <cstdarg>
 #  include <cstring>
+#  include <string_view>
 #endif
 
 #include "DeviceManager.h"
@@ -1137,26 +1138,33 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
                written + 1, sizeof(buf));
   }
   
+  // Use the length from vsnprintf (capped at buffer size) to avoid strlen
+  size_t len = static_cast<size_t>(
+      written < static_cast<int>(sizeof(buf)) ? written : sizeof(buf) - 1);
+  
   // Remove trailing newline if present
-  size_t len = std::strlen(buf);
   if (len > 0 && buf[len - 1] == '\n') {
     buf[len - 1] = '\0';
+    --len;
   }
+  
+  // Use string_view to avoid unnecessary copying
+  std::string_view message(buf, len);
   
   // Forward to appropriate Crane log level
   switch (level) {
     case LIBBPF_WARN:
-      CRANE_WARN("[libbpf] {}", buf);
+      CRANE_WARN("[libbpf] {}", message);
       break;
     case LIBBPF_INFO:
-      CRANE_INFO("[libbpf] {}", buf);
+      CRANE_INFO("[libbpf] {}", message);
       break;
     case LIBBPF_DEBUG:
-      CRANE_DEBUG("[libbpf] {}", buf);
+      CRANE_DEBUG("[libbpf] {}", message);
       break;
     default:
       // Unknown log level - use DEBUG as fallback
-      CRANE_DEBUG("[libbpf] (unknown level) {}", buf);
+      CRANE_DEBUG("[libbpf] (unknown level) {}", message);
       break;
   }
   
