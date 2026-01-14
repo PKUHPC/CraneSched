@@ -924,11 +924,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
 
           if (!rich_result) {
             rich_error_list.emplace_back(rich_result);
-          } else {
-            *log += fmt::format("Del: account: {}, partition: {}\n",
-                                account_name, value);
           }
         }
+        *log += fmt::format("Del: account: {}, partition: {}\n", account_name,
+                            fmt::join(operation.value_list(), ","));
         break;
       }
       case crane::grpc::ModifyField::Qos: {
@@ -937,11 +936,11 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
               res_user, qos, account_name, partition, force);
           if (!rich_result) {
             rich_error_list.emplace_back(rich_result);
-          } else {
-            *log += fmt::format("Del: account: {}, partition: {}, qos: {}\n",
-                                account_name, partition, qos);
           }
         }
+        *log += fmt::format("Del: account: {}, partition: {}, qos: {}\n",
+                            account_name, partition,
+                            fmt::join(operation.value_list(), ","));
         break;
       }
       default:
@@ -2728,7 +2727,7 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
 
 CraneExpectedRich<void> AccountManager::CheckAndDeleteUserAllowedQos_(
     User* user, const std::string& qos, const std::string& account,
-    const std::string& partition, const bool force) {
+    const std::string& partition, bool force) {
   if (partition.empty()) {
     // Delete the qos of all partition
     for (auto& [par, pair] :

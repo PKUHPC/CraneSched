@@ -316,7 +316,7 @@ class AccountManager {
 
   CraneExpectedRich<void> CheckAndDeleteUserAllowedQos_(
       User* user, const std::string& qos, const std::string& account,
-      const std::string& partition, const bool force);
+      const std::string& partition, bool force);
   CraneExpectedRich<void> CheckAndDeleteUserAllowedQosInSinglePartition(
       User* user, const std::string& qos, const std::string& account,
       const std::string& partition, const bool force);
