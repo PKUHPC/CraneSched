@@ -1139,16 +1139,20 @@ static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format
   }
   
   // Use the length from vsnprintf (capped at buffer size) to avoid strlen
+  // When truncated, vsnprintf returns the would-be length (>= sizeof(buf)),
+  // but actually writes sizeof(buf)-1 characters plus null terminator
   size_t len = static_cast<size_t>(
       written < static_cast<int>(sizeof(buf)) ? written : sizeof(buf) - 1);
   
-  // Remove trailing newline if present
+  // Remove trailing newline if present (update len to reflect actual content length)
   if (len > 0 && buf[len - 1] == '\n') {
-    buf[len - 1] = '\0';
-    --len;
+    --len;  // Decrement length first, so len now points to the newline position
+    buf[len] = '\0';  // Replace newline with null terminator
   }
   
-  // Use string_view to avoid unnecessary copying
+  // Use string_view with explicit length to avoid unnecessary copying
+  // Safe because: 1) buffer is always null-terminated by vsnprintf
+  //               2) we track exact content length in 'len'
   std::string_view message(buf, len);
   
   // Forward to appropriate Crane log level
