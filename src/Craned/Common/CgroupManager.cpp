@@ -27,6 +27,7 @@
 #  include <bpf/bpf.h>
 #  include <bpf/libbpf.h>
 #  include <linux/bpf.h>
+
 #  include <cerrno>
 #  include <cstdarg>
 #  include <cstring>
@@ -1122,55 +1123,57 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 #ifdef CRANE_ENABLE_BPF
 
 // Custom libbpf print callback that forwards logs to Crane's logging system
-static int LibbpfPrintCallback(enum libbpf_print_level level, const char *format,
-                               va_list args) {
-  // Create a buffer for the formatted message - 4KB should be sufficient for most messages
+static int LibbpfPrintCallback(enum libbpf_print_level level,
+                               const char *format, va_list args) {
+  // Create a buffer for the formatted message - 4KB should be sufficient for
+  // most messages
   constexpr size_t kBufferSize = 4096;
   char buf[kBufferSize];
   int written = std::vsnprintf(buf, kBufferSize, format, args);
-  
+
   // Check for encoding errors or truncation
   if (written < 0) {
     CRANE_ERROR("[libbpf] Failed to format log message: encoding error");
     return 0;
   }
   if (written >= static_cast<int>(kBufferSize)) {
-    CRANE_WARN("[libbpf] Log message truncated (needed {} bytes, buffer is {} bytes)",
-               written + 1, kBufferSize);
+    CRANE_WARN(
+        "[libbpf] Log message truncated (needed {} bytes, buffer is {} bytes)",
+        written + 1, kBufferSize);
   }
-  
+
   // Use the length from vsnprintf (capped at buffer size) to avoid strlen
   // When truncated, vsnprintf returns the would-be length (>= kBufferSize),
   // but actually writes kBufferSize-1 characters plus null terminator
   size_t len = static_cast<size_t>(
       written < static_cast<int>(kBufferSize) ? written : kBufferSize - 1);
-  
+
   // Create string_view with explicit length to avoid unnecessary copying
   // Safe because buffer is always null-terminated by vsnprintf
   std::string_view message(buf, len);
-  
+
   // Remove trailing newline if present using string_view's remove_suffix
   if (!message.empty() && message.back() == '\n') {
     message.remove_suffix(1);
   }
-  
+
   // Forward to appropriate Crane log level
   switch (level) {
-    case LIBBPF_WARN:
-      CRANE_WARN("[libbpf] {}", message);
-      break;
-    case LIBBPF_INFO:
-      CRANE_INFO("[libbpf] {}", message);
-      break;
-    case LIBBPF_DEBUG:
-      CRANE_DEBUG("[libbpf] {}", message);
-      break;
-    default:
-      // Unknown log level - use DEBUG as fallback
-      CRANE_DEBUG("[libbpf] (unknown level) {}", message);
-      break;
+  case LIBBPF_WARN:
+    CRANE_WARN("[libbpf] {}", message);
+    break;
+  case LIBBPF_INFO:
+    CRANE_INFO("[libbpf] {}", message);
+    break;
+  case LIBBPF_DEBUG:
+    CRANE_DEBUG("[libbpf] {}", message);
+    break;
+  default:
+    // Unknown log level - use DEBUG as fallback
+    CRANE_DEBUG("[libbpf] (unknown level) {}", message);
+    break;
   }
-  
+
   return 0;
 }
 
@@ -1197,7 +1200,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
   if (cgroup_count_ == 0) {
     // Set up libbpf logging callback to forward logs to Crane's logging system
     libbpf_set_print(LibbpfPrintCallback);
-    
+
     bpf_obj_ = bpf_object__open_file(CgConstant::kBpfObjectFilePath, nullptr);
     if (bpf_obj_ == nullptr) {
       CRANE_ERROR("Failed to open BPF object file {}: {}",
@@ -1249,7 +1252,8 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
         .type = static_cast<int16_t>(0)};
     if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
                              sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-      CRANE_ERROR("Failed to set debug log level in BPF: {}", std::strerror(errno));
+      CRANE_ERROR("Failed to set debug log level in BPF: {}",
+                  std::strerror(errno));
       return false;
     }
   }
@@ -1423,9 +1427,10 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
       if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
                                &key, sizeof(BpfKey), &bpf_device,
                                sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-        CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}: {}",
-                    bpf_device.major, bpf_device.minor, key.cgroup_id,
-                    std::strerror(errno));
+        CRANE_ERROR(
+            "Failed to update BPF map major {},minor {} cgroup id {}: {}",
+            bpf_device.major, bpf_device.minor, key.cgroup_id,
+            std::strerror(errno));
         close(cgroup_fd);
         return false;
       }
@@ -1520,9 +1525,9 @@ bool CgroupV2::EraseBpfDeviceMap() {
                          .minor = bpf_meta.minor};
     if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(), &key,
                              sizeof(BpfKey), BPF_ANY) < 0) {
-      CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}: {}",
-                  bpf_meta.major, bpf_meta.minor, key.cgroup_id,
-                  std::strerror(errno));
+      CRANE_ERROR(
+          "Failed to delete BPF map major {},minor {} in cgroup id {}: {}",
+          bpf_meta.major, bpf_meta.minor, key.cgroup_id, std::strerror(errno));
       return false;
     }
   }
