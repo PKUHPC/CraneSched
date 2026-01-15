@@ -29,17 +29,17 @@ AccountManager::AccountManager() { InitDataMap_(); }
 
 CraneExpected<void> AccountManager::AddUser(uint32_t uid,
                                             const User& new_user) {
-  CraneExpected<void> result;
+  CraneExpectedRich<void> result;
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   result = CheckIfUserHasHigherPrivThan_(*op_user, new_user.admin_level);
-  if (!result) return result;
+  if (!result) return std::unexpected{result.error().code()};
 
   if (new_user.name == "ALL")
     return std::unexpected(CraneErrCode::ERR_INVALID_USERNAME);
@@ -57,7 +57,7 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
     if (stale_user->account_to_attrs_map.contains(object_account))
       return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
     result = CheckIfUserHasHigherPrivThan_(*op_user, stale_user->admin_level);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
   }
 
   // Check whether the account exists
@@ -70,7 +70,7 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
        new_user.account_to_attrs_map.at(object_account)
            .allowed_partition_qos_map) {
     result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
   }
 
   return AddUser_(op_user->name, new_user, account, stale_user);
@@ -82,9 +82,9 @@ CraneExpected<void> AccountManager::AddAccount(uint32_t uid,
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    CraneExpected<void> result;
+    CraneExpectedRich<void> result;
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
     // When creating an account without a parent, the permission level of
     // op_user must be Operator or higher.
@@ -93,10 +93,10 @@ CraneExpected<void> AccountManager::AddAccount(uint32_t uid,
     else {
       result = CheckIfUserHasPermOnAccountNoLock_(
           *op_user, new_account.parent_account, false);
-      if (!result && result.error() == CraneErrCode::ERR_INVALID_ACCOUNT)
+      if (!result && result.error().code() == CraneErrCode::ERR_INVALID_ACCOUNT)
         return std::unexpected(CraneErrCode::ERR_INVALID_PARENT_ACCOUNT);
     }
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
     actor_name = op_user->name;
   }
 
@@ -157,11 +157,11 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
     actor_name = op_user->name;
   }
 
@@ -182,7 +182,7 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
     return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   const User* user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
@@ -193,7 +193,7 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, user_exist->admin_level);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -214,15 +214,14 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   auto result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
-  if (!result) return result;
-
+  if (!result) return std::unexpected{result.error().code()};
   // The provided account is invalid.
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
@@ -238,11 +237,11 @@ CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
     actor_name = op_user->name;
   }
 
@@ -265,11 +264,11 @@ CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
     actor_name = op_user->name;
   }
 
@@ -290,7 +289,7 @@ CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
                                                 const std::string& user_name) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
@@ -298,7 +297,7 @@ CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
   }
   if (p_target_user->default_wckey == name) {
     return std::unexpected(CraneErrCode::ERR_DEL_DEFAULT_WCKEY);
@@ -414,7 +413,7 @@ CraneExpected<std::set<User>> AccountManager::QueryAllUserInfo(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   // Operators and above can query all users.
@@ -454,7 +453,7 @@ CraneExpected<std::vector<Wckey>> AccountManager::QueryAllWckeyInfo(
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   // Operators and above can query all wckeys.
@@ -483,7 +482,7 @@ CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   // Query the specified user information.
@@ -493,7 +492,7 @@ CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   auto result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
-  if (!result) return std::unexpected(result.error());
+  if (!result) return std::unexpected(result.error().code());
 
   return *user;
 }
@@ -507,7 +506,7 @@ CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     res_user = *user_result.value();
   }
 
@@ -553,13 +552,13 @@ CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
 CraneExpected<Account> AccountManager::QueryAccountInfo(
     uint32_t uid, const std::string& account) {
   User res_user;
-  CraneExpected<void> result{};
+  CraneExpectedRich<void> result{};
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     res_user = *user_result.value();
   }
 
@@ -567,7 +566,7 @@ CraneExpected<Account> AccountManager::QueryAccountInfo(
 
   const Account* account_ptr = GetAccountInfoNoLock_(account);
   result = CheckIfUserHasPermOnAccountNoLock_(res_user, account, true);
-  if (!result) return std::unexpected(result.error());
+  if (!result) return std::unexpected{result.error().code()};
 
   return *account_ptr;
 }
@@ -580,7 +579,7 @@ CraneExpected<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
     res_user = *op_user;
   }
@@ -614,7 +613,7 @@ CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
     res_user = *op_user;
   }
@@ -741,9 +740,7 @@ AccountManager::CheckModifyAccountOperations(
           auto val = operation.value_list()[0];
           auto result = CheckSetAccountDefaultQosNoLock_(account, val);
           if (!result) {
-            auto rich_error =
-                std::unexpected{FormatRichErr(result.error(), val)};
-            rich_error_list.emplace_back(rich_error);
+            rich_error_list.emplace_back(result);
             continue;
           }
           account->default_qos = val;
@@ -763,9 +760,7 @@ AccountManager::CheckModifyAccountOperations(
             auto result = CheckDeleteAccountAllowedPartitionNoLock_(
                 account, partition, force);
             if (!result) {
-              auto rich_error =
-                  std::unexpected{FormatRichErr(result.error(), partition)};
-              rich_error_list.emplace_back(rich_error);
+              rich_error_list.emplace_back(result);
               continue;
             }
             modify_record->emplace_back(partition, ModifyField::Partition,
@@ -782,9 +777,7 @@ AccountManager::CheckModifyAccountOperations(
             auto result =
                 CheckDeleteAccountAllowedQosNoLock_(account, qos, force);
             if (!result) {
-              auto rich_error =
-                  std::unexpected{FormatRichErr(result.error(), qos)};
-              rich_error_list.emplace_back(rich_error);
+              rich_error_list.emplace_back(result);
               continue;
             }
 
@@ -828,8 +821,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
-    rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(user_result.error(), "")});
+    rich_error_list.emplace_back(std::unexpected{user_result.error()});
     return rich_error_list;
   }
 
@@ -845,14 +837,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   auto result =
       CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
   if (!result) {
-    if (result.error() == CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), op_user->name)});
-    } else {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), account_name)});
-    }
-
+    rich_error_list.emplace_back(result);
     return rich_error_list;
   }
   std::string actor_name = op_user->name;
@@ -978,7 +963,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
           }
         } else if (operation.type() == crane::grpc::OperationType::Overwrite) {
           // has side effect
-          auto rich_result = CheckSetUserAllowedPartitionNoLock_(
+          auto rich_result = CheckAndSetUserAllowedPartitionNoLock_(
               account, partition_list, res_user);
           if (!rich_result) {
             rich_error_list.emplace_back(rich_result);
@@ -1053,7 +1038,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     const std::string& partition,
     const std::vector<crane::grpc::ModifyFieldOperation>& operations,
     bool force) {
-  CraneExpected<void> result;
   std::vector<CraneExpectedRich<void>> rich_error_list;
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -1061,8 +1045,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
-    rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(user_result.error(), "")});
+    rich_error_list.emplace_back(std::unexpected{user_result.error()});
     return rich_error_list;
   }
 
@@ -1076,25 +1059,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   std::string actual_account = account;
   std::string actor_name;
 
-  result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user, user,
-                                                    &actual_account, false);
+  auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
+      *op_user, user, &actual_account, false);
   if (!result) {
-    if (result.error() == CraneErrCode::ERR_PERMISSION_USER) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), op_user->name)});
-    } else if (result.error() == CraneErrCode::ERR_USER_ACCOUNT_MISMATCH) {
-      rich_error_list.emplace_back(std::unexpected{
-          FormatRichErr(result.error(),
-                        fmt::format("user: {}, account: {}", name, account))});
-    } else if (result.error() ==
-               CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), op_user->name)});
-    } else {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), "")});
-    }
-
+    rich_error_list.emplace_back(result);
     return rich_error_list;
   }
   actor_name = op_user->name;
@@ -1141,8 +1109,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(user_result.error(), "")});
+      rich_error_list.emplace_back(std::unexpected{user_result.error()});
       return rich_error_list;
     }
     const User* op_user = user_result.value();
@@ -1150,8 +1117,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), op_user->name)});
+      rich_error_list.emplace_back(result);
       return rich_error_list;
     }
   }
@@ -1254,7 +1220,7 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
@@ -1262,7 +1228,7 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -1282,11 +1248,11 @@ CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
+    if (!user_result) return std::unexpected(user_result.error().code());
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return result;
+    if (!result) return std::unexpected{result.error().code()};
     actor_name = op_user->name;
   }
 
@@ -1307,7 +1273,7 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
@@ -1318,7 +1284,7 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
         *user_result.value(), user, &actual_account, false);
-    if (!result) return result;
+    if (!result) return std::unexpected(user_result.error().code());
     actor_name = user_result.value()->name;
   }
 
@@ -1445,16 +1411,18 @@ CraneExpected<std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   return std::unexpected(CraneErrCode::ERR_USER_NO_PRIVILEGE);
 }
 
-CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
+CraneExpectedRich<void> AccountManager::CheckIfUidHasPermOnUser(
     uint32_t uid, const std::string& username, bool read_only_priv) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected{user_result.error()};
 
   const User* user = GetExistedUserInfoNoLock_(username);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!user)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
 
   return CheckIfUserHasPermOnUserNoLock_(*user_result.value(), user,
                                          read_only_priv);
@@ -1466,7 +1434,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   // Verify whether the serial number already exists in the user database.
@@ -1503,42 +1471,41 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
 CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
     uint32_t uid, const std::string& partition_name,
     const std::unordered_set<std::string>& accounts) {
-  CraneExpected<void> result{};
+  CraneExpectedRich<void> result{};
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected{user_result.error().code()};
   const User* op_user = user_result.value();
   result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-  if (!result) return result;
+  if (!result) return std::unexpected{result.error().code()};
 
   for (const auto& account_name : accounts) {
     const Account* account = GetAccountInfoNoLock_(account_name);
-    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+    if (!account) return std::unexpected{CraneErrCode::ERR_INVALID_ACCOUNT};
     result =
         CheckPartitionIsAllowedNoLock_(account, partition_name, false, false);
-    if (!result) return std::unexpected(result.error());
+    if (!result) return std::unexpected{result.error().code()};
   }
 
-  return result;
+  return {};
 }
 
 CraneExpected<void> AccountManager::ResetUserCertificate(
     uint32_t uid, const std::string& username) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  CraneExpected<void> result{};
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
+  if (!user_result) return std::unexpected(user_result.error().code());
   const User* op_user = user_result.value();
 
   const auto p_target_user = GetExistedUserInfoNoLock_(username);
   if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-  if (!result) return result;
+  auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+  if (!result) return std::unexpected{result.error().code()};
 
   if (!p_target_user->cert_number.empty() &&
       !g_vault_client->RevokeCert(p_target_user->cert_number))
@@ -1560,7 +1527,7 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
 
   m_user_map_[p_target_user->name]->cert_number = "";
 
-  return result;
+  return {};
 }
 
 /******************************************
@@ -1577,8 +1544,7 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
     auto result =
         CheckPartitionIsAllowedNoLock_(&account, partition, false, true);
     if (!result) {
-      rich_error_list.emplace_back(
-          std::unexpected(FormatRichErr(result.error(), partition)));
+      rich_error_list.emplace_back(result);
       continue;
     }
 
@@ -1602,7 +1568,7 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
   return rich_error_list;
 }
 
-CraneExpectedRich<void> AccountManager::CheckSetUserAllowedPartitionNoLock_(
+CraneExpectedRich<void> AccountManager::CheckAndSetUserAllowedPartitionNoLock_(
     const Account& account,
     const std::unordered_set<std::string>& partition_list, User* user) {
   user->account_to_attrs_map[account.name]
@@ -1610,8 +1576,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedPartitionNoLock_(
   for (const auto& partition : partition_list) {
     auto result =
         CheckPartitionIsAllowedNoLock_(&account, partition, false, true);
-    if (!result)
-      return std::unexpected(FormatRichErr(result.error(), partition));
+    if (!result) return result;
 
     // modify the user
     user->account_to_attrs_map[account.name]
@@ -1636,8 +1601,7 @@ AccountManager::CheckAddUserAllowedQosNoLock_(
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(&account, qos, false, true);
     if (!result) {
-      rich_error_list.emplace_back(
-          std::unexpected(FormatRichErr(result.error(), qos)));
+      rich_error_list.emplace_back(result);
       continue;
     }
     if (partition.empty()) {
@@ -1711,7 +1675,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(&account, qos, false, true);
-    if (!result) return std::unexpected(FormatRichErr(result.error(), qos));
+    if (!result) result;
   }
 
   const std::string& account_name = account.name;
@@ -1906,8 +1870,7 @@ AccountManager::CheckAddAccountAllowedPartitionNoLock_(
     auto result =
         CheckPartitionIsAllowedNoLock_(account, partition, true, false);
     if (!result) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), partition)});
+      rich_error_list.emplace_back(result);
       continue;
     }
     if (ranges::contains(account->allowed_partition, partition)) {
@@ -1926,8 +1889,7 @@ AccountManager::CheckAddAccountAllowedQosNoLock_(
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(account, qos, true, false);
     if (!result) {
-      rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), qos)});
+      rich_error_list.emplace_back(result);
       continue;
     }
 
@@ -1947,15 +1909,14 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedPartitionNoLock_(
   for (const auto& partition : partition_list) {
     auto result =
         CheckPartitionIsAllowedNoLock_(&account, partition, true, false);
-    if (!result)
-      return std::unexpected(FormatRichErr(result.error(), partition));
+    if (!result) return result;
   }
 
   for (const auto& par : account.allowed_partition) {
     if (!ranges::contains(partition_list, par)) {
       if (!force && IsAllowedPartitionOfAnyNodeNoLock_(&account, par))
         return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_CHILD_HAS_PARTITION, ""));
+            FormatRichErr(CraneErrCode::ERR_CHILD_HAS_PARTITION, par));
     }
   }
 
@@ -1967,72 +1928,82 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedQosNoLock_(
     bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(&account, qos, true, false);
-    if (!result) return std::unexpected(FormatRichErr(result.error(), qos));
+    if (!result) return result;
   }
 
   for (const auto& qos : account.allowed_qos_list) {
     if (!ranges::contains(qos_list, qos)) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(&account, qos))
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_SET_ACCOUNT_QOS, ""));
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_SET_ACCOUNT_QOS,
+            fmt::format("account: {}, qos: {}", account.name, qos)));
     }
   }
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckSetAccountDefaultQosNoLock_(
+CraneExpectedRich<void> AccountManager::CheckSetAccountDefaultQosNoLock_(
     const Account* account, const std::string& qos) {
   auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
   if (!result) return result;
 
   if (account->default_qos == qos)
-    return std::unexpected(CraneErrCode::ERR_DUPLICATE_DEFAULT_QOS);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_DUPLICATE_DEFAULT_QOS, qos)};
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
+CraneExpectedRich<void>
+AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
     const Account* account, const std::string& partition, bool force) {
   auto result =
       CheckPartitionIsAllowedNoLock_(account, partition, false, false);
   if (!result) return result;
 
   if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition))
-    return std::unexpected(CraneErrCode::ERR_CHILD_HAS_PARTITION);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_CHILD_HAS_PARTITION, partition)};
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckDeleteAccountAllowedQosNoLock_(
+CraneExpectedRich<void> AccountManager::CheckDeleteAccountAllowedQosNoLock_(
     const Account* account, const std::string& qos, bool force) {
   auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
   if (!result) return result;
 
   if (!force && account->default_qos == qos)
-    return std::unexpected(CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos));
 
   if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
-    return std::unexpected(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS, qos));
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckIfUserHasHigherPrivThan_(
+CraneExpectedRich<void> AccountManager::CheckIfUserHasHigherPrivThan_(
     const User& op_user, User::AdminLevel admin_level) {
   if (op_user.admin_level <= admin_level)
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name));
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckIfUserHasPermOnAccountNoLock_(
+CraneExpectedRich<void> AccountManager::CheckIfUserHasPermOnAccountNoLock_(
     const User& op_user, const std::string& account, bool read_only_priv) {
   if (account.empty())
-    return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED,
+                                         "the account is empty"));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  if (!account_ptr)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account));
 
   if (op_user.admin_level == User::None) {
     if (read_only_priv) {
@@ -2050,29 +2021,35 @@ CraneExpected<void> AccountManager::CheckIfUserHasPermOnAccountNoLock_(
         if (acc == account || PaternityTestNoLock_(acc, account)) return {};
     }
 
-    return std::unexpected(CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED, op_user.name));
   }
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckIfUserHasPermOnUserOfAccountNoLock_(
-    const User& op_user, const User* user, std::string* account,
-    bool read_only_priv) {
+CraneExpectedRich<void>
+AccountManager::CheckIfUserHasPermOnUserOfAccountNoLock_(const User& op_user,
+                                                         const User* user,
+                                                         std::string* account,
+                                                         bool read_only_priv) {
   CRANE_ASSERT(user != nullptr);
 
   if (account->empty()) *account = user->default_account;
 
   if (op_user.admin_level < user->admin_level)
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name));
 
   if (!user->account_to_attrs_map.contains(*account))
-    return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
+        fmt::format("user: {}, account: {}", user->name, *account)));
 
   return CheckIfUserHasPermOnAccountNoLock_(op_user, *account, read_only_priv);
 }
 
-CraneExpected<void> AccountManager::CheckIfUserHasPermOnUserNoLock_(
+CraneExpectedRich<void> AccountManager::CheckIfUserHasPermOnUserNoLock_(
     const User& op_user, const User* user, bool read_only_priv) {
   CRANE_ASSERT(user != nullptr);
 
@@ -2085,25 +2062,28 @@ CraneExpected<void> AccountManager::CheckIfUserHasPermOnUserNoLock_(
       return {};
   }
 
-  return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+  return std::unexpected(
+      FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name));
 }
 
-CraneExpected<void> AccountManager::CheckPartitionIsAllowedNoLock_(
+CraneExpectedRich<void> AccountManager::CheckPartitionIsAllowedNoLock_(
     const Account* account, const std::string& partition, bool check_parent,
     bool is_user) {
   CRANE_ASSERT(account != nullptr);
 
   // check if new partition existed
   if (!g_config.Partitions.contains(partition))
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARTITION, partition));
 
   if (!check_parent) {
     // check if account has access to new partition
     if (!ranges::contains(account->allowed_partition, partition)) {
       if (is_user)
-        return std::unexpected(
-            CraneErrCode::ERR_PARENT_ACCOUNT_PARTITION_MISSING);
-      return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_PARENT_ACCOUNT_PARTITION_MISSING, partition));
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition));
     }
   } else {
     // Check if parent account has access to the partition
@@ -2111,29 +2091,30 @@ CraneExpected<void> AccountManager::CheckPartitionIsAllowedNoLock_(
       const Account* parent =
           GetExistedAccountInfoNoLock_(account->parent_account);
       if (!ranges::contains(parent->allowed_partition, partition))
-        return std::unexpected(
-            CraneErrCode::ERR_PARENT_ACCOUNT_PARTITION_MISSING);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_PARENT_ACCOUNT_PARTITION_MISSING, partition));
     }
   }
 
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
+CraneExpectedRich<void> AccountManager::CheckQosIsAllowedNoLock_(
     const Account* account, const std::string& qos, bool check_parent,
     bool is_user) {
   CRANE_ASSERT(account != nullptr);
 
   // check if the qos existed
   if (!GetExistedQosInfoNoLock_(qos))
-    return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_QOS, qos));
 
   if (!check_parent) {
     // check if account has access to new qos
     if (!ranges::contains(account->allowed_qos_list, qos)) {
       if (is_user)
-        return std::unexpected(CraneErrCode::ERR_PARENT_ACCOUNT_QOS_MISSING);
-      return std::unexpected(CraneErrCode::ERR_QOS_MISSING);
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_PARENT_ACCOUNT_QOS_MISSING, qos));
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_QOS_MISSING, qos));
     }
   } else {
     // Check if parent account has access to the qos
@@ -2141,7 +2122,8 @@ CraneExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
       const Account* parent =
           GetExistedAccountInfoNoLock_(account->parent_account);
       if (!ranges::contains(parent->allowed_qos_list, qos))
-        return std::unexpected(CraneErrCode::ERR_PARENT_ACCOUNT_QOS_MISSING);
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_PARENT_ACCOUNT_QOS_MISSING, qos));
     }
   }
 
@@ -2180,20 +2162,21 @@ void AccountManager::InitDataMap_() {
   }
 }
 
-CraneExpected<const User*> AccountManager::GetUserInfoByUidNoLock_(
+CraneExpectedRich<const User*> AccountManager::GetUserInfoByUidNoLock_(
     uint32_t uid) {
   PasswordEntry entry(uid);
 
   if (!entry.Valid()) {
     CRANE_ERROR("Uid {} not existed", uid);
-    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_INVALID_UID, std::to_string(uid))};
   }
-
   const User* user = GetExistedUserInfoNoLock_(entry.Username());
 
   if (!user) {
     CRANE_ERROR("User '{}' is not a user of Crane", entry.Username());
-    return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_INVALID_OP_USER, entry.Username())};
   }
 
   return user;
