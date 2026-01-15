@@ -28,7 +28,21 @@
 #include <string>
 #include <vector>
 
+#include "crane/FileLock.h"
 #include "crane/Logger.h"
+#include "crane/PasswordEntry.h"
+
+extern "C" {
+#include <shadow/subid.h>
+}
+
+#if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 4
+// For older libsubid versions, map the function names to their legacy
+// equivalents
+#  define subid_free free
+#  define subid_get_uid_ranges get_subuid_ranges
+#  define subid_get_gid_ranges get_subgid_ranges
+#endif
 
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
@@ -411,6 +425,87 @@ absl::Time GetSystemBootTime() {
   absl::Time current_time = absl::FromTimeT(time(nullptr));
   absl::Duration uptime = absl::Seconds(system_info.uptime);
   return current_time - uptime;
+
+#else
+#  error "Unsupported OS"
+#endif
+}
+
+namespace {
+bool AppendLine(int fd, const std::string& line, std::string* err) {
+  // Seek to end to ensure append despite concurrent writes
+  if (lseek(fd, 0, SEEK_END) == -1) {
+    if (err)
+      *err = fmt::format("lseek failed: {}", strerror(errno));
+    return false;
+  }
+
+  ssize_t written = write(fd, line.c_str(), line.size());
+  if (written != static_cast<ssize_t>(line.size())) {
+    if (err)
+      *err = fmt::format("write failed: {}", written == -1 ? strerror(errno)
+                                                            : "short write");
+    return false;
+  }
+  if (fsync(fd) == -1) {
+    if (err) *err = fmt::format("fsync failed: {}", strerror(errno));
+    return false;
+  }
+  return true;
+}
+}  // namespace
+
+bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
+                       uint64_t uid_count, uint64_t gid_start,
+                       uint64_t gid_count, std::string* err) {
+#if defined(__linux__) || defined(__unix__)
+  const char* subuid_path = "/etc/subuid";
+  const char* subgid_path = "/etc/subgid";
+
+  // Acquire locks in fixed order to avoid deadlock
+  auto uid_lock = util::AcquireWriteLock(subuid_path);
+  if (!uid_lock) {
+    if (err) *err = fmt::format("Failed to lock {}: {}", subuid_path, uid_lock.error());
+    return false;
+  }
+
+  auto gid_lock = util::AcquireWriteLock(subgid_path);
+  if (!gid_lock) {
+    if (err) *err = fmt::format("Failed to lock {}: {}", subgid_path, gid_lock.error());
+    return false;
+  }
+
+  // Re-check via libsubid after locking to detect races
+  struct subid_range* uid_ranges = nullptr;
+  struct subid_range* gid_ranges = nullptr;
+  int uid_count_check = subid_get_uid_ranges(owner.c_str(), &uid_ranges);
+  int gid_count_check = subid_get_gid_ranges(owner.c_str(), &gid_ranges);
+
+  bool success = true;
+  std::string uid_line = fmt::format("{}:{}:{}\n", owner, uid_start, uid_count);
+  std::string gid_line = fmt::format("{}:{}:{}\n", owner, gid_start, gid_count);
+
+  // Append uid mapping if missing
+  if (uid_count_check <= 0) {
+    if (!AppendLine(uid_lock->GetFileDescriptor(), uid_line, err)) {
+      success = false;
+    }
+  }
+
+  // Append gid mapping if missing
+  if (success && gid_count_check <= 0) {
+    if (!AppendLine(gid_lock->GetFileDescriptor(), gid_line, err)) {
+      success = false;
+    }
+  }
+
+  // Free libsubid allocated memory
+  if (uid_ranges != nullptr) subid_free(uid_ranges);
+  if (gid_ranges != nullptr) subid_free(gid_ranges);
+
+  // Locks are automatically released by RAII
+
+  return success;
 
 #else
 #  error "Unsupported OS"

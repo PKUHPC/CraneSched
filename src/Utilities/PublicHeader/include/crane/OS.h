@@ -86,4 +86,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
+bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
+                       uint64_t uid_count, uint64_t gid_start,
+                       uint64_t gid_count, std::string* err);
+
 }  // namespace util::os

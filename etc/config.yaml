@@ -192,3 +192,7 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+  SubId:
+    Managed: true
+    RangeSize: 65536
+    BaseOffset: 0

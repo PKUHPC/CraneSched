@@ -21,6 +21,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         yaml-cpp
         Subid::subid
         bs_thread_pool
+        Utility_FileLock
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
         sol2
 )

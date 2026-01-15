@@ -24,6 +24,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <limits>
+
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
@@ -634,13 +636,83 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
     const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx) {
   using cri::CriClient;
 
+  const auto& subid_conf = g_config.Container.SubId;
+  const uint64_t range = subid_conf.RangeSize;
+  const uint64_t uid = pwd.Uid();
+  const uint64_t gid = pwd.Gid();
+  const uint64_t uid_start = subid_conf.BaseOffset + uid * range;
+  const uint64_t gid_start = subid_conf.BaseOffset + gid * range;
+
+  // Check for overflow
+  if (uid_start > std::numeric_limits<unsigned long>::max() ||
+      gid_start > std::numeric_limits<unsigned long>::max() ||
+      range > std::numeric_limits<unsigned long>::max()) {
+    CRANE_ERROR("SubId range overflow for uid: {}, gid: {}", uid, gid);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  auto matches = [](const SubIdRanges& ranges, uint64_t start,
+                    uint64_t count) -> bool {
+    return ranges.Valid() && ranges.Count() == 1 &&
+           ranges[0].start == start && ranges[0].count == count;
+  };
+
   auto subuid = pwd.SubUidRanges();
   auto subgid = pwd.SubGidRanges();
 
-  if (!subuid.Valid() || !subgid.Valid()) {
-    CRANE_ERROR("SubUID/SubGID ranges are not valid for uid: {}, gid: {}",
-                pwd.Uid(), pwd.Gid());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+  if (!subid_conf.Managed) {
+    // Unmanaged mode: require exact matches
+    if (!matches(subuid, uid_start, range) ||
+        !matches(subgid, gid_start, range)) {
+      CRANE_ERROR(
+          "SubId unmanaged mode: expected uid range [{}, {}], gid range [{}, "
+          "{}] for user {}, but not found",
+          uid_start, range, gid_start, range, pwd.Username());
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+  } else {
+    // Managed mode: validate or ensure mappings
+    bool uid_exists = subuid.Valid() && subuid.Count() > 0;
+    bool gid_exists = subgid.Valid() && subgid.Count() > 0;
+
+    if (uid_exists || gid_exists) {
+      // If any ranges exist, both must match the deterministic mapping
+      if (!matches(subuid, uid_start, range) ||
+          !matches(subgid, gid_start, range)) {
+        CRANE_ERROR(
+            "SubId mismatch: expected uid range [{}, {}], gid range [{}, {}] "
+            "for user {}, but found uid range [{}, {}], gid range [{}, {}]",
+            uid_start, range, gid_start, range, pwd.Username(),
+            uid_exists ? subuid[0].start : 0, uid_exists ? subuid[0].count : 0,
+            gid_exists ? subgid[0].start : 0, gid_exists ? subgid[0].count : 0);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    } else {
+      // Both missing: allocate them
+      std::string err;
+      if (!util::os::EnsureSubIdRanges(pwd.Username(), uid_start, range,
+                                       gid_start, range, &err)) {
+        CRANE_ERROR("Failed to ensure SubId ranges for user {}: {}",
+                    pwd.Username(), err);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+
+      // Re-query to verify
+      PasswordEntry pwd_recheck(uid);
+      subuid = pwd_recheck.SubUidRanges();
+      subgid = pwd_recheck.SubGidRanges();
+
+      if (!matches(subuid, uid_start, range) ||
+          !matches(subgid, gid_start, range)) {
+        CRANE_ERROR(
+            "SubId verification failed after allocation for user {}: expected "
+            "uid range [{}, {}], gid range [{}, {}], but found uid range [{}, "
+            "{}], gid range [{}, {}]",
+            pwd.Username(), uid_start, range, gid_start, range, subuid[0].start,
+            subuid[0].count, subgid[0].start, subgid[0].count);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    }
   }
 
   // NOTE: Using 0 as the start of the range no matter run_as_user is 0 or not.

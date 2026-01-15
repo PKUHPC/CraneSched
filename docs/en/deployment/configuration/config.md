@@ -360,25 +360,76 @@ CraneSched supports running jobs in containers through CRI (Container Runtime In
 Container:
   # Enable container support (experimental)
   Enabled: false
-  
+
   # Temporary directory for container data (relative to CraneBaseDir)
   TempDir: supervisor/containers/
-  
+
   # Path to container runtime socket
   RuntimeEndpoint: /run/containerd/containerd.sock
-  
+
   # Path to image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
+
+  # SubUID/SubGID configuration (user namespaces)
+  SubId:
+    # Whether to automatically manage SubID ranges
+    Managed: true
+    # Size of SubUID/SubGID range per user
+    RangeSize: 65536
+    # Base offset for SubUID/SubGID ranges
+    BaseOffset: 0
 ```
 
 !!! info "Experimental Feature"
     Container support is currently experimental. There may be limitations and problems.
+
+### SubID Configuration Details
+
+SubID (subordinate user/group IDs) configuration is used for secure container user namespace isolation:
+
+- **Managed Mode**:
+  - `true` (default): CraneSched automatically manages `/etc/subuid` and `/etc/subgid` entries
+    - If user's SubID ranges don't exist, they are automatically added
+    - If ranges exist but don't match expected values, job startup fails with error
+  - `false` (unmanaged mode): Requires SubID ranges to be pre-configured in the system
+    - Ranges are verified to exactly match expected values before job startup
+    - Job fails if ranges don't match
+
+- **RangeSize**: Size of SubUID/SubGID range per user (default: 65536)
+  - Must be greater than 0
+  - Recommended: 65536 (provides sufficient ID space)
+
+- **BaseOffset**: Starting offset for SubID ranges (default: 0)
+  - Used to calculate deterministic ranges per user: `start = BaseOffset + uid × RangeSize`
+
+### Manual Validation
+
+After enabling container user namespaces, it's recommended to perform the following validation steps:
+
+1. **Test automatic allocation** (Managed mode):
+   - Ensure test user has no existing entries in `/etc/subuid` and `/etc/subgid`
+   - Run a container job as that user
+   - Verify the expected SubID lines were automatically added:
+     ```bash
+     grep testuser /etc/subuid /etc/subgid
+     ```
+   - Run the job again and confirm no duplicate entries were added
+
+2. **Test range mismatch validation**:
+   - Manually add a mismatching SubID entry in `/etc/subuid` or `/etc/subgid`
+   - Attempt to run a container job as that user
+   - Confirm the job startup fails with a clear mismatch error message
+
+3. **Verify ID isolation**:
+   - Run the `id` command inside a container
+   - Confirm UID/GID mappings are correctly applied (shows UID 0 inside container, but uses SubID range on host)
 
 **Requirements:**
 
 - CRI-compatible runtime (containerd or CRI-O) installed on compute nodes
 - Runtime socket accessible with appropriate permissions
 - Container images available or accessible from registries
+- `libsubid` installed on the system (for SubID management)
 
 
 ## Applying Changes
