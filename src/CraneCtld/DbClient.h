@@ -83,25 +83,6 @@ class MongodbClient {
   using sub_document = bsoncxx::builder::basic::sub_document;
   struct JobSummary {
     enum class Type : std::uint8_t { HOUR, DAY, MONTH };
-
-    struct Key {
-      std::string account;
-      std::string wckey;
-      uint32_t cpus_alloc;
-
-      template <typename H>
-      friend H AbslHashValue(H h, const Key& key) {
-        return H::combine(std::move(h), key.account, key.wckey, key.cpus_alloc);
-      }
-      bool operator==(const Key& other) const {
-        return account == other.account && wckey == other.wckey &&
-               cpus_alloc == other.cpus_alloc;
-      }
-    };
-    struct Value {
-      double total_cpu_time = 0;
-      int32_t total_count = 0;
-    };
   };
 
   // Task aggregation information for acc_usage tables
@@ -113,11 +94,6 @@ class MongodbClient {
     std::chrono::sys_seconds start_time;
     std::chrono::sys_seconds end_time;
     double total_cpus;
-  };
-
-  struct JobTimeRange {
-    std::chrono::sys_seconds start_time;
-    std::chrono::sys_seconds end_time;
   };
 
   struct MongoServerVersion {
@@ -213,10 +189,6 @@ class MongodbClient {
   void SetInitialAggregationCompleted_(JobSummary::Type type, bool completed);
 
   std::chrono::sys_seconds GetJobMinStartTime_();
-  void WriteJobSizeSummaryReply_(
-      const absl::flat_hash_map<JobSummary::Key, JobSummary::Value>& agg_map,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
-      int max_data_size);
 
   // Execute aggregation for a single hour (worker function for thread pool)
   bool AggregateJobSummaryForSingleHour_(

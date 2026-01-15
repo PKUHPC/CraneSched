@@ -2961,29 +2961,6 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
   return true;
 }
 
-void MongodbClient::WriteJobSizeSummaryReply_(
-    const absl::flat_hash_map<JobSummary::Key, JobSummary::Value>& agg_map,
-    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
-    int max_data_size) {
-  crane::grpc::QueryJobSizeSummaryReply reply;
-  for (const auto& agg_val : agg_map) {
-    auto* item = reply.add_item_list();
-    item->set_cluster(g_config.CraneClusterName);
-    item->set_account(agg_val.first.account);
-    item->set_wckey(agg_val.first.wckey);
-    item->set_cpus_alloc(agg_val.first.cpus_alloc);
-    item->set_total_cpu_time(agg_val.second.total_cpu_time);
-    item->set_total_count(agg_val.second.total_count);
-    if (reply.item_list_size() >= max_data_size) {
-      stream->Write(reply);
-      reply.clear_item_list();
-    }
-  }
-  if (reply.item_list_size() > 0) {
-    stream->Write(reply);
-  }
-}
-
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
