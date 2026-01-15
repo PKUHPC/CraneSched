@@ -30,15 +30,17 @@ $ creport [<OPTION>] [<COMMAND>]
 
 :   显示 creport 命令的帮助信息。
 
-## 用户资源消耗排行
+## user 子命令
+
+### user topusage - 用户资源消耗排行
 
 ```bash
 creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-A, --account string**
 
@@ -56,7 +58,7 @@ creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
 
 :   指定输出条数（默认 10 条）。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **LOGIN**: 用户名
@@ -64,7 +66,7 @@ creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
 - **ACCOUNT**: 账户名
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  user topusage -S=2024-09-01T01:00:00 -E=2025-09-01T00:20:10
@@ -86,15 +88,49 @@ Usage reported in CPU Minutes
 |-------------|---------|-------------|------------|------|--------|
 ```
 
-## 账户-用户资源利用率
+## cluster 子命令
+<!---
+### cluster utilization - 集群整体利用率
+
+```bash
+creport cluster utilization [--start-time=...] [--end-time=...] ...
+```
+
+#### 命令行选项
+
+无子命令特有选项（通用选项见前文"通用选项"）。
+
+#### 输出字段
+
+- **CLUSTER**: 集群名
+- **ALLOCATE**: 统计区间内，所有作业实际分配的资源总量（CPU分钟），即所有作业分配核数 × 运行分钟累加
+- **DOWN**: 统计区间内，节点因故障、维护等不可用的总时间（CPU分钟），即停机核数 × 停机分钟累加
+- **PLANNED**: 统计区间内，有作业排队但未分配资源的时间（CPU分钟），通常表示资源紧张或排队溢出
+- **REPORTED**: 统计区间内，所有资源的理论最大可用时间（CPU分钟），即集群总核数 × 时间跨度
+
+#### 输出示例
+
+```bash
+$ creport  cluster  utilization  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
+--------------------------------------------------------------------------------
+Cluster Utilization 2024-09-01T00:00:00 - 2025-09-01T00:00:00 (31536000 secs)
+Usage reported in CPU Minutes
+|-------------|----------|------|---------|----------|
+| CLUSTER     | ALLOCATE | DOWN | PLANNED | REPORTED |
+|-------------|----------|------|---------|----------|
+| crane       | 3.33     | -    | -       | -        |
+|-------------|----------|------|---------|----------|
+```
+--->
+### cluster accountutilizationbyuser - 账户-用户资源利用率
 
 ```bash
 creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-A, --account string**
 
@@ -104,7 +140,7 @@ creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--
 
 :   指定查询的用户，指定多个用户时用逗号隔开。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **ACCOUNT**: 账户名
@@ -113,7 +149,7 @@ creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 - **ENERGY**: 作业消耗的能源
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  cluster  accountutilizationbyuser  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -135,15 +171,15 @@ Usage reported in CPU Minutes
 |-------------|------------|---------|-------------|------|--------|
 ```
 
-## 用户-账户资源利用率
+### cluster userutilizationbyaccount - 用户-账户资源利用率
 
 ```bash
 creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-A, --account string**
 
@@ -153,7 +189,7 @@ creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--
 
 :   指定查询的用户，指定多个用户时用逗号隔开。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **LOGIN**: 用户名
@@ -162,7 +198,7 @@ creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 - **ENERGY**: 作业消耗的能源
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  cluster  userutilizationbyaccount  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -184,29 +220,29 @@ Usage reported in CPU Minutes
 |-------------|---------|-------------|------------|------|--------|
 ```
 
-## 用户-wckey资源利用率
+### cluster userutilizationbywckey - 用户-WCKEY资源利用率
 
 ```bash
 creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-u, --user string**
 
 :   指定查询的用户，指定多个用户时用逗号隔开。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **LOGIN**: 用户名
 - **PROPER NAME**: Linux系统全名
-- **WCKEY**: wckey名
+- **WCKEY**: WCKEY名
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  cluster  userutilizationbywckey  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -228,29 +264,29 @@ Usage reported in CPU Minutes
 |-------------|---------|-------------|-------|------|
 ```
 
-## wckey-用户资源利用率
+### cluster wckeyutilizationbyuser - WCKEY-用户资源利用率
 
 ```bash
 creport cluster wckeyutilizationbyuser [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-w, --wckeys string**
 
-:   指定查询的 wckeys，指定多个 wckey 时用逗号隔开。
+:   指定查询的 WCKEY，指定多个 WCKEY 时用逗号隔开。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
-- **WCKEY**: wckey名
+- **WCKEY**: WCKEY名
 - **LOGIN**: 用户名
 - **PROPER NAME**: Linux系统全名
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  cluster  wckeyutilizationbyuser  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -272,15 +308,15 @@ Usage reported in CPU Minutes
 |-------------|-------|---------|-------------|------|
 ```
 
-## 账户-qos资源利用率
+### cluster accountutilizationbyqos - 账户-QOS资源利用率
 
 ```bash
 creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--account=...] [--qos=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（通用选项见前文"通用选项"）：
 
 **-A, --account string**
 
@@ -288,17 +324,17 @@ creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--a
 
 **-q, --qos string**
 
-:   指定查询的 Qos，指定多个 Qos 时用逗号隔开。
+:   指定查询的 QOS，指定多个 QOS 时用逗号隔开。
 
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **ACCOUNT**: 账户名
-- **QOS**: Qos名
+- **QOS**: QOS名
 - **USED**: 用户下每个作业总CPUs*运行时间值的总和
 - **ENERGY**: 作业消耗的能源
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport cluster accountutilizationbyqos -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -320,51 +356,11 @@ Usage reported in CPU Minutes
 |-------------|------------|-----------|------|--------|
 ```
 
-## 集群整体利用率
+## job 子命令
 
-```bash
-creport cluster utilization [--start-time=...] [--end-time=...] ...
-```
+### job 子命令公共选项
 
-### 命令行选项
-
-无子命令特有选项（通用选项见前文“通用选项”）。
-
-### 输出字段
-
-- **CLUSTER**: 集群名
-- **ALLOCATE**: 统计区间内，所有作业实际分配的资源总量（CPU分钟），即所有作业分配核数 × 运行分钟累加
-- **DOWN**: 统计区间内，节点因故障、维护等不可用的总时间（CPU分钟），即停机核数 × 停机分钟累加
-- **PLANNED**: 统计区间内，有作业排队但未分配资源的时间（CPU分钟），通常表示资源紧张或排队溢出
-- **REPORTED**: 统计区间内，所有资源的理论最大可用时间（CPU分钟），即集群总核数 × 时间跨度
-
-### 输出示例
-
-```bash
-$ creport  cluster  utilization  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
---------------------------------------------------------------------------------
-Cluster Utilization 2024-09-01T00:00:00 - 2025-09-01T00:00:00 (31536000 secs)
-Usage reported in CPU Minutes
-|-------------|----------|------|---------|----------|
-| CLUSTER     | ALLOCATE | DOWN | PLANNED | REPORTED |
-|-------------|----------|------|---------|----------|
-| crane       | 3.33     | -    | -       | -        |
-|-------------|----------|------|---------|----------|
-```
-
-## 按账户分组的作业规模分布
-
-```bash
-creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
-```
-
-### 命令行选项
-
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
-
-**-A, --account string**
-
-:   指定查询账户，指定多个账户时用逗号隔开。
+以下选项适用于所有 job 子命令。为避免重复，后续各子命令小节中不再重复列出。
 
 **--gid string**
 
@@ -390,7 +386,21 @@ creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] .
 
 :   指定查询的分区，指定多个分区时用逗号隔开。
 
-### 输出字段
+### job sizesbyaccount - 按账户分组的作业规模分布
+
+```bash
+creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
+```
+
+#### 命令行选项
+
+以下为该子命令特有选项（公共选项见前文"job 子命令公共选项"）：
+
+**-A, --account string**
+
+:   指定查询账户，指定多个账户时用逗号隔开。
+
+#### 输出字段
 
 - **CLUSTER**: 集群名
 - **ACCOUNT**: 账户名
@@ -402,7 +412,7 @@ creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] .
 - **TOTAL CPU TIME**: 特定账户下所有的CPU分钟总和
 - **% OF CLUSTER**: 占用集群所有作业CPU分钟数的百分比
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  job  sizesbyaccount  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -424,48 +434,24 @@ Time reported in Minutes
 +-------------+------------+-----------+-------------+--------------+--------------+-------------+----------------+----------------+
 ```
 
-## 按wckey分组的作业规模分布
+### job sizesbywckey - 按WCKEY分组的作业规模分布
 
 ```bash
 creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（公共选项见前文"job 子命令公共选项"）：
 
 **-w, --wckeys string**
 
-:   指定查询的 wckeys，指定多个 wckey 时用逗号隔开。
+:   指定查询的 WCKEY，指定多个 WCKEY 时用逗号隔开。
 
-**--gid string**
-
-:   指定查询的 gid，指定多个 gid 时用逗号隔开。
-
-**--grouping string**
-
-:   以逗号分隔的尺寸分组列表（默认：`50,100,250,500,1000`）。
-
-**--printjobcount bool**
-
-:   报告将打印作业范围的数量，而不是使用的时间。
-
-**-j, --jobs string**
-
-:   指定查询作业号，指定多个作业号时用逗号隔开（如 `-j=2,3,4`）。
-
-**-n, --nodes string**
-
-:   指定查询的节点名，指定多个节点时用逗号隔开。
-
-**-p, --partition string**
-
-:   指定查询的分区，指定多个分区时用逗号隔开。
-
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
-- **WCKEY**: wckey 名
+- **WCKEY**: WCKEY名
 - **0-49 CPUs**: 0-49CPUs范围CPU分钟
 - **50-249 CPUs**: 50-249CPUs范围CPU分钟
 - **250-499 CPUs**: 250-499CPUs范围CPU分钟
@@ -474,7 +460,7 @@ creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 - **TOTAL CPU TIME**: 特定账户下所有的CPU分钟总和
 - **% OF CLUSTER**: 占用集群所有作业CPU分钟数的百分比
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  job  sizesbywckey  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -488,15 +474,15 @@ Time reported in Minutes
 +-------------+-------+-----------+-------------+--------------+--------------+-------------+----------------+----------------+
 ```
 
-## 按wckey和account分组的作业规模分布
+### job sizesbyaccountandwckey - 按账户和WCKEY分组的作业规模分布
 
 ```bash
 creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
-### 命令行选项
+#### 命令行选项
 
-以下为该子命令特有选项（通用选项见前文“通用选项”）：
+以下为该子命令特有选项（公共选项见前文"job 子命令公共选项"）：
 
 **-A, --account string**
 
@@ -504,36 +490,12 @@ creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys
 
 **-w, --wckeys string**
 
-:   指定查询的 wckeys，指定多个 wckey 时用逗号隔开。
+:   指定查询的 WCKEY，指定多个 WCKEY 时用逗号隔开。
 
-**--gid string**
-
-:   指定查询的 gid，指定多个 gid 时用逗号隔开。
-
-**--grouping string**
-
-:   以逗号分隔的尺寸分组列表（默认：`50,100,250,500,1000`）。
-
-**--printjobcount bool**
-
-:   报告将打印作业范围的数量，而不是使用的时间。
-
-**-j, --jobs string**
-
-:   指定查询作业号，指定多个作业号时用逗号隔开（如 `-j=2,3,4`）。
-
-**-n, --nodes string**
-
-:   指定查询的节点名，指定多个节点时用逗号隔开。
-
-**-p, --partition string**
-
-:   指定查询的分区，指定多个分区时用逗号隔开。
-
-### 输出字段
+#### 输出字段
 
 - **CLUSTER**: 集群名
-- **ACCOUNT:WCKEY**: 账户名与 wckey 名的组合（格式：`<ACCOUNT>:<WCKEY>`）
+- **ACCOUNT:WCKEY**: 账户名与WCKEY名的组合（格式：`<ACCOUNT>:<WCKEY>`）
 - **0-49 CPUs**: 0-49CPUs范围CPU分钟
 - **50-249 CPUs**: 50-249CPUs范围CPU分钟
 - **250-499 CPUs**: 250-499CPUs范围CPU分钟
@@ -542,7 +504,7 @@ creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys
 - **TOTAL CPU TIME**: 特定账户下所有的CPU分钟总和
 - **% OF CLUSTER**: 占用集群所有作业CPU分钟数的百分比
 
-### 输出示例
+#### 输出示例
 
 ```bash
 $ creport  job  sizesbyaccountandwckey  -S=2024-09-01T00:00:00 -E=2025-09-01T00:00:00
@@ -564,13 +526,6 @@ Time reported in Minutes
 +-------------+----------------+-----------+-------------+--------------+--------------+-------------+----------------+----------------+
 ```
 
-## 手动触发数据聚合
-
-**用于手动触发数据聚合，仅限root用户触发**
-
-```bash
-creport active
-```
 
 ## 另请参阅
 
