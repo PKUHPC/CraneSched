@@ -15,8 +15,6 @@ DbName: crane_db
 JobAggregationTimeoutMs: 600000
 # Job aggregation batch size for MongoDB operations.
 JobAggregationBatchSize: 100
-# Job aggregation concurrency for MongoDB operations.
-JobAggregationConcurrency: 4
 
 Vault:
   Enabled: false

@@ -201,8 +201,6 @@ struct Config {
   uint32_t JobAggregationTimeoutMs{
       600000};  // Job aggregation timeout (ms, default 10 minutes)
   uint32_t JobAggregationBatchSize{100};  // Job aggregation batch size
-  // Job aggregation concurrency (number of parallel workers)
-  uint32_t JobAggregationConcurrency{4};
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;

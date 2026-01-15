@@ -766,26 +766,15 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbName = "crane_db";
 
-      // Read JobAggregationTimeoutMs from database.yaml
       if (config["JobAggregationTimeoutMs"]) {
         g_config.JobAggregationTimeoutMs =
             config["JobAggregationTimeoutMs"].as<uint32_t>();
       }
-      // Default value is already set in CtldPublicDefs.h (600000ms)
 
-      // Read JobAggregationBatchSize from database.yaml
       if (config["JobAggregationBatchSize"]) {
         g_config.JobAggregationBatchSize =
             config["JobAggregationBatchSize"].as<uint32_t>();
       }
-      // Default value is already set in CtldPublicDefs.h (1000)
-
-      // Read JobAggregationConcurrency from database.yaml
-      if (config["JobAggregationConcurrency"]) {
-        g_config.JobAggregationConcurrency =
-            config["JobAggregationConcurrency"].as<uint32_t>();
-      }
-      // Default value is already set in CtldPublicDefs.h (4)
 
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
