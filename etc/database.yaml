@@ -11,6 +11,10 @@ DbHost: localhost
 DbPort: 27017
 DbReplSetName: crane_rs
 DbName: crane_db
+# Job aggregation timeout in milliseconds for MongoDB operations.
+JobAggregationTimeoutMs: 600000
+# Job aggregation batch size for MongoDB operations.
+JobAggregationBatchSize: 100
 
 Vault:
   Enabled: false
