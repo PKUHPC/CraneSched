@@ -71,11 +71,11 @@ if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection wckey_table
 fi
 if [ "$mode" -eq 5 ] || [ "$mode" -eq 7 ]; then
-  wipe_collection hour_job_summary_table
-  wipe_collection day_job_summary_table
-  wipe_collection month_job_summary_table
+  wipe_collection acc_usage_hour_table
+  wipe_collection acc_usage_day_table
+  wipe_collection acc_usage_month_table
 fi
 
 if [ "$mode" -eq 5 ] || [ "$mode" -eq 8 ]; then
-  wipe_collection "summary_time_table"
+  wipe_collection summary_time_table
 fi
