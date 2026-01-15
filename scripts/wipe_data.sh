@@ -29,23 +29,6 @@ function wipe_collection() {
     exit
 EOF
 }
-
-function batch_insert_collection() {
-  collection=$1
-  json_file=$2
-  mongoimport --username "$username" --password "$password" --host "$host" --port "$port" \
-    --authenticationDatabase admin --db "$dbname" --collection "$collection" \
-    --file "$json_file" --jsonArray
-}
-
-function batch_insert_collection_process() {
-  collection=$1
-  json_file=$2
-  mongoimport --username "$username" --password "$password" --host "$host" --port "$port" \
-    --authenticationDatabase admin --db "$dbname" --collection "$collection" \
-    --file "$json_file"
-}
-
 # Wipe data according to mode
 if [ "$mode" -eq 1 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection acct_table
