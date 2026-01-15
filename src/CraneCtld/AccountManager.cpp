@@ -207,41 +207,44 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
   return AddWckey_(new_wckey, find_wckey, user_exist);
 }
 
-CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
-                                               const std::string& name,
-                                               const std::string& account) {
+CraneExpectedRich<void> AccountManager::DeleteUser(uint32_t uid,
+                                                   const std::string& name,
+                                                   const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected{user_result.error()};
   const User* op_user = user_result.value();
 
   const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!user)
+    return std::unexpected{FormatRichErr(CraneErrCode::ERR_INVALID_USER, name)};
 
   auto result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
-  if (!result) return std::unexpected{result.error().code()};
+  if (!result) return result;
   // The provided account is invalid.
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
-    return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
+                      fmt::format("user: {}, account: {}", name, account))};
 
   return DeleteUser_(op_user->name, *user, account);
 }
 
-CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
-                                                  const std::string& name) {
+CraneExpectedRich<void> AccountManager::DeleteAccount(uint32_t uid,
+                                                      const std::string& name) {
   std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected{user_result.error()};
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return std::unexpected{result.error().code()};
+    if (!result) return result;
     actor_name = op_user->name;
   }
 
@@ -249,63 +252,72 @@ CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  if (!account)
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account->name)};
 
   // Cannot delete because there are child nodes.
   if (!account->child_accounts.empty() || !account->users.empty())
-    return std::unexpected(CraneErrCode::ERR_ACCOUNT_HAS_CHILDREN);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_ACCOUNT_HAS_CHILDREN, account->name)};
 
   return DeleteAccount_(actor_name, *account);
 }
 
-CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
-                                              const std::string& name) {
+CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
+                                                  const std::string& name) {
   std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected{user_result.error()};
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return std::unexpected{result.error().code()};
+    if (!result) return result;
     actor_name = op_user->name;
   }
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* qos = GetExistedQosInfoNoLock_(name);
-  if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+  if (!qos)
+    return std::unexpected{FormatRichErr(CraneErrCode::ERR_INVALID_QOS, name)};
 
   // Cannot delete because the QoS is still in use.
   if (qos->reference_count != 0)
-    return std::unexpected(CraneErrCode::ERR_QOS_REFERENCES_EXIST);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_QOS_REFERENCES_EXIST, name)};
 
   return DeleteQos_(actor_name, name);
 }
 
-CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
-                                                const std::string& name,
-                                                const std::string& user_name) {
+CraneExpectedRich<void> AccountManager::DeleteWckey(
+    uint32_t uid, const std::string& name, const std::string& user_name) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
   const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
-  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!p_target_user)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, user_name));
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
-    if (!result) return std::unexpected{result.error().code()};
+    if (!result) return result;
   }
   if (p_target_user->default_wckey == name) {
-    return std::unexpected(CraneErrCode::ERR_DEL_DEFAULT_WCKEY);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_DEL_DEFAULT_WCKEY, name));
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   const Wckey* wckey = GetExistedWckeyInfoNoLock_(name, user_name);
-  if (!wckey) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+  if (!wckey)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_WCKEY, name));
 
   return DeleteWckey_(name, user_name);
 }
@@ -407,13 +419,14 @@ AccountManager::WckeyMutexSharedPtr AccountManager::GetExistedWckeyInfo(
   return WckeyMutexSharedPtr{wckey, &m_rw_wckey_mutex_};
 }
 
-CraneExpected<std::set<User>> AccountManager::QueryAllUserInfo(uint32_t uid) {
+CraneExpectedRich<std::set<User>> AccountManager::QueryAllUserInfo(
+    uint32_t uid) {
   std::set<User> res_user_set;
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
   // Operators and above can query all users.
@@ -477,27 +490,29 @@ CraneExpected<std::vector<Wckey>> AccountManager::QueryAllWckeyInfo(
   return res_wckey_list;
 }
 
-CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
-                                                  const std::string& username) {
+CraneExpectedRich<User> AccountManager::QueryUserInfo(
+    uint32_t uid, const std::string& username) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
   // Query the specified user information.
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(username);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!user)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
 
   auto result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
-  if (!result) return std::unexpected(result.error().code());
+  if (!result) return std::unexpected(result.error());
 
   return *user;
 }
 
-CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
+CraneExpectedRich<std::set<Account>> AccountManager::QueryAllAccountInfo(
     uint32_t uid) {
   User res_user;
   std::set<Account> res_account_set;
@@ -506,7 +521,7 @@ CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected(user_result.error());
     res_user = *user_result.value();
   }
 
@@ -549,29 +564,28 @@ CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
   return res_account_set;
 }
 
-CraneExpected<Account> AccountManager::QueryAccountInfo(
+CraneExpectedRich<Account> AccountManager::QueryAccountInfo(
     uint32_t uid, const std::string& account) {
   User res_user;
-  CraneExpectedRich<void> result{};
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected(user_result.error());
     res_user = *user_result.value();
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const Account* account_ptr = GetAccountInfoNoLock_(account);
-  result = CheckIfUserHasPermOnAccountNoLock_(res_user, account, true);
-  if (!result) return std::unexpected{result.error().code()};
+  auto result = CheckIfUserHasPermOnAccountNoLock_(res_user, account, true);
+  if (!result) return std::unexpected{result.error()};
 
   return *account_ptr;
 }
 
-CraneExpected<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
+CraneExpectedRich<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   User res_user;
 
   std::set<Qos> res_qos_set;
@@ -579,7 +593,7 @@ CraneExpected<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
     res_user = *op_user;
   }
@@ -606,14 +620,14 @@ CraneExpected<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   return res_qos_set;
 }
 
-CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
-                                                const std::string& qos) {
+CraneExpectedRich<Qos> AccountManager::QueryQosInfo(uint32_t uid,
+                                                    const std::string& qos) {
   User res_user;
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
     res_user = *op_user;
   }
@@ -621,7 +635,8 @@ CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* qos_ptr = GetExistedQosInfoNoLock_(qos);
-  if (!qos_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+  if (!qos_ptr)
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_QOS, qos));
 
   if (res_user.admin_level < User::Operator) {
     bool found = false;
@@ -632,7 +647,8 @@ CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
         found = std::ranges::contains(part_qos_map.second, qos);
       }
     }
-    if (!found) return std::unexpected(CraneErrCode::ERR_QOS_MISSING);
+    if (!found)
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_QOS_MISSING, qos));
   }
 
   return *qos_ptr;
@@ -1239,44 +1255,47 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
   return SetUserDefaultWckey_(name, user_name);
 }
 
-CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
-                                                 const std::string& name,
-                                                 bool block) {
+CraneExpectedRich<void> AccountManager::BlockAccount(uint32_t uid,
+                                                     const std::string& name,
+                                                     bool block) {
   std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error().code());
+    if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return std::unexpected{result.error().code()};
+    if (!result) return result;
     actor_name = op_user->name;
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  if (!account)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, name));
 
   if (account->blocked == block) return {};
 
   return BlockAccountNoLock_(actor_name, name, block);
 }
 
-CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
-                                              const std::string& name,
-                                              const std::string& account,
-                                              bool block) {
+CraneExpectedRich<void> AccountManager::BlockUser(uint32_t uid,
+                                                  const std::string& name,
+                                                  const std::string& account,
+                                                  bool block) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected(user_result.error());
 
   const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!user)
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_USER, name));
 
   std::string actual_account = account;
   std::string actor_name;
@@ -1284,7 +1303,7 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
         *user_result.value(), user, &actual_account, false);
-    if (!result) return std::unexpected(user_result.error().code());
+    if (!result) return result;
     actor_name = user_result.value()->name;
   }
 
@@ -1493,23 +1512,26 @@ CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
   return {};
 }
 
-CraneExpected<void> AccountManager::ResetUserCertificate(
+CraneExpectedRich<void> AccountManager::ResetUserCertificate(
     uint32_t uid, const std::string& username) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error().code());
+  if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
   const auto p_target_user = GetExistedUserInfoNoLock_(username);
-  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!p_target_user)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
 
   auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-  if (!result) return std::unexpected{result.error().code()};
+  if (!result) return result;
 
   if (!p_target_user->cert_number.empty() &&
       !g_vault_client->RevokeCert(p_target_user->cert_number))
-    return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_REVOKE_CERTIFICATE, username));
 
   // Save the serial number in the database.
   mongocxx::client_session::with_transaction_cb callback =
@@ -1520,7 +1542,8 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   CRANE_DEBUG("Reset User {} Certificate {}", p_target_user->name,
               p_target_user->cert_number);
@@ -2501,9 +2524,9 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
-                                                const User& user,
-                                                const std::string& account) {
+CraneExpectedRich<void> AccountManager::DeleteUser_(
+    const std::string& actor_name, const User& user,
+    const std::string& account) {
   const std::string& name = user.name;
 
   std::list<std::string> remove_accounts;
@@ -2538,7 +2561,8 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
   if (g_config.VaultConf.Enabled) {
     if (res_user.deleted && !res_user.cert_number.empty() &&
         !g_vault_client->RevokeCert(res_user.cert_number))
-      return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+      return std::unexpected{
+          FormatRichErr(CraneErrCode::ERR_REVOKE_CERTIFICATE, user.name)};
   }
 
   mongocxx::client_session::with_transaction_cb callback =
@@ -2565,7 +2589,8 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")};
   }
 
   for (auto& remove_account : remove_accounts) {
@@ -2582,7 +2607,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteAccount_(
+CraneExpectedRich<void> AccountManager::DeleteAccount_(
     const std::string& actor_name, const Account& account) {
   const std::string& name = account.name;
 
@@ -2604,7 +2629,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")};
   }
 
   if (!account.parent_account.empty()) {
@@ -2619,8 +2645,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteQos_(const std::string& actor_name,
-                                               const std::string& name) {
+CraneExpectedRich<void> AccountManager::DeleteQos_(
+    const std::string& actor_name, const std::string& name) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
@@ -2629,15 +2655,16 @@ CraneExpected<void> AccountManager::DeleteQos_(const std::string& actor_name,
       };
 
   if (!g_db_client->CommitTransaction(callback))
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   m_qos_map_[name]->deleted = true;
 
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteWckey_(const std::string& name,
-                                                 const std::string& user_name) {
+CraneExpectedRich<void> AccountManager::DeleteWckey_(
+    const std::string& name, const std::string& user_name) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2649,7 +2676,8 @@ CraneExpected<void> AccountManager::DeleteWckey_(const std::string& name,
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
   }
 
   if (m_wckey_map_[{name, user_name}])
@@ -2827,7 +2855,7 @@ void AccountManager::SetAccountAllowedQos_(
   return;
 }
 
-CraneExpected<void> AccountManager::BlockUserNoLock_(
+CraneExpectedRich<void> AccountManager::BlockUserNoLock_(
     const std::string& actor_name, const std::string& name,
     const std::string& account, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
@@ -2841,7 +2869,8 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
   }
 
   m_user_map_[name]->account_to_attrs_map[account].blocked = block;
@@ -2849,7 +2878,7 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(
   return {};
 }
 
-CraneExpected<void> AccountManager::BlockAccountNoLock_(
+CraneExpectedRich<void> AccountManager::BlockAccountNoLock_(
     const std::string& actor_name, const std::string& name, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2860,7 +2889,8 @@ CraneExpected<void> AccountManager::BlockAccountNoLock_(
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
   }
 
   m_account_map_[name]->blocked = block;
