@@ -659,7 +659,6 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
           return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                                                "Invalid allowed parameter"));
         }
-
       }
       break;
     case crane::grpc::LicenseResource_Field_LastConsumed:
@@ -678,7 +677,8 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
       break;
     case crane::grpc::LicenseResource_Field_Flags: {
       for (const auto& flag : absl::StrSplit(value, ',')) {
-        std::string lower_str = absl::AsciiStrToLower(absl::StripAsciiWhitespace(flag));
+        std::string lower_str =
+            absl::AsciiStrToLower(absl::StripAsciiWhitespace(flag));
         if (lower_str == "absolute") {
           res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
         } else if (lower_str == "none") {
@@ -718,12 +718,12 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     allocated = res_resource->allocated;
   else {
     if (res_resource->allocated > 100)
-      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-        "Allocated resources {}% exceed 100%", res_resource->allocated));
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Allocated resources {}% exceed 100%", res_resource->allocated));
     allocated =
         (res_resource->total_resource_count * res_resource->allocated) / 100;
   }
-
 
   if (allocated > res_resource->total_resource_count) {
     CRANE_TRACE(
