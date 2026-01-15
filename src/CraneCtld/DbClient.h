@@ -201,6 +201,8 @@ class MongodbClient {
       for (const std::string& v : value) array.append(v);
     }));
   }
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const User::PartToAllowedQosMap& value);
 
   template <typename T>
   bool UpdateEntityOne(EntityType type, const std::string& opt,
@@ -343,8 +345,74 @@ class MongodbClient {
   bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>
+    requires requires(bsoncxx::builder::core core, std::remove_cvref_t<V> t) {
+      core.append(t);
+    }
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const V& value);
+                           const V& value) {
+    using bsoncxx::builder::basic::kvp;
+    doc.append(kvp(key, value));
+  };
+
+  template <typename V>
+    requires std::ranges::input_range<std::remove_cvref_t<V>> &&
+             (!std::convertible_to<std::remove_cvref_t<V>, std::string> &&
+              !std::convertible_to<std::remove_cvref_t<V>, std::string_view> &&
+              !std::is_convertible_v<std::remove_cvref_t<V>, const char*>)
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const V& value) {
+    using bsoncxx::builder::basic::kvp;
+    using T = std::remove_cvref_t<V>;
+    constexpr bool not_string = !std::convertible_to<T, std::string> &&
+                                !std::convertible_to<T, std::string_view> &&
+                                !std::is_convertible_v<T, const char*>;
+    constexpr bool is_map = requires {
+      typename T::key_type;
+      typename T::mapped_type;
+    };
+    if constexpr (is_map) {
+      doc.append(kvp(key, [&](sub_document sub_doc) {
+        for (const auto& [k, v] : value) {
+          SubDocumentAppendItem_(sub_doc, k, v);
+        }
+      }));
+    } else if constexpr (not_string) {
+      doc.append(kvp(key, [&](sub_array array) {
+        for (const auto& v : value) {
+          array.append(v);
+        }
+      }));
+
+    } else {
+      static_assert(
+          false,
+          "DocumentAppendItem_ not implemented for this range-like type");
+    }
+  };
+
+  void DocumentAppendItem_(
+      document& doc, const std::string& key,
+      const std::unordered_map<std::string, User::AttrsInAccount>& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const DeviceMap& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::vector<gid_t>& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const DedicatedResourceInNode& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceInNode& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceV2& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::optional<ContainerMetaInTask>& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::optional<PodMetaInTask>& value);
+
+  void DocumentAppendItem_(
+      document& doc, const std::string& key,
+      const std::unordered_map<std::string, uint32_t>& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -416,41 +484,6 @@ class MongodbClient {
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
 };
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document& doc, const std::string& key, const std::list<std::string>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
-    document& doc, const std::string& key,
-    const std::unordered_map<std::string, User::AttrsInAccount>& value);
-
-template <>
-void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
-    sub_document& doc, const std::string& key,
-    const User::PartToAllowedQosMap& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
-                                                   const std::string& key,
-                                                   const DeviceMap& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, uint32_t>>(
-    document& doc, const std::string& key,
-    const std::unordered_map<std::string, uint32_t>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
-    document& doc, const std::string& key,
-    const std::optional<ContainerMetaInTask>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
-    document& doc, const std::string& key,
-    const std::optional<PodMetaInTask>& value);
 
 }  // namespace Ctld
 
