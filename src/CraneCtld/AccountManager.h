@@ -62,31 +62,31 @@ class AccountManager {
 
   CraneExpected<void> AddUserWckey(uint32_t uid, const Wckey& wckey);
 
-  CraneExpected<void> DeleteUser(uint32_t uid, const std::string& name,
+  CraneExpectedRich<void> DeleteUser(uint32_t uid, const std::string& name,
                                  const std::string& account);
 
-  CraneExpected<void> DeleteAccount(uint32_t uid, const std::string& name);
+  CraneExpectedRich<void> DeleteAccount(uint32_t uid, const std::string& name);
 
-  CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
+  CraneExpectedRich<void> DeleteQos(uint32_t uid, const std::string& name);
 
-  CraneExpected<void> DeleteWckey(uint32_t uid, const std::string& name,
+  CraneExpectedRich<void> DeleteWckey(uint32_t uid, const std::string& name,
                                   const std::string& user_name);
 
-  CraneExpected<std::set<User>> QueryAllUserInfo(uint32_t uid);
+  CraneExpectedRich<std::set<User>> QueryAllUserInfo(uint32_t uid);
 
   CraneExpected<std::vector<Wckey>> QueryAllWckeyInfo(
       uint32_t uid, std::unordered_set<std::string> wckey_list);
 
-  CraneExpected<User> QueryUserInfo(uint32_t uid, const std::string& username);
+  CraneExpectedRich<User> QueryUserInfo(uint32_t uid, const std::string& username);
 
-  CraneExpected<std::set<Account>> QueryAllAccountInfo(uint32_t uid);
+  CraneExpectedRich<std::set<Account>> QueryAllAccountInfo(uint32_t uid);
 
-  CraneExpected<Account> QueryAccountInfo(uint32_t uid,
+  CraneExpectedRich<Account> QueryAccountInfo(uint32_t uid,
                                           const std::string& account);
 
-  CraneExpected<std::set<Qos>> QueryAllQosInfo(uint32_t uid);
+  CraneExpectedRich<std::set<Qos>> QueryAllQosInfo(uint32_t uid);
 
-  CraneExpected<Qos> QueryQosInfo(uint32_t uid, const std::string& qos);
+  CraneExpectedRich<Qos> QueryQosInfo(uint32_t uid, const std::string& qos);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
   UserMapMutexSharedPtr GetAllUserInfo();
@@ -127,10 +127,10 @@ class AccountManager {
       uint32_t uid, const std::string& name,
       const std::vector<crane::grpc::ModifyFieldOperation>& operation);
 
-  CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
+  CraneExpectedRich<void> BlockAccount(uint32_t uid, const std::string& name,
                                    bool block);
 
-  CraneExpected<void> BlockUser(uint32_t uid, const std::string& name,
+  CraneExpectedRich<void> BlockUser(uint32_t uid, const std::string& name,
                                 const std::string& account, bool block);
 
   CraneExpected<std::list<Txn>> QueryTxnList(
@@ -163,7 +163,7 @@ class AccountManager {
                                                  const std::string& csr_content,
                                                  const std::string& alt_names);
 
-  CraneExpected<void> ResetUserCertificate(uint32_t uid,
+  CraneExpectedRich<void> ResetUserCertificate(uint32_t uid,
                                            const std::string& username);
 
  private:
@@ -299,16 +299,16 @@ class AccountManager {
   CraneExpected<void> AddWckey_(const Wckey& wckey, const Wckey* stale_wckey,
                                 const User* user);
 
-  CraneExpected<void> DeleteUser_(const std::string& actor_name,
+  CraneExpectedRich<void> DeleteUser_(const std::string& actor_name,
                                   const User& user, const std::string& account);
 
-  CraneExpected<void> DeleteAccount_(const std::string& actor_name,
+  CraneExpectedRich<void> DeleteAccount_(const std::string& actor_name,
                                      const Account& account);
 
-  CraneExpected<void> DeleteQos_(const std::string& actor_name,
+  CraneExpectedRich<void> DeleteQos_(const std::string& actor_name,
                                  const std::string& name);
 
-  CraneExpected<void> DeleteWckey_(const std::string& name,
+  CraneExpectedRich<void> DeleteWckey_(const std::string& name,
                                    const std::string& user_name);
 
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
@@ -327,11 +327,11 @@ class AccountManager {
                              std::unordered_set<std::string>& qos_list,
                              std::vector<ModifyRecord>* modify_record);
 
-  CraneExpected<void> BlockUserNoLock_(const std::string& actor_name,
+  CraneExpectedRich<void> BlockUserNoLock_(const std::string& actor_name,
                                        const std::string& name,
                                        const std::string& account, bool block);
 
-  CraneExpected<void> BlockAccountNoLock_(const std::string& actor_name,
+  CraneExpectedRich<void> BlockAccountNoLock_(const std::string& actor_name,
                                           const std::string& name, bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
