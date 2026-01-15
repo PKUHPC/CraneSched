@@ -412,10 +412,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const ::crane::grpc::QueryJobSizeSummaryRequest *request,
       ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer)
       override;
-  grpc::Status ActiveAggregationManually(
-      ::grpc::ServerContext *context,
-      const ::crane::grpc::ActiveAggregationManuallyRequest *request,
-      ::crane::grpc::ActiveAggregationManuallyReply *response) override;
 
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(

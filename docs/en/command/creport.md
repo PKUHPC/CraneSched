@@ -4,7 +4,7 @@
 cluster.**
 
 ```bash
-$ creport [<OPTION>] [<COMMAND>]
+creport [<OPTION>] [<COMMAND>]
 ```
 
 ## Common Options
@@ -34,7 +34,7 @@ The following options apply to most subcommands. To avoid duplication, they are 
 ## Display User Resource Consumption Ranking
 
 ```bash
-$ creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
+creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### Command Line Options
@@ -90,7 +90,7 @@ Usage reported in CPU Minutes
 ## Display Account-User Resource Utilization
 
 ```bash
-$ creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--account=...] ...
+creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### Command Line Options
@@ -139,7 +139,7 @@ Usage reported in CPU Minutes
 ## Display User-Account Resource Utilization
 
 ```bash
-$ creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--user=...] ...
+creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
 ### Command Line Options
@@ -188,7 +188,7 @@ Usage reported in CPU Minutes
 ## Display User-WCKEY Resource Utilization
 
 ```bash
-$ creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--user=...] ...
+creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
 ### Command Line Options
@@ -232,7 +232,7 @@ Usage reported in CPU Minutes
 ## Display WCKEY-User Resource Utilization
 
 ```bash
-$ creport cluster wckeyutilizationbyuser [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport cluster wckeyutilizationbyuser [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### Command Line Options
@@ -246,7 +246,7 @@ Subcommand-specific options (common options are listed above):
 ### Output Fields
 
 - **CLUSTER**: Cluster name
-- **WCKEY**:wckey name
+- **WCKEY**: Wckey name
 - **LOGIN**: Username
 - **PROPER NAME**: Full Linux system name
 - **USED**: The sum of total CPUs * runtime for each job under the user
@@ -276,7 +276,7 @@ Usage reported in CPU Minutes
 ## Display Account-QOS Resource Utilization
 
 ```bash
-$ creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--account=...] [--qos=...] ...
+creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--account=...] [--qos=...] ...
 ```
 
 ### Command Line Options
@@ -324,7 +324,7 @@ Usage reported in CPU Minutes
 ## Display Overall Cluster Utilization
 
 ```bash
-$ creport cluster utilization [--start-time=...] [--end-time=...] ...
+creport cluster utilization [--start-time=...] [--end-time=...] ...
 ```
 
 ### Command Line Options
@@ -360,7 +360,7 @@ Usage reported in CPU Minutes
 ## Display Job Size Distribution Grouped by Account
 
 ```bash
-$ creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
+creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### Command Line Options
@@ -401,7 +401,7 @@ Subcommand-specific options (common options are listed above):
 - **ACCOUNT**: Account name
 - **0-49 CPUs**: CPU minutes in the 0-49 CPUs range
 - **50-249 CPUs**: CPU minutes in the 50-249 CPUs range
-- **250-499 CPUs**:CPU minutes in the 250-499 CPUs range
+- **250-499 CPUs**: CPU minutes in the 250-499 CPUs range
 - **500-999 CPUs**: CPU minutes in the 500-999 CPUs range
 - **>= 1000 CPUs**: CPU minutes in the ≥1000 CPUs range
 - **TOTAL CPU TIME**: Total CPU minutes for all jobs under the specific account
@@ -432,7 +432,7 @@ Time reported in Minutes
 ## Display Job Size Distribution Grouped by WCKEY
 
 ```bash
-$ creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### Command Line Options
@@ -496,7 +496,7 @@ Time reported in Minutes
 ## Display Job Size Distribution Grouped by WCKEY and Account
 
 ```bash
-$ creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### Command Line Options

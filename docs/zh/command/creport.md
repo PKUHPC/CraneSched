@@ -33,7 +33,7 @@ $ creport [<OPTION>] [<COMMAND>]
 ## 用户资源消耗排行
 
 ```bash
-$ creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
+creport user topusage [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### 命令行选项
@@ -89,7 +89,7 @@ Usage reported in CPU Minutes
 ## 账户-用户资源利用率
 
 ```bash
-$ creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--account=...] ...
+creport cluster accountutilizationbyuser [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### 命令行选项
@@ -138,7 +138,7 @@ Usage reported in CPU Minutes
 ## 用户-账户资源利用率
 
 ```bash
-$ creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--user=...] ...
+creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
 ### 命令行选项
@@ -187,7 +187,7 @@ Usage reported in CPU Minutes
 ## 用户-wckey资源利用率
 
 ```bash
-$ creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--user=...] ...
+creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--user=...] ...
 ```
 
 ### 命令行选项
@@ -231,7 +231,7 @@ Usage reported in CPU Minutes
 ## wckey-用户资源利用率
 
 ```bash
-$ creport cluster wckeyutilizationbyuser [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport cluster wckeyutilizationbyuser [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### 命令行选项
@@ -275,7 +275,7 @@ Usage reported in CPU Minutes
 ## 账户-qos资源利用率
 
 ```bash
-$ creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--account=...] [--qos=...] ...
+creport cluster accountutilizationbyqos [--start-time=...] [--end-time=...] [--account=...] [--qos=...] ...
 ```
 
 ### 命令行选项
@@ -323,7 +323,7 @@ Usage reported in CPU Minutes
 ## 集群整体利用率
 
 ```bash
-$ creport cluster utilization [--start-time=...] [--end-time=...] ...
+creport cluster utilization [--start-time=...] [--end-time=...] ...
 ```
 
 ### 命令行选项
@@ -355,7 +355,7 @@ Usage reported in CPU Minutes
 ## 按账户分组的作业规模分布
 
 ```bash
-$ creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
+creport job sizesbyaccount [--start-time=...] [--end-time=...] [--account=...] ...
 ```
 
 ### 命令行选项
@@ -427,7 +427,7 @@ Time reported in Minutes
 ## 按wckey分组的作业规模分布
 
 ```bash
-$ creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### 命令行选项
@@ -491,7 +491,7 @@ Time reported in Minutes
 ## 按wckey和account分组的作业规模分布
 
 ```bash
-$ creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
+creport job sizesbyaccountandwckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 ```
 
 ### 命令行选项

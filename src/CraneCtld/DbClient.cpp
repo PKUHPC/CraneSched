@@ -22,6 +22,8 @@
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
 
+#include "mongocxx/private/append_aggregate_options.hh"
+
 namespace Ctld {
 
 using bsoncxx::builder::basic::kvp;
@@ -505,16 +507,47 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
             mongocxx::options::update{}.upsert(true));
 
     if (ret != bsoncxx::stdx::nullopt) {
-      auto now = std::chrono::system_clock::now();
-      auto start_time = std::chrono::sys_seconds{
-          std::chrono::seconds{task->StartTimeInUnixSecond()}};
-      auto end_time = std::chrono::sys_seconds{
-          std::chrono::seconds{task->EndTimeInUnixSecond()}};
-      auto end_time_hour = std::chrono::floor<std::chrono::hours>(end_time);
-      if (end_time_hour < now - 1h) {
-        AggregateAllJobInfoAsync(
-            std::optional{std::vector{JobTimeRange{start_time, end_time}}});
+      // Real-time aggregation: append to acc_usage tables with transaction
+      // Note: Tasks in database are always completed/failed/cancelled
+      // Uses transaction to ensure atomicity of aggregation and marking
+      try {
+        using bsoncxx::builder::basic::make_document;
+        auto task_doc_copy = bsoncxx::document::value(job_doc.view());
+        auto filter_copy = bsoncxx::document::value(filter.view());
+
+        bool txn_success =
+            CommitTransaction([this, &task_doc_copy, &filter_copy](
+                                  mongocxx::client_session* session) {
+              // 1. Append to acc_usage tables (hour/day/month)
+              AppendToAccUsageTable(task_doc_copy.view(), session);
+
+              // 2. Mark as aggregated
+              (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
+                  *session, filter_copy.view(),
+                  make_document(
+                      kvp("$set",
+                          make_document(
+                              kvp("aggregated", true),
+                              kvp("aggregated_at",
+                                  bsoncxx::types::b_date{
+                                      std::chrono::system_clock::now()})))));
+            });
+
+        if (!txn_success) {
+          CRANE_WARN(
+              "Transaction failed for task {} aggregation. "
+              "Will be recovered on startup.",
+              task->TaskId());
+        }
+      } catch (const std::exception& e) {
+        // Best effort: failure doesn't affect task insertion
+        // Startup recovery will handle unaggregated tasks
+        CRANE_WARN(
+            "Failed to append task {} to acc_usage tables: {}. "
+            "Will be recovered on startup.",
+            task->TaskId(), e.what());
       }
+
       return true;
     }
   } catch (const std::exception& e) {
@@ -558,21 +591,18 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
 
     auto result = bulk.execute();
     if (result) {
-      auto now = std::chrono::system_clock::now();
-
-      std::vector<JobTimeRange> job_time_ranges;
-      job_time_ranges.reserve(tasks.size());
-      for (const TaskInCtld* t : tasks) {
-        auto start_time = std::chrono::sys_seconds{
-            std::chrono::seconds{t->StartTimeInUnixSecond()}};
-        auto end_time = std::chrono::sys_seconds{
-            std::chrono::seconds{t->EndTimeInUnixSecond()}};
-        auto end_time_hour = std::chrono::floor<std::chrono::hours>(end_time);
-        if (end_time_hour < now - 1h) {
-          job_time_ranges.emplace_back(JobTimeRange{start_time, end_time});
+      // Real-time aggregation for each task (best effort)
+      // Failures will be recovered on startup via RecoverMissingAggregations
+      for (const TaskInCtld* task : tasks) {
+        try {
+          AppendToAccUsageTable(task, nullptr);
+        } catch (const std::exception& e) {
+          CRANE_WARN(
+              "Failed to append task {} to acc_usage tables: {}. "
+              "Will be recovered on startup.",
+              task->TaskId(), e.what());
         }
       }
-      if (!job_time_ranges.empty()) AggregateAllJobInfoAsync(job_time_ranges);
       return true;
     }
   } catch (const std::exception& e) {
@@ -1230,55 +1260,736 @@ bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
   return false;
 }
 
-void MongodbClient::AggregateAllJobInfoAsync(
-    std::optional<std::vector<JobTimeRange>>&& job_time_ranges) {
-  if (!m_job_summary_enabled_) {
-    CRANE_LOGGER_WARN(
-        m_logger_, "Job summary disabled; AggregateAllJobInfoAsync ignored.");
-    return;
+// Real-time aggregation: Append task to acc_usage tables (hour/day/month)
+void MongodbClient::AppendToAccUsageTable(
+    const bsoncxx::document::view& task_doc,
+    mongocxx::client_session* session) {
+  using namespace std::chrono;
+
+  try {
+    // Extract task information from BSON document
+    std::string account = std::string(task_doc["account"].get_string().value);
+    std::string username = std::string(task_doc["username"].get_string().value);
+    std::string qos = std::string(task_doc["qos"].get_string().value);
+    std::string wckey = task_doc["wckey"]
+                            ? std::string(task_doc["wckey"].get_string().value)
+                            : "";
+
+    // Get task start/end time and resources
+    int64_t time_start = task_doc["time_start"].get_int64().value;
+    int64_t time_end = task_doc["time_end"].get_int64().value;
+    double cpus_alloc = task_doc["cpus_alloc"].get_double().value;
+    double nodes_alloc = task_doc["nodes_alloc"].get_double().value;
+
+    auto start_time = sys_seconds(seconds(time_start));
+    auto end_time = sys_seconds(seconds(time_end));
+    double total_cpus = cpus_alloc * nodes_alloc;
+
+    // Create aggregation info struct
+    JobAggregationInfo info{.account = account,
+                            .username = username,
+                            .qos = qos,
+                            .wckey = wckey,
+                            .start_time = start_time,
+                            .end_time = end_time,
+                            .total_cpus = total_cpus};
+
+    // Append to all three granularity tables (with optional session for txn)
+    AppendToHourTable_(info, session);
+    AppendToDayTable_(info, session);
+    AppendToMonthTable_(info, session);
+
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to append task to acc_usage tables: {}", e.what());
+    throw;
   }
-  m_aggregate_job_request_queue_.enqueue(std::move(job_time_ranges));
-  m_aggregate_job_async_handle_->send();
 }
 
-bool MongodbClient::QueryJobSizeSummaryByJobIds(
+// Overload: append task from TaskInCtld pointer (builds JobAggregationInfo)
+void MongodbClient::AppendToAccUsageTable(const TaskInCtld* task,
+                                          mongocxx::client_session* session) {
+  using namespace std::chrono;
+
+  try {
+    // Build JobAggregationInfo from TaskInCtld
+    JobAggregationInfo info{
+        .account = task->account,
+        .username = task->Username(),
+        .qos = task->qos,
+        .wckey = task->wckey,
+        .start_time = sys_seconds(seconds(task->StartTimeInUnixSecond())),
+        .end_time = sys_seconds(seconds(task->EndTimeInUnixSecond())),
+        .total_cpus = task->allocated_res_view.CpuCount() *
+                      static_cast<double>(task->nodes_alloc)};
+
+    // Append to all three granularity tables
+    AppendToHourTable_(info, session);
+    AppendToDayTable_(info, session);
+    AppendToMonthTable_(info, session);
+
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to append task {} to acc_usage tables: {}",
+                task->TaskId(), e.what());
+    throw;
+  }
+}
+
+// Append task to hour table - handles cross-hour allocation internally
+void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
+                                       mongocxx::client_session* session) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto client = GetClient_();
+  auto current_hour = floor<hours>(info.start_time);
+  auto end_hour = floor<hours>(info.end_time);
+
+  // Loop through each hour the task spans
+  while (current_hour <= end_hour) {
+    auto next_hour = current_hour + hours(1);
+
+    // Calculate actual running time within this hour
+    // Convert hour-precision time_point to sys_seconds for comparison
+    auto current_hour_sec = time_point_cast<seconds>(current_hour);
+    auto next_hour_sec = time_point_cast<seconds>(next_hour);
+    auto hour_start_in_task = std::max(current_hour_sec, info.start_time);
+    auto hour_end_in_task = std::min(next_hour_sec, info.end_time);
+
+    int64_t duration_this_hour =
+        duration_cast<seconds>(hour_end_in_task - hour_start_in_task).count();
+
+    if (duration_this_hour > 0) {
+      double cpu_time_this_hour = info.total_cpus * duration_this_hour;
+
+      // Upsert to hour table
+      auto filter = make_document(
+          kvp("hour", bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                          current_hour)}),
+          kvp("account", info.account), kvp("username", info.username),
+          kvp("qos", info.qos), kvp("wckey", info.wckey));
+
+      auto update = make_document(
+          kvp("$inc", make_document(kvp("total_cpu_time", cpu_time_this_hour))),
+          kvp("$setOnInsert",
+              make_document(kvp("aggregated_at",
+                                bsoncxx::types::b_date{system_clock::now()}))));
+
+      mongocxx::options::update options;
+      options.upsert(true);
+
+      bsoncxx::stdx::optional<mongocxx::result::update> result;
+      if (session) {
+        result =
+            (*client)[m_db_name_][m_acc_usage_hour_collection_name_].update_one(
+                *session, filter.view(), update.view(), options);
+      } else {
+        result =
+            (*client)[m_db_name_][m_acc_usage_hour_collection_name_].update_one(
+                filter.view(), update.view(), options);
+      }
+
+      if (!result) {
+        CRANE_WARN("Failed to append cpu_time={} to hour {}",
+                   cpu_time_this_hour, system_clock::to_time_t(current_hour));
+      }
+    }
+
+    current_hour = next_hour;
+  }
+}
+
+// Append task to day table - handles cross-day allocation internally
+void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
+                                      mongocxx::client_session* session) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto client = GetClient_();
+  auto current_day = floor<days>(info.start_time);
+  auto end_day = floor<days>(info.end_time);
+
+  // Loop through each day the task spans
+  while (current_day <= end_day) {
+    auto next_day = current_day + days(1);
+
+    // Calculate actual running time within this day
+    // Convert sys_days to sys_seconds for comparison
+    auto current_day_sec = time_point_cast<seconds>(current_day);
+    auto next_day_sec = time_point_cast<seconds>(next_day);
+    auto day_start_in_task = std::max(current_day_sec, info.start_time);
+    auto day_end_in_task = std::min(next_day_sec, info.end_time);
+
+    int64_t duration_this_day =
+        duration_cast<seconds>(day_end_in_task - day_start_in_task).count();
+
+    if (duration_this_day > 0) {
+      double cpu_time_this_day = info.total_cpus * duration_this_day;
+
+      // Upsert to day table
+      auto filter = make_document(
+          kvp("day", bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                         current_day)}),
+          kvp("account", info.account), kvp("username", info.username),
+          kvp("qos", info.qos), kvp("wckey", info.wckey));
+
+      auto update = make_document(
+          kvp("$inc", make_document(kvp("total_cpu_time", cpu_time_this_day))),
+          kvp("$setOnInsert",
+              make_document(kvp("aggregated_at",
+                                bsoncxx::types::b_date{system_clock::now()}))));
+
+      mongocxx::options::update options;
+      options.upsert(true);
+
+      bsoncxx::stdx::optional<mongocxx::result::update> result;
+      if (session) {
+        result =
+            (*client)[m_db_name_][m_acc_usage_day_collection_name_].update_one(
+                *session, filter.view(), update.view(), options);
+      } else {
+        result =
+            (*client)[m_db_name_][m_acc_usage_day_collection_name_].update_one(
+                filter.view(), update.view(), options);
+      }
+
+      if (!result) {
+        CRANE_WARN("Failed to append cpu_time={} to day {}", cpu_time_this_day,
+                   sys_days{current_day}.time_since_epoch().count());
+      }
+    }
+
+    current_day = next_day;
+  }
+}
+
+// Append task to month table - handles cross-month allocation internally
+void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
+                                        mongocxx::client_session* session) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto client = GetClient_();
+
+  // Get start and end months
+  auto start_day = floor<days>(info.start_time);
+  auto end_day = floor<days>(info.end_time);
+  auto start_ymd = year_month_day{start_day};
+  auto end_ymd = year_month_day{end_day};
+  auto current_month = year_month{start_ymd.year(), start_ymd.month()};
+  auto end_month = year_month{end_ymd.year(), end_ymd.month()};
+
+  // Loop through each month the task spans
+  while (current_month <= end_month) {
+    auto month_start = sys_days{current_month / 1};
+    auto next_month = current_month + months(1);
+    auto month_end = sys_days{next_month / 1};
+
+    // Calculate actual running time within this month
+    // Convert sys_days to sys_seconds for comparison
+    auto month_start_sec = time_point_cast<seconds>(month_start);
+    auto month_end_sec = time_point_cast<seconds>(month_end);
+    auto month_start_in_task = std::max(month_start_sec, info.start_time);
+    auto month_end_in_task = std::min(month_end_sec, info.end_time);
+
+    int64_t duration_this_month =
+        duration_cast<seconds>(month_end_in_task - month_start_in_task).count();
+
+    if (duration_this_month > 0) {
+      double cpu_time_this_month = info.total_cpus * duration_this_month;
+
+      // Upsert to month table
+      auto filter = make_document(
+          kvp("month", bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                           month_start)}),
+          kvp("account", info.account), kvp("username", info.username),
+          kvp("qos", info.qos), kvp("wckey", info.wckey));
+
+      auto update = make_document(
+          kvp("$inc",
+              make_document(kvp("total_cpu_time", cpu_time_this_month))),
+          kvp("$setOnInsert",
+              make_document(kvp("aggregated_at",
+                                bsoncxx::types::b_date{system_clock::now()}))));
+
+      mongocxx::options::update options;
+      options.upsert(true);
+
+      bsoncxx::stdx::optional<mongocxx::result::update> result;
+      if (session) {
+        result =
+            (*client)[m_db_name_][m_acc_usage_month_collection_name_]
+                .update_one(*session, filter.view(), update.view(), options);
+      } else {
+        result = (*client)[m_db_name_][m_acc_usage_month_collection_name_]
+                     .update_one(filter.view(), update.view(), options);
+      }
+
+      if (!result) {
+        CRANE_WARN("Failed to append cpu_time={} to month {}-{}",
+                   cpu_time_this_month, static_cast<int>(current_month.year()),
+                   static_cast<unsigned>(current_month.month()));
+      }
+    }
+
+    current_month = next_month;
+  }
+}
+
+// Convenience function: query task by ID and append
+void MongodbClient::AppendToAccUsageTableById(const std::string& task_db_id) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  auto client = GetClient_();
+  auto filter = make_document(kvp("_id", bsoncxx::oid(task_db_id)));
+  auto maybe_task =
+      (*client)[m_db_name_][m_task_collection_name_].find_one(filter.view());
+
+  if (!maybe_task) {
+    CRANE_ERROR("Task {} not found in database", task_db_id);
+    return;
+  }
+
+  AppendToAccUsageTable(maybe_task->view());
+}
+
+// Mark task as aggregated in task_table
+void MongodbClient::MarkTaskAsAggregated(const bsoncxx::oid& task_id) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto client = GetClient_();
+  (*client)[m_db_name_][m_task_collection_name_].update_one(
+      make_document(kvp("_id", task_id)),
+      make_document(kvp("$set", make_document(kvp("aggregated", true),
+                                              kvp("aggregated_at",
+                                                  bsoncxx::types::b_date{
+                                                      system_clock::now()})))));
+}
+
+// Day aggregation: from acc_usage_hour_table to acc_usage_day_table
+// (For new cluster initialization only)
+void MongodbClient::AggregateAccUsageToDayOrMonth_(
+    JobSummary::Type src_type, JobSummary::Type dst_type,
+    std::chrono::sys_seconds period_start,
+    std::chrono::sys_seconds period_end) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+  std::string src_coll_str;
+  std::string dst_coll_str;
+  if (src_type == JobSummary::Type::HOUR && dst_type == JobSummary::Type::DAY) {
+    src_coll_str = m_acc_usage_hour_collection_name_;
+    dst_coll_str = m_acc_usage_day_collection_name_;
+  } else if (src_type == JobSummary::Type::DAY &&
+             dst_type == JobSummary::Type::MONTH) {
+    src_coll_str = m_acc_usage_day_collection_name_;
+    dst_coll_str = m_acc_usage_month_collection_name_;
+  } else {
+    CRANE_ERROR("Unsupported job summary aggregation: {} to {}",
+                JobSummaryTypeToString_(src_type),
+                JobSummaryTypeToString_(dst_type));
+    return;
+  }
+
+  std::string src_time_field = JobSummaryTypeToString_(src_type);
+  std::string period_field = JobSummaryTypeToString_(dst_type);
+
+  auto client = GetClient_();
+  mongocxx::pipeline pipeline;
+
+  pipeline.match(make_document(
+      kvp(src_time_field,
+          make_document(
+              kvp("$gte", bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                              period_start)}),
+              kvp("$lt", bsoncxx::types::b_date{
+                             time_point_cast<milliseconds>(period_end)})))));
+  pipeline.add_fields(make_document(kvp(
+      period_field,
+      bsoncxx::types::b_date{time_point_cast<milliseconds>(period_start)})));
+
+  // 3. Group: aggregate by all dimensions
+  pipeline.group(make_document(
+      kvp("_id", make_document(kvp(period_field, "$" + period_field),
+                               kvp("account", "$account"),
+                               kvp("username", "$username"), kvp("qos", "$qos"),
+                               kvp("wckey", "$wckey"))),
+      kvp("total_cpu_time", make_document(kvp("$sum", "$total_cpu_time")))));
+
+  // 4. AddFields: add metadata
+  pipeline.add_fields(make_document(kvp("aggregated_at", "$$NOW")));
+
+  // 5. ReplaceRoot: restructure document
+  pipeline.replace_root(make_document(
+      kvp("newRoot",
+          make_document(kvp(period_field, "$_id." + period_field),
+                        kvp("account", "$_id.account"),
+                        kvp("username", "$_id.username"),
+                        kvp("qos", "$_id.qos"), kvp("wckey", "$_id.wckey"),
+                        kvp("total_cpu_time", "$total_cpu_time"),
+                        kvp("aggregated_at", "$aggregated_at")))));
+
+  // 6. Merge: merge into acc_usage_day_table
+  pipeline.merge(make_document(
+      kvp("into", dst_coll_str),
+      kvp("on",
+          make_array(period_field, "account", "username", "qos", "wckey")),
+      kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
+
+  // Execute aggregation - read from hour table
+  try {
+    mongocxx::options::aggregate agg_opts;
+    agg_opts.allow_disk_use(true);
+    agg_opts.max_time(milliseconds{g_config.JobAggregationTimeoutMs});
+    agg_opts.batch_size(g_config.JobAggregationBatchSize);
+    agg_opts.comment(
+        {fmt::format("CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}",
+                     __func__, period_start, period_end)});
+    auto result =
+        (*client)[m_db_name_][src_coll_str].aggregate(pipeline, agg_opts);
+    for (auto doc : result) {
+      // Just iterate to completion
+    }
+    CRANE_INFO("{} aggregation completed for {} - {}", period_field,
+               period_start, period_end);
+  } catch (const std::exception& e) {
+    CRANE_ERROR("{} aggregation failed for {} - {}: {}", period_field,
+                period_start, period_end, e.what());
+    throw;
+  }
+}
+
+// Recovery for new cluster: batch aggregation using existing functions
+void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
+                                                   bool day_done,
+                                                   bool month_done) {
+  using namespace std::chrono;
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  auto client = GetClient_();
+
+  // 1. Get job time range
+  auto min_start = GetJobMinStartTime_();
+  if (min_start == sys_seconds{seconds{0}}) {
+    CRANE_INFO("No jobs found, skipping aggregation recovery");
+    // Mark all levels as completed since there's nothing to aggregate
+    SetInitialAggregationCompleted_(JobSummary::Type::HOUR, true);
+    SetInitialAggregationCompleted_(JobSummary::Type::DAY, true);
+    SetInitialAggregationCompleted_(JobSummary::Type::MONTH, true);
+    return;
+  }
+
+  auto now = floor<hours>(system_clock::now());
+
+  // 2. First, mark all tasks as aggregated (before doing batch aggregation)
+  //    This prevents duplicate processing if interrupted during aggregation
+  //    Mark in batches of 10000 to avoid connection timeout
+  if (!hour_done) {
+    CRANE_INFO("Marking all jobs as aggregated before batch aggregation...");
+    auto task_coll = (*client)[m_db_name_][m_task_collection_name_];
+
+    constexpr int64_t kBatchSize = 10000;
+    int64_t total_marked = 0;
+
+    // Filter for documents where aggregated is not true (missing or false)
+    // Note: {$ne: true} also matches documents where the field doesn't exist
+    auto filter =
+        make_document(kvp("aggregated", make_document(kvp("$ne", true))));
+
+    while (true) {
+      // Find batch of document IDs to update
+      auto find_opts = mongocxx::options::find{};
+      find_opts.limit(kBatchSize);
+      find_opts.projection(make_document(kvp("_id", 1)));
+
+      std::vector<bsoncxx::types::bson_value::value> ids;
+      auto cursor = task_coll.find(filter.view(), find_opts);
+      for (const auto& doc : cursor) {
+        ids.push_back(doc["_id"].get_owning_value());
+      }
+
+      if (ids.empty()) {
+        break;  // No more documents to mark
+      }
+
+      // Build array of IDs for $in query
+      bsoncxx::builder::basic::array id_array;
+      for (const auto& id : ids) {
+        id_array.append(id);
+      }
+
+      // Update this batch
+      auto batch_filter =
+          make_document(kvp("_id", make_document(kvp("$in", id_array))));
+      auto update = make_document(
+          kvp("$set",
+              make_document(kvp("aggregated", true),
+                            kvp("aggregated_at",
+                                bsoncxx::types::b_date{system_clock::now()}))));
+
+      auto result = task_coll.update_many(batch_filter.view(), update.view());
+      if (result) {
+        total_marked += result->modified_count();
+      }
+
+      CRANE_INFO("Batch marking progress: {} jobs marked so far...",
+                 total_marked);
+
+      // If we got fewer than batch size, we're done
+      if (static_cast<int64_t>(ids.size()) < kBatchSize) {
+        break;
+      }
+    }
+
+    CRANE_INFO("Total {} jobs marked as aggregated", total_marked);
+  }
+
+  // 3. Hour aggregation (use multi-threaded function)
+  if (!hour_done) {
+    auto hour_start = GetJobSummaryLastSuccessTime_(JobSummary::Type::HOUR)
+                          .value_or(floor<hours>(min_start));
+
+    CRANE_INFO("Hour aggregation: from {} to {}", hour_start, now);
+
+    bool success =
+        AggregateJobSummaryByHour_(hour_start, now, m_task_collection_name_);
+
+    if (success) {
+      UpdateJobSummaryLastSuccessTime_(JobSummary::Type::HOUR, now);
+      SetInitialAggregationCompleted_(JobSummary::Type::HOUR, true);
+      CRANE_INFO("Hour aggregation completed and marked");
+    } else {
+      CRANE_ERROR("Hour aggregation failed, will retry on next startup");
+      return;  // Don't proceed to day/month if hour failed
+    }
+  }
+
+  // 4. Day aggregation (from hour table)
+  if (!day_done) {
+    auto day_start = GetJobSummaryLastSuccessTime_(JobSummary::Type::DAY)
+                         .value_or(floor<days>(min_start));
+    auto day_end = floor<days>(now);
+
+    int64_t total_days =
+        duration_cast<days>(day_end - floor<days>(day_start)).count() + 1;
+    int64_t processed_days = 0;
+
+    CRANE_INFO("Day aggregation: from {} to {} ({} days)",
+               time_point_cast<seconds>(day_start),
+               time_point_cast<seconds>(day_end), total_days);
+
+    auto current_day = floor<days>(day_start);
+    while (current_day <= day_end) {
+      auto next_day = current_day + days(1);
+      try {
+        AggregateAccUsageToDayOrMonth_(JobSummary::Type::HOUR,
+                                       JobSummary::Type::DAY,
+                                       time_point_cast<seconds>(current_day),
+                                       time_point_cast<seconds>(next_day));
+      } catch (const std::exception& e) {
+        CRANE_ERROR("Day aggregation failed for {}: {}", current_day, e.what());
+      }
+
+      processed_days++;
+      if (processed_days % 30 == 0 || processed_days == total_days) {
+        CRANE_INFO("Day aggregation progress: {}/{} ({:.1f}%)", processed_days,
+                   total_days, 100.0 * processed_days / total_days);
+      }
+      current_day = next_day;
+    }
+
+    UpdateJobSummaryLastSuccessTime_(JobSummary::Type::DAY,
+                                     time_point_cast<seconds>(day_end));
+    SetInitialAggregationCompleted_(JobSummary::Type::DAY, true);
+    CRANE_INFO("Day aggregation completed: {} days processed", processed_days);
+  }
+
+  // 5. Month aggregation (from day table)
+  if (!month_done) {
+    auto month_start_opt =
+        GetJobSummaryLastSuccessTime_(JobSummary::Type::MONTH);
+    sys_days month_start_day;
+    if (month_start_opt) {
+      month_start_day = floor<days>(*month_start_opt);
+    } else {
+      month_start_day = floor<days>(min_start);
+    }
+
+    auto start_ymd = year_month_day{month_start_day};
+    auto end_ymd = year_month_day{floor<days>(now)};
+    auto current_month = year_month{start_ymd.year(), start_ymd.month()};
+    auto end_month = year_month{end_ymd.year(), end_ymd.month()};
+
+    int64_t total_months = (static_cast<int>(end_ymd.year()) -
+                            static_cast<int>(start_ymd.year())) *
+                               12 +
+                           (static_cast<unsigned>(end_ymd.month()) -
+                            static_cast<unsigned>(start_ymd.month())) +
+                           1;
+    int64_t processed_months = 0;
+
+    CRANE_INFO("Month aggregation: {} total months to process", total_months);
+
+    while (current_month <= end_month) {
+      auto month_start = sys_days{current_month / 1};
+      auto next_month = current_month + months(1);
+      auto month_end = sys_days{next_month / 1};
+
+      try {
+        AggregateAccUsageToDayOrMonth_(JobSummary::Type::DAY,
+                                       JobSummary::Type::MONTH,
+                                       time_point_cast<seconds>(month_start),
+                                       time_point_cast<seconds>(month_end));
+      } catch (const std::exception& e) {
+        CRANE_ERROR("Month aggregation failed: {}", e.what());
+      }
+
+      processed_months++;
+      CRANE_INFO("Month aggregation progress: {}/{} ({:.1f}%) - {}-{}",
+                 processed_months, total_months,
+                 100.0 * processed_months / total_months,
+                 static_cast<int>(current_month.year()),
+                 static_cast<unsigned>(current_month.month()));
+
+      current_month = next_month;
+    }
+
+    auto last_month_end = sys_days{(end_month + months(1)) / 1};
+    UpdateJobSummaryLastSuccessTime_(
+        JobSummary::Type::MONTH,
+        time_point_cast<seconds>(sys_seconds{last_month_end}));
+    SetInitialAggregationCompleted_(JobSummary::Type::MONTH, true);
+    CRANE_INFO("Month aggregation completed: {} months processed",
+               processed_months);
+  }
+
+  CRANE_INFO("New cluster aggregation recovery completed");
+}
+
+// Recovery for existing cluster: iterate unaggregated tasks and append
+void MongodbClient::RecoverExistingClusterAggregations_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  CRANE_INFO("Starting existing cluster aggregation recovery...");
+
+  auto client = GetClient_();
+
+  // 1. Query all unaggregated completed tasks
+  auto filter = make_document(
+      kvp("aggregated", make_document(kvp("$ne", true))),
+      kvp("status", make_document(kvp("$in", make_array("Completed", "Failed",
+                                                        "Cancelled")))));
+
+  auto cursor =
+      (*client)[m_db_name_][m_task_collection_name_].find(filter.view());
+
+  int count = 0;
+  for (auto&& task_doc : cursor) {
+    // 2. Append to acc_usage tables (hour/day/month)
+    try {
+      AppendToAccUsageTable(task_doc);
+
+      // 3. Mark as aggregated
+      MarkTaskAsAggregated(task_doc["_id"].get_oid().value);
+
+      count++;
+      if (count % 1000 == 0) {
+        CRANE_INFO("Recovered {} unaggregated tasks...", count);
+      }
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Failed to append task {}: {}",
+                  task_doc["_id"].get_oid().value.to_string(), e.what());
+    }
+  }
+
+  CRANE_INFO(
+      "Existing cluster aggregation recovery completed, {} tasks recovered",
+      count);
+}
+
+// Main recovery function: detect cluster type and choose strategy
+void MongodbClient::RecoverMissingAggregations_() {
+  // Check initial aggregation completion status for all levels
+  bool hour_done = GetInitialAggregationCompleted_(JobSummary::Type::HOUR);
+  bool day_done = GetInitialAggregationCompleted_(JobSummary::Type::DAY);
+  bool month_done = GetInitialAggregationCompleted_(JobSummary::Type::MONTH);
+
+  if (hour_done && day_done && month_done) {
+    // Initial aggregation completed, use append for new unaggregated tasks
+    RecoverExistingClusterAggregations_();
+  } else {
+    // New cluster or interrupted: use batch aggregation
+    CRANE_INFO(
+        "Initial aggregation incomplete (hour={}, day={}, month={}), "
+        "starting/resuming batch aggregation...",
+        hour_done, day_done, month_done);
+    RecoverNewClusterAggregations_(hour_done, day_done, month_done);
+  }
+}
+
+bool MongodbClient::QueryJobSizeSummary(
     const crane::grpc::QueryJobSizeSummaryRequest* request,
     grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream) {
-  if (!m_job_summary_enabled_) {
-    CRANE_LOGGER_WARN(m_logger_,
-                      "Job summary disabled; QueryJobSizeSummaryByJobIds "
-                      "ignored.");
-    return false;
+  using namespace std::chrono;
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  // Calculate query time boundaries
+  sys_seconds query_start_time;
+  sys_seconds query_end_time;
+
+  if (request->has_filter_start_time()) {
+    auto start_tp = sys_time<nanoseconds>{
+        seconds{request->filter_start_time().seconds()} +
+        nanoseconds{request->filter_start_time().nanos()}};
+    query_start_time = time_point_cast<seconds>(floor<hours>(start_tp));
+  } else {
+    query_start_time = sys_seconds{seconds{0}};
   }
+
+  if (request->has_filter_end_time()) {
+    auto end_tp =
+        sys_time<nanoseconds>{seconds{request->filter_end_time().seconds()} +
+                              nanoseconds{request->filter_end_time().nanos()}};
+    query_end_time = time_point_cast<seconds>(ceil<hours>(end_tp));
+  } else {
+    query_end_time = time_point_cast<seconds>(ceil<hours>(system_clock::now()));
+  }
+
+  // CRITICAL: Limit end_time to current hour
+  sys_seconds now_floor_hour =
+      time_point_cast<seconds>(floor<hours>(system_clock::now()));
+  if (query_end_time > now_floor_hour) {
+    query_end_time = now_floor_hour;
+  }
+
+  // Validate time range
+  if (query_end_time <= query_start_time) {
+    CRANE_LOGGER_INFO(
+        m_logger_, "No time ranges for job size summary to query by job ids");
+    return true;
+  }
+
+  int64_t query_start_sec = query_start_time.time_since_epoch().count();
+  int64_t query_end_sec = query_end_time.time_since_epoch().count();
 
   document filter;
   auto grouping_list = request->filter_grouping_list();
 
-  if (request->has_filter_start_time()) {
-    using namespace std::chrono;
-    auto start_tp = sys_time<nanoseconds>{
-        seconds{request->filter_start_time().seconds()} +
-        nanoseconds{request->filter_start_time().nanos()}};
-    int64_t start_time_sec = time_point_cast<seconds>(floor<hours>(start_tp))
-                                 .time_since_epoch()
-                                 .count();
-    filter.append(kvp("time_start", [&](sub_document time_start_doc) {
-      time_start_doc.append(kvp("$gte", start_time_sec));
-    }));
-  }
-
-  if (request->has_filter_end_time()) {
-    using namespace std::chrono;
-    auto end_tp =
-        sys_time<nanoseconds>{seconds{request->filter_end_time().seconds()} +
-                              nanoseconds{request->filter_end_time().nanos()}};
-    int64_t end_time_sec = time_point_cast<seconds>(ceil<hours>(end_tp))
-                               .time_since_epoch()
-                               .count();
-    filter.append(kvp("time_end", [&](sub_document time_end_doc) {
-      time_end_doc.append(kvp("$lte", end_time_sec));
-    }));
-  }
+  // Match jobs that overlap with the query time range
+  // Overlap condition: job.time_start < query_end AND job.time_end >
+  // query_start
+  filter.append(kvp("time_end", make_document(kvp("$gt", query_start_sec))),
+                kvp("time_start", make_document(kvp("$lt", query_end_sec))));
 
   bool has_accounts_constraint = !request->filter_accounts().empty();
   if (has_accounts_constraint) {
@@ -1358,74 +2069,202 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
     }));
   }
 
-  absl::flat_hash_map<JobSummary::Key, JobSummary::Value> agg_map;
+  bool has_gids_constraint = !request->filter_gids().empty();
+  if (has_gids_constraint) {
+    filter.append(kvp("id_group", [&request](sub_document gid_doc) {
+      array gid_array;
+      for (const auto& gid : request->filter_gids()) {
+        gid_array.append(static_cast<std::int32_t>(gid));
+      }
+      gid_doc.append(kvp("$in", gid_array));
+    }));
+  }
+
+  auto timer_start = steady_clock::now();
+
+  // Build aggregation pipeline
+  mongocxx::pipeline pipeline;
+
+  // Stage 1: $match - filter documents
+  pipeline.match(filter.view());
+
+  // Stage 2: $addFields - compute total_cpus and clip times to query boundaries
+  pipeline.add_fields(make_document(
+      kvp("total_cpus",
+          make_document(
+              kvp("$multiply", make_array("$cpus_alloc", "$nodes_alloc")))),
+      kvp("clipped_start",
+          make_document(
+              kvp("$max", make_array(query_start_sec, "$time_start")))),
+      kvp("clipped_end",
+          make_document(kvp("$min", make_array(query_end_sec, "$time_end"))))));
+
+  // Stage 3: $addFields - compute cpu_time and group_key
+  document stage3;
+  stage3.append(kvp(
+      "cpu_time",
+      make_document(kvp(
+          "$multiply",
+          make_array(
+              make_document(kvp("$subtract",
+                                make_array("$clipped_end", "$clipped_start"))),
+              "$total_cpus")))));
+
+  if (grouping_list.empty()) {
+    stage3.append(kvp("group_key", "$total_cpus"));
+  } else {
+    // Build $switch expression for bucket grouping
+    array branches;
+    for (int i = 0; i < grouping_list.size(); ++i) {
+      uint32_t threshold = grouping_list[i];
+      uint32_t bucket = (i == 0) ? threshold : grouping_list[i - 1];
+      branches.append(make_document(
+          kvp("case", make_document(kvp(
+                          "$lt", make_array("$total_cpus",
+                                            static_cast<int32_t>(threshold))))),
+          kvp("then", static_cast<int32_t>(bucket))));
+    }
+    stage3.append(
+        kvp("group_key",
+            make_document(
+                kvp("$switch",
+                    make_document(
+                        kvp("branches", branches),
+                        kvp("default",
+                            static_cast<int32_t>(
+                                grouping_list[grouping_list.size() - 1])))))));
+  }
+  pipeline.add_fields(stage3.view());
+
+  // Stage 4: $group - aggregate by (account, wckey, cpus_alloc/bucket)
+  pipeline.group(make_document(
+      kvp("_id",
+          make_document(kvp("account", "$account"),
+                        kvp("wckey", make_document(kvp(
+                                         "$ifNull", make_array("$wckey", "")))),
+                        kvp("cpus_alloc", "$group_key"))),
+      kvp("total_cpu_time", make_document(kvp("$sum", "$cpu_time"))),
+      kvp("total_count", make_document(kvp("$sum", 1)))));
+
+  // Execute aggregation and process results
+  crane::grpc::QueryJobSizeSummaryReply reply;
+  int64_t result_count = 0;
   try {
-    mongocxx::cursor cursor =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].find(
-            filter.view());
-    for (auto view : cursor) {
-      std::string acc = std::string(view["account"].get_string().value);
-      std::string wk =
-          view["wckey"] ? std::string(view["wckey"].get_string().value) : "";
-      uint32_t cpus_alloc =
-          static_cast<uint32_t>(view["cpus_alloc"].get_double().value *
-                                view["nodes_alloc"].get_int32().value);
-      int64_t time_start = view["time_start"].get_int64().value;
-      int64_t time_end = view["time_end"].get_int64().value;
-      double total_cpu_time = (time_end - time_start) * cpus_alloc;
-      if (grouping_list.empty()) {
-        agg_map[{acc, wk, cpus_alloc}].total_cpu_time += total_cpu_time;
-        agg_map[{acc, wk, cpus_alloc}].total_count += 1;
-      } else {
-        int group_index = 0;
-        for (const auto group : grouping_list) {
-          if (cpus_alloc < group) {
-            break;
-          }
-          group_index++;
-        }
-        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
-        agg_map[{acc, wk, bucket}].total_cpu_time += total_cpu_time;
-        agg_map[{acc, wk, bucket}].total_count += 1;
+    auto cursor =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].aggregate(
+            pipeline);
+    for (auto doc : cursor) {
+      auto id = doc["_id"].get_document().view();
+      crane::grpc::JobSizeSummaryItem item;
+      item.set_cluster(g_config.CraneClusterName);
+      item.set_account(std::string(id["account"].get_string().value));
+      item.set_wckey(std::string(id["wckey"].get_string().value));
+      item.set_cpus_alloc(static_cast<uint32_t>(
+          ViewGetArithmeticValue_<double>(id["cpus_alloc"])));
+      item.set_total_cpu_time(
+          ViewGetArithmeticValue_<double>(doc["total_cpu_time"]));
+      item.set_total_count(
+          ViewGetArithmeticValue_<int64_t>(doc["total_count"]));
+      reply.add_item_list()->CopyFrom(item);
+      result_count++;
+      if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
+        stream->Write(reply);
+        reply.clear_item_list();
       }
     }
   } catch (const bsoncxx::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    CRANE_LOGGER_ERROR(m_logger_, "QueryJobSizeSummary error: {}", e.what());
+    return false;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    CRANE_LOGGER_ERROR(m_logger_, "QueryJobSizeSummary error: {}", e.what());
+    return false;
   }
 
-  crane::grpc::QueryJobSizeSummaryReply reply;
-  for (const auto& kv : agg_map) {
-    crane::grpc::JobSizeSummaryItem item;
-    item.set_cluster(g_config.CraneClusterName);
-    item.set_account(kv.first.account);
-    item.set_wckey(kv.first.wckey);
-    item.set_cpus_alloc(kv.first.cpus_alloc);
-    item.set_total_cpu_time(kv.second.total_cpu_time);
-    item.set_total_count(kv.second.total_count);
-    reply.add_item_list()->CopyFrom(item);
-    if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
-      stream->Write(reply);
-      reply.clear_item_list();
-    }
-  }
   if (reply.item_list_size() > 0) {
     stream->Write(reply);
   }
+
+  auto elapsed_ms =
+      duration_cast<milliseconds>(steady_clock::now() - timer_start).count();
+  CRANE_LOGGER_INFO(m_logger_,
+                    "QueryJobSizeSummary completed: {} groups, {} ms",
+                    result_count, elapsed_ms);
+
   return true;
 }
 
-void MongodbClient::QueryJobSummary(
+grpc::Status MongodbClient::QueryJobSummary(
     const crane::grpc::QueryJobSummaryRequest* request,
     grpc::ServerWriter<crane::grpc::QueryJobSummaryReply>* stream) {
-  if (!m_job_summary_enabled_) {
-    CRANE_LOGGER_WARN(m_logger_,
-                      "Job summary disabled; QueryJobSummary ignored.");
-    return;
-  }
-
   using namespace std::chrono;
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  auto timer_start = steady_clock::now();
+  int64_t result_count = 0;
+
+  std::string dim1, dim2;
+  switch (request->report_type()) {
+  case crane::grpc::QueryJobSummaryRequest::ACCOUNT_UTILIZATION_BY_USER:
+    dim1 = "account";
+    dim2 = "username";
+    if (!request->filter_qoss().empty() || !request->filter_wckeys().empty())
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "AccountUtilizationByUser only supports filter_accounts and "
+              "filter_users"};
+    break;
+  case crane::grpc::QueryJobSummaryRequest::ACCOUNT_UTILIZATION_BY_QOS:
+    dim1 = "account";
+    dim2 = "qos";
+    if (!request->filter_users().empty() || !request->filter_wckeys().empty()) {
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "AccountUtilizationByQOS only supports filter_accounts and "
+              "filter_QoSs"};
+    }
+    break;
+  case crane::grpc::QueryJobSummaryRequest::USER_UTILIZATION_BY_ACCOUNT:
+    dim1 = "username";
+    dim2 = "account";
+    if (!request->filter_qoss().empty() || !request->filter_wckeys().empty()) {
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "UserUtilizationByAccount only supports filter_users and "
+              "filter_accounts"};
+    }
+    break;
+  case crane::grpc::QueryJobSummaryRequest::USER_UTILIZATION_BY_WCKEY:
+    dim1 = "username";
+    dim2 = "wckey";
+    if (!request->filter_accounts().empty() ||
+        !request->filter_qoss().empty()) {
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "UserUtilizationByWckey only supports filter_users and "
+              "filter_wckeys"};
+    }
+    break;
+  case crane::grpc::QueryJobSummaryRequest::WCKEY_UTILIZATION_BY_USER:
+    dim1 = "wckey";
+    dim2 = "username";
+    if (!request->filter_accounts().empty() ||
+        !request->filter_qoss().empty()) {
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "WCKeyUtilizationByUser only supports filter_wckeys and "
+              "filter_users"};
+    }
+    break;
+  case crane::grpc::QueryJobSummaryRequest::USER_TOP_USAGE:
+    dim1 = "username";
+    dim2 = "account";
+    if (request->filter_gids_size() > 0 || !request->filter_wckeys().empty() ||
+        !request->filter_qoss().empty()) {
+      return {grpc::StatusCode::INVALID_ARGUMENT,
+              "UserTopUsage only supports filter_users and filter_accounts"};
+    }
+    break;
+  default:
+    CRANE_LOGGER_ERROR(m_logger_, "Unknown report type: {}",
+                       static_cast<int>(request->report_type()));
+    return {grpc::StatusCode::INVALID_ARGUMENT, "Unknown report type"};
+  }
 
   auto start_tp =
       sys_time<nanoseconds>{seconds{request->filter_start_time().seconds()} +
@@ -1434,9 +2273,6 @@ void MongodbClient::QueryJobSummary(
       sys_time<nanoseconds>{seconds{request->filter_end_time().seconds()} +
                             nanoseconds{request->filter_end_time().nanos()}};
 
-  // Only expand, never shrink:
-  // - start: floor to hour
-  // - end:   ceil  to hour
   sys_seconds start_time = time_point_cast<seconds>(floor<hours>(start_tp));
   sys_seconds end_time = time_point_cast<seconds>(ceil<hours>(end_tp));
 
@@ -1448,31 +2284,26 @@ void MongodbClient::QueryJobSummary(
 
   if (end_time <= start_time) {
     CRANE_LOGGER_INFO(m_logger_, "No time ranges to query.");
-    return;
+    return grpc::Status::OK;
   }
 
   auto hour_job_summ_table =
-      (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+      (*GetClient_())[m_db_name_][m_acc_usage_hour_collection_name_];
   auto day_job_summ_table =
-      (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+      (*GetClient_())[m_db_name_][m_acc_usage_day_collection_name_];
   auto month_job_summ_table =
-      (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+      (*GetClient_())[m_db_name_][m_acc_usage_month_collection_name_];
 
   auto ranges = SplitToTimeRange(start_time, end_time);
-
-  auto last_month_success =
-      GetJobSummaryLastSuccessTime_(JobSummary::Type::MONTH);
-  auto last_day_success = GetJobSummaryLastSuccessTime_(JobSummary::Type::DAY);
-
-  DowngradeRanges(ranges, last_month_success, last_day_success);
-
   auto& [hour_ranges, day_ranges, month_ranges] = ranges;
+
   mongocxx::collection* entry_table = nullptr;
   mongocxx::pipeline pipeline;
 
   try {
     auto common_filter = GetJobSummeryQueryCommonFilter(request);
     bool is_first_filter = true;
+
     if (!hour_ranges.empty()) {
       if (is_first_filter) {
         entry_table = &hour_job_summ_table;
@@ -1481,7 +2312,7 @@ void MongodbClient::QueryJobSummary(
       document hour_filter;
       hour_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
       SetJobSummeryQueryTimeFilter("hour", hour_ranges, hour_filter);
-      AppendUnionWithRanges(pipeline, m_hour_job_summary_collection_name_,
+      AppendUnionWithRanges(pipeline, m_acc_usage_hour_collection_name_,
                             hour_filter.view(),
                             entry_table == &hour_job_summ_table);
     }
@@ -1493,7 +2324,7 @@ void MongodbClient::QueryJobSummary(
       document day_filter;
       day_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
       SetJobSummeryQueryTimeFilter("day", day_ranges, day_filter);
-      AppendUnionWithRanges(pipeline, m_day_job_summary_collection_name_,
+      AppendUnionWithRanges(pipeline, m_acc_usage_day_collection_name_,
                             day_filter.view(),
                             entry_table == &day_job_summ_table);
     }
@@ -1505,29 +2336,79 @@ void MongodbClient::QueryJobSummary(
       document month_filter;
       month_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
       SetJobSummeryQueryTimeFilter("month", month_ranges, month_filter);
-      AppendUnionWithRanges(pipeline, m_month_job_summary_collection_name_,
+      AppendUnionWithRanges(pipeline, m_acc_usage_month_collection_name_,
                             month_filter.view(),
                             entry_table == &month_job_summ_table);
     }
     if (is_first_filter) {
       CRANE_LOGGER_INFO(m_logger_, "No time ranges to query.");
-      return;
+      return grpc::Status::OK;
     }
 
-    // Grouping
-    auto group_bson = bsoncxx::from_json(R"({
-      "$group": {
-        "_id": {
-          "account": "$account",
-          "username": "$username",
-          "qos": "$qos",
-          "wckey": "$wckey"
-        },
-        "total_cpu_time": { "$sum": "$total_cpu_time" },
-        "total_count": { "$sum": "$total_count" }
-      }
-    })");
-    pipeline.append_stage(group_bson.view());
+    auto group_doc = make_document(kvp(
+        "$group",
+        make_document(
+            kvp("_id",
+                make_document(kvp(dim1, "$" + dim1), kvp(dim2, "$" + dim2))),
+            kvp("total_cpu_time",
+                make_document(kvp("$sum", "$total_cpu_time"))),
+            kvp("total_count", make_document(kvp("$sum", "$total_count"))))));
+    pipeline.append_stage(group_doc.view());
+
+    if (request->report_type() ==
+        crane::grpc::QueryJobSummaryRequest::USER_TOP_USAGE) {
+      // Stage 2: Group by username, calculate user total and preserve account
+      // details
+      auto group_by_user = make_document(
+          kvp("$group",
+              make_document(
+                  kvp("_id", "$_id." + dim1),
+                  kvp("user_total_cpu_time",
+                      make_document(kvp("$sum", "$total_cpu_time"))),
+                  kvp("accounts",
+                      make_document(
+                          kvp("$push",
+                              make_document(kvp("account", "$_id." + dim2),
+                                            kvp("cpu_time", "$total_cpu_time"),
+                                            kvp("count", "$total_count"))))))));
+      pipeline.append_stage(group_by_user.view());
+
+      // Stage 3: Sort by user total cpu time descending
+      auto sort_by_user_total = make_document(
+          kvp("$sort", make_document(kvp("user_total_cpu_time", -1))));
+      pipeline.append_stage(sort_by_user_total.view());
+
+      // Stage 4: Limit to top N users
+      int32_t top_n = std::min(request->num_limit(), 10u);
+      auto limit_stage = make_document(kvp("$limit", top_n));
+      pipeline.append_stage(limit_stage.view());
+
+      // Stage 5: Unwind accounts array to get per-account details
+      auto unwind_stage = make_document(kvp("$unwind", "$accounts"));
+      pipeline.append_stage(unwind_stage.view());
+
+      // Stage 6: Project to restore original _id structure for compatibility
+      auto project_stage = make_document(
+          kvp("$project",
+              make_document(
+                  kvp("_id", make_document(kvp(dim1, "$_id"),
+                                           kvp(dim2, "$accounts.account"))),
+                  kvp("total_cpu_time", "$accounts.cpu_time"),
+                  kvp("total_count", "$accounts.count"),
+                  kvp("user_total_cpu_time", 1))));
+      pipeline.append_stage(project_stage.view());
+
+      // Stage 7: Sort by user total (descending), then account (ascending)
+      auto final_sort = make_document(
+          kvp("$sort", make_document(kvp("user_total_cpu_time", -1),
+                                     kvp("_id." + dim2, 1))));
+      pipeline.append_stage(final_sort.view());
+    } else {
+      auto sort_doc =
+          make_document(kvp("$sort", make_document(kvp("_id." + dim1, 1),
+                                                   kvp("_id." + dim2, 1))));
+      pipeline.append_stage(sort_doc.view());
+    }
 
     mongocxx::options::aggregate agg_opts;
     agg_opts.allow_disk_use(true);
@@ -1539,19 +2420,30 @@ void MongodbClient::QueryJobSummary(
 
     auto cursor = entry_table->aggregate(pipeline, agg_opts);
 
+    // Helper to set item field by dimension name
+    auto set_item_field = [](crane::grpc::JobSummaryItem* item,
+                             const std::string& dim, const std::string& value) {
+      if (dim == "account")
+        item->set_account(value);
+      else if (dim == "username")
+        item->set_username(value);
+      else if (dim == "qos")
+        item->set_qos(value);
+      else if (dim == "wckey")
+        item->set_wckey(value);
+    };
+
     crane::grpc::QueryJobSummaryReply reply;
     for (auto&& doc : cursor) {
       auto id = doc["_id"].get_document().view();
-      crane::grpc::JobSummaryItem item;
-      item.set_cluster(g_config.CraneClusterName);
-      item.set_account(std::string(id["account"].get_string().value));
-      item.set_username(std::string(id["username"].get_string().value));
-      item.set_qos(std::string(id["qos"].get_string().value));
-      item.set_wckey(std::string(id["wckey"].get_string().value));
-      item.set_total_count(ViewValueOr_(doc["total_count"], 0));
-      item.set_total_cpu_time(ViewValueOr_(doc["total_cpu_time"], 0.0));
+      auto* item = reply.add_item_list();
+      item->set_cluster(g_config.CraneClusterName);
+      set_item_field(item, dim1, std::string(id[dim1].get_string().value));
+      set_item_field(item, dim2, std::string(id[dim2].get_string().value));
+      item->set_total_count(ViewValueOr_(doc["total_count"], 0));
+      item->set_total_cpu_time(ViewValueOr_(doc["total_cpu_time"], 0.0));
+      result_count++;
 
-      reply.add_item_list()->CopyFrom(item);
       if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
         stream->Write(reply);
         reply.clear_item_list();
@@ -1565,173 +2457,12 @@ void MongodbClient::QueryJobSummary(
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
-}
 
-void MongodbClient::QueryJobSizeSummary(
-    const crane::grpc::QueryJobSizeSummaryRequest* request,
-    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream) {
-  if (!m_job_summary_enabled_) {
-    CRANE_LOGGER_WARN(m_logger_,
-                      "Job summary disabled; QueryJobSizeSummary ignored.");
-    return;
-  }
-
-  using namespace std::chrono;
-  using bsoncxx::builder::basic::make_array;
-  using bsoncxx::builder::basic::make_document;
-
-  auto start_tp =
-      sys_time<nanoseconds>{seconds{request->filter_start_time().seconds()} +
-                            nanoseconds{request->filter_start_time().nanos()}};
-  auto end_tp =
-      sys_time<nanoseconds>{seconds{request->filter_end_time().seconds()} +
-                            nanoseconds{request->filter_end_time().nanos()}};
-
-  sys_seconds start_time = time_point_cast<seconds>(floor<hours>(start_tp));
-  sys_seconds end_time = time_point_cast<seconds>(ceil<hours>(end_tp));
-
-  sys_seconds now_floor_hour =
-      time_point_cast<seconds>(floor<hours>(system_clock::now()));
-  if (end_time > now_floor_hour) {
-    end_time = now_floor_hour;
-  }
-
-  if (end_time <= start_time) {
-    CRANE_LOGGER_INFO(m_logger_,
-                      "No time ranges for job size summary to query");
-    return;
-  }
-
-  std::vector<std::uint32_t> grouping_list(
-      request->filter_grouping_list().begin(),
-      request->filter_grouping_list().end());
-
-  auto ranges = SplitToTimeRange(start_time, end_time);
-
-  auto last_month_success =
-      GetJobSummaryLastSuccessTime_(JobSummary::Type::MONTH);
-  auto last_day_success = GetJobSummaryLastSuccessTime_(JobSummary::Type::DAY);
-
-  DowngradeRanges(ranges, last_month_success, last_day_success);
-  auto& [hour_ranges, day_ranges, month_ranges] = ranges;
-
-  auto hour_job_summ_table =
-      (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
-  auto day_job_summ_table =
-      (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
-  auto month_job_summ_table =
-      (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
-  document filter_builder;
-
-  mongocxx::collection* entry_table = nullptr;
-  mongocxx::pipeline pipeline;
-
-  try {
-    auto common_filter = GetJobSummeryQueryCommonFilter(request);
-
-    bool is_first_filter = true;
-    if (!hour_ranges.empty()) {
-      if (is_first_filter) {
-        entry_table = &hour_job_summ_table;
-        is_first_filter = false;
-      }
-      document hour_filter;
-      hour_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("hour", hour_ranges, hour_filter);
-      AppendUnionWithRanges(pipeline, m_hour_job_summary_collection_name_,
-                            hour_filter.view(),
-                            entry_table == &hour_job_summ_table);
-    }
-    if (!day_ranges.empty()) {
-      if (is_first_filter) {
-        entry_table = &day_job_summ_table;
-        is_first_filter = false;
-      }
-      document day_filter;
-      day_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("day", day_ranges, day_filter);
-      AppendUnionWithRanges(pipeline, m_day_job_summary_collection_name_,
-                            day_filter.view(),
-                            entry_table == &day_job_summ_table);
-    }
-    if (!month_ranges.empty()) {
-      if (is_first_filter) {
-        entry_table = &month_job_summ_table;
-        is_first_filter = false;
-      }
-      document month_filter;
-      month_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("month", month_ranges, month_filter);
-      AppendUnionWithRanges(pipeline, m_month_job_summary_collection_name_,
-                            month_filter.view(),
-                            entry_table == &month_job_summ_table);
-    }
-    if (is_first_filter) {
-      CRANE_INFO("No time ranges for job size summary to query");
-      return;
-    }
-
-    // Grouping
-    auto group_bson = bsoncxx::from_json(R"({
-      "$group": {
-        "_id": {
-          "account": "$account",
-          "username": "$username",
-          "wckey": "$wckey",
-          "cpus_alloc": "$cpus_alloc"
-        },
-        "total_cpu_time": { "$sum": "$total_cpu_time" },
-        "total_count": { "$sum": "$total_count" }
-      }
-    })");
-    pipeline.append_stage(group_bson.view());
-
-    mongocxx::options::aggregate agg_opts;
-    agg_opts.allow_disk_use(true);
-    agg_opts.max_time(milliseconds{g_config.JobAggregationTimeoutMs});
-    agg_opts.batch_size(g_config.JobAggregationBatchSize);
-    agg_opts.comment(
-        {fmt::format("CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}",
-                     __func__, start_tp, end_tp)});
-
-    auto cursor = entry_table->aggregate(pipeline, agg_opts);
-
-    absl::flat_hash_map<JobSummary::Key, JobSummary::Value> agg_map;
-    if (grouping_list.empty()) {
-      for (auto&& doc : cursor) {
-        auto id = doc["_id"].get_document().view();
-        JobSummary::Key key{
-            .account = std::string(id["account"].get_string().value),
-            .wckey = std::string(id["wckey"].get_string().value),
-            .cpus_alloc = ViewValueOr_(id["cpus_alloc"], uint32_t{0})};
-        agg_map[key].total_cpu_time += ViewValueOr_(doc["total_cpu_time"], 0.0);
-        agg_map[key].total_count += ViewValueOr_(doc["total_count"], 0);
-      }
-      WriteJobSizeSummaryReply_(agg_map, stream, MaxJobSummaryBatchSize);
-    } else {
-      for (auto&& doc : cursor) {
-        auto id = doc["_id"].get_document().view();
-        uint32_t cpus_alloc = ViewValueOr_(id["cpus_alloc"], uint32_t{0});
-        int group_index = 0;
-        for (const auto group : grouping_list) {
-          if (cpus_alloc < group) break;
-          group_index++;
-        }
-        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
-        JobSummary::Key key{
-            .account = std::string(id["account"].get_string().value),
-            .wckey = std::string(id["wckey"].get_string().value),
-            .cpus_alloc = bucket};
-        agg_map[key].total_cpu_time += ViewValueOr_(doc["total_cpu_time"], 0.0);
-        agg_map[key].total_count += ViewValueOr_(doc["total_count"], 0);
-      }
-      WriteJobSizeSummaryReply_(agg_map, stream, MaxJobSummaryBatchSize);
-    }
-  } catch (const bsoncxx::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
+  auto elapsed_ms =
+      duration_cast<milliseconds>(steady_clock::now() - timer_start).count();
+  CRANE_LOGGER_INFO(m_logger_, "QueryJobSummary completed: {} groups, {} ms",
+                    result_count, elapsed_ms);
+  return grpc::Status::OK;
 }
 
 std::string MongodbClient::JobSummaryTypeToString_(
@@ -1825,233 +2556,89 @@ MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
   }
 }
 
-std::chrono::sys_seconds MongodbClient::GetJobMinEndTime_() {
+bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
+  try {
+    auto summary_coll =
+        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+
+    using bsoncxx::builder::basic::kvp;
+    using bsoncxx::builder::basic::make_document;
+    auto filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
+    auto doc_opt = summary_coll.find_one(filter.view());
+    if (!doc_opt) return false;
+
+    auto doc = doc_opt->view();
+    auto it = doc.find("initial_completed");
+    if (it == doc.end()) return false;
+
+    if (it->type() == bsoncxx::type::k_bool) {
+      return it->get_bool().value;
+    }
+    return false;
+  } catch (const std::exception& e) {
+    CRANE_ERROR("GetInitialAggregationCompleted_ failed: {}", e.what());
+    return false;
+  }
+}
+
+void MongodbClient::SetInitialAggregationCompleted_(JobSummary::Type type,
+                                                    bool completed) {
+  try {
+    auto summary_coll =
+        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+
+    using bsoncxx::builder::basic::kvp;
+    using bsoncxx::builder::basic::make_document;
+
+    auto filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
+    auto update = make_document(
+        kvp("$set", make_document(kvp("initial_completed", completed))));
+
+    summary_coll.update_one(filter.view(), update.view(),
+                            mongocxx::options::update{}.upsert(true));
+
+    CRANE_INFO("Set initial_completed={} for {}", completed,
+               JobSummaryTypeToString_(type));
+  } catch (const std::exception& e) {
+    CRANE_ERROR("SetInitialAggregationCompleted_ failed: {}", e.what());
+  }
+}
+
+std::chrono::sys_seconds MongodbClient::GetJobMinStartTime_() {
   try {
     auto task_coll = (*GetClient_())[m_db_name_][m_task_collection_name_];
 
     using bsoncxx::builder::basic::make_document;
-    auto sort_doc = make_document(kvp("time_end", 1));
+    auto sort_doc = make_document(kvp("time_start", 1));
     mongocxx::options::find options;
     options.sort(sort_doc.view());
     options.limit(1);
 
     auto doc_opt = task_coll.find_one(make_document().view(), options);
     if (!doc_opt) {
-      CRANE_LOGGER_INFO(m_logger_, "No tasks found when getting min end time.");
+      CRANE_INFO("No jobs found when getting min start time.");
       return std::chrono::sys_seconds{std::chrono::seconds{0}};
     }
 
     auto doc = doc_opt->view();
-
-    int64_t time_end_sec = ViewValueOr_(doc["time_end"], int64_t{0});
-    return std::chrono::sys_seconds{std::chrono::seconds{time_end_sec}};
+    int64_t time_start_sec = ViewValueOr_(doc["time_start"], int64_t{0});
+    return std::chrono::sys_seconds{std::chrono::seconds{time_start_sec}};
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, "Get job min end time failed: {}.", e.what());
+    CRANE_ERROR("GetJobMinStartTime_ failed: {}", e.what());
     return std::chrono::sys_seconds{std::chrono::seconds{0}};
   }
 }
 
-bool MongodbClient::AggregatedForJobTimeRanges_(
-    const std::vector<JobTimeRange>& job_time_ranges) {
-  using namespace std::chrono;
-
-  if (!m_job_summary_enabled_) return true;  // Disabled is not a failure
-
-  if (job_time_ranges.empty()) return true;  // Nothing to do is not a failure
-
-  auto last_hour_summary_tp_opt =
-      GetJobSummaryLastSuccessTime_(JobSummary::Type::HOUR);
-  if (!last_hour_summary_tp_opt) {
-    m_aggregate_job_request_queue_.enqueue(std::nullopt);
-    return true;  // Fallback to full aggregation
-  }
-  sys_seconds last_hour_summary_tp{*last_hour_summary_tp_opt};
-
-  std::set<sys_seconds> hours_to_update;
-
-  for (const JobTimeRange& range : job_time_ranges) {
-    sys_seconds start_tp = range.start_time;
-    sys_seconds end_tp = range.end_time;
-
-    if (start_tp.time_since_epoch() <= seconds{0}) continue;
-    if (end_tp.time_since_epoch() <= seconds{0}) continue;
-    if (start_tp >= end_tp) continue;
-
-    sys_seconds start_hour = floor<hours>(start_tp);
-    sys_seconds end_hour = floor<hours>(end_tp);
-
-    for (sys_seconds hour_tp = start_hour; hour_tp <= end_hour;
-         hour_tp += hours{1}) {
-      if (hour_tp < last_hour_summary_tp) {
-        hours_to_update.emplace(hour_tp);
-      }
-    }
-  }
-
-  if (hours_to_update.empty()) return true;  // Nothing to do is not a failure
-
-  std::set<sys_days> days_to_update;
-  std::set<sys_days> months_to_update;
-
-  // Aggregate hours with fast-fail
-  for (sys_seconds hour_start_tp : hours_to_update) {
-    sys_seconds hour_end_tp = hour_start_tp + hours{1};
-    if (!AggregateJobSummaryByHour_(hour_start_tp, hour_end_tp,
-                                    m_task_collection_name_)) {
-      CRANE_LOGGER_ERROR(m_logger_,
-                         "Hour aggregation failed at [{}, {}), stopping",
-                         hour_start_tp, hour_end_tp);
-      return false;  // Fast fail, don't proceed to Day/Month
-    }
-
-    sys_days day_start = floor<days>(hour_start_tp);
-    days_to_update.emplace(day_start);
-
-    year_month_day ymd{day_start};
-    sys_days month_start = sys_days{ymd.year() / ymd.month() / 1};
-    months_to_update.emplace(month_start);
-  }
-
-  // Aggregate days with fast-fail (only if hours succeeded)
-  for (sys_days day_start : days_to_update) {
-    sys_seconds start_tp{day_start};
-    sys_seconds end_tp{day_start + days{1}};
-    if (!AggregateJobSummaryByDayOrMonth_(
-            JobSummary::Type::HOUR, JobSummary::Type::DAY, start_tp, end_tp)) {
-      CRANE_LOGGER_ERROR(m_logger_,
-                         "Day aggregation failed at [{}, {}), stopping",
-                         start_tp, end_tp);
-      return false;  // Fast fail, don't proceed to Month
-    }
-  }
-
-  // Aggregate months with fast-fail (only if days succeeded)
-  for (sys_days month_start : months_to_update) {
-    year_month_day ymd{month_start};
-    year_month ym{ymd.year(), ymd.month()};
-    sys_days next_month_start = sys_days{(ym + months{1}) / 1};
-
-    if (!AggregateJobSummaryByDayOrMonth_(
-            JobSummary::Type::DAY, JobSummary::Type::MONTH,
-            sys_seconds{month_start}, sys_seconds{next_month_start})) {
-      CRANE_LOGGER_ERROR(
-          m_logger_, "Month aggregation failed at [{}, {}), stopping",
-          sys_seconds{month_start}, sys_seconds{next_month_start});
-      return false;
-    }
-  }
-
-  return true;  // All succeeded
-}
-
-bool MongodbClient::AggregateJobs_() {
-  if (!m_job_summary_enabled_) return true;  // Disabled is not a failure
-  auto start_total = std::chrono::steady_clock::now();
-  auto start = std::chrono::steady_clock::now();
-
-  // Aggregate Hour with cascade control
-  if (!AggregateJobSummaryByType_(JobSummary::Type::HOUR)) {
-    CRANE_LOGGER_ERROR(m_logger_,
-                       "Hour aggregation failed, skipping Day and Month");
-    return false;
-  }
-  auto end = std::chrono::steady_clock::now();
-  CRANE_LOGGER_TRACE(
-      m_logger_, "Aggregate hour table used {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count());
-
-  // Aggregate Day (only if Hour succeeded)
-  start = std::chrono::steady_clock::now();
-  if (!AggregateJobSummaryByType_(JobSummary::Type::DAY)) {
-    CRANE_LOGGER_ERROR(m_logger_, "Day aggregation failed, skipping Month");
-    return false;
-  }
-  end = std::chrono::steady_clock::now();
-  CRANE_LOGGER_TRACE(
-      m_logger_, "Aggregate day table used {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count());
-
-  // Aggregate Month (only if Day succeeded)
-  start = std::chrono::steady_clock::now();
-  if (!AggregateJobSummaryByType_(JobSummary::Type::MONTH)) {
-    CRANE_LOGGER_ERROR(m_logger_, "Month aggregation failed");
-    return false;
-  }
-  end = std::chrono::steady_clock::now();
-  CRANE_LOGGER_TRACE(
-      m_logger_, "Aggregate month table used {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count());
-
-  auto end_total = std::chrono::steady_clock::now();
-  CRANE_LOGGER_TRACE(m_logger_, "Aggregate cluster usage total used {} ms",
-                     std::chrono::duration_cast<std::chrono::milliseconds>(
-                         end_total - start_total)
-                         .count());
-  return true;  // All succeeded
-}
-
-bool MongodbClient::AggregateJobSummaryByType_(JobSummary::Type summery_type) {
-  using namespace std::chrono;
-  if (!m_job_summary_enabled_) return true;  // Disabled is not a failure
-  using Type = JobSummary::Type;
-  auto now = floor<seconds>(system_clock::now());
-  sys_seconds now_boundary_tp{seconds{0}};
-  if (summery_type == Type::HOUR) {
-    now_boundary_tp = floor<hours>(now);
-  } else if (summery_type == Type::DAY) {
-    now_boundary_tp = sys_seconds{floor<days>(now)};
-  } else if (summery_type == Type::MONTH) {
-    auto d = floor<days>(now);
-    year_month_day ymd{d};
-    sys_days m0 = sys_days{ymd.year() / ymd.month() / 1};
-    now_boundary_tp = sys_seconds{m0};
-  } else {
-    return false;  // Unsupported type
-  }
-
-  auto last_tp = GetJobSummaryLastSuccessTime_(summery_type);
-  if (!last_tp) {
-    auto min_end_time = GetJobMinEndTime_();
-    auto d = floor<days>(min_end_time);
-    year_month_day ymd{d};
-    sys_days m0 = sys_days{ymd.year() / ymd.month() / 1};
-    last_tp = m0;
-  }
-
-  if (last_tp >= now_boundary_tp) return true;  // No work needed, not a failure
-
-  if (summery_type == Type::HOUR) {
-    return AggregateJobSummaryByHour_(last_tp.value(), now_boundary_tp,
-                                      m_task_collection_name_);
-  } else if (summery_type == Type::DAY) {
-    return AggregateJobSummaryByDayOrMonth_(Type::HOUR, Type::DAY,
-                                            last_tp.value(), now_boundary_tp);
-  } else if (summery_type == Type::MONTH) {
-    return AggregateJobSummaryByDayOrMonth_(Type::DAY, Type::MONTH,
-                                            last_tp.value(), now_boundary_tp);
-  }
-  return false;  // Should not reach here
-}
-
 // Worker function to aggregate a single hour (executed in thread pool)
-MongodbClient::HourAggregationResult
-MongodbClient::AggregateJobSummaryForSingleHour_(
+bool MongodbClient::AggregateJobSummaryForSingleHour_(
     std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
-    const std::string& task_collection_name) {
+    const std::string& task_collection_name, int64_t& cached_min_start) {
   using namespace std::chrono;
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_array;
   using bsoncxx::builder::basic::make_document;
 
   auto timer_start = steady_clock::now();
-  HourAggregationResult result{
-      .hour_start = hour_start,
-      .hour_end = hour_end,
-      .success = false,
-  };
 
   try {
     mongocxx::client* client = GetClient_();
@@ -2063,15 +2650,37 @@ MongodbClient::AggregateJobSummaryForSingleHour_(
     auto cur_start_date =
         bsoncxx::types::b_date{time_point_cast<milliseconds>(hour_start)};
 
+    mongocxx::options::find find_opts;
+    find_opts.sort(make_document(kvp("time_start", 1)));
+    find_opts.limit(1);
+    find_opts.projection(make_document(kvp("time_start", 1)));
+
+    auto probe_cursor = jobs.find(
+        make_document(
+            kvp("time_end", make_document(kvp("$gt", cur_start))),
+            kvp("time_start", make_document(kvp("$gte", cached_min_start),
+                                            kvp("$lt", cur_end)))),
+        find_opts);
+
+    bool has_task = false;
+    for (auto&& doc : probe_cursor) {
+      cached_min_start = doc["time_start"].get_int64().value;
+      has_task = true;
+    }
+
+    if (!has_task) {
+      CRANE_LOGGER_TRACE(m_logger_, "Hour [{}, {}) skipped: no active tasks",
+                         hour_start, hour_end);
+      return true;
+    }
+
     mongocxx::pipeline pipeline;
 
     // Match jobs that overlap with the current hour [cur_start, cur_end)
-    pipeline.match(make_document(kvp(
-        "$and",
-        make_array(make_document(
-                       kvp("time_start", make_document(kvp("$lt", cur_end)))),
-                   make_document(kvp(
-                       "time_end", make_document(kvp("$gte", cur_start))))))));
+    pipeline.match(make_document(
+        kvp("time_end", make_document(kvp("$gt", cur_start))),
+        kvp("time_start", make_document(kvp("$gte", cached_min_start),
+                                        kvp("$lt", cur_end)))));
 
     // Add the 'hour' field representing the current hour interval
     pipeline.add_fields(make_document(kvp("hour", cur_start_date)));
@@ -2101,40 +2710,28 @@ MongodbClient::AggregateJobSummaryForSingleHour_(
                            "$subtract", make_array("$actual_end_sec",
                                                    "$actual_start_sec")))))))));
 
-    // Group jobs by hour, account, username, qos, wckey, cpus_alloc,
-    // partition_name
+    // Group jobs by hour, account, username, qos, wckey (simplified for new
+    // acc_usage tables)
     pipeline.group(make_document(
         kvp("_id",
             make_document(kvp("hour", "$hour"), kvp("account", "$account"),
                           kvp("username", "$username"), kvp("qos", "$qos"),
-                          kvp("wckey", "$wckey"), kvp("id_group", "$id_group"),
-                          kvp("cpus_alloc", "$cpus_alloc"),
-                          kvp("partition_name", "$partition_name"),
-                          kvp("nodelist", "$nodelist"))),
-        kvp("total_cpu_time", make_document(kvp("$sum", "$cpus_time"))),
-        kvp("total_count", make_document(kvp("$sum", 1))),
-        kvp("nodename_list", make_document(kvp("$first", "$nodename_list")))));
+                          kvp("wckey", "$wckey"))),
+        kvp("total_cpu_time", make_document(kvp("$sum", "$cpus_time")))));
 
-    // Reshape the result document
+    // Reshape the result document (simplified structure)
     pipeline.replace_root(make_document(kvp(
         "newRoot",
         make_document(kvp("hour", "$_id.hour"), kvp("account", "$_id.account"),
                       kvp("username", "$_id.username"), kvp("qos", "$_id.qos"),
                       kvp("wckey", "$_id.wckey"),
-                      kvp("cpus_alloc", "$_id.cpus_alloc"),
-                      kvp("id_group", "$_id.id_group"),
-                      kvp("partition_name", "$_id.partition_name"),
-                      kvp("nodelist", "$_id.nodelist"),
-                      kvp("nodename_list", "$nodename_list"),
                       kvp("total_cpu_time", "$total_cpu_time"),
-                      kvp("total_count", "$total_count")))));
+                      kvp("aggregated_at", "$$NOW")))));
 
-    // Merge the aggregation results into the summary collection
+    // Merge the aggregation results into the new acc_usage_hour_table
     pipeline.merge(make_document(
-        kvp("into", m_hour_job_summary_collection_name_),
-        kvp("on",
-            make_array("hour", "account", "username", "qos", "wckey",
-                       "id_group", "cpus_alloc", "partition_name", "nodelist")),
+        kvp("into", m_acc_usage_hour_collection_name_),
+        kvp("on", make_array("hour", "account", "username", "qos", "wckey")),
         kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
 
     // Configure aggregation options
@@ -2151,23 +2748,18 @@ MongodbClient::AggregateJobSummaryForSingleHour_(
     // Force execution of the aggregation pipeline (including $merge)
     for (auto&& doc : cursor) {}
 
-    result.success = true;
-    result.duration =
-        duration_cast<milliseconds>(steady_clock::now() - timer_start);
-
     // Each thread outputs its own statistics (duration only)
-    CRANE_LOGGER_TRACE(m_logger_,
-                       "Hour [{}, {}) aggregation completed, used {} ms",
-                       hour_start, hour_end, result.duration.count());
-
+    CRANE_LOGGER_TRACE(
+        m_logger_, "Hour [{}, {}) aggregation completed, used {} ms",
+        hour_start, hour_end,
+        duration_cast<milliseconds>(steady_clock::now() - timer_start).count());
   } catch (const std::exception& e) {
-    result.success = false;
-    result.error_msg = e.what();
-    result.duration =
-        duration_cast<milliseconds>(steady_clock::now() - timer_start);
+    CRANE_LOGGER_TRACE(m_logger_, "Hour [{}, {}) aggregation failed: {}",
+                       hour_start, hour_end, e.what());
+    return false;
   }
 
-  return result;
+  return true;
 }
 
 bool MongodbClient::AggregateJobSummaryByHour_(
@@ -2178,10 +2770,8 @@ bool MongodbClient::AggregateJobSummaryByHour_(
   using namespace std::chrono;
 
   try {
-    // Check if thread should stop before starting aggregation
     if (m_thread_stop_) {
-      CRANE_LOGGER_INFO(
-          m_logger_, "Hour aggregation aborted before start: thread stopping");
+      CRANE_LOGGER_INFO(m_logger_, "Hour aggregation aborted: thread stopping");
       return false;
     }
 
@@ -2189,106 +2779,44 @@ bool MongodbClient::AggregateJobSummaryByHour_(
     std::vector<sys_seconds> hour_boundaries;
     auto cur_tp = floor<hours>(start_sec);
     while (cur_tp < end_sec) {
-      // Check if thread should stop during boundary generation
-      if (m_thread_stop_) {
-        CRANE_LOGGER_INFO(m_logger_,
-                          "Hour boundary generation interrupted at {}", cur_tp);
-        return false;
-      }
-
+      if (m_thread_stop_) return false;
       hour_boundaries.push_back(cur_tp);
       cur_tp += hours{1};
     }
-
     if (hour_boundaries.empty()) return true;
 
-    // Create thread pool with configured concurrency (reused for all batches)
-    BS::thread_pool pool(g_config.JobAggregationConcurrency,
-                         [] { util::SetCurrentThreadName("JobAggThr"); });
-
-    size_t batch_size = g_config.JobAggregationConcurrency;
     sys_seconds last_success_time = start_sec;
+    int64_t cached_min_start = 0;
 
-    // Process hours in batches
-    for (size_t batch_start = 0; batch_start < hour_boundaries.size();
-         batch_start += batch_size) {
-      // Check if thread should stop before processing next batch
+    for (size_t i = 0; i < hour_boundaries.size(); i++) {
       if (m_thread_stop_) {
-        CRANE_LOGGER_INFO(m_logger_,
-                          "Hour aggregation interrupted at batch {}/{}, "
-                          "last_success={}",
-                          batch_start, hour_boundaries.size(),
-                          last_success_time);
+        CRANE_LOGGER_INFO(m_logger_, "Hour aggregation interrupted at {}/{}", i,
+                          hour_boundaries.size());
         return false;
       }
 
-      size_t batch_end =
-          std::min(batch_start + batch_size, hour_boundaries.size());
+      sys_seconds hour_start = hour_boundaries[i];
+      sys_seconds hour_end = hour_start + hours{1};
 
-      // Submit current batch tasks to thread pool
-      std::vector<std::future<HourAggregationResult>> futures;
-      futures.reserve(batch_size);
-      for (size_t i = batch_start; i < batch_end; i++) {
-        sys_seconds hour_start = hour_boundaries[i];
-        sys_seconds hour_end = hour_start + hours{1};
+      auto ok = AggregateJobSummaryForSingleHour_(
+          hour_start, hour_end, task_collection_name, cached_min_start);
 
-        // Submit task to thread pool - call member function instead of inline
-        // lambda
-        auto future = pool.submit_task(
-            [this, hour_start, hour_end, task_collection_name] {
-              return AggregateJobSummaryForSingleHour_(hour_start, hour_end,
-                                                       task_collection_name);
-            });
-
-        futures.push_back(std::move(future));
-      }
-
-      // Wait for current batch to complete (logs already output in threads)
-      bool batch_success = true;
-      for (auto& future : futures) {
-        try {
-          auto result = future.get();
-          if (!result.success) {
-            batch_success = false;
-            CRANE_LOGGER_ERROR(m_logger_, "Hour [{}, {}) failed: {}",
-                               result.hour_start, result.hour_end,
-                               result.error_msg);
-          }
-        } catch (const std::exception& e) {
-          batch_success = false;
-          CRANE_LOGGER_ERROR(m_logger_, "Future exception: {}", e.what());
-        }
-      }
-
-      // Fast fail: return false immediately if batch fails
-      if (!batch_success) {
-        CRANE_LOGGER_ERROR(m_logger_,
-                           "Batch aggregation failed at batch [{}, {}), "
-                           "stopping further processing",
-                           batch_start, batch_end);
+      if (!ok) {
         return false;
       }
 
-      // Update last_success_time after each successful batch to avoid redoing
-      // successful batches on subsequent failures
-      last_success_time = hour_boundaries[batch_end - 1] + hours{1};
+      last_success_time = hour_end;
       UpdateJobSummaryLastSuccessTime_(
           JobSummary::Type::HOUR, time_point_cast<seconds>(last_success_time));
-      CRANE_LOGGER_DEBUG(
-          m_logger_,
-          "Batch [{}, {}) completed: {} hours, updated last_success_time to {}",
-          batch_start, batch_end, batch_end - batch_start, last_success_time);
     }
 
-    // All batches succeeded
-    CRANE_LOGGER_INFO(
-        m_logger_,
-        "AggregateJobSummaryByHour from {} to {} completed successfully",
-        start_sec, end_sec);
+    CRANE_LOGGER_INFO(m_logger_,
+                      "AggregateJobSummaryByHour from {} to {} completed",
+                      start_sec, end_sec);
     return true;
 
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour fatal error: {}",
+    CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour error: {}",
                        e.what());
     return false;
   }
@@ -2298,9 +2826,8 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
     JobSummary::Type src_type, JobSummary::Type dst_type,
     std::chrono::sys_seconds period_start_tp,
     std::chrono::sys_seconds period_end_tp) {
-  CRANE_INFO("AggregateJobSummaryBy {} from {} to {}",
-             JobSummaryTypeToString_(src_type), period_start_tp,
-             period_start_tp);
+  CRANE_INFO("AggregateJobSummaryBy{} from {} to {}",
+             JobSummaryTypeToString_(src_type), period_start_tp, period_end_tp);
   using namespace std::chrono;
 
   using bsoncxx::builder::basic::kvp;
@@ -2310,12 +2837,12 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
   std::string src_coll_str;
   std::string dst_coll_str;
   if (src_type == JobSummary::Type::HOUR && dst_type == JobSummary::Type::DAY) {
-    src_coll_str = m_hour_job_summary_collection_name_;
-    dst_coll_str = m_day_job_summary_collection_name_;
+    src_coll_str = m_acc_usage_hour_collection_name_;
+    dst_coll_str = m_acc_usage_day_collection_name_;
   } else if (src_type == JobSummary::Type::DAY &&
              dst_type == JobSummary::Type::MONTH) {
-    src_coll_str = m_day_job_summary_collection_name_;
-    dst_coll_str = m_month_job_summary_collection_name_;
+    src_coll_str = m_acc_usage_day_collection_name_;
+    dst_coll_str = m_acc_usage_month_collection_name_;
   } else {
     CRANE_ERROR("Unsupported job summary aggregation: {} to {}",
                 JobSummaryTypeToString_(src_type),
@@ -2364,19 +2891,14 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
 
       pipeline.add_fields(make_document(kvp(period_field, cur_start_date)));
 
+      // Simplified grouping for new acc_usage tables
       pipeline.group(make_document(
           kvp("_id", make_document(kvp(period_field, group_period_field_ref),
                                    kvp("account", "$account"),
                                    kvp("username", "$username"),
-                                   kvp("qos", "$qos"), kvp("wckey", "$wckey"),
-                                   kvp("id_group", "$id_group"),
-                                   kvp("cpus_alloc", "$cpus_alloc"),
-                                   kvp("partition_name", "$partition_name"),
-                                   kvp("nodelist", "$nodelist"))),
-          kvp("total_cpu_time", make_document(kvp("$sum", "$total_cpu_time"))),
-          kvp("total_count", make_document(kvp("$sum", "$total_count"))),
-          kvp("nodename_list",
-              make_document(kvp("$first", "$nodename_list")))));
+                                   kvp("qos", "$qos"), kvp("wckey", "$wckey"))),
+          kvp("total_cpu_time",
+              make_document(kvp("$sum", "$total_cpu_time")))));
 
       pipeline.replace_root(make_document(
           kvp("newRoot",
@@ -2384,20 +2906,19 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
                             kvp("account", "$_id.account"),
                             kvp("username", "$_id.username"),
                             kvp("qos", "$_id.qos"), kvp("wckey", "$_id.wckey"),
-                            kvp("cpus_alloc", "$_id.cpus_alloc"),
-                            kvp("id_group", "$_id.id_group"),
-                            kvp("partition_name", "$_id.partition_name"),
-                            kvp("nodelist", "$_id.nodelist"),
-                            kvp("nodename_list", "$nodename_list"),
                             kvp("total_cpu_time", "$total_cpu_time"),
-                            kvp("total_count", "$total_count")))));
+                            kvp("aggregated_at", "$$NOW")))));
 
       pipeline.merge(make_document(
           kvp("into", dst_coll_str),
-          kvp("on", make_array(period_field, "account", "username", "qos",
-                               "wckey", "id_group", "cpus_alloc",
-                               "partition_name", "nodelist")),
-          kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
+          kvp("on",
+              make_array(period_field, "account", "username", "qos", "wckey")),
+          kvp("whenMatched",
+              make_document(
+                  kvp("$set",
+                      make_document(kvp("total_cpu_time", "$total_cpu_time"),
+                                    kvp("aggregated_at", "$$NOW"))))),
+          kvp("whenNotMatched", "insert")));
 
       mongocxx::options::aggregate agg_opts;
       agg_opts.allow_disk_use(true);
@@ -2461,51 +2982,6 @@ void MongodbClient::WriteJobSizeSummaryReply_(
   if (reply.item_list_size() > 0) {
     stream->Write(reply);
   }
-}
-
-void MongodbClient::EvCleanAggregateRequestCb_() {
-  std::optional<std::vector<JobTimeRange>> elem;
-  std::vector<JobTimeRange> all_job_ranges;
-  bool has_full_aggregation_request = false;
-
-  while (m_aggregate_job_request_queue_.try_dequeue(elem)) {
-    if (elem) {
-      all_job_ranges.insert(all_job_ranges.end(), elem.value().begin(),
-                            elem.value().end());
-    } else {
-      has_full_aggregation_request = true;
-    }
-  }
-
-  if (!all_job_ranges.empty()) {
-    AggregatedForJobTimeRanges_(all_job_ranges);
-  }
-
-  if (has_full_aggregation_request) {
-    AggregateJobs_();
-  }
-}
-
-void MongodbClient::MongoDbSummaryThread_() {
-  util::SetCurrentThreadName("DbSummaryThr");
-
-  std::shared_ptr<uvw::idle_handle> idle_handle =
-      m_uvw_loop_->resource<uvw::idle_handle>();
-
-  idle_handle->on<uvw::idle_event>(
-      [this](const uvw::idle_event&, uvw::idle_handle& h) {
-        if (m_thread_stop_) {
-          h.parent().walk([](auto&& h) { h.close(); });
-          h.parent().stop();
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      });
-
-  if (idle_handle->start() != 0) {
-    CRANE_ERROR("Failed to start the idle event in reservation loop.");
-  }
-
-  m_uvw_loop_->run();
 }
 
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
@@ -3141,6 +3617,13 @@ bsoncxx::builder::basic::document MongodbClient::DocumentConstructor_(
 }
 
 mongocxx::client* MongodbClient::GetClient_() {
+  // The main thread's thread_local objects are destroyed during the global
+  // destruction phase after main() returns. At that time, the MongoDB
+  // connection pool (m_connect_pool_) may have already been destroyed, which
+  // means the thread_local destructor will attempt to return a connection to a
+  // pool that no longer exists. This results in undefined behavior and highly
+  // unstable shutdown crashes.
+  // FIXME: CRITICAL lifecycle issue
   if (m_connect_pool_) {
     thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
     return &(*entry);
@@ -4209,45 +4692,78 @@ void MongodbClient::CreateCollectionIndex(
   mongocxx::options::index index_options;
   index_options.name(idx_name);
   index_options.unique(unique);
+
+  CRANE_DEBUG("Creating index '{}' on collection '{}'{}...", idx_name,
+              coll.name(), unique ? " (unique)" : "");
   coll.create_index(index_builder.view(), index_options);
 }
 
 bool MongodbClient::InitTableIndexes() {
   try {
+    CRANE_LOGGER_DEBUG(m_logger_, "Initializing database indexes...");
+
     // Create indexes for the raw task table
-    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    CRANE_LOGGER_DEBUG(m_logger_, "Creating indexes for task_table...");
+    auto client = m_connect_pool_->acquire();
+    auto raw_table = client[m_db_name_][m_task_collection_name_];
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
-
-    // Create indexes for the hour summary table
-    auto hour_coll =
-        (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
-    CreateCollectionIndex(hour_coll, {"hour"}, false);
+    // Indexes for jobsize queries (direct task_table scan)
     CreateCollectionIndex(
-        hour_coll,
-        {"hour", "account", "username", "qos", "wckey", "id_group",
-         "cpus_alloc", "partition_name", "nodelist"},
-        true);
+        raw_table, {"time_start", "time_end", "account", "username"}, false);
+    CreateCollectionIndex(raw_table, {"time_start", "time_end", "cpus_alloc"},
+                          false);
 
-    // Create indexes for the day summary table
-    auto day_coll =
-        (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
-    CreateCollectionIndex(day_coll, {"day"}, false);
-    CreateCollectionIndex(
-        day_coll,
-        {"day", "account", "username", "qos", "wckey", "id_group", "cpus_alloc",
-         "partition_name", "nodelist"},
-        true);
+    // Create indexes for new acc_usage aggregation tables
+    // acc_usage_hour_table indexes
+    CRANE_LOGGER_DEBUG(
+        m_logger_, "Creating indexes for acc_usage_hour_table (6 indexes)...");
+    auto acc_hour_coll = client[m_db_name_][m_acc_usage_hour_collection_name_];
+    CreateCollectionIndex(acc_hour_coll,
+                          {"account", "username", "qos", "wckey", "hour"},
+                          true);  // unique
+    CreateCollectionIndex(acc_hour_coll, {"account", "username", "hour"},
+                          false);
+    CreateCollectionIndex(acc_hour_coll, {"username", "wckey", "hour"}, false);
+    CreateCollectionIndex(acc_hour_coll, {"account", "qos", "hour"}, false);
+    CreateCollectionIndex(acc_hour_coll, {"username", "hour"}, false);
+    CreateCollectionIndex(acc_hour_coll, {"hour"}, false);
 
-    // Create indexes for the month summary table
-    auto month_coll =
-        (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
-    CreateCollectionIndex(month_coll, {"month"}, false);
-    CreateCollectionIndex(
-        month_coll,
-        {"month", "account", "username", "qos", "wckey", "id_group",
-         "cpus_alloc", "partition_name", "nodelist"},
-        true);
+    // acc_usage_day_table indexes
+    CRANE_LOGGER_DEBUG(
+        m_logger_, "Creating indexes for acc_usage_day_table (6 indexes)...");
+    auto acc_day_coll = client[m_db_name_][m_acc_usage_day_collection_name_];
+    CreateCollectionIndex(acc_day_coll,
+                          {"account", "username", "qos", "wckey", "day"},
+                          true);  // unique
+    CreateCollectionIndex(acc_day_coll, {"account", "username", "day"}, false);
+    CreateCollectionIndex(acc_day_coll, {"username", "wckey", "day"}, false);
+    CreateCollectionIndex(acc_day_coll, {"account", "qos", "day"}, false);
+    CreateCollectionIndex(acc_day_coll, {"username", "day"}, false);
+    CreateCollectionIndex(acc_day_coll, {"day"}, false);
 
+    // acc_usage_month_table indexes
+    CRANE_LOGGER_DEBUG(
+        m_logger_, "Creating indexes for acc_usage_month_table (6 indexes)...");
+    auto acc_month_coll =
+        client[m_db_name_][m_acc_usage_month_collection_name_];
+    CreateCollectionIndex(acc_month_coll,
+                          {"account", "username", "qos", "wckey", "month"},
+                          true);  // unique
+    CreateCollectionIndex(acc_month_coll, {"account", "username", "month"},
+                          false);
+    CreateCollectionIndex(acc_month_coll, {"username", "wckey", "month"},
+                          false);
+    CreateCollectionIndex(acc_month_coll, {"account", "qos", "month"}, false);
+    CreateCollectionIndex(acc_month_coll, {"username", "month"}, false);
+    CreateCollectionIndex(acc_month_coll, {"month"}, false);
+
+    // task_table: add index for aggregated field (recovery optimization)
+    CRANE_LOGGER_DEBUG(m_logger_,
+                       "Creating aggregation recovery index on task_table...");
+    CreateCollectionIndex(raw_table, {"aggregated", "status"}, false);
+
+    CRANE_LOGGER_DEBUG(m_logger_,
+                       "All database indexes initialized successfully");
     return true;
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
@@ -4261,34 +4777,19 @@ bool MongodbClient::Init() {
     return false;
   }
 
-  if (!m_job_summary_enabled_) {
-    CRANE_LOGGER_INFO(
-        m_logger_,
-        "Job summary disabled; skipping summary timer/thread initialization.");
-    return true;
+  // Recover missing aggregations on startup
+  if (m_job_summary_enabled_) {
+    try {
+      CRANE_LOGGER_DEBUG(m_logger_, "Starting aggregation recovery...");
+      RecoverMissingAggregations_();
+      CRANE_LOGGER_DEBUG(m_logger_, "Aggregation recovery completed");
+      return true;
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Aggregation recovery failed: {}. Continuing startup...",
+                  e.what());
+      return false;
+    }
   }
-
-  m_uvw_loop_ = uvw::loop::create();
-  m_aggregate_jobs_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
-
-  m_aggregate_jobs_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        AggregateJobs_();
-      });
-  using namespace std::chrono;
-  auto now = time_point_cast<milliseconds>(system_clock::now());
-  auto next_hour = time_point_cast<milliseconds>(floor<hours>(now) + hours{1});
-  auto diff = next_hour - now;
-
-  m_aggregate_jobs_timer_handle_->start(diff, 1h);
-
-  m_aggregate_job_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_aggregate_job_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanAggregateRequestCb_();
-      });
-
-  m_job_aggregate_thread_ = std::thread([this] { MongoDbSummaryThread_(); });
 
   return true;
 }
@@ -4323,9 +4824,6 @@ MongodbClient::MongodbClient() {
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
-MongodbClient::~MongodbClient() {
-  m_thread_stop_ = true;
-  if (m_job_aggregate_thread_.joinable()) m_job_aggregate_thread_.join();
-}
+MongodbClient::~MongodbClient() { m_thread_stop_ = true; }
 
 }  // namespace Ctld

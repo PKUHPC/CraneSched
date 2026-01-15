@@ -889,7 +889,6 @@ void DestroyCtldGlobalVariables() {
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
-  g_db_client.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
@@ -1010,6 +1009,7 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  util::SetCurrentThreadName("CraneCtldMain");
 }
 
 void CreateFolders() {

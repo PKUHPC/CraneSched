@@ -2212,6 +2212,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSummary(
   }
 
   g_db_client->QueryJobSummary(request, writer);
+
   return grpc::Status::OK;
 }
 
@@ -2222,42 +2223,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
 
-  if (!g_db_client->JobSummaryEnabled()) {
-    return {grpc::StatusCode::UNIMPLEMENTED,
-            "Job summary requires MongoDB >= 4.4"};
-  }
-
-  if (request->filter_job_ids().size() > 0) {
-    g_db_client->QueryJobSizeSummaryByJobIds(request, writer);
-  } else {
-    g_db_client->QueryJobSizeSummary(request, writer);
-  }
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
-    ::grpc::ServerContext* context,
-    const ::crane::grpc::ActiveAggregationManuallyRequest* request,
-    ::crane::grpc::ActiveAggregationManuallyReply* response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
-
-  if (!g_db_client->JobSummaryEnabled()) {
-    response->set_ok(false);
-    response->set_reason("Job summary requires MongoDB >= 4.4");
-    return grpc::Status::OK;
-  }
-
-  // TLS + UID binding
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  if (request->uid() != 0) {
-    response->set_ok(false);
-    response->set_reason("Only the root user can perform this operation");
-    return grpc::Status::OK;
-  }
-  g_db_client->AggregateAllJobInfoAsync(std::nullopt);
-  response->set_ok(true);
+  g_db_client->QueryJobSizeSummary(request, writer);
 
   return grpc::Status::OK;
 }

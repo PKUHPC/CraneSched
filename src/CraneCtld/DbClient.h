@@ -104,6 +104,17 @@ class MongodbClient {
     };
   };
 
+  // Task aggregation information for acc_usage tables
+  struct JobAggregationInfo {
+    std::string account;
+    std::string username;
+    std::string qos;
+    std::string wckey;
+    std::chrono::sys_seconds start_time;
+    std::chrono::sys_seconds end_time;
+    double total_cpus;
+  };
+
   struct JobTimeRange {
     std::chrono::sys_seconds start_time;
     std::chrono::sys_seconds end_time;
@@ -164,34 +175,25 @@ class MongodbClient {
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
-  /* ----- Method of operating the job summary ----------- */
-  /*
-   * Timer will aggregate finished jobs every hour, but when cluster go into
-   * some inconsistency, there maybe a new finished job inserted into db with
-   * end_time in the past. So we provide an async method to aggregate job
-   * summary for specified job time range(s).
-   *
-   * @param job_time_ranges: Optional vector of job time ranges (start_time,
-   * end_time) to aggregate. If not set, aggregate all unaggregated jobs up to
-   * the latest available aggregate time.
-   *
-   * Assume it's 15:01 now, and the last successful aggregation was at 13:01.
-   * - If job_time_ranges is not provided, aggregate jobs ended in
-   *   [13:00:00 , 15:00:00) .
-   * - If job_time_ranges is provided with ranges like [10:30-12:15],
-   *   re-aggregate all affected hours (10:00, 11:00, 12:00).
-   */
-  void AggregateAllJobInfoAsync(
-      std::optional<std::vector<JobTimeRange>>&& job_time_ranges);
-  bool QueryJobSizeSummaryByJobIds(
+  bool QueryJobSizeSummary(
       const crane::grpc::QueryJobSizeSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
-  void QueryJobSummary(
+  grpc::Status QueryJobSummary(
       const crane::grpc::QueryJobSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
-  void QueryJobSizeSummary(
-      const crane::grpc::QueryJobSizeSummaryRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+
+  // Real-time aggregation: append task to acc_usage tables
+  void AppendToAccUsageTable(const bsoncxx::document::view& task_doc,
+                             mongocxx::client_session* session = nullptr);
+  void AppendToAccUsageTable(const TaskInCtld* task,
+                             mongocxx::client_session* session = nullptr);
+  void AppendToAccUsageTableById(const std::string& task_db_id);
+
+  // Mark task as aggregated in task_table
+  void MarkTaskAsAggregated(const bsoncxx::oid& task_id);
+
+  // Recovery functions for startup
+  void RecoverMissingAggregations_();
 
  private:
   [[nodiscard]] bool MongoVersionAtLeast_(int major, int minor) const {
@@ -205,30 +207,21 @@ class MongodbClient {
   static std::string JobSummaryTypeToString_(JobSummary::Type summary_type);
   std::optional<std::chrono::sys_seconds> GetJobSummaryLastSuccessTime_(
       JobSummary::Type summary_type);
-  std::chrono::sys_seconds GetJobMinEndTime_();
+
+  // Initial aggregation completion tracking
+  bool GetInitialAggregationCompleted_(JobSummary::Type type);
+  void SetInitialAggregationCompleted_(JobSummary::Type type, bool completed);
+
+  std::chrono::sys_seconds GetJobMinStartTime_();
   void WriteJobSizeSummaryReply_(
       const absl::flat_hash_map<JobSummary::Key, JobSummary::Value>& agg_map,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
       int max_data_size);
 
-  void EvCleanAggregateRequestCb_();
-  bool AggregatedForJobTimeRanges_(
-      const std::vector<JobTimeRange>& job_time_ranges);
-  bool AggregateJobs_();
-  bool AggregateJobSummaryByType_(JobSummary::Type summery_type);
-  // Result structure for single hour aggregation
-  struct HourAggregationResult {
-    std::chrono::sys_seconds hour_start;
-    std::chrono::sys_seconds hour_end;
-    bool success;
-    std::string error_msg;
-    std::chrono::milliseconds duration;
-  };
-
   // Execute aggregation for a single hour (worker function for thread pool)
-  HourAggregationResult AggregateJobSummaryForSingleHour_(
+  bool AggregateJobSummaryForSingleHour_(
       std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
-      const std::string& task_collection_name);
+      const std::string& task_collection_name, int64_t& cached_min_start);
 
   bool AggregateJobSummaryByHour_(std::chrono::sys_seconds start_sec,
                                   std::chrono::sys_seconds end_sec,
@@ -237,7 +230,25 @@ class MongodbClient {
       JobSummary::Type src_type, JobSummary::Type dst_type,
       std::chrono::sys_seconds period_start_tp,
       std::chrono::sys_seconds period_end_tp);
-  void MongoDbSummaryThread_();
+
+  // New acc_usage aggregation helpers - each handles one granularity
+  void AppendToHourTable_(const JobAggregationInfo& info,
+                          mongocxx::client_session* session = nullptr);
+  void AppendToDayTable_(const JobAggregationInfo& info,
+                         mongocxx::client_session* session = nullptr);
+  void AppendToMonthTable_(const JobAggregationInfo& info,
+                           mongocxx::client_session* session = nullptr);
+
+  // Day/Month aggregation functions (for new cluster initialization only)
+  void AggregateAccUsageToDayOrMonth_(JobSummary::Type src_type,
+                                      JobSummary::Type dst_type,
+                                      std::chrono::sys_seconds period_start,
+                                      std::chrono::sys_seconds period_end);
+
+  // Recovery helper functions
+  void RecoverNewClusterAggregations_(bool hour_done, bool day_done,
+                                      bool month_done);
+  void RecoverExistingClusterAggregations_();
 
   /* ----- Method of operating the account table ----------- */
  public:
@@ -472,6 +483,23 @@ class MongodbClient {
 
     return default_value;
   }
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  T ViewGetArithmeticValue_(const bsoncxx::document::element& view_value) {
+    switch (view_value.type()) {
+    case bsoncxx::type::k_bool:
+      return static_cast<T>(view_value.get_bool().value);
+    case bsoncxx::type::k_int32:
+      return static_cast<T>(view_value.get_int32().value);
+    case bsoncxx::type::k_int64:
+      return static_cast<T>(view_value.get_int64().value);
+    case bsoncxx::type::k_double:
+      return static_cast<T>(view_value.get_double().value);
+    default:
+      throw std::runtime_error(
+          "Non-arithmetic type in ViewGetArithmeticValue_");
+    }
+  }
 
   template <typename T>
     requires std::is_arithmetic_v<T>
@@ -554,12 +582,11 @@ class MongodbClient {
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
   const std::string m_wckey_collection_name_{"wckey_table"};
-  const std::string m_hour_job_summary_collection_name_{
-      "hour_job_summary_table"};
-  const std::string m_day_job_summary_collection_name_{"day_job_summary_table"};
-  const std::string m_month_job_summary_collection_name_{
-      "month_job_summary_table"};
+
   const std::string m_summary_time_collection_name_{"summary_time_table"};
+  const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
+  const std::string m_acc_usage_day_collection_name_{"acc_usage_day_table"};
+  const std::string m_acc_usage_month_collection_name_{"acc_usage_month_table"};
   static constexpr int MaxJobSummaryBatchSize =
       5000;  // Maximum number of items per gRPC streaming batch
   std::shared_ptr<spdlog::logger> m_logger_;
@@ -574,12 +601,6 @@ class MongodbClient {
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
   std::atomic_bool m_thread_stop_{false};
-  std::shared_ptr<uvw::timer_handle> m_aggregate_jobs_timer_handle_;
-  ConcurrentQueue<std::optional<std::vector<JobTimeRange>>>
-      m_aggregate_job_request_queue_;
-  std::shared_ptr<uvw::async_handle> m_aggregate_job_async_handle_;
-  std::shared_ptr<uvw::loop> m_uvw_loop_;
-  std::thread m_job_aggregate_thread_;
 };
 
 template <>
