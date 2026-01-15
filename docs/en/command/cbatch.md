@@ -429,4 +429,3 @@ For more container usage examples, see [Container Usage Examples](../reference/c
 - [ccontrol](ccontrol.md) - Control jobs and system resources
 - [ccon](ccon.md) - Container job management
 - [Container Overview](../reference/container/index.md) - Container feature introduction
-- [creport](creport.md) - Query job-related statistics
