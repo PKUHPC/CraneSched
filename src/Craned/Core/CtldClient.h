@@ -219,6 +219,11 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
+  void HealthCheckThread_();
+  void HealthCheck_();
+
+  bool NeedHealthCheck_();
+
   absl::Mutex m_step_status_change_mtx_;
 
   std::list<StepStatusChangeQueueElem> m_step_status_change_list_
@@ -247,6 +252,9 @@ class CtldClient {
   std::shared_ptr<uvw::timer_handle> m_ping_handle_;
   std::atomic_bool m_ping_ctld_{false};
   std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
+
+  std::thread m_health_check_thread_;
+  std::atomic_bool m_health_check_init_{false};
 };
 
 }  // namespace Craned
