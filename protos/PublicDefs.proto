@@ -161,9 +161,15 @@ message DependencyStatus {
   }
 }
 
-message SignalParam {
+message Signal {
   int32 signal_number = 1;
-  uint32 seconds_before_kill = 2;
+  uint32 signal_time = 2; // seconds_before_kill
+  enum SignalFlag {
+    NONE = 0;
+    B = 1;
+    R = 2;
+  }
+  SignalFlag signal_flag = 3;
 }
 
 message TaskToCtld {
@@ -229,7 +235,7 @@ message TaskToCtld {
 
   string task_prolog = 46;
   string task_epilog = 47;
-  optional SignalParam signal_param = 48;
+  repeated Signal signals = 48;
 }
 
 message TaskInEmbeddedDb {
@@ -400,7 +406,7 @@ message StepToD {
 
   string task_prolog = 30;
   string task_epilog = 31;
-  optional SignalParam signal_param = 32;
+  repeated Signal signals = 32;
 }
 
 message JobStepsToD {

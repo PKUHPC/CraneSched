@@ -547,15 +547,6 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_cpus_per_task(this->job->TaskToCtld().cpus_per_task());
   step_to_d.set_submit_dir(this->job->TaskToCtld().submit_dir());
 
-  if (this->job->TaskToCtld().has_signal_param()) {
-    step_to_d.mutable_signal_param()->CopyFrom(
-        this->job->TaskToCtld().signal_param());
-    auto signal_param = step_to_d.signal_param();
-    CRANE_INFO(" seconds_before_kill {} signal_num {}  ",
-               signal_param.seconds_before_kill(),
-               signal_param.signal_number());
-  }
-
   return step_to_d;
 }
 
@@ -970,14 +961,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
       step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
     }
   }
-  if (this->job->TaskToCtld().has_signal_param()) {
-    step_to_d.mutable_signal_param()->CopyFrom(
-        this->job->TaskToCtld().signal_param());
-    auto signal_param = step_to_d.signal_param();
-    CRANE_INFO(" common seconds_before_kill {} signal_num {}  ",
-               signal_param.seconds_before_kill(),
-               signal_param.signal_number());
-  }
+
+  step_to_d.mutable_signals()->CopyFrom(job->TaskToCtld().signals());
 
   step_to_d.set_task_prolog(task_prolog);
   step_to_d.set_task_epilog(task_epilog);

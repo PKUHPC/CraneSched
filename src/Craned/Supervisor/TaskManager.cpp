@@ -99,6 +99,9 @@ bool StepInstance::IsContainer() const noexcept {
 bool StepInstance::IsDaemon() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
+bool StepInstance::IsPrimary() const noexcept {
+  return m_step_to_supv_.step_type() == crane::grpc::StepType::PRIMARY;
+}
 
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
@@ -2038,7 +2041,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
     DelTerminationTimer_();
-    DelSignalTimer_();
+    DelSignalTimers_();
     m_step_.StopCforedClient();
     m_step_.StopCriClient();
 
@@ -2282,6 +2285,7 @@ void TaskManager::EvTaskTimerCb_() {
               g_config.JobId);
 
   DelTerminationTimer_();
+  DelSignalTimers_();
 
   if (m_step_.IsCalloc()) {
     // Now calloc and cbatch steps only have one task with id 0.
@@ -2515,7 +2519,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     }
     // Delete the old timer.
     DelTerminationTimer_();
-    DelSignalTimer_();
+    DelSignalTimers_();
 
     absl::Time start_time =
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
@@ -2529,25 +2533,17 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       m_terminate_task_async_handle_->send();
     } else {
       // If the task haven't timed out, set up a new timer.
-      int64_t new_sec =
-          ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
+      int64_t new_sec = ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
       AddTerminationTimer_(new_sec);
 
-      if (m_step_.GetStep().has_signal_param()) {
-        auto signal_param = m_step_.GetStep().signal_param();
-        int64_t signal_sec = new_sec - signal_param.seconds_before_kill();
-        if (signal_sec > 0) {
-          int signal_num = signal_param.signal_number();
-          AddSignalTimer_(signal_sec, signal_num);
-          CRANE_INFO(
-              "Add a new signal timer of seconds_before_kill {} signal_num "
-              "{} new seconds {}, time_limit {}",
-              signal_param.seconds_before_kill(), signal_param.signal_number(),
-              signal_sec, new_sec);
-        } else {
-          CRANE_WARN("Signal offset {} >= time_limit {}, skipping signal timer",
-                     signal_param.seconds_before_kill(), new_sec);
+      for (const auto& signal : m_step_.GetStep().signals()) {
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B && !m_step_.IsPrimary())
+          continue;
+        if (signal.signal_time() >= new_sec) {
+          CRANE_TRACE("signal {} time of {}s >= time_limit {}s, ignore this signal.", signal.signal_number(), signal.signal_time(), new_sec);
+          continue;
         }
+        AddSignalTimer_(new_sec-signal.signal_time(), signal.signal_number());
       }
     }
 
@@ -2584,24 +2580,17 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       int64_t sec = m_step_.GetStep().time_limit().seconds();
       AddTerminationTimer_(sec);
       CRANE_INFO("Add a timer of {} seconds", sec);
-      if (m_step_.GetStep().has_signal_param()) {
-        auto signal_param = m_step_.GetStep().signal_param();
-        int64_t signal_sec = sec - signal_param.seconds_before_kill();
-        if (signal_sec > 0) {
-          int signal_num = signal_param.signal_number();
-          AddSignalTimer_(signal_sec, signal_num);
-          CRANE_INFO(
-              "Add a signal timer of seconds_before_kill {} signal_num {} for "
-              "job #{}",
-              signal_param.seconds_before_kill(), signal_param.signal_number(),
-              m_step_.GetStep().job_id());
-        } else {
-          CRANE_WARN(
-              "Signal offset {} >= time_limit {} for job #{}, skipping signal "
-              "timer",
-              signal_param.seconds_before_kill(), sec,
-              m_step_.GetStep().job_id());
+
+      for (const auto& signal : m_step_.GetStep().signals()) {
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B && !m_step_.IsPrimary())
+          continue;
+        if (signal.signal_time() > sec) {
+          CRANE_TRACE("signal time of {}s > time_limit {}s, ignore this signal.", signal.signal_time(), sec);
+          continue;
         }
+        AddSignalTimer_(sec-signal.signal_time(), signal.signal_number());
+        CRANE_INFO("Add a signal time of {}s for signal", signal.signal_time(), signal.signal_number());
+      }
     }
 
     m_step_.pwd.Init(m_step_.uid);
