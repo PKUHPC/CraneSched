@@ -47,7 +47,7 @@ class ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  std::shared_ptr<uvw::timer_handle> signal_timer{nullptr};
+  std::vector<std::shared_ptr<uvw::timer_handle>> signal_timers;
   PasswordEntry pwd;
 
   bool orphaned{false};
@@ -120,6 +120,7 @@ class StepInstance {
 
   // Perspective 2: Role in a Job
   [[nodiscard]] bool IsDaemon() const noexcept;
+  [[nodiscard]] bool IsPrimary() const noexcept;
 
   // Perspective 3: Container support
   [[nodiscard]] bool IsPod() const noexcept;
@@ -527,14 +528,14 @@ class TaskManager {
           }
         });
     signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
-    m_step_.signal_timer = signal_handle;
+    m_step_.signal_timers.emplace_back(signal_handle);
   }
 
-  void DelSignalTimer_() {
-    if (m_step_.signal_timer) {
-      m_step_.signal_timer->close();
-      m_step_.signal_timer.reset();
+  void DelSignalTimers_() {
+    for (const auto& signal_timer : m_step_.signal_timers) {
+      signal_timer->close();
     }
+    m_step_.signal_timers.clear();
   }
 
   void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
