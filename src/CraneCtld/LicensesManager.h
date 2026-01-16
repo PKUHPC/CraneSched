@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "DbClient.h"
+#include "absl/container/flat_hash_map.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/PluginClient.h"
@@ -34,6 +36,9 @@ using HashMap = absl::flat_hash_map<K, V, Hash>;
 using LicensesAtomicMap = util::AtomicHashMap<HashMap, LicenseId, License>;
 using LicensesMetaRawMap = LicensesAtomicMap::RawMap;
 
+using LicensesMapExclusivePtr =
+    util::ScopeExclusivePtr<LicensesMetaRawMap, util::rw_mutex>;
+
 class LicensesManager {
  public:
   LicensesManager();
@@ -41,6 +46,8 @@ class LicensesManager {
   ~LicensesManager() = default;
 
   int Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+
+  LicensesMapExclusivePtr GetLicensesMapExclusivePtr();
 
   void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest *request,
                        crane::grpc::QueryLicensesInfoReply *response);
@@ -50,25 +57,61 @@ class LicensesManager {
           &lic_id_to_count,
       bool is_license_or);
 
-  bool CheckLicenseCountSufficient(
-      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-          &lic_id_to_count,
-      bool is_license_or,
-      std::unordered_map<LicenseId, uint32_t> *actual_licenses);
+  void CheckLicenseCountSufficient(
+      std::vector<PdJobInScheduler *> *job_ptr_vec);
 
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  bool MallocLicenseResource(
+  bool MallocLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void MallocLicenseResourceWhenRecoverRunning(
+  void MallocLicenseWhenRecoverRunning(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void FreeLicenseResource(
+  void FreeLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
+
+  /* TODO：multi-cluster synchronization */
+
+  CraneExpectedRich<void> AddLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
+
+  CraneExpectedRich<void> ModifyLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
+
+  CraneExpectedRich<void> RemoveLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters);
+
+  CraneExpectedRich<void> QueryLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      std::list<LicenseResourceInDb> *res_licenses);
 
  private:
+  CraneExpectedRich<void> CheckAndUpdateFields_(
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators,
+      LicenseResourceInDb *res_resource);
+
+  void UpdateLicense_(const LicenseResourceInDb &license_resource,
+                      uint32_t cluster_allowed, License *license);
+
+  absl::flat_hash_map<std::pair<LicenseId, std::string>, /* license_id, server
+                                                          */
+                      std::unique_ptr<LicenseResourceInDb>>
+      m_license_resource_map_;
+
+  util::rw_mutex m_rw_resource_mutex_;
+
   LicensesAtomicMap m_licenses_map_;
 };
 

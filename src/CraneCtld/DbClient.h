@@ -102,6 +102,7 @@ class MongodbClient {
     USER = 1,
     QOS = 2,
     WCKEY = 3,
+    RESOURCE = 4,
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
@@ -236,6 +237,9 @@ class MongodbClient {
           "UpdateEntityOne does not support WCKEY. Use UpdateEntityOneByFields "
           "instead.");
       return false;
+    case EntityType::RESOURCE:
+      CRANE_ERROR("UpdateEntityOne does not support RESOURCE.");
+      return false;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
@@ -287,6 +291,9 @@ class MongodbClient {
     case EntityType::WCKEY:
       coll_name = m_wckey_collection_name_;
       break;
+    case EntityType::RESOURCE:
+      CRANE_ERROR("UpdateEntityOneByFields does not support RESOURCE.");
+      return false;
     }
 
     auto count =
@@ -332,6 +339,12 @@ class MongodbClient {
   void SelectTxns(
       const std::unordered_map<std::string, std::string>& conditions,
       int64_t start_time, int64_t end_time, std::list<Txn>* res_txn);
+
+  bool InsertLicenseResource(const LicenseResourceInDb& resource);
+  bool UpdateLicenseResource(const LicenseResourceInDb& resource);
+  bool DeleteLicenseResource(const std::string& resource_name,
+                             const std::string& server);
+  void SelectAllLicenseResource(std::list<LicenseResourceInDb>* resource_list);
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
@@ -382,6 +395,10 @@ class MongodbClient {
   void ViewToTxn_(const bsoncxx::document::view& txn_view, Txn* txn);
   document TxnToDocument_(const Txn& txn);
 
+  void ViewToLicenseResource_(const bsoncxx::document::view& resource_view,
+                              LicenseResourceInDb* resource);
+  document LicenseResourceToDocument_(const LicenseResourceInDb& resource);
+
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
@@ -407,6 +424,8 @@ class MongodbClient {
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
   const std::string m_wckey_collection_name_{"wckey_table"};
+  const std::string m_license_resource_collection_name_{
+      "license_resource_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;

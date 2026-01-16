@@ -799,6 +799,10 @@ enum ErrCode {
   ERR_MISSING_DEPENDENCY = 91;
   ERR_DB_INSERT_FAILED = 92;
   ERR_LUA_FAILED = 93;
+  ERR_RESOURCE_NOT_FOUND = 94;
+  ERR_INVALID_ARGUMENT = 95;
+
+  ERR_RESOURCE_ALREADY_EXIST = 96;
 }
 
 enum EntityType {
@@ -947,4 +951,44 @@ message LicenseInfo {
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+  uint32 reserved = 5;
+  bool remote = 6;
+  uint32 last_consumed = 7;
+  uint32 last_deficit = 8;
+  int64 last_update = 9;
+}
+
+message LicenseResourceInfo {
+  string resource_name = 1;
+  map<string, uint32> cluster_resource_info = 2;
+  uint32 count = 3;
+  string server = 4;
+  string server_type = 5;
+  LicenseResource.Type type = 6;
+  string description = 7;
+  uint32 last_consumed = 8;
+  uint32 allocated = 9;
+  uint32 flags = 10;
+}
+
+message LicenseResource {
+  enum Type {
+    NotSet = 0;
+    License = 1;
+  }
+
+  enum Field {
+    Count = 0;
+    Allowed = 1;
+    LastConsumed = 2;
+    Description = 3;
+    Flags = 4;
+    ServerType = 5;
+    ResourceType = 6;
+  }
+
+  enum Flag {
+    None = 0;
+    Absolute = 1;
+  }
 }

@@ -44,6 +44,7 @@ cacctmgr <操作> <实体> [ID] [选项]
 - **user**: 个人用户
 - **qos**: 服务质量设置
 - **transaction**: 事务日志（仅用于 show 操作）
+- **resource**: 资源（许可证资源）
 
 ---
 
@@ -664,6 +665,125 @@ cacctmgr show wckey [名称]
 cacctmgr show wckey
 ```
 
+## 6. 资源管理
+
+### 6.1 添加资源
+
+**语法：**
+```bash
+cacctmgr add resource <名称> [选项]
+```
+
+**选项：**
+
+- **Description=<描述>**:  资源描述
+- **Name=<名称>**: 资源名
+- **Server=<服务器地址>**: 资源服务器地址
+- **ServerType=<服务器类型>**: 资源服务器类型
+- **Type=<类型>**: 资源类型（License, NotSet）
+- **Count=<数量>**: 资源数量
+- **LastConsumed=<数量>**: 外部资源使用数
+- **Allocated=<数量>**: 已分配的资源数
+- **Flags=<标志>**: 资源标志（None、Absolute）
+- **Allowed=<数量>**: 集群可使用的资源数
+- **Cluster=<分区>**: 集群名
+
+**示例：**
+
+创建资源：
+```bash
+cacctmgr add resource matlab count=50 server=rlm_host \
+  servertype=rlm type=license
+```
+
+创建资源并分配集群资源：
+```bash
+cacctmgr add resource nastran cluster=fluid,pdf \
+  server=flex_host servertype=flexlm \
+  count=100 allowed=50 type=license
+```
+
+### 6.2 删除资源
+
+**语法：**
+```bash
+cacctmgr delete resource <名称>
+```
+
+**选项：**
+
+- **Name=<名称>**: 删除资源名
+- **Server=<服务器地址>**: 指定资源服务器地址
+- **Cluster=<集群1, 集群2,..>**: 指定集群
+
+**示例：**
+```bash
+cacctmgr delete resource matlab server=rlm_host cluster=fluid
+
+cacctmgr delete resource nastran server=flex_host
+```
+
+### 6.3 修改资源
+
+**语法：**
+```bash
+cacctmgr modify resource where Name=<resource> Server=<server> Cluster=<集群1, 集群2,..> set <属性>=<值>
+```
+
+**属性：**
+
+- **Description=<描述>**:  资源描述
+- **ServerType=<服务器类型>**: 资源服务器类型
+- **Type=<类型>**: 资源类型（License, NotSet）
+- **Count=<数量>**: 资源数量
+- **LastConsumed=<数量>**: 外部资源使用数
+- **Allocated=<数量>**: 已分配的资源数
+- **Flags=<标志>**: 资源标志（None、Absolute）
+- **Allowed=<数量>**: 集群可使用的资源数（必须指定集群）
+
+**示例：**
+
+修改资源数量：
+```bash
+cacctmgr modify resource name=matlab server=rlm_host set \
+  count=200
+```
+
+更新资源集群分配：
+```bash
+cacctmgr modify resource name=matlab server=rlm_host \
+  cluster=pdf set allowed=60
+```
+
+### 6.4 显示资源
+
+**语法：**
+```bash
+cacctmgr show resource [withclusters] where [选项]
+```
+
+**选项：**
+
+- **Name=<名称>**: 仅显示特定资源
+- **Server=<服务器地址>**: 资源服务器地址
+- **Cluster=<分区>**: 集群名
+
+**示例：**
+
+显示所有资源：
+```bash
+cacctmgr show resource
+
+cacctmgr show resource withclusters
+```
+
+显示特定资源：
+```bash
+cacctmgr show resource where name=matlab server=rlm_host cluster=fluid
+```
+
+---
+
 ## 使用示例
 
 ### 完整工作流示例
@@ -712,6 +832,7 @@ cacctmgr show transaction where Actor=professor
 cacctmgr show account --json
 cacctmgr show user Accounts=PKU --json
 cacctmgr show qos --json
+cacctmgr show resource --json
 ```
 
 ---
@@ -731,7 +852,9 @@ cacctmgr show qos --json
 | 修改 QoS  | ✓     | ✓        | ✗           | ✗        |
 | 显示（查询）  | ✓     | ✓        | ✓           | ✓（自己的账户） |
 | 阻止/解除阻止 | ✓     | ✓        | 同账户         | ✗        |
-
+| 添加资源    | ✓     | ✓        | ✗           | ✗        |
+| 删除资源    | ✓     | ✓        | ✗           | ✗        |
+| 修改资源    | ✓     | ✓        | ✗           | ✗        |
 ---
 
 ## 重要说明

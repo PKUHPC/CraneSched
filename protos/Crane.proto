@@ -1088,6 +1088,49 @@ message ExecInContainerStepReply {
   string url = 3;
 }
 
+message AddOrModifyLicenseResourceRequest {
+  uint32 uid = 1;
+  string resource_name = 2;
+  string server = 3;
+  repeated string clusters = 4;
+  message Operator {
+    LicenseResource.Field operator_field = 1;
+    string value = 2;
+  }
+  repeated Operator operators = 5;
+  bool is_add = 6;
+}
+
+message AddOrModifyLicenseResourceReply {
+  bool ok = 1;
+  RichError rich_err = 2;
+}
+
+message DeleteLicenseResourceRequest {
+  uint32 uid = 1;
+  string resource_name = 2;
+  string server = 3;
+  repeated string clusters = 4;
+}
+
+message DeleteLicenseResourceReply {
+  bool ok = 1;
+  RichError rich_err = 2;
+}
+
+message QueryLicenseResourceRequest {
+  uint32 uid = 1;
+  string resource_name = 2;
+  string server = 3;
+  repeated string clusters = 4;
+}
+
+message QueryLicenseResourceReply {
+  bool ok = 1;
+  RichError rich_err = 2;
+  repeated LicenseResourceInfo license_resource_list = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1137,6 +1180,10 @@ service CraneCtld {
   rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
 
   rpc QueryTxnLog(QueryTxnLogRequest) returns (QueryTxnLogReply);
+
+  rpc DeleteLicenseResource(DeleteLicenseResourceRequest) returns (DeleteLicenseResourceReply);
+  rpc AddOrModifyLicenseResource(AddOrModifyLicenseResourceRequest) returns (AddOrModifyLicenseResourceReply);
+  rpc QueryLicenseResource(QueryLicenseResourceRequest) returns (QueryLicenseResourceReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);

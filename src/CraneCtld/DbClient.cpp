@@ -668,7 +668,7 @@ bool MongodbClient::FetchJobStepRecords(
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {
         mutable_licenses->emplace(std::string(elem.key()),
-                                  elem.get_int32().value);
+                                  elem.get_int64().value);
       }
 
       job_info_ptr->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
@@ -943,6 +943,9 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   case EntityType::WCKEY:
     coll = m_wckey_collection_name_;
     break;
+  default:
+    CRANE_ERROR("Invalid entity type {}.", static_cast<int>(type));
+    return false;
   }
   document filter;
   filter.append(kvp("name", name));
@@ -1176,6 +1179,83 @@ void MongodbClient::SelectTxns(
     Txn txn;
     ViewToTxn_(view, &txn);
     res_txn->emplace_back(txn);
+  }
+}
+
+bool MongodbClient::InsertLicenseResource(const LicenseResourceInDb& resource) {
+  document doc = LicenseResourceToDocument_(resource);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .insert_one(*GetSession_(), doc.view());
+
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return false;
+}
+
+bool MongodbClient::UpdateLicenseResource(const LicenseResourceInDb& resource) {
+  document doc = LicenseResourceToDocument_(resource), set_document, filter;
+
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+  set_document.append(kvp("$set", doc));
+
+  filter.append(kvp("name", resource.name));
+  filter.append(kvp("server", resource.server));
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .update_one(*GetSession_(), filter.view(), set_document.view());
+
+    if (!update_result || update_result->modified_count() == 0) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    return false;
+  }
+
+  return true;
+}
+
+bool MongodbClient::DeleteLicenseResource(const std::string& resource_name,
+                                          const std::string& server) {
+  document filter;
+  filter.append(kvp("name", resource_name));
+  filter.append(kvp("server", server));
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .delete_one(*GetSession_(), filter.view());
+
+    if (result && result.value().deleted_count() == 1) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return false;
+}
+
+void MongodbClient::SelectAllLicenseResource(
+    std::list<LicenseResourceInDb>* resource_list) {
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].find(
+            {});
+    for (auto view : cursor) {
+      LicenseResourceInDb resource;
+      ViewToLicenseResource_(view, &resource);
+      resource_list->emplace_back(resource);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
@@ -1469,7 +1549,7 @@ void MongodbClient::DocumentAppendItem_<
     const std::unordered_map<std::string, uint32_t>& value) {
   doc.append(kvp(key, [&value](sub_document sub_doc) {
     for (const auto& [k, v] : value) {
-      sub_doc.append(kvp(k, static_cast<int32_t>(v)));
+      sub_doc.append(kvp(k, static_cast<int64_t>(v)));
     }
   }));
 }
@@ -1741,6 +1821,64 @@ MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
   };
   std::tuple<int64_t, std::string, std::string, int32_t, std::string> values{
       txn.creation_time, txn.actor, txn.target, txn.action, txn.info};
+
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToLicenseResource_(
+    const bsoncxx::document::view& resource_view,
+    LicenseResourceInDb* resource) {
+  try {
+    resource->name = ViewValueOr_(resource_view["name"], std::string{});
+    resource->server = ViewValueOr_(resource_view["server"], std::string{});
+    resource->server_type =
+        ViewValueOr_(resource_view["server_type"], std::string{});
+    resource->type = static_cast<crane::grpc::LicenseResource::Type>(
+        ViewValueOr_(resource_view["type"], 0));
+    resource->allocated = ViewValueOr_(resource_view["allocated"], int64_t(0));
+    resource->total_resource_count =
+        ViewValueOr_(resource_view["count"], int64_t(0));
+    resource->flags = ViewValueOr_(resource_view["flags"], 0);
+    resource->last_consumed =
+        ViewValueOr_(resource_view["last_consumed"], int64_t(0));
+    resource->last_update = absl::FromUnixSeconds(
+        ViewValueOr_(resource_view["last_update"], int64_t(0)));
+    resource->description =
+        ViewValueOr_(resource_view["description"], std::string{});
+
+    for (auto&& elem :
+         ViewValueOr_(resource_view["cluster_resources"],
+                      bsoncxx::builder::basic::make_document().view())) {
+      resource->cluster_resources.emplace(std::string(elem.key()),
+                                          elem.get_int64().value);
+    }
+
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+MongodbClient::document MongodbClient::LicenseResourceToDocument_(
+    const LicenseResourceInDb& resource) {
+  std::array<std::string, 11> fields{
+      "name",      "server",        "server_type",       "type",
+      "allocated", "last_consumed", "cluster_resources", "count",
+      "flags",     "last_update",   "description"};
+
+  std::tuple<std::string, std::string, std::string, int32_t, int64_t, int64_t,
+             std::unordered_map<std::string, uint32_t>, int64_t, int32_t,
+             int64_t, std::string>
+      values{resource.name,
+             resource.server,
+             resource.server_type,
+             static_cast<int32_t>(resource.type),
+             resource.allocated,
+             resource.last_consumed,
+             resource.cluster_resources,
+             resource.total_resource_count,
+             static_cast<int32_t>(resource.flags),
+             absl::ToUnixSeconds(resource.last_update),
+             resource.description};
 
   return DocumentConstructor_(fields, values);
 }
