@@ -324,7 +324,6 @@ void CtldClientStateMachine::ActionDisconnected_() {
 
 void CtldClient::Shutdown() {
   m_stopping_ = true;
-  m_health_check_cv_.notify_all();
   m_step_status_change_mtx_.Lock();
   CRANE_INFO("Cleaning up status changes in CtldClient");
 
@@ -654,30 +653,7 @@ void CtldClient::Init() {
     bool expected = false;
     if (g_config.HealthCheck.Interval > 0L &&
         m_health_check_init_.compare_exchange_strong(expected, true)) {
-      m_health_check_init_ = true;
-      m_health_check_thread_ = std::thread([this] {
-        util::SetCurrentThreadName("HealthCheckThr");
-        CRANE_TRACE("HealthCheckThr start");
-        HealthCheck_();
-        if (g_config.HealthCheck.NodeState & START_ONLY) return;
-        std::mt19937 rng{std::random_device{}()};
-        std::unique_lock<std::mutex> lock(m_health_check_mutex_);
-        do {
-          uint64_t interval = g_config.HealthCheck.Interval;
-          uint64_t delay = interval;
-          if (g_config.HealthCheck.Cycle) {
-            std::uniform_int_distribution<uint64_t> dist(1, interval);
-            delay = dist(rng);
-          }
-          if (m_health_check_cv_.wait_for(
-                  lock, std::chrono::seconds(delay),
-                  [this] { return m_stopping_ || !m_stub_; })) {
-            return;
-          }
-          if (m_stopping_ || !m_stub_) return;
-          if (NeedHealthCheck_()) HealthCheck_();
-        } while (true);
-      });
+      m_health_check_thread_ = std::thread([this] { HealthCheckThread_(); });
     }
   });
 }
@@ -999,6 +975,38 @@ bool CtldClient::SendStatusChanges_(
     }
   }
   return true;
+}
+
+void CtldClient::HealthCheckThread_() {
+  util::SetCurrentThreadName("HealthCheckThr");
+  CRANE_TRACE("HealthCheckThr start");
+
+  HealthCheck_();
+  if (g_config.HealthCheck.NodeState & START_ONLY) return;
+  std::mt19937 rng{std::random_device{}()};
+  std::chrono::steady_clock::time_point last_check_time =
+      std::chrono::steady_clock::now();
+  uint64_t interval = g_config.HealthCheck.Interval;
+  uint64_t delay = interval;
+  do {
+    if (m_stopping_ || !m_stub_) return;
+    if (!m_ping_ctld_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      last_check_time = std::chrono::steady_clock::now();
+      continue;
+    }
+    if (last_check_time + std::chrono::seconds(delay) >
+        std::chrono::steady_clock::now())
+      continue;
+    if (NeedHealthCheck_()) HealthCheck_();
+    last_check_time = std::chrono::steady_clock::now();
+    if (g_config.HealthCheck.Cycle) {
+      std::uniform_int_distribution<uint64_t> dist(1, interval);
+      delay = dist(rng);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  } while (true);
+  CRANE_TRACE("HealthCheckThr stop..");
 }
 
 void CtldClient::HealthCheck_() {

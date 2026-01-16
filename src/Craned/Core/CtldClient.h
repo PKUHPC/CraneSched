@@ -221,6 +221,7 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
+  void HealthCheckThread_();
   void HealthCheck_();
 
   bool NeedHealthCheck_();
@@ -256,8 +257,6 @@ class CtldClient {
 
   std::thread m_health_check_thread_;
   std::atomic_bool m_health_check_init_{false};
-  std::mutex m_health_check_mutex_;
-  std::condition_variable m_health_check_cv_;
 };
 
 }  // namespace Craned
