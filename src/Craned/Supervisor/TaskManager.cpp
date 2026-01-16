@@ -2533,17 +2533,21 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       m_terminate_task_async_handle_->send();
     } else {
       // If the task haven't timed out, set up a new timer.
-      int64_t new_sec = ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
+      int64_t new_sec =
+          ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
       AddTerminationTimer_(new_sec);
 
       for (const auto& signal : m_step_.GetStep().signals()) {
-        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B && !m_step_.IsPrimary())
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B &&
+            !m_step_.IsPrimary())
           continue;
         if (signal.signal_time() >= new_sec) {
-          CRANE_TRACE("signal {} time of {}s >= time_limit {}s, ignore this signal.", signal.signal_number(), signal.signal_time(), new_sec);
+          CRANE_TRACE(
+              "signal {} time of {}s >= time_limit {}s, ignore this signal.",
+              signal.signal_number(), signal.signal_time(), new_sec);
           continue;
         }
-        AddSignalTimer_(new_sec-signal.signal_time(), signal.signal_number());
+        AddSignalTimer_(new_sec - signal.signal_time(), signal.signal_number());
       }
     }
 
@@ -2582,14 +2586,18 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_INFO("Add a timer of {} seconds", sec);
 
       for (const auto& signal : m_step_.GetStep().signals()) {
-        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B && !m_step_.IsPrimary())
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B &&
+            !m_step_.IsPrimary())
           continue;
         if (signal.signal_time() > sec) {
-          CRANE_TRACE("signal time of {}s > time_limit {}s, ignore this signal.", signal.signal_time(), sec);
+          CRANE_TRACE(
+              "signal time of {}s > time_limit {}s, ignore this signal.",
+              signal.signal_time(), sec);
           continue;
         }
-        AddSignalTimer_(sec-signal.signal_time(), signal.signal_number());
-        CRANE_INFO("Add a signal time of {}s for signal", signal.signal_time(), signal.signal_number());
+        AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
+        CRANE_INFO("Add a signal time of {}s for signal", signal.signal_time(),
+                   signal.signal_number());
       }
     }
 
