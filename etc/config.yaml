@@ -184,15 +184,18 @@ Container:
   Enabled: false
   # Relate to CraneBaseDir
   TempDir: supervisor/containers/
-  # In most cases, ImageEndpoint is the same as RuntimeEndpoint
+  # Runtime service endpoint, e.g., containerd socket path
   RuntimeEndpoint: /run/containerd/containerd.sock
+  # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   ImageEndpoint: /run/containerd/containerd.sock
+  # SubID configuration
+  SubId:
+    Managed: true
+    RangeSize: 65536
+    BaseOffset: 100000
+  # BindFS settings
   BindFs:
     Enabled: false
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
-  SubId:
-    Managed: true
-    RangeSize: 65536
-    BaseOffset: 100000

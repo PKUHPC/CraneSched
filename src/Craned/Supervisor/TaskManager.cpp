@@ -636,34 +636,36 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
     const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx) {
   using cri::CriClient;
 
-  const auto& subid_conf = g_config.Container.SubId;
-  const uint64_t range = subid_conf.RangeSize;
   const uint64_t uid = pwd.Uid();
   const uint64_t gid = pwd.Gid();
-  const uint64_t uid_start = subid_conf.BaseOffset + uid * range;
-  const uint64_t gid_start = subid_conf.BaseOffset + gid * range;
+
+  const auto& subid_conf = g_config.Container.SubId;
+  const uint64_t size = subid_conf.RangeSize;
+  const uint64_t uid_start = subid_conf.BaseOffset + (uid * size);
+  const uint64_t gid_start = subid_conf.BaseOffset + (gid * size);
 
   // Check for overflow
-  if (uid_start > std::numeric_limits<unsigned long>::max() ||
-      gid_start > std::numeric_limits<unsigned long>::max() ||
-      range > std::numeric_limits<unsigned long>::max()) {
+  if (uid_start > std::numeric_limits<uint64_t>::max() ||
+      gid_start > std::numeric_limits<uint64_t>::max() ||
+      size > std::numeric_limits<uint64_t>::max()) {
     CRANE_ERROR("SubId range overflow for uid: {}, gid: {}", uid, gid);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  auto matches = [](const SubIdRanges& ranges, uint64_t start,
-                    uint64_t count) -> bool {
-    return ranges.Valid() && ranges.Count() == 1 &&
-           ranges[0].start == start && ranges[0].count == count;
-  };
-
   auto subuid = pwd.SubUidRanges();
   auto subgid = pwd.SubGidRanges();
 
+  bool uid_exists = subuid.Valid() && subuid.Count() > 0;
+  bool gid_exists = subgid.Valid() && subgid.Count() > 0;
+
+  auto matches = [](const SubIdRanges& ranges, uint64_t start,
+                    uint64_t count) -> bool {
+    return ranges.Valid() && ranges.Count() == 1 && ranges[0].start == start &&
+           ranges[0].count == count;
+  };
+
   if (!subid_conf.Managed) {
     // Unmanaged mode: require any usable ranges for both UID and GID.
-    bool uid_exists = subuid.Valid() && subuid.Count() > 0;
-    bool gid_exists = subgid.Valid() && subgid.Count() > 0;
     if (!uid_exists || !gid_exists) {
       CRANE_ERROR(
           "SubId unmanaged mode: missing subuid/subgid ranges for user {} "
@@ -674,25 +676,22 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
     }
   } else {
     // Managed mode: validate or ensure mappings
-    bool uid_exists = subuid.Valid() && subuid.Count() > 0;
-    bool gid_exists = subgid.Valid() && subgid.Count() > 0;
-
     if (uid_exists || gid_exists) {
       // If any ranges exist, both must match the deterministic mapping
-      if (!matches(subuid, uid_start, range) ||
-          !matches(subgid, gid_start, range)) {
+      if (!matches(subuid, uid_start, size) ||
+          !matches(subgid, gid_start, size)) {
         CRANE_ERROR(
             "SubId mismatch: expected uid range [{}, {}], gid range [{}, {}] "
             "for user {}, but found uid range [{}, {}], gid range [{}, {}]",
-            uid_start, range, gid_start, range, pwd.Username(),
+            uid_start, size, gid_start, size, pwd.Username(),
             uid_exists ? subuid[0].start : 0, uid_exists ? subuid[0].count : 0,
             gid_exists ? subgid[0].start : 0, gid_exists ? subgid[0].count : 0);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     } else {
       // Both missing: allocate them
-      auto ensure_result = util::os::EnsureSubIdRanges(
-          pwd.Username(), uid_start, range, gid_start, range);
+      auto ensure_result = PasswordEntry::EnsureSubIdRanges(
+          pwd.Username(), uid_start, size, gid_start, size);
       if (!ensure_result) {
         CRANE_ERROR("Failed to ensure SubId ranges for user {}: {}",
                     pwd.Username(), ensure_result.error());
@@ -704,14 +703,12 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
       subuid = pwd_recheck.SubUidRanges();
       subgid = pwd_recheck.SubGidRanges();
 
-      if (!matches(subuid, uid_start, range) ||
-          !matches(subgid, gid_start, range)) {
+      if (!matches(subuid, uid_start, size) ||
+          !matches(subgid, gid_start, size)) {
         CRANE_ERROR(
             "SubId verification failed after allocation for user {}: expected "
-            "uid range [{}, {}], gid range [{}, {}], but found uid range [{}, "
-            "{}], gid range [{}, {}]",
-            pwd.Username(), uid_start, range, gid_start, range, subuid[0].start,
-            subuid[0].count, subgid[0].start, subgid[0].count);
+            "uid range [{}, {}], gid range [{}, {}]",
+            pwd.Username(), uid_start, size, gid_start, size);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     }

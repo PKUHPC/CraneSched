@@ -23,7 +23,6 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
-#include <expected>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -87,9 +86,5 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
                             std::filesystem::path const& p);
 
 absl::Time GetSystemBootTime();
-
-std::expected<void, std::string> EnsureSubIdRanges(
-    const std::string& owner, uint64_t uid_start, uint64_t uid_count,
-    uint64_t gid_start, uint64_t gid_count);
 
 }  // namespace util::os
