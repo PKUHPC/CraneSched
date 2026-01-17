@@ -641,14 +641,21 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
 
   const auto& subid_conf = g_config.Container.SubId;
   const uint64_t size = subid_conf.RangeSize;
-  const uint64_t uid_start = subid_conf.BaseOffset + (uid * size);
-  const uint64_t gid_start = subid_conf.BaseOffset + (gid * size);
 
-  // Check for overflow
-  if (uid_start > std::numeric_limits<uint64_t>::max() ||
-      gid_start > std::numeric_limits<uint64_t>::max() ||
-      size > std::numeric_limits<uint64_t>::max()) {
-    CRANE_ERROR("SubId range overflow for uid: {}, gid: {}", uid, gid);
+  uint64_t uid_start{};
+  uint64_t gid_start{};
+
+  if (util::MulOverflow(uid, size, uid_start) ||
+      util::AddOverflow(subid_conf.BaseOffset, uid_start, uid_start)) {
+    CRANE_ERROR("Failed to calculate uid_start for user {}: uid overflowed.",
+                pwd.Username());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (util::MulOverflow(gid, size, gid_start) ||
+      util::AddOverflow(subid_conf.BaseOffset, gid_start, gid_start)) {
+    CRANE_ERROR("Failed to calculate gid_start for user {}: gid overflowed.",
+                pwd.Username());
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
