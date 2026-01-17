@@ -661,13 +661,15 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   auto subgid = pwd.SubGidRanges();
 
   if (!subid_conf.Managed) {
-    // Unmanaged mode: require exact matches
-    if (!matches(subuid, uid_start, range) ||
-        !matches(subgid, gid_start, range)) {
+    // Unmanaged mode: require any usable ranges for both UID and GID.
+    bool uid_exists = subuid.Valid() && subuid.Count() > 0;
+    bool gid_exists = subgid.Valid() && subgid.Count() > 0;
+    if (!uid_exists || !gid_exists) {
       CRANE_ERROR(
-          "SubId unmanaged mode: expected uid range [{}, {}], gid range [{}, "
-          "{}] for user {}, but not found",
-          uid_start, range, gid_start, range, pwd.Username());
+          "SubId unmanaged mode: missing subuid/subgid ranges for user {} "
+          "(subuid: {}, subgid: {})",
+          pwd.Username(), uid_exists ? "present" : "missing",
+          gid_exists ? "present" : "missing");
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
   } else {
@@ -689,11 +691,11 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
       }
     } else {
       // Both missing: allocate them
-      std::string err;
-      if (!util::os::EnsureSubIdRanges(pwd.Username(), uid_start, range,
-                                       gid_start, range, &err)) {
+      auto ensure_result = util::os::EnsureSubIdRanges(
+          pwd.Username(), uid_start, range, gid_start, range);
+      if (!ensure_result) {
         CRANE_ERROR("Failed to ensure SubId ranges for user {}: {}",
-                    pwd.Username(), err);
+                    pwd.Username(), ensure_result.error());
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
 

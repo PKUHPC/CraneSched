@@ -23,8 +23,10 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include <expected>
 #include <filesystem>
 #include <set>
+#include <string>
 
 struct SystemRelInfo {
   std::string name;
@@ -86,8 +88,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
-bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
-                       uint64_t uid_count, uint64_t gid_start,
-                       uint64_t gid_count, std::string* err);
+std::expected<void, std::string> EnsureSubIdRanges(
+    const std::string& owner, uint64_t uid_start, uint64_t uid_count,
+    uint64_t gid_start, uint64_t gid_count);
 
 }  // namespace util::os

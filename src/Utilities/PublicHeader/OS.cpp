@@ -431,30 +431,28 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-bool AppendLine(int fd, const std::string& line, std::string* err) {
+std::expected<void, std::string> AppendLine(int fd,
+                                            const std::string& line) {
   // Seek to end to ensure append despite concurrent writes
   if (lseek(fd, 0, SEEK_END) == -1) {
-    if (err) *err = fmt::format("lseek failed: {}", strerror(errno));
-    return false;
+    return std::unexpected(fmt::format("lseek failed: {}", strerror(errno)));
   }
 
   ssize_t written = write(fd, line.c_str(), line.size());
   if (written != static_cast<ssize_t>(line.size())) {
-    if (err)
-      *err = fmt::format("write failed: {}",
-                         written == -1 ? strerror(errno) : "short write");
-    return false;
+    return std::unexpected(
+        fmt::format("write failed: {}",
+                    written == -1 ? strerror(errno) : "short write"));
   }
   if (fsync(fd) == -1) {
-    if (err) *err = fmt::format("fsync failed: {}", strerror(errno));
-    return false;
+    return std::unexpected(fmt::format("fsync failed: {}", strerror(errno)));
   }
-  return true;
+  return {};
 }
 
-bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
-                       uint64_t uid_count, uint64_t gid_start,
-                       uint64_t gid_count, std::string* err) {
+std::expected<void, std::string> EnsureSubIdRanges(
+    const std::string& owner, uint64_t uid_start, uint64_t uid_count,
+    uint64_t gid_start, uint64_t gid_count) {
 #if defined(__linux__) || defined(__unix__)
   const char* subuid_path = "/etc/subuid";
   const char* subgid_path = "/etc/subgid";
@@ -462,18 +460,14 @@ bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
   // Acquire locks in fixed order to avoid deadlock
   auto uid_lock = util::AcquireWriteLock(subuid_path);
   if (!uid_lock) {
-    if (err)
-      *err =
-          fmt::format("Failed to lock {}: {}", subuid_path, uid_lock.error());
-    return false;
+    return std::unexpected(
+        fmt::format("Failed to lock {}: {}", subuid_path, uid_lock.error()));
   }
 
   auto gid_lock = util::AcquireWriteLock(subgid_path);
   if (!gid_lock) {
-    if (err)
-      *err =
-          fmt::format("Failed to lock {}: {}", subgid_path, gid_lock.error());
-    return false;
+    return std::unexpected(
+        fmt::format("Failed to lock {}: {}", subgid_path, gid_lock.error()));
   }
 
   // Re-check via libsubid after locking to detect races
@@ -482,31 +476,38 @@ bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
   int uid_count_check = subid_get_uid_ranges(owner.c_str(), &uid_ranges);
   int gid_count_check = subid_get_gid_ranges(owner.c_str(), &gid_ranges);
 
-  bool success = true;
+  auto free_ranges = [&]() {
+    if (uid_ranges != nullptr) subid_free(uid_ranges);
+    if (gid_ranges != nullptr) subid_free(gid_ranges);
+  };
+
   std::string uid_line = fmt::format("{}:{}:{}\n", owner, uid_start, uid_count);
   std::string gid_line = fmt::format("{}:{}:{}\n", owner, gid_start, gid_count);
 
   // Append uid mapping if missing
   if (uid_count_check <= 0) {
-    if (!AppendLine(uid_lock->GetFileDescriptor(), uid_line, err)) {
-      success = false;
+    auto append_result = AppendLine(uid_lock->GetFileDescriptor(), uid_line);
+    if (!append_result) {
+      free_ranges();
+      return std::unexpected(append_result.error());
     }
   }
 
   // Append gid mapping if missing
-  if (success && gid_count_check <= 0) {
-    if (!AppendLine(gid_lock->GetFileDescriptor(), gid_line, err)) {
-      success = false;
+  if (gid_count_check <= 0) {
+    auto append_result = AppendLine(gid_lock->GetFileDescriptor(), gid_line);
+    if (!append_result) {
+      free_ranges();
+      return std::unexpected(append_result.error());
     }
   }
 
   // Free libsubid allocated memory
-  if (uid_ranges != nullptr) subid_free(uid_ranges);
-  if (gid_ranges != nullptr) subid_free(gid_ranges);
+  free_ranges();
 
   // Locks are automatically released by RAII
 
-  return success;
+  return {};
 
 #else
 #  error "Unsupported OS"
