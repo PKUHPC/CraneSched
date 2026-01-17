@@ -228,7 +228,24 @@ The following is a Meta CNI + Calico + Port Mapping + Bandwidth configuration. W
       ```
     Some fields in this configuration file depend on your actual cluster deployment. Adjust them as needed.
 
-### Optional Dependencies
+### Advanced Features
+
+CraneSched container features include some advanced capabilities that require additional configuration:
+
+- **Fake Root (User Namespace)**: Use user namespaces to provide "fake root" isolation inside containers; this requires **SubID**. If you need to mount directories and the underlying filesystem does not support ID Mapped Mounts, install **BindFs**.
+
+#### SubID
+
+!!! note
+    CraneSched supports automatic management of SubUID/SubGID ranges ("Managed" mode; see the "Container Configuration" section). If you want to manage SubID yourself, follow the instructions below.
+
+In "Managed" mode, CraneSched calculates each user's SubUID/SubGID range start with `BaseOffset + ID * RangeSize` and maintains system files such as `/etc/subuid`. If this mode does not meet your requirements, you can manage SubID directly or using external services.
+
+In "Unmanaged" mode, CraneSched only reads SubID information from the system via the `shadow-utils` APIs. Therefore, administrators must ensure that users on all cluster nodes have consistent, non-overlapping SubID ranges. You can manually edit `/etc/subuid` and `/etc/subgid`, or use LDAP for centralized management.
+
+Some systems can obtain SubID information from an LDAP server via sssd. Refer to documentation for FreeIPA, OpenLDAP, and similar solutions for configuration guidance.
+
+To switch SubID management modes or adjust parameters for Managed mode, see the [Container Configuration](#container-configuration) section below.
 
 #### BindFs
 
