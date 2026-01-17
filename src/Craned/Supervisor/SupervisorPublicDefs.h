@@ -66,7 +66,7 @@ struct Config {
     struct SubIdConfig {
       bool Managed{true};
       uint64_t RangeSize{65536};
-      uint64_t BaseOffset{0};
+      uint64_t BaseOffset{100000};
     };
     SubIdConfig SubId;
   };

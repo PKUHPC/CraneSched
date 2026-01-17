@@ -431,20 +431,18 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-namespace {
 bool AppendLine(int fd, const std::string& line, std::string* err) {
   // Seek to end to ensure append despite concurrent writes
   if (lseek(fd, 0, SEEK_END) == -1) {
-    if (err)
-      *err = fmt::format("lseek failed: {}", strerror(errno));
+    if (err) *err = fmt::format("lseek failed: {}", strerror(errno));
     return false;
   }
 
   ssize_t written = write(fd, line.c_str(), line.size());
   if (written != static_cast<ssize_t>(line.size())) {
     if (err)
-      *err = fmt::format("write failed: {}", written == -1 ? strerror(errno)
-                                                            : "short write");
+      *err = fmt::format("write failed: {}",
+                         written == -1 ? strerror(errno) : "short write");
     return false;
   }
   if (fsync(fd) == -1) {
@@ -453,7 +451,6 @@ bool AppendLine(int fd, const std::string& line, std::string* err) {
   }
   return true;
 }
-}  // namespace
 
 bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
                        uint64_t uid_count, uint64_t gid_start,
@@ -465,13 +462,17 @@ bool EnsureSubIdRanges(const std::string& owner, uint64_t uid_start,
   // Acquire locks in fixed order to avoid deadlock
   auto uid_lock = util::AcquireWriteLock(subuid_path);
   if (!uid_lock) {
-    if (err) *err = fmt::format("Failed to lock {}: {}", subuid_path, uid_lock.error());
+    if (err)
+      *err =
+          fmt::format("Failed to lock {}: {}", subuid_path, uid_lock.error());
     return false;
   }
 
   auto gid_lock = util::AcquireWriteLock(subgid_path);
   if (!gid_lock) {
-    if (err) *err = fmt::format("Failed to lock {}: {}", subgid_path, gid_lock.error());
+    if (err)
+      *err =
+          fmt::format("Failed to lock {}: {}", subgid_path, gid_lock.error());
     return false;
   }
 

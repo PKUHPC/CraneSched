@@ -368,68 +368,9 @@ Container:
 
   # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
-
-  # SubUID/SubGID 配置（用户命名空间）
-  SubId:
-    # 是否自动管理 SubID 范围
-    Managed: true
-    # 每个用户的 SubUID/SubGID 范围大小
-    RangeSize: 65536
-    # SubUID/SubGID 范围的基础偏移量
-    BaseOffset: 0
 ```
 
-!!! info "实验性功能"
-    容器支持目前处于实验阶段，可能存在限制和问题。
-
-### SubID 配置说明
-
-SubID（从属用户/组 ID）配置用于容器用户命名空间的安全隔离：
-
-- **Managed（托管模式）**：
-  - `true`（默认）：CraneSched 自动管理 `/etc/subuid` 和 `/etc/subgid` 条目
-    - 如果用户的 SubID 范围不存在，系统会自动添加
-    - 如果范围存在但不匹配预期值，作业启动会失败并显示错误
-  - `false`（非托管模式）：要求 SubID 范围在系统中预先配置
-    - 作业启动前会验证范围是否与预期值完全匹配
-    - 如果不匹配，作业会失败
-
-- **RangeSize（范围大小）**：每个用户的 SubUID/SubGID 范围大小（默认：65536）
-  - 必须大于 0
-  - 建议值：65536（提供充足的 ID 空间）
-
-- **BaseOffset（基础偏移）**：SubID 范围的起始偏移量（默认：0）
-  - 用于计算每个用户的确定性范围：`start = BaseOffset + uid × RangeSize`
-
-### 手动验证
-
-在启用容器用户命名空间后，建议执行以下验证步骤：
-
-1. **测试自动分配**（Managed 模式）：
-   - 确保测试用户在 `/etc/subuid` 和 `/etc/subgid` 中没有现有条目
-   - 以该用户身份运行容器作业
-   - 验证系统自动添加了预期的 SubID 行：
-     ```bash
-     grep testuser /etc/subuid /etc/subgid
-     ```
-   - 再次运行作业，确认没有添加重复条目
-
-2. **测试范围匹配验证**：
-   - 在 `/etc/subuid` 或 `/etc/subgid` 中手动添加不匹配的 SubID 条目
-   - 尝试以该用户身份运行容器作业
-   - 确认作业启动失败并显示清晰的不匹配错误消息
-
-3. **验证 ID 隔离**：
-   - 在容器内运行 `id` 命令
-   - 确认 UID/GID 映射正确应用（容器内显示为 UID 0，但主机上使用 SubID 范围）
-
-**要求：**
-
-- 在计算节点上安装兼容 CRI 的运行时（containerd 或 CRI-O）
-- 具有适当权限可访问运行时套接字
-- 容器镜像可用或可从 Registry 访问
-- 系统安装了 `libsubid`（用于 SubID 管理）
-
+更多容器相关配置请参见[容器运行时配置指南](../container.md)。
 
 ## 应用更改
 

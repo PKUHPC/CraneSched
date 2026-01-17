@@ -312,6 +312,15 @@ Container:
   # CRI image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # SubUID/SubGID configuration
+  SubId:
+    # Whether to automatically manage SubID ranges
+    Managed: true
+    # Size of SubUID/SubGID range per user
+    RangeSize: 65536
+    # Base offset for SubUID/SubGID ranges
+    BaseOffset: 100000
+
   # BindFs configuration (optional, for user namespace mapping)
   BindFs:
     Enabled: false
@@ -328,6 +337,16 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | Temporary data directory during container runtime, relative to `CraneBaseDir`. Stores container metadata, logs, etc. |
 | `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
 | `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
+
+### SubID Configuration
+
+SubID (subordinate user/group IDs) configuration is used for secure container user namespace isolation.
+
+| Field | Type | Default | Description |
+|:-----|:-----|:-------|:-----|
+| `SubId.Managed` | bool | `true` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically adds and validates SubID ranges<br>- `false`: managed by the administrator |
+| `RangeSize` | int | `65536` | Size of SubUID/SubGID range per user. Must be greater than 0; recommended value is 65536 |
+| `BaseOffset` | int | `100000` | Base offset for SubID ranges. Used to calculate each user's range: `start = BaseOffset + uid * RangeSize` |
 
 ### BindFs Configuration
 
