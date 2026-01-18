@@ -202,7 +202,7 @@ The system needs to have Lua version 5.x and lua-devel installed.
 ### Crane compilation
 ```shell
 # Check the packaging guide for details
-cmake -G Ninja .. -DCRANE_ENABLE_LUA=true
+cmake -G Ninja .. -DCRANE_ENABLE_LUA=ON
 ```
 
 ### /etc/crane/config.yaml

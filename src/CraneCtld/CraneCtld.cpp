@@ -937,12 +937,16 @@ void InitializeCtldGlobalVariables() {
 
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
 
-#ifdef HAVE_LUA
   if (!g_config.JobSubmitLuaScript.empty()) {
+#ifdef HAVE_LUA
     g_lua_pool = std::make_unique<crane::LuaPool>();
     if (!g_lua_pool->Init()) std::exit(1);
-  }
+#else
+    CRANE_WARN(
+        "JobSubmitLuaScript is configured but CraneCtld was built without Lua "
+        "support. The Lua script will NOT be executed.");
 #endif
+  }
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
