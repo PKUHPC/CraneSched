@@ -475,6 +475,8 @@ bool TaskScheduler::Init() {
                 event_time = absl::FromUnixSeconds(time_end);
               }
               break;
+            default:
+              std::unreachable();
             }
           } else {
             CRANE_WARN("Dependee Job #{} not found in database.", dep_id);
@@ -1678,15 +1680,20 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
 
 std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(
     TaskInCtld* task) {
+#ifdef HAVE_LUA
   if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
   return g_lua_pool->ExecuteLuaScript([task]() {
     return LuaJobHandler::JobSubmit(g_config.JobSubmitLuaScript, task);
   });
+#else
+  return std::nullopt;
+#endif
 }
 
 void TaskScheduler::JobModifyLuaCheck(
     const crane::grpc::ModifyTaskRequest& request,
     crane::grpc::ModifyTaskReply* response, std::list<task_id_t>* task_ids) {
+#ifdef HAVE_LUA
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
@@ -1725,6 +1732,7 @@ void TaskScheduler::JobModifyLuaCheck(
       task_ids->emplace_back(task_id);
     }
   }
+#endif
 }
 
 CraneExpected<std::future<CraneExpected<task_id_t>>>

@@ -22,10 +22,9 @@
 
 #ifdef HAVE_LUA
 #  include <sol/sol.hpp>
-#endif
 
-#include "AccountManager.h"
-#include "crane/Lua.h"
+#  include "crane/Lua.h"
+#endif
 
 namespace Ctld {
 
@@ -61,4 +60,6 @@ class LuaJobHandler {
 
 }  // namespace Ctld
 
+#ifdef HAVE_LUA
 inline std::unique_ptr<crane::LuaPool> g_lua_pool;
+#endif

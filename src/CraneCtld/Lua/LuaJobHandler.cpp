@@ -18,6 +18,7 @@
 
 #include "LuaJobHandler.h"
 
+#include "AccountManager.h"
 #include "CranedMetaContainer.h"
 #include "TaskScheduler.h"
 
