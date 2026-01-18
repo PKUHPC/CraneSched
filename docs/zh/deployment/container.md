@@ -363,7 +363,7 @@ SubID（从属用户/组 ID）配置用于容器用户命名空间的安全隔�
 
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
-| `SubId.Managed` | bool | `true` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：自动添加和验证 SubID 范围<br>- `false`：管理员自行配置 |
+| `Managed` | bool | `true` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：自动添加和验证 SubID 范围<br>- `false`：管理员自行配置 |
 | `RangeSize` | int | `65536` | 每个用户的 SubUID/SubGID 范围大小。必须大于 0，建议值为 65536 |
 | `BaseOffset` | int | `100000` | SubID 范围的基础偏移量。用于计算每个用户的范围：`start = BaseOffset + uid × RangeSize` |
 
@@ -373,10 +373,10 @@ BindFs 用于实现宿主机目录到容器内的用户 ID 映射挂载，解决
 
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
-| `BindFs.Enabled` | bool | `false` | 是否启用 BindFs 功能 |
-| `BindFs.BindfsBinary` | string | `bindfs` | bindfs 可执行文件路径 |
-| `BindFs.FusermountBinary` | string | `fusermount3` | fusermount 可执行文件路径（用于卸载 FUSE 文件系统） |
-| `BindFs.MountBaseDir` | string | `/mnt/crane` | BindFs 挂载点的基础目录。可以是绝对路径，或相对于 `CraneBaseDir` 的相对路径 |
+| `Enabled` | bool | `false` | 是否启用 BindFs 功能 |
+| `BindfsBinary` | string | `bindfs` | bindfs 可执行文件路径 |
+| `FusermountBinary` | string | `fusermount3` | fusermount 可执行文件路径（用于卸载 FUSE 文件系统） |
+| `MountBaseDir` | string | `/mnt/crane` | BindFs 挂载点的基础目录。可以是绝对路径，或相对于 `CraneBaseDir` 的相对路径 |
 
 ## 镜像管理
 

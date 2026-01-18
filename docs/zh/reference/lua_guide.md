@@ -1,12 +1,12 @@
 # Lua 脚本配置指南
 
-本文描述 Crane 的 Lua 脚本配置以及它们的API。
+本文描述 Crane 的 Lua 脚本配置以及它们的 API。
 
-## Lua实现函数
-编写lua脚本时，以下所有函数均为必需项。未实现的函数必须提供 stub。
+## Lua 实现函数
+编写 Lua 脚本时，以下所有函数均为必需项。未实现的函数必须提供 `stub`。
 
 ### crane_job_submit
-该函数由 **cranectld 守护进程**在接收到用户的作业提交参数时调用，
+该函数由 **cranectld 守护进程** 在接收到用户的作业提交参数时调用，
 无论使用的是何种命令（例如 `calloc`、`cbatch`）。
 只有用户明确指定的参数会出现在 `job_desc` 中；对于提交时未定义的字段，
 会使用 `0` 或 `nil`。
@@ -16,13 +16,13 @@
 注意：此函数可以访问 cranectld 的全局数据结构，例如用于检查可用的分区、预留等。
 
 ```lua
-function crane_job_submit(job_desc, part_list, submit_uid)
+function crane_job_submit(job_desc, part_list, uid)
 ```
 **参数：**
 
 * job_desc: 作业分配请求参数。
-* part_list: 用户有权限使用的分区列表（指针的列表）。
-* submit_uid: 发起请求的用户 ID。
+* part_list: 用户有权限使用的分区列表。
+* uid: 发起请求的用户 ID。
 
 **返回：**
 
@@ -30,43 +30,41 @@ function crane_job_submit(job_desc, part_list, submit_uid)
 * crane.ERROR — 作业提交因错误被拒绝。
 * crane.*（使用Crane错误码）根据定义的错误码拒绝提交。
 
-#### 注意
-由于 `job_desc` **只包含用户指定的值**，未定义的字段可通过检查是否为 `nil` 或 `0` 来识别。
-这允许站点实施策略，例如 *要求用户必须指定节点数*。
+!!! warning
+    由于 `job_desc` **只包含用户指定的值**，未定义的字段可通过检查是否为 `nil` 或 `0` 来识别。
+    这允许站点实施策略，例如 *要求用户必须指定节点数*。
 
 ### crane_job_modify
 该函数由 **cranectld 守护进程** 在接收到用户修改作业的参数时调用，
 无论使用的是何种命令（例如 ccontrol）。
 可用于记录和/或修改用户提交的作业修改参数。
 
-与 job_submit 类似，此函数也可以访问 cranectld 的全局数据结构，例如分区、预留等。
+与 `crane_job_submit` 类似，此函数也可以访问 cranectld 的全局数据结构，例如分区、预留等。
 ```lua
-function crane_job_modify(job_desc, job_ptr, part_list, submit_uid)
+function crane_job_modify(job_desc, job_ptr, part_list, uid)
 ```
 **参数：**
 
-- job_desc
-作业修改请求的参数规格。
-- job_ptr
-cranectld 当前保存的被修改作业的数据结构。
-- part_list
-该用户有权限使用的分区列表。
-- modify_uid
-发起作业修改操作的用户 ID。
+- job_desc: 作业修改请求的参数规格。
+- job_ptr: cranectld 当前保存的被修改作业的数据结构。
+- part_list: 该用户有权限使用的分区列表。
+- uid: 发起作业修改操作的用户 ID。
 
 **返回值：**  与 `crane_job_submit` 一致。
 
 
-## Lua脚本可用
+## Lua 脚本可用 API
 
 ### 可用函数
 
-| 函数名                                                        | 解释                |
-|------------------------------------------------------------|-------------------|
-| crane.get_job_env_field(job_desc, "env_name")              | 查询job的env字段的值     |
-| crane.set_job_env_field(job_desc, "env_name", "env_value") | 设置job的env字段       |
-| crane.log_error("msg")/log_info("msg")/log_debug("msg")    | 日志函数              |
-| crane.log_user("msg")                                      | 用户日志              |
+| 函数名                                                            | 解释                |
+|----------------------------------------------------------------|-------------------|
+| crane.get_job_env_field(job_desc, "env_name")                  | 查询 job 的 env 字段值   |
+| crane.set_job_env_field("env_name", "env_value", job_desc)     | 设置 job 的 env 字段    |
+| crane.get_qos_priority("qos_name")                             | 查询 QOS 的优先级        |
+| crane.get_resv("resv_name")                                    | 查询预约信息（不存在返回 nil） |
+| crane.log_error("msg")/crane.log_info("msg")/crane.log_debug("msg") | 日志函数              |
+| crane.log_user("msg")                                          | 用户日志              |
 
 ### 传入参数属性
 
@@ -78,7 +76,7 @@ cranectld 当前保存的被修改作业的数据结构。
 |-------------------------|---------|--------------|
 | time_limit              | number  | 时间限制         | 
 | partition_id            | string  | 作业所属分区       | 
-| requested_node_res_view | table   | 需求资源信息       | 
+| requested_node_res_view | ResourceView | 需求资源信息   | 
 | type                    | number  | 作业类型         |
 | uid                     | number  | 作业所属uid      |
 | gid                     | number  | 作业所属gid      |
@@ -88,21 +86,21 @@ cranectld 当前保存的被修改作业的数据结构。
 | node_num                | number  | 节点数目         |
 | ntasks_per_node         | number  | 每个节点的task数目  |
 | cpus_per_task           | number  | 每个task的cpu数目 |
-| included_nodes          | string  | 包含的节点        |
-| excluded_nodes          | string  | 排除的节点        |
+| included_nodes          | table(string list) | 包含的节点 |
+| excluded_nodes          | table(string list) | 排除的节点 |
 | requeue_if_failed       | boolean | 是否允许失败重试     |
 | get_user_env            | boolean | 是否获取用户环境变量   |
 | cmd_line                | string  | 作业命令行        |
-| env                     | table   | 环境变量         |
+| env                     | table(map) | 环境变量       |
 | cwd                     | string  | 作业执行目录       |
 | extra_attr              | string  | 额外的属性        |
 | reservation             | string  | 预约信息         |
 | begin_time              | number  | 作业开始时间       |
 | exclusive               | boolean | 是否独占节点       |
-| licenses_count          | table   | 许可证信息        |
+| licenses_count          | table(map) | 许可证信息     |
 
 #### part_list
-该用户有权限使用的分区
+该用户有权限使用的分区列表。
 
 | 属性名                 | 类型                 | 解释     |
 |---------------------|--------------------|--------|
@@ -121,7 +119,10 @@ cranectld 当前保存的被修改作业的数据结构。
 
 ### 全局变量
 
-#### crane.jobs or job_ptr
+#### crane.jobs
+
+`crane.jobs` 是全局作业表，值为 TaskInfo 结构。`job_ptr`（`crane_job_modify` 入参）
+也使用相同字段定义。
 
 | 属性名            | 类型           | 解释       |
 |----------------|--------------|----------|
@@ -152,9 +153,9 @@ cranectld 当前保存的被修改作业的数据结构。
 | pending_reason | string       | 排队原因     |
 | craned_list    | string       | 作业节点列表   |
 | elapsed_time   | number       | 已用时间     |
-| execution_node | string       | 作业执行节点   |
+| execution_node | table(string list) | 作业执行节点 |
 | exclusive      | boolean      | 作业是否独占节点 |
-| alloc_res_view | ResourceView | 已使用资源信息  |
+| allocated_res_view | ResourceView | 已使用资源信息 |
 | env            | table(map)   | 环境变量     |
 
 #### crane.reservations
@@ -175,21 +176,22 @@ cranectld 当前保存的被修改作业的数据结构。
 | denied_users     | table(string list) | 预约拒绝的用户 |
 
 ## Lua 脚本配置
-系统需安装Lua5.x版本及lua-devel。
 
-### Crane 编译
+系统需安装 Lua 5.x 版本及 lua-devel。
+
+### 构建配置
 ```shell
 # 详细查看打包指南
-cmake -G Ninja .. -DCRANE_WITH_LUA=true
+cmake -G Ninja .. -DCRANE_ENABLE_LUA=ON
 ```
 
-### /etc/crane/config.yaml
+### 系统配置
 
 ```yaml
 JobSubmitLuaScript: /path/to/your/job_submit.lua
 ```
 
-## Lua脚本样例
+## Lua 脚本样例
 
 ```lua
 function crane_job_submit(job_desc, part_list, uid)
@@ -320,7 +322,7 @@ function crane_job_submit(job_desc, part_list, uid)
     return crane.SUCCESS
 end
 
-function crane_job_modify(job_desc, job_rec, part_list, uid)
+function crane_job_modify(job_desc, job_ptr, part_list, uid)
     crane.log_info("==== crane_job_modify ====")
 
     return crane.SUCCESS

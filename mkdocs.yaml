@@ -140,7 +140,7 @@ plugins:
             Pending Reason: 作业排队原因
             License Usage Guide: 许可证使用指南
             Keepalived Guide: Keepalived 使用指南
-            Lua Guide: Lua脚本配置指南
+            Lua Guide: Lua 脚本配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
@@ -162,7 +162,7 @@ plugins:
             PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Container Deployment: 容器功能部署
-            Plugins: 插件
+            Plugins: 插件部署
         - locale: en
           name: English
           build: true

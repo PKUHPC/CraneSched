@@ -86,7 +86,7 @@ option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" O
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 
-option(CRANE_WITH_LUA "Enable lua" OFF)
+option(CRANE_ENABLE_LUA "Enable lua" OFF)
 
 # Options end here -------------------------------------------------------------------------------
 
@@ -286,7 +286,7 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
-if (CRANE_WITH_LUA)
+if (CRANE_ENABLE_LUA)
     find_package(Lua QUIET)
     if(LUA_FOUND)
         add_definitions(-DHAVE_LUA)

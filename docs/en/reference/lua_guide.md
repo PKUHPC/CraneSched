@@ -19,14 +19,14 @@ This function can be used to log and/or modify user-supplied job submission para
 Note: This function has access to global cranectld data structures, for example to inspect available partitions, reservations, etc.
 
 ```lua
-function crane_job_submit(job_desc, part_list, submit_uid)
+function crane_job_submit(job_desc, part_list, uid)
 ```
 
 **Parameters:**
 
 - **job_desc**: Job allocation request specification.
-- **part_list**: List of partitions (pointers) that the user is authorized to use.
-- **submit_uid**: User ID initiating the request.
+- **part_list**: List of partitions the user is authorized to use.
+- **uid**: User ID initiating the request.
 
 **Returns:**
 
@@ -46,7 +46,7 @@ It can be used to log and/or modify job modification parameters supplied by the 
 Like `crane_job_submit`, this function can also access global cranectld data structures, such as partitions and reservations.
 
 ```lua
-function crane_job_modify(job_desc, job_ptr, part_list, submit_uid)
+function crane_job_modify(job_desc, job_ptr, part_list, uid)
 ```
 
 **Parameters:**
@@ -60,22 +60,24 @@ function crane_job_modify(job_desc, job_ptr, part_list, submit_uid)
 - **part_list**  
   List of partitions the user is authorized to use.
 
-- **modify_uid**  
+- **uid**  
   User ID performing the modification.
 
 **Returns:**  
 Same as the return values of `crane_job_submit`.
 
-## Lua Script Availability
+## Lua Script APIs
 
 ### Available Functions
 
-| Function Name                                               | Description                                   |
-|------------------------------------------------------------|-----------------------------------------------|
-| crane.get_job_env_field(job_desc, "env_name")              | Query the value of a job's environment field  |
-| crane.set_job_env_field(job_desc, "env_name", "env_value") | Set the value of a job's environment field    |
-| crane.log_error("msg") / log_info("msg") / log_debug("msg")| Logging functions                             |
-| crane.log_user("msg")                                      | User-visible log message                     |
+| Function Name                                                    | Description                                      |
+|-----------------------------------------------------------------|--------------------------------------------------|
+| crane.get_job_env_field(job_desc, "env_name")                   | Query a job's environment field value            |
+| crane.set_job_env_field("env_name", "env_value", job_desc)      | Set a job's environment field                    |
+| crane.get_qos_priority("qos_name")                              | Query QoS priority                               |
+| crane.get_resv("resv_name")                                     | Query reservation info (nil if not found)        |
+| crane.log_error("msg") / crane.log_info("msg") / crane.log_debug("msg") | Logging functions                          |
+| crane.log_user("msg")                                           | User-visible log message                         |
 
 ---
 
@@ -87,7 +89,7 @@ Same as the return values of `crane_job_submit`.
 |---------------------------|---------|-----------------------------------------------|
 | time_limit                | number  | Time limit                                    |
 | partition_id              | string  | Partition to which the job belongs            |
-| requested_node_res_view   | table   | Requested resource information                |
+| requested_node_res_view   | ResourceView | Requested resource information           |
 | type                      | number  | Job type                                      |
 | uid                       | number  | UID of the job owner                          |
 | gid                       | number  | GID of the job owner                          |
@@ -97,18 +99,18 @@ Same as the return values of `crane_job_submit`.
 | node_num                  | number  | Number of nodes                               |
 | ntasks_per_node           | number  | Number of tasks per node                      |
 | cpus_per_task             | number  | Number of CPUs per task                       |
-| included_nodes            | string  | Nodes explicitly included                    |
-| excluded_nodes            | string  | Nodes explicitly excluded                    |
+| included_nodes            | table(string list) | Nodes explicitly included            |
+| excluded_nodes            | table(string list) | Nodes explicitly excluded            |
 | requeue_if_failed         | boolean | Whether the job can be requeued on failure    |
 | get_user_env              | boolean | Whether to load user environment variables    |
 | cmd_line                  | string  | Job command line                              |
-| env                       | table   | Environment variables                         |
+| env                       | table(map) | Environment variables                      |
 | cwd                       | string  | Working directory of the job                  |
 | extra_attr                | string  | Extra attributes                              |
 | reservation               | string  | Reservation information                      |
 | begin_time                | number  | Job start time                                |
 | exclusive                 | boolean | Whether to run in exclusive node mode         |
-| licenses_count            | table   | License information                           |
+| licenses_count            | table(map) | License information                        |
 
 
 ---
@@ -134,7 +136,10 @@ Same as the return values of `crane_job_submit`.
 
 ### Global Variables
 
-#### crane.jobs or job_ptr
+#### crane.jobs
+
+`crane.jobs` is a global job table with TaskInfo values. `job_ptr` (argument to
+`crane_job_modify`) uses the same field definitions.
 
 | Attribute Name | Type           | Description                              |
 |----------------|----------------|------------------------------------------|
@@ -165,9 +170,9 @@ Same as the return values of `crane_job_submit`.
 | pending_reason | string         | Reason for being pending                 |
 | craned_list    | string         | List of nodes allocated to the job       |
 | elapsed_time   | number         | Elapsed execution time                   |
-| execution_node | string         | Job execution node                       |
+| execution_node | table(string list) | Job execution node                   |
 | exclusive      | boolean        | Whether the job runs in exclusive mode   |
-| alloc_res_view | ResourceView   | Allocated (in-use) resource information |
+| allocated_res_view | ResourceView | Allocated (in-use) resource information |
 | env            | table(map)     | Environment variables                   |
 
 ---
@@ -197,7 +202,7 @@ The system needs to have Lua version 5.x and lua-devel installed.
 ### Crane compilation
 ```shell
 # Check the packaging guide for details
-cmake -G Ninja .. -DCRANE_WITH_LUA=true
+cmake -G Ninja .. -DCRANE_ENABLE_LUA=true
 ```
 
 ### /etc/crane/config.yaml
@@ -337,7 +342,7 @@ function crane_job_submit(job_desc, part_list, uid)
     return crane.SUCCESS
 end
 
-function crane_job_modify(job_desc, job_rec, part_list, uid)
+function crane_job_modify(job_desc, job_ptr, part_list, uid)
     crane.log_info("==== crane_job_modify ====")
 
     return crane.SUCCESS

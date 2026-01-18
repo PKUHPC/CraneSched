@@ -361,7 +361,7 @@ SubID (subordinate user/group IDs) configuration is used for secure container us
 
 | Field | Type | Default | Description |
 |:-----|:-----|:-------|:-----|
-| `SubId.Managed` | bool | `true` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically adds and validates SubID ranges<br>- `false`: managed by the administrator |
+| `Managed` | bool | `true` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically adds and validates SubID ranges<br>- `false`: managed by the administrator |
 | `RangeSize` | int | `65536` | Size of SubUID/SubGID range per user. Must be greater than 0; recommended value is 65536 |
 | `BaseOffset` | int | `100000` | Base offset for SubID ranges. Used to calculate each user's range: `start = BaseOffset + uid * RangeSize` |
 
@@ -371,10 +371,10 @@ BindFs implements user ID mapping mounts from host directories to containers, re
 
 | Field | Type | Default | Description |
 |:-----|:-----|:-------|:-----|
-| `BindFs.Enabled` | bool | `false` | Whether to enable BindFs |
-| `BindFs.BindfsBinary` | string | `bindfs` | Path to the bindfs executable |
-| `BindFs.FusermountBinary` | string | `fusermount3` | Path to the fusermount executable (used to unmount FUSE filesystems) |
-| `BindFs.MountBaseDir` | string | `/mnt/crane` | Base directory for BindFs mount points. Can be an absolute path or relative to `CraneBaseDir` |
+| `Enabled` | bool | `false` | Whether to enable BindFs |
+| `BindfsBinary` | string | `bindfs` | Path to the bindfs executable |
+| `FusermountBinary` | string | `fusermount3` | Path to the fusermount executable (used to unmount FUSE filesystems) |
+| `MountBaseDir` | string | `/mnt/crane` | Base directory for BindFs mount points. Can be an absolute path or relative to `CraneBaseDir` |
 
 ## Image Management
 

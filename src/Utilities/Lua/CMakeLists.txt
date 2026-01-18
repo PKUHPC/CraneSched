@@ -8,7 +8,7 @@ target_link_libraries(Utility_Lua PUBLIC
         spdlog::spdlog
         sol2
         Utility_PublicHeader
-        BS_thread_pool
+        bs_thread_pool
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
 )
 
