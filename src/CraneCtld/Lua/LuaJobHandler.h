@@ -21,8 +21,6 @@
 // Precompiled header comes first!
 
 #ifdef HAVE_LUA
-#  include <sol/sol.hpp>
-
 #  include "crane/Lua.h"
 #endif
 

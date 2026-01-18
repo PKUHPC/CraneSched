@@ -59,6 +59,8 @@ option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 
 option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)
 
+option(CRANE_ENABLE_LUA "Enable lua support" OFF)
+
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
@@ -85,8 +87,6 @@ option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" OFF)
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
-
-option(CRANE_ENABLE_LUA "Enable lua" OFF)
 
 # Options end here -------------------------------------------------------------------------------
 
