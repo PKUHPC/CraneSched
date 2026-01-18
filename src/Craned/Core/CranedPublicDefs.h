@@ -25,6 +25,7 @@
 #include "CommonPublicDefs.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/TracerManager.h"
 
 namespace Craned {
 
@@ -119,6 +120,12 @@ struct Config {
   };
   PluginConfig Plugin;
 
+  struct TracingConfig {
+    bool Enabled{false};
+    std::string Measurement{"crane_spans"};
+  };
+  TracingConfig Tracing;
+
   struct SupervisorConfig {
     std::filesystem::path Path;
     std::string DebugLevel;
@@ -168,6 +175,7 @@ inline Config g_config{};
 
 struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
+  inline crane::TracerManager* trace_ = nullptr;
 };
 
 inline RunTimeStatus g_runtime_status{};

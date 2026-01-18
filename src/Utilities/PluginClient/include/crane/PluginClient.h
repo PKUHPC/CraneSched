@@ -57,6 +57,7 @@ class PluginClient {
     UPDATE_POWER_STATE,
     REGISTER_CRANED,
     UPDATE_LICENSES,
+    INSERT_SPANS,
     HookTypeCount,
   };
 
@@ -90,6 +91,9 @@ class PluginClient {
   void UpdateLicensesHookAsync(
       const std::vector<crane::grpc::LicenseInfo>& licenses);
 
+  // Send OpenTelemetry spans encoded as Influx line protocol records
+  void InsertSpansHookAsync(const std::vector<std::string>& records);
+
  private:
   // HookDispatchFunc is a function pointer type that handles different
   // event.
@@ -113,6 +117,9 @@ class PluginClient {
   grpc::Status SendUpdateLicensesHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
 
+  grpc::Status SendInsertSpansHook_(grpc::ClientContext* context,
+                                    google::protobuf::Message* msg);
+
   void AsyncSendThread_();
 
   std::shared_ptr<Channel> m_channel_;
@@ -132,7 +139,8 @@ class PluginClient {
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
            &PluginClient::SendRegisterCranedHook_,
-           &PluginClient::SendUpdateLicensesHook_}};
+           &PluginClient::SendUpdateLicensesHook_,
+           &PluginClient::SendInsertSpansHook_}};
 };
 
 }  // namespace plugin

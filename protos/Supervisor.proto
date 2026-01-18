@@ -82,6 +82,12 @@ message InitSupervisorRequest {
   CforedListenConf cfored_listen_conf = 25;
   uint64 max_log_file_size = 26;
   uint64 max_log_file_num = 27;
+
+  message TracingConfig {
+    bool enabled = 1;
+    string measurement = 2;
+  }
+  TracingConfig tracing_config = 28;
 }
 
 message SupervisorReady {

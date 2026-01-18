@@ -1779,6 +1779,12 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   task->SetSubmitTime(absl::Now());
 
+  auto& tracer = crane::TracerManager::GetInstance();
+  task->trace_guard = tracer.StartSpan("Job.Lifecycle");
+  task->trace_guard.SetAttribute("user", task->Username());
+  task->trace_guard.SetAttribute("job_name", task->name);
+  task->trace_guard.AddEvent("Job Submitted");
+
   result = TaskScheduler::HandleUnsetOptionalInTaskToCtld(task.get());
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
@@ -3044,6 +3050,10 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
       uint32_t pos = accepted_tasks.size() - 1 - i;
       task_id_t id = accepted_tasks[pos].first->TaskId();
+      auto& task_ptr = accepted_tasks[pos].first;
+      task_ptr->trace_guard.SetAttribute("job_id", id);
+      task_ptr->trace_guard.AddEvent("Job Accepted");
+
       auto& task_id_promise = accepted_tasks[pos].second;
       auto* job = accepted_tasks[pos].first.get();
       std::vector<std::pair<crane::grpc::DependencyType, task_id_t>>

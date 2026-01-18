@@ -179,6 +179,10 @@ Supervisor:
   # max files of supervisor log file
   MaxLogFileNum: 3
 
+Tracing:
+  Enabled: true
+  Measurement: crane_spans
+
 Container:
   # Toggle the container support in CraneSched
   Enabled: false

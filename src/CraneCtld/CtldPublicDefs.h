@@ -23,6 +23,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include "crane/TracerManager.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -166,6 +167,12 @@ struct Config {
     bool Enabled{false};
   };
   ContainerConfig Container;
+
+  struct TracingConfig {
+    bool Enabled{false};
+    std::string Measurement{"crane_spans"};
+  };
+  TracingConfig Tracing;
 
   bool CompressedRpc{};
 
@@ -889,6 +896,8 @@ struct TaskInCtld {
 
   double mandated_priority{0.0};
 
+  crane::TraceGuard trace_guard;
+
   // Helper function
  public:
   // =================== Get Attr ==================
@@ -1404,3 +1413,4 @@ struct PdJobInScheduler {
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
+inline crane::TracerManager* trace_ = nullptr;
