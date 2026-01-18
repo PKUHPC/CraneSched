@@ -168,6 +168,12 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct TracingConfig {
+    bool Enabled{false};
+    std::string Measurement{"crane_spans"};
+  };
+  TracingConfig Tracing;
+
   bool CompressedRpc{};
 
   std::string CraneClusterName;
@@ -1313,3 +1319,4 @@ struct Txn {
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
+inline crane::TracerManager* trace_ = nullptr;

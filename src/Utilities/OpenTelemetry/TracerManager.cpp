@@ -19,10 +19,8 @@
 #include "crane/TracerManager.h"
 
 #ifdef CRANE_ENABLE_TRACING
-#  include <fstream>
 
 #  include "crane/InfluxDbExporter.h"
-#  include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
@@ -73,47 +71,6 @@ void TraceGuard::AddEvent(const std::string& event_name) {
 TracerManager& TracerManager::GetInstance() {
   static TracerManager instance;
   return instance;
-}
-
-bool TracerManager::Initialize(const std::string& output_file_path,
-                               const std::string& service_name) {
-#ifdef CRANE_ENABLE_TRACING
-  namespace trace_api = opentelemetry::trace;
-  namespace trace_sdk = opentelemetry::sdk::trace;
-  namespace resource = opentelemetry::sdk::resource;
-
-  service_name_ = service_name;
-
-  output_stream_ = std::make_shared<std::ofstream>(
-      output_file_path, std::ios::out | std::ios::app);
-  if (!static_cast<std::ofstream*>(output_stream_.get())->is_open()) {
-    return false;
-  }
-
-  auto exporter =
-      opentelemetry::exporter::trace::OStreamSpanExporterFactory::Create(
-          *output_stream_);
-
-  auto processor =
-      trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));
-
-  auto resource_attributes = resource::ResourceAttributes{
-      {resource::SemanticConventions::kServiceName, service_name_}};
-  auto resource_ptr = resource::Resource::Create(resource_attributes);
-
-  auto provider = std::make_shared<trace_sdk::TracerProvider>(
-      std::move(processor), resource_ptr);
-  tracer_provider_ = provider;
-
-  trace_api::Provider::SetTracerProvider(tracer_provider_);
-
-  tracer_ = tracer_provider_->GetTracer(service_name_);
-
-  initialized_ = true;
-  return true;
-#else
-  return false;
-#endif
 }
 
 #ifdef CRANE_ENABLE_TRACING

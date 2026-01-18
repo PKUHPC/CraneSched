@@ -308,6 +308,16 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
+      if (config["Tracing"]) {
+        if (config["Tracing"]["Enabled"]) {
+          g_config.Tracing.Enabled = config["Tracing"]["Enabled"].as<bool>();
+        }
+        if (config["Tracing"]["Measurement"]) {
+          g_config.Tracing.Measurement =
+              config["Tracing"]["Measurement"].as<std::string>();
+        }
+      }
+
       ParseCranedConfig(config);
 
       // spdlog should be initialized as soon as possible
@@ -1020,6 +1030,14 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
+  trace_ = &crane::TracerManager::GetInstance();
+  if (g_config.Plugin.Enabled && g_config.Tracing.Enabled) {
+    crane::PluginSpanConfig span_config;
+    span_config.measurement = g_config.Tracing.Measurement;
+    trace_->Initialize(span_config, "craned");
+    CRANE_INFO("[Tracing] TracerManager initialized...");
+  }
+
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 
@@ -1077,6 +1095,8 @@ void WaitForStopAndDoGvarFini() {
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
+
+  if (trace_) trace_->Shutdown();
 
   std::exit(0);
 }

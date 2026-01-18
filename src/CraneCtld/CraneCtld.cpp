@@ -705,6 +705,15 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Tracing"]) {
+        auto tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+        if (tracing_config["Measurement"])
+          g_config.Tracing.Measurement =
+              tracing_config["Measurement"].as<std::string>();
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
@@ -862,6 +871,8 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+  if (trace_) trace_->Shutdown();
+
   g_task_scheduler.reset();
   g_craned_keeper.reset();
 
@@ -910,6 +921,14 @@ void InitializeCtldGlobalVariables() {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+    trace_ = &crane::TracerManager::GetInstance();
+    if (g_config.Plugin.Enabled && g_config.Tracing.Enabled) {
+      crane::PluginSpanConfig span_config;
+      span_config.measurement = g_config.Tracing.Measurement;
+      trace_->Initialize(span_config, "cranectld");
+      CRANE_INFO("[Tracing] TracerManager initialized with measurement: {}",
+                 span_config.measurement);
+    }
   }
 
   if (g_config.VaultConf.Enabled) {
@@ -1120,12 +1139,6 @@ int main(int argc, char** argv) {
   ParseConfig(argc, argv);
   CheckSingleton();
   InstallStackTraceHooks();
-
-  // Test OpenTelemetry tracing
-  auto& tracer = crane::TracerManager::GetInstance();
-  std::string trace_file =
-      "/nfs/home/interntwo/crane/CraneSched/output/cranectld_traces.json";
-  tracer.Initialize(trace_file, "cranectld");
 
   if (g_config.CraneCtldForeground)
     StartServer();

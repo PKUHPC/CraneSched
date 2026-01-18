@@ -640,6 +640,12 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
 
+    if (g_config.Tracing.Enabled) {
+      auto* tracing_conf = init_req.mutable_tracing_config();
+      tracing_conf->set_enabled(true);
+      tracing_conf->set_measurement(g_config.Tracing.Measurement);
+    }
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
