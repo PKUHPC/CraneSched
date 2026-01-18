@@ -230,7 +230,24 @@ Meta CNI 需要经过配置才能正常使用。
       ```
     该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
 
-### 可选依赖
+### 高级特性
+
+鹤思容器功能具备一些高级特性，需要额外配置：
+
+- **Fake Root (User Namespace)**: 通过用户命名空间实现容器内“假 root”权限隔离，需配置 **SubID**。如需挂载目录，且底层文件系统不支持 ID Mapped Mounts，则需安装 **BindFs**。
+
+#### SubID
+
+!!! note
+    鹤思系统支持自动管理 SubUID/SubGID 范围（“Managed” 模式）。如需自行管理 SubID，请按以下说明操作。
+
+“Managed” 模式下，鹤思通过 `BaseOffset + ID × RangeSize` 计算每个用户的 SubUID/SubGID 范围起始值，并维护 `/etc/subuid` 等系统文件。若该模式无法满足需求，可手动管理或使用外部服务。
+
+“Unmanaged” 模式下，鹤思仅通过 `shadow-utils` 的 API 获取系统中的 SubID 信息。因此，管理员必须确保集群内所有节点上的用户具有一致的、不冲突的 SubID 范围。管理员可以手动填写 `/etc/subuid` 和 `/etc/subgid` 文件，或通过 LDAP 服务器集中管理。
+
+部分系统可通过 sssd 服务从 LDAP 服务器获取 SubID 信息。请参考 FreeIPA、OpenLDAP 等解决方案的文档进行配置。
+
+要切换 SubID 管理模式，或对 Managed 模式的参数进行调整，请参见下文的[容器配置说明](#容器配置说明)部分。
 
 #### BindFs
 
@@ -313,6 +330,15 @@ Container:
   
   # CRI 镜像服务套接字（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
+
+  # SubUID/SubGID 配置
+  SubId:
+    # 是否自动管理 SubID 范围
+    Managed: true
+    # 每个用户的 SubUID/SubGID 范围大小
+    RangeSize: 65536
+    # SubUID/SubGID 范围的基础偏移量
+    BaseOffset: 100000
   
   # BindFs 配置（可选，用于用户命名空间映射）
   BindFs:
@@ -330,6 +356,16 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | 容器运行期间的临时数据目录，相对于 `CraneBaseDir`。存储容器元数据、日志等 |
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
+
+### SubID 配置
+
+SubID（从属用户/组 ID）配置用于容器用户命名空间的安全隔离。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|:-----|:-----|:-------|:-----|
+| `SubId.Managed` | bool | `true` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：自动添加和验证 SubID 范围<br>- `false`：管理员自行配置 |
+| `RangeSize` | int | `65536` | 每个用户的 SubUID/SubGID 范围大小。必须大于 0，建议值为 65536 |
+| `BaseOffset` | int | `100000` | SubID 范围的基础偏移量。用于计算每个用户的范围：`start = BaseOffset + uid × RangeSize` |
 
 ### BindFs 配置
 

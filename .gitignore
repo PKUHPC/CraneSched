@@ -1,4 +1,5 @@
-generated
+# Generated files
+generated/
 cmake-build-*
 build/
 site/
@@ -16,9 +17,7 @@ dependencies/.extracted
 ### JetBrains template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
 # Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
-
 .idea
-
 .idea/misc.xml
 
 # Deployment stuff. Containing some personal info.
@@ -44,26 +43,6 @@ dependencies/.extracted
 .idea/**/dynamic.xml
 .idea/**/uiDesigner.xml
 .idea/**/dbnavigator.xml
-
-# Gradle
-.idea/**/gradle.xml
-.idea/**/libraries
-
-# Gradle and Maven with auto-import
-# When using Gradle or Maven with auto-import, you should exclude module files,
-# since they will be recreated, and may cause churn.  Uncomment if using
-# auto-import.
-# .idea/artifacts
-# .idea/compiler.xml
-# .idea/jarRepositories.xml
-# .idea/modules.xml
-# .idea/*.iml
-# .idea/modules
-# *.iml
-# *.ipr
-
-# CMake
-cmake-build-*/
 
 # Mongo Explorer plugin
 .idea/**/mongoSettings.xml
@@ -97,5 +76,10 @@ fabric.properties
 .idea/misc.xml
 .idea/misc.xml
 
-# VS Code
+# VS Code 
 .vscode/
+
+# Agents
+.claude/
+CLAUDE.md
+AGENTS.md

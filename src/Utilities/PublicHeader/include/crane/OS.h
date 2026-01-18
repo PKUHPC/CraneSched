@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <set>
+#include <string>
 
 struct SystemRelInfo {
   std::string name;

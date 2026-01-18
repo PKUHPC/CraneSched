@@ -63,6 +63,12 @@ struct Config {
       std::filesystem::path MountBaseDir{"/mnt/crane"};
     };
     BindFsConfig BindFs;
+    struct SubIdConfig {
+      bool Managed{true};
+      uint64_t RangeSize{65536};
+      uint64_t BaseOffset{100000};
+    };
+    SubIdConfig SubId;
   };
   ContainerConfig Container;
 

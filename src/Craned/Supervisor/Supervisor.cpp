@@ -139,6 +139,12 @@ int InitFromStdin(int argc, char** argv) {
           bindfs_conf.fusermount_binary();
       g_config.Container.BindFs.MountBaseDir = bindfs_conf.mount_base_dir();
     }
+    if (msg.container_config().has_subid()) {
+      const auto& subid_conf = msg.container_config().subid();
+      g_config.Container.SubId.Managed = subid_conf.managed();
+      g_config.Container.SubId.RangeSize = subid_conf.range_size();
+      g_config.Container.SubId.BaseOffset = subid_conf.base_offset();
+    }
   }
 
   // Plugin config

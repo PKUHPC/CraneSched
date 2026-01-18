@@ -360,26 +360,18 @@ CraneSched supports running jobs in containers through CRI (Container Runtime In
 Container:
   # Enable container support (experimental)
   Enabled: false
-  
+
   # Temporary directory for container data (relative to CraneBaseDir)
   TempDir: supervisor/containers/
-  
+
   # Path to container runtime socket
   RuntimeEndpoint: /run/containerd/containerd.sock
-  
+
   # Path to image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 ```
 
-!!! info "Experimental Feature"
-    Container support is currently experimental. There may be limitations and problems.
-
-**Requirements:**
-
-- CRI-compatible runtime (containerd or CRI-O) installed on compute nodes
-- Runtime socket accessible with appropriate permissions
-- Container images available or accessible from registries
-
+For more container-related configuration, see the [Container runtime configuration guide](../container.md).
 
 ## Applying Changes
 

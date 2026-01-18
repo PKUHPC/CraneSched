@@ -18,12 +18,19 @@
 
 #pragma once
 
+#include <fcntl.h>
 #include <pwd.h>
+#include <unistd.h>
 
+#include <cerrno>
+#include <concepts>
 #include <cstdlib>
+#include <cstring>
+#include <expected>
 #include <stdexcept>
 #include <string>
 
+#include "crane/FileLock.h"
 #include "crane/Logger.h"
 
 extern "C" {
@@ -98,6 +105,67 @@ class PasswordEntry {
     if (s_passwd_size_ == -1) s_passwd_size_ = 16384;
   }
 
+  static std::expected<void, std::string> EnsureSubIdRanges(
+      const std::string& owner, uint64_t uid_start, uint64_t uid_count,
+      uint64_t gid_start, uint64_t gid_count) {
+#if defined(__linux__) || defined(__unix__)
+    const char* subuid_path = "/etc/subuid";
+    const char* subgid_path = "/etc/subgid";
+
+    // Acquire locks in fixed order to avoid deadlock
+    auto uid_lock = util::AcquireWriteLock(subuid_path);
+    if (!uid_lock) {
+      return std::unexpected(
+          std::format("Failed to lock {}: {}", subuid_path, uid_lock.error()));
+    }
+
+    auto gid_lock = util::AcquireWriteLock(subgid_path);
+    if (!gid_lock) {
+      return std::unexpected(
+          std::format("Failed to lock {}: {}", subgid_path, gid_lock.error()));
+    }
+
+    // Re-check via libsubid after locking to detect races
+    struct subid_range* uid_ranges = nullptr;
+    struct subid_range* gid_ranges = nullptr;
+    int uid_count_check = subid_get_uid_ranges(owner.c_str(), &uid_ranges);
+    int gid_count_check = subid_get_gid_ranges(owner.c_str(), &gid_ranges);
+
+    auto free_ranges = [&]() {
+      if (uid_ranges != nullptr) subid_free(uid_ranges);
+      if (gid_ranges != nullptr) subid_free(gid_ranges);
+    };
+
+    // Append uid mapping if missing
+    if (uid_count_check <= 0) {
+      auto append_result = AddSubIdEntry_(uid_lock->GetFileDescriptor(), owner,
+                                          uid_start, uid_count);
+      if (!append_result) {
+        free_ranges();
+        return std::unexpected(append_result.error());
+      }
+    }
+
+    // Append gid mapping if missing
+    if (gid_count_check <= 0) {
+      auto append_result = AddSubIdEntry_(gid_lock->GetFileDescriptor(), owner,
+                                          gid_start, gid_count);
+      if (!append_result) {
+        free_ranges();
+        return std::unexpected(append_result.error());
+      }
+    }
+
+    // Free libsubid allocated memory
+    free_ranges();
+
+    // Locks are automatically released by RAII
+    return {};
+#else
+#  error "Unsupported OS"
+#endif
+  }
+
   explicit PasswordEntry(uid_t uid) { Init(uid); }
   PasswordEntry() = default;
   void Init(uid_t uid) {
@@ -151,6 +219,30 @@ class PasswordEntry {
   }
 
  private:
+  static std::expected<void, std::string> AddSubIdEntry_(
+      int fd, const std::string& owner, uint64_t start, uint64_t count) {
+#if defined(__linux__) || defined(__unix__)
+    // Seek to end to ensure append despite concurrent writes
+    if (lseek(fd, 0, SEEK_END) == -1) {
+      return std::unexpected(std::format("lseek failed: {}", strerror(errno)));
+    }
+
+    std::string entry = std::format("{}:{}:{}\n", owner, start, count);
+    ssize_t written = write(fd, entry.c_str(), entry.size());
+    if (written != static_cast<ssize_t>(entry.size())) {
+      return std::unexpected(std::format(
+          "write failed: {}", written == -1 ? strerror(errno) : "short write"));
+    }
+    if (fsync(fd) == -1) {
+      return std::unexpected(std::format("fsync failed: {}", strerror(errno)));
+    }
+
+    return {};
+#else
+#  error "Unsupported OS"
+#endif
+  }
+
   bool m_valid_{false};
   uid_t m_uid_{};
 

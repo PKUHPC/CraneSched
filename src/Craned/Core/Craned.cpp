@@ -680,6 +680,19 @@ void ParseConfig(int argc, char** argv) {
               g_config.Container.BindFs.MountBaseDir =
                   std::move(mount_base_dir);
             }
+            if (container_config["SubId"]) {
+              const auto& subid_config = container_config["SubId"];
+              g_config.Container.SubId.Managed =
+                  YamlValueOr<bool>(subid_config["Managed"], true);
+              g_config.Container.SubId.RangeSize =
+                  YamlValueOr<uint64_t>(subid_config["RangeSize"], 65536);
+              g_config.Container.SubId.BaseOffset =
+                  YamlValueOr<uint64_t>(subid_config["BaseOffset"], 100000);
+            }
+            if (g_config.Container.SubId.RangeSize == 0) {
+              CRANE_ERROR("Container.SubId.RangeSize must be > 0");
+              std::exit(1);
+            }
           }
         }
       }

@@ -53,6 +53,13 @@ message InitSupervisorRequest {
       string mount_base_dir = 3;
     }
     BindFsConfig bindfs = 4;
+
+    message SubIdConfig {
+      bool managed = 1;
+      uint64 range_size = 2;
+      uint64 base_offset = 3;
+    }
+    SubIdConfig subid = 5;
   }
   ContainerConfig container_config = 15;
 

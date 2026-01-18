@@ -40,6 +40,9 @@
 
 namespace util {
 
+using CertPair = std::pair<std::string,   // CN
+                           std::string>;  // serial number
+
 template <typename T = std::string, typename YamlNode, typename DefaultType>
   requires requires(const YamlNode& node) {
     { node.template as<T>() };
@@ -48,8 +51,29 @@ T YamlValueOr(const YamlNode& node, const DefaultType& default_value) {
   return node ? node.template as<T>() : default_value;
 }
 
-using CertPair = std::pair<std::string,   // CN
-                           std::string>;  // serial number
+template <class T>
+concept BuiltinOverflowInt =
+    std::integral<T> && (!std::same_as<std::remove_cvref_t<T>, bool>);
+
+template <typename T>
+  requires BuiltinOverflowInt<T>
+inline bool AddOverflow(T a, T b, T& out) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_add_overflow(a, b, &out);
+#else
+#  error "AddOverflow is not implemented for this compiler"
+#endif
+}
+
+template <typename T>
+  requires BuiltinOverflowInt<T>
+inline bool MulOverflow(T a, T b, T& out) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_mul_overflow(a, b, &out);
+#else
+#  error "MulOverflow is not implemented for this compiler"
+#endif
+}
 
 uint32_t Crc32Of(std::string_view data, uint32_t seed = 0);
 uint32_t Adler32Of(std::string_view data, uint32_t seed = 1);

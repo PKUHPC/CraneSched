@@ -633,6 +633,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
         bindfs_conf->set_mount_base_dir(
             g_config.Container.BindFs.MountBaseDir.string());
       }
+      auto* subid_conf = container_conf->mutable_subid();
+      subid_conf->set_managed(g_config.Container.SubId.Managed);
+      subid_conf->set_range_size(g_config.Container.SubId.RangeSize);
+      subid_conf->set_base_offset(g_config.Container.SubId.BaseOffset);
     }
 
     if (g_config.Plugin.Enabled) {
