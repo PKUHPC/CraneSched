@@ -31,7 +31,7 @@ CraneCtldForInternalListenPort: 10013
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
 CraneCtldLogFile: cranectld/cranectld.log
-# file path of cranectld lock file (relative to CraneBaseDir, when set Keepalived, Relative to CraneNFSBaseDir)
+# file path of cranectld lock file (relative to CraneBaseDir. When using Keepalived, relative to CraneSharedBaseDir)
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
@@ -45,7 +45,7 @@ CraneCtld:
 
 Keepalived:
   # the base directory of NFS storage
-  CraneNFSBaseDir: /var/crane/
+  CraneSharedBaseDir: /var/crane/
   # file path of cranectld alive file (relative to CraneBaseDir)
   CraneCtldAliveFile: cranectld/cranectld.alive
 
@@ -159,7 +159,7 @@ AllLicenseResourcesAbsolute: false
 RejectJobsBeyondCapacity: false
 
 # Set the wckey
-#TrackWCKey: Yes
+# TrackWCKey: Yes
 
 # Set the mode for opening output and error files
 # Default value is false.
@@ -193,7 +193,7 @@ Container:
     Managed: true
     RangeSize: 65536
     BaseOffset: 100000
-  # BindFS settings
+  # BindFS configuration
   BindFs:
     Enabled: false
     BindfsBinary: /usr/bin/bindfs

@@ -181,12 +181,13 @@ void ParseConfig(int argc, char** argv) {
       if (config["Keepalived"]) {
         auto& g_keepalived_config = g_config.KeepalivedConfig;
         const auto& keepalived_config = config["Keepalived"];
-        if (keepalived_config["CraneNFSBaseDir"]) {
-          g_keepalived_config.CraneNFSBaseDir =
-              keepalived_config["CraneNFSBaseDir"].as<std::string>();
+        if (keepalived_config["CraneSharedBaseDir"]) {
+          g_keepalived_config.CraneSharedBaseDir =
+              keepalived_config["CraneSharedBaseDir"].as<std::string>();
         } else {
           CRANE_ERROR(
-              "Keepalived.CraneNFSBaseDir is not set in configuration file.");
+              "Keepalived.CraneSharedBaseDir is not set in configuration "
+              "file.");
           exit(1);
         }
         g_keepalived_config.CraneCtldAliveFile =
@@ -194,9 +195,9 @@ void ParseConfig(int argc, char** argv) {
             YamlValueOr(keepalived_config["CraneCtldAliveFile"],
                         kDefaultCraneCtldAlivePath);
         // When keepalived is set, the mutex file directory is located in
-        // CraneNFSBaseDir.
+        // CraneSharedBaseDir.
         g_config.CraneCtldMutexFilePath =
-            g_keepalived_config.CraneNFSBaseDir /
+            g_keepalived_config.CraneSharedBaseDir /
             YamlValueOr(config["CraneCtldMutexFilePath"],
                         kDefaultCraneCtldMutexFile);
       }
@@ -729,8 +730,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneEmbeddedDbBackend = "Unqlite";
 
       std::filesystem::path db_base_dir = g_config.CraneBaseDir;
-      if (!g_config.KeepalivedConfig.CraneNFSBaseDir.empty())
-        db_base_dir = g_config.KeepalivedConfig.CraneNFSBaseDir;
+      if (!g_config.KeepalivedConfig.CraneSharedBaseDir.empty())
+        db_base_dir = g_config.KeepalivedConfig.CraneSharedBaseDir;
 
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull()) {
         std::filesystem::path path(config["CraneCtldDbPath"].as<std::string>());
@@ -937,8 +938,14 @@ void InitializeCtldGlobalVariables() {
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
 
   if (!g_config.JobSubmitLuaScript.empty()) {
+#ifdef HAVE_LUA
     g_lua_pool = std::make_unique<crane::LuaPool>();
     if (!g_lua_pool->Init()) std::exit(1);
+#else
+    CRANE_WARN(
+        "JobSubmitLuaScript is configured but CraneCtld was built without Lua "
+        "support. The Lua script will NOT be executed.");
+#endif
   }
 
   bool ok;

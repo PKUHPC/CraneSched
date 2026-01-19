@@ -43,6 +43,7 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
+        $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
         uvw
 
         cxxopts
@@ -67,8 +68,6 @@ target_link_libraries(cranectld PRIVATE
         range-v3::range-v3
 
         Backward::Interface
-        $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
-        sol2
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
@@ -89,8 +88,4 @@ endif ()
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(cranectld PRIVATE stdc++fs)
-endif ()
-
-if (${LUA_FOUND})
-    target_include_directories(cranectld PRIVATE ${LUA_INCLUDE_DIR})
 endif ()

@@ -13,8 +13,8 @@ dnf install keepalived
 ### Crane Config 配置（/etc/crane/config.yaml）
 ```yaml
 Keepalived:
-  # the base directory of NFS storage
-  CraneNFSBaseDir: /var/crane/
+  # the base directory on a shared storage
+  CraneSharedBaseDir: /var/crane/
   # file path of cranectld alive file (relative to CraneBaseDir)
   CraneCtldAliveFile: cranectld/cranectld.alive
 ```

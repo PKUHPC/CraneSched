@@ -210,7 +210,7 @@ struct Config {
   bool WckeyValid{false};
 
   struct KeepalivedConfig {
-    std::filesystem::path CraneNFSBaseDir;
+    std::filesystem::path CraneSharedBaseDir;
     std::filesystem::path CraneCtldAliveFile;
   };
   KeepalivedConfig KeepalivedConfig;

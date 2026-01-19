@@ -21,11 +21,8 @@
 // Precompiled header comes first!
 
 #ifdef HAVE_LUA
-#  include <sol/sol.hpp>
+#  include "crane/Lua.h"
 #endif
-
-#include "AccountManager.h"
-#include "crane/Lua.h"
 
 namespace Ctld {
 
@@ -61,4 +58,6 @@ class LuaJobHandler {
 
 }  // namespace Ctld
 
+#ifdef HAVE_LUA
 inline std::unique_ptr<crane::LuaPool> g_lua_pool;
+#endif

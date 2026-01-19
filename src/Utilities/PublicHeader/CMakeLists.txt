@@ -10,9 +10,7 @@ add_library(Utility_PublicHeader
         include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h
         GrpcHelper.cpp
-        include/crane/GrpcHelper.h
-        Lua.cpp
-        include/crane/Lua.h)
+        include/crane/GrpcHelper.h)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
@@ -22,13 +20,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         Subid::subid
         bs_thread_pool
         Utility_FileLock
-        $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
-        sol2
 )
-
-if (${LUA_FOUND})
-    target_include_directories(Utility_PublicHeader PRIVATE ${LUA_INCLUDE_DIR})
-endif ()
 
 # This trimmed version is used for PAM module
 # since -fPIC flag should be enabled for a dynamic library
