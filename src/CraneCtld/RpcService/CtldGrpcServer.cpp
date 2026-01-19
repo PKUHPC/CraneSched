@@ -181,6 +181,18 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
+    grpc::ServerContext* context,
+    const crane::grpc::UpdateNodeDrainStateRequest* request,
+    crane::grpc::UpdateNodeDrainStateReply* response) {
+  bool result = g_meta_container->UpdateNodeDrainState(
+      request->craned_id(), request->drain(), request->reason());
+
+  response->set_ok(result);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CforedStream(
     grpc::ServerContext* context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,

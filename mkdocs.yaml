@@ -98,6 +98,7 @@ nav:
         - Quick Start: reference/container/quickstart.md
         - Examples: reference/container/examples.md
         - Troubleshooting: reference/container/troubleshooting.md
+    - Prolog Epilog Guide: reference/prolog_epilog_guide.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -141,6 +142,7 @@ plugins:
             License Usage Guide: 许可证使用指南
             Keepalived Guide: Keepalived 使用指南
             Lua Guide: Lua 脚本配置指南
+            Prolog Epilog Guide: Prolog/Epilog 配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练

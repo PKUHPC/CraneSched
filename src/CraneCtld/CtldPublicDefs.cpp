@@ -482,6 +482,9 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
 
+  step.set_task_prolog(job.TaskToCtld().task_prolog());
+  step.set_task_epilog(job.TaskToCtld().task_epilog());
+
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -779,6 +782,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   }
 
   allocated_craneds_regex = job.allocated_craneds_regex;
+  task_prolog = job.TaskToCtld().task_prolog();
+  task_epilog = job.TaskToCtld().task_epilog();
 
   /* Field of StepToCtld proto */
   crane::grpc::StepToCtld step;
@@ -823,6 +828,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
+  step.set_task_prolog(job.TaskToCtld().task_prolog());
+  step.set_task_epilog(job.TaskToCtld().task_epilog());
 
   *MutableStepToCtld() = std::move(step);
 }
@@ -891,6 +898,10 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   SetStatus(crane::grpc::TaskStatus::Pending);
   SetHeld(false);
   SetStartTime(absl::Now());
+
+  task_prolog = step_to_ctld.task_prolog();
+  task_epilog = step_to_ctld.task_epilog();
+
   *MutableStepToCtld() = step_to_ctld;
 }
 
@@ -950,6 +961,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
       step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
     }
   }
+
+  step_to_d.set_task_prolog(task_prolog);
+  step_to_d.set_task_epilog(task_epilog);
 
   return step_to_d;
 }

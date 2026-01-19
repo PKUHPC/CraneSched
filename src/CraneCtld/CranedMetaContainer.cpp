@@ -855,6 +855,46 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
+bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
+                                               bool is_drain,
+                                               const std::string& reason) {
+  if (is_drain) LockResReduceEvents();
+
+  CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain,
+              reason);
+
+  if (!craned_meta_map_.Contains(craned_id)) {
+    CRANE_ERROR("Unknown craned_id '{}', cannot update drain state.",
+                craned_id);
+    if (is_drain) UnlockResReduceEvents();
+    return false;
+  }
+
+  auto craned_meta = craned_meta_map_[craned_id];
+
+  if (!craned_meta->alive) {
+    CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.",
+                craned_id);
+    if (is_drain) UnlockResReduceEvents();
+    return false;
+  }
+
+  if (craned_meta->drain == is_drain) {
+    if (is_drain) UnlockResReduceEvents();
+    return true;
+  }
+
+  craned_meta->drain = is_drain;
+  craned_meta->state_reason = reason;
+
+  if (is_drain) {
+    AddResReduceEventsAndUnlock({std::make_pair(
+        absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+  }
+
+  return true;
+}
+
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
     const std::string& partition_name, bool is_allowed_list,
     std::unordered_set<std::string>&& accounts) {

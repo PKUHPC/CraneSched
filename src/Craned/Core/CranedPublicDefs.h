@@ -168,6 +168,21 @@ struct Config {
       Ipv6ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
+
+  struct JobLifecycleHookConfig {
+    std::vector<std::string> Prologs;
+    std::vector<std::string> Epilogs;
+    uint32_t PrologTimeout{0};
+    uint32_t EpilogTimeout{0};
+    uint32_t PrologEpilogTimeout{0};
+    int PrologFlags{0};
+    uint64_t MaxOutputSize{0};
+
+    std::vector<std::string> TaskPrologs;
+    std::vector<std::string> TaskEpilogs;
+  };
+
+  JobLifecycleHookConfig JobLifecycleHook;
 };
 
 inline Config g_config{};

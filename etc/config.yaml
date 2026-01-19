@@ -94,6 +94,20 @@ PriorityWeightQoS: 1000000
 
 #JobSubmitLuaScript: /path/to/your/job_submit.lua
 
+#JobLifecycleHook:
+#  Prolog: /path/to/prolog.sh
+#  PrologTimeout: 60
+#  PrologFlags: Contain
+#  Epilog: /path/to/epilog.sh
+#  EpilogTimeout: 60
+#  PrologEpilogTimeout: 120
+#  CranectldProlog: /path/to/cranectld_prolog.sh
+#  CranectldEpilog: /path/to/cranectld_epilog.sh
+#  CrunProlog: /path/to/srun_prolog.sh
+#  CrunEpilog: /path/to/srun_epilog.sh
+#  TaskProlog: /path/to/task_prolog.sh
+#  TaskEpilog: /path/to/task_epilog.sh
+
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
