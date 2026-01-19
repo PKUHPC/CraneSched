@@ -2589,14 +2589,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B &&
             !m_step_.IsPrimary())
           continue;
-        if (signal.signal_time() > sec) {
+        if (signal.signal_time() >= sec) {
           CRANE_TRACE(
               "signal time of {}s > time_limit {}s, ignore this signal.",
               signal.signal_time(), sec);
           continue;
         }
         AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
-        CRANE_INFO("Add a signal time of {}s for signal", signal.signal_time(),
+        CRANE_INFO("Add a signal time of {}s for signal {}", signal.signal_time(),
                    signal.signal_number());
       }
     }
