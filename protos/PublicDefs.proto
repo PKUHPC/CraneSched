@@ -161,6 +161,17 @@ message DependencyStatus {
   }
 }
 
+message Signal {
+  int32 signal_number = 1;
+  uint32 signal_time = 2;  // seconds_before_kill
+  enum SignalFlag {
+    NONE = 0;
+    B = 1;
+    R = 2;
+  }
+  SignalFlag signal_flag = 3;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -221,6 +232,7 @@ message TaskToCtld {
   string submit_hostname = 43;
   string submit_dir = 44;
   optional uint64 mem_per_cpu = 45;
+  repeated Signal signals = 46;
 }
 
 message TaskInEmbeddedDb {
@@ -383,6 +395,7 @@ message StepToD {
   string submit_hostname = 26;
   uint32 total_gpus = 27;
   string submit_dir = 28;
+  repeated Signal signals = 30;
 
   // Not used now.
   string extra_attr = 29;

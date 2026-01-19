@@ -951,6 +951,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     }
   }
 
+  step_to_d.mutable_signals()->CopyFrom(job->TaskToCtld().signals());
+
   return step_to_d;
 }
 
