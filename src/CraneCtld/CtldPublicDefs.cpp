@@ -1090,7 +1090,7 @@ void CommonStepInCtld::StepStatusChange(
 
         std::unordered_set<step_id_t> pd_steps;
         // Cancel all other step with CANCELED status
-        absl::Time cancel_time = absl::Now();
+        const absl::Time& cancel_time = this->EndTime();
         for (const auto& comm_step : job->Steps() | std::views::values) {
           // All pending steps are crun steps, just set status to cancelled
           if (comm_step->Status() == crane::grpc::TaskStatus::Pending) {
