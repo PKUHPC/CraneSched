@@ -2596,8 +2596,8 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
           continue;
         }
         AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
-        CRANE_INFO("Add a signal time of {}s for signal {}", signal.signal_time(),
-                   signal.signal_number());
+        CRANE_INFO("Add a signal time of {}s for signal {}",
+                   signal.signal_time(), signal.signal_number());
       }
     }
 
