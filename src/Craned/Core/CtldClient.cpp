@@ -18,6 +18,8 @@
 
 #include "CtldClient.h"
 
+#include <random>
+
 #include "CranedServer.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
@@ -991,13 +993,17 @@ void CtldClient::HealthCheckThread_() {
   do {
     if (m_stopping_ || !m_stub_) return;
     if (!m_ping_ctld_) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
       last_check_time = std::chrono::steady_clock::now();
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
     }
+
     if (last_check_time + std::chrono::seconds(delay) >
-        std::chrono::steady_clock::now())
+        std::chrono::steady_clock::now()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
+    }
+
     if (NeedHealthCheck_()) HealthCheck_();
     last_check_time = std::chrono::steady_clock::now();
     if (g_config.HealthCheck.Cycle) {
