@@ -118,10 +118,6 @@ class AccountManager {
       const std::string& partition,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
       bool force);
-
-  CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
-                                crane::grpc::ModifyField modify_field,
-                                const std::string& value);
   CraneExpected<void> ModifyDefaultWckey(uint32_t uid, const std::string& name,
                                          const std::string& user_name);
   std::vector<CraneExpectedRich<void>> ModifyQos(
