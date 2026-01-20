@@ -18,7 +18,7 @@
 
 #include "crane/Lua.h"
 
-#include "crane/String.h"
+#include "crane/Logger.h"
 
 namespace crane {
 
