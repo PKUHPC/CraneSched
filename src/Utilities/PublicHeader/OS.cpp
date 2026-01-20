@@ -573,9 +573,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       }
       for (const auto& [name, value] : args.envs)
         if (setenv(name.c_str(), value.c_str(), 1)) {
-          fmt::print(stderr,
-                     "[Subprocess] Error: setenv() for {}={} failed.\n", name,
-                     value);
+          fmt::print(stderr, "[Subprocess] Error: setenv() for {}={} failed.\n",
+                     name, value);
           _exit(EXIT_FAILURE);
         }
 
