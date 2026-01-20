@@ -22,6 +22,15 @@
 
 namespace crane {
 
+// LuaEnvironment getter methods
+#ifdef HAVE_LUA
+sol::state& LuaEnvironment::GetLuaState() const { return *m_lua_state_ptr_; }
+
+sol::table LuaEnvironment::GetCraneTable() const { return m_crane_table_; }
+
+std::string LuaEnvironment::GetUserMsg() const { return m_user_msg_; }
+#endif
+
 bool LuaEnvironment::Init(const std::string& script) {
 #ifdef HAVE_LUA
   m_lua_script_ = script;
@@ -193,5 +202,36 @@ bool LuaEnvironment::CheckLuaScriptFunctions_(
 }
 
 #endif
+
+// LuaPool methods
+bool LuaPool::Init() {
+#ifndef HAVE_LUA
+  CRANE_ERROR("Lua is not enabled");
+  return false;
+#endif
+  m_thread_pool_ = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("LuaThreadPool"); });
+  return true;
+}
+
+std::future<CraneRichError> LuaPool::ExecuteLuaScript(
+    const std::string& lua_script) {
+  auto promise = std::make_shared<std::promise<CraneRichError>>();
+  std::future<CraneRichError> fut = promise->get_future();
+  m_thread_pool_->detach_task([lua_script, promise]() {
+    CraneRichError result;
+    auto lua_env = std::make_unique<crane::LuaEnvironment>();
+    if (!lua_env->Init(lua_script)) {
+      result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
+                             "Failed to init lua environment");
+    } else if (!lua_env->LoadLuaScript({}))
+      result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
+                             "Failed to load lua script");
+
+    promise->set_value(result);
+  });
+  return fut;
+}
 
 }  // namespace crane

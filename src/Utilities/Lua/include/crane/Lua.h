@@ -38,9 +38,9 @@ class LuaEnvironment {
 
   bool LoadLuaScript(const std::vector<std::string>& req_funcs);
 #ifdef HAVE_LUA
-  sol::state& GetLuaState() const { return *m_lua_state_ptr_; }
-  sol::table GetCraneTable() const { return m_crane_table_; }
-  std::string GetUserMsg() const { return m_user_msg_; }
+  sol::state& GetLuaState() const;
+  sol::table GetCraneTable() const;
+  std::string GetUserMsg() const;
 
  private:
   void RegisterFunctions_();
@@ -60,34 +60,9 @@ class LuaPool {
  public:
   LuaPool() = default;
 
-  bool Init() {
-#ifndef HAVE_LUA
-    CRANE_ERROR("Lua is not enabled");
-    return false;
-#endif
-    m_thread_pool_ = std::make_unique<BS::thread_pool>(
-        std::thread::hardware_concurrency(),
-        [] { util::SetCurrentThreadName("LuaThreadPool"); });
-    return true;
-  }
+  bool Init();
 
-  std::future<CraneRichError> ExecuteLuaScript(const std::string& lua_script) {
-    auto promise = std::make_shared<std::promise<CraneRichError>>();
-    std::future<CraneRichError> fut = promise->get_future();
-    m_thread_pool_->detach_task([lua_script, promise]() {
-      CraneRichError result;
-      auto lua_env = std::make_unique<crane::LuaEnvironment>();
-      if (!lua_env->Init(lua_script)) {
-        result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
-                               "Failed to init lua environment");
-      } else if (!lua_env->LoadLuaScript({}))
-        result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
-                               "Failed to load lua script");
-
-      promise->set_value(result);
-    });
-    return fut;
-  }
+  std::future<CraneRichError> ExecuteLuaScript(const std::string& lua_script);
 
   template <typename Callback>
     requires std::invocable<Callback> &&
