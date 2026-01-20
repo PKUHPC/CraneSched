@@ -82,6 +82,7 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
+constexpr bool kDefaultTrackWCKey = false;
 
 struct Config {
   struct CraneCtldConf {
