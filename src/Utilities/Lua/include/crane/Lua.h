@@ -25,7 +25,8 @@
 #include <BS_thread_pool.hpp>
 #include <memory>
 
-#include "crane/Logger.h"
+#include "crane/PublicHeader.h"
+#include "crane/String.h"
 
 namespace crane {
 class LuaEnvironment {
