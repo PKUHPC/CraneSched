@@ -84,3 +84,6 @@ fabric.properties
 .worktrees/
 CLAUDE.md
 AGENTS.md
+
+# CodeQL artifacts
+_codeql_detected_source_root
