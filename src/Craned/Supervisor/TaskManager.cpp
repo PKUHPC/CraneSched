@@ -779,6 +779,11 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
        {std::string(kCriLabelJobNameKey), job_name}});
   m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
                                          pod_meta.labels().end());
+
+  m_pod_config_.mutable_annotations()->insert(
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {"hostname", hostname}});
   m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
                                               pod_meta.annotations().end());
 
