@@ -22,9 +22,17 @@
 
 #  include "crane/TracerManager.h"
 
-#  define CRANE_TRACE_BEGIN(span_name)                               \
-    auto __crane_span =                                              \
-        crane::TracerManager::GetInstance().CreateSpan(span_name);   \
+// CRANE_TRACE_START: Starts a new Trace (Root Span). Ignores any parent context.
+#  define CRANE_TRACE_START(trace_name)                                  \
+    auto __crane_span =                                                  \
+        crane::TracerManager::GetInstance().CreateRootSpan(trace_name);  \
+    ::crane::_internal::ScopedSpan __crane_scoped_span(__crane_span)
+
+// CRANE_SPAN_START: Starts a Span. It acts as a Child Span if there is an
+// active parent in the current scope, otherwise starts a Root Span.
+#  define CRANE_SPAN_START(span_name)                                    \
+    auto __crane_span =                                                  \
+        crane::TracerManager::GetInstance().CreateSpan(span_name);       \
     ::crane::_internal::ScopedSpan __crane_scoped_span(__crane_span)
 
 #  define CRANE_TRACE_SET_ATTRIBUTE(key, value)                       \
@@ -57,7 +65,8 @@
 
 #else
 
-#  define CRANE_TRACE_BEGIN(span_name)
+#  define CRANE_TRACE_START(trace_name)
+#  define CRANE_SPAN_START(span_name)
 #  define CRANE_TRACE_SET_ATTRIBUTE(key, value)
 #  define CRANE_TRACE_ADD_EVENT(event_name)
 #  define CRANE_TRACE_END(status)

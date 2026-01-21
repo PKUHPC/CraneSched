@@ -103,6 +103,24 @@ TracerManager::CreateSpan(const std::string& span_name) {
     return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
         nullptr);
   }
+
+  // Check if there is an active parent span in the current thread
+  if (_internal::g_current_span &&
+      _internal::g_current_span->GetContext().IsValid()) {
+    opentelemetry::trace::StartSpanOptions options;
+    options.parent = _internal::g_current_span->GetContext();
+    return tracer_->StartSpan(span_name, options);
+  }
+
+  return tracer_->StartSpan(span_name);
+}
+
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+TracerManager::CreateRootSpan(const std::string& span_name) {
+  if (!tracer_) {
+    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
+        nullptr);
+  }
   return tracer_->StartSpan(span_name);
 }
 
