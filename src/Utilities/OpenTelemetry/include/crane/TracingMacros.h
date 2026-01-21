@@ -35,6 +35,14 @@
         crane::TracerManager::GetInstance().CreateSpan(span_name);       \
     ::crane::_internal::ScopedSpan __crane_scoped_span(__crane_span)
 
+// CRANE_TRACE_RPC_HANDLER: Starts a Span from the context extracted from the
+// gRPC server context.
+#  define CRANE_TRACE_RPC_HANDLER(context, span_name)                         \
+    auto __parent_ctx = crane::TracerManager::GetInstance().Extract(context); \
+    auto __crane_span = crane::TracerManager::GetInstance().CreateSpan(       \
+        span_name, __parent_ctx);                                             \
+    ::crane::_internal::ScopedSpan __crane_scoped_span(__crane_span)
+
 #  define CRANE_TRACE_SET_ATTRIBUTE(key, value)                       \
     do {                                                              \
       if (::crane::_internal::g_current_span) {                       \
@@ -67,6 +75,7 @@
 
 #  define CRANE_TRACE_START(trace_name)
 #  define CRANE_SPAN_START(span_name)
+#  define CRANE_TRACE_RPC_HANDLER(context, span_name)
 #  define CRANE_TRACE_SET_ATTRIBUTE(key, value)
 #  define CRANE_TRACE_ADD_EVENT(event_name)
 #  define CRANE_TRACE_END(status)

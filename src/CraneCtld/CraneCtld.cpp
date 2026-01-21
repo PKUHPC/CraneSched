@@ -1122,17 +1122,6 @@ int main(int argc, char** argv) {
   CheckSingleton();
   InstallStackTraceHooks();
 
-  // Test OpenTelemetry tracing
-  auto& tracer = crane::TracerManager::GetInstance();
-  if (tracer.Initialize("/nfs/home/interntwo/crane/output/cranectld_traces.json", "cranectld")) {
-    CRANE_TRACE_START("cranectld.startup_test");
-    CRANE_TRACE_SET_ATTRIBUTE("test.type", "initialization");
-    CRANE_TRACE_SET_ATTRIBUTE("component", "cranectld");
-    CRANE_TRACE_ADD_EVENT("test.cranectld");
-    CRANE_TRACE_END("OK");
-    tracer.Shutdown();
-  }
-
   if (g_config.CraneCtldForeground)
     StartServer();
   else
