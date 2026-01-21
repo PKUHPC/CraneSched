@@ -1698,7 +1698,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(&account, qos, false, true);
-    if (!result) result;
+    if (!result) return result;
   }
 
   const std::string& account_name = account.name;
