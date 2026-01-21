@@ -12,7 +12,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     crane_tracer
     PUBLIC opentelemetry-cpp::trace
            opentelemetry-cpp::ostream_span_exporter
-           opentelemetry-cpp::resources)
+           opentelemetry-cpp::resources
+           grpc++)
   
   message(STATUS "OpenTelemetry tracing enabled (Debug build) - output to file")
 else()

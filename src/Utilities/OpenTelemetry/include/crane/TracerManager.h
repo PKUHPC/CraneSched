@@ -62,9 +62,9 @@ class TracerManager {
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateRootSpan(
       const std::string& span_name);
 
-  void Inject(grpc::ClientContext& context);
+  void Inject(::grpc::ClientContext& context);
 
-  opentelemetry::context::Context Extract(const grpc::ServerContext* context);
+  opentelemetry::context::Context Extract(const ::grpc::ServerContext* context);
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateChildSpan(
       const std::string& span_name,

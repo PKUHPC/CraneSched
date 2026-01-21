@@ -41,7 +41,7 @@ using opentelemetry::context::propagation::TextMapCarrier;
 
 class GrpcClientCarrier : public TextMapCarrier {
  public:
-  GrpcClientCarrier(grpc::ClientContext& context) : context_(context) {}
+  GrpcClientCarrier(::grpc::ClientContext& context) : context_(context) {}
   virtual opentelemetry::nostd::string_view Get(
       opentelemetry::nostd::string_view key) const noexcept override {
     return "";
@@ -52,12 +52,12 @@ class GrpcClientCarrier : public TextMapCarrier {
   }
 
  private:
-  grpc::ClientContext& context_;
+  ::grpc::ClientContext& context_;
 };
 
 class GrpcServerCarrier : public TextMapCarrier {
  public:
-  GrpcServerCarrier(const grpc::ServerContext* context) : context_(context) {}
+  GrpcServerCarrier(const ::grpc::ServerContext* context) : context_(context) {}
   virtual opentelemetry::nostd::string_view Get(
       opentelemetry::nostd::string_view key) const noexcept override {
     auto it = context_->client_metadata().find(std::string(key));
@@ -71,7 +71,7 @@ class GrpcServerCarrier : public TextMapCarrier {
                    opentelemetry::nostd::string_view value) noexcept override {}
 
  private:
-  const grpc::ServerContext* context_;
+  const ::grpc::ServerContext* context_;
 };
 #endif
 
@@ -121,7 +121,7 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 
   tracer_ = tracer_provider_->GetTracer(service_name_);
 
-  opentelemetry::context::propagation::GlobalPropagator::SetGlobalPropagator(
+  opentelemetry::context::propagation::GlobalTextMapPropagator::SetGlobalPropagator(
       opentelemetry::nostd::shared_ptr<
           opentelemetry::context::propagation::TextMapPropagator>(
           new opentelemetry::trace::propagation::HttpTraceContext()));
@@ -177,18 +177,18 @@ TracerManager::CreateSpan(
   return tracer_->StartSpan(span_name, options);
 }
 
-void TracerManager::Inject(grpc::ClientContext& context) {
+void TracerManager::Inject(::grpc::ClientContext& context) {
   auto propagator =
-      opentelemetry::context::propagation::GlobalPropagator::GetGlobalPropagator();
+      opentelemetry::context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
   auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
   GrpcClientCarrier carrier(context);
   propagator->Inject(carrier, current_ctx);
 }
 
 opentelemetry::context::Context TracerManager::Extract(
-    const grpc::ServerContext* context) {
+    const ::grpc::ServerContext* context) {
   auto propagator =
-      opentelemetry::context::propagation::GlobalPropagator::GetGlobalPropagator();
+      opentelemetry::context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
   GrpcServerCarrier carrier(context);
   auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
   return propagator->Extract(carrier, current_ctx);
