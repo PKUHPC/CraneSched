@@ -20,7 +20,6 @@
 
 #include "AccountMetaContainer.h"
 #include "Security/VaultClient.h"
-#include "TaskScheduler.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
