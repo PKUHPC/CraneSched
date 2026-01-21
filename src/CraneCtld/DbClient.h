@@ -196,9 +196,12 @@ class MongodbClient {
       std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
       const std::string& task_collection_name, int64_t cached_min_start);
 
+  // (For new cluster initialization only)
   bool AggregateJobSummaryByHour_(std::chrono::sys_seconds start_sec,
                                   std::chrono::sys_seconds end_sec,
                                   const std::string& task_collection_name);
+
+  // (For new cluster initialization only)
   bool AggregateJobSummaryByDayOrMonth_(
       JobSummary::Type src_type, JobSummary::Type dst_type,
       std::chrono::sys_seconds period_start_tp,
@@ -211,12 +214,6 @@ class MongodbClient {
                          mongocxx::client_session* session = nullptr);
   void AppendToMonthTable_(const JobAggregationInfo& info,
                            mongocxx::client_session* session = nullptr);
-
-  // Day/Month aggregation functions (for new cluster initialization only)
-  void AggregateAccUsageToDayOrMonth_(JobSummary::Type src_type,
-                                      JobSummary::Type dst_type,
-                                      std::chrono::sys_seconds period_start,
-                                      std::chrono::sys_seconds period_end);
 
   // Recovery helper functions
   void RecoverNewClusterAggregations_(bool hour_done, bool day_done,
