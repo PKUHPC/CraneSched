@@ -32,7 +32,13 @@
 #  include "opentelemetry/trace/provider.h"
 #  include "opentelemetry/trace/span.h"
 #  include "opentelemetry/trace/tracer.h"
+#  include "opentelemetry/context/context.h"
 #endif
+
+namespace grpc {
+class ClientContext;
+class ServerContext;
+}
 
 namespace crane {
 
@@ -49,8 +55,16 @@ class TracerManager {
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
       const std::string& span_name);
 
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
+      const std::string& span_name,
+      const opentelemetry::context::Context& parent_context);
+
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateRootSpan(
       const std::string& span_name);
+
+  void Inject(grpc::ClientContext& context);
+
+  opentelemetry::context::Context Extract(const grpc::ServerContext* context);
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateChildSpan(
       const std::string& span_name,
