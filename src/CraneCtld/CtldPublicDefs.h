@@ -1155,11 +1155,13 @@ struct Qos {
         "name: {}, description: {}, reference_count: {}, priority: {}, "
         "max_jobs_per_user: {}, max_running_tasks_per_user: {}, "
         "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
-        "max_cpus_per_account: {}",
+        "max_cpus_per_account: {}, max_jobs_per_account: {}, "
+        "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}",
         name, description, reference_count, priority, max_jobs_per_user,
         max_running_tasks_per_user,
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
-        max_cpus_per_account);
+        max_cpus_per_account, max_jobs_per_account, max_submit_jobs_per_user,
+        max_submit_jobs_per_account);
   }
 
   static const std::string GetModifyFieldStr(
