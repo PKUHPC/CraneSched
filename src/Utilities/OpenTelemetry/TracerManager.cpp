@@ -20,7 +20,7 @@
 
 #ifdef CRANE_ENABLE_TRACING
 
-#  include "crane/InfluxDbExporter.h"
+#  include "crane/PluginSpanExporter.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
@@ -46,6 +46,9 @@ TraceGuard::TraceGuard(TraceGuard&& other) noexcept {
 TraceGuard& TraceGuard::operator=(TraceGuard&& other) noexcept {
 #ifdef CRANE_ENABLE_TRACING
   if (this != &other) {
+    if (!moved_ && span_) {
+      span_->End();
+    }
     span_ = std::move(other.span_);
     moved_ = other.moved_;
     other.moved_ = true;
@@ -61,6 +64,7 @@ TraceGuard::TraceGuard(
 #endif
 
 void TraceGuard::AddEvent(const std::string& event_name) {
+  // If tracing is disabled, this is a no-op
 #ifdef CRANE_ENABLE_TRACING
   if (span_) {
     span_->AddEvent(event_name);
@@ -125,19 +129,6 @@ TraceGuard TracerManager::StartSpan(const std::string& span_name) {
 #else
   return TraceGuard();
 #endif
-}
-
-void TracerManager::AddEvent(const std::string& event_name) {
-#ifdef CRANE_ENABLE_TRACING
-  if (g_current_span) {
-    g_current_span->AddEvent(event_name);
-  }
-#endif
-}
-
-void TracerManager::EndSpan(const std::string& status) {
-  // Deprecated. Use TraceGuard destructors or explicit End if exposed.
-  // We don't have access to the span here anymore as g_current_span is removed.
 }
 
 #ifdef CRANE_ENABLE_TRACING

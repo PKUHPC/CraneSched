@@ -2,7 +2,7 @@
 # This file contains all plugin-related settings
 
 # Toggle the plugin module in CraneSched
-Enabled: false
+Enabled: true
 
 # Socket path relative to CraneBaseDir
 PlugindSockPath: "cplugind/cplugind.sock"

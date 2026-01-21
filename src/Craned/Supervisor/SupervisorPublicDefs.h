@@ -99,11 +99,12 @@ struct Config {
   std::string JobName;
   EnvMap JobEnv;
   step_id_t StepId;
-  inline crane::TracerManager* trace_ = nullptr;
   StepToSupv StepSpec;
   std::atomic_int TaskCount;
   std::string CgroupPath;  // resolved cgroup path for OOM monitoring
 };
+
+inline crane::TracerManager* trace_ = nullptr;
 
 inline Config g_config;
 

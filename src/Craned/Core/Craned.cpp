@@ -43,9 +43,11 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/TracerManager.h"
 
 using namespace Craned::Common;
 using Craned::g_config;
+using Craned::trace_;
 using Craned::JobInD;
 
 CraneErrCode RecoverCgForJobs(
@@ -1031,12 +1033,14 @@ void GlobalVariableInit() {
   }
 
   trace_ = &crane::TracerManager::GetInstance();
+#ifdef CRANE_ENABLE_TRACING
   if (g_config.Plugin.Enabled && g_config.Tracing.Enabled) {
     crane::PluginSpanConfig span_config;
     span_config.measurement = g_config.Tracing.Measurement;
     trace_->Initialize(span_config, "craned");
     CRANE_INFO("[Tracing] TracerManager initialized...");
   }
+#endif
 
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
@@ -1110,11 +1114,18 @@ void StartServer() {
 
   GlobalVariableInit();
 
-  util::os::CheckProxyEnvironmentVariable();
+  {
+    // Ensure tracing logic compiles even without CRANE_ENABLE_TRACING (will be no-op)
+    // StartSpan is always available in header but implementation returns empty guard if disabled.
+    auto span = crane::TracerManager::GetInstance().StartSpan("Craned_Lifecycle");
+    CRANE_INFO("[Tracing] Craned_Lifecycle span started");
 
-  g_ctld_client->StartGrpcCtldConnection();
+    util::os::CheckProxyEnvironmentVariable();
 
-  WaitForStopAndDoGvarFini();
+    g_ctld_client->StartGrpcCtldConnection();
+
+    WaitForStopAndDoGvarFini();
+  }
 }
 
 void StartDaemon() {

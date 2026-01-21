@@ -3,6 +3,7 @@
 #ifdef CRANE_ENABLE_TRACING
 
 #  include <chrono>
+#  include <fstream>
 #  include <iomanip>
 #  include <iostream>
 #  include <sstream>
@@ -93,12 +94,14 @@ opentelemetry::sdk::common::ExportResult PluginSpanExporter::Export(
 
     ss << ",span_name=" << EscapeTag(std::string(span_data->GetName()));
 
-    char trace_id_hex[33];
-    span_data->GetTraceId().ToLowerBase16(trace_id_hex);
+    char trace_id_hex[33] = {0};
+    span_data->GetTraceId().ToLowerBase16(
+        opentelemetry::nostd::span<char, 32>{trace_id_hex, 32});
     ss << ",trace_id=" << trace_id_hex;
 
-    char span_id_hex[17];
-    span_data->GetSpanId().ToLowerBase16(span_id_hex);
+    char span_id_hex[17] = {0};
+    span_data->GetSpanId().ToLowerBase16(
+        opentelemetry::nostd::span<char, 16>{span_id_hex, 16});
     ss << ",span_id=" << span_id_hex;
 
     // Fields
@@ -151,6 +154,14 @@ opentelemetry::sdk::common::ExportResult PluginSpanExporter::Export(
 }
 
 void PluginSpanExporter::SendData(const std::string& data) {
+  // Temporary output to file for testing
+  std::ofstream out("/nfs/home/interntwo/crane/output/traces.log",
+                    std::ios::app);
+  if (out.is_open()) {
+    out << data;
+    out.close();
+  }
+
   if (!g_plugin_client) {
     return;
   }

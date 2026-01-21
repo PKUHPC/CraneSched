@@ -49,6 +49,10 @@ Keepalived:
   # file path of cranectld alive file (relative to CraneBaseDir)
   CraneCtldAliveFile: cranectld/cranectld.alive
 
+Tracing:
+  Enabled: true
+  Measurement: "crane_spans"
+
 # Craned settings
 # the listening address of control machine
 CranedListenAddr: 0.0.0.0

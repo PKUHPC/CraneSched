@@ -175,8 +175,9 @@ inline Config g_config{};
 
 struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
-  inline crane::TracerManager* trace_ = nullptr;
 };
+
+inline crane::TracerManager* trace_ = nullptr;
 
 inline RunTimeStatus g_runtime_status{};
 }  // namespace Craned

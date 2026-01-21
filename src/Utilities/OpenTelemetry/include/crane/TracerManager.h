@@ -86,6 +86,11 @@ class TracerManager {
 
   TraceGuard StartSpan(const std::string& span_name);
 
+#ifdef CRANE_ENABLE_TRACING
+  void SetAttributeImpl(const std::string& key,
+                        const opentelemetry::common::AttributeValue& value);
+#endif
+
   template <typename T>
   void SetAttribute(const std::string& key, const T& value) {
 #ifdef CRANE_ENABLE_TRACING

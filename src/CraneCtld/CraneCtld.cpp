@@ -40,6 +40,7 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/TracerManager.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -1047,14 +1048,19 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
-    if (!util::os::CreateFile(g_config.KeepalivedConfig.CraneCtldAliveFile)) {
-      DestroyCtldGlobalVariables();
-      std::exit(1);
-    }
-  }
+  {
+    auto span = crane::TracerManager::GetInstance().StartSpan("CraneCtld_Lifecycle");
+    CRANE_INFO("[Tracing] CraneCtld_Lifecycle span started");
 
-  g_ctld_server->Wait();
+    if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
+      if (!util::os::CreateFile(g_config.KeepalivedConfig.CraneCtldAliveFile)) {
+        DestroyCtldGlobalVariables();
+        std::exit(1);
+      }
+    }
+
+    g_ctld_server->Wait();
+  }
 
   DestroyCtldGlobalVariables();
 

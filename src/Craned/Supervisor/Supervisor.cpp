@@ -28,8 +28,10 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
+#include "crane/TracerManager.h"
 
 using Craned::Supervisor::g_config;
+using Craned::Supervisor::trace_;
 
 int InitFromStdin(int argc, char** argv) {
   auto supervisor_start_time = std::chrono::system_clock::now();
@@ -297,12 +299,14 @@ void GlobalVariableInit(int grpc_output_fd) {
   }
 
   trace_ = &crane::TracerManager::GetInstance();
+#ifdef CRANE_ENABLE_TRACING
   if (g_config.Plugin.Enabled && g_config.Tracing.Enabled) {
     crane::PluginSpanConfig span_config;
     span_config.measurement = g_config.Tracing.Measurement;
     trace_->Initialize(span_config, "supervisor");
     CRANE_INFO("[Tracing] TracerManager initialized...");
   }
+#endif
 
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
@@ -329,55 +333,62 @@ void StartServer(int grpc_output_fd) {
 
   GlobalVariableInit(grpc_output_fd);
 
-  // Set FD_CLOEXEC on stdin, stdout, stderr
-  util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
+  {
+    auto span =
+        crane::TracerManager::GetInstance().StartSpan("Supervisor_Lifecycle");
+    CRANE_INFO("[Tracing] Supervisor_Lifecycle span started");
 
-  CRANE_INFO("Supervisor started for step type: {}.",
-             static_cast<int>(g_config.StepSpec.step_type()));
+    // Set FD_CLOEXEC on stdin, stdout, stderr
+    util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
-  if (g_config.StepSpec.step_type() == StepType::DAEMON) {
-    // For container jobs, the daemon step need to setup a pod per node,
-    // then the following common steps will launch containers inside the pod.
-    bool ready = true;
-    if (g_config.StepSpec.has_pod_meta()) {
-      if (!g_config.Container.Enabled) {
-        CRANE_ERROR(
-            "Container config is required for daemon step with pod spec.");
-        ready = false;
-      } else {
-        // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto ok_prom = g_task_mgr->ExecuteTaskAsync();
-        if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to start daemon step, code: {}",
-                      static_cast<int>(err));
+    CRANE_INFO("Supervisor started for step type: {}.",
+               static_cast<int>(g_config.StepSpec.step_type()));
+
+    if (g_config.StepSpec.step_type() == StepType::DAEMON) {
+      // For container jobs, the daemon step need to setup a pod per node,
+      // then the following common steps will launch containers inside the pod.
+      bool ready = true;
+      if (g_config.StepSpec.has_pod_meta()) {
+        if (!g_config.Container.Enabled) {
+          CRANE_ERROR(
+              "Container config is required for daemon step with pod spec.");
           ready = false;
+        } else {
+          // Just wait here for pod setup. if pod failed, daemon step failed.
+          auto ok_prom = g_task_mgr->ExecuteTaskAsync();
+          if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
+            CRANE_ERROR("Failed to start daemon step, code: {}",
+                        static_cast<int>(err));
+            ready = false;
+          }
         }
       }
+
+      // Daemon step is RUNNING after supervisor and related resources are ready.
+      g_runtime_status.Status =
+          ready ? StepStatus::Running : StepStatus::Failed;
+
+    } else {
+      // Common step is CONFIGURED after supervisor is ready.
+      g_runtime_status.Status = StepStatus::Configured;
     }
 
-    // Daemon step is RUNNING after supervisor and related resources are ready.
-    g_runtime_status.Status = ready ? StepStatus::Running : StepStatus::Failed;
+    g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
+                                           std::nullopt);
 
-  } else {
-    // Common step is CONFIGURED after supervisor is ready.
-    g_runtime_status.Status = StepStatus::Configured;
+    g_server->Wait();
+    g_server.reset();
+    g_task_mgr->Wait();
+    g_task_mgr.reset();
+
+    g_craned_client.reset();
+    g_plugin_client.reset();
+
+    if (trace_) trace_->Shutdown();
+
+    g_thread_pool->wait();
+    g_thread_pool.reset();
   }
-
-  g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
-                                         std::nullopt);
-
-  g_server->Wait();
-  g_server.reset();
-  g_task_mgr->Wait();
-  g_task_mgr.reset();
-
-  g_craned_client.reset();
-  g_plugin_client.reset();
-
-  if (trace_) trace_->Shutdown();
-
-  g_thread_pool->wait();
-  g_thread_pool.reset();
 
   std::exit(0);
 }
