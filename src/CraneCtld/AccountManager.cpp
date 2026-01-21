@@ -1957,9 +1957,8 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedQosNoLock_(
   for (const auto& qos : account.allowed_qos_list) {
     if (!ranges::contains(qos_list, qos)) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(&account, qos))
-        return std::unexpected(FormatRichErr(
-            CraneErrCode::ERR_SET_ACCOUNT_QOS,
-            fmt::format("account: {}, qos: {}", account.name, qos)));
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_SET_ACCOUNT_QOS, qos));
     }
   }
 
