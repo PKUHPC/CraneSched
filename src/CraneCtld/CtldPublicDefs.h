@@ -1175,6 +1175,12 @@ struct Qos {
       return "max_cpus_per_user";
     case crane::grpc::ModifyField::MaxTimeLimitPerTask:
       return "max_time_limit_per_task";
+    case crane::grpc::ModifyField::MaxJobsPerAccount:
+      return "max_jobs_per_account";
+    case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
+      return "max_submit_jobs_per_user";
+    case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
+      return "max_submit_jobs_per_account";
     default:
       std::unreachable();
     }
@@ -1380,87 +1386,9 @@ struct PdJobInScheduler {
 
   absl::Time submit_time;
   uint32_t partition_priority;
-  uint32_t qos_priority;
-  std::string account;
-
-  double priority;
-
-  absl::Time start_time;
-  ResourceV2 allocated_res;
-  std::vector<CranedId> craned_ids;
-
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-      req_licenses;
-  bool is_license_or;
-  std::unordered_map<LicenseId, uint32_t> actual_licenses;
-
-  std::string reason;
-
-  PdJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
-        time_limit(job->time_limit),
-        partition_id(job->partition_id),
-        reservation(job->reservation),
-        requested_node_res_view(job->requested_node_res_view),
-        node_num(job->node_num),
-        ntasks_per_node(job->ntasks_per_node),
-        cpus_per_task(job->cpus_per_task),
-        exclusive(job->exclusive),
-        included_nodes(job->included_nodes),
-        excluded_nodes(job->excluded_nodes),
-        submit_time(job->SubmitTime()),
-        partition_priority(job->partition_priority),
-        qos_priority(job->qos_priority),
-        account(job->account),
-        priority(job->mandated_priority),
-        req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()) {}
-};
-
-constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE> CraneModifyFieldStrArr =  {
-  "partition",
-  "qos",
-  "default_qos",
-  "description", // account and qos
-  // user
-  "admin_level",
-  "default_account",
-  // qos
-  "priority",
-  "max_jobs_per_user",
-  "max_cpus_per_user",
-  "max_time_limit_per_task",
-  "max_jobs_per_account",
-  "max_submit_jobs_per_user",
-  "max_submit_jobs_per_account"
-};
-
-inline std::string_view CraneModifyFieldStr(
-    crane::grpc::ModifyField modify_field) {
-  return CraneModifyFieldStrArr[static_cast<uint16_t>(modify_field)];
-}
-
-struct PdJobInScheduler {
-  task_id_t job_id;
-  absl::Duration time_limit;
-
-  PartitionId partition_id;
-  std::string reservation;
-
-  ResourceView requested_node_res_view;
-  uint32_t node_num;
-  uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
-  bool exclusive;
-
-  std::unordered_set<std::string> included_nodes;
-  std::unordered_set<std::string> excluded_nodes;
-
-  absl::Time submit_time;
-  uint32_t partition_priority;
   std::string qos;
-  std::string username;
   uint32_t qos_priority;
+  std::string username;
   std::string account;
   std::list<std::string> account_chain;
 
