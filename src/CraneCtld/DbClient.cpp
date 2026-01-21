@@ -1600,100 +1600,6 @@ void MongodbClient::MarkTaskAsAggregated(const bsoncxx::oid& task_id) {
                                                       system_clock::now()})))));
 }
 
-// Day aggregation: from acc_usage_hour_table to acc_usage_day_table
-// (For new cluster initialization only)
-void MongodbClient::AggregateAccUsageToDayOrMonth_(
-    JobSummary::Type src_type, JobSummary::Type dst_type,
-    std::chrono::sys_seconds period_start,
-    std::chrono::sys_seconds period_end) {
-  using bsoncxx::builder::basic::kvp;
-  using bsoncxx::builder::basic::make_array;
-  using bsoncxx::builder::basic::make_document;
-  using namespace std::chrono;
-  std::string src_coll_str;
-  std::string dst_coll_str;
-  if (src_type == JobSummary::Type::HOUR && dst_type == JobSummary::Type::DAY) {
-    src_coll_str = m_acc_usage_hour_collection_name_;
-    dst_coll_str = m_acc_usage_day_collection_name_;
-  } else if (src_type == JobSummary::Type::DAY &&
-             dst_type == JobSummary::Type::MONTH) {
-    src_coll_str = m_acc_usage_day_collection_name_;
-    dst_coll_str = m_acc_usage_month_collection_name_;
-  } else {
-    CRANE_ERROR("Unsupported job summary aggregation: {} to {}",
-                JobSummaryTypeToString_(src_type),
-                JobSummaryTypeToString_(dst_type));
-    return;
-  }
-
-  std::string src_time_field = JobSummaryTypeToString_(src_type);
-  std::string period_field = JobSummaryTypeToString_(dst_type);
-
-  auto client = GetClient_();
-  mongocxx::pipeline pipeline;
-
-  pipeline.match(make_document(
-      kvp(src_time_field,
-          make_document(
-              kvp("$gte", bsoncxx::types::b_date{time_point_cast<milliseconds>(
-                              period_start)}),
-              kvp("$lt", bsoncxx::types::b_date{
-                             time_point_cast<milliseconds>(period_end)})))));
-  pipeline.add_fields(make_document(kvp(
-      period_field,
-      bsoncxx::types::b_date{time_point_cast<milliseconds>(period_start)})));
-
-  // 3. Group: aggregate by all dimensions
-  pipeline.group(make_document(
-      kvp("_id", make_document(kvp(period_field, "$" + period_field),
-                               kvp("account", "$account"),
-                               kvp("username", "$username"), kvp("qos", "$qos"),
-                               kvp("wckey", "$wckey"))),
-      kvp("total_cpu_time", make_document(kvp("$sum", "$total_cpu_time")))));
-
-  // 4. AddFields: add metadata
-  pipeline.add_fields(make_document(kvp("aggregated_at", "$$NOW")));
-
-  // 5. ReplaceRoot: restructure document
-  pipeline.replace_root(make_document(
-      kvp("newRoot",
-          make_document(kvp(period_field, "$_id." + period_field),
-                        kvp("account", "$_id.account"),
-                        kvp("username", "$_id.username"),
-                        kvp("qos", "$_id.qos"), kvp("wckey", "$_id.wckey"),
-                        kvp("total_cpu_time", "$total_cpu_time"),
-                        kvp("aggregated_at", "$aggregated_at")))));
-
-  // 6. Merge: merge into acc_usage_day_table
-  pipeline.merge(make_document(
-      kvp("into", dst_coll_str),
-      kvp("on",
-          make_array(period_field, "account", "username", "qos", "wckey")),
-      kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
-
-  // Execute aggregation - read from hour table
-  try {
-    mongocxx::options::aggregate agg_opts;
-    agg_opts.allow_disk_use(true);
-    agg_opts.max_time(milliseconds{g_config.JobAggregationTimeoutMs});
-    agg_opts.batch_size(g_config.JobAggregationBatchSize);
-    agg_opts.comment(
-        {fmt::format("CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}",
-                     __func__, period_start, period_end)});
-    auto result =
-        (*client)[m_db_name_][src_coll_str].aggregate(pipeline, agg_opts);
-    for (auto doc : result) {
-      // Just iterate to completion
-    }
-    CRANE_INFO("{} aggregation completed for {} - {}", period_field,
-               period_start, period_end);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("{} aggregation failed for {} - {}: {}", period_field,
-                period_start, period_end, e.what());
-    throw;
-  }
-}
-
 // Recovery for new cluster: batch aggregation using existing functions
 void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
                                                    bool day_done,
@@ -1818,10 +1724,10 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
     while (current_day <= day_end) {
       auto next_day = current_day + days(1);
       try {
-        AggregateAccUsageToDayOrMonth_(JobSummary::Type::HOUR,
-                                       JobSummary::Type::DAY,
-                                       time_point_cast<seconds>(current_day),
-                                       time_point_cast<seconds>(next_day));
+        AggregateJobSummaryByDayOrMonth_(JobSummary::Type::HOUR,
+                                         JobSummary::Type::DAY,
+                                         time_point_cast<seconds>(current_day),
+                                         time_point_cast<seconds>(next_day));
       } catch (const std::exception& e) {
         CRANE_ERROR("Day aggregation failed for {}: {}", current_day, e.what());
       }
@@ -1872,10 +1778,10 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
       auto month_end = sys_days{next_month / 1};
 
       try {
-        AggregateAccUsageToDayOrMonth_(JobSummary::Type::DAY,
-                                       JobSummary::Type::MONTH,
-                                       time_point_cast<seconds>(month_start),
-                                       time_point_cast<seconds>(month_end));
+        AggregateJobSummaryByDayOrMonth_(JobSummary::Type::DAY,
+                                         JobSummary::Type::MONTH,
+                                         time_point_cast<seconds>(month_start),
+                                         time_point_cast<seconds>(month_end));
       } catch (const std::exception& e) {
         CRANE_ERROR("Month aggregation failed: {}", e.what());
       }
@@ -2774,6 +2680,7 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
     agg_opts.comment(
         {fmt::format("CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}",
                      __func__, hour_start, hour_end)});
+    agg_opts.hint(mongocxx::hint{"time_start_1_time_end_1"});
 
     // Execute aggregation
     auto cursor = jobs.aggregate(pipeline, agg_opts);
@@ -2867,8 +2774,6 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
     JobSummary::Type src_type, JobSummary::Type dst_type,
     std::chrono::sys_seconds period_start_tp,
     std::chrono::sys_seconds period_end_tp) {
-  CRANE_INFO("AggregateJobSummaryBy{} from {} to {}",
-             JobSummaryTypeToString_(src_type), period_start_tp, period_end_tp);
   using namespace std::chrono;
 
   using bsoncxx::builder::basic::kvp;
@@ -2954,12 +2859,7 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
           kvp("into", dst_coll_str),
           kvp("on",
               make_array(period_field, "account", "username", "qos", "wckey")),
-          kvp("whenMatched",
-              make_document(
-                  kvp("$set",
-                      make_document(kvp("total_cpu_time", "$total_cpu_time"),
-                                    kvp("aggregated_at", "$$NOW"))))),
-          kvp("whenNotMatched", "insert")));
+          kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
 
       mongocxx::options::aggregate agg_opts;
       agg_opts.allow_disk_use(true);
@@ -2968,15 +2868,15 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
       agg_opts.comment({fmt::format(
           "CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}", __func__,
           sys_seconds{cur_start_day}, sys_seconds{cur_end_day})});
-
+      agg_opts.hint(mongocxx::hint{JobSummaryTypeToString_(src_type) + "_1"});
       auto cursor = src_coll.aggregate(pipeline, agg_opts);
       for (auto&& doc : cursor) {}
 
       auto end_timer = steady_clock::now();
-      CRANE_LOGGER_TRACE(
-          m_logger_,
-          "AggregateJobSummaryByDayOrMonth [{}, {}) completed, used {} ms",
-          sys_seconds{cur_start_day}, sys_seconds{cur_end_day},
+      CRANE_LOGGER_INFO(
+          m_logger_, "{} [{},{}) aggregation completed, used {} ms.",
+          JobSummaryTypeToString_(dst_type), sys_seconds{cur_start_day},
+          sys_seconds{cur_end_day},
           duration_cast<milliseconds>(end_timer - start_timer).count());
       // Advance window
       if (dst_type == JobSummary::Type::DAY) {
@@ -2990,13 +2890,9 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
       }
     }
     UpdateJobSummaryLastSuccessTime_(dst_type, sys_seconds{cur_start_day});
-    CRANE_LOGGER_INFO(m_logger_,
-                      "AggregateJobSummaryByDayOrMonth from {} to {} success.",
-                      period_start_tp, period_end_tp);
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(
-        m_logger_, "[mongodb] Aggregate job day or month summary exception: {}",
-        e.what());
+    CRANE_LOGGER_ERROR(m_logger_, "Aggregate job {} summary exception: {}",
+                       JobSummaryTypeToString_(dst_type), e.what());
     return false;
   }
   return true;
@@ -4853,9 +4749,6 @@ void MongodbClient::CreateCollectionIndex(
   mongocxx::options::index index_options;
   index_options.name(idx_name);
   index_options.unique(unique);
-
-  CRANE_DEBUG("Creating index '{}' on collection '{}'{}...", idx_name,
-              coll.name(), unique ? " (unique)" : "");
   coll.create_index(index_builder.view(), index_options);
 }
 
@@ -4873,11 +4766,11 @@ bool MongodbClient::InitTableIndexes() {
         raw_table, {"time_start", "time_end", "account", "username"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end", "cpus_alloc"},
                           false);
+    // task_table: add index for aggregated field (recovery optimization)
+    CRANE_LOGGER_DEBUG(m_logger_,
+                       "Creating aggregation recovery index on task_table...");
+    CreateCollectionIndex(raw_table, {"aggregated", "status"}, false);
 
-    // Create indexes for new acc_usage aggregation tables
-    // acc_usage_hour_table indexes
-    CRANE_LOGGER_DEBUG(
-        m_logger_, "Creating indexes for acc_usage_hour_table (6 indexes)...");
     auto acc_hour_coll = client[m_db_name_][m_acc_usage_hour_collection_name_];
     CreateCollectionIndex(acc_hour_coll,
                           {"account", "username", "qos", "wckey", "hour"},
@@ -4889,9 +4782,6 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(acc_hour_coll, {"username", "hour"}, false);
     CreateCollectionIndex(acc_hour_coll, {"hour"}, false);
 
-    // acc_usage_day_table indexes
-    CRANE_LOGGER_DEBUG(
-        m_logger_, "Creating indexes for acc_usage_day_table (6 indexes)...");
     auto acc_day_coll = client[m_db_name_][m_acc_usage_day_collection_name_];
     CreateCollectionIndex(acc_day_coll,
                           {"account", "username", "qos", "wckey", "day"},
@@ -4902,9 +4792,6 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(acc_day_coll, {"username", "day"}, false);
     CreateCollectionIndex(acc_day_coll, {"day"}, false);
 
-    // acc_usage_month_table indexes
-    CRANE_LOGGER_DEBUG(
-        m_logger_, "Creating indexes for acc_usage_month_table (6 indexes)...");
     auto acc_month_coll =
         client[m_db_name_][m_acc_usage_month_collection_name_];
     CreateCollectionIndex(acc_month_coll,
@@ -4917,11 +4804,6 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(acc_month_coll, {"account", "qos", "month"}, false);
     CreateCollectionIndex(acc_month_coll, {"username", "month"}, false);
     CreateCollectionIndex(acc_month_coll, {"month"}, false);
-
-    // task_table: add index for aggregated field (recovery optimization)
-    CRANE_LOGGER_DEBUG(m_logger_,
-                       "Creating aggregation recovery index on task_table...");
-    CreateCollectionIndex(raw_table, {"aggregated", "status"}, false);
 
     CRANE_LOGGER_DEBUG(m_logger_,
                        "All database indexes initialized successfully");
