@@ -82,6 +82,8 @@ inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
+inline constexpr size_t kMaxOutputQueueBytes = 1 * 1024 * 1024ULL;
+
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
     "cranectld/cranectld.lock";
@@ -117,6 +119,9 @@ constexpr uint64_t kCranedPingIntervalSec = 10;
 constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
+
+constexpr uint32_t kMaxReconnectAttempts = 1000;
+constexpr uint32_t kMaxReconnectIntervalSec = 60;
 
 namespace ExitCode {
 

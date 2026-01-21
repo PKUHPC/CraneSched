@@ -81,6 +81,7 @@ class CforedStreamWriter {
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
     task_res_alloc_reply->set_job_id(job_id);
     task_res_alloc_reply->set_step_id(step_id);
+    CRANE_TRACE("[Step #{}.{}] WriteTaskResAllocReply called", job_id, step_id);
 
     if (allocated_craned_expt.has_value()) {
       task_res_alloc_reply->set_ok(true);
@@ -158,6 +159,22 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
+  bool WriteTaskMetaReply(bool ok, const std::string &failure_reason,
+                          const crane::grpc::StepToCtld &step, int32_t pid) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::STEP_META_REPLY);
+    auto *task_meta_reply = reply.mutable_payload_step_meta_reply();
+    task_meta_reply->set_ok(ok);
+    task_meta_reply->set_failure_reason(failure_reason);
+    task_meta_reply->set_cattach_pid(pid);
+    task_meta_reply->mutable_step()->CopyFrom(step);
+
+    return m_stream_->Write(reply);
+  }
+
   void Invalidate() {
     LockGuard guard(&m_stream_mtx_);
     m_valid_ = false;
@@ -171,6 +188,29 @@ class CforedStreamWriter {
   grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                            crane::grpc::StreamCforedRequest> *m_stream_
       ABSL_GUARDED_BY(m_stream_mtx_);
+};
+
+class StreamWriterProxy {
+ public:
+  void SetWriter(std::shared_ptr<CforedStreamWriter> writer) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    writer_ = std::move(writer);
+  }
+
+  std::shared_ptr<CforedStreamWriter> GetWriter() {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return writer_;
+  }
+
+  template <typename Func>
+  void WithWriter(Func &&func) {
+    std::shared_ptr<CforedStreamWriter> writer = GetWriter();
+    if (writer) func(*writer);
+  }
+
+ private:
+  std::mutex mtx_;
+  std::shared_ptr<CforedStreamWriter> writer_;
 };
 
 class CtldServer;
@@ -452,6 +492,10 @@ class CtldServer {
   HashMap<std::string /* cfored_name */,
           HashMap<job_id_t, std::unordered_set<step_id_t>>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
+
+  Mutex m_stream_proxy_mtx_;
+  HashMap<std::string /* cfored_name */, std::shared_ptr<StreamWriterProxy>>
+      m_cfored_stream_proxy_map_ ABSL_GUARDED_BY(m_stream_proxy_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;
