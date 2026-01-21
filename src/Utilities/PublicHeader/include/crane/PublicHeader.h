@@ -264,19 +264,26 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
+        "Requested CRI operation is not supported in multi-node steps.",
         "Invalid memory format",
-        "Step resource request exceeds job resource",
-
 
         // 85 - 89
-       "The specified wckey does not exist",
+        "Step resource request exceeds job resource",
+        "The specified wckey does not exist",
         "The wckey already exists in crane",
         "The entered cluster does not exist",
         "Cannot delete the default wckey. Please set a different default wckey first",
-        "No default wckey is set. Please specify a wckey or set a default wckey",
 
         // 90-94
-        "Lua script validation failed"
+        "No default wckey is set. Please specify a wckey or set a default wckey",
+        "ERR_MISSING_DEPENDENCY",
+        "ERR_DB_INSERT_FAILED",
+        "Lua script validation failed",
+        "ERR_RESOURCE_NOT_FOUND",
+
+        // 95-99
+        "ERR_INVALID_ARGUMENT",
+        "ERR_RESOURCE_ALREADY_EXIST"
     };
 // clang-format on
 }  // namespace Internal
