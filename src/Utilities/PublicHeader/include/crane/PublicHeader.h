@@ -285,6 +285,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST"
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
+        "ERR_USER_HAS_TASK"
     };
 // clang-format on
 }  // namespace Internal
