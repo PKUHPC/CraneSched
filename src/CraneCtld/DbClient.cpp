@@ -1918,7 +1918,7 @@ bool MongodbClient::QueryJobSizeSummary(
   int64_t query_end_sec = query_end_time.time_since_epoch().count();
 
   document filter;
-  auto grouping_list = request->filter_grouping_list();
+  auto& grouping_list = request->filter_grouping_list();
 
   // Match jobs that overlap with the query time range
   // Overlap condition: job.time_start < query_end AND job.time_end >
@@ -2026,6 +2026,9 @@ bool MongodbClient::QueryJobSizeSummary(
   // Stage 2: compute total_cpus
   pipeline.project(make_document(
       kvp("account", 1), kvp("wckey", 1),
+      kvp("total_cpus",
+          make_document(
+              kvp("$multiply", make_array("$cpus_alloc", "$nodes_alloc")))),
       kvp("cpu_time",
           make_document(kvp(
               "$multiply",
@@ -2050,9 +2053,15 @@ bool MongodbClient::QueryJobSizeSummary(
   } else {
     // Build $switch expression for bucket grouping
     array branches;
-    for (int i = 0; i < grouping_list.size(); ++i) {
+    branches.append(make_document(
+        kvp("case",
+            make_document(kvp(
+                "$lt", make_array("$total_cpus",
+                                  static_cast<int32_t>(grouping_list[0]))))),
+        kvp("then", 0)));
+    for (int i = 1; i < grouping_list.size(); ++i) {
       uint32_t threshold = grouping_list[i];
-      uint32_t bucket = (i == 0) ? threshold : grouping_list[i - 1];
+      uint32_t bucket = grouping_list[i - 1];
       branches.append(make_document(
           kvp("case", make_document(kvp(
                           "$lt", make_array("$total_cpus",
