@@ -735,7 +735,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  // g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
+  g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
 
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
@@ -744,7 +744,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromResv(task->reservation, task->TaskId(),
                                              task->AllocatedRes());
   }
-  // g_account_meta_container->MallocQosResource(*task);
   if (!task->licenses_count.empty())
     g_licenses_manager->MallocLicenseWhenRecoverRunning(task->licenses_count);
 
@@ -1093,9 +1092,8 @@ void TaskScheduler::ScheduleThread_() {
             }
           }
 
-          if (auto result = g_account_meta_container->MallocQosResource(
-                  *job_in_scheduler);
-              !result) {
+          if (auto result = g_account_meta_container->CheckAndMallocQosResource(
+                  *job_in_scheduler); !result) {
             job->pending_reason = result.error();
             continue;
           }
@@ -1877,7 +1875,7 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (result) {
     auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      CRANE_DEBUG("The requested QoS resources have reached the limit.");
       g_account_meta_container->UserReduceTask(task->Username());
       return std::unexpected(res);
     }
@@ -4412,18 +4410,7 @@ void SchedulerAlgo::NodeSelect(
   // Schedule pending tasks
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
-    // ctld only virtual resource;
-    if (!job->req_licenses.empty()) {
-      if (!g_licenses_manager->CheckLicenseCountSufficient(
-              job->req_licenses, job->is_license_or, &job->actual_licenses)) {
-        job->reason = "License";
-        continue;
-      }
-    }
-    // TODO: Check multiple jobs together?
-    if (!g_account_meta_container->CheckQosResourceSufficient(job)) {
-      continue;
-    }
+    if (!job->reason.empty()) continue;
 
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {

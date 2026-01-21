@@ -57,7 +57,7 @@ class AccountMetaContainer final {
 
   bool CheckQosResourceSufficient(PdJobInScheduler* job);
 
-  std::expected<void, std::string> MallocQosResource(
+  std::expected<void, std::string> CheckAndMallocQosResource(
       const PdJobInScheduler& job);
 
   void FreeQosSubmitResource(const TaskInCtld& task);
@@ -109,6 +109,9 @@ class AccountMetaContainer final {
 
     current -= need;
   }
+
+  std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(
+      const std::list<std::string>& account_chain);
 
   // lock user -> lock account
   std::array<std::mutex, kNumStripes> m_user_stripes_;
