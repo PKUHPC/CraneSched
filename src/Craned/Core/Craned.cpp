@@ -1195,7 +1195,7 @@ int main(int argc, char** argv) {
   // Test OpenTelemetry tracing
   auto& tracer = crane::TracerManager::GetInstance();
   if (tracer.Initialize("/nfs/home/interntwo/crane/output/craned_traces.json", "craned")) {
-    CRANE_TRACE_BEGIN("craned.startup_test");
+    CRANE_TRACE_START("craned.startup_test");
     CRANE_TRACE_SET_ATTRIBUTE("test.type", "initialization");
     CRANE_TRACE_SET_ATTRIBUTE("component", "craned");
     CRANE_TRACE_ADD_EVENT("test.craned");

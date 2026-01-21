@@ -49,6 +49,9 @@ class TracerManager {
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
       const std::string& span_name);
 
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateRootSpan(
+      const std::string& span_name);
+
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateChildSpan(
       const std::string& span_name,
       const opentelemetry::trace::SpanContext& parent_context);
