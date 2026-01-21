@@ -43,6 +43,7 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/TracingMacros.h"
 
 using namespace Craned::Common;
 using Craned::g_config;
@@ -1190,6 +1191,17 @@ int main(int argc, char** argv) {
   ParseConfig(argc, argv);
   CheckSingleton();
   InstallStackTraceHooks();
+
+  // Test OpenTelemetry tracing
+  auto& tracer = crane::TracerManager::GetInstance();
+  if (tracer.Initialize("/nfs/home/interntwo/crane/output/craned_traces.json", "craned")) {
+    CRANE_TRACE_BEGIN("craned.startup_test");
+    CRANE_TRACE_SET_ATTRIBUTE("test.type", "initialization");
+    CRANE_TRACE_SET_ATTRIBUTE("component", "craned");
+    CRANE_TRACE_ADD_EVENT("test.craned");
+    CRANE_TRACE_END("OK");
+    tracer.Shutdown();
+  }
 
   if (g_config.CranedForeground)
     StartServer();
