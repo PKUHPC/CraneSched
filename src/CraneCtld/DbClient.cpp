@@ -2117,27 +2117,27 @@ bool MongodbClient::QueryJobSizeSummary(
   // Stage 1: $match - filter documents
   pipeline.match(filter.view());
 
-  // Stage 2: $addFields - compute total_cpus and clip times to query boundaries
-  pipeline.add_fields(make_document(
-      kvp("total_cpus",
-          make_document(
-              kvp("$multiply", make_array("$cpus_alloc", "$nodes_alloc")))),
-      kvp("clipped_start",
-          make_document(
-              kvp("$max", make_array(query_start_sec, "$time_start")))),
-      kvp("clipped_end",
-          make_document(kvp("$min", make_array(query_end_sec, "$time_end"))))));
+  // Stage 2: compute total_cpus
+  pipeline.project(make_document(
+      kvp("account", 1), kvp("wckey", 1),
+      kvp("cpu_time",
+          make_document(kvp(
+              "$multiply",
+              make_array(
+                  "$nodes_alloc", "$cpus_alloc",
+                  make_document(kvp(
+                      "$subtract",
+                      make_array(
+                          // clipped_end: min(query_end, time_end)
+                          make_document(kvp(
+                              "$min", make_array(query_end_sec, "$time_end"))),
+                          // clipped_start: max(query_start, time_start)
+                          make_document(
+                              kvp("$max", make_array(query_start_sec,
+                                                     "$time_start"))))))))))));
 
-  // Stage 3: $addFields - compute cpu_time and group_key
+  // Stage 3: group by group_key
   document stage3;
-  stage3.append(kvp(
-      "cpu_time",
-      make_document(kvp(
-          "$multiply",
-          make_array(
-              make_document(kvp("$subtract",
-                                make_array("$clipped_end", "$clipped_start"))),
-              "$total_cpus")))));
 
   if (grouping_list.empty()) {
     stage3.append(kvp("group_key", "$total_cpus"));
@@ -2688,15 +2688,16 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
     find_opts.projection(make_document(kvp("time_start", 1)));
 
     auto probe_cursor = jobs.find(
-        make_document(
-            kvp("time_end", make_document(kvp("$gt", cur_start))),
-            kvp("time_start", make_document(kvp("$gte", cached_min_start),
-                                            kvp("$lt", cur_end)))),
+        make_document(kvp("time_end", make_document(kvp("$gt", cur_start))),
+                      kvp("time_start",
+                          make_document(kvp("$gte", cached_min_start),
+                                        kvp("$lt", cur_end), kvp("$ne", 0)))),
         find_opts);
 
     bool has_task = false;
     for (auto&& doc : probe_cursor) {
-      discovered_min_start = doc["time_start"].get_int64().value;
+      discovered_min_start =
+          ViewGetArithmeticValue_<int64_t>(doc["time_start"]);
       has_task = true;
     }
 
@@ -2714,33 +2715,30 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
         kvp("time_start", make_document(kvp("$gte", discovered_min_start),
                                         kvp("$lt", cur_end), kvp("$ne", 0)))));
 
-    // Add the 'hour' field representing the current hour interval
-    pipeline.add_fields(make_document(kvp("hour", cur_start_date)));
+    // Project only required fields to reduce pipeline memory usage
+    pipeline.project(make_document(kvp("time_start", 1), kvp("time_end", 1),
+                                   kvp("nodes_alloc", 1), kvp("cpus_alloc", 1),
+                                   kvp("account", 1), kvp("username", 1),
+                                   kvp("qos", 1), kvp("wckey", 1)));
 
+    // Add computed fields: hour, wckey (with default), cpus_time
+    // cpus_time = nodes_alloc * cpus_alloc * runtime_in_hour
     pipeline.add_fields(make_document(
-        kvp("cpus_alloc",
-            make_document(
-                kvp("$multiply", make_array("$nodes_alloc", "$cpus_alloc"))))));
-
-    pipeline.add_fields(make_document(
-        kvp("wckey", make_document(kvp("$ifNull", make_array("$wckey", ""))))));
-
-    // Clip job start/end times to the current hour boundaries
-    pipeline.add_fields(make_document(
-        kvp("actual_start_sec",
-            make_document(kvp("$max", make_array(cur_start, "$time_start")))),
-        kvp("actual_end_sec",
-            make_document(kvp("$min", make_array(cur_end, "$time_end"))))));
-
-    // Compute CPU time for this hour slice
-    pipeline.add_fields(make_document(kvp(
-        "cpus_time",
-        make_document(kvp(
-            "$multiply",
-            make_array("$cpus_alloc",
-                       make_document(kvp(
-                           "$subtract", make_array("$actual_end_sec",
-                                                   "$actual_start_sec")))))))));
+        kvp("hour", cur_start_date),
+        kvp("wckey", make_document(kvp("$ifNull", make_array("$wckey", "")))),
+        kvp("cpus_time",
+            make_document(kvp(
+                "$multiply",
+                make_array(
+                    "$nodes_alloc", "$cpus_alloc",
+                    make_document(kvp(
+                        "$subtract",
+                        make_array(
+                            make_document(
+                                kvp("$min", make_array(cur_end, "$time_end"))),
+                            make_document(kvp(
+                                "$max",
+                                make_array(cur_start, "$time_start"))))))))))));
 
     // Group jobs by hour, account, username, qos, wckey (simplified for new
     // acc_usage tables)
