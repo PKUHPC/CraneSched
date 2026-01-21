@@ -34,11 +34,8 @@ add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
 add_subdirectory(parallel-hashmap)
 add_subdirectory(libvault)
-<<<<<<< HEAD
 add_subdirectory(lua_sol)
-=======
 add_subdirectory(opentelemetry-cpp)
->>>>>>> 5fd3ec68 (add debug choice)
 
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
