@@ -1180,42 +1180,63 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
   }
 
   Qos res_qos(*p);
-  std::string log = "";
+  std::string log;
 
   for (const auto& operation : operations) {
     auto value = operation.value_list()[0];
     switch (operation.modify_field()) {
     case crane::grpc::ModifyField::Description: {
       res_qos.description = value;
-      log += fmt::format("Set: qos: {}, description: {}\n", name, value);
+      log += fmt::format("description: {}\n", name, value);
       break;
     }
     case crane::grpc::ModifyField::Priority: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.priority = value_number;
-      log += fmt::format("Set: qos: {}, priority: {}\n", name, value);
+      log += fmt::format("priority: {}\n", name, value);
       break;
     }
     case crane::grpc::ModifyField::MaxJobsPerUser: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_jobs_per_user = value_number;
-      log += fmt::format("Set: qos: {}, max_jobs_per_user: {}\n", name, value);
+      log += fmt::format("max_jobs_per_user: {}\n", name, value);
       break;
     }
     case crane::grpc::ModifyField::MaxCpusPerUser: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_cpus_per_user = value_number;
-      log += fmt::format("Set: qos: {}, max_cpus_per_user: {}\n", name, value);
+      log += fmt::format("max_cpus_per_user: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxJobsPerAccount: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_jobs_per_account = value_number;
+      log += fmt::format("max_jobs_per_account: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobsPerUser: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs_per_user = value_number;
+      log += fmt::format("max_jobs_per_account: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobsPerAccount: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs_per_account = value_number;
+      log += fmt::format("max_submit_jobs_per_account: {}\n", name, value);
       break;
     }
     case crane::grpc::ModifyField::MaxTimeLimitPerTask: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_time_limit_per_task = absl::Seconds(value_number);
-      log += fmt::format("Set: qos: {}, max_time_limit_per_task: {}\n", name,
+      log += fmt::format("max_time_limit_per_task: {}\n", name,
                          value);
       break;
     }
