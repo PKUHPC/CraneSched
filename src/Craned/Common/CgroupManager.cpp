@@ -395,6 +395,13 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
             changed_cgroup)) {
       return nullptr;
     }
+    if ((preferred_controllers & Controller::CPUSET_CONTROLLER) &&
+        InitializeController_(
+            *native_cgroup, Controller::CPUSET_CONTROLLER,
+            required_controllers & Controller::CPUSET_CONTROLLER, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     if ((preferred_controllers & Controller::CPU_CONTROLLER_V2) &&
         InitializeController_(
@@ -1641,20 +1648,25 @@ void CgroupV2::Destroy() {
 }
 
 CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids) {
-  int cpu_size = std::ranges::max(cpu_ids);
+  if (cpu_ids.empty()) return CraneErrCode::SUCCESS;
+  int cpu_size = std::ranges::max(cpu_ids) + 1;
+
+  size_t cpu_set_size = CPU_ALLOC_SIZE(cpu_size);
   cpu_set_t *cpu_mask = CPU_ALLOC(cpu_size);
   if (cpu_mask == nullptr) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  CPU_ZERO_S(cpu_size, cpu_mask);
+  CPU_ZERO_S(cpu_set_size, cpu_mask);
   for (int cpu_id : cpu_ids) {
-    CPU_SET_S(cpu_id, cpu_size, cpu_mask);
+    CPU_SET_S(cpu_id, cpu_set_size, cpu_mask);
   }
-  if (sched_setaffinity(pid, cpu_size, cpu_mask) == -1) {
+  if (sched_setaffinity(pid, cpu_set_size, cpu_mask) == -1) {
     CRANE_ERROR("Failed to set cpu affinity for pid {}: {}", pid,
                 std::strerror(errno));
+    CPU_FREE(cpu_mask);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
+  CPU_FREE(cpu_mask);
   return CraneErrCode::SUCCESS;
 }
 
