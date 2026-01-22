@@ -43,61 +43,6 @@ namespace _internal {
 #ifdef CRANE_ENABLE_TRACING
 thread_local opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
     g_current_span;
-
-// Helper function to covert Hex string to bytes
-void HexToBytes(const std::string& hex, uint8_t* out, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    if (i * 2 + 1 >= hex.length()) break;
-    std::string byteString = hex.substr(i * 2, 2);
-    out[i] = (uint8_t)strtol(byteString.c_str(), nullptr, 16);
-  }
-}
-
-// Helper to get SpanContext from Shared File
-opentelemetry::trace::SpanContext GetInitialContext() {
-  std::string trace_id_str;
-
-  // Try reading from shared file
-  std::ifstream infile("/tmp/crane_trace.id");
-  if (infile.good()) {
-    std::getline(infile, trace_id_str);
-  }
-
-  if (!trace_id_str.empty()) {
-    uint8_t trace_id_buf[16] = {0};
-    HexToBytes(trace_id_str, trace_id_buf, 16);
-    opentelemetry::trace::TraceId trace_id(trace_id_buf);
-
-    uint8_t span_id_buf[8] = {0};
-    // If no parent span id provided, we use a dummy one to ensure correct
-    // linkage
-    uint8_t dummy[] = {0, 0, 0, 0, 0, 0, 0, 1};
-    memcpy(span_id_buf, dummy, 8);
-    opentelemetry::trace::SpanId span_id(span_id_buf);
-
-    return opentelemetry::trace::SpanContext(
-        trace_id, span_id, opentelemetry::trace::TraceFlags{1}, true);
-  }
-  return opentelemetry::trace::SpanContext::GetInvalid();
-}
-
-void PublishTraceId(
-    const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& span) {
-  if (span && span->GetContext().IsValid()) {
-    char trace_id_hex[32] = {0};
-    span->GetContext().trace_id().ToLowerBase16(trace_id_hex);
-    std::string trace_id_str(trace_id_hex, 32);
-
-    // Save to shared file
-    std::ofstream outfile("/tmp/crane_trace.id");
-    if (outfile.good()) {
-      outfile << trace_id_str;
-      outfile.close();
-      // Current umask might restrict read permissions for other users/groups
-      chmod("/tmp/crane_trace.id", 0666);
-    }
-  }
-}
 #endif
 }  // namespace _internal
 
@@ -159,16 +104,6 @@ void TracerManager::Shutdown() {
 }
 
 #ifdef CRANE_ENABLE_TRACING
-void TracerManager::InjectTraceContextToEnv(
-    const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& span) {
-  _internal::PublishTraceId(span);
-}
-
-void TracerManager::ClearEnvTraceContext() {
-  // Also remove the shared trace file to clean up context for next run
-  std::remove("/tmp/crane_trace.id");
-}
-
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
 TracerManager::CreateSpan(const std::string& span_name) {
   if (!tracer_) {
@@ -184,15 +119,7 @@ TracerManager::CreateSpan(const std::string& span_name) {
     return tracer_->StartSpan(span_name, options);
   }
 
-  auto env_context = _internal::GetInitialContext();
-  if (env_context.IsValid()) {
-    opentelemetry::trace::StartSpanOptions options;
-    options.parent = env_context;
-    return tracer_->StartSpan(span_name, options);
-  }
-
   auto span = tracer_->StartSpan(span_name);
-  InjectTraceContextToEnv(span);
   return span;
 }
 
@@ -203,15 +130,7 @@ TracerManager::CreateRootSpan(const std::string& span_name) {
         nullptr);
   }
 
-  auto env_context = _internal::GetInitialContext();
-  if (env_context.IsValid()) {
-    opentelemetry::trace::StartSpanOptions options;
-    options.parent = env_context;
-    return tracer_->StartSpan(span_name, options);
-  }
-
   auto span = tracer_->StartSpan(span_name);
-  InjectTraceContextToEnv(span);
   return span;
 }
 
