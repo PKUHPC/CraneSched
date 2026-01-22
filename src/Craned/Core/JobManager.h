@@ -186,6 +186,8 @@ class JobManager {
 
   struct EvQueueAllocateStepElem {
     std::unique_ptr<StepInstance> step_inst;
+    bool need_run_prolog;
+    EnvMap job_env;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -217,6 +219,9 @@ class JobManager {
   bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
+
+  bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
+                                            const EnvMap& job_env);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 

@@ -328,8 +328,16 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       // in the corresponding handler (EvGrpcExecuteTaskCb_).
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
-
-      EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst)};
+      EvQueueAllocateStepElem elem{
+          .step_inst = std::move(step_inst),
+          .need_run_prolog = false
+      };
+      // GetJobEnvMap must step_map has the daemon step.
+      if (elem.step_inst->step_id != kDaemonStepId) {
+        elem.need_run_prolog = !job_ptr->is_prolog_run;
+        elem.job_env = job_ptr->GetJobEnvMap();
+        job_ptr->is_prolog_run = true;
+      }
       m_grpc_alloc_step_queue_.enqueue(std::move(elem));
     }
   }
@@ -476,7 +484,14 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
-    g_thread_pool->detach_task([this, execution = step_inst.release()] {
+    g_thread_pool->detach_task([this, execution = step_inst.release(),
+                                need_run_prolog = elem.need_run_prolog,
+                                job_env = elem.job_env] {
+      if (need_run_prolog) {
+        if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id, job_env))
+          return ;
+      }
+
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
     });
   }
@@ -944,6 +959,53 @@ void JobManager::FreeStepAllocation_(
   // TODO: delete cgroup
 }
 
+bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
+                                          const EnvMap& job_env) {
+  // force the script to be executed at step allocation
+  if (!g_config.JobLifecycleHook.Prologs.empty() &&
+      !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
+    bool script_lock = false;
+    if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+      m_prolog_serial_mutex_.Lock();
+      script_lock = true;
+    }
+    CRANE_TRACE("[Step #{}.{}] Running Prolog In AllocSteps.", job_id, step_id);
+    RunPrologEpilogArgs args{
+        .scripts = g_config.JobLifecycleHook.Prologs,
+        .envs = job_env,
+        .run_uid = 0,
+        .run_gid = 0,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+    if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+      args.at_child_setup_cb = [this, job_id](pid_t pid) {
+        return MigrateProcToCgroupOfJob(pid, job_id);
+      };
+    }
+
+    if (g_config.JobLifecycleHook.PrologTimeout > 0)
+      args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+    auto result = util::os::RunPrologOrEpiLog(args);
+    if (script_lock) m_prolog_serial_mutex_.Unlock();
+    if (!result) {
+      auto status = result.error();
+      CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
+                  job_id, step_id, status.exit_code, status.signal_num);
+      g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+      ActivateTaskStatusChangeAsync_(
+          job_id, step_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::EC_PROLOG_ERR,
+          fmt::format("Failed to run prolog for job#{} ", job_id),
+          google::protobuf::util::TimeUtil::GetCurrentTime());
+      return false;
+    }
+    CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id, step_id);
+  }
+  return true;
+}
+
 void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // This function runs in a multi-threading manner. Take care of thread
   // safety. JobInstance will not be free during this function. Take care of
@@ -999,55 +1061,6 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   {
     absl::MutexLock lk(job->step_map_mtx.get());
     job->step_map.emplace(step->step_id, std::move(step));
-  }
-
-  // force the script to be executed at step allocation
-  if (!g_config.JobLifecycleHook.Prologs.empty() &&
-      !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
-    if (!job->is_prolog_run) {
-      job->is_prolog_run = true;
-      bool script_lock = false;
-      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
-      CRANE_TRACE("[Step #{}.{}] Running Prolog In AllocSteps.", job_id,
-                  step_id);
-      RunPrologEpilogArgs args{
-          .scripts = g_config.JobLifecycleHook.Prologs,
-          .envs = job->GetJobEnvMap(),
-          .run_uid = 0,
-          .run_gid = 0,
-          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-
-      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-        args.at_child_setup_cb = [job](pid_t pid) {
-          if (!job || !job->cgroup) return false;
-          return job->cgroup->MigrateProcIn(pid);
-        };
-      }
-
-      if (g_config.JobLifecycleHook.PrologTimeout > 0)
-        args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-        args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
-      auto result = util::os::RunPrologOrEpiLog(args);
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
-      if (!result) {
-        auto status = result.error();
-        CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
-                    job_id, step_id, status.exit_code, status.signal_num);
-        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-        ActivateTaskStatusChangeAsync_(
-            job_id, step_id, crane::grpc::TaskStatus::Failed,
-            ExitCode::EC_PROLOG_ERR,
-            fmt::format("Failed to run prolog for job#{} ", job_id),
-            google::protobuf::util::TimeUtil::GetCurrentTime());
-        return;
-      }
-      CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id,
-                  step_id);
-    }
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
