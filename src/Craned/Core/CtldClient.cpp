@@ -1000,7 +1000,7 @@ void CtldClient::StartHealthCheck() {
   if (g_config.HealthCheck.Interval == 0) return;
 
   bool expected = false;
-  if (!m_health_check_init_.compare_exchange_strong(expected, true))
+  if (m_health_check_init_.compare_exchange_strong(expected, true))
     HealthCheck_();
 
   if (g_config.HealthCheck.NodeState & START_ONLY) return;
