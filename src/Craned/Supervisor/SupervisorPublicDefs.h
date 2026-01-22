@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/TracerManager.h"
 
 namespace Craned::Supervisor {
 
@@ -117,3 +118,7 @@ inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
+
+#ifdef CRANE_ENABLE_TRACING
+inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> g_tracer;
+#endif

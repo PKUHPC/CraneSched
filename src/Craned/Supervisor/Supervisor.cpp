@@ -276,6 +276,18 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   PasswordEntry::InitializeEntrySize();
 
+#ifdef CRANE_ENABLE_TRACING
+  std::filesystem::path trace_dir =
+      "/nfs/home/interntwo/crane/output/supervisor";
+
+  auto trace_file = trace_dir / fmt::format("supervisor_{}_{}.trace",
+                                            g_config.JobId, g_config.StepId);
+  if (crane::TracerManager::GetInstance().Initialize(trace_file.string(),
+                                                     "Supervisor")) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
+
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
   g_thread_pool = std::make_unique<BS::thread_pool>(
@@ -365,6 +377,10 @@ void StartServer(int grpc_output_fd) {
 
   g_thread_pool->wait();
   g_thread_pool.reset();
+
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
 
   std::exit(0);
 }

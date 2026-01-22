@@ -970,6 +970,13 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+#ifdef CRANE_ENABLE_TRACING
+  if (crane::TracerManager::GetInstance().Initialize(
+          g_config.CranedLogFile.string() + ".trace", "Craned")) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
+
   // It is always ok to create thread pool first.
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
@@ -1093,6 +1100,10 @@ void WaitForStopAndDoGvarFini() {
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
+
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
 
   std::exit(0);
 }
