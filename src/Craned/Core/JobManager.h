@@ -221,7 +221,7 @@ class JobManager {
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 
   bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
-                                            const EnvMap& job_env);
+                                const EnvMap& job_env);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 

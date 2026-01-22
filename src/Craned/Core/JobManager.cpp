@@ -328,10 +328,8 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       // in the corresponding handler (EvGrpcExecuteTaskCb_).
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
-      EvQueueAllocateStepElem elem{
-          .step_inst = std::move(step_inst),
-          .need_run_prolog = false
-      };
+      EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
+                                   .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
       if (elem.step_inst->step_id != kDaemonStepId) {
         elem.need_run_prolog = !job_ptr->is_prolog_run;
@@ -488,8 +486,9 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
                                 need_run_prolog = elem.need_run_prolog,
                                 job_env = elem.job_env] {
       if (need_run_prolog) {
-        if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id, job_env))
-          return ;
+        if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
+                                      job_env))
+          return;
       }
 
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
