@@ -194,6 +194,8 @@ class CtldClient {
     m_last_active_time_ = std::chrono::steady_clock::now();
   }
 
+  void StartHealthCheck();
+
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
   // Convenience method for reporting status changes
@@ -221,9 +223,7 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
-  void HealthCheckThread_();
   void HealthCheck_();
-
   bool NeedHealthCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
@@ -255,8 +255,8 @@ class CtldClient {
   std::atomic_bool m_ping_ctld_{false};
   std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
 
-  std::thread m_health_check_thread_;
   std::atomic_bool m_health_check_init_{false};
+  std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
 };
 
 }  // namespace Craned

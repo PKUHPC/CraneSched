@@ -309,6 +309,7 @@ void CtldClientStateMachine::ActionReady_() {
   m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(true);
   g_ctld_client->StartPingCtld();
+  g_ctld_client->StartHealthCheck();
   if (m_action_ready_cb_)
     g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
 }
@@ -356,6 +357,27 @@ CtldClient::CtldClient() {
         return success;
       });
 
+  if (g_config.HealthCheck.Interval > 0 &&
+      ((g_config.HealthCheck.NodeState & START_ONLY) == 0u)) {
+    m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+    m_health_check_handle_->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+          if (!m_ping_ctld_) return;
+          g_thread_pool->detach_task([this]() {
+            if (NeedHealthCheck_()) HealthCheck_();
+            uint64_t delay = g_config.HealthCheck.Interval;
+            if (g_config.HealthCheck.Cycle) {
+              std::mt19937 rng{std::random_device{}()};
+              std::uniform_int_distribution<uint64_t> dist(
+                  1, g_config.HealthCheck.Interval);
+              delay = dist(rng);
+            }
+            m_health_check_handle_->start(std::chrono::seconds(delay),
+                                          std::chrono::seconds(0));
+          });
+        });
+  }
+
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PingCtldThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -385,7 +407,6 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  if (m_health_check_thread_.joinable()) m_health_check_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -652,11 +673,7 @@ void CtldClient::Init() {
       });
 
   g_ctld_client_sm->SetActionReadyCb([this]() {
-    bool expected = false;
-    if (g_config.HealthCheck.Interval > 0L &&
-        m_health_check_init_.compare_exchange_strong(expected, true)) {
-      m_health_check_thread_ = std::thread([this] { HealthCheckThread_(); });
-    }
+
   });
 }
 
@@ -979,40 +996,24 @@ bool CtldClient::SendStatusChanges_(
   return true;
 }
 
-void CtldClient::HealthCheckThread_() {
-  util::SetCurrentThreadName("HealthCheckThr");
-  CRANE_TRACE("HealthCheckThr start");
+void CtldClient::StartHealthCheck() {
+  if (g_config.HealthCheck.Interval == 0) return;
 
-  HealthCheck_();
+  bool expected = false;
+  if (!m_health_check_init_.compare_exchange_strong(expected, true))
+    HealthCheck_();
+
   if (g_config.HealthCheck.NodeState & START_ONLY) return;
-  std::mt19937 rng{std::random_device{}()};
-  std::chrono::steady_clock::time_point last_check_time =
-      std::chrono::steady_clock::now();
-  uint64_t interval = g_config.HealthCheck.Interval;
-  uint64_t delay = interval;
-  do {
-    if (m_stopping_ || !m_stub_) return;
-    if (!m_ping_ctld_) {
-      last_check_time = std::chrono::steady_clock::now();
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      continue;
-    }
 
-    if (last_check_time + std::chrono::seconds(delay) >
-        std::chrono::steady_clock::now()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      continue;
-    }
-
-    if (NeedHealthCheck_()) HealthCheck_();
-    last_check_time = std::chrono::steady_clock::now();
-    if (g_config.HealthCheck.Cycle) {
-      std::uniform_int_distribution<uint64_t> dist(1, interval);
-      delay = dist(rng);
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  } while (true);
-  CRANE_TRACE("HealthCheckThr stop..");
+  uint64_t delay = g_config.HealthCheck.Interval;
+  if (g_config.HealthCheck.Cycle) {
+    std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<uint64_t> dist(1,
+                                                 g_config.HealthCheck.Interval);
+    delay = dist(rng);
+  }
+  m_health_check_handle_->start(std::chrono::seconds(delay),
+                                std::chrono::seconds(0));
 }
 
 void CtldClient::HealthCheck_() {
