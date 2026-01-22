@@ -40,6 +40,7 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/TracerManager.h"
 #include "crane/TracingMacros.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
@@ -1027,6 +1028,14 @@ int StartServer() {
 
   CreateFolders();
 
+  crane::TracerManager::GetInstance().Initialize(
+      "/nfs/home/interntwo/crane/output/cranectld_trace.log", "CraneCtld");
+  auto root_span = crane::TracerManager::GetInstance().CreateRootSpan(
+      "CraneCtld_Main_Trace");
+  if (root_span) {
+    root_span->AddEvent("CraneCtld_Main_Function_Start");
+  }
+
   InitializeCtldGlobalVariables();
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
@@ -1039,6 +1048,12 @@ int StartServer() {
   g_ctld_server->Wait();
 
   DestroyCtldGlobalVariables();
+
+  if (root_span) {
+    root_span->End();
+  }
+  crane::TracerManager::GetInstance().ClearEnvTraceContext();
+  crane::TracerManager::GetInstance().Shutdown();
 
   return 0;
 }
