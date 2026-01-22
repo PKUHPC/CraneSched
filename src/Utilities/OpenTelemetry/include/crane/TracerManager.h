@@ -57,11 +57,6 @@ class TracerManager {
       const opentelemetry::trace::SpanContext& parent_context);
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> GetTracer();
-
-  // Helper methods for environment variable management
-  void InjectTraceContextToEnv(
-      const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& span);
-  void ClearEnvTraceContext();
 #endif
 
   TracerManager(const TracerManager&) = delete;
