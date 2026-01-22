@@ -43,7 +43,6 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
-#include "crane/TracerManager.h"
 #include "crane/TracingMacros.h"
 
 using namespace Craned::Common;
@@ -51,7 +50,6 @@ using Craned::g_config;
 using Craned::JobInD;
 
 /* Trace Handle */
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> g_root_span;
 
 CraneErrCode RecoverCgForJobs(
     std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
@@ -964,14 +962,6 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 }
 
 void GlobalVariableInit() {
-  crane::TracerManager::GetInstance().Initialize(
-      "/nfs/home/interntwo/crane/output/craned_trace.log", "Craned");
-  g_root_span =
-      crane::TracerManager::GetInstance().CreateSpan("Craned_Main_Trace");
-  if (g_root_span) {
-    g_root_span->AddEvent("Craned_Main_Function_Start");
-  }
-
   CreateRequiredDirectories();
 
   // Mask SIGPIPE to prevent Craned from crushing due to
@@ -1103,13 +1093,6 @@ void WaitForStopAndDoGvarFini() {
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
-
-  if (g_root_span) {
-    g_root_span->End();
-    g_root_span.reset();
-  }
-  crane::TracerManager::GetInstance().ClearEnvTraceContext();
-  crane::TracerManager::GetInstance().Shutdown();
 
   std::exit(0);
 }
