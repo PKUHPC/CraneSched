@@ -20,10 +20,7 @@
 
 #ifdef CRANE_ENABLE_TRACING
 #  include <fstream>
-#  include <grpcpp/grpcpp.h>
 
-#  include "opentelemetry/context/propagation/global_propagator.h"
-#  include "opentelemetry/context/propagation/text_map_propagator.h"
 #  include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
@@ -31,49 +28,9 @@
 #  include "opentelemetry/sdk/trace/batch_span_processor_options.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
-#  include "opentelemetry/trace/propagation/http_trace_context.h"
 #endif
 
 namespace crane {
-
-#ifdef CRANE_ENABLE_TRACING
-using opentelemetry::context::propagation::TextMapCarrier;
-
-class GrpcClientCarrier : public TextMapCarrier {
- public:
-  GrpcClientCarrier(::grpc::ClientContext& context) : context_(context) {}
-  virtual opentelemetry::nostd::string_view Get(
-      opentelemetry::nostd::string_view key) const noexcept override {
-    return "";
-  }
-  virtual void Set(opentelemetry::nostd::string_view key,
-                   opentelemetry::nostd::string_view value) noexcept override {
-    context_.AddMetadata(std::string(key), std::string(value));
-  }
-
- private:
-  ::grpc::ClientContext& context_;
-};
-
-class GrpcServerCarrier : public TextMapCarrier {
- public:
-  GrpcServerCarrier(const ::grpc::ServerContext* context) : context_(context) {}
-  virtual opentelemetry::nostd::string_view Get(
-      opentelemetry::nostd::string_view key) const noexcept override {
-    auto it = context_->client_metadata().find(std::string(key));
-    if (it != context_->client_metadata().end()) {
-      return opentelemetry::nostd::string_view(it->second.data(),
-                                               it->second.length());
-    }
-    return "";
-  }
-  virtual void Set(opentelemetry::nostd::string_view key,
-                   opentelemetry::nostd::string_view value) noexcept override {}
-
- private:
-  const ::grpc::ServerContext* context_;
-};
-#endif
 
 namespace _internal {
 #ifdef CRANE_ENABLE_TRACING
@@ -121,11 +78,6 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 
   tracer_ = tracer_provider_->GetTracer(service_name_);
 
-  opentelemetry::context::propagation::GlobalTextMapPropagator::SetGlobalPropagator(
-      opentelemetry::nostd::shared_ptr<
-          opentelemetry::context::propagation::TextMapPropagator>(
-          new opentelemetry::trace::propagation::HttpTraceContext()));
-
   initialized_ = true;
   return true;
 #else
@@ -161,37 +113,6 @@ TracerManager::CreateSpan(const std::string& span_name) {
   }
 
   return tracer_->StartSpan(span_name);
-}
-
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-TracerManager::CreateSpan(
-    const std::string& span_name,
-    const opentelemetry::context::Context& parent_context) {
-  if (!tracer_) {
-    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
-        nullptr);
-  }
-
-  opentelemetry::trace::StartSpanOptions options;
-  options.parent = parent_context;
-  return tracer_->StartSpan(span_name, options);
-}
-
-void TracerManager::Inject(::grpc::ClientContext& context) {
-  auto propagator =
-      opentelemetry::context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-  auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-  GrpcClientCarrier carrier(context);
-  propagator->Inject(carrier, current_ctx);
-}
-
-opentelemetry::context::Context TracerManager::Extract(
-    const ::grpc::ServerContext* context) {
-  auto propagator =
-      opentelemetry::context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-  GrpcServerCarrier carrier(context);
-  auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-  return propagator->Extract(carrier, current_ctx);
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
