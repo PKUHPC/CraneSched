@@ -1006,6 +1006,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
     if (!job->is_prolog_run) {
       job->is_prolog_run = true;
+      bool script_lock = false;
+      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+        m_prolog_serial_mutex_.Lock();
+        script_lock = true;
+      }
       CRANE_TRACE("[Step #{}.{}] Running Prolog In AllocSteps.", job_id,
                   step_id);
       RunPrologEpilogArgs args{
@@ -1022,19 +1027,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         };
       }
 
-      bool script_lock = false;
-
-      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
-
       if (g_config.JobLifecycleHook.PrologTimeout > 0)
         args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
       else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(args);
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
       if (!result) {
         auto status = result.error();
         CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
@@ -1049,6 +1046,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       }
       CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id,
                   step_id);
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
     }
   }
 
@@ -1389,7 +1387,12 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     if (!g_config.JobLifecycleHook.Epilogs.empty() && !(g_config.JobLifecycleHook.PrologFlags &
         PrologFlagEnum::RunInJob)) {
-      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap()]() {
+      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap(), this]() {
+        bool script_lock = false;
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+          m_prolog_serial_mutex_.Lock();
+          script_lock = true;
+        }
         CRANE_TRACE("#{}: Running epilogs...", job_id);
         RunPrologEpilogArgs run_epilog_args{
             .scripts = g_config.JobLifecycleHook.Epilogs,
@@ -1412,6 +1415,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         } else {
           CRANE_DEBUG("[Job #{}]: Epilog success", job_id);
         }
+        if (script_lock) m_prolog_serial_mutex_.Unlock();
       });
     }
 
