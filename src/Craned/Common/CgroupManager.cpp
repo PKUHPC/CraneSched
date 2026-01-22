@@ -69,6 +69,7 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   using CgConstant::Controller;
   using CgConstant::GetControllerStringView;
 
+  // TODO: Add cpuset controller when enabling cgroup cpuset management.
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
     void *handle = nullptr;
     controller_data info{};
