@@ -23,6 +23,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include "crane/TracerManager.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -1400,3 +1401,7 @@ struct Txn {
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
+
+#ifdef CRANE_ENABLE_TRACING
+inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> g_tracer;
+#endif

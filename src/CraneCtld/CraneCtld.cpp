@@ -904,6 +904,10 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
+  g_task_scheduler.reset();
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_task_scheduler.reset();
@@ -938,6 +942,13 @@ void InitializeCtldGlobalVariables() {
 
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
+
+#ifdef CRANE_ENABLE_TRACING
+  if (crane::TracerManager::GetInstance().Initialize(
+          g_config.CraneCtldLogFile.string() + ".trace", "CraneCtld")) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
 
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
