@@ -50,6 +50,7 @@ enum class Controller : uint8_t {
   BLOCK_CONTROLLER,
   CPU_CONTROLLER,
   DEVICES_CONTROLLER,
+  CPUSET_CONTROLLER,
 
   MEMORY_CONTROLLER_V2,
   CPU_CONTROLLER_V2,
@@ -73,6 +74,7 @@ enum class ControllerFile : uint8_t {
 
   DEVICES_DENY,
   DEVICES_ALLOW,
+  CPUSET_CPUS,
 
   // V2
   CPU_WEIGHT_V2,
@@ -83,6 +85,7 @@ enum class ControllerFile : uint8_t {
   MEMORY_HIGH_V2,
 
   IO_WEIGHT_V2,
+  CPUSET_CPUS_V2,
   // root cgroup controller can't be change or created
 
   CONTROLLER_FILE_COUNT,
@@ -103,6 +106,11 @@ inline constexpr std::string kRootCgNamePrefix = "crane";
 inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
+
+constexpr int kParsedJobIdIdx = 0;
+constexpr int kParsedStepIdIdx = 1;
+constexpr int kParsedSystemFlagIdx = 2;
+constexpr int kParsedTaskIdIdx = 3;
 
 // Common cgroup filename constants
 // cgroup v2 memory events file used to read OOM and OOM_KILL counters
@@ -129,6 +137,7 @@ constexpr std::array<std::string_view,
         "blkio",
         "cpu",
         "devices",
+        "cpuset",
         // V2
         "memory",
         "cpu",
@@ -152,6 +161,7 @@ constexpr std::array<std::string_view,
 
         "devices.deny",
         "devices.allow",
+        "cpuset.cpus",
 
         // V2
         "cpu.weight",
@@ -162,6 +172,7 @@ constexpr std::array<std::string_view,
         "memory.high",
 
         "io.weight",
+        "cpuset.cpus",
     };
 
 }  // namespace Internal
@@ -379,6 +390,7 @@ class CgroupInterface {
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
+  virtual bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) = 0;
   virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
   virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
   virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
@@ -412,6 +424,7 @@ class CgroupV1 : public CgroupInterface {
 
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
+  bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
   bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
@@ -439,6 +452,7 @@ class CgroupV2 : public CgroupInterface {
   ~CgroupV2() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
+  bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
   bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
@@ -489,6 +503,8 @@ class CgroupV2 : public CgroupInterface {
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
 #endif
 };
+
+CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids);
 
 class AllocatableResourceAllocator {
  public:
