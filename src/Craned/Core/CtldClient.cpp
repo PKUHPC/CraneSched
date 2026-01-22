@@ -359,23 +359,54 @@ CtldClient::CtldClient() {
 
   if (g_config.HealthCheck.Interval > 0 &&
       ((g_config.HealthCheck.NodeState & START_ONLY) == 0u)) {
-    m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+    m_health_check_uvw_loop_ = uvw::loop::create();
+    m_health_check_handle_ =
+        m_health_check_uvw_loop_->resource<uvw::timer_handle>();
     m_health_check_handle_->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
           if (!m_ping_ctld_) return;
-          g_thread_pool->detach_task([this]() {
-            if (NeedHealthCheck_()) HealthCheck_();
-            uint64_t delay = g_config.HealthCheck.Interval;
-            if (g_config.HealthCheck.Cycle) {
-              std::mt19937 rng{std::random_device{}()};
-              std::uniform_int_distribution<uint64_t> dist(
-                  1, g_config.HealthCheck.Interval);
-              delay = dist(rng);
-            }
-            m_health_check_handle_->start(std::chrono::seconds(delay),
-                                          std::chrono::seconds(0));
-          });
+          if (NeedHealthCheck_()) HealthCheck_();
+          uint64_t delay = g_config.HealthCheck.Interval;
+          if (g_config.HealthCheck.Cycle) {
+            std::mt19937 rng{std::random_device{}()};
+            std::uniform_int_distribution<uint64_t> dist(
+                1, g_config.HealthCheck.Interval);
+            delay = dist(rng);
+          }
+          m_health_check_handle_->start(std::chrono::seconds(delay),
+                                        std::chrono::seconds(0));
         });
+    m_health_check_async_ = m_health_check_uvw_loop_->resource<uvw::async_handle>();
+    m_health_check_async_->on<uvw::async_event>(
+        [this](const uvw::async_event&, uvw::async_handle&) {
+          uint64_t delay = g_config.HealthCheck.Interval;
+          if (g_config.HealthCheck.Cycle) {
+            std::mt19937 rng{std::random_device{}()};
+            std::uniform_int_distribution<uint64_t> dist(
+                1, g_config.HealthCheck.Interval);
+            delay = dist(rng);
+          }
+          m_health_check_handle_->start(std::chrono::seconds(delay),
+                                        std::chrono::seconds(0));
+        });
+    m_health_check_uvw_thread_ = std::thread([this] {
+      util::SetCurrentThreadName("HealthCheckThr");
+      auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
+      idle_handle->on<uvw::idle_event>(
+          [this](const uvw::idle_event&, uvw::idle_handle& h) {
+            if (m_stopping_) {
+              h.parent().walk([](auto&& h) { h.close(); });
+              h.parent().stop();
+              return;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          });
+      if (idle_handle->start() != 0) {
+        CRANE_ERROR("Failed to start the idle event in CtldClient loop.");
+      }
+      m_health_check_uvw_loop_->run();
+    });
   }
 
   m_uvw_thread_ = std::thread([this] {
@@ -1005,15 +1036,7 @@ void CtldClient::StartHealthCheck() {
 
   if (g_config.HealthCheck.NodeState & START_ONLY) return;
 
-  uint64_t delay = g_config.HealthCheck.Interval;
-  if (g_config.HealthCheck.Cycle) {
-    std::mt19937 rng{std::random_device{}()};
-    std::uniform_int_distribution<uint64_t> dist(1,
-                                                 g_config.HealthCheck.Interval);
-    delay = dist(rng);
-  }
-  m_health_check_handle_->start(std::chrono::seconds(delay),
-                                std::chrono::seconds(0));
+  m_health_check_async_->send();
 }
 
 void CtldClient::HealthCheck_() {
