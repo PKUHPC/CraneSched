@@ -258,8 +258,16 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 
   for (auto& job : jobs) {
     task_id_t job_id = job.job_id;
-    uid_t uid = job.Uid();
 
+#ifdef CRANE_ENABLE_TRACING
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Alloc Job " + std::to_string(job_id));
+      span->SetAttribute("job_id", job_id);
+      span->End();
+    }
+#endif
+
+    uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
@@ -276,6 +284,13 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   std::vector<StepInstance*> steps_to_free;
 
   for (job_id_t job_id : job_ids) {
+#ifdef CRANE_ENABLE_TRACING
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Free Job " + std::to_string(job_id));
+      span->SetAttribute("job_id", job_id);
+      span->End();
+    }
+#endif
     auto job = FreeJobInfo_(job_id);
     if (!job.has_value()) {
       CRANE_INFO("Try to free non-existent job #{}.", job_id);

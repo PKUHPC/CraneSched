@@ -1078,6 +1078,15 @@ void TaskScheduler::ScheduleThread_() {
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
 
+#ifdef CRANE_ENABLE_TRACING
+          if (g_tracer) {
+            auto span = g_tracer->StartSpan("Schedule Job " +
+                                            std::to_string(job->TaskId()));
+            span->SetAttribute("job_id", job->TaskId());
+            span->End();
+          }
+#endif
+
           job->SetStatus(crane::grpc::TaskStatus::Configuring);
 
           job->allocated_craneds_regex =

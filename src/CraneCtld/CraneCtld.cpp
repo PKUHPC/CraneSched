@@ -895,8 +895,12 @@ void InitializeCtldGlobalVariables() {
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
 #ifdef CRANE_ENABLE_TRACING
+  std::filesystem::path trace_dir = "/nfs/home/interntwo/crane/output";
+  std::error_code ec;
+  std::filesystem::create_directories(trace_dir, ec);
+
   if (crane::TracerManager::GetInstance().Initialize(
-          g_config.CraneCtldLogFile.string() + ".trace", "CraneCtld")) {
+          (trace_dir / "cranectld.trace").string(), "CraneCtld")) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

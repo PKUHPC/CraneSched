@@ -971,8 +971,12 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
 #ifdef CRANE_ENABLE_TRACING
+  std::filesystem::path trace_dir = "/nfs/home/interntwo/crane/output";
+  std::error_code ec;
+  std::filesystem::create_directories(trace_dir, ec);
+
   if (crane::TracerManager::GetInstance().Initialize(
-          g_config.CranedLogFile.string() + ".trace", "Craned")) {
+          (trace_dir / "craned.trace").string(), "Craned")) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif
