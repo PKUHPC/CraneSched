@@ -1385,9 +1385,10 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       continue;
     }
 
-    if (!g_config.JobLifecycleHook.Epilogs.empty() && !(g_config.JobLifecycleHook.PrologFlags &
-        PrologFlagEnum::RunInJob)) {
-      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap(), this]() {
+    if (!g_config.JobLifecycleHook.Epilogs.empty() &&
+        !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
+      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap(),
+                                  this]() {
         bool script_lock = false;
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
           m_prolog_serial_mutex_.Lock();

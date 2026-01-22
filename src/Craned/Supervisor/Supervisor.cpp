@@ -399,7 +399,7 @@ void StartServer(int grpc_output_fd) {
         CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
                     status.signal_num);
         ready = false;
-      } else  {
+      } else {
         CRANE_DEBUG("Prolog success");
       }
     }
