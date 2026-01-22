@@ -147,6 +147,7 @@ bool TaskScheduler::Init() {
   if (!pending_queue.empty()) {
     CRANE_INFO("{} pending task(s) recovered.", pending_queue.size());
 
+    absl::Time recovery_time = absl::Now();
     for (auto&& [task_db_id, task_in_embedded_db] : pending_queue) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
@@ -186,6 +187,8 @@ bool TaskScheduler::Init() {
             "move it to the ended queue.",
             task_id);
         task->SetStatus(crane::grpc::Failed);
+        task->SetStartTime(recovery_time);
+        task->SetEndTime(recovery_time);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
         if (!ok) {
@@ -2898,18 +2901,19 @@ void TaskScheduler::CleanCancelQueueCb_() {
     });
   }
 
-  absl::Time end_time = absl::Now();
+  absl::Time cancel_time = absl::Now();
 
   if (!pending_task_ptr_vec.empty()) {
     for (auto& task : pending_task_ptr_vec) {
       task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(end_time);
+      task->SetStartTime(cancel_time);
+      task->SetEndTime(cancel_time);
       g_account_meta_container->FreeQosResource(*task);
 
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
-                                    end_time);
+                                    cancel_time);
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
-                                    end_time);
+                                    cancel_time);
       task->TriggerDependencyEvents(crane::grpc::AFTER_OK,
                                     absl::InfiniteFuture());
       task->TriggerDependencyEvents(crane::grpc::AFTER_NOT_OK,
@@ -2945,7 +2949,8 @@ void TaskScheduler::CleanCancelQueueCb_() {
   if (pending_step_ptr_vec.empty()) return;
   for (auto& step : pending_step_ptr_vec) {
     step->SetStatus(crane::grpc::Cancelled);
-    step->SetEndTime(absl::Now());
+    step->SetStartTime(cancel_time);
+    step->SetEndTime(cancel_time);
 
     if (step->type == crane::grpc::Interactive) {
       auto& meta = step->ia_meta.value();
