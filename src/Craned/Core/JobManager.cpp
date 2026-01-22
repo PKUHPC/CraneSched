@@ -1032,6 +1032,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(args);
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
       if (!result) {
         auto status = result.error();
         CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
@@ -1046,7 +1047,6 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       }
       CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id,
                   step_id);
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
     }
   }
 
