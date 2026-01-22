@@ -1387,7 +1387,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       continue;
     }
 
-    if (!g_config.JobLifecycleHook.Epilogs.empty()) {
+    if (!g_config.JobLifecycleHook.Epilogs.empty() && !(g_config.JobLifecycleHook.PrologFlags &
+        PrologFlagEnum::RunInJob)) {
       g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap()]() {
         CRANE_TRACE("#{}: Running epilogs...", job_id);
         RunPrologEpilogArgs run_epilog_args{

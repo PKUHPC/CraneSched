@@ -309,33 +309,6 @@ void GlobalVariableInit(int grpc_output_fd) {
     std::exit(1);
   }
 
-  if (!g_config.JobLifecycleHook.Prologs.empty()) {
-    CRANE_TRACE("Running Prologs...");
-    RunPrologEpilogArgs run_prolog_args{
-        .scripts = g_config.JobLifecycleHook.Prologs,
-        .envs = g_config.JobEnv,
-        .run_uid = 0,
-        .run_gid = 0,
-        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-    if (g_config.JobLifecycleHook.PrologTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-      run_prolog_args.timeout_sec =
-          g_config.JobLifecycleHook.PrologEpilogTimeout;
-
-    auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
-    if (!result) {
-      auto status = result.error();
-      CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
-                  status.signal_num);
-      msg.set_ok(false);
-      SerializeDelimitedToZeroCopyStream(msg, &ostream);
-      ostream.Close();
-      std::abort();
-    }
-    CRANE_DEBUG("Prolog success");
-  }
-
   PasswordEntry::InitializeEntrySize();
 
   Craned::Common::CgroupManager::Init(
@@ -403,6 +376,31 @@ void StartServer(int grpc_output_fd) {
                       static_cast<int>(err));
           ready = false;
         }
+      }
+    }
+
+    if (!g_config.JobLifecycleHook.Prologs.empty()) {
+      CRANE_TRACE("Running Prologs...");
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts = g_config.JobLifecycleHook.Prologs,
+          .envs = g_config.JobEnv,
+          .run_uid = 0,
+          .run_gid = 0,
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
+                    status.signal_num);
+        ready = false;
+      } else  {
+        CRANE_DEBUG("Prolog success");
       }
     }
 
