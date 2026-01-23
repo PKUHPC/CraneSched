@@ -2425,6 +2425,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
 
+#ifdef CRANE_ENABLE_TRACING
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan(fmt::format("Execute Task {}", task_id));
+      span->SetAttribute("job_id", m_step_.job_id);
+      span->End();
+    }
+#endif
+
     auto* task = m_step_.GetTaskInstance(task_id);
     if (auto err = m_step_.Prepare(); err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to prepare step for task execution.");
