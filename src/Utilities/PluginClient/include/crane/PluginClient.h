@@ -57,6 +57,7 @@ class PluginClient {
     UPDATE_POWER_STATE,
     REGISTER_CRANED,
     UPDATE_LICENSES,
+    TRACE,
     HookTypeCount,
   };
 
@@ -73,6 +74,7 @@ class PluginClient {
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
   void NodeEventHookAsync(
       std::vector<crane::grpc::plugin::CranedEventInfo> events);
+  void TraceHookAsync(std::vector<crane::grpc::plugin::SpanInfo> spans);
 
   // Launched by Craned
   void CreateCgroupHookAsync(task_id_t task_id, const std::string& cgroup,
@@ -112,6 +114,8 @@ class PluginClient {
 
   grpc::Status SendUpdateLicensesHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
+  grpc::Status SendTraceHook_(grpc::ClientContext* context,
+                              google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
@@ -132,7 +136,8 @@ class PluginClient {
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
            &PluginClient::SendRegisterCranedHook_,
-           &PluginClient::SendUpdateLicensesHook_}};
+           &PluginClient::SendUpdateLicensesHook_,
+           &PluginClient::SendTraceHook_}};
 };
 
 }  // namespace plugin

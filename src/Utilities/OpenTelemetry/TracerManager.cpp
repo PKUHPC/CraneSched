@@ -51,8 +51,9 @@ TracerManager& TracerManager::GetInstance() {
   return instance;
 }
 
-bool TracerManager::Initialize(const std::string& output_file_path,
-                               const std::string& service_name) {
+bool TracerManager::Initialize(
+    const std::string& output_file_path, const std::string& service_name,
+    std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter) {
 #ifdef CRANE_ENABLE_TRACING
   namespace trace_api = opentelemetry::trace;
   namespace trace_sdk = opentelemetry::sdk::trace;
@@ -63,6 +64,14 @@ bool TracerManager::Initialize(const std::string& output_file_path,
   output_stream_ = std::make_shared<std::ofstream>(
       output_file_path, std::ios::out | std::ios::app);
   if (!static_cast<std::ofstream*>(output_stream_.get())->is_open()) {
+    std::cerr << "Failed to open trace output file: " << output_file_path
+              << std::endl;
+    // Don't return false here, we might still want the extra_exporter to work?
+    // But original code returned false. Let's keep returning false or handle it
+    // if extra_exporter is present. If file fails, we probably still want to
+    // continue if extra_exporter is valid. But simplicity, let's assume file op
+    // is important. However, if we fail here, we don't set up provider. Let's
+    // stick to original behavior for file, but improved logging.
     return false;
   }
 
@@ -79,6 +88,13 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 
   auto provider = std::make_shared<trace_sdk::TracerProvider>(
       std::move(processor), resource_ptr);
+
+  if (extra_exporter) {
+    auto extra_processor = trace_sdk::SimpleSpanProcessorFactory::Create(
+        std::move(extra_exporter));
+    provider->AddProcessor(std::move(extra_processor));
+  }
+
   tracer_provider_ = provider;
 
   trace_api::Provider::SetTracerProvider(tracer_provider_);
