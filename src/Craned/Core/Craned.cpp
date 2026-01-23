@@ -43,6 +43,7 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/TracePluginExporter.h"
 #include "crane/TracingMacros.h"
 
 using namespace Craned::Common;
@@ -975,8 +976,13 @@ void GlobalVariableInit() {
   std::error_code ec;
   std::filesystem::create_directories(trace_dir, ec);
 
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
   if (crane::TracerManager::GetInstance().Initialize(
-          (trace_dir / "craned.trace").string(), "Craned")) {
+          (trace_dir / "craned.trace").string(), "Craned",
+          std::move(plugin_exporter))) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

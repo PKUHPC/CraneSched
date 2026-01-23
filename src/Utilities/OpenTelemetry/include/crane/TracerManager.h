@@ -41,7 +41,9 @@ class TracerManager {
   static TracerManager& GetInstance();
 
   bool Initialize(const std::string& output_file_path,
-                  const std::string& service_name);
+                  const std::string& service_name,
+                  std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>
+                      extra_exporter = nullptr);
 
   void Shutdown();
 

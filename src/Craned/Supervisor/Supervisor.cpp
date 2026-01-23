@@ -28,6 +28,7 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
+#include "crane/TracePluginExporter.h"
 
 using Craned::Supervisor::g_config;
 
@@ -291,8 +292,12 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   auto trace_file = trace_dir / fmt::format("supervisor_{}_{}.trace",
                                             g_config.JobId, g_config.StepId);
-  if (crane::TracerManager::GetInstance().Initialize(trace_file.string(),
-                                                     "Supervisor")) {
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
+  if (crane::TracerManager::GetInstance().Initialize(
+          trace_file.string(), "Supervisor", std::move(plugin_exporter))) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

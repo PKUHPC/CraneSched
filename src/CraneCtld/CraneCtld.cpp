@@ -40,6 +40,7 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/TracePluginExporter.h"
 #include "crane/TracingMacros.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
@@ -899,8 +900,13 @@ void InitializeCtldGlobalVariables() {
   std::error_code ec;
   std::filesystem::create_directories(trace_dir, ec);
 
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
   if (crane::TracerManager::GetInstance().Initialize(
-          (trace_dir / "cranectld.trace").string(), "CraneCtld")) {
+          (trace_dir / "cranectld.trace").string(), "CraneCtld",
+          std::move(plugin_exporter))) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

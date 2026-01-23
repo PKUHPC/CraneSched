@@ -118,6 +118,24 @@ message UpdateLicensesHookReply {
   bool ok = 1;
 }
 
+message SpanInfo {
+  string trace_id = 1;
+  string span_id = 2;
+  string parent_span_id = 3;
+  string name = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  map<string, string> attributes = 7;
+}
+
+message TraceHookRequest {
+  repeated SpanInfo spans = 1;
+}
+
+message TraceHookReply {
+  bool ok = 1;
+}
+
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc StartHook(StartHookRequest) returns (StartHookReply);
@@ -126,6 +144,7 @@ service CranePluginD {
   rpc UpdatePowerStateHook(UpdatePowerStateHookRequest) returns (UpdatePowerStateHookReply);
   rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
   rpc UpdateLicensesHook(UpdateLicensesHookRequest) returns (UpdateLicensesHookReply);
+  rpc TraceHook(TraceHookRequest) returns (TraceHookReply);
 
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
