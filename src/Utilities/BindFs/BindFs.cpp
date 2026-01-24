@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "crane/FileLock.h"
-#include "crane/Logger.h"
 #include "crane/String.h"
 #include "linux/magic.h"
 

@@ -31,7 +31,6 @@
 #include <string>
 
 #include "crane/FileLock.h"
-#include "crane/Logger.h"
 
 extern "C" {
 #include <shadow/subid.h>
