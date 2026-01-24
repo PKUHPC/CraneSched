@@ -393,7 +393,7 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
-        std::format("Container not found, possibly initializing or failed: {}",
+        std::format("Container not found, possibly initializing or exited: {}",
                     rich_err.description()));
     response->set_ok(false);
     return Status::OK;
@@ -474,7 +474,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
-        std::format("Container not found, possibly initializing: {}",
+        std::format("Container not found, possibly initializing or exited: {}",
                     rich_err.description()));
     response->set_ok(false);
     return Status::OK;
