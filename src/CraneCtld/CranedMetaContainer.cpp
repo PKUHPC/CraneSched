@@ -855,7 +855,9 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health, const std::string& reason) {
+bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
+                                               bool is_drain,
+                                               const std::string& reason) {
   if (is_drain) LockResReduceEvents();
 
   CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain,
