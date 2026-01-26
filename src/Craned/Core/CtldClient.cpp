@@ -438,7 +438,7 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  if (m_health_check_uvw_thread_.joinable()) m_health_check_uvw_thread_.join();
+  if (m_health_check_uvw_thread_ && m_health_check_uvw_thread_->joinable()) m_health_check_uvw_thread_->join();
 }
 
 void CtldClient::Init() {
