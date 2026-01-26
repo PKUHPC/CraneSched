@@ -373,10 +373,10 @@ CtldClient::CtldClient() {
                 1, g_config.HealthCheck.Interval);
             delay = dist(rng);
           }
-          h.start(std::chrono::seconds(delay),
-                                        std::chrono::seconds(0));
+          h.start(std::chrono::seconds(delay), std::chrono::seconds(0));
         });
-    m_health_check_async_ = m_health_check_uvw_loop_->resource<uvw::async_handle>();
+    m_health_check_async_ =
+        m_health_check_uvw_loop_->resource<uvw::async_handle>();
     m_health_check_async_->on<uvw::async_event>(
         [this](const uvw::async_event&, uvw::async_handle&) {
           uint64_t delay = g_config.HealthCheck.Interval;
@@ -438,7 +438,8 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  if (m_health_check_uvw_thread_ && m_health_check_uvw_thread_->joinable()) m_health_check_uvw_thread_->join();
+  if (m_health_check_uvw_thread_ && m_health_check_uvw_thread_->joinable())
+    m_health_check_uvw_thread_->join();
 }
 
 void CtldClient::Init() {
