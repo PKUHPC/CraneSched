@@ -55,8 +55,6 @@ class AccountMetaContainer final {
 
   void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
 
-  bool CheckQosResourceSufficient(PdJobInScheduler* job);
-
   std::expected<void, std::string> CheckAndMallocQosResource(
       const PdJobInScheduler& job);
 
@@ -110,18 +108,18 @@ class AccountMetaContainer final {
     current -= need;
   }
 
+  // Lock acquisition order:
+  // Always acquire locks in the following order to avoid deadlocks:
+  // 1. Lock user(s) first.
+  // 2. Then lock account(s).
+  // For both users and accounts, acquire locks in ascending order by their IDs (from smallest to largest).
+  std::array<std::mutex, kNumStripes> m_user_stripes_;
+  std::array<std::mutex, kNumStripes> m_account_stripes_;
   std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(
       const std::list<std::string>& account_chain);
 
-  // lock user -> lock account
-  std::array<std::mutex, kNumStripes> m_user_stripes_;
-
-  std::array<std::mutex, kNumStripes> m_account_stripes_;
-
   ResourceMetaMap m_user_meta_map_;
-
   ResourceMetaMap m_account_meta_map_;
-
   UserToTaskNumMap m_user_to_task_map_;
 };
 

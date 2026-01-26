@@ -1355,10 +1355,11 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   return CheckIfTimeLimitSecIsValid(sec);
 }
 
+// TODO: Overload the += and -= operators?
 struct QosResource {
   ResourceView resource;
-  uint32_t jobs_count;
-  uint32_t submit_jobs_count;
+  uint32_t jobs_count{};
+  uint32_t submit_jobs_count{};
 };
 
 // Transaction
