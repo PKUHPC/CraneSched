@@ -484,6 +484,7 @@ message PodTaskAdditionalMeta {
   repeated PortMapping ports = 11;
   // DNSConfig dns_config = 12;
   // NOTE: DNSConfig is handled by backend only.
+  string dns = 12;
 }
 
 message ContainerTaskAdditionalMeta {

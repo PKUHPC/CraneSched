@@ -56,6 +56,7 @@ struct Config {
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    std::string DNS;
     struct BindFsConfig {
       bool Enabled{false};
       std::filesystem::path BindfsBinary{"bindfs"};

@@ -787,6 +787,11 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
                                               pod_meta.annotations().end());
 
+  auto dns_config = m_pod_config_.mutable_dns_config();
+  dns_config->clear_servers();
+  auto dns = !pod_meta.dns().empty() ? pod_meta.dns() : g_config.Container.DNS;
+  dns_config->add_servers(dns);
+
   // log directory
   m_pod_config_.set_log_directory(m_log_dir_);
 

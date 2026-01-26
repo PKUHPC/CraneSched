@@ -638,6 +638,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
+      container_conf->set_dns(g_config.Container.DNS);
       if (g_config.Container.BindFs.Enabled) {
         auto* bindfs_conf = container_conf->mutable_bindfs();
         bindfs_conf->set_bindfs_binary(
