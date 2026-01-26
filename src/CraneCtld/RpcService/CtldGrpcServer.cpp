@@ -1306,9 +1306,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
   if (request->account_list().empty()) {
     auto res = g_account_manager->QueryAllAccountInfo(request->uid());
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_code(res.error());
-      new_err_record->set_description("");
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     } else {
       res_account_list = std::move(res.value());
     }
@@ -1318,9 +1316,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     for (const auto& account : account_list) {
       auto res = g_account_manager->QueryAccountInfo(request->uid(), account);
       if (!res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(account);
-        new_err_record->set_code(res.error());
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
       } else {
         res_account_list.emplace(std::move(res.value()));
       }
@@ -1388,9 +1384,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
   if (user_list.empty()) {
     auto res = g_account_manager->QueryAllUserInfo(request->uid());
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_code(res.error());
-      new_err_record->set_description("");
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     } else {
       res_user_list = std::move(res.value());
     }
@@ -1398,9 +1392,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     for (const auto& username : user_list) {
       auto res = g_account_manager->QueryUserInfo(request->uid(), username);
       if (!res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(username);
-        new_err_record->set_code(res.error());
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
       } else {
         res_user_list.emplace(std::move(res.value()));
       }
@@ -1502,9 +1494,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
   if (request->qos_list().empty()) {
     auto res = g_account_manager->QueryAllQosInfo(request->uid());
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_code(res.error());
-      new_err_record->set_description("");
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     } else {
       res_qos_list = std::move(res.value());
     }
@@ -1514,9 +1504,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     for (const auto& qos : qos_list) {
       auto res = g_account_manager->QueryQosInfo(request->uid(), qos);
       if (!res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description(qos);
-        new_err_record->set_code(res.error());
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
       } else {
         res_qos_list.emplace(std::move(res.value()));
       }
@@ -1556,9 +1544,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
   for (const auto& account_name : request->account_list()) {
     auto res = g_account_manager->DeleteAccount(request->uid(), account_name);
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_description(account_name);
-      new_err_record->set_code(res.error());
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     }
   }
 
@@ -1608,9 +1594,7 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     auto res = g_account_manager->DeleteUser(request->uid(), user_name,
                                              request->account());
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_description(user_name);
-      new_err_record->set_code(res.error());
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     }
   }
 
@@ -1635,9 +1619,7 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
   for (const auto& qos_name : request->qos_list()) {
     auto res = g_account_manager->DeleteQos(request->uid(), qos_name);
     if (!res) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_description(qos_name);
-      new_err_record->set_code(res.error());
+      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
     }
   }
 
@@ -1662,9 +1644,7 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
   auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
                                             request->user_name());
   if (!res) {
-    auto* new_err_record = response->mutable_rich_error();
-    new_err_record->set_description("");
-    new_err_record->set_code(res.error());
+    response->mutable_rich_error()->CopyFrom(res.error());
     response->set_ok(false);
   } else {
     response->set_ok(true);
@@ -1682,7 +1662,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
                         "CraneCtld Server is not ready");
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  CraneExpected<void> res;
+  CraneExpectedRich<void> res;
   std::unordered_set<std::string> entity_list{request->entity_list().begin(),
                                               request->entity_list().end()};
 
@@ -1700,17 +1680,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       res = g_account_manager->BlockAccount(request->uid(), account_name,
                                             request->block());
       if (!res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        if (request->entity_list().empty()) {
-          if (res.error() == CraneErrCode::ERR_INVALID_OP_USER ||
-              res.error() == CraneErrCode::ERR_INVALID_UID) {
-            new_err_record->set_description("");
-            new_err_record->set_code(res.error());
-            break;
-          }
-        }
-        new_err_record->set_description(account_name);
-        new_err_record->set_code(res.error());
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
       }
     }
     break;
@@ -1733,17 +1703,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       res = g_account_manager->BlockUser(request->uid(), user_name,
                                          request->account(), request->block());
       if (!res) {
-        auto* new_err_record = response->mutable_rich_error_list()->Add();
-        if (request->entity_list().empty()) {
-          if (res.error() == CraneErrCode::ERR_INVALID_OP_USER ||
-              res.error() == CraneErrCode::ERR_INVALID_UID) {
-            new_err_record->set_description("");
-            new_err_record->set_code(res.error());
-            break;
-          }
-        }
-        new_err_record->set_description(user_name);
-        new_err_record->set_code(res.error());
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
       }
     }
     break;
@@ -1784,9 +1744,7 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
     auto result =
         g_account_manager->ResetUserCertificate(request->uid(), username);
     if (!result) {
-      auto* new_err_record = response->mutable_rich_error_list()->Add();
-      new_err_record->set_description(username);
-      new_err_record->set_code(result.error());
+      response->mutable_rich_error_list()->Add()->CopyFrom(result.error());
     }
   }
 
