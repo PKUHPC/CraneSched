@@ -553,7 +553,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       CloseFdFrom(3);
 
       if (args.at_child_setup_cb) {
-        bool result = args.at_child_setup_cb(pid);
+        bool result = args.at_child_setup_cb(getpid());
         if (!result) {
           fmt::print(stderr,
                      "[Subprocess] Error: subprocess callback failed\n");

@@ -87,8 +87,8 @@ JobLifecycleHook:
   PrologEpilogTimeout: 120
   CranectldProlog: /path/to/cranectld_prolog.sh
   CranectldEpilog: /path/to/cranectld_epilog.sh
-  CrunProlog: /path/to/srun_prolog.sh
-  CrunEpilog: /path/to/srun_epilog.sh
+  CrunProlog: /path/to/crun_prolog.sh
+  CrunEpilog: /path/to/crun_epilog.sh
   TaskProlog: /path/to/task_prolog.sh
   TaskEpilog: /path/to/task_epilog.sh
 ```
