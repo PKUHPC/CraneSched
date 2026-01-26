@@ -373,7 +373,7 @@ CtldClient::CtldClient() {
                 1, g_config.HealthCheck.Interval);
             delay = dist(rng);
           }
-          m_health_check_handle_->start(std::chrono::seconds(delay),
+          h.start(std::chrono::seconds(delay),
                                         std::chrono::seconds(0));
         });
     m_health_check_async_ = m_health_check_uvw_loop_->resource<uvw::async_handle>();
@@ -391,7 +391,7 @@ CtldClient::CtldClient() {
         });
     m_health_check_uvw_thread_ = std::thread([this] {
       util::SetCurrentThreadName("HealthCheckThr");
-      auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
+      auto idle_handle = m_health_check_uvw_loop_->resource<uvw::idle_handle>();
       idle_handle->on<uvw::idle_event>(
           [this](const uvw::idle_event&, uvw::idle_handle& h) {
             if (m_stopping_) {
@@ -438,6 +438,7 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  if (m_health_check_uvw_thread_.joinable()) m_health_check_uvw_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -702,10 +703,6 @@ void CtldClient::Init() {
       [this](CtldClientStateMachine::RegisterArg const& arg) {
         CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
-
-  g_ctld_client_sm->SetActionReadyCb([this]() {
-
-  });
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address) {
