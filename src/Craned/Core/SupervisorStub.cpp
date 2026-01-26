@@ -67,7 +67,12 @@ SupervisorStub::InitAndGetRecoveredMap() {
         if (!supv_ids) {
           CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
                       file.string());
-          std::filesystem::remove(file);
+          std::error_code ec;
+          std::filesystem::remove(file, ec);
+          if (ec) {
+            CRANE_ERROR("Failed to remove socket file {}: {}", file.string(),
+                        ec.message());
+          }
           latch.count_down();
           return;
         }

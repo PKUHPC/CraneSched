@@ -44,6 +44,9 @@ CforedClient::CforedClient() {
         CleanX11FwdHandlerQueueCb_();
       });
 
+  m_clean_x11_fwd_remote_eof_queue_async_handle_ =
+      m_loop_->resource<uvw::async_handle>();
+
   m_clean_stop_task_io_queue_async_handle_ =
       m_loop_->resource<uvw::async_handle>();
   m_clean_stop_task_io_queue_async_handle_->on<uvw::async_event>(
@@ -101,7 +104,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
   CreateStdoutFwdQueueElem elem;
   elem.meta = std::move(meta);
   auto ok_future = elem.promise.get_future();
-  m_create_stdout_fwd_handler_queue_.enqueue(std::move(elem));
+  m_create_stdout_fwd_queue_.enqueue(std::move(elem));
   m_clean_stdout_fwd_handler_queue_async_handle_->send();
   return ok_future.get();
 }
@@ -109,7 +112,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
 uint16_t CforedClient::InitUvX11FwdHandler() {
   CreateX11FwdQueueElem elem;
   auto port_future = elem.promise.get_future();
-  m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));
+  m_create_x11_fwd_queue_.enqueue(std::move(elem));
   m_clean_x11_fwd_handler_queue_async_handle_->send();
   return port_future.get();
 }
@@ -193,6 +196,7 @@ uint16_t CforedClient::SetupX11forwarding_() {
     x11_fd_info->sock = sock;
     absl::MutexLock lock(&m_mtx_);
     m_x11_fd_info_map_[x11_local_id] = x11_fd_info;
+    sock->data(x11_fd_info);
     sock->read();
   });
 
@@ -231,7 +235,7 @@ bool CforedClient::WriteStringToFd_(const std::string& msg, int fd,
 
 void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
   CreateStdoutFwdQueueElem elem;
-  while (m_create_stdout_fwd_handler_queue_.try_dequeue(elem)) {
+  while (m_create_stdout_fwd_queue_.try_dequeue(elem)) {
     auto& meta = elem.meta;
     auto stdout_read = meta.stdout_read;
     auto task_id = meta.task_id;
@@ -341,10 +345,28 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
 
 void CforedClient::CleanX11FwdHandlerQueueCb_() {
   CreateX11FwdQueueElem elem;
-  while (m_create_x11_fwd_handler_queue_.try_dequeue(elem)) {
+  while (m_create_x11_fwd_queue_.try_dequeue(elem)) {
     CRANE_INFO("Setup X11 forwarding");
     elem.promise.set_value(SetupX11forwarding_());
   }
+}
+
+void CforedClient::CleanX11RemoveEofQueueCb_() {
+  x11_local_id_t x11_id;
+  while (m_x11_fwd_remote_eof_queue_.try_dequeue(x11_id)) {
+    absl::MutexLock lock(&m_mtx_);
+    auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
+    if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
+      auto& x11_fd_info = x11_fd_info_it->second;
+      if (x11_fd_info->sock) {
+        CRANE_DEBUG("[X11 #{}] Remote EOF received. Closing local socket.",
+                    x11_id);
+        x11_fd_info->sock->close();
+      }
+    } else {
+      CRANE_WARN("Trying to close unknown x11_local_id: {}.", x11_id);
+    }
+  };
 }
 
 void CforedClient::CleanStopTaskIOQueueCb_() {
@@ -639,13 +661,11 @@ void CforedClient::AsyncSendRecvThread_() {
         auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
         if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
           auto& x11_fd_info = x11_fd_info_it->second;
-          if (!x11_fd_info->x11_input_stopped)
-            x11_fd_info->x11_input_stopped =
-                !WriteStringToFd_(*msg, x11_fd_info->fd, eof);
+          // This fd is closed in event loop
+          !WriteStringToFd_(*msg, x11_fd_info->fd, false);
           if (eof) {
-            CRANE_DEBUG("[X11 #{}] Received EOF.", x11_id);
-            // User closed X11 connection at crun
-            x11_fd_info->sock->close();
+            m_x11_fwd_remote_eof_queue_.enqueue(x11_id);
+            m_clean_x11_fwd_remote_eof_queue_async_handle_->send();
           }
         } else {
           CRANE_WARN("Trying to write X11 input to unknown x11_local_id: {}.",

@@ -28,11 +28,8 @@ namespace Craned::Supervisor {
 class CforedClient {
   struct X11FdInfo {
     int fd;
-    std::shared_ptr<uvw::tcp_handle> sock;
     std::atomic<bool> sock_stopped;
-
-    // Cannot write to process x11 fd after input stopped
-    bool x11_input_stopped{false};
+    std::shared_ptr<uvw::tcp_handle> sock;
   };
 
   struct TaskFwdMeta {
@@ -85,7 +82,7 @@ class CforedClient {
     TaskFwdMeta meta;
     std::promise<bool> promise;
   };
-  ConcurrentQueue<CreateStdoutFwdQueueElem> m_create_stdout_fwd_handler_queue_;
+  ConcurrentQueue<CreateStdoutFwdQueueElem> m_create_stdout_fwd_queue_;
   std::shared_ptr<uvw::async_handle>
       m_clean_stdout_fwd_handler_queue_async_handle_;
   void CleanStdoutFwdHandlerQueueCb_();
@@ -93,10 +90,15 @@ class CforedClient {
   struct CreateX11FwdQueueElem {
     std::promise<uint16_t> promise;
   };
-  ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_handler_queue_;
+  ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_queue_;
+  void CleanX11FwdHandlerQueueCb_();
   std::shared_ptr<uvw::async_handle>
       m_clean_x11_fwd_handler_queue_async_handle_;
-  void CleanX11FwdHandlerQueueCb_();
+
+  ConcurrentQueue<x11_local_id_t> m_x11_fwd_remote_eof_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_clean_x11_fwd_remote_eof_queue_async_handle_;
+  void CleanX11RemoveEofQueueCb_();
   ConcurrentQueue<task_id_t> m_stop_task_io_queue_;
   std::shared_ptr<uvw::async_handle> m_clean_stop_task_io_queue_async_handle_;
   void CleanStopTaskIOQueueCb_();
