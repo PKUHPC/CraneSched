@@ -823,8 +823,8 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
   ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
 
-  ERR_INVALID_MEM_FORMAT = 84;       // Invalid mem format when parsing mem
-  ERR_STEP_RES_BEYOND = 85;          // Step resource request exceeds job resource.
+  ERR_INVALID_MEM_FORMAT = 84;  // Invalid mem format when parsing mem
+  ERR_STEP_RES_BEYOND = 85;     // Step resource request exceeds job resource.
 
   ERR_INVALID_WCKEY = 86;
   ERR_WCKEY_ALREADY_EXISTS = 87;

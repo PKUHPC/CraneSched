@@ -29,7 +29,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
     return CraneErrCode::ERR_INVALID_QOS;
   }
 
-  if (static_cast<double>(task.total_res_view.GetAllocatableRes().cpu_count) > qos->max_cpus_per_user)
+  if (static_cast<double>(task.total_res_view.GetAllocatableRes().cpu_count) >
+      qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (qos->max_jobs_per_user == 0)
