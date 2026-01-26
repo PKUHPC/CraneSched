@@ -256,9 +256,9 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
           auto iter = pair.second.find(task.qos);
           if (iter == pair.second.end()) {
             CRANE_ERROR(
-                "Qos '{}' not found for user '{}', cannot free resource for "
+                "Qos '{}' not found for account '{}', cannot free resource for "
                 "task {}.",
-                task.qos, task.Username(), task.TaskId());
+                task.qos, account_name, task.TaskId());
             return;
           }
           auto& val = iter->second;
@@ -441,7 +441,6 @@ bool AccountMetaContainer::CheckQosResource_(
       });
 
   if (!result) return false;
-  ;
 
   for (const auto& account_name : job.account_chain) {
     m_account_meta_map_.if_contains(
