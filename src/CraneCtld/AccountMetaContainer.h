@@ -87,23 +87,29 @@ class AccountMetaContainer final {
   bool CheckQosResource_(const Qos& qos, const PdJobInScheduler& job,
                          const ResourceView& resource_view);
 
-  template<typename T>
-  static void CheckAndSubResource_(T& current, T need, const std::string& resource_name,
-                           const std::string& username, const std::string& qos, task_id_t task_id) {
-      if (current < need) {
-        if constexpr (std::is_same_v<T, AllocatableResource>) {
-          CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}.",
-                     resource_name, username, qos, task_id);
-          current.SetToZero();
-        } else if constexpr (std::is_same_v<T, uint32_t>) {
-          CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}. cur={}, need={}",
-                     resource_name, username, qos, task_id, current, need);
-          current = 0;
-        } else {
-          CRANE_ERROR("Unknown type");
-        }
-        return;
+  template <typename T>
+  static void CheckAndSubResource_(T& current, T need,
+                                   const std::string& resource_name,
+                                   const std::string& username,
+                                   const std::string& qos, task_id_t task_id) {
+    if (current < need) {
+      if constexpr (std::is_same_v<T, AllocatableResource>) {
+        CRANE_ERROR(
+            "Insufficient {} when freeing for user/account '{}', qos '{}', "
+            "task {}.",
+            resource_name, username, qos, task_id);
+        current.SetToZero();
+      } else if constexpr (std::is_same_v<T, uint32_t>) {
+        CRANE_ERROR(
+            "Insufficient {} when freeing for user/account '{}', qos '{}', "
+            "task {}. cur={}, need={}",
+            resource_name, username, qos, task_id, current, need);
+        current = 0;
+      } else {
+        CRANE_ERROR("Unknown type");
       }
+      return;
+    }
 
     current -= need;
   }
@@ -112,7 +118,8 @@ class AccountMetaContainer final {
   // Always acquire locks in the following order to avoid deadlocks:
   // 1. Lock user(s) first.
   // 2. Then lock account(s).
-  // For both users and accounts, acquire locks in ascending order by their IDs (from smallest to largest).
+  // For both users and accounts, acquire locks in ascending order by their IDs
+  // (from smallest to largest).
   std::array<std::mutex, kNumStripes> m_user_stripes_;
   std::array<std::mutex, kNumStripes> m_account_stripes_;
   std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(

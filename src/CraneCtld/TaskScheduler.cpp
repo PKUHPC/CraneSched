@@ -1093,7 +1093,8 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           if (auto result = g_account_meta_container->CheckAndMallocQosResource(
-                  *job_in_scheduler); !result) {
+                  *job_in_scheduler);
+              !result) {
             job->pending_reason = result.error();
             continue;
           }

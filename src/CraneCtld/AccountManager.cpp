@@ -1235,8 +1235,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_time_limit_per_task = absl::Seconds(value_number);
-      log += fmt::format("max_time_limit_per_task: {}\n", name,
-                         value);
+      log += fmt::format("max_time_limit_per_task: {}\n", name, value);
       break;
     }
     default:
