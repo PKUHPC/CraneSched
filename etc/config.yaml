@@ -214,3 +214,6 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+
+Cfored:
+  DebugLevel: info
