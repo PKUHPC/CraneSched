@@ -166,7 +166,8 @@ class MongodbClient {
                              mongocxx::client_session* session = nullptr);
 
   // Mark task as aggregated in task_table
-  void MarkTaskAsAggregated(const bsoncxx::oid& task_id);
+  void MarkTaskAsAggregated(const bsoncxx::oid& task_id,
+                            mongocxx::client_session* session = nullptr);
 
   // Recovery functions for startup
   void RecoverMissingAggregations_();

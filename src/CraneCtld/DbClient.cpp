@@ -1586,18 +1586,26 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
 }
 
 // Mark task as aggregated in task_table
-void MongodbClient::MarkTaskAsAggregated(const bsoncxx::oid& task_id) {
+void MongodbClient::MarkTaskAsAggregated(const bsoncxx::oid& task_id,
+                                         mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
   auto client = GetClient_();
-  (*client)[m_db_name_][m_task_collection_name_].update_one(
-      make_document(kvp("_id", task_id)),
-      make_document(kvp("$set", make_document(kvp("aggregated", true),
-                                              kvp("aggregated_at",
-                                                  bsoncxx::types::b_date{
-                                                      system_clock::now()})))));
+  auto filter = make_document(kvp("_id", task_id));
+  auto update = make_document(kvp(
+      "$set", make_document(kvp("aggregated", true),
+                            kvp("aggregated_at",
+                                bsoncxx::types::b_date{system_clock::now()}))));
+
+  if (session) {
+    (*client)[m_db_name_][m_task_collection_name_].update_one(
+        *session, filter.view(), update.view());
+  } else {
+    (*client)[m_db_name_][m_task_collection_name_].update_one(filter.view(),
+                                                              update.view());
+  }
 }
 
 // Recovery for new cluster: batch aggregation using existing functions
@@ -1821,26 +1829,41 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
   // 1. Query all unaggregated completed tasks
   auto filter = make_document(
       kvp("aggregated", make_document(kvp("$ne", true))),
-      kvp("status", make_document(kvp("$in", make_array("Completed", "Failed",
-                                                        "Cancelled")))));
+      kvp("state",
+          make_document(kvp(
+              "$in",
+              make_array(
+                  static_cast<int64_t>(crane::grpc::TaskStatus::Cancelled),
+                  static_cast<int64_t>(crane::grpc::TaskStatus::Completed),
+                  static_cast<int64_t>(crane::grpc::TaskStatus::OutOfMemory),
+                  static_cast<int64_t>(
+                      crane::grpc::TaskStatus::ExceedTimeLimit),
+                  static_cast<int64_t>(crane::grpc::TaskStatus::Failed))))));
 
   auto cursor =
       (*client)[m_db_name_][m_task_collection_name_].find(filter.view());
 
   int count = 0;
   for (auto&& task_doc : cursor) {
-    // 2. Append to acc_usage tables (hour/day/month)
+    // Use transaction to ensure atomicity of append + mark operations
+    auto session = client->start_session();
     try {
-      AppendToAccUsageTable(task_doc);
+      session.start_transaction();
+
+      // 2. Append to acc_usage tables (hour/day/month)
+      AppendToAccUsageTable(task_doc, &session);
 
       // 3. Mark as aggregated
-      MarkTaskAsAggregated(task_doc["_id"].get_oid().value);
+      MarkTaskAsAggregated(task_doc["_id"].get_oid().value, &session);
 
+      session.commit_transaction();
       count++;
+
       if (count % 1000 == 0) {
         CRANE_INFO("Recovered {} unaggregated tasks...", count);
       }
     } catch (const std::exception& e) {
+      session.abort_transaction();
       CRANE_ERROR("Failed to append task {}: {}",
                   task_doc["_id"].get_oid().value.to_string(), e.what());
     }
