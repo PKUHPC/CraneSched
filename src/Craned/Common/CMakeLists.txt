@@ -30,6 +30,7 @@ target_link_libraries(craned_common
         ${LIBCGROUP_BUILD_PRODUCTS}
         
         Utility_PublicHeader
+        Utility_PasswordEntry
         Utility_PluginClient
         
         crane_proto_lib

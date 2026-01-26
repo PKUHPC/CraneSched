@@ -19,7 +19,6 @@
 #pragma once
 
 #include <fcntl.h>
-#include <spdlog/spdlog.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -33,6 +32,8 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+
+#include "crane/Logger.h"
 
 namespace util {
 
