@@ -161,6 +161,41 @@ int InitFromStdin(int argc, char** argv) {
       std::filesystem::path(kDefaultSupervisorUnixSockDir) /
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
+  if (msg.has_job_lifecycle_hook_config()) {
+    g_config.JobLifecycleHook.TaskPrologs.reserve(
+        msg.job_lifecycle_hook_config().task_prologs_size());
+    for (const auto& task_prolog :
+         msg.job_lifecycle_hook_config().task_prologs()) {
+      g_config.JobLifecycleHook.TaskPrologs.emplace_back(task_prolog);
+    }
+    g_config.JobLifecycleHook.TaskEpilogs.reserve(
+        msg.job_lifecycle_hook_config().task_epilogs_size());
+    for (const auto& task_epilog :
+         msg.job_lifecycle_hook_config().task_epilogs()) {
+      g_config.JobLifecycleHook.TaskEpilogs.emplace_back(task_epilog);
+    }
+
+    g_config.JobLifecycleHook.Prologs.reserve(
+        msg.job_lifecycle_hook_config().prologs_size());
+    for (const auto& prolog : msg.job_lifecycle_hook_config().prologs()) {
+      g_config.JobLifecycleHook.Prologs.emplace_back(prolog);
+    }
+    g_config.JobLifecycleHook.Epilogs.reserve(
+        msg.job_lifecycle_hook_config().epilogs_size());
+    for (const auto& epilog : msg.job_lifecycle_hook_config().epilogs()) {
+      g_config.JobLifecycleHook.Epilogs.emplace_back(epilog);
+    }
+
+    g_config.JobLifecycleHook.PrologTimeout =
+        msg.job_lifecycle_hook_config().prolog_timeout();
+    g_config.JobLifecycleHook.EpilogTimeout =
+        msg.job_lifecycle_hook_config().epilog_timeout();
+    g_config.JobLifecycleHook.PrologEpilogTimeout =
+        msg.job_lifecycle_hook_config().prolog_epilog_timeout();
+    g_config.JobLifecycleHook.MaxOutputSize =
+        msg.job_lifecycle_hook_config().max_output_size();
+  }
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,
@@ -341,6 +376,31 @@ void StartServer(int grpc_output_fd) {
                       static_cast<int>(err));
           ready = false;
         }
+      }
+    }
+
+    if (!g_config.JobLifecycleHook.Prologs.empty()) {
+      CRANE_TRACE("Running Prologs...");
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts = g_config.JobLifecycleHook.Prologs,
+          .envs = g_config.JobEnv,
+          .run_uid = 0,
+          .run_gid = 0,
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
+                    status.signal_num);
+        ready = false;
+      } else {
+        CRANE_DEBUG("Prolog success");
       }
     }
 

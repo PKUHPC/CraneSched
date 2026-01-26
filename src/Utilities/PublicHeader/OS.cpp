@@ -18,17 +18,22 @@
 
 #include "crane/OS.h"
 
+#include <absl/cleanup/cleanup.h>
 #include <grp.h>
 #include <pwd.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <future>
 #include <string>
 #include <vector>
 
+#include "absl/strings/str_split.h"
 #include "crane/Logger.h"
+#include "re2/re2.h"
 
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
@@ -415,6 +420,193 @@ absl::Time GetSystemBootTime() {
 #else
 #  error "Unsupported OS"
 #endif
+}
+
+std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
+    const RunPrologEpilogArgs& args) {
+  auto read_stream = [](int fd, uint64_t max_size) {
+    std::string out;
+    out.reserve(max_size);
+
+    char buf[4096];
+    ssize_t bytes_read;
+
+    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
+      size_t space_left = max_size - out.size();
+      if (bytes_read > static_cast<ssize_t>(space_left)) {
+        out.append(buf, space_left);
+        break;
+      }
+
+      out.append(buf, bytes_read);
+
+      if (out.size() >= max_size) {
+        break;
+      }
+    }
+
+    return out;
+  };
+
+  std::string output;
+
+  auto start_time = std::chrono::steady_clock::now();
+
+  for (const auto& script : args.scripts) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start_time);
+    if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
+      CRANE_ERROR("Total timeout ({}s) reached before running {}.",
+                  args.timeout_sec, script);
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+    }
+
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) == -1) {
+      CRANE_ERROR("{} pipe stdout creation failed: {}", script,
+                  strerror(errno));
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+      CRANE_ERROR("{} pid fork failed: {}.", script, strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+    }
+
+    if (pid > 0) {
+      close(stdout_pipe[1]);
+
+      int status = 0;
+      auto fut = std::async(std::launch::async, [pid, &status]() {
+        return waitpid(pid, &status, 0);
+      });
+
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed_now =
+          std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+      uint32_t remaining_time = (args.timeout_sec > elapsed_now.count())
+                                    ? args.timeout_sec - elapsed_now.count()
+                                    : 0;
+      bool child_exited = false;
+
+      if (args.timeout_sec == 0) {
+        if (fut.get() == pid) child_exited = true;
+      } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
+                 std::future_status::ready) {
+        if (fut.get() == pid) child_exited = true;
+      }
+
+      if (!child_exited) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        CRANE_TRACE("{} Timeout.", script);
+      }
+
+      int exit_code = 0;
+      int signal_num = 0;
+
+      if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+        signal_num = 0;
+      } else if (WIFSIGNALED(status)) {
+        exit_code = 0;
+        signal_num = WTERMSIG(status);
+      } else {
+        exit_code = status;
+        signal_num = 0;
+      }
+
+      auto tmp = read_stream(stdout_pipe[0], args.output_size);
+      if (!tmp.empty()) {
+        size_t remaining = args.output_size - output.size();
+        if (remaining > 0) {
+          if (tmp.size() > remaining) {
+            output.append(tmp, 0, remaining);
+          } else {
+            output.append(tmp);
+          }
+        }
+      }
+
+      close(stdout_pipe[0]);
+
+      if (exit_code != 0) {
+        CRANE_TRACE("{} Failed (exit status {}:{}), output: {}.", script,
+                    exit_code, signal_num, output);
+        return std::unexpected(RunPrologEpilogStatus{.exit_code = exit_code,
+                                                     .signal_num = signal_num});
+      }
+
+    } else {  // child proc
+      close(stdout_pipe[0]);
+      if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1) _exit(EXIT_FAILURE);
+      if (dup2(stdout_pipe[1], STDERR_FILENO) == -1) _exit(EXIT_FAILURE);
+      close(stdout_pipe[1]);
+
+      CloseFdFrom(3);
+
+      if (args.at_child_setup_cb) {
+        bool result = args.at_child_setup_cb(getpid());
+        if (!result) {
+          fmt::print(stderr,
+                     "[Subprocess] Error: subprocess callback failed\n");
+          _exit(EXIT_FAILURE);
+        }
+      }
+
+      if (setgid(args.run_gid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {}\n",
+                   args.run_gid, strerror(errno));
+        _exit(EXIT_FAILURE);
+      }
+      if (setuid(args.run_uid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setuid({}) failed: {}\n",
+                   args.run_uid, strerror(errno));
+        _exit(EXIT_FAILURE);
+      }
+      for (const auto& [name, value] : args.envs)
+        if (setenv(name.c_str(), value.c_str(), 1)) {
+          fmt::print(stderr, "[Subprocess] Error: setenv() for {}={} failed.\n",
+                     name, value);
+          _exit(EXIT_FAILURE);
+        }
+
+      std::vector<const char*> argv = {script.c_str(), nullptr};
+      execvp(argv[0], const_cast<char* const*>(argv.data()));
+      fmt::print(stderr, "[Subprocess] execvp() failed: {}\n", strerror(errno));
+      _exit(EXIT_FAILURE);
+    }
+  }
+
+  return output;
+}
+
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
+  static const LazyRE2 export_re = {
+      R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
+  static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
+  static const LazyRE2 print_re = {R"(^print\s+(.*)$)"};
+
+  for (std::string_view line : absl::StrSplit(output, '\n')) {
+    std::string name, value, to_print;
+    if (RE2::FullMatch(line, *export_re, &name, &value)) {
+      (*env_map)[name] = value;
+    } else if (RE2::FullMatch(line, *unset_re, &name)) {
+      env_map->erase(name);
+    } else if (RE2::FullMatch(line, *print_re, &to_print)) {
+      write(task_stdout_fd, to_print.data(), to_print.size());
+      write(task_stdout_fd, "\n", 1);
+    }
+  }
 }
 
 }  // namespace util::os

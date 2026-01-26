@@ -23,9 +23,12 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include <expected>
 #include <filesystem>
 #include <set>
 #include <string>
+
+#include "crane/Logger.h"
 
 struct SystemRelInfo {
   std::string name;
@@ -37,6 +40,22 @@ struct NodeSpecInfo {
   std::string name;
   int64_t cpu;
   double memory_gb;
+};
+
+// prolog or epilog
+struct RunPrologEpilogArgs {
+  std::vector<std::string> scripts;
+  std::unordered_map<std::string, std::string> envs;
+  uint32_t timeout_sec{0};
+  uid_t run_uid;
+  gid_t run_gid;
+  uint64_t output_size;
+  std::function<bool(pid_t)> at_child_setup_cb;
+};
+
+struct RunPrologEpilogStatus {
+  int exit_code;
+  int signal_num;
 };
 
 namespace util::os {
@@ -86,5 +105,12 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
                             std::filesystem::path const& p);
 
 absl::Time GetSystemBootTime();
+
+std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
+    const RunPrologEpilogArgs& args);
+
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd);
 
 }  // namespace util::os

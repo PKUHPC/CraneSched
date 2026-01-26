@@ -1719,6 +1719,59 @@ CraneErrCode ProcInstance::Spawn() {
 
     // Apply environment variables
     InitEnvMap();
+
+    if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts = g_config.JobLifecycleHook.TaskPrologs,
+          .envs = m_env_,
+          .run_uid = m_parent_step_inst_->uid,
+          .run_gid = m_parent_step_inst_->gids[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        fmt::print(
+            stderr,
+            "[Subprocess] Error: Failed to run task prolog, status={}:{}\n",
+            status.exit_code, status.signal_num);
+        std::abort();
+      }
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
+                                                STDOUT_FILENO);
+    }
+
+    if (!m_parent_step_inst_->GetStep().task_prolog().empty()) {
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts =
+              std::vector<std::string>{
+                  m_parent_step_inst_->GetStep().task_prolog()},
+          .envs = m_env_,
+          .run_uid = m_parent_step_inst_->uid,
+          .run_gid = m_parent_step_inst_->gids[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        fmt::print(stderr,
+                   "[Subprocess] Error: Failed to run step task prolog, "
+                   "status={}:{}\n",
+                   status.exit_code, status.signal_num);
+        std::abort();
+      }
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
+                                                STDOUT_FILENO);
+    }
+
     err = SetChildProcEnv_();
     if (err != CraneErrCode::SUCCESS) {
       fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
@@ -1905,6 +1958,30 @@ TaskManager::TaskManager()
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   CRANE_TRACE("TaskManager destroyed.");
+
+  if (!g_config.JobLifecycleHook.Epilogs.empty()) {
+    CRANE_TRACE("Running Epilogs...");
+    RunPrologEpilogArgs run_epilog_args{
+        .scripts = g_config.JobLifecycleHook.Epilogs,
+        .envs = g_config.JobEnv,
+        .run_uid = 0,
+        .run_gid = 0,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+    if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec =
+          g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+    auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+    if (!result) {
+      auto status = result.error();
+      CRANE_DEBUG("Epilog failed status={}:{}", status.exit_code,
+                  status.signal_num);
+    } else {
+      CRANE_DEBUG("Epilog success");
+    }
+  }
 }
 
 void TaskManager::Wait() {
@@ -2224,6 +2301,54 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
+    if (!m_step_.GetStep().task_epilog().empty()) {
+      CRANE_TRACE("[Task #{}] Running step task_epilog...", task_id);
+      RunPrologEpilogArgs run_epilog_args{
+          .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_epilog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("[Task #{}]: step task_epilog failed status={}:{}", task_id,
+                    status.exit_code, status.signal_num);
+      } else {
+        CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
+      }
+    }
+
+    if (!g_config.JobLifecycleHook.TaskEpilogs.empty()) {
+      CRANE_TRACE("[Task #{}] Running task_epilog...", task_id);
+      RunPrologEpilogArgs run_epilog_args{
+          .scripts = g_config.JobLifecycleHook.TaskEpilogs,
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_epilog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("[Task #{}]: task_epilog failed status={}:{}", task_id,
+                    status.exit_code, status.signal_num);
+      } else {
+        CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
+      }
+    }
+
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
@@ -2451,7 +2576,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
-
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");

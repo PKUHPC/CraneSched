@@ -89,6 +89,18 @@ message InitSupervisorRequest {
   CforedListenConf cfored_listen_conf = 25;
   uint64 max_log_file_size = 26;
   uint64 max_log_file_num = 27;
+
+  message JobLifecycleHookConfig {
+    repeated string task_prologs = 1;
+    repeated string task_epilogs = 2;
+    repeated string prologs = 3;
+    repeated string epilogs = 4;
+    uint32 prolog_timeout = 5;
+    uint32 epilog_timeout = 6;
+    uint32 prolog_epilog_timeout = 7;
+    uint64 max_output_size = 8;
+  };
+  JobLifecycleHookConfig job_lifecycle_hook_config = 30;
 }
 
 message SupervisorReady {
