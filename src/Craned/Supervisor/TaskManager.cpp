@@ -2538,7 +2538,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       AddTerminationTimer_(new_sec);
 
       for (const auto& signal : m_step_.GetStep().signals()) {
-        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B &&
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
             !m_step_.IsPrimary())
           continue;
         if (signal.signal_time() >= new_sec) {
@@ -2586,7 +2586,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_INFO("Add a timer of {} seconds", sec);
 
       for (const auto& signal : m_step_.GetStep().signals()) {
-        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_B &&
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
             !m_step_.IsPrimary())
           continue;
         if (signal.signal_time() >= sec) {

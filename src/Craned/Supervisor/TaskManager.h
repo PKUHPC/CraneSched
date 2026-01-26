@@ -528,7 +528,7 @@ class TaskManager {
           }
         });
     signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
-    m_step_.signal_timers.emplace_back(signal_handle);
+    m_step_.signal_timers.emplace_back(std::move(signal_handle));
   }
 
   void DelSignalTimers_() {
