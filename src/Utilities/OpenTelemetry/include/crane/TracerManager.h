@@ -40,8 +40,7 @@ class TracerManager {
  public:
   static TracerManager& GetInstance();
 
-  bool Initialize(const std::string& output_file_path,
-                  const std::string& service_name,
+  bool Initialize(const std::string& service_name,
                   std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>
                       extra_exporter = nullptr);
 
@@ -72,7 +71,6 @@ class TracerManager {
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
       tracer_provider_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;
-  std::shared_ptr<std::ostream> output_stream_;
 #endif
   std::string service_name_;
   bool initialized_ = false;

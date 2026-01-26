@@ -278,26 +278,12 @@ void GlobalVariableInit(int grpc_output_fd) {
   PasswordEntry::InitializeEntrySize();
 
 #ifdef CRANE_ENABLE_TRACING
-  std::filesystem::path trace_dir =
-      "/nfs/home/interntwo/crane/output/supervisor";
-
-  if (!std::filesystem::exists(trace_dir)) {
-    try {
-      std::filesystem::create_directories(trace_dir);
-    } catch (const std::filesystem::filesystem_error& e) {
-      fmt::print(stderr, "Failed to create trace directory {}: {}\n",
-                 trace_dir.string(), e.what());
-    }
-  }
-
-  auto trace_file = trace_dir / fmt::format("supervisor_{}_{}.trace",
-                                            g_config.JobId, g_config.StepId);
   auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
       []() { return g_plugin_client.get(); },
       []() { return g_config.Plugin.Enabled; });
 
   if (crane::TracerManager::GetInstance().Initialize(
-          trace_file.string(), "Supervisor", std::move(plugin_exporter))) {
+          "Supervisor", std::move(plugin_exporter))) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

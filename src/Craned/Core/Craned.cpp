@@ -972,17 +972,12 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
 #ifdef CRANE_ENABLE_TRACING
-  std::filesystem::path trace_dir = "/nfs/home/interntwo/crane/output";
-  std::error_code ec;
-  std::filesystem::create_directories(trace_dir, ec);
-
   auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
       []() { return g_plugin_client.get(); },
       []() { return g_config.Plugin.Enabled; });
 
   if (crane::TracerManager::GetInstance().Initialize(
-          (trace_dir / "craned.trace").string(), "Craned",
-          std::move(plugin_exporter))) {
+          "Craned", std::move(plugin_exporter))) {
     g_tracer = crane::TracerManager::GetInstance().GetTracer();
   }
 #endif

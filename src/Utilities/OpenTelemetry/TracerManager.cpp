@@ -18,13 +18,9 @@
 
 #include "crane/TracerManager.h"
 
+#include <vector>
+
 #ifdef CRANE_ENABLE_TRACING
-#  include <sys/stat.h>
-#  include <sys/types.h>
-
-#  include <fstream>
-
-#  include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
@@ -52,7 +48,7 @@ TracerManager& TracerManager::GetInstance() {
 }
 
 bool TracerManager::Initialize(
-    const std::string& output_file_path, const std::string& service_name,
+    const std::string& service_name,
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter) {
 #ifdef CRANE_ENABLE_TRACING
   namespace trace_api = opentelemetry::trace;
@@ -61,38 +57,30 @@ bool TracerManager::Initialize(
 
   service_name_ = service_name;
 
-  output_stream_ = std::make_shared<std::ofstream>(
-      output_file_path, std::ios::out | std::ios::app);
-  if (!static_cast<std::ofstream*>(output_stream_.get())->is_open()) {
-    std::cerr << "Failed to open trace output file: " << output_file_path
-              << std::endl;
-    // Don't return false here, we might still want the extra_exporter to work?
-    // But original code returned false. Let's keep returning false or handle it
-    // if extra_exporter is present. If file fails, we probably still want to
-    // continue if extra_exporter is valid. But simplicity, let's assume file op
-    // is important. However, if we fail here, we don't set up provider. Let's
-    // stick to original behavior for file, but improved logging.
-    return false;
-  }
-
-  auto exporter =
-      opentelemetry::exporter::trace::OStreamSpanExporterFactory::Create(
-          *output_stream_);
-
-  auto processor =
-      trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));
-
   auto resource_attributes = resource::ResourceAttributes{
       {resource::SemanticConventions::kServiceName, service_name_}};
   auto resource_ptr = resource::Resource::Create(resource_attributes);
 
-  auto provider = std::make_shared<trace_sdk::TracerProvider>(
-      std::move(processor), resource_ptr);
+  std::shared_ptr<trace_sdk::TracerProvider> provider;
 
   if (extra_exporter) {
-    auto extra_processor = trace_sdk::SimpleSpanProcessorFactory::Create(
+    auto processor = trace_sdk::SimpleSpanProcessorFactory::Create(
         std::move(extra_exporter));
-    provider->AddProcessor(std::move(extra_processor));
+    provider = std::make_shared<trace_sdk::TracerProvider>(std::move(processor),
+                                                           resource_ptr);
+  } else {
+    // If no exporter is provided, we still create a provider but it won't
+    // export anything. Assuming TracerProvider has a constructor that accepts
+    // just resource or we pass null processor? To be safe and compatible with
+    // typical usage where we expect output, we might want to warn. For now,
+    // let's assume we can create it with empty processors (not available in all
+    // versions directly via constructor maybe?) Let's create a provider with no
+    // processor if possible. If headers allow:
+    // TracerProvider(std::vector<std::unique_ptr<SpanProcessor>>&& processors,
+    // ...)
+    std::vector<std::unique_ptr<trace_sdk::SpanProcessor>> processors;
+    provider = std::make_shared<trace_sdk::TracerProvider>(
+        std::move(processors), resource_ptr);
   }
 
   tracer_provider_ = provider;
