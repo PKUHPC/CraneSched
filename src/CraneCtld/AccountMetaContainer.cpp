@@ -29,8 +29,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
     return CraneErrCode::ERR_INVALID_QOS;
   }
 
-  if (static_cast<double>(task.cpus_per_task) * task.node_num >
-      qos->max_cpus_per_user)
+  if (static_cast<double>(task.total_res_view.GetAllocatableRes().cpu_count) > qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (qos->max_jobs_per_user == 0)
@@ -47,7 +46,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+  const ResourceView& resource_view = task.total_res_view;
+
   user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -84,7 +84,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+  const ResourceView& resource_view = task.total_res_view;
   CRANE_DEBUG("Free QOS resource {} for task {} of user {}",
               util::ReadableResourceView(resource_view), task.TaskId(),
               task.Username());

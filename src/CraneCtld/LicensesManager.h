@@ -29,6 +29,8 @@
 
 namespace Ctld {
 
+struct PdJobInScheduler;
+
 template <typename K, typename V,
           typename Hash = absl::container_internal::hash_default_hash<K>>
 using HashMap = absl::flat_hash_map<K, V, Hash>;
@@ -45,65 +47,64 @@ class LicensesManager {
 
   ~LicensesManager() = default;
 
-  int Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+  int Init(const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map);
 
   LicensesMapExclusivePtr GetLicensesMapExclusivePtr();
 
-  void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest *request,
-                       crane::grpc::QueryLicensesInfoReply *response);
+  void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest* request,
+                       crane::grpc::QueryLicensesInfoReply* response);
 
   std::expected<void, std::string> CheckLicensesLegal(
-      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-          &lic_id_to_count,
+      const google::protobuf::RepeatedPtrField<
+          crane::grpc::TaskToCtld::License>& lic_id_to_count,
       bool is_license_or);
 
-  void CheckLicenseCountSufficient(
-      std::vector<PdJobInScheduler *> *job_ptr_vec);
+  void CheckLicenseCountSufficient(std::vector<PdJobInScheduler*>* job_ptr_vec);
 
   void FreeReserved(
-      const std::unordered_map<LicenseId, uint32_t> &actual_license);
+      const std::unordered_map<LicenseId, uint32_t>& actual_license);
 
   bool MallocLicense(
-      const std::unordered_map<LicenseId, uint32_t> &actual_license);
+      const std::unordered_map<LicenseId, uint32_t>& actual_license);
 
   void MallocLicenseWhenRecoverRunning(
-      const std::unordered_map<LicenseId, uint32_t> &actual_license);
+      const std::unordered_map<LicenseId, uint32_t>& actual_license);
 
   void FreeLicense(
-      const std::unordered_map<LicenseId, uint32_t> &actual_license);
+      const std::unordered_map<LicenseId, uint32_t>& actual_license);
 
   /* TODO：multi-cluster synchronization */
 
   CraneExpectedRich<void> AddLicenseResource(
-      const std::string &name, const std::string &server,
-      const std::vector<std::string> &clusters,
-      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
-          &operators);
+      const std::string& name, const std::string& server,
+      const std::vector<std::string>& clusters,
+      const std::unordered_map<crane::grpc::LicenseResource::Field,
+                               std::string>& operators);
 
   CraneExpectedRich<void> ModifyLicenseResource(
-      const std::string &name, const std::string &server,
-      const std::vector<std::string> &clusters,
-      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
-          &operators);
+      const std::string& name, const std::string& server,
+      const std::vector<std::string>& clusters,
+      const std::unordered_map<crane::grpc::LicenseResource::Field,
+                               std::string>& operators);
 
   CraneExpectedRich<void> RemoveLicenseResource(
-      const std::string &name, const std::string &server,
-      const std::vector<std::string> &clusters);
+      const std::string& name, const std::string& server,
+      const std::vector<std::string>& clusters);
 
   CraneExpectedRich<void> QueryLicenseResource(
-      const std::string &name, const std::string &server,
-      const std::vector<std::string> &clusters,
-      std::list<LicenseResourceInDb> *res_licenses);
+      const std::string& name, const std::string& server,
+      const std::vector<std::string>& clusters,
+      std::list<LicenseResourceInDb>* res_licenses);
 
  private:
   CraneExpectedRich<void> CheckAndUpdateFields_(
-      const std::vector<std::string> &clusters,
-      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
-          &operators,
-      LicenseResourceInDb *res_resource);
+      const std::vector<std::string>& clusters,
+      const std::unordered_map<crane::grpc::LicenseResource::Field,
+                               std::string>& operators,
+      LicenseResourceInDb* res_resource);
 
-  void UpdateLicense_(const LicenseResourceInDb &license_resource,
-                      uint32_t cluster_allowed, License *license);
+  void UpdateLicense_(const LicenseResourceInDb& license_resource,
+                      uint32_t cluster_allowed, License* license);
 
   absl::flat_hash_map<std::pair<LicenseId, std::string>, /* license_id, server
                                                           */
