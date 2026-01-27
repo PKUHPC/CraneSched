@@ -1779,14 +1779,12 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->priority = qos_view[Qos::FieldStringOfPriority()].get_int64().value;
     qos->max_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxJobsPerUser()].get_int64().value;
-    qos->max_jobs_per_account =
-        qos_view[Qos::FieldStringOfMaxJobsPerAccount()].get_int64().value;
-    qos->max_cpus_per_user =
-        qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
+    qos->max_jobs_per_account = ViewValueOr_(qos_view[Qos::FieldStringOfMaxJobsPerAccount()], int64_t(std::numeric_limits<decltype(qos->max_jobs_per_account)>::max()));
+    qos->max_cpus_per_user = ViewValueOr_(qos_view[Qos::FieldStringOfMaxCpusPerUser()], int64_t(std::numeric_limits<decltype(qos->max_cpus_per_user)>::max()));
     qos->max_submit_jobs_per_user =
-        qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()], int64_t(std::numeric_limits<decltype(qos->max_submit_jobs_per_user)>::max()));
     qos->max_submit_jobs_per_account =
-        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()], int64_t(std::numeric_limits<decltype(qos->max_submit_jobs_per_account)>::max()));
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
   } catch (const bsoncxx::exception& e) {

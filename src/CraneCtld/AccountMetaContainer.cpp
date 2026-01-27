@@ -274,7 +274,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
   CRANE_DEBUG(
-      "Free QOS {} submit resource for job {} of user {} and account {}.",
+      "Free QOS {} resource for job {} of user {} and account {}.",
       task.qos, task.TaskId(), task.Username(), task.account);
 
   m_user_meta_map_.if_contains(task.Username(), [&](std::pair<const std::string,

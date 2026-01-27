@@ -2990,7 +2990,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
       task->SetStatus(crane::grpc::Cancelled);
       task->SetStartTime(cancel_time);
       task->SetEndTime(cancel_time);
-      g_account_meta_container->FreeQosResource(*task);
+      g_account_meta_container->FreeQosSubmitResource(*task);
 
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                     cancel_time);
@@ -3125,7 +3125,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
-        g_account_meta_container->FreeQosResource(*pair.first);
+        g_account_meta_container->FreeQosSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(
             std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
@@ -3168,7 +3168,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
         }
         if (missing_deps) {
           CRANE_WARN("Job #{} rejected: missing dependencies.", id);
-          g_account_meta_container->FreeQosResource(*job);
+          g_account_meta_container->FreeQosSubmitResource(*job);
           task_id_promise.set_value(
               std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
           tasks_to_purge[id] = job->TaskDbId();
@@ -3205,7 +3205,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
+      g_account_meta_container->FreeQosSubmitResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(
           std::unexpected(CraneErrCode::ERR_BEYOND_TASK_ID));
     }
