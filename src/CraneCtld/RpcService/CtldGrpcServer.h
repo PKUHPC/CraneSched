@@ -205,6 +205,11 @@ class CtldForInternalServiceImpl final
       const crane::grpc::UpdateNodeDrainStateRequest *request,
       crane::grpc::UpdateNodeDrainStateReply *response) override;
 
+  grpc::Status QueryCranedInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryCranedInfoRequest *request,
+      crane::grpc::QueryCranedInfoReply *response) override;
+
   grpc::Status CforedStream(
       grpc::ServerContext *context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,

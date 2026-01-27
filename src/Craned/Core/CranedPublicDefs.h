@@ -119,6 +119,14 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct HealthCheckConfig {
+    std::string Program;
+    uint64_t Interval{0};
+    uint32_t NodeState{0};
+    bool Cycle{false};
+  };
+  HealthCheckConfig HealthCheck;
+
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
@@ -192,6 +200,16 @@ struct RunTimeStatus {
 };
 
 inline RunTimeStatus g_runtime_status{};
+
+enum HealthCheckNodeStateEnum : std::uint8_t {
+  ANY = 1,
+  IDLE = 2,
+  ALLOC = 4,
+  MIXED = 8,
+  NONDRAINED_IDLE = 16,
+  START_ONLY = 32
+};
+
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

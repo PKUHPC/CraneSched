@@ -373,6 +373,29 @@ Container:
 
 For more container-related configuration, see the [Container runtime configuration guide](../container.md).
 
+## Craned Health Check Configuration
+```yaml
+HealthCheck:
+  # The absolute path to the health check script to be executed
+  Program: /path/to/your/script
+  # The interval between two periodic health checks, in seconds
+  Interval: 60
+  # Precisely controls under which node states the HealthCheckProgram is triggered
+  NodeState: ANY
+  # Indicates whether to randomly stagger the start time of health checks within the interval, rather than starting all checks simultaneously at each interval
+  Cycle: false
+```
+
+NodeState options:
+
+- **IDLE**: Only execute the health check when no jobs are assigned to the node. This is the safest and most conservative option, as it completely avoids any performance impact on running applications.
+- **ALLOC**: Only execute the health check when the node is fully allocated. This provides broader coverage but may interfere with job performance.
+- **MIXED**: Execute the health check when the node is partially allocated.
+- **ANY**: Execute the health check regardless of the node's allocation state. This offers the widest monitoring coverage but also poses the highest risk of interfering with jobs.
+- **NONDRAINED_IDLE**: Execute the health check only when the node has no jobs assigned and its state is not DRAIN.
+- **START_ONLY**: Only execute the health check once when Craned starts.
+
+
 ## Applying Changes
 
 After modifying the configuration:
