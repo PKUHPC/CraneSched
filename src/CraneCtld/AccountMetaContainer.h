@@ -53,12 +53,6 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosResource>>, 4,
       std::shared_mutex>;
 
-  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
-      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, uint32_t>>, 4,
-      std::shared_mutex>;
-
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -93,26 +87,30 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  static std::string CheckTres_(const ResourceView& resource_req,
-                                 const ResourceView& resource_total);
-
-  static bool CheckGres_(const DeviceMap& device_req,
-                         const DeviceMap& device_total);
-
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
-                                              const Qos& qos);
+                                            const Qos& qos);
 
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
 
-  bool CheckQosResource_(const Qos& qos, const PdJobInScheduler& job,
-                         const ResourceView& resource_view);
+  CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
+                                                 const Qos& qos);
+
+  std::expected<void, std::string> CheckQosResource_(
+      const Qos& qos, const PdJobInScheduler& job,
+      const ResourceView& resource_view);
+
+  static std::expected<void, std::string> CheckTres_(
+      const ResourceView& resource_req, const ResourceView& resource_total);
+
+  static bool CheckGres_(const DeviceMap& device_req,
+                         const DeviceMap& device_total);
 
   template<typename T>
   static void CheckAndSubResource_(T& current, T need, const std::string& resource_name,
                            const std::string& username, const std::string& qos, task_id_t task_id) {
       if (current < need) {
-        if constexpr (std::is_same_v<T, AllocatableResource>) {
+        if constexpr (std::is_same_v<T, ResourceView>) {
           CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}.",
                      resource_name, username, qos, task_id);
           current.SetToZero();
@@ -120,6 +118,10 @@ class AccountMetaContainer final {
           CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}. cur={}, need={}",
                      resource_name, username, qos, task_id, current, need);
           current = 0;
+        } else if constexpr (std::is_same_v<T, absl::Duration>) {
+          CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}. cur={}, need={}",
+                     resource_name, username, qos, task_id, current, need);
+          current = absl::ZeroDuration();
         } else {
           CRANE_ERROR("Unknown type");
         }
