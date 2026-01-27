@@ -22,9 +22,10 @@
 // Precompiled header comes first!
 
 #include "AccountManager.h"
-#include "TaskScheduler.h"
 
 namespace Ctld {
+
+struct PdJobInScheduler;
 
 constexpr int kNumStripes = 128;
 

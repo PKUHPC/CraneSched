@@ -19,6 +19,7 @@
 #include "AccountMetaContainer.h"
 
 #include "AccountManager.h"
+#include "TaskScheduler.h"
 
 namespace Ctld {
 

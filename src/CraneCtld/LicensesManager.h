@@ -29,6 +29,8 @@
 
 namespace Ctld {
 
+struct PdJobInScheduler;
+
 template <typename K, typename V,
           typename Hash = absl::container_internal::hash_default_hash<K>>
 using HashMap = absl::flat_hash_map<K, V, Hash>;
