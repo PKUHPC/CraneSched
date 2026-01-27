@@ -1397,6 +1397,7 @@ CraneExpected<void> AccountManager::CheckQosLimitOnTask(
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   {
+    task->account_chain.clear();
     const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
     std::string account_name = task->account;
     do {

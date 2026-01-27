@@ -1096,6 +1096,11 @@ void TaskScheduler::ScheduleThread_() {
           if (auto result = g_account_meta_container->CheckAndMallocQosResource(
                   *job_in_scheduler);
               !result) {
+            // free licenses
+            if (!job_in_scheduler->actual_licenses.empty()) {
+              g_licenses_manager->FreeLicense(
+                  job_in_scheduler->actual_licenses);
+            }
             job->pending_reason = result.error();
             continue;
           }
