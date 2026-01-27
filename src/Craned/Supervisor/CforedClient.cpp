@@ -362,10 +362,11 @@ void CforedClient::CleanX11RemoteEofQueueCb_() {
     auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
     if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
       auto& x11_fd_info = x11_fd_info_it->second;
-      if (x11_fd_info->sock) {
+      if (x11_fd_info->sock && !x11_fd_info->sock_stopped) {
         CRANE_DEBUG("[X11 #{}] Remote EOF received. Closing local socket.",
                     x11_id);
         x11_fd_info->sock->close();
+        x11_fd_info->sock_stopped = true;
       }
     } else {
       CRANE_WARN("Trying to close unknown x11_local_id: {}.", x11_id);
@@ -664,12 +665,17 @@ void CforedClient::AsyncSendRecvThread_() {
         bool eof = reply.payload_task_x11_input_req().eof();
         auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
         if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
-          auto& x11_fd_info = x11_fd_info_it->second;
-          // This fd is closed in event loop
-          bool success = WriteStringToFd_(*msg, x11_fd_info->fd, false);
-          if (!success || eof) {
-            m_x11_fwd_remote_eof_queue_.enqueue(x11_id);
-            m_clean_x11_fwd_remote_eof_queue_async_handle_->send();
+          if (!x11_fd_info_it->second->sock_stopped) {
+            auto& x11_fd_info = x11_fd_info_it->second;
+            // This fd is closed in event loop
+            bool success = WriteStringToFd_(*msg, x11_fd_info->fd, false);
+            if (!success || eof) {
+              m_x11_fwd_remote_eof_queue_.enqueue(x11_id);
+              m_clean_x11_fwd_remote_eof_queue_async_handle_->send();
+            }
+          } else {
+            CRANE_DEBUG("[X11 #{}] Socket already stopped. Ignoring input.",
+                        x11_id);
           }
         } else {
           CRANE_WARN("Trying to write X11 input to unknown x11_local_id: {}.",
