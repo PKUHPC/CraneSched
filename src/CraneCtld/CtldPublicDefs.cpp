@@ -995,14 +995,16 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   if (step_to_ctld.has_cpus_per_task()) {
     task_res_view.GetAllocatableRes().cpu_count =
         cpu_t(step_to_ctld.cpus_per_task());
+  } else {
+    task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
+  }
 
-    if (step_to_ctld.has_mem_per_cpu()) {
-      uint64_t mem_per_task =
-          static_cast<uint64_t>(step_to_ctld.cpus_per_task()) *
-          step_to_ctld.mem_per_cpu();
-      task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
-      task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
-    }
+  if (step_to_ctld.has_mem_per_cpu()) {
+    uint64_t mem_per_task =
+        static_cast<uint64_t>(step_to_ctld.cpus_per_task()) *
+        step_to_ctld.mem_per_cpu();
+    task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
+    task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
   }
 
   {
@@ -1574,13 +1576,15 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   if (val.has_cpus_per_task()) {
     task_res_view.GetAllocatableRes().cpu_count = cpu_t(val.cpus_per_task());
+  } else {
+    task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
+  }
 
-    if (val.has_mem_per_cpu()) {
-      uint64_t mem_per_task =
-          static_cast<uint64_t>(val.cpus_per_task()) * val.mem_per_cpu();
-      task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
-      task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
-    }
+  if (val.has_mem_per_cpu()) {
+    uint64_t mem_per_task =
+        static_cast<uint64_t>(val.cpus_per_task()) * val.mem_per_cpu();
+    task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
+    task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
   }
 
   uid = val.uid();

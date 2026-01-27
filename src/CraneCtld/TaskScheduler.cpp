@@ -4784,13 +4784,13 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
   // Check res req valid
-  {
-    const auto& res = task->node_res_view + task->task_res_view;
-
-    if (res.MemoryBytes() == 0) {
-      CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-    }
+  if (task->total_res_view.MemoryBytes() == 0) {
+    CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+  if (task->task_res_view.CpuCount() == 0) {
+    CRANE_DEBUG("Job #{} has zero cpu request.", task->TaskId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
 
   // Check whether the selected partition is able to run this task.
@@ -4931,6 +4931,17 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   auto* job = step->job;
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+
+  if (step->total_res_view.MemoryBytes() == 0) {
+    CRANE_DEBUG("Step #{}.{} has zero memory request.", step->job_id,
+                step->StepId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+  if (step->task_res_view.CpuCount() == 0) {
+    CRANE_DEBUG("Step #{}.{} has zero cpu request.", step->job_id,
+                step->StepId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
 
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
