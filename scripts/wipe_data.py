@@ -194,7 +194,7 @@ def parse_arguments():
         help="Include resource_table in MongoDB wipe.",
     )
     parser.add_argument(
-        "-s", "--summary_tale",
+        "-s", "--summary_table",
         action="store_true",
         help="Include hour/day/month/summary_table in MongoDB wipe.",
     )
@@ -263,7 +263,7 @@ def _main():
                 to_wipe.append(Collection.WCKEY)
             if args.resource_table:
                 to_wipe.append(Collection.RESOURCE)
-            if args.summary_tale:
+            if args.summary_table:
                 to_wipe.append(Collection.SUMMARY)
                 to_wipe.append(Collection.ACC_HOUR)
                 to_wipe.append(Collection.ACC_DAY)
