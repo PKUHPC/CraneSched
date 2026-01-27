@@ -794,7 +794,7 @@ void DaemonStepInCtld::SetFieldsOfStepInfo(
       static_cast<crane::grpc::ResourceView>(job->allocated_res_view);
 }
 
-void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
+void CommonStepInCtld::InitPrimaryStepFromJob(TaskInCtld& job) {
   /* Fields in StepInCtld */
   this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
@@ -868,14 +868,19 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
     task_res_map[cur_task_id] =
         job.AllocatedRes().at(job.executing_craned_ids.front());
   } else {
+    ResourceV2 step_alloc_res;
+    task_id_t cur_task_id = 0;
     for (const auto& craned_id : job.CranedIds()) {
-      for (int i = 0; i < job.ntasks_per_node; ++i) {
+      ResourceInNode& res_avail = job.StepResAvail().at(craned_id);
+      ResourceInNode feasible_res;
+      node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
+      res_avail -= feasible_res;
+      step_alloc_res.AddResourceInNode(craned_id, feasible_res);
+      while (task_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res)) {
+        res_avail -= feasible_res;
         craned_task_map[craned_id].insert(cur_task_id);
-        auto res = job.AllocatedRes().at(craned_id);
-        // Mem is allocated at step level, set to 0 here to avoid mem limit.
-        res.allocatable_res.memory_bytes = 0;
-        res.allocatable_res.memory_sw_bytes = 0;
-        task_res_map[cur_task_id] = res;
+        task_res_map[cur_task_id] = feasible_res;
+        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
         ++cur_task_id;
       }
     }
@@ -1807,8 +1812,6 @@ int TaskInCtld::SchedulePendingSteps(
       if (ntasks_on_node < min_ntask_per_node) {
         continue;
       }
-      // step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-      // step_craned_ids.insert(craned_id);
       candidates.push(node_info{ntasks_on_node, &craned_id});
       sum_ntasks += ntasks_on_node;
       if (candidates.size() > step->node_num) {
@@ -1826,7 +1829,7 @@ int TaskInCtld::SchedulePendingSteps(
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
-      ResourceInNode res_avail = step_res_avail_.at(*info.craned_id);
+      ResourceInNode& res_avail = step_res_avail_.at(*info.craned_id);
       ResourceInNode feasible_res;
       step->node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
       res_avail -= feasible_res;
@@ -1862,7 +1865,6 @@ int TaskInCtld::SchedulePendingSteps(
           .allocated_nodes{std::make_pair(
               util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
     }
-    step_res_avail_ -= step_alloc_res;
     pending_step_ids_.pop();
     ++popped_count;
     scheduled_steps->push_back(step);
