@@ -17,6 +17,7 @@
  */
 
 #include "LicensesManager.h"
+#include "TaskScheduler.h"
 
 namespace Ctld {
 

@@ -28,6 +28,7 @@
 #include "EmbeddedDbClient.h"
 #include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
+#include "LicensesManager.h"
 #include "crane/PluginClient.h"
 #include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
