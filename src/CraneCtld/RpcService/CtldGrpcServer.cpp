@@ -25,10 +25,10 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
-#include "LicensesManager.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
