@@ -876,7 +876,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(TaskInCtld& job) {
       node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
       res_avail -= feasible_res;
       step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-      while (task_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res)) {
+      while (
+          task_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res)) {
         res_avail -= feasible_res;
         craned_task_map[craned_id].insert(cur_task_id);
         task_res_map[cur_task_id] = feasible_res;
