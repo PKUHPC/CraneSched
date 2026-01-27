@@ -22,8 +22,6 @@
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
 
-#include "mongocxx/private/append_aggregate_options.hh"
-
 namespace Ctld {
 
 using bsoncxx::builder::basic::kvp;

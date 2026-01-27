@@ -2320,9 +2320,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSummary(
             "Job summary requires MongoDB >= 4.4"};
   }
 
-  g_db_client->QueryJobSummary(request, writer);
-
-  return grpc::Status::OK;
+  return g_db_client->QueryJobSummary(request, writer);
 }
 
 grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
@@ -2332,8 +2330,10 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
 
-  g_db_client->QueryJobSizeSummary(request, writer);
-
+  bool ok = g_db_client->QueryJobSizeSummary(request, writer);
+  if (!ok) {
+    return {grpc::StatusCode::INTERNAL, "QueryJobSizeSummary failed"};
+  }
   return grpc::Status::OK;
 }
 
