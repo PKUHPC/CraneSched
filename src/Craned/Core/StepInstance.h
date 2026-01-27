@@ -39,6 +39,7 @@ struct StepInstance {
 
   StepStatus status{StepStatus::Invalid};
   std::shared_ptr<SupervisorStub> supervisor_stub{nullptr};
+  // job_id/step_id/system group
   std::unique_ptr<CgroupInterface> crane_cgroup{nullptr};
 
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);

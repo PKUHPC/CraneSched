@@ -568,18 +568,26 @@ class CgroupManager {
 
   /**
    * \brief Allocate and return cgroup handle for job/step/task, should only be
-   * called once per job/step/task.
+   * called once per job/step/task. This function may cause cgroup leak!
+   * Manually create cgroup and set resource.
    * \param cgroup_str cgroup_str for job/step/task.
    * \param resource resource constrains
    * \param recover recover cgroup instead creating new one.
    * \param min_mem minimum memory size for cgroup, default none, for job cgroup
-   * \param alloc_mem true if need to enforce memory limit, default true
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
+   *
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,
       const crane::grpc::ResourceInNode &resource, bool recover,
       std::uint64_t min_mem = 0U);
+  static CraneExpected<std::unique_ptr<CgroupInterface>> CreateOrOpenCgroup(
+      const std::string &cgroup_str, bool retrieve);
+  static CraneErrCode SetCgroupResource(
+      CgroupInterface *cg, const crane::grpc::ResourceInNode &resource,
+      std::uint64_t min_mem = 0U);
+  static CraneErrCode RecoverCgroupWithResource(
+      CgroupInterface *cg, const crane::grpc::ResourceInNode &resource);
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
@@ -624,6 +632,9 @@ class CgroupManager {
 #ifdef CRANE_ENABLE_BPF
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
+
+  inline static spdlog::level::level_enum log_level;
+
  private:
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
       const std::string &cgroup_str);

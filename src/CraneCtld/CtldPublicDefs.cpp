@@ -1237,6 +1237,10 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         for (const auto& node : job->DaemonStep()->CranedIds()) {
           context->craned_jobs_to_free[node].emplace_back(job->TaskId());
         }
+      } else {
+        for (const auto& node : this->CranedIds()) {
+          context->craned_step_free_map[node][job_id].insert(step_id);
+        }
       }
     } else {
       // Step COMPLETED

@@ -54,7 +54,9 @@ void StepInstance::CleanUp() {
         job_id, step_id, static_cast<int>(this->status));
   }
   if (this->crane_cgroup != nullptr) {
-    g_thread_pool->detach_task([cgroup = crane_cgroup.release()] {
+    g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
+                                cgroup = crane_cgroup.release()] {
+      // This is step_id/system cgroup
       int cnt = 0;
 
       while (true) {
@@ -76,16 +78,50 @@ void StepInstance::CleanUp() {
       cgroup->Destroy();
 
       delete cgroup;
+
+      auto step_cg_path =
+          std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+          Common::CgConstant::kRootCgNamePrefix /
+          CgroupManager::CgroupStrByJobId(job_id) /
+          fmt::format("{}{}", Common::CgConstant::kStepCgNamePrefix, step_id);
+
+      std::error_code ec;
+      if (std::filesystem::exists(step_cg_path, ec)) {
+        // Remove step cgroup directory
+        std::filesystem::remove(step_cg_path, ec);
+        if (ec) {
+          CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
+                      job_id, step_id, step_cg_path, ec.message());
+        } else {
+          CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
+                      step_id, step_cg_path);
+        }
+      } else {
+        if (ec) {
+          CRANE_ERROR(
+              "[Step #{}.{}] Failed to check existence of step cgroup dir {}: "
+              "{}",
+              job_id, step_id, step_cg_path, ec.message());
+        } else {
+          CRANE_DEBUG(
+              "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
+              job_id, step_id, step_cg_path);
+        }
+      }
     });
   }
 }
 
 CraneErrCode StepInstance::Prepare() {
-  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
-      false);
+  auto cg_expt = CgroupManager::CreateOrOpenCgroup(
+      CgroupManager::CgroupStrByStepId(job_id, step_id, true), false);
   if (!cg_expt) return cg_expt.error();
   this->crane_cgroup = std::move(cg_expt.value());
+  auto* cg = this->crane_cgroup.get();
+  CraneErrCode err = CgroupManager::SetCgroupResource(cg, step_to_d.res());
+  if (err != CraneErrCode::SUCCESS) {
+    return err;
+  }
   return CraneErrCode::SUCCESS;
 }
 

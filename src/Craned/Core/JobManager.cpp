@@ -545,6 +545,15 @@ CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
     return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
   }
   auto& stub = step_it->second->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when changing timelimit",
+                job_id, step_id);
+    StepStatusChangeAsync(job_id, step_id, StepStatus::Failed,
+                          ExitCode::EC_RPC_ERR,
+                          "Supervisor stub is null when changing timelimit",
+                          google::protobuf::util::TimeUtil::GetCurrentTime());
+    return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
+  }
   auto err = stub->ChangeTaskTimeLimit(absl::Seconds(new_timelimit_sec));
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR(
@@ -571,6 +580,15 @@ CraneExpected<EnvMap> JobManager::QuerySshStepEnvVariables(job_id_t job_id,
     return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
   }
   auto& stub = step_it->second->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when query env", job_id,
+                step_id);
+    StepStatusChangeAsync(job_id, step_id, StepStatus::Failed,
+                          ExitCode::EC_RPC_ERR,
+                          "Supervisor stub is null when query env",
+                          google::protobuf::util::TimeUtil::GetCurrentTime());
+    return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
+  }
   return stub->QueryStepEnv();
 }
 
@@ -794,6 +812,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // we should send TaskStatusChange manually.
   CraneErrCode err = step_ptr->Prepare();
   if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
@@ -1046,6 +1065,15 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       for (auto step_id : terminate_step_ids) {
         auto& step_instance = job_instance->step_map.at(step_id);
         auto stub = step_instance->supervisor_stub;
+        if (!stub) {
+          CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
+                      elem.job_id, step_id);
+          StepStatusChangeAsync(
+              elem.job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+              "Supervisor stub is null when terminating",
+              google::protobuf::util::TimeUtil::GetCurrentTime());
+          continue;
+        }
         auto err =
             stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
         if (err != CraneErrCode::SUCCESS) {
@@ -1129,6 +1157,20 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     g_thread_pool->detach_task([&shutdown_step_latch, step] {
       auto stub = step->supervisor_stub;
+      if (!stub) {
+        CRANE_ERROR(
+            "[Step #{}.{}] Supervisor stub is null when shutdown supervisor",
+            step->job_id, step->step_id);
+        g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+            .job_id = step->job_id,
+            .step_id = step->step_id,
+            .new_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor stub is null when changing timelimit",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
+        shutdown_step_latch.count_down();
+        return;
+      }
       CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
                   step->job_id, step->step_id);
       auto err = stub->ShutdownSupervisor();

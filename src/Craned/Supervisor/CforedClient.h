@@ -98,7 +98,7 @@ class CforedClient {
   ConcurrentQueue<x11_local_id_t> m_x11_fwd_remote_eof_queue_;
   std::shared_ptr<uvw::async_handle>
       m_clean_x11_fwd_remote_eof_queue_async_handle_;
-  void CleanX11RemoveEofQueueCb_();
+  void CleanX11RemoteEofQueueCb_();
   ConcurrentQueue<task_id_t> m_stop_task_io_queue_;
   std::shared_ptr<uvw::async_handle> m_clean_stop_task_io_queue_async_handle_;
   void CleanStopTaskIOQueueCb_();

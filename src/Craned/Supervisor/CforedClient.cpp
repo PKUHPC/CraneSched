@@ -46,6 +46,10 @@ CforedClient::CforedClient() {
 
   m_clean_x11_fwd_remote_eof_queue_async_handle_ =
       m_loop_->resource<uvw::async_handle>();
+  m_clean_x11_fwd_remote_eof_queue_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanX11RemoteEofQueueCb_();
+      });
 
   m_clean_stop_task_io_queue_async_handle_ =
       m_loop_->resource<uvw::async_handle>();
@@ -351,7 +355,7 @@ void CforedClient::CleanX11FwdHandlerQueueCb_() {
   }
 }
 
-void CforedClient::CleanX11RemoveEofQueueCb_() {
+void CforedClient::CleanX11RemoteEofQueueCb_() {
   x11_local_id_t x11_id;
   while (m_x11_fwd_remote_eof_queue_.try_dequeue(x11_id)) {
     absl::MutexLock lock(&m_mtx_);
@@ -662,8 +666,8 @@ void CforedClient::AsyncSendRecvThread_() {
         if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
           auto& x11_fd_info = x11_fd_info_it->second;
           // This fd is closed in event loop
-          !WriteStringToFd_(*msg, x11_fd_info->fd, false);
-          if (eof) {
+          bool success = WriteStringToFd_(*msg, x11_fd_info->fd, false);
+          if (!success || eof) {
             m_x11_fwd_remote_eof_queue_.enqueue(x11_id);
             m_clean_x11_fwd_remote_eof_queue_async_handle_->send();
           }

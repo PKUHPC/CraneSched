@@ -46,6 +46,7 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
 
+  log_level = debug_level;
 #ifdef CRANE_ENABLE_CGROUP_V2
   enum cg_setup_mode_t setup_mode;
   setup_mode = cgroup_setup_mode();
@@ -562,6 +563,64 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
 
   if (ok) return std::move(cg_unique_ptr);
   return std::unexpected(CraneErrCode::ERR_CGROUP);
+}
+
+CraneExpected<std::unique_ptr<CgroupInterface>>
+CgroupManager::CreateOrOpenCgroup(const std::string &cgroup_str,
+                                  bool retrieve) {
+  std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
+  if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
+    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_REQUIRED_CONTROLLERS,
+                                  NO_CONTROLLER_FLAG, retrieve);
+  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
+    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
+                                  NO_CONTROLLER_FLAG, retrieve);
+  } else {
+    CRANE_WARN("cgroup version is not supported.");
+  }
+  return cg_unique_ptr;
+}
+
+CraneErrCode CgroupManager::SetCgroupResource(
+    CgroupInterface *cg, const crane::grpc::ResourceInNode &resource,
+    std::uint64_t min_mem) {
+  ResourceInNode resource_in_node(resource);
+  if (min_mem != 0) {
+    if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
+      CRANE_WARN(
+          "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
+          cg->CgroupName());
+      resource_in_node.allocatable_res.memory_bytes = min_mem;
+      resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
+    }
+  }
+
+  CRANE_TRACE("Setting cgroup {}. Res: CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
+              cg->CgroupName(), resource_in_node.allocatable_res.CpuCount(),
+              resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
+              util::ReadableDresInNode(resource_in_node));
+
+  bool ok = AllocatableResourceAllocator::Allocate(
+      resource_in_node.allocatable_res, cg);
+  if (ok)
+    ok &= DedicatedResourceAllocator::Allocate(resource_in_node.dedicated_res,
+                                               cg);
+
+  if (ok) return CraneErrCode::SUCCESS;
+  return CraneErrCode::ERR_CGROUP;
+}
+
+CraneErrCode CgroupManager::RecoverCgroupWithResource(
+    CgroupInterface *cg, const crane::grpc::ResourceInNode &resource) {
+#ifdef CRANE_ENABLE_BPF
+  if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
+    return CraneErrCode::SUCCESS;
+  }
+  auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg);
+  cg_v2_ptr->RecoverFromResInNode(resource);
+#endif
+
+  return CraneErrCode::SUCCESS;
 }
 
 std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV1_(
@@ -1172,6 +1231,7 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 // Custom libbpf print callback that forwards logs to Crane's logging system
 static int LibbpfPrintCallback(enum libbpf_print_level level,
                                const char *format, va_list args) {
+  static auto logger = AddLogger("libbpf", CgroupManager::log_level, true);
   // Create a buffer for the formatted message - 4KB should be sufficient for
   // most messages
   constexpr size_t kBufferSize = 4096;
@@ -1180,12 +1240,12 @@ static int LibbpfPrintCallback(enum libbpf_print_level level,
 
   // Check for encoding errors or truncation
   if (written < 0) {
-    CRANE_ERROR("[libbpf] Failed to format log message: encoding error");
+    CRANE_LOGGER_ERROR(logger, "Failed to format log message: encoding error");
     return 0;
   }
   if (written >= static_cast<int>(kBufferSize)) {
-    CRANE_WARN(
-        "[libbpf] Log message truncated (needed {} bytes, buffer is {} bytes)",
+    CRANE_LOGGER_WARN(
+        logger, "Log message truncated (needed {} bytes, buffer is {} bytes)",
         written + 1, kBufferSize);
   }
 
@@ -1207,17 +1267,17 @@ static int LibbpfPrintCallback(enum libbpf_print_level level,
   // Forward to appropriate Crane log level
   switch (level) {
   case LIBBPF_WARN:
-    CRANE_WARN("[libbpf] {}", message);
+    CRANE_LOGGER_WARN(logger, " {}", message);
     break;
   case LIBBPF_INFO:
-    CRANE_INFO("[libbpf] {}", message);
+    CRANE_LOGGER_INFO(logger, " {}", message);
     break;
   case LIBBPF_DEBUG:
-    CRANE_DEBUG("[libbpf] {}", message);
+    CRANE_LOGGER_DEBUG(logger, " {}", message);
     break;
   default:
     // Unknown log level - use DEBUG as fallback
-    CRANE_DEBUG("[libbpf] (unknown level) {}", message);
+    CRANE_LOGGER_DEBUG(logger, " (unknown level) {}", message);
     break;
   }
 
