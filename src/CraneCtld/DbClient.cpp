@@ -463,7 +463,6 @@ bool MongodbClient::InsertRecoveredJob(
   filter.append(
       kvp("task_id",
           static_cast<int32_t>(task_in_embedded_db.runtime_attr().task_id())));
-  filter.append(kvp("cluster", g_config.CraneClusterName));
 
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
@@ -479,40 +478,23 @@ bool MongodbClient::InsertRecoveredJob(
             mongocxx::options::update{}.upsert(true));
 
     if (ret != bsoncxx::stdx::nullopt) {
-      try {
-        using bsoncxx::builder::basic::make_document;
-        auto task_doc_copy = bsoncxx::document::value(job_doc.view());
-        auto filter_copy = bsoncxx::document::value(filter.view());
+      using bsoncxx::builder::basic::make_document;
 
-        bool txn_success =
-            CommitTransaction([this, &task_doc_copy, &filter_copy](
-                                  mongocxx::client_session* session) {
-              // 1. Append to acc_usage tables (hour/day/month)
-              AppendToAccUsageTable(task_doc_copy.view(), session);
+      bool txn_success = CommitTransaction(
+          [this, &job_doc](mongocxx::client_session* session) {
+            // 1. Append to acc_usage tables (hour/day/month)
+            AppendToAccUsageTable(job_doc.view(), session);
 
-              // 2. Mark as aggregated
-              (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
-                  *session, filter_copy.view(),
-                  make_document(
-                      kvp("$set",
-                          make_document(
-                              kvp("aggregated", true),
-                              kvp("aggregated_at",
-                                  bsoncxx::types::b_date{
-                                      std::chrono::system_clock::now()})))));
-            });
-        if (txn_success) return true;
-        CRANE_WARN(
-            "Transaction failed for job {} aggregation. "
-            "Will be recovered on startup.",
-            task_in_embedded_db.runtime_attr().task_id());
-
-      } catch (const std::exception& e) {
-        CRANE_WARN(
-            "Failed to append job {} to acc_usage tables: {}. "
-            "Will be recovered on startup.",
-            task_in_embedded_db.runtime_attr().task_id(), e.what());
-      }
+            // 2. Mark as aggregated
+            MarkTaskAsAggregated(
+                ViewGetArithmeticValue_<int32_t>(job_doc.view()["task_id"]),
+                session);
+          });
+      if (txn_success) return true;
+      CRANE_WARN(
+          "Transaction failed for job {} aggregation. "
+          "Will be recovered on startup.",
+          task_in_embedded_db.runtime_attr().task_id());
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -527,7 +509,6 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   // Create filter by task_id
   document filter;
   filter.append(kvp("task_id", static_cast<int32_t>(task->TaskId())));
-  filter.append(kvp("cluster", g_config.CraneClusterName));
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
@@ -550,22 +531,13 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
         auto task_doc_copy = bsoncxx::document::value(job_doc.view());
         auto filter_copy = bsoncxx::document::value(filter.view());
 
-        bool txn_success =
-            CommitTransaction([this, &task_doc_copy, &filter_copy](
-                                  mongocxx::client_session* session) {
+        bool txn_success = CommitTransaction(
+            [this, &task_doc_copy, task](mongocxx::client_session* session) {
               // 1. Append to acc_usage tables (hour/day/month)
               AppendToAccUsageTable(task_doc_copy.view(), session);
 
               // 2. Mark as aggregated
-              (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
-                  *session, filter_copy.view(),
-                  make_document(
-                      kvp("$set",
-                          make_document(
-                              kvp("aggregated", true),
-                              kvp("aggregated_at",
-                                  bsoncxx::types::b_date{
-                                      std::chrono::system_clock::now()})))));
+              MarkTaskAsAggregated(task->TaskId(), session);
             });
 
         if (!txn_success) {
@@ -607,7 +579,6 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
       // Create filter by task_id
       document filter;
       filter.append(kvp("task_id", static_cast<int32_t>(task->TaskId())));
-      filter.append(kvp("cluster", g_config.CraneClusterName));
 
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
@@ -629,14 +600,18 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
       // Real-time aggregation for each task (best effort)
       // Failures will be recovered on startup via RecoverMissingAggregations
       for (const TaskInCtld* task : tasks) {
-        try {
-          AppendToAccUsageTable(task, nullptr);
-        } catch (const std::exception& e) {
+        using bsoncxx::builder::basic::make_document;
+        bool txn_success =
+            CommitTransaction([this, task](mongocxx::client_session* session) {
+              AppendToAccUsageTable(task, session);
+              // 2. Mark as aggregated
+              MarkTaskAsAggregated(task->TaskId(), session);
+            });
+        if (!txn_success)
           CRANE_WARN(
-              "Failed to append task {} to acc_usage tables: {}. "
+              "Failed to append task {} to acc_usage tables. "
               "Will be recovered on startup.",
-              task->TaskId(), e.what());
-        }
+              task->TaskId());
       }
       return true;
     }
@@ -1195,7 +1170,6 @@ bool MongodbClient::InsertRecoveredStep(
   // Filter by task_id (job_id)
   document filter;
   filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
-  filter.append(kvp("cluster", g_config.CraneClusterName));
 
   // Use $push to append step, and $setOnInsert to create minimal document if
   // needed
@@ -1247,7 +1221,6 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       // Filter by task_id (job_id)
       document filter;
       filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
-      filter.append(kvp("cluster", g_config.CraneClusterName));
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document
@@ -1586,14 +1559,14 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
 }
 
 // Mark task as aggregated in task_table
-void MongodbClient::MarkTaskAsAggregated(const bsoncxx::oid& task_id,
+void MongodbClient::MarkTaskAsAggregated(job_id_t job_id,
                                          mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
   auto client = GetClient_();
-  auto filter = make_document(kvp("_id", task_id));
+  auto filter = make_document(kvp("task_id", static_cast<int32_t>(job_id)));
   auto update = make_document(kvp(
       "$set", make_document(kvp("aggregated", true),
                             kvp("aggregated_at",
@@ -1845,27 +1818,19 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
 
   int count = 0;
   for (auto&& task_doc : cursor) {
-    // Use transaction to ensure atomicity of append + mark operations
-    auto session = client->start_session();
-    try {
-      session.start_transaction();
+    bool success =
+        CommitTransaction([this, &task_doc](mongocxx::client_session* session) {
+          AppendToAccUsageTable(task_doc, session);
+          MarkTaskAsAggregated(
+              ViewGetArithmeticValue_<int32_t>(task_doc["task_id"]), session);
+        });
+    if (!success) {
+      CRANE_ERROR("Failed to append job to acc usage table.");
+    }
+    count++;
 
-      // 2. Append to acc_usage tables (hour/day/month)
-      AppendToAccUsageTable(task_doc, &session);
-
-      // 3. Mark as aggregated
-      MarkTaskAsAggregated(task_doc["_id"].get_oid().value, &session);
-
-      session.commit_transaction();
-      count++;
-
-      if (count % 1000 == 0) {
-        CRANE_INFO("Recovered {} unaggregated tasks...", count);
-      }
-    } catch (const std::exception& e) {
-      session.abort_transaction();
-      CRANE_ERROR("Failed to append task {}: {}",
-                  task_doc["_id"].get_oid().value.to_string(), e.what());
+    if (count % 1000 == 0) {
+      CRANE_INFO("Recovered {} unaggregated tasks...", count);
     }
   }
 
