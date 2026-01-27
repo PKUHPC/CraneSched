@@ -457,7 +457,7 @@ creport job sizesbywckey [--start-time=...] [--end-time=...] [--wckeys=...] ...
 - **250-499 CPUs**: 250-499CPUs范围CPU分钟
 - **500-999 CPUs**: 500-999CPUs范围CPU分钟
 - **>= 1000 CPUs**: 大于等于1000CPUs范围CPU分钟
-- **TOTAL CPU TIME**: 特定账户下所有的CPU分钟总和
+- **TOTAL CPU TIME**: 特定 WcKey 下所有的CPU分钟总和
 - **% OF CLUSTER**: 占用集群所有作业CPU分钟数的百分比
 
 #### 输出示例

@@ -462,7 +462,7 @@ Subcommand-specific options (common options are listed in "Common Options for jo
 - **250-499 CPUs**: CPU minutes in the 250-499 CPUs range
 - **500-999 CPUs**: CPU minutes in the 500-999 CPUs range
 - **>= 1000 CPUs**: CPU minutes in the >=1000 CPUs range
-- **TOTAL CPU TIME**: Total CPU minutes for all jobs under the specific account
+- **TOTAL CPU TIME**: Total CPU minutes for all jobs under the specific wckey
 - **% OF CLUSTER**: Percentage of total cluster job CPU minutes occupied
 
 #### Sample Output
