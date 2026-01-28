@@ -230,7 +230,8 @@ CraneExpectedRich<void> AccountManager::DeleteUser(uint32_t uid,
                       fmt::format("user: {}, account: {}", name, account))};
 
   if (g_account_meta_container->UserHasTask(user->name))
-    return std::unexpected(CraneErrCode::ERR_USER_HAS_TASK);
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_USER_HAS_TASK,
+                      fmt::format("user: {}", name)));
 
   return DeleteUser_(op_user->name, *user, account);
 }
