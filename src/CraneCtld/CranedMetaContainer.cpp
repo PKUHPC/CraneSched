@@ -920,30 +920,6 @@ CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
   return result;
 }
 
-void CranedMetaContainer::UpdateNodeStateWithNodeHealthCheck(
-    const CranedId& craned_id, bool is_healthy, const std::string& reason) {
-  if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR(
-        "Node health check: unknown craned_id '{}', cannot update drain state.",
-        craned_id);
-    return;
-  }
-
-  auto craned_meta = craned_meta_map_[craned_id];
-
-  if (craned_meta->drain && craned_meta->state_reason == reason) {
-    craned_meta->drain = !is_healthy;
-    if (is_healthy) craned_meta->state_reason.clear();
-  } else if (!craned_meta->drain && !is_healthy) {
-    craned_meta->drain = true;
-    craned_meta->state_reason = reason;
-  }
-
-  CRANE_WARN(
-      "Node health check: craned_id '{}' drain state changed to {}. Reason: {}",
-      craned_id, craned_meta->drain, reason);
-}
-
 CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     const std::string& partition_name, const std::string& account_name) {
   auto part_metas_map = partition_meta_map_.GetMapSharedPtr();

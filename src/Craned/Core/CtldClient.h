@@ -225,9 +225,6 @@ class CtldClient {
 
   void HealthCheck_();
   bool NeedHealthCheck_();
-  void SendStatusChanges_();
-
-  void CranedReportHealth_(bool is_healthy, std::string reason);
 
   void NodeHealthCheck_();
 
