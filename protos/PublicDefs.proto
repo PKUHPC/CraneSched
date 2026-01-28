@@ -163,7 +163,7 @@ message DependencyStatus {
 
 message Signal {
   int32 signal_number = 1;
-  uint32 signal_time = 2; // seconds_before_kill
+  uint32 signal_time = 2;  // seconds_before_kill
   enum SignalFlag {
     NONE = 0;
     // (B) Send the signal only to the batch shell, not to other job steps.
