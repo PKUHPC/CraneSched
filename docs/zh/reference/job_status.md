@@ -11,6 +11,6 @@ CraneSched 作业包含以下状态：
 | **ExceedTimeLimit** | 作业因超出申请的时间限制而被终止。 |
 | **Cancelled** | 作业已被用户或管理员取消。 |
 | **OutOfMemory** | 作业因使用的内存超过申请量而被 OOM killer 终止。 |
-| **Configuring** | 作业资源正在配置中（例如运行 prolog 脚本）。 |
+| **Starting** | 作业资源正在配置中（例如运行 prolog 脚本）。 |
 | **Configured** | 作业资源已配置完成，准备就绪。 |
 | **Completing** | 作业正在结束过程中（例如运行 epilog 脚本）。 |
