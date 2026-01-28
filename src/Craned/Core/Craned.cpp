@@ -410,6 +410,55 @@ void ParseConfig(int argc, char** argv) {
       g_config.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("Cluster name is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("Cluster name is empty.");
+        std::exit(1);
+      }
+
+      if (config["HealthCheck"]) {
+        const auto& health_check_config = config["HealthCheck"];
+        g_config.HealthCheck.Program =
+            YamlValueOr(health_check_config["Program"], "");
+        if (g_config.HealthCheck.Program.empty()) {
+          CRANE_ERROR("HealthCheckProgram is not configured");
+          std::exit(1);
+        }
+        g_config.HealthCheck.Interval =
+            YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
+        std::vector<std::string> node_states = absl::StrSplit(
+            absl::StripAsciiWhitespace(absl::AsciiStrToLower(
+                YamlValueOr(health_check_config["NodeState"], "any"))),
+            ",");
+        for (const auto& state : node_states) {
+          if (state == "any")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::ANY;
+          else if (state == "idle")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::IDLE;
+          else if (state == "alloc")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::ALLOC;
+          else if (state == "mixed")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::MIXED;
+          else if (state == "nondrained_idle")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::NONDRAINED_IDLE;
+          else if (state == "start_only")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::START_ONLY;
+        }
+
+        g_config.HealthCheck.Cycle =
+            YamlValueOr<bool>(health_check_config["Cycle"], false);
+      }
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
