@@ -73,8 +73,6 @@ Craned:
   MaxLogFileSize: 50M
   # max files of craned log file
   MaxLogFileNum: 3
-  
-  CraneCtldTimeout: 5
   # Set the interval for node health check.
   # 0 means the health check is disabled.
   NodeHealthCheckInterval: 0

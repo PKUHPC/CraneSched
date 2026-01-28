@@ -73,9 +73,6 @@ inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 inline constexpr double kMemoryToleranceGB = 0.01;
 
-inline const char* const NodeHealthCheckFailedReason =
-    "Node failed health check";
-
 inline constexpr uint64_t kDefaultCraneCtldMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
 inline constexpr uint64_t kDefaultCraneCtldMaxLogFileNum = 3;

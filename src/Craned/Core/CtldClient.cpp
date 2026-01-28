@@ -438,9 +438,9 @@ CtldClient::CtldClient() {
   m_node_health_check_timer_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (m_stopping_ || !m_stub_) return;
-        // TODO: should check state?
         NodeHealthCheck_();
       });
+
   if (g_config.CranedConf.NodeHealthCheckInterval > 0) {
     auto interval =
         std::chrono::seconds(g_config.CranedConf.NodeHealthCheckInterval);
@@ -454,7 +454,8 @@ CtldClient::~CtldClient() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   if (m_health_check_uvw_thread_ && m_health_check_uvw_thread_->joinable())
     m_health_check_uvw_thread_->join();
-  if (m_mem_config_check_thread_.joinable()) m_mem_config_check_thread_.join();
+  if (m_node_health_check_thread_.joinable())
+    m_node_health_check_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -1176,25 +1177,6 @@ bool CtldClient::Ping_() {
   return reply.ok();
 }
 
-void CtldClient::CranedReportHealth_(bool is_healthy, std::string reason) {
-  if (m_stopping_ || !m_stub_) return;
-
-  grpc::ClientContext context;
-  crane::grpc::CranedReportHealthRequest request;
-  google::protobuf::Empty reply;
-
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
-  request.set_craned_id(g_config.CranedIdOfThisNode);
-  request.set_healthy(is_healthy);
-  request.set_reason(reason);
-
-  auto result = m_stub_->CranedReportHealth(&context, request, &reply);
-  if (!result.ok()) {
-    CRANE_ERROR("CranedReportHealth failed: is_healthy={}", is_healthy);
-  }
-}
-
 void CtldClient::NodeHealthCheck_() {
   if (!g_server->ReadyFor(RequestSource::CTLD)) return;
 
@@ -1214,14 +1196,15 @@ void CtldClient::NodeHealthCheck_() {
 
   CRANE_DEBUG("Start node health checking....");
 
-  std::string reason = NodeHealthCheckFailedReason;
+  std::string reason;
   int64_t cpu_count =
       static_cast<int64_t>(node_config->allocatable_res.cpu_count);
   if (node_real.cpu < cpu_count) {
-    CRANE_WARN(
+    reason = fmt::format(
         "Node health check fail. config cpu_count: {}, real cpu_count: {}",
         cpu_count, node_real.cpu);
-    CranedReportHealth_(false, reason);
+    CRANE_WARN(reason);
+    UpdateNodeDrainState(true, reason);
     return;
   }
 
@@ -1230,9 +1213,11 @@ void CtldClient::NodeHealthCheck_() {
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 
   if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
-    CranedReportHealth_(false, reason);
-    CRANE_WARN("Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
-               mem_gb_config, node_real.memory_gb);
+    reason = fmt::format(
+        "Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
+        mem_gb_config, node_real.memory_gb);
+    CRANE_WARN(reason);
+    UpdateNodeDrainState(true, reason);
     return;
   }
 
@@ -1240,16 +1225,17 @@ void CtldClient::NodeHealthCheck_() {
     const auto& device = device_pair.second;
     for (const auto& file_meta : device->device_file_metas) {
       if (!std::filesystem::exists(file_meta.path)) {
-        CRANE_WARN("Node health check fail. Device file {} not found.",
-                   file_meta.path);
-        CranedReportHealth_(false, reason);
+        reason =
+            fmt::format("Node health check fail. Device file {} not found.",
+                        file_meta.path);
+        CRANE_WARN(reason);
+        UpdateNodeDrainState(true, reason);
         return;
       }
     }
   }
 
   CRANE_DEBUG("Node health check success.");
-  CranedReportHealth_(true, reason);
   return;
 }
 
