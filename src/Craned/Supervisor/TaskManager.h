@@ -47,6 +47,7 @@ class ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::vector<std::shared_ptr<uvw::timer_handle>> signal_timers;
   PasswordEntry pwd;
 
   bool orphaned{false};
@@ -119,6 +120,7 @@ class StepInstance {
 
   // Perspective 2: Role in a Job
   [[nodiscard]] bool IsDaemon() const noexcept;
+  [[nodiscard]] bool IsPrimary() const noexcept;
 
   // Perspective 3: Container support
   [[nodiscard]] bool IsPod() const noexcept;
@@ -511,6 +513,29 @@ class TaskManager {
       m_step_.termination_timer->close();
       m_step_.termination_timer.reset();
     }
+  }
+
+  void AddSignalTimer_(int64_t secs, int signal_number) {
+    auto signal_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    signal_handle->on<uvw::timer_event>(
+        [this, signal_number, TaskIds = m_step_.GetTaskIds()](
+            const uvw::timer_event&, uvw::timer_handle& h) {
+          for (task_id_t task_id : TaskIds) {
+            auto* task = m_step_.GetTaskInstance(task_id);
+            if (task != nullptr && task->GetExecId().has_value()) {
+              task->Kill(signal_number);
+            }
+          }
+        });
+    signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
+    m_step_.signal_timers.emplace_back(std::move(signal_handle));
+  }
+
+  void DelSignalTimers_() {
+    for (const auto& signal_timer : m_step_.signal_timers) {
+      signal_timer->close();
+    }
+    m_step_.signal_timers.clear();
   }
 
   void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
