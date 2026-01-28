@@ -84,6 +84,7 @@ nav:
         - cacctmgr: command/cacctmgr.md
   - Reference:
     - Exit Codes: reference/exit_code.md
+    - Job Status: reference/job_status.md
     - Error Codes: reference/error_code.md
     - Job Environment Variables: reference/job_env_vars.md
     - Job Steps: reference/job_steps.md
@@ -134,6 +135,7 @@ plugins:
             Account Management: 账户管理
             Reference: 参考文档
             Exit Codes: 退出代码
+            Job Status: 作业状态
             Error Codes: 系统错误提示和解决方法
             Job Environment Variables: 作业环境变量
             Job Steps: 作业步
