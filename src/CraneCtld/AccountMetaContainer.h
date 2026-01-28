@@ -109,7 +109,7 @@ class AccountMetaContainer final {
   template<typename T>
   static void CheckAndSubResource_(T& current, T need, const std::string& resource_name,
                            const std::string& username, const std::string& qos, task_id_t task_id) {
-      if (current < need) {
+      if (current <= need) {
         if constexpr (std::is_same_v<T, ResourceView>) {
           CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}.",
                      resource_name, username, qos, task_id);
@@ -120,7 +120,7 @@ class AccountMetaContainer final {
           current = 0;
         } else if constexpr (std::is_same_v<T, absl::Duration>) {
           CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}. cur={}, need={}",
-                     resource_name, username, qos, task_id, current, need);
+                     resource_name, username, qos, task_id, absl::FormatDuration(current), absl::FormatDuration(need));
           current = absl::ZeroDuration();
         } else {
           CRANE_ERROR("Unknown type");

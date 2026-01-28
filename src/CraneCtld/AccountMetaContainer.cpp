@@ -449,6 +449,10 @@ bool AccountMetaContainer::UserHasTask(const std::string& username) {
   return result;
 }
 
+void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
+  m_qos_meta_map_.erase(qos);
+}
+
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;

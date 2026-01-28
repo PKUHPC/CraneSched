@@ -1156,6 +1156,15 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
     return "max_submit_jobs_per_account";
   }
+  static constexpr const char* FieldStringOfMaxTresPerUser() {
+    return "max_tres_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxTresPerAccount() {
+    return "max_tres_per_account";
+  }
+  static constexpr const char* FieldStringOfMaxTres() {
+    return "max_tres";
+  }
   static constexpr const char* FieldStringOfMaxJobs() {
     return "max_jobs";
   }
