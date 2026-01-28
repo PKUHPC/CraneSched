@@ -2541,6 +2541,9 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
             !m_step_.IsPrimary())
           continue;
+        if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            m_step_.IsPrimary())
+          continue;
         if (signal.signal_time() >= new_sec) {
           CRANE_TRACE(
               "signal {} time of {}s >= time_limit {}s, ignore this signal.",
@@ -2588,6 +2591,9 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       for (const auto& signal : m_step_.GetStep().signals()) {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
             !m_step_.IsPrimary())
+          continue;
+        if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            m_step_.IsPrimary())
           continue;
         if (signal.signal_time() >= sec) {
           CRANE_TRACE(
