@@ -60,6 +60,7 @@ message InitSupervisorRequest {
       uint64 base_offset = 3;
     }
     SubIdConfig subid = 5;
+    string dns = 6;
   }
   ContainerConfig container_config = 15;
 
