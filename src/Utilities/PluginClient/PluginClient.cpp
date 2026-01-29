@@ -224,6 +224,22 @@ grpc::Status PluginClient::SendRegisterCranedHook_(
   return m_stub_->RegisterCranedHook(context, *request, &reply);
 }
 
+grpc::Status PluginClient::SendTraceHook_(grpc::ClientContext* context,
+                                          google::protobuf::Message* msg) {
+  using crane::grpc::plugin::TraceHookReply;
+  using crane::grpc::plugin::TraceHookRequest;
+
+  auto* request = dynamic_cast<TraceHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+
+  TraceHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending TraceHook.");
+  /* We don't want to trace the TraceHook itself, it will cause infinite loop if
+   * not handled carefuly. */
+  return m_stub_->TraceHook(context, *request, &reply);
+}
+
 grpc::Status PluginClient::SendUpdateLicensesHook_(
     grpc::ClientContext* context, google::protobuf::Message* msg) {
   using crane::grpc::plugin::UpdateLicensesHookReply;
@@ -354,4 +370,16 @@ void PluginClient::UpdateLicensesHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
+void PluginClient::TraceHookAsync(
+    std::vector<crane::grpc::plugin::SpanInfo> spans) {
+  auto request = std::make_unique<crane::grpc::plugin::TraceHookRequest>();
+  auto* mutable_spans = request->mutable_spans();
+  for (auto& span : spans) {
+    mutable_spans->Add()->CopyFrom(span);
+  }
+
+  HookEvent e{HookType::TRACE,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
 }  // namespace plugin

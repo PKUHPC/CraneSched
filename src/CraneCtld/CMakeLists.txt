@@ -45,6 +45,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PasswordEntry
         Utility_PluginClient
         $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
+        crane_tracer
         uvw
 
         cxxopts
