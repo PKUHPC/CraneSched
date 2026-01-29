@@ -1965,6 +1965,16 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     m_step_.StopCriClient();
 
     if (!orphaned && !m_step_.IsDaemon()) {
+#ifdef CRANE_ENABLE_TRACING
+      if (g_tracer) {
+        auto span = g_tracer->StartSpan("Task Status Change (finish)");
+        span->SetAttribute("service", "craned");
+        span->SetAttribute("job_id", m_step_.job_id);
+        span->SetAttribute("step_id", m_step_.step_id);
+        span->SetAttribute("task_id", task_id);
+        span->End();
+      }
+#endif
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     }
@@ -2427,8 +2437,11 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
 #ifdef CRANE_ENABLE_TRACING
     if (g_tracer) {
-      auto span = g_tracer->StartSpan(fmt::format("Execute Task {}", task_id));
+      auto span = g_tracer->StartSpan("Execute Task");
+      span->SetAttribute("service", "craned");
       span->SetAttribute("job_id", m_step_.job_id);
+      span->SetAttribute("step_id", m_step_.step_id);
+      span->SetAttribute("task_id", task_id);
       span->End();
     }
 #endif
