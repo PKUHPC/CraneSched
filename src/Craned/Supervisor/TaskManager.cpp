@@ -149,7 +149,7 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     auto total_task_num =
-    m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
+        m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
     std::vector<int> gtids(total_task_num);
     std::iota(gtids.begin(), gtids.end(), 0);
     env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(total_task_num));
@@ -245,9 +245,9 @@ void ITaskInstance::InitEnvMap() {
   }
   if (g_config.EnableSlurmCompatibleEnv) {
     auto proc_id_to_str = [nodelist = m_parent_step_inst_->GetStep().nodelist(),
-                       ntasks_per_node =
-                           m_parent_step_inst_->GetStep().ntasks_per_node(),
-                       task_id = task_id]() -> std::string {
+                           ntasks_per_node =
+                               m_parent_step_inst_->GetStep().ntasks_per_node(),
+                           task_id = task_id]() -> std::string {
       auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
       if (it == nodelist.end()) {
         return "-1";

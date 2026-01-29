@@ -117,9 +117,11 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.emplace("SLURMD_NODENAME", g_config.Hostname);
     env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
     std::list<std::string> slurm_node_list;
-    std::list<std::string> host_list{daemon_step_to_d.nodelist().begin(), daemon_step_to_d.nodelist().end()};
+    std::list<std::string> host_list{daemon_step_to_d.nodelist().begin(),
+                                     daemon_step_to_d.nodelist().end()};
     if (!util::HostNameListToStr_(host_list, &slurm_node_list)) {
-      CRANE_ERROR("cannot emplace SLURM_NODELIST, because HostNameListToStr_ failed");
+      CRANE_ERROR(
+          "cannot emplace SLURM_NODELIST, because HostNameListToStr_ failed");
     } else {
       env_map.emplace("SLURM_NODELIST", absl::StrJoin(slurm_node_list, ","));
     }
