@@ -2,6 +2,7 @@
 import os
 import argparse
 import sys
+import re
 from datetime import datetime
 try:
     from influxdb_client import InfluxDBClient
@@ -34,7 +35,15 @@ def setup_args():
 
     return parser.parse_args()
 
+def validate_input(val, pattern, name):
+    if val is not None and not re.fullmatch(pattern, val):
+        print(f"Error: Invalid format for {name}: {val}")
+        sys.exit(1)
+
 def build_flux_query(args):
+    validate_input(args.trace_id, r'^[a-fA-F0-9]+$', "trace-id")
+    validate_input(args.service, r'^[a-zA-Z0-9_\-\.]+$', "service")
+
     # Base query
     query = f'''from(bucket: "{args.bucket}")
     |> range(start: -{args.minutes}m)

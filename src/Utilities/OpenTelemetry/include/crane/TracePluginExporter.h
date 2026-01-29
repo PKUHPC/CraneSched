@@ -7,13 +7,16 @@
 
 #include "crane/Logger.h"
 #include "crane/PluginClient.h"
-#include "opentelemetry/sdk/trace/exporter.h"
-#include "opentelemetry/sdk/trace/span_data.h"
+#ifdef CRANE_ENABLE_TEST
+#  include "opentelemetry/sdk/trace/exporter.h"
+#  include "opentelemetry/sdk/trace/span_data.h"
+#endif
 #include "protos/Plugin.grpc.pb.h"
 #include "protos/Plugin.pb.h"
 
 namespace crane {
 
+#ifdef CRANE_ENABLE_TEST
 class TracePluginExporter : public opentelemetry::sdk::trace::SpanExporter {
  public:
   using PluginClientGetter = std::function<plugin::PluginClient*()>;
@@ -34,12 +37,8 @@ class TracePluginExporter : public opentelemetry::sdk::trace::SpanExporter {
       const opentelemetry::nostd::span<
           std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
           spans) noexcept override {
-    if (!m_enabled_getter_() || !m_client_getter_()) {
-      return opentelemetry::sdk::common::ExportResult::kSuccess;
-    }
-
     auto* client = m_client_getter_();
-    if (!client) {
+    if (!m_enabled_getter_() || !client) {
       return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
 
@@ -121,5 +120,6 @@ class TracePluginExporter : public opentelemetry::sdk::trace::SpanExporter {
   PluginClientGetter m_client_getter_;
   PluginEnabledGetter m_enabled_getter_;
 };
+#endif
 
 }  // namespace crane
