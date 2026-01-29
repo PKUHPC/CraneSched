@@ -34,6 +34,16 @@
 #  include "opentelemetry/trace/tracer.h"
 #endif
 
+#ifndef CRANE_ENABLE_TEST
+namespace opentelemetry {
+namespace sdk {
+namespace trace {
+class SpanExporter;
+}  // namespace trace
+}  // namespace sdk
+}  // namespace opentelemetry
+#endif
+
 namespace crane {
 
 class TracerManager {
