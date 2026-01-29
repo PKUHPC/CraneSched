@@ -362,6 +362,9 @@ void ParseConfig(int argc, char** argv) {
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
 
+      g_config.EnableSlurmCompatibleEnv =
+          YamlValueOr<bool>(config["EnableSlurmCompatibleEnv"], false);
+
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
 

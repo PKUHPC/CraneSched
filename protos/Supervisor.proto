@@ -101,6 +101,8 @@ message InitSupervisorRequest {
     uint64 max_output_size = 8;
   };
   JobLifecycleHookConfig job_lifecycle_hook_config = 30;
+
+  bool enable_slurm_compatible_env = 31;
 }
 
 message SupervisorReady {

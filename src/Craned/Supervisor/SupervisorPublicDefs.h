@@ -114,6 +114,8 @@ struct Config {
   };
 
   JobLifecycleHookConfig JobLifecycleHook;
+
+  bool EnableSlurmCompatibleEnv{false};
 };
 
 inline Config g_config;
