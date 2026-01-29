@@ -226,6 +226,8 @@ class CtldClient {
   void HealthCheck_();
   bool NeedHealthCheck_();
 
+  void NodeHealthCheck_();
+
   absl::Mutex m_step_status_change_mtx_;
 
   std::list<StepStatusChangeQueueElem> m_step_status_change_list_
@@ -260,6 +262,9 @@ class CtldClient {
   std::shared_ptr<uvw::loop> m_health_check_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
   std::shared_ptr<uvw::async_handle> m_health_check_async_;
+
+  std::thread m_node_health_check_thread_;
+  std::shared_ptr<uvw::timer_handle> m_node_health_check_timer_;
 };
 
 }  // namespace Craned

@@ -171,6 +171,9 @@ void ParseCranedConfig(const YAML::Node& config) {
     if (craned_config["MaxLogFileNum"]) {
       conf.MaxLogFileNum = craned_config["MaxLogFileNum"].as<uint64_t>();
     }
+
+    conf.NodeHealthCheckInterval =
+        YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
   }
   g_config.CranedConf = std::move(conf);
 }
