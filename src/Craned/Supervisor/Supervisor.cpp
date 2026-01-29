@@ -277,7 +277,7 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   PasswordEntry::InitializeEntrySize();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
       []() { return g_plugin_client.get(); },
       []() { return g_config.Plugin.Enabled; });
@@ -378,7 +378,7 @@ void StartServer(int grpc_output_fd) {
   g_thread_pool->wait();
   g_thread_pool.reset();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   crane::TracerManager::GetInstance().Shutdown();
 #endif
 

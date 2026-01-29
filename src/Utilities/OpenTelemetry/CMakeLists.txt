@@ -5,8 +5,8 @@ add_library(crane_tracer STATIC TracerManager.cpp)
 target_include_directories(crane_tracer PUBLIC
                            ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  target_compile_definitions(crane_tracer PUBLIC CRANE_ENABLE_TRACING)
+if(CMAKE_TEST)
+  target_compile_definitions(crane_tracer PUBLIC CRANE_ENABLE_TEST)
   
   target_link_libraries(
     crane_tracer
@@ -14,9 +14,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
            opentelemetry-cpp::ostream_span_exporter
            opentelemetry-cpp::resources)
   
-  message(STATUS "OpenTelemetry tracing enabled (Debug build) - output to file")
+  message(STATUS "OpenTelemetry tracing enabled (CMAKE_TEST=ON) - output to file")
 else()
-  message(STATUS "OpenTelemetry tracing disabled (Release build)")
+  message(STATUS "OpenTelemetry tracing disabled (CMAKE_TEST=OFF)")
 endif()
 
 install(DIRECTORY include/ DESTINATION include)

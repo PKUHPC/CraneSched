@@ -55,6 +55,8 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
+option(CMAKE_TEST "Enable testing features" OFF)
+
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 
 option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)

@@ -259,7 +259,7 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   for (auto& job : jobs) {
     task_id_t job_id = job.job_id;
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
     if (g_tracer) {
       auto span = g_tracer->StartSpan("Alloc Job");
       span->SetAttribute("service", "craned");
@@ -285,7 +285,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   std::vector<StepInstance*> steps_to_free;
 
   for (job_id_t job_id : job_ids) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
     if (g_tracer) {
       auto span = g_tracer->StartSpan("Free Job");
       span->SetAttribute("service", "craned");
@@ -446,7 +446,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
                       ","));
     FreeStepAllocation_(std::move(steps_to_clean));
     if (!jobs_to_clean.empty()) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
       if (g_tracer) {
         for (const auto& job : jobs_to_clean) {
           auto span = g_tracer->StartSpan("Finish Release");

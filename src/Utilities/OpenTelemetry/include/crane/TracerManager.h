@@ -24,7 +24,7 @@
 #include <string>
 #include <unordered_map>
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
 #  include "opentelemetry/sdk/trace/processor.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
@@ -46,7 +46,7 @@ class TracerManager {
 
   void Shutdown();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
       const std::string& span_name);
 
@@ -67,7 +67,7 @@ class TracerManager {
   TracerManager() = default;
   ~TracerManager() = default;
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
       tracer_provider_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;

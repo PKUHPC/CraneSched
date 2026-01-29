@@ -858,7 +858,7 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   crane::TracerManager::GetInstance().Shutdown();
 #endif
   g_task_scheduler.reset();
@@ -895,7 +895,7 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
       []() { return g_plugin_client.get(); },
       []() { return g_config.Plugin.Enabled; });

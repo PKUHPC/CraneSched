@@ -971,7 +971,7 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
       []() { return g_plugin_client.get(); },
       []() { return g_config.Plugin.Enabled; });
@@ -1106,7 +1106,7 @@ void WaitForStopAndDoGvarFini() {
   // It may be called in the thread pool.
   g_plugin_client.reset();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   crane::TracerManager::GetInstance().Shutdown();
 #endif
 

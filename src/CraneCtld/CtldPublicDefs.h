@@ -1407,6 +1407,6 @@ struct PdJobInScheduler {
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
 inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> g_tracer;
 #endif
