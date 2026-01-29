@@ -1047,6 +1047,7 @@ int StartServer() {
   CreateFolders();
 
   InitializeCtldGlobalVariables();
+  CRANE_INFO("CraneCtld service ready.");
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
     if (!util::os::CreateFile(g_config.KeepalivedConfig.CraneCtldAliveFile)) {

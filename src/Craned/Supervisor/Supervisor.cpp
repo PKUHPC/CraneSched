@@ -27,7 +27,6 @@
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
-#include "crane/PublicHeader.h"
 
 using Craned::Supervisor::g_config;
 
@@ -342,7 +341,6 @@ void GlobalVariableInit(int grpc_output_fd) {
 
 void StartServer(int grpc_output_fd) {
   using crane::grpc::StepType;
-  using Craned::Supervisor::g_runtime_status;
   using Craned::Supervisor::StepStatus;
 
   constexpr uint64_t file_max = 640000;
@@ -359,6 +357,7 @@ void StartServer(int grpc_output_fd) {
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
 
+  StepStatus status{StepStatus::Invalid};
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
@@ -405,15 +404,12 @@ void StartServer(int grpc_output_fd) {
     }
 
     // Daemon step is RUNNING after supervisor and related resources are ready.
-    g_runtime_status.Status = ready ? StepStatus::Running : StepStatus::Failed;
-
+    status = ready ? StepStatus::Running : StepStatus::Failed;
   } else {
-    // Common step is CONFIGURED after supervisor is ready.
-    g_runtime_status.Status = StepStatus::Configured;
+    // Common step is Starting after supervisor is ready.
+    status = StepStatus::Starting;
   }
-
-  g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
-                                         std::nullopt);
+  g_task_mgr->SupervisorFinishInit(status);
 
   g_server->Wait();
   g_server.reset();

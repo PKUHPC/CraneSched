@@ -25,6 +25,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
@@ -645,6 +646,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext* context, const crane::grpc::CancelTaskRequest* request,
     crane::grpc::CancelTaskReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->operator_uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1448,7 +1451,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         user_info->set_account(account);
       }
       user_info->set_admin_level(
-          static_cast<crane::grpc::UserInfo_AdminLevel>(user.admin_level));
+          static_cast<crane::grpc::UserInfo::AdminLevel>(user.admin_level));
       user_info->set_blocked(item.blocked);
 
       auto* partition_qos_list =
@@ -1846,7 +1849,8 @@ grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
 
-  std::unordered_map<crane::grpc::LicenseResource_Field, std::string> operators;
+  std::unordered_map<crane::grpc::LicenseResource::Field, std::string>
+      operators;
   for (const auto& operator_ : request->operators()) {
     operators.emplace(operator_.operator_field(), operator_.value());
   }
