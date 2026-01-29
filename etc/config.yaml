@@ -222,6 +222,7 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+  Dns: 127.0.0.1
 
 Cfored:
   DebugLevel: info

@@ -702,17 +702,17 @@ void ParseConfig(int argc, char** argv) {
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
             
-            if (container_config["DNS"]){
-              auto dns = container_config["DNS"].as<std::string>();
+            if (container_config["Dns"]){
+              auto dns = container_config["Dns"].as<std::string>();
               ipv4_t dummy;
               bool is_ok = !crane::StrToIpv4(dns, &dummy);
               if (!is_ok){
-              CRANE_ERROR("DNS is invaild!");
+              CRANE_ERROR("Dns is invaild!");
               std::exit(1);
               }
-              g_config.Container.DNS = dns;
+              g_config.Container.Dns = dns;
             }else{
-              g_config.Container.DNS = "127.0.0.1";
+              g_config.Container.Dns = "127.0.0.1";
             }
 
             if (container_config["BindFs"]) {

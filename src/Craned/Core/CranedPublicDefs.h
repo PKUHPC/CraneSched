@@ -104,7 +104,7 @@ struct Config {
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
     
-    std::string DNS; 
+    std::string Dns; 
     struct BindFsConfig {
       bool Enabled{false};
       std::filesystem::path BindfsBinary{"bindfs"};
