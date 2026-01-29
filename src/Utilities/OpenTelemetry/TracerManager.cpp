@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
@@ -36,7 +36,7 @@
 namespace crane {
 
 namespace _internal {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
 thread_local opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
     g_current_span;
 #endif
@@ -50,7 +50,7 @@ TracerManager& TracerManager::GetInstance() {
 bool TracerManager::Initialize(
     const std::string& service_name,
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   namespace trace_api = opentelemetry::trace;
   namespace trace_sdk = opentelemetry::sdk::trace;
   namespace resource = opentelemetry::sdk::resource;
@@ -97,7 +97,7 @@ bool TracerManager::Initialize(
 }
 
 void TracerManager::Shutdown() {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
   if (tracer_provider_) {
     static_cast<opentelemetry::sdk::trace::TracerProvider*>(
         tracer_provider_.get())
@@ -107,7 +107,7 @@ void TracerManager::Shutdown() {
 #endif
 }
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
 TracerManager::CreateSpan(const std::string& span_name) {
   if (!tracer_) {

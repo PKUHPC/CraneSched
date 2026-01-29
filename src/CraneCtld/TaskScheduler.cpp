@@ -1116,7 +1116,7 @@ void TaskScheduler::ScheduleThread_() {
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
 
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
           if (g_tracer) {
             auto span = g_tracer->StartSpan("Alloc Job");
             span->SetAttribute("service", "cranectld");
@@ -3443,7 +3443,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
 
     if (job_finished_status.has_value()) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
       if (g_tracer) {
         auto span = g_tracer->StartSpan("Receive Task End");
         span->SetAttribute("service", "cranectld");
@@ -3627,7 +3627,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
         if (g_tracer) {
           for (const auto& [job_id, step_ids] :
                context.craned_step_exec_map.at(craned_id)) {
@@ -3720,7 +3720,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         const auto& jobs = context.craned_jobs_to_free.at(craned_id);
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
         if (g_tracer) {
           for (const auto& job_id : jobs) {
             auto span = g_tracer->StartSpan("Release Job");
@@ -3800,7 +3800,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   // Jobs will update in embedded db
   for (auto* job : context.rn_job_raw_ptrs) {
-#ifdef CRANE_ENABLE_TRACING
+#ifdef CRANE_ENABLE_TEST
     if (g_tracer) {
       auto span = g_tracer->StartSpan("Commit Job Status");
       span->SetAttribute("service", "cranectld");
