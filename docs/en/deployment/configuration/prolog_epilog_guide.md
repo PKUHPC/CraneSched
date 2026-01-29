@@ -1,4 +1,9 @@
 # Prolog/Epilog Configuration Guide
+To enhance the flexibility and controllability of job scheduling, 
+Crane should support the automatic invocation of user-defined 
+Prolog (pre-execution) and Epilog (post-execution) scripts at different stages of job allocation 
+and step execution. This enables functionalities such as job environment initialization, 
+resource verification, and cleanup.
 
 Crane supports multiple `prolog` and `epilog` programs. Note that for security reasons, these programs do **not** have a search path set. You must either specify fully qualified paths in the programs or set the `PATH` environment variable. The table below explains the prolog and epilog programs available during job allocation, including when and where they run.
 
