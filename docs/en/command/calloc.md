@@ -50,6 +50,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
 - **-h, --help**: Display help information
 - **-v, --version**: Display calloc version
+- **--signal**: Send signal to job
 
 ## Usage Examples
 
@@ -177,6 +178,12 @@ calloc --mail-type=ALL --mail-user=user@example.com -N 1 -p CPU
 Allocate GPU resources:
 ```bash
 calloc --gres=gpu:a100:2 -N 1 -p GPU
+```
+
+### signal
+Send signal to job:
+```bash
+calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```
 
 ## Interactive Usage
