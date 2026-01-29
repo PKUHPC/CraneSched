@@ -65,10 +65,10 @@ nav:
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
       - PKI+TLS Deployment: deployment/configuration/pki.md
-      - License Usage Guide: reference/license_guide.md
-      - Keepalived Guide: reference/keepalived.md
-      - Lua Guide: reference/lua_guide.md
-      - Prolog Epilog Guide: reference/prolog_epilog_guide.md
+      - License Usage Guide: deployment/configuration/license_guide.md
+      - Keepalived Guide: deployment/configuration/keepalived.md
+      - Lua Guide: deployment/configuration/lua_guide.md
+      - Prolog Epilog Guide: deployment/configuration/prolog_epilog_guide.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md

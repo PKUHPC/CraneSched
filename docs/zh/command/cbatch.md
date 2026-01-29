@@ -341,7 +341,7 @@ cbatch --signal=SIGUSR1@60 my_script.sh
 
 # 在timelimit前60秒发送SIGUSR1信号，只有batch进程会收到信号
 cbatch --signal=B:SIGUSR1@60 my_script.sh
-````
+```
 
 ### 容器作业
 
