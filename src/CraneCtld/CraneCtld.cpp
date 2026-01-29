@@ -886,8 +886,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-  g_task_scheduler.reset();
   g_craned_keeper.reset();
+  // Craned keeper will query running job from scheduler
+  g_task_scheduler.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
@@ -996,17 +997,6 @@ void InitializeCtldGlobalVariables() {
     // No need to worry disconnect before task scheduler init
     g_meta_container->CranedDown(craned_id);
   });
-
-  using namespace std::chrono_literals;
-
-  g_task_scheduler = std::make_unique<TaskScheduler>();
-
-  ok = g_task_scheduler->Init();
-  if (!ok) {
-    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
-    DestroyCtldGlobalVariables();
-    std::exit(1);
-  }
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 

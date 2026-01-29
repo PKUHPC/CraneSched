@@ -1221,13 +1221,13 @@ void MongodbClient::AppendToAccUsageTable(
                             ? std::string(task_doc["wckey"].get_string().value)
                             : "";
     // Get task start/end time and resources
-    int64_t time_start = task_doc["time_start"].get_int64().value;
+    auto time_start = ViewGetArithmeticValue_<int64_t>(task_doc["time_start"]);
     if (time_start == 0) {
       return;
     }
-    int64_t time_end = task_doc["time_end"].get_int64().value;
-    double cpus_alloc = task_doc["cpus_alloc"].get_double().value;
-    double nodes_alloc = task_doc["nodes_alloc"].get_double().value;
+    auto time_end = ViewGetArithmeticValue_<int64_t>(task_doc["time_end"]);
+    auto cpus_alloc = ViewGetArithmeticValue_<double>(task_doc["cpus_alloc"]);
+    auto nodes_alloc = ViewGetArithmeticValue_<double>(task_doc["nodes_alloc"]);
 
     auto start_time = sys_seconds(seconds(time_start));
     auto end_time = sys_seconds(seconds(time_end));
