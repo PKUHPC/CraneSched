@@ -180,14 +180,10 @@ Allocate GPU resources:
 calloc --gres=gpu:a100:2 -N 1 -p GPU
 ```
 
-### Signal
+### signal
+Send signal to job:
 ```bash
-Send signals to jobs
-# Send SIGUSR1 signal 60 seconds before timelimit, all steps except the batch process will receive this signal
-cbatch --signal=SIGUSR1@60 my_script.sh
-
-# Send SIGUSR1 signal 60 seconds before timelimit, only the batch process will receive the signal
-cbatch --signal=B:SIGUSR1@60 my_script.sh
+calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```
 
 ## Interactive Usage

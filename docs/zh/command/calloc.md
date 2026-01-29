@@ -183,7 +183,7 @@ calloc --gres=gpu:a100:2 -N 1 -p GPU
 ### signal信号
 发送信号给作业：
 ```bash
-calloc --signal=SIGUSR1 -N 1 -p CPU
+calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```
 
 ## 交互式使用
