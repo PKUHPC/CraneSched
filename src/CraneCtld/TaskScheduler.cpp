@@ -1118,8 +1118,8 @@ void TaskScheduler::ScheduleThread_() {
 
 #ifdef CRANE_ENABLE_TRACING
           if (g_tracer) {
-            auto span = g_tracer->StartSpan("Schedule Job " +
-                                            std::to_string(job->TaskId()));
+            auto span = g_tracer->StartSpan("Alloc Job");
+            span->SetAttribute("service", "cranectld");
             span->SetAttribute("job_id", job->TaskId());
             span->End();
           }
@@ -3443,6 +3443,14 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
 
     if (job_finished_status.has_value()) {
+#ifdef CRANE_ENABLE_TRACING
+      if (g_tracer) {
+        auto span = g_tracer->StartSpan("Receive Task End");
+        span->SetAttribute("service", "cranectld");
+        span->SetAttribute("job_id", task->TaskId());
+        span->End();
+      }
+#endif
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
 
@@ -3619,6 +3627,17 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
+#ifdef CRANE_ENABLE_TRACING
+        if (g_tracer) {
+          for (const auto& [job_id, step_ids] :
+               context.craned_step_exec_map.at(craned_id)) {
+            auto span = g_tracer->StartSpan("Execute Job");
+            span->SetAttribute("service", "cranectld");
+            span->SetAttribute("job_id", job_id);
+            span->End();
+          }
+        }
+#endif
         CraneExpected failed_steps =
             stub->ExecuteSteps(context.craned_step_exec_map.at(craned_id));
         if (failed_steps.has_value() && !failed_steps.value().empty()) {
@@ -3701,6 +3720,16 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         const auto& jobs = context.craned_jobs_to_free.at(craned_id);
+#ifdef CRANE_ENABLE_TRACING
+        if (g_tracer) {
+          for (const auto& job_id : jobs) {
+            auto span = g_tracer->StartSpan("Release Job");
+            span->SetAttribute("service", "cranectld");
+            span->SetAttribute("job_id", job_id);
+            span->End();
+          }
+        }
+#endif
         auto err = stub->FreeJobs(jobs);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to FreeJobs for [{}] on Node {}",
@@ -3771,6 +3800,14 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   // Jobs will update in embedded db
   for (auto* job : context.rn_job_raw_ptrs) {
+#ifdef CRANE_ENABLE_TRACING
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Commit Job Status");
+      span->SetAttribute("service", "cranectld");
+      span->SetAttribute("job_id", job->TaskId());
+      span->End();
+    }
+#endif
     if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
                                                        job->RuntimeAttr()))
       CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfTask()",
