@@ -99,6 +99,7 @@ Container-related options are used to create Pod jobs that support container exe
 - **-C, --config string**: Path to configuration file (default: `/etc/crane/config.yaml`)
 - **-h, --help**: Display help information
 - **-v, --version**: Display cbatch version
+- **--signal**: Send signal to job
 
 ## Usage Examples
 
@@ -330,6 +331,16 @@ cbatch --json my_script.sh
 Submit a simple command without creating a script file:
 ```bash
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
+```
+
+### Signal
+```bash
+Send signals to jobs
+# Send SIGUSR1 signal 60 seconds before timelimit, all steps except the batch process will receive this signal
+cbatch --signal=SIGUSR1@60 my_script.sh
+
+# Send SIGUSR1 signal 60 seconds before timelimit, only the batch process will receive the signal
+cbatch --signal=B:SIGUSR1@60 my_script.sh
 ```
 
 ### Container Jobs

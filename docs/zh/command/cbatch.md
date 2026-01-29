@@ -99,6 +99,7 @@ cbatch cbatch_test.sh
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）
 - **-h, --help**: 显示帮助信息
 - **-v, --version**: 显示 cbatch 版本
+- **--signal**: 发送信号给作业
 
 ## 使用示例
 
@@ -331,6 +332,16 @@ cbatch --json my_script.sh
 ```bash
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
+
+### signal信号
+向作业发送信号
+```bash
+# 在timelimit前60秒发送SIGUSR1信号，除batch进程外其他step都会收到该信号
+cbatch --signal=SIGUSR1@60 my_script.sh
+
+# 在timelimit前60秒发送SIGUSR1信号，只有batch进程会收到信号
+cbatch --signal=B:SIGUSR1@60 my_script.sh
+````
 
 ### 容器作业
 

@@ -50,6 +50,7 @@ calloc 必须在运行 `cfored` 的节点上启动。当任务启动时，会进
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）
 - **-h, --help**: 显示帮助信息
 - **-v, --version**: 显示 calloc 版本
+- **--signal**: 发送信号给作业
 
 ## 使用示例
 
@@ -177,6 +178,12 @@ calloc --mail-type=ALL --mail-user=user@example.com -N 1 -p CPU
 分配 GPU 资源：
 ```bash
 calloc --gres=gpu:a100:2 -N 1 -p GPU
+```
+
+### signal信号
+发送信号给作业：
+```bash
+calloc --signal=SIGUSR1 -N 1 -p CPU
 ```
 
 ## 交互式使用

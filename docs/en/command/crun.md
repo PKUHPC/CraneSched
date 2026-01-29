@@ -191,6 +191,13 @@ Default: NONE.
 :   **Applies to:** `job`, `step`    
 Email address to receive job status notifications if --mail-type is specified.
 
+
+**--signal=<sig_num>[@sig_time]**
+
+:   **Applies to:** `job`  
+Send signal to the job if --signal is specified. The format is "<sig_num>[@sig_time]", where sig_num is the signal number and sig_time is the signal sending time, sent sig_time seconds before the time limit.
+
+
 ## Job Mode vs Step Mode
 
 ### Job Mode
