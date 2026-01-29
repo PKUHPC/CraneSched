@@ -42,6 +42,7 @@ target_link_libraries(cranectld PRIVATE
         concurrentqueue
 
         Utility_PublicHeader
+        Utility_PasswordEntry
         Utility_PluginClient
         $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
         crane_tracer

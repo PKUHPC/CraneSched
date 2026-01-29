@@ -389,11 +389,11 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
                 request->step_id(), request->job_id(), rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
-    // The caller should retry later. Fix this after we add CONFIGURING state.
+    // The caller should retry later.
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
-        std::format("Container not found, possibly initializing: {}",
+        std::format("Container not found, possibly initializing or exited: {}",
                     rich_err.description()));
     response->set_ok(false);
     return Status::OK;
@@ -474,7 +474,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
-        std::format("Container not found, possibly initializing: {}",
+        std::format("Container not found, possibly initializing or exited: {}",
                     rich_err.description()));
     response->set_ok(false);
     return Status::OK;

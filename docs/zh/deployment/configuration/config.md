@@ -372,6 +372,33 @@ Container:
 
 更多容器相关配置请参见[容器运行时配置指南](../container.md)。
 
+## Craned健康检查配置
+```yaml
+HealthCheck:
+  # 将要执行的健康检查脚本的绝对路径
+  Program: /path/to/your/script
+  # 指定了两次周期性健康检查之间的时间间隔，单位为秒
+  Interval: 60
+  # 精确控制 HealthCheckProgram 在何种节点状态下被触发。
+  NodeState: ANY
+  # 指示在 HealthCheckInterval 定义的时间周期内，随机地错开检查的启动时间，而不是在每个周期的开始时刻同时启动
+  Cycle: false
+```
+
+`NodeState`有以下选项：
+
+- **IDLE**：仅当节点上没有任何作业分配时执行检查。这是最安全、最保守的选项，因为它完全避免了对正在运行的应用程序产生任何性能影响。
+
+- **ALLOC**：仅当节点处于完全分配（ALLOCATED）状态时执行检查。这种方式覆盖更全面，但存在干扰作业性能的风险。
+
+- **MIXED**：当节点处于部分分配状态时执行检查。
+
+- **ANY**：无论节点处于何种分配状态，都执行检查。这提供了最广泛的监控覆盖，但同时也带来了最高的作业干扰风险。
+
+- **NONDRAINED_IDLE**：当节点上没有任何作业分配且节点状态不为DRAIN时执行检测。
+
+- **START_ONLY**：只有Craned启动时执行一次。
+
 ## 应用更改
 
 修改配置后：

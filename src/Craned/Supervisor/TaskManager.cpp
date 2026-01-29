@@ -99,6 +99,9 @@ bool StepInstance::IsContainer() const noexcept {
 bool StepInstance::IsDaemon() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
+bool StepInstance::IsPrimary() const noexcept {
+  return m_step_to_supv_.step_type() == crane::grpc::StepType::PRIMARY;
+}
 
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
@@ -1719,6 +1722,59 @@ CraneErrCode ProcInstance::Spawn() {
 
     // Apply environment variables
     InitEnvMap();
+
+    if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts = g_config.JobLifecycleHook.TaskPrologs,
+          .envs = m_env_,
+          .run_uid = m_parent_step_inst_->uid,
+          .run_gid = m_parent_step_inst_->gids[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        fmt::print(
+            stderr,
+            "[Subprocess] Error: Failed to run task prolog, status={}:{}\n",
+            status.exit_code, status.signal_num);
+        std::abort();
+      }
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
+                                                STDOUT_FILENO);
+    }
+
+    if (!m_parent_step_inst_->GetStep().task_prolog().empty()) {
+      RunPrologEpilogArgs run_prolog_args{
+          .scripts =
+              std::vector<std::string>{
+                  m_parent_step_inst_->GetStep().task_prolog()},
+          .envs = m_env_,
+          .run_uid = m_parent_step_inst_->uid,
+          .run_gid = m_parent_step_inst_->gids[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) {
+        auto status = result.error();
+        fmt::print(stderr,
+                   "[Subprocess] Error: Failed to run step task prolog, "
+                   "status={}:{}\n",
+                   status.exit_code, status.signal_num);
+        std::abort();
+      }
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
+                                                STDOUT_FILENO);
+    }
+
     err = SetChildProcEnv_();
     if (err != CraneErrCode::SUCCESS) {
       fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
@@ -1905,6 +1961,30 @@ TaskManager::TaskManager()
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   CRANE_TRACE("TaskManager destroyed.");
+
+  if (!g_config.JobLifecycleHook.Epilogs.empty()) {
+    CRANE_TRACE("Running Epilogs...");
+    RunPrologEpilogArgs run_epilog_args{
+        .scripts = g_config.JobLifecycleHook.Epilogs,
+        .envs = g_config.JobEnv,
+        .run_uid = 0,
+        .run_gid = 0,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+    if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec =
+          g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+    auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+    if (!result) {
+      auto status = result.error();
+      CRANE_DEBUG("Epilog failed status={}:{}", status.exit_code,
+                  status.signal_num);
+    } else {
+      CRANE_DEBUG("Epilog success");
+    }
+  }
 }
 
 void TaskManager::Wait() {
@@ -1961,6 +2041,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
     DelTerminationTimer_();
+    DelSignalTimers_();
     m_step_.StopCforedClient();
     m_step_.StopCriClient();
 
@@ -2214,6 +2295,7 @@ void TaskManager::EvTaskTimerCb_() {
               g_config.JobId);
 
   DelTerminationTimer_();
+  DelSignalTimers_();
 
   if (m_step_.IsCalloc()) {
     // Now calloc and cbatch steps only have one task with id 0.
@@ -2233,6 +2315,54 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     auto* task = m_step_.GetTaskInstance(task_id);
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
+
+    if (!m_step_.GetStep().task_epilog().empty()) {
+      CRANE_TRACE("[Task #{}] Running step task_epilog...", task_id);
+      RunPrologEpilogArgs run_epilog_args{
+          .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_epilog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("[Task #{}]: step task_epilog failed status={}:{}", task_id,
+                    status.exit_code, status.signal_num);
+      } else {
+        CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
+      }
+    }
+
+    if (!g_config.JobLifecycleHook.TaskEpilogs.empty()) {
+      CRANE_TRACE("[Task #{}] Running task_epilog...", task_id);
+      RunPrologEpilogArgs run_epilog_args{
+          .scripts = g_config.JobLifecycleHook.TaskEpilogs,
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_epilog_args.timeout_sec =
+            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+      if (!result) {
+        auto status = result.error();
+        CRANE_DEBUG("[Task #{}]: task_epilog failed status={}:{}", task_id,
+                    status.exit_code, status.signal_num);
+      } else {
+        CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
+      }
+    }
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
@@ -2399,6 +2529,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     }
     // Delete the old timer.
     DelTerminationTimer_();
+    DelSignalTimers_();
 
     absl::Time start_time =
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
@@ -2412,8 +2543,25 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       m_terminate_task_async_handle_->send();
     } else {
       // If the task haven't timed out, set up a new timer.
-      AddTerminationTimer_(
-          ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
+      int64_t new_sec =
+          ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
+      AddTerminationTimer_(new_sec);
+
+      for (const auto& signal : m_step_.GetStep().signals()) {
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            !m_step_.IsPrimary())
+          continue;
+        if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            m_step_.IsPrimary())
+          continue;
+        if (signal.signal_time() >= new_sec) {
+          CRANE_TRACE(
+              "signal {} time of {}s >= time_limit {}s, ignore this signal.",
+              signal.signal_number(), signal.signal_time(), new_sec);
+          continue;
+        }
+        AddSignalTimer_(new_sec - signal.signal_time(), signal.signal_number());
+      }
     }
 
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
@@ -2460,6 +2608,24 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       int64_t sec = m_step_.GetStep().time_limit().seconds();
       AddTerminationTimer_(sec);
       CRANE_INFO("Add a timer of {} seconds", sec);
+
+      for (const auto& signal : m_step_.GetStep().signals()) {
+        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            !m_step_.IsPrimary())
+          continue;
+        if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+            m_step_.IsPrimary())
+          continue;
+        if (signal.signal_time() >= sec) {
+          CRANE_TRACE(
+              "signal time of {}s > time_limit {}s, ignore this signal.",
+              signal.signal_time(), sec);
+          continue;
+        }
+        AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
+        CRANE_INFO("Add a signal time of {}s for signal {}",
+                   signal.signal_time(), signal.signal_number());
+      }
     }
 
     m_step_.pwd.Init(m_step_.uid);
@@ -2472,7 +2638,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
-
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");

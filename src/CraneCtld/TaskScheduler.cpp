@@ -147,6 +147,7 @@ bool TaskScheduler::Init() {
   if (!pending_queue.empty()) {
     CRANE_INFO("{} pending task(s) recovered.", pending_queue.size());
 
+    absl::Time recovery_time = absl::Now();
     for (auto&& [task_db_id, task_in_embedded_db] : pending_queue) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
@@ -186,6 +187,8 @@ bool TaskScheduler::Init() {
             "move it to the ended queue.",
             task_id);
         task->SetStatus(crane::grpc::Failed);
+        task->SetStartTime(recovery_time);
+        task->SetEndTime(recovery_time);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
         if (!ok) {
@@ -1148,6 +1151,58 @@ void TaskScheduler::ScheduleThread_() {
       }
       m_task_indexes_mtx_.Unlock();
 
+      Mutex thread_pool_mtx;
+      HashSet<task_id_t> failed_job_id_set;
+
+      if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
+        // TODO: cbatch job must be requeue
+        begin = std::chrono::steady_clock::now();
+        absl::BlockingCounter prolog_bl(jobs_to_run.size());
+        for (auto& job : jobs_to_run) {
+          const task_id_t job_id = job->TaskId();
+          g_thread_pool->detach_task([&, job_id, env = job->env]() {
+            // run prolog ctld script
+            RunPrologEpilogArgs run_prolog_args{
+                .scripts = g_config.JobLifecycleHook.CranectldPrologs,
+                .envs = env,
+                .run_uid = 0,
+                .run_gid = 0,
+                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+            if (g_config.JobLifecycleHook.PrologTimeout) {
+              run_prolog_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologTimeout;
+            } else {
+              run_prolog_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologEpilogTimeout;
+            }
+            CRANE_TRACE(
+                "#{}: Running CraneCtldProlog as UID {} with timeout {}s",
+                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
+            auto run_prolog_result =
+                util::os::RunPrologOrEpiLog(run_prolog_args);
+            if (!run_prolog_result) {
+              auto status = run_prolog_result.error();
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
+                          job_id, status.exit_code, status.signal_num);
+              thread_pool_mtx.Lock();
+              failed_job_id_set.emplace(job_id);
+              thread_pool_mtx.Unlock();
+            } else {
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
+            }
+            prolog_bl.DecrementCount();
+          });
+        }
+        prolog_bl.Wait();
+        end = std::chrono::steady_clock::now();
+        CRANE_TRACE(
+            "CraneCtldProlog running costed {} ms",
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                .count());
+      }
+
+      begin = std::chrono::steady_clock::now();
+
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
       // Map for AllocJobs rpc.
@@ -1157,9 +1212,6 @@ void TaskScheduler::ScheduleThread_() {
           craned_alloc_steps;
 
       std::vector<StepInCtld*> step_in_ctld_vec;
-
-      Mutex thread_pool_mtx;
-      HashSet<task_id_t> failed_job_id_set;
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
 
@@ -1173,6 +1225,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
+        if (failed_job_id_set.contains(job->TaskId())) continue;
         // IMPORTANT: job must be put into running_task_map before any
         // time-consuming operation, otherwise TaskStatusChange RPC will come
         // earlier before job is put into running_task_map.
@@ -1187,6 +1240,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
+        if (failed_job_id_set.contains(job->TaskId())) continue;
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*job);
@@ -1201,6 +1255,7 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
+          if (failed_job_id_set.contains(job->TaskId())) continue;
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
             craned_alloc_job_map[craned_id].push_back(
@@ -1239,7 +1294,6 @@ void TaskScheduler::ScheduleThread_() {
             alloc_job_latch.count_down();
             return;
           }
-
           auto err = stub->AllocJobs(jobs);
           if (err == CraneErrCode::SUCCESS) {
             alloc_job_latch.count_down();
@@ -2907,18 +2961,19 @@ void TaskScheduler::CleanCancelQueueCb_() {
     });
   }
 
-  absl::Time end_time = absl::Now();
+  absl::Time cancel_time = absl::Now();
 
   if (!pending_task_ptr_vec.empty()) {
     for (auto& task : pending_task_ptr_vec) {
       task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(end_time);
+      task->SetStartTime(cancel_time);
+      task->SetEndTime(cancel_time);
       g_account_meta_container->FreeQosResource(*task);
 
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
-                                    end_time);
+                                    cancel_time);
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
-                                    end_time);
+                                    cancel_time);
       task->TriggerDependencyEvents(crane::grpc::AFTER_OK,
                                     absl::InfiniteFuture());
       task->TriggerDependencyEvents(crane::grpc::AFTER_NOT_OK,
@@ -2954,7 +3009,8 @@ void TaskScheduler::CleanCancelQueueCb_() {
   if (pending_step_ptr_vec.empty()) return;
   for (auto& step : pending_step_ptr_vec) {
     step->SetStatus(crane::grpc::Cancelled);
-    step->SetEndTime(absl::Now());
+    step->SetStartTime(cancel_time);
+    step->SetEndTime(cancel_time);
 
     if (step->type == crane::grpc::Interactive) {
       auto& meta = step->ia_meta.value();
@@ -3363,6 +3419,37 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicense(task->licenses_count);
+
+      if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
+        g_thread_pool->detach_task(
+            [job_id = task->TaskId(), env_copy = task->env]() {
+              RunPrologEpilogArgs run_epilog_ctld_args{
+                  .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
+                  .envs = env_copy,
+                  .run_uid = 0,
+                  .run_gid = 0,
+                  .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+              if (g_config.JobLifecycleHook.EpilogTimeout) {
+                run_epilog_ctld_args.timeout_sec =
+                    g_config.JobLifecycleHook.EpilogTimeout;
+              } else {
+                run_epilog_ctld_args.timeout_sec =
+                    g_config.JobLifecycleHook.PrologEpilogTimeout;
+              }
+              CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
+                          run_epilog_ctld_args.run_uid,
+                          run_epilog_ctld_args.timeout_sec);
+              auto result = util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
+              if (!result) {
+                auto status = result.error();
+                CRANE_DEBUG("Job #[{}]: CraneCtldEpilog failed status={}:{}",
+                            job_id, status.exit_code, status.signal_num);
+              } else {
+                CRANE_DEBUG("Job #[{}]: CraneCtldEpilog success", job_id);
+              }
+            });
+      }
+
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 

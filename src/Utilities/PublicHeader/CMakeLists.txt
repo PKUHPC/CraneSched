@@ -7,7 +7,6 @@ add_library(Utility_PublicHeader
         include/crane/Lock.h
         include/crane/Pointer.h
         include/crane/Logger.h
-        include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h
         GrpcHelper.cpp
         include/crane/GrpcHelper.h)
@@ -17,9 +16,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         crane_proto_lib
         fpm
         yaml-cpp
-        Subid::subid
         bs_thread_pool
-        Utility_FileLock
 )
 
 # This trimmed version is used for PAM module

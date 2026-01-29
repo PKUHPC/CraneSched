@@ -176,6 +176,26 @@ void ParseConfig(int argc, char** argv) {
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
 
+      if (config["JobLifecycleHook"]) {
+        const auto& hook_config = config["JobLifecycleHook"];
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(hook_config["CranectldProlog"], ""), config_path,
+            &g_config.JobLifecycleHook.CranectldPrologs);
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(hook_config["CranectldEpilog"], ""), config_path,
+            &g_config.JobLifecycleHook.CranectldEpilogs);
+
+        g_config.JobLifecycleHook.PrologTimeout =
+            YamlValueOr<uint32_t>(hook_config["PrologTimeout"], 0);
+        g_config.JobLifecycleHook.EpilogTimeout =
+            YamlValueOr<uint32_t>(hook_config["EpilogTimeout"], 0);
+        g_config.JobLifecycleHook.PrologEpilogTimeout =
+            YamlValueOr<uint32_t>(hook_config["PrologEpilogTimeout"], 0);
+        g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
+            hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
+      }
+
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 

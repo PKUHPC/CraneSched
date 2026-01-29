@@ -175,6 +175,9 @@ void ParseCranedConfig(const YAML::Node& config) {
     if (craned_config["MaxLogFileNum"]) {
       conf.MaxLogFileNum = craned_config["MaxLogFileNum"].as<uint64_t>();
     }
+
+    conf.NodeHealthCheckInterval =
+        YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -420,6 +423,45 @@ void ParseConfig(int argc, char** argv) {
       } else {
         CRANE_ERROR("Cluster name is empty.");
         std::exit(1);
+      }
+
+      if (config["HealthCheck"]) {
+        const auto& health_check_config = config["HealthCheck"];
+        g_config.HealthCheck.Program =
+            YamlValueOr(health_check_config["Program"], "");
+        if (g_config.HealthCheck.Program.empty()) {
+          CRANE_ERROR("HealthCheckProgram is not configured");
+          std::exit(1);
+        }
+        g_config.HealthCheck.Interval =
+            YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
+        std::vector<std::string> node_states = absl::StrSplit(
+            absl::StripAsciiWhitespace(absl::AsciiStrToLower(
+                YamlValueOr(health_check_config["NodeState"], "any"))),
+            ",");
+        for (const auto& state : node_states) {
+          if (state == "any")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::ANY;
+          else if (state == "idle")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::IDLE;
+          else if (state == "alloc")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::ALLOC;
+          else if (state == "mixed")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::MIXED;
+          else if (state == "nondrained_idle")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::NONDRAINED_IDLE;
+          else if (state == "start_only")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::START_ONLY;
+        }
+
+        g_config.HealthCheck.Cycle =
+            YamlValueOr<bool>(health_check_config["Cycle"], false);
       }
 
       if (config["Nodes"]) {
@@ -700,6 +742,58 @@ void ParseConfig(int argc, char** argv) {
           }
         }
       }
+
+      if (config["JobLifecycleHook"]) {
+        const auto& job_log_hook_config = config["JobLifecycleHook"];
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["Prolog"], ""), config_path,
+            &g_config.JobLifecycleHook.Prologs);
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["Epilog"], ""), config_path,
+            &g_config.JobLifecycleHook.Epilogs);
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["TaskProlog"], ""), config_path,
+            &g_config.JobLifecycleHook.TaskPrologs);
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["TaskEpilog"], ""), config_path,
+            &g_config.JobLifecycleHook.TaskEpilogs);
+
+        g_config.JobLifecycleHook.PrologTimeout =
+            YamlValueOr<uint32_t>(job_log_hook_config["PrologTimeout"], 0);
+        g_config.JobLifecycleHook.EpilogTimeout =
+            YamlValueOr<uint32_t>(job_log_hook_config["EpilogTimeout"], 0);
+        g_config.JobLifecycleHook.PrologEpilogTimeout = YamlValueOr<uint32_t>(
+            job_log_hook_config["PrologEpilogTimeout"], 0);
+        g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
+            job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
+
+        auto prolog_flags =
+            YamlValueOr<std::string>(job_log_hook_config["PrologFlags"], "");
+
+        for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
+          std::string trimmed(
+              absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
+          if (trimmed == "contain")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
+          if (trimmed == "forcerequeueonfail")
+            g_config.JobLifecycleHook.PrologFlags |= ForceRequeueOnFail;
+          if (trimmed == "runinjob")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::RunInJob;
+          if (trimmed == "serial")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Serial;
+        }
+        // judge
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
+          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+            CRANE_ERROR(
+                "Cannot set RunInJob and Serial flags at the same time.");
+            std::exit(1);
+          }
+        }
+      }  // end of JobLifecycleHook
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());

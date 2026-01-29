@@ -1131,6 +1131,16 @@ message QueryLicenseResourceReply {
   repeated LicenseResourceInfo license_resource_list = 3;
 }
 
+message UpdateNodeDrainStateRequest {
+  string craned_id = 1;
+  bool drain = 2;
+  string reason = 3;
+}
+
+message UpdateNodeDrainStateReply {
+  bool ok = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1215,6 +1225,9 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
+
+  rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
+  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);

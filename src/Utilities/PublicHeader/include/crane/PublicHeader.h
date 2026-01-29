@@ -49,6 +49,8 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
+constexpr int MaxHealthCheckWaitTimeMs = 60000;
+
 inline const char* const kDefaultHost = "0.0.0.0";
 
 constexpr step_id_t kDaemonStepId = 0;
@@ -69,6 +71,7 @@ inline const char* const kHostFilePath = "/etc/hosts";
 inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
+inline constexpr double kMemoryToleranceGB = 0.01;
 
 inline constexpr uint64_t kDefaultCraneCtldMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
@@ -118,6 +121,15 @@ constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 
+enum PrologFlagEnum : std::uint8_t {
+  Contain = 1 << 0,             // 0000 0001 = 1
+  ForceRequeueOnFail = 1 << 1,  // 0000 0010 = 2
+  RunInJob = 1 << 2,            // 0000 0100 = 4
+  Serial = 1 << 3,              // 0000 1000 = 8
+};
+
+constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;
@@ -137,6 +149,7 @@ enum ExitCodeEnum : uint16_t {
   EC_CRANED_DOWN,
   EC_EXEC_ERR,
   EC_RPC_ERR,
+  EC_PROLOG_ERR,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };

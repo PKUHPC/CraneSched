@@ -89,6 +89,8 @@ struct JobInD {
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
+  bool is_prolog_run{false};
+
   EnvMap GetJobEnvMap();
 };
 
@@ -184,6 +186,8 @@ class JobManager {
 
   struct EvQueueAllocateStepElem {
     std::unique_ptr<StepInstance> step_inst;
+    bool need_run_prolog;
+    EnvMap job_env;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -215,6 +219,9 @@ class JobManager {
   bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
+
+  bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
+                                const EnvMap& job_env);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
@@ -306,6 +313,8 @@ class JobManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
+
+  util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial
 
   std::thread m_uvw_thread_;
 };

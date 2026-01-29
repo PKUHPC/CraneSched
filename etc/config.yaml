@@ -73,6 +73,9 @@ Craned:
   MaxLogFileSize: 50M
   # max files of craned log file
   MaxLogFileNum: 3
+  # Set the interval for node health check.
+  # 0 means the health check is disabled.
+  NodeHealthCheckInterval: 0
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -93,6 +96,20 @@ PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
 
 #JobSubmitLuaScript: /path/to/your/job_submit.lua
+
+#JobLifecycleHook:
+#  Prolog: /path/to/prolog.sh
+#  PrologTimeout: 60
+#  PrologFlags: Contain
+#  Epilog: /path/to/epilog.sh
+#  EpilogTimeout: 60
+#  PrologEpilogTimeout: 120
+#  CranectldProlog: /path/to/cranectld_prolog.sh
+#  CranectldEpilog: /path/to/cranectld_epilog.sh
+#  CrunProlog: /path/to/srun_prolog.sh
+#  CrunEpilog: /path/to/srun_epilog.sh
+#  TaskProlog: /path/to/task_prolog.sh
+#  TaskEpilog: /path/to/task_epilog.sh
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
@@ -153,6 +170,14 @@ Licenses:
 
 AllLicenseResourcesAbsolute: false
 
+
+#HealthCheck:
+#  Program: /usr/sbin/nhc
+#  Interval: 60
+#  # IDLE, ALLOC, MIXED, ANY, NONDRAINED_IDLE, START_ONLY
+#  NodeState: ANY
+#  Cycle: false
+
 # Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
 # if this option is set to true.
 # Default value is false.
@@ -168,6 +193,8 @@ JobFileAppend: false
 
 # Set the flag to ignore warnings about config files mismatches.
 IgnoreConfigInconsistency: false
+
+
 
 Supervisor:
   Path: /usr/libexec/csupervisor
@@ -200,3 +227,7 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+
+Cfored:
+  DebugLevel: info
+  PidFilePath: cfored/cfored.pid

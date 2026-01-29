@@ -80,6 +80,7 @@ struct Config {
     uint32_t CtldTimeoutSec;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t NodeHealthCheckInterval;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {
@@ -119,6 +120,14 @@ struct Config {
     SubIdConfig SubId;
   };
   ContainerConfig Container;
+
+  struct HealthCheckConfig {
+    std::string Program;
+    uint64_t Interval{0};
+    uint32_t NodeState{0};
+    bool Cycle{false};
+  };
+  HealthCheckConfig HealthCheck;
 
   struct PluginConfig {
     bool Enabled{false};
@@ -169,6 +178,21 @@ struct Config {
       Ipv6ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
+
+  struct JobLifecycleHookConfig {
+    std::vector<std::string> Prologs;
+    std::vector<std::string> Epilogs;
+    uint32_t PrologTimeout{0};
+    uint32_t EpilogTimeout{0};
+    uint32_t PrologEpilogTimeout{0};
+    int PrologFlags{0};
+    uint64_t MaxOutputSize{0};
+
+    std::vector<std::string> TaskPrologs;
+    std::vector<std::string> TaskEpilogs;
+  };
+
+  JobLifecycleHookConfig JobLifecycleHook;
 };
 
 inline Config g_config{};
@@ -178,6 +202,16 @@ struct RunTimeStatus {
 };
 
 inline RunTimeStatus g_runtime_status{};
+
+enum HealthCheckNodeStateEnum : std::uint8_t {
+  ANY = 1,
+  IDLE = 2,
+  ALLOC = 4,
+  MIXED = 8,
+  NONDRAINED_IDLE = 16,
+  START_ONLY = 32
+};
+
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

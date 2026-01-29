@@ -194,6 +194,8 @@ class CtldClient {
     m_last_active_time_ = std::chrono::steady_clock::now();
   }
 
+  void StartHealthCheck();
+
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
   // Convenience method for reporting status changes
@@ -201,6 +203,8 @@ class CtldClient {
                              crane::grpc::TaskStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason = std::nullopt);
+
+  void UpdateNodeDrainState(bool is_drain, const std::string& reason);
 
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
@@ -218,6 +222,11 @@ class CtldClient {
   bool Ping_();
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
+
+  void HealthCheck_();
+  bool NeedHealthCheck_();
+
+  void NodeHealthCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
 
@@ -247,6 +256,15 @@ class CtldClient {
   std::shared_ptr<uvw::timer_handle> m_ping_handle_;
   std::atomic_bool m_ping_ctld_{false};
   std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
+
+  std::atomic_bool m_health_check_init_{false};
+  std::optional<std::thread> m_health_check_uvw_thread_;
+  std::shared_ptr<uvw::loop> m_health_check_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
+  std::shared_ptr<uvw::async_handle> m_health_check_async_;
+
+  std::thread m_node_health_check_thread_;
+  std::shared_ptr<uvw::timer_handle> m_node_health_check_timer_;
 };
 
 }  // namespace Craned
