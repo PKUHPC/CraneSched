@@ -4662,7 +4662,11 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   task->partition_priority = part_it->second.priority;
 
   Config::Partition const& part_meta = part_it->second;
-
+  CRANE_TRACE("Task {} node res:{},task res:{} ,part def:{} max:{}",
+              task->TaskId(), part_meta.default_mem_per_cpu,
+              part_meta.max_mem_per_cpu,
+              util::ReadableResourceView(task->node_res_view),
+              util::ReadableResourceView(task->task_res_view));
   if (task->node_res_view.MemoryBytes() == 0 &&
       task->task_res_view.MemoryBytes() == 0) {
     // If a task leaves its memory bytes to 0,
