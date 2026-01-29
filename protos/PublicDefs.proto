@@ -834,21 +834,23 @@ enum ModifyField {
   AdminLevel = 4;
   DefaultAccount = 5;
   // qos
-  Priority = 30;
-  MaxJobsPerUser = 31;
-  MaxCpusPerUser = 32;
-  MaxTimeLimitPerTask = 33;
-  MaxJobsPerAccount = 34;
-  MaxSubmitJobsPerUser = 35;
-  MaxSubmitJobsPerAccount = 36;
+  Priority = 6;
+  MaxJobsPerUser = 7;
+  MaxCpusPerUser = 8;
+  MaxTimeLimitPerTask = 9;
+  MaxJobsPerAccount = 10;
+  MaxSubmitJobsPerUser = 11;
+  MaxSubmitJobsPerAccount = 12;
+  MaxJobs = 13;
+  MaxSubmitJobs = 14;
+  MaxWall = 15;
+  MaxTres = 16;
+  MaxTresPerUser = 17;
+  MaxTresPerAccount = 18;
+  Flags = 19;
+
   // wckey
   DefaultWckey = 40;
-  MaxJobs = 41;
-  MaxSubmitJobs = 42;
-  MaxWall = 43;
-  MaxTres = 44;
-  MaxTresPerUser = 45;
-  MaxTresPerAccount = 46;
 }
 
 message AccountInfo {

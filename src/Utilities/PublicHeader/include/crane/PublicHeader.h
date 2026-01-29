@@ -562,6 +562,8 @@ class ResourceView {
   DeviceMap& GetDeviceMap() { return device_map; }
   const DeviceMap& GetDeviceMap() const { return device_map; }
 
+  std::string ResourceViewToString() const;
+
  private:
   AllocatableResource allocatable_res;
   DeviceMap device_map;

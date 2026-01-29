@@ -18,6 +18,8 @@
 
 #include "crane/PublicHeader.h"
 
+#include "crane/String.h"
+
 AllocatableResource& AllocatableResource::operator+=(
     const AllocatableResource& rhs) {
   cpu_count += rhs.cpu_count;
@@ -778,6 +780,13 @@ uint64_t ResourceView::GpuCount() const {
                                       static_cast<uint64_t>(0));
 
   return untyped_count + type_sum;
+}
+
+std::string ResourceView::ResourceViewToString() const {
+  return std::format("cpu: {}, mem: {}, gres: {}",
+    static_cast<double>(allocatable_res.cpu_count),
+    util::ReadableMemory(allocatable_res.memory_bytes),
+    util::ReadableTypedDeviceMap(device_map));
 }
 
 uint64_t ResourceView::MemoryBytes() const {

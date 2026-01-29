@@ -1162,21 +1162,13 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxTresPerAccount() {
     return "max_tres_per_account";
   }
-  static constexpr const char* FieldStringOfMaxTres() {
-    return "max_tres";
-  }
-  static constexpr const char* FieldStringOfMaxJobs() {
-    return "max_jobs";
-  }
+  static constexpr const char* FieldStringOfMaxTres() { return "max_tres"; }
+  static constexpr const char* FieldStringOfMaxJobs() { return "max_jobs"; }
   static constexpr const char* FieldStringOfMaxSubmitJobs() {
     return "max_submit_jobs";
   }
-  static constexpr const char* FieldStringOfMaxWall() {
-    return "max_wall";
-  }
-  static constexpr const char* FieldStringOfFlags() {
-    return "flags";
-  }
+  static constexpr const char* FieldStringOfMaxWall() { return "max_wall"; }
+  static constexpr const char* FieldStringOfFlags() { return "flags"; }
 
   std::string QosToString() const {
     return fmt::format(
@@ -1185,13 +1177,16 @@ struct Qos {
         "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
         "max_jobs_per_account: {}, "
         "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}, "
-        "max_jobs: {}, max_submit_jobs: {}, max_wall: {}, flags: {}",
+        "max_jobs: {}, max_submit_jobs: {}, max_wall: {}, flags: {}, max_tres: "
+        "{}, max_tres_per_user: {}, max_tres_per_account: {}",
         name, description, reference_count, priority, max_jobs_per_user,
         max_running_tasks_per_user,
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
         max_jobs_per_account, max_submit_jobs_per_user,
-        max_submit_jobs_per_account, max_jobs, max_submit_jobs, absl::FormatDuration(max_wall),
-        flags);
+        max_submit_jobs_per_account, max_jobs, max_submit_jobs,
+        absl::FormatDuration(max_wall), flags, max_tres.ResourceViewToString(),
+        max_tres_per_user.ResourceViewToString(),
+        max_tres_per_account.ResourceViewToString());
   }
 
   static const std::string GetModifyFieldStr(
@@ -1225,6 +1220,8 @@ struct Qos {
       return "max_tres_per_user";
     case crane::grpc::ModifyField::MaxWall:
       return "max_wall";
+    case crane::grpc::ModifyField::Flags:
+      return "flags";
     default:
       std::unreachable();
     }

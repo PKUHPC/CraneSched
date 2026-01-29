@@ -1158,6 +1158,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       return rich_error_list;
     }
   }
+
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) {
@@ -1171,7 +1172,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     auto value = operation.value_list()[0];
     auto item = Qos::GetModifyFieldStr(operation.modify_field());
     int64_t value_number;
-    if (item != Qos::FieldStringOfDescription()) {
+    if (item != Qos::FieldStringOfDescription() &&
+        item != Qos::FieldStringOfMaxTresPerUser() &&
+        item != Qos::FieldStringOfMaxTresPerAccount() &&
+        item != Qos::FieldStringOfMaxTres()) {
       bool ok = util::ConvertStringToInt64(value, &value_number);
       if (!ok) {
         rich_error_list.emplace_back(std::unexpected{
@@ -1182,6 +1186,14 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
           !CheckIfTimeLimitSecIsValid(value_number)) {
         rich_error_list.emplace_back(std::unexpected{
             FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)});
+      }
+    } else if (item == Qos::FieldStringOfMaxTresPerUser() ||
+               item == Qos::FieldStringOfMaxTresPerAccount() ||
+               item == Qos::FieldStringOfMaxTres()) {
+      ResourceView resource_view;
+      if (!util::ConvertStringToResourceView(value, &resource_view)) {
+        rich_error_list.emplace_back(std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, value)});
       }
     }
   }
@@ -1243,12 +1255,54 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       log += fmt::format("max_submit_jobs_per_account: {}\n", name, value);
       break;
     }
+    case crane::grpc::ModifyField::MaxTresPerUser: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres_per_user);
+      log += fmt::format("max_tres_per_user: {}\n", res_qos.max_tres_per_user.ResourceViewToString());
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTresPerAccount: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres_per_account);
+      log += fmt::format("max_tres_per_account: {}\n", res_qos.max_tres_per_account.ResourceViewToString());
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTres: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres);
+      log += fmt::format("max_tres: {}\n", res_qos.max_tres.ResourceViewToString());
+      break;
+    }
+    case crane::grpc::ModifyField::MaxJobs: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_jobs = value_number;
+      log += fmt::format("max_jobs: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobs: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs = value_number;
+      log += fmt::format("max_submit_jobs: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxWall: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_wall = absl::Seconds(value_number);
+      log += fmt::format("max_wall: {}\n", value);
+      break;
+    }
     case crane::grpc::ModifyField::MaxTimeLimitPerTask: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_time_limit_per_task = absl::Seconds(value_number);
-      log += fmt::format("max_time_limit_per_task: {}\n", name,
-                         value);
+      log += fmt::format("max_time_limit_per_task: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::Flags: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.flags = value_number;
+      log += fmt::format("flags: {}\n", value);
       break;
     }
     default:
@@ -1295,50 +1349,6 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
 
   return SetUserDefaultWckey_(name, user_name);
-}
-
-CraneExpected<void> AccountManager::ModifyQosTres(
-    uint32_t uid, const std::string& name,
-    crane::grpc::ModifyField modify_field, const std::string& value) {
-  {
-    util::read_lock_guard user_guard(m_rw_user_mutex_);
-    auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-
-    auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return result;
-  }
-
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-
-  const Qos* p = GetExistedQosInfoNoLock_(name);
-  if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
-
-  Qos res_qos = *p;
-  std::string item = std::string(CraneModifyFieldStr(modify_field));
-
-  if (item == Qos::FieldStringOfMaxTresPerUser()) {
-    if (!util::ConvertStringToResourceView(value, &res_qos.max_tres_per_user))
-      return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
-  } else if (item == Qos::FieldStringOfMaxTresPerAccount()) {
-      if (!util::ConvertStringToResourceView(value, &res_qos.max_tres_per_account))
-        return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
-  } else if (item == Qos::FieldStringOfMaxTres()) {
-    if (!util::ConvertStringToResourceView(value, &res_qos.max_tres))
-      return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
-  }
-
-  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
-    g_db_client->UpdateQos(res_qos);
-  };
-
-  if (!g_db_client->CommitTransaction(callback))
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-
-  *m_qos_map_[name] = std::move(res_qos);
-
-  return {};
 }
 
 CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,

@@ -705,7 +705,7 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
       if (!ConvertStringToDeviceMap(item.substr(5), &tmp.GetDeviceMap()))
         return false;
     } else {
-      std::vector<std::string> kv = absl::StrSplit(item, "=");
+      std::vector<std::string> kv = absl::StrSplit(item, ":");
       if (kv.size() == 2) {
         if (kv[0] == "cpu") {
           if (kv[1] == "-1") {
