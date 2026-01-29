@@ -4678,6 +4678,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
         static_cast<double>(task->task_res_view.CpuCount()) * task_mem_per_cpu;
     task->task_res_view.GetAllocatableRes().memory_sw_bytes =
         static_cast<double>(task->task_res_view.CpuCount()) * task_mem_per_cpu;
+    CRANE_TRACE("task_mem_per_cpu for job #{} is set to {}", task->TaskId(),
+                task_mem_per_cpu);
   } else if (part_meta.max_mem_per_cpu != 0) {
     // If a task sets its memory bytes,
     // check if memory/core ratio is greater than the partition's maximum
