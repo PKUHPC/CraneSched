@@ -24,16 +24,16 @@ class TracePluginExporter : public opentelemetry::sdk::trace::SpanExporter {
       : m_client_getter_(std::move(client_getter)),
         m_enabled_getter_(std::move(enabled_getter)) {}
 
-  std::unique_ptr<opentelemetry::sdk::trace::Recordable> MakeRecordable()
-      noexcept override {
+  std::unique_ptr<opentelemetry::sdk::trace::Recordable>
+  MakeRecordable() noexcept override {
     return std::unique_ptr<opentelemetry::sdk::trace::Recordable>(
         new opentelemetry::sdk::trace::SpanData());
   }
 
   opentelemetry::sdk::common::ExportResult Export(
       const opentelemetry::nostd::span<
-          std::unique_ptr<opentelemetry::sdk::trace::Recordable>>& spans)
-      noexcept override {
+          std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
+          spans) noexcept override {
     if (!m_enabled_getter_() || !m_client_getter_()) {
       return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
@@ -77,7 +77,8 @@ class TracePluginExporter : public opentelemetry::sdk::trace::SpanExporter {
               .count() %
           1000000000);
 
-      auto end_ts = span->GetStartTime().time_since_epoch() + span->GetDuration();
+      auto end_ts =
+          span->GetStartTime().time_since_epoch() + span->GetDuration();
       info.mutable_end_time()->set_seconds(
           std::chrono::duration_cast<std::chrono::seconds>(end_ts).count());
       info.mutable_end_time()->set_nanos(
