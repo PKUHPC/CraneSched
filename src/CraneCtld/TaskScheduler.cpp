@@ -4706,6 +4706,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   task->total_res_view =
       task->node_res_view * task->node_num + task->task_res_view * task->ntasks;
+  CRANE_TRACE("Job #{} total res:{}", task->TaskId(),
+              util::ReadableResourceView(task->total_res_view));
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);

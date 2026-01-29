@@ -2246,8 +2246,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     mem_req += task_to_ctld.mem_per_node() * task_to_ctld.node_num();
   }
   if (task_to_ctld.has_cpus_per_task() && task_to_ctld.has_mem_per_cpu()) {
-    mem_req += static_cast<int64_t>(task_to_ctld.cpus_per_task()) *
-               task_to_ctld.mem_per_cpu() * task_to_ctld.ntasks();
+    mem_req += static_cast<int64_t>(task_to_ctld.cpus_per_task() *
+                                    task_to_ctld.mem_per_cpu() *
+                                    task_to_ctld.ntasks());
   }
 
   bsoncxx::builder::stream::document env_doc;
