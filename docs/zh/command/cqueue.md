@@ -420,3 +420,4 @@ cqueue --step -j 100,200,300
 - [cacct](cacct.md) - 查询已完成的作业
 - [ccontrol](ccontrol.md) - 控制和查询作业/作业步
 - [ccon](ccon.md) - 容器作业管理
+- [creport](creport.md) - 查询作业相关统计信息
