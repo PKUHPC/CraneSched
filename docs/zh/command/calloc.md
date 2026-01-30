@@ -180,8 +180,10 @@ calloc --mail-type=ALL --mail-user=user@example.com -N 1 -p CPU
 calloc --gres=gpu:a100:2 -N 1 -p GPU
 ```
 
-### signal信号
-发送信号给作业：
+### Signal信号
+
+当作业距离结束时间还有 sig_time 秒时，系统会向其发送信号 sig_num。sig_num 可以是信号编号或名称（如 "10" 或 "USR1"）。sig_time 必须是 0 到 65535 之间的整数。默认情况下，作业结束前不会发送任何信号。如果只指定了 sig_num 而未指定 sig_time，则默认提前 60 秒发送信号。
+
 ```bash
 calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```

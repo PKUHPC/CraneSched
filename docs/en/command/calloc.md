@@ -180,8 +180,10 @@ Allocate GPU resources:
 calloc --gres=gpu:a100:2 -N 1 -p GPU
 ```
 
-### signal
-Send signal to job:
+### Signal
+
+When a job is within sig_time seconds of its end time, the system will send it the signal sig_num. sig_num can be either a signal number or name (e.g., "10" or "USR1"). sig_time must be an integer between 0 and 65535. By default, no signal is sent before the job's end time. If only sig_num is specified without sig_time, the default lead time is 60 seconds.
+
 ```bash
 calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```

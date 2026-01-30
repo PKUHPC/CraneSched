@@ -68,7 +68,7 @@ nav:
       - License Usage Guide: deployment/configuration/license_guide.md
       - Keepalived Guide: deployment/configuration/keepalived.md
       - Lua Guide: deployment/configuration/lua_guide.md
-      - Prolog Epilog Guide: deployment/configuration/prolog_epilog_guide.md
+      - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
