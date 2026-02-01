@@ -99,6 +99,7 @@ cbatch cbatch_test.sh
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）
 - **-h, --help**: 显示帮助信息
 - **-v, --version**: 显示 cbatch 版本
+- **--signal**: 发送信号给作业
 
 ## 使用示例
 
@@ -331,6 +332,20 @@ cbatch --json my_script.sh
 ```bash
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
+
+### Signal信号
+
+当作业距离结束时间还有 sig_time 秒时，系统会向其发送信号 sig_num。sig_num 可以是信号编号或名称（如 "10" 或 "USR1"）。sig_time 必须是 0 到 65535 之间的整数。默认情况下，作业结束前不会发送任何信号。如果只指定了 sig_num 而未指定 sig_time，则默认提前 60 秒发送信号。
+
+默认情况下，除了batch shell 本身，其他所有作业步骤都会收到信号。使用 "B:" 选项可以只向 batch shell 发送信号，其他进程不会收到信号。
+```bash
+# 在timelimit前60秒发送SIGUSR1信号，除batch进程外其他step都会收到该信号
+cbatch --signal=SIGUSR1@60 my_script.sh
+
+# 在timelimit前60秒发送SIGUSR1信号，只有batch进程会收到信号
+cbatch --signal=B:SIGUSR1@60 my_script.sh
+```
+
 
 ### 容器作业
 

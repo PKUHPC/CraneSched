@@ -65,6 +65,10 @@ nav:
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
       - PKI+TLS Deployment: deployment/configuration/pki.md
+      - License Usage Guide: deployment/configuration/license_guide.md
+      - Keepalived Guide: deployment/configuration/keepalived.md
+      - Lua Guide: deployment/configuration/lua_guide.md
+      - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
@@ -90,16 +94,12 @@ nav:
     - Job Steps: reference/job_steps.md
     - Job Dependency: reference/job_dependency.md
     - Pending Reason: reference/pending_reason.md
-    - License Usage Guide: reference/license_guide.md
-    - Keepalived Guide: reference/keepalived.md
-    - Lua Guide: reference/lua_guide.md
     - Container Support:
         - Overview: reference/container/index.md
         - Concepts: reference/container/concepts.md
         - Quick Start: reference/container/quickstart.md
         - Examples: reference/container/examples.md
         - Troubleshooting: reference/container/troubleshooting.md
-    - Prolog Epilog Guide: reference/prolog_epilog_guide.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md

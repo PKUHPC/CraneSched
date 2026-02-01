@@ -1,5 +1,7 @@
 # Lua Script Configuration Guide
-
+Support flexible extension and policy control for job submission and modification through Lua scripts.
+Administrators can write Lua scripts to implement functions such as parameter validation, 
+logging, and policy enforcement, and dynamically load them via configuration files.
 This document describes Crane’s Lua script configuration and its APIs.
 
 ## Lua Callback Functions
