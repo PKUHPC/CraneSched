@@ -52,7 +52,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
 std::expected<void, DbErrorCode> UnqliteDb::Close() {
   int rc;
   if (m_db_ != nullptr) {
-    CRANE_TRACE("Closing unqlite...");
+    CRANE_TRACE("Closing unqlite at {} ...", m_db_path_);
     rc = unqlite_close(m_db_);
     m_db_ = nullptr;
 
@@ -636,7 +636,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
           snapshot->pending_queue.emplace(id, std::move(task));
           break;
         case crane::grpc::Running:
-        case crane::grpc::Configured:
+        case crane::grpc::Starting:
         case crane::grpc::Configuring:
         case crane::grpc::Completing:
           snapshot->running_queue.emplace(id, std::move(task));

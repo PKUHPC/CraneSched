@@ -115,7 +115,7 @@ enum TaskStatus {
   Cancelled = 5;
   OutOfMemory = 6;
   Configuring = 7;
-  Configured = 8;
+  Starting = 8;
   Completing = 9;
 
   Invalid = 15;
@@ -179,7 +179,6 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
-  ResourceView req_resources = 3;
 
   TaskType type = 4;
 
@@ -189,7 +188,7 @@ message TaskToCtld {
   string qos = 8;
   uint32 node_num = 9;
   uint32 ntasks_per_node = 10;
-  double cpus_per_task = 11;
+  uint32 ntasks = 17;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
@@ -238,6 +237,9 @@ message TaskToCtld {
   string task_prolog = 46;
   string task_epilog = 47;
   repeated Signal signals = 48;
+  optional double cpus_per_task = 50;
+  optional uint64 mem_per_node = 51;
+  optional DeviceMap gres_per_node = 52;
 }
 
 message TaskInEmbeddedDb {
@@ -275,18 +277,20 @@ message StepToCtld {
   google.protobuf.Duration time_limit = 1;
   // account, qos from job
   uint32 job_id = 2;
-  ResourceView req_resources_per_task = 3;
+
   TaskType type = 5;
   uint32 uid = 6;  // Only for authorization
   string name = 7;
 
-  optional uint32 node_num = 8;
-  optional uint32 ntasks_per_node = 9;
+  uint32 node_num = 8;
+  uint32 ntasks_per_node = 9;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
   repeated uint32 gid = 14;
+
+  uint32 ntasks = 15;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -296,6 +300,9 @@ message StepToCtld {
   // Step <-> Container
   optional ContainerTaskAdditionalMeta container_meta = 24;
 
+  string task_prolog = 27;
+  string task_epilog = 28;
+
   string extra_attr = 30;
 
   string cmd_line = 31;
@@ -304,9 +311,11 @@ message StepToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+
   optional uint64 mem_per_cpu = 36;
-  string task_prolog = 27;
-  string task_epilog = 28;
+  optional double cpus_per_task = 37;
+  optional uint64 mem_per_node = 38;
+  optional DeviceMap gres_per_node = 39;
 }
 
 message RuntimeAttrOfStep {
@@ -374,6 +383,7 @@ message StepToD {
 
   uint32 uid = 6;
   repeated uint32 gid = 7;
+  map<uint32 /*task id*/, ResourceInNode> task_res_map = 8;
 
   // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;
@@ -395,6 +405,7 @@ message StepToD {
   repeated string nodelist = 20;
 
   uint32 node_num = 22;
+  uint32 ntasks = 21;
   uint32 ntasks_per_node = 23;
   double cpus_per_task = 24;
 
@@ -586,6 +597,7 @@ message TaskInfo {
   ResourceView allocated_res_view = 40;
   string wckey = 41;
   map<string, string> env = 42;
+  uint32 ntasks = 43;
 }
 
 message StepInfo {
@@ -607,6 +619,7 @@ message StepInfo {
   uint32 node_num = 12;
   string cmd_line = 13;
   string cwd = 14;
+  uint32 ntasks = 15;
   ResourceView req_res_view = 17;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;

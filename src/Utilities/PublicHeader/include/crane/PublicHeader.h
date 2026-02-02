@@ -132,6 +132,7 @@ constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
 
 namespace ExitCode {
 
+constexpr size_t KCrunExitCodeStatusNum = 128;
 inline constexpr size_t kExitStatusNum = 256;
 inline constexpr size_t kTerminationSignalBase = kExitStatusNum;
 inline constexpr size_t kTerminationSignalNum = 64;
@@ -466,6 +467,8 @@ struct ResourceInNode {
   ResourceInNode& operator+=(const ResourceInNode& rhs);
   ResourceInNode& operator-=(const ResourceInNode& rhs);
 
+  void ckmin(const ResourceInNode& rhs);
+
   bool IsZero() const;
   void SetToZero();
 };
@@ -548,7 +551,7 @@ class ResourceView {
   void SetToZero();
 
   bool GetFeasibleResourceInNode(const ResourceInNode& avail_res,
-                                 ResourceInNode* feasible_res);
+                                 ResourceInNode* feasible_res) const;
 
   double CpuCount() const;
   uint64_t MemoryBytes() const;
@@ -567,11 +570,22 @@ class ResourceView {
   DeviceMap device_map;
 
   friend ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
+  friend ResourceView operator+(const ResourceView& lhs,
+                                const ResourceView& rhs);
   friend bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
   friend bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 };
 
 ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
+ResourceView operator+(const ResourceView& lhs, const ResourceView& rhs);
 
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
+
+template <class... Ts>
+struct VariantVisitor : Ts... {
+  using Ts::operator()...;
+};
+
+template <class... Ts>
+VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
