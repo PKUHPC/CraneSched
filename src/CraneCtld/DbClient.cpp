@@ -166,9 +166,12 @@ void SetJobSummeryQueryTimeFilter(const std::string& time_field,
   bsoncxx::builder::basic::array time_array;
   for (auto& r : range)
     time_array.append(bsoncxx::builder::basic::make_document(
-        kvp(time_field, bsoncxx::builder::basic::make_document(
-                            kvp("$gte", bsoncxx::types::b_date{r.first}),
-                            kvp("$lt", bsoncxx::types::b_date{r.second})))));
+        kvp(time_field,
+            bsoncxx::builder::basic::make_document(
+                kvp("$gte", bsoncxx::types::b_date{std::chrono::time_point_cast<
+                                std::chrono::milliseconds>(r.first)}),
+                kvp("$lt", bsoncxx::types::b_date{std::chrono::time_point_cast<
+                               std::chrono::milliseconds>(r.second)})))));
   document.append(kvp("$or", time_array));
 }
 
@@ -2208,32 +2211,29 @@ grpc::Status MongodbClient::QueryJobSummary(
       return grpc::Status::OK;
     }
 
-    auto group_doc = make_document(kvp(
-        "$group",
-        make_document(
-            kvp("_id",
-                make_document(kvp(dim1, "$" + dim1), kvp(dim2, "$" + dim2))),
-            kvp("total_cpu_time",
-                make_document(kvp("$sum", "$total_cpu_time"))),
-            kvp("total_count", make_document(kvp("$sum", "$total_count"))))));
+    auto group_doc = make_document(
+        kvp("$group",
+            make_document(kvp("_id", make_document(kvp(dim1, "$" + dim1),
+                                                   kvp(dim2, "$" + dim2))),
+                          kvp("total_cpu_time",
+                              make_document(kvp("$sum", "$total_cpu_time"))))));
     pipeline.append_stage(group_doc.view());
 
     if (request->report_type() ==
         crane::grpc::QueryJobSummaryRequest::USER_TOP_USAGE) {
       // Stage 2: Group by username, calculate user total and preserve account
       // details
-      auto group_by_user = make_document(
-          kvp("$group",
-              make_document(
-                  kvp("_id", "$_id." + dim1),
-                  kvp("user_total_cpu_time",
-                      make_document(kvp("$sum", "$total_cpu_time"))),
-                  kvp("accounts",
-                      make_document(
-                          kvp("$push",
-                              make_document(kvp("account", "$_id." + dim2),
-                                            kvp("cpu_time", "$total_cpu_time"),
-                                            kvp("count", "$total_count"))))))));
+      auto group_by_user = make_document(kvp(
+          "$group",
+          make_document(
+              kvp("_id", "$_id." + dim1),
+              kvp("user_total_cpu_time",
+                  make_document(kvp("$sum", "$total_cpu_time"))),
+              kvp("accounts",
+                  make_document(kvp(
+                      "$push",
+                      make_document(kvp("account", "$_id." + dim2),
+                                    kvp("cpu_time", "$total_cpu_time"))))))));
       pipeline.append_stage(group_by_user.view());
 
       // Stage 3: Sort by user total cpu time descending
@@ -2257,7 +2257,6 @@ grpc::Status MongodbClient::QueryJobSummary(
                   kvp("_id", make_document(kvp(dim1, "$_id"),
                                            kvp(dim2, "$accounts.account"))),
                   kvp("total_cpu_time", "$accounts.cpu_time"),
-                  kvp("total_count", "$accounts.count"),
                   kvp("user_total_cpu_time", 1))));
       pipeline.append_stage(project_stage.view());
 
@@ -2303,7 +2302,6 @@ grpc::Status MongodbClient::QueryJobSummary(
       item->set_cluster(g_config.CraneClusterName);
       set_item_field(item, dim1, std::string(id[dim1].get_string().value));
       set_item_field(item, dim2, std::string(id[dim2].get_string().value));
-      item->set_total_count(ViewValueOr_(doc["total_count"], 0));
       item->set_total_cpu_time(ViewValueOr_(doc["total_cpu_time"], 0.0));
       result_count++;
 
@@ -2581,8 +2579,7 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
             make_document(kvp("hour", "$hour"), kvp("account", "$account"),
                           kvp("username", "$username"), kvp("qos", "$qos"),
                           kvp("wckey", "$wckey"))),
-        kvp("total_cpu_time", make_document(kvp("$sum", "$cpus_time"))),
-        kvp("job_count", make_document(kvp("$sum", 1)))));
+        kvp("total_cpu_time", make_document(kvp("$sum", "$cpus_time")))));
 
     // Reshape the result document (simplified structure)
     pipeline.replace_root(make_document(kvp(
@@ -2591,7 +2588,6 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
                       kvp("username", "$_id.username"), kvp("qos", "$_id.qos"),
                       kvp("wckey", "$_id.wckey"),
                       kvp("total_cpu_time", "$total_cpu_time"),
-                      kvp("job_count", "$job_count"),
                       kvp("aggregated_at", "$$NOW")))));
 
     // Merge the aggregation results into the new acc_usage_hour_table
