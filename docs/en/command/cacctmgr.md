@@ -449,6 +449,9 @@ cacctmgr add qos <name> [OPTIONS]
 - **Description=&lt;desc&gt;**: QoS description
 - **Priority=&lt;priority&gt;**: Priority value (higher = higher priority)
 - **MaxJobsPerUser=&lt;num&gt;**: Maximum concurrent jobs per user
+- **MaxJobsPerAccount=&lt;num&gt;**: Maximum concurrent jobs per account
+- **MaxSubmitJobsPerUser=&lt;num&gt;**: Maximum submitted jobs per user
+- **MaxSubmitJobsPerAccount=&lt;num&gt;**: Maximum submitted jobs per account
 - **MaxCpusPerUser=&lt;num&gt;**: Maximum CPUs per user
 - **MaxTimeLimitPerTask=&lt;seconds&gt;**: Maximum runtime per task (in seconds)
 - **Name=&lt;name1,name2,...&gt;**: Batch create multiple QoS (comma-separated)
@@ -504,6 +507,9 @@ cacctmgr modify qos where Name=<qos> set <ATTRIBUTE>=<value>
 - **Description=&lt;desc&gt;**: Set description
 - **MaxCpusPerUser=&lt;num&gt;**: Set max CPUs per user
 - **MaxJobsPerUser=&lt;num&gt;**: Set max jobs per user
+- **MaxJobsPerAccount=&lt;num&gt;**: Set the maximum number of concurrent jobs per account
+- **MaxSubmitJobsPerUser=&lt;num&gt;**: Set the maximum number of submitted jobs per user
+- **MaxSubmitJobsPerAccount=&lt;num&gt;**: Set the maximum number of submitted jobs per account
 - **MaxTimeLimitPerTask=&lt;seconds&gt;**: Set max time per task (seconds)
 - **Priority=&lt;priority&gt;**: Set priority
 
