@@ -293,7 +293,7 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey(
-    uint32_t uid, const std::string& name, const std::string& user_name) {
+    uint32_t uid, const std::string& name, const std::string& user_name, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -303,14 +303,19 @@ CraneExpectedRich<void> AccountManager::DeleteWckey(
   if (!p_target_user)
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_USER, user_name));
+
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
     if (!result) return result;
   }
-  if (p_target_user->default_wckey == name) {
+
+  bool to_delete_default = false;
+  if (!force && p_target_user->default_wckey == name) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_DEL_DEFAULT_WCKEY, name));
+  } else if (force && p_target_user->default_wckey == name) {
+    to_delete_default = true;
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -319,7 +324,7 @@ CraneExpectedRich<void> AccountManager::DeleteWckey(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_WCKEY, name));
 
-  return DeleteWckey_(name, user_name);
+  return DeleteWckey_(name, user_name, to_delete_default);
 }
 
 AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
@@ -2663,7 +2668,7 @@ CraneExpectedRich<void> AccountManager::DeleteQos_(
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey_(
-    const std::string& name, const std::string& user_name) {
+    const std::string& name, const std::string& user_name, bool to_delete_default) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2672,6 +2677,8 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
         g_db_client->UpdateEntityOneByFields(MongodbClient::EntityType::WCKEY,
                                              "$set", filter_fields, "deleted",
                                              true);
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     user_name, "default_wckey", "");
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2681,6 +2688,9 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
 
   if (m_wckey_map_[{name, user_name}])
     m_wckey_map_[{name, user_name}]->deleted = true;
+
+  if (to_delete_default)
+    m_user_map_[user_name]->default_wckey.clear();
 
   return {};
 }

@@ -70,7 +70,7 @@ class AccountManager {
   CraneExpectedRich<void> DeleteQos(uint32_t uid, const std::string& name);
 
   CraneExpectedRich<void> DeleteWckey(uint32_t uid, const std::string& name,
-                                      const std::string& user_name);
+                                      const std::string& user_name, bool force);
 
   CraneExpectedRich<std::set<User>> QueryAllUserInfo(uint32_t uid);
 
@@ -308,7 +308,7 @@ class AccountManager {
                                      const std::string& name);
 
   CraneExpectedRich<void> DeleteWckey_(const std::string& name,
-                                       const std::string& user_name);
+                                       const std::string& user_name, bool to_delete_default);
 
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
                                            const std::string& user);

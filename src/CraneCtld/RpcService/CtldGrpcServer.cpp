@@ -1318,7 +1318,6 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
     response->set_code(modify_res.error());
   }
 
-  response->set_ok(true);
   return grpc::Status::OK;
 }
 
@@ -1671,7 +1670,7 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
-                                            request->user_name());
+                                            request->user_name(), request->force());
   if (!res) {
     response->mutable_rich_error()->CopyFrom(res.error());
     response->set_ok(false);

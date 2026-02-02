@@ -1562,13 +1562,12 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
 
-  if (!wckey.empty()) {
-    if (using_default_wckey) {
-      task_info->set_wckey("*" + wckey);
-    } else {
-      task_info->set_wckey(wckey);
-    }
-  }
+  std::string wckey_info;
+  if (using_default_wckey) 
+    wckey_info += "*";
+  if (!wckey.empty()) 
+    wckey_info += wckey;
+  task_info->set_wckey(wckey_info);
 
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());

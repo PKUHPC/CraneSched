@@ -382,6 +382,7 @@ message DeleteWckeyRequest {
   uint32 uid = 1;
   string name = 2;
   string user_name = 3;
+  bool force = 4;
 }
 
 message DeleteWckeyReply {
