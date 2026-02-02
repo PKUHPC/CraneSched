@@ -473,6 +473,8 @@ bool MongodbClient::FetchJobRecords(
           }
         }
 
+        job_info.set_wckey(ViewValueOr_(view["wckey"], std::string("")));
+
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
