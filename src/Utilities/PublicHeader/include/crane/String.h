@@ -35,6 +35,7 @@
 #include <list>
 #include <ranges>
 #include <string>
+#include <string_view>
 
 #include "crane/PublicHeader.h"
 
