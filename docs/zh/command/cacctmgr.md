@@ -444,6 +444,9 @@ cacctmgr add qos <名称> [选项]
 - **Description=&lt;描述&gt;**: QoS 描述
 - **Priority=&lt;优先级&gt;**: 优先级值（值越高，优先级越高）
 - **MaxJobsPerUser=&lt;数量&gt;**: 每个用户的最大并发作业数
+- **MaxJobsPerAccount=&lt;数量&gt;**: 每个账户的最大并发作业数
+- **MaxSubmitJobsPerUser=&lt;数量&gt;**: 每个用户的最大提交作业数
+- **MaxSubmitJobsPerAccount=&lt;数量&gt;**: 每个账户的最大提交作业数
 - **MaxCpusPerUser=&lt;数量&gt;**: 每个用户的最大 CPU 数
 - **MaxTimeLimitPerTask=&lt;秒数&gt;**: 每个任务的最大运行时间（秒）
 - **Name=&lt;名称1,名称2,...&gt;**: 批量创建多个 QoS（逗号分隔）
@@ -499,6 +502,9 @@ cacctmgr modify qos where Name=<qos> set <属性>=<值>
 - **Description=&lt;描述&gt;**: 设置描述
 - **MaxCpusPerUser=&lt;数量&gt;**: 设置每个用户的最大 CPU 数
 - **MaxJobsPerUser=&lt;数量&gt;**: 设置每个用户的最大作业数
+- **MaxJobsPerAccount=&lt;数量&gt;**: 设置每个账户的最大作业数
+- **MaxSubmitJobsPerUser=&lt;数量&gt;**: 设置每个用户的最大提交作业数
+- **MaxSubmitJobsPerAccount=&lt;数量&gt;**: 设置每个账户的最大提交作业数
 - **MaxTimeLimitPerTask=&lt;秒数&gt;**: 设置每个任务的最大时间（秒）
 - **Priority=&lt;优先级&gt;**: 设置优先级
 
