@@ -293,7 +293,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey(
-    uint32_t uid, const std::string& name, const std::string& user_name, bool force) {
+    uint32_t uid, const std::string& name, const std::string& user_name,
+    bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -2668,7 +2669,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos_(
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey_(
-    const std::string& name, const std::string& user_name, bool to_delete_default) {
+    const std::string& name, const std::string& user_name,
+    bool to_delete_default) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2689,8 +2691,7 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
   if (m_wckey_map_[{name, user_name}])
     m_wckey_map_[{name, user_name}]->deleted = true;
 
-  if (to_delete_default)
-    m_user_map_[user_name]->default_wckey.clear();
+  if (to_delete_default) m_user_map_[user_name]->default_wckey.clear();
 
   return {};
 }

@@ -472,14 +472,14 @@ bool MongodbClient::FetchJobRecords(
                         job_id);
           }
         }
-        
+
         std::string wckey_info;
-        bool using_default_wckey = ViewValueOr_(view["using_default_wckey"], false);
-        if (using_default_wckey) 
-          wckey_info += "*";
+        bool using_default_wckey =
+            ViewValueOr_(view["using_default_wckey"], false);
+        if (using_default_wckey) wckey_info += "*";
         wckey_info += ViewValueOr_(view["wckey"], std::string(""));
         job_info.set_wckey(wckey_info);
-        
+
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
@@ -2450,7 +2450,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              // 40-44
              task->licenses_count,
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey, task->using_default_wckey};
+             bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
+             task->using_default_wckey};
 
   return DocumentConstructor_(fields, values);
 }

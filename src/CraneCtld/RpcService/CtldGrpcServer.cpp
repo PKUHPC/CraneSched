@@ -1669,8 +1669,8 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
-                                            request->user_name(), request->force());
+  auto res = g_account_manager->DeleteWckey(
+      request->uid(), request->name(), request->user_name(), request->force());
   if (!res) {
     response->mutable_rich_error()->CopyFrom(res.error());
     response->set_ok(false);

@@ -308,7 +308,8 @@ class AccountManager {
                                      const std::string& name);
 
   CraneExpectedRich<void> DeleteWckey_(const std::string& name,
-                                       const std::string& user_name, bool to_delete_default);
+                                       const std::string& user_name,
+                                       bool to_delete_default);
 
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
                                            const std::string& user);
