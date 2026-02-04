@@ -71,7 +71,6 @@ class AccountMetaContainer final {
   bool UserHasTask(const std::string& username);
 
  private:
- 
   const static int kNumStripes = 128;
 
   static int StripeForKey_(const std::string& key) {

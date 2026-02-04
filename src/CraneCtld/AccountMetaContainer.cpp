@@ -122,7 +122,6 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
     TaskInCtld& task) {
-
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   // Under normal circumstances, QoS must exist.
   if (!qos) {
@@ -342,7 +341,7 @@ void AccountMetaContainer::UserAddTask(const std::string& username) {
 
 void AccountMetaContainer::UserReduceTask(const std::string& username) {
   bool is_contains = false;
-  
+
   m_user_to_task_map_.if_contains(
       username, [&](std::pair<const std::string, uint32_t>& pair) {
         is_contains = true;
@@ -355,7 +354,6 @@ void AccountMetaContainer::UserReduceTask(const std::string& username) {
 
   if (!is_contains)
     CRANE_ERROR("User '{}' not found in m_user_to_task_map_.", username);
-
 }
 
 bool AccountMetaContainer::UserHasTask(const std::string& username) {
@@ -436,23 +434,24 @@ bool AccountMetaContainer::CheckQosResource_(
 
   bool result = true;
 
-  m_user_meta_map_.if_contains(
-      job.username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto iter = pair.second.find(job.qos);
-        if (iter == pair.second.end()) {
-          CRANE_ERROR(
-             "Qos '{}' not found for user '{}', cannot free resource for task {}.",
-              job.qos, job.username, job.job_id);
-          result = false;
-          return;
-        }
-        auto& val = iter->second;
-        if (val.jobs_count + 1 > qos.max_jobs_per_user) result = false;
+  m_user_meta_map_.if_contains(job.username, [&](std::pair<const std::string,
+                                                           QosToResourceMap>&
+                                                     pair) {
+    auto iter = pair.second.find(job.qos);
+    if (iter == pair.second.end()) {
+      CRANE_ERROR(
+          "Qos '{}' not found for user '{}', cannot free resource for task {}.",
+          job.qos, job.username, job.job_id);
+      result = false;
+      return;
+    }
+    auto& val = iter->second;
+    if (val.jobs_count + 1 > qos.max_jobs_per_user) result = false;
 
-        if (val.resource.CpuCount() + resource_view.CpuCount() >
-            qos.max_cpus_per_user)
-          result = false;
-      });
+    if (val.resource.CpuCount() + resource_view.CpuCount() >
+        qos.max_cpus_per_user)
+      result = false;
+  });
 
   if (!result) return false;
 
