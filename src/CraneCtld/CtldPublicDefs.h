@@ -1374,6 +1374,12 @@ struct QosResource {
   ResourceView resource;
   uint32_t jobs_count{};
   uint32_t submit_jobs_count{};
+
+
+  bool IsZero() const {
+    return resource.IsZero() && jobs_count == 0 && submit_jobs_count == 0;
+  }
+
 };
 
 // Transaction

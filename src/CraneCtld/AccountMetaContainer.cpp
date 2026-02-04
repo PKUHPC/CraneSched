@@ -31,13 +31,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       "TryMallocQosSubmitResource for job of user {} and account {}.....",
       task.Username(), task.account);
 
-  {
-    const auto& user_ptr =
-        g_account_manager->GetExistedUserInfo(task.Username());
-    UserAddTask(task.Username());
-    if (!user_ptr) return CraneErrCode::ERR_INVALID_USER;
-  }
-
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -251,6 +244,8 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
     CheckAndSubResource_(val.submit_jobs_count, static_cast<uint32_t>(1),
                          "submit_jobs_count", task.Username(), task.qos,
                          task.TaskId());
+
+    if (val.IsZero()) pair.second.erase(iter);
   });
 
   for (const auto& account_name : task.account_chain) {
@@ -269,6 +264,8 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
           CheckAndSubResource_(val.submit_jobs_count, static_cast<uint32_t>(1),
                                "submit_jobs_count", account_name, task.qos,
                                task.TaskId());
+
+          if (val.IsZero()) pair.second.erase(iter);
         });
   }
 
@@ -299,6 +296,8 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
     CheckAndSubResource_(val.submit_jobs_count, static_cast<uint32_t>(1),
                          "submit_jobs_count", task.Username(), task.qos,
                          task.TaskId());
+
+    if (val.IsZero()) pair.second.erase(iter);
   });
 
   for (const auto& account_name : task.account_chain) {
@@ -320,6 +319,8 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
           CheckAndSubResource_(val.submit_jobs_count, static_cast<uint32_t>(1),
                                "submit_jobs_count", account_name, task.qos,
                                task.TaskId());
+
+          if (val.IsZero()) pair.second.erase(iter);
         });
   }
   UserReduceTask(task.Username());
@@ -437,7 +438,15 @@ bool AccountMetaContainer::CheckQosResource_(
 
   m_user_meta_map_.if_contains(
       job.username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& val = pair.second.at(job.qos);
+        auto iter = pair.second.find(job.qos);
+        if (iter == pair.second.end()) {
+          CRANE_ERROR(
+             "Qos '{}' not found for user '{}', cannot free resource for task {}.",
+              job.qos, job.username, job.job_id);
+          result = false;
+          return;
+        }
+        auto& val = iter->second;
         if (val.jobs_count + 1 > qos.max_jobs_per_user) result = false;
 
         if (val.resource.CpuCount() + resource_view.CpuCount() >
@@ -451,7 +460,16 @@ bool AccountMetaContainer::CheckQosResource_(
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& val = pair.second.at(job.qos);
+          auto iter = pair.second.find(job.qos);
+          if (iter == pair.second.end()) {
+            CRANE_ERROR(
+                "Qos '{}' not found for account '{}', cannot free resource for "
+                "job {}.",
+                job.qos, account_name, job.job_id);
+            result = false;
+            return;
+          }
+          auto& val = iter->second;
           if (val.jobs_count + 1 > qos.max_jobs_per_account) result = false;
         });
     if (!result) break;
