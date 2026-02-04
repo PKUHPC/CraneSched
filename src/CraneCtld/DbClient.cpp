@@ -472,9 +472,14 @@ bool MongodbClient::FetchJobRecords(
                         job_id);
           }
         }
-
-        job_info.set_wckey(ViewValueOr_(view["wckey"], std::string("")));
-
+        
+        std::string wckey_info;
+        bool using_default_wckey = ViewValueOr_(view["using_default_wckey"], false);
+        if (using_default_wckey) 
+          wckey_info += "*";
+        wckey_info += ViewValueOr_(view["wckey"], std::string(""));
+        job_info.set_wckey(wckey_info);
+        
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
@@ -2380,10 +2385,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
-  // 40 licenses_alloc nodename_list wckey
+  // 40 licenses_alloc nodename_list wckey  using_default_wckey
 
   // clang-format off
-  std::array<std::string, 43> fields{
+  std::array<std::string, 44> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -2401,7 +2406,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info", 
       // 40 - 44
-      "licenses_alloc", "nodename_list", "wckey"
+      "licenses_alloc", "nodename_list", "wckey", "using_default_wckey"
   };
   // clang-format on
 
@@ -2415,7 +2420,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>             /*41-43*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -2445,7 +2450,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              // 40-44
              task->licenses_count,
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey};
+             bsoncxx::array::value{nodename_list_array.view()}, task->wckey, task->using_default_wckey};
 
   return DocumentConstructor_(fields, values);
 }
