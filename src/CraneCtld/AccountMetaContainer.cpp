@@ -129,12 +129,15 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
     TaskInCtld& task) {
+
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   // Under normal circumstances, QoS must exist.
   if (!qos) {
     CRANE_ERROR("Try to malloc resource from an unknown qos {}", task.qos);
     return;
   }
+
+  g_account_meta_container->UserAddTask(task.Username());
 
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
@@ -337,19 +340,21 @@ void AccountMetaContainer::UserAddTask(const std::string& username) {
 }
 
 void AccountMetaContainer::UserReduceTask(const std::string& username) {
-  if (!m_user_to_task_map_.contains(username)) {
-    CRANE_ERROR("User '{}' not found in m_user_to_task_map_.", username);
-    return;
-  }
-
+  bool is_contains = false;
+  
   m_user_to_task_map_.if_contains(
       username, [&](std::pair<const std::string, uint32_t>& pair) {
+        is_contains = true;
         if (pair.second == 0) {
           CRANE_ERROR("job_num == 0 when reduce user {} job", username);
           return;
         }
         --pair.second;
       });
+
+  if (!is_contains)
+    CRANE_ERROR("User '{}' not found in m_user_to_task_map_.", username);
+
 }
 
 bool AccountMetaContainer::UserHasTask(const std::string& username) {
