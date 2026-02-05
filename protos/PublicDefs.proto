@@ -695,6 +695,7 @@ message TrimmedPartitionInfo {
     CranedPowerState power_state = 3;
     uint32 count = 4;
     string craned_list_regex = 5;
+    string state_reason = 6;
   }
 
   string name = 1;
