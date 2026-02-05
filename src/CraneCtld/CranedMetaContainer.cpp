@@ -701,6 +701,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     std::list<std::string> craned_name_lists[control_state_num]
                                             [resource_state_num]
                                             [power_state_num];
+    std::map<std::string, std::string> state_reason_map;
 
     auto craned_rng =
         craned_ids |
@@ -741,6 +742,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
         craned_name_lists[static_cast<int>(control_state)][static_cast<int>(
             resource_state)][static_cast<int>(craned_meta->power_state)]
             .emplace_back(craned_meta->static_meta.hostname);
+        state_reason_map.emplace(craned_meta->static_meta.hostname,
+                                 craned_meta->state_reason);
       }
     });
 
@@ -757,6 +760,21 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
             craned_list->set_count(craned_name_lists[i][j][k].size());
             craned_list->set_craned_list_regex(
                 util::HostNameListToStr(craned_name_lists[i][j][k]));
+            std::vector<std::string> reasons;
+            for (const auto& node_name : craned_name_lists[i][j][k]) {
+              auto it = state_reason_map.find(node_name);
+              if (it != state_reason_map.end() && !it->second.empty()) {
+                reasons.push_back(it->second);
+              }
+            }
+
+            std::sort(reasons.begin(), reasons.end());
+            reasons.erase(std::unique(reasons.begin(), reasons.end()),
+                          reasons.end());
+
+            if (!reasons.empty()) {
+              craned_list->set_state_reason(absl::StrJoin(reasons, "; "));
+            }
           }
         }
       }
