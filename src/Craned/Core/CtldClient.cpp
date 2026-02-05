@@ -1204,7 +1204,7 @@ void CtldClient::NodeHealthCheck_() {
         "Node health check fail. config cpu_count: {}, real cpu_count: {}",
         cpu_count, node_real.cpu);
     CRANE_WARN(reason);
-    UpdateNodeDrainState(true, reason);
+    UpdateNodeDrainState(true, "CPU count mismatch");
     return;
   }
 
@@ -1217,7 +1217,7 @@ void CtldClient::NodeHealthCheck_() {
         "Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
         mem_gb_config, node_real.memory_gb);
     CRANE_WARN(reason);
-    UpdateNodeDrainState(true, reason);
+    UpdateNodeDrainState(true, "Mem mismatch");
     return;
   }
 
@@ -1229,7 +1229,7 @@ void CtldClient::NodeHealthCheck_() {
             fmt::format("Node health check fail. Device file {} not found.",
                         file_meta.path);
         CRANE_WARN(reason);
-        UpdateNodeDrainState(true, reason);
+        UpdateNodeDrainState(true, "Device not found");
         return;
       }
     }
