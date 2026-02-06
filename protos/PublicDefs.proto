@@ -230,7 +230,13 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
-  optional string wckey = 42;
+
+  message Wckey {
+    string wckey_name = 1;
+    bool using_default_wckey = 2;
+  }
+  optional Wckey wckey = 42;
+
   string submit_hostname = 43;
   string submit_dir = 44;
   optional uint64 mem_per_cpu = 45;
