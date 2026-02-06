@@ -85,6 +85,7 @@ class PmixGrpcClient : public PmixClient {
   void WaitAllStubReady() override {
     std::unique_lock<std::mutex> lock(m_mutex_);
     if (GetChannelCount() >= m_node_num_) return ;
+    // TODO: timeout 5s
     m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_node_num_; });
   }
 

@@ -177,15 +177,16 @@ bool PmixGrpcServer::Init(const Config& config) {
   m_server_ = builder.BuildAndStart();
   if (!m_server_ || selected_port == 0) {
     CRANE_ERROR("Failed to bind port for PMIx direct connection");
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    return false;
+  }
+
+  auto result = g_pmix_server->GetCranedClient()->BroadcastPmixPort(std::to_string(selected_port));
+  if (!result) {
+    CRANE_ERROR("Failed to broadcast PMIx port");
     return false;
   }
 
   CRANE_INFO("PMIx direct connection is listening on [{}:{}]", listen_addr, selected_port);
-
-  std::thread([selected_port]() {
-    g_pmix_server->GetCranedClient()->BroadcastPmixPort(std::to_string(selected_port));
-  }).detach();
 
   return true;
 }

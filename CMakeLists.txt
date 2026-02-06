@@ -365,12 +365,15 @@ set_target_properties(libpmix PROPERTIES
 )
 
 # todo: if ucx enabled, use ucx
-find_package(UCX QUIET)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(UCX REQUIRED ucx)
 if(UCX_FOUND)
-    message(STATUS "UCX found: ${UCX_INCLUDE_DIRS}")
+    message(STATUS "UCX found by pkg-config: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES}")
     add_definitions(-DHAVE_UCX)
     set(UCX_LIBS ${UCX_LIBRARIES})
     set(UCX_INCLUDES ${UCX_INCLUDE_DIRS})
+else()
+    message(FATAL_ERROR "UCX not found. Please install libucx-dev/ucx-devel.")
 endif()
 
 if (ENABLE_BERKELEY_DB)

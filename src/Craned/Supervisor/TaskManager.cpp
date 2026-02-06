@@ -28,10 +28,10 @@
 #include <limits>
 #include <variant>
 
+#include "Pmix.h"
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
-#include "Pmix.h"
 #include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
@@ -2689,7 +2689,6 @@ TaskManager::~TaskManager() {
       CRANE_DEBUG("Epilog success");
     }
   }
-  g_pmix_server.reset();
 }
 
 void TaskManager::SupervisorFinishInit(StepStatus status) {
@@ -2709,8 +2708,7 @@ bool TaskManager::InitPmixPreFork() {
         .CraneScriptDir = g_config.CraneScriptDir,
         .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
 
-    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep(),
-                             m_step_.GetStepProcessEnv()))
+    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep()))
       return false;
   }
 

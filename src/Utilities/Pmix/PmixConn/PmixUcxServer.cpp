@@ -151,6 +151,7 @@ bool PmixUcxServer::Init(const Config& config) {
     return false;
   }
 
+  bool result = true;
   std::string addr_str;
   PmixUcxClient* ucx_client;
 
@@ -178,12 +179,15 @@ bool PmixUcxServer::Init(const Config& config) {
 
   addr_str = std::string(reinterpret_cast<const char*>(m_ucx_addr_), m_ucx_alen_);
 
+  result = g_pmix_server->GetCranedClient()->BroadcastPmixPort(addr_str);
+  if (!result) {
+    CRANE_ERROR("Failed to broadcast UCX address");
+    goto err_efd;
+  }
+
   ucx_client = dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
   ucx_client->InitUcxWorker(m_mutex_, m_ucp_worker_);
 
-  std::thread([addr_str]() {
-    g_pmix_server->GetCranedClient()->BroadcastPmixPort(addr_str);
-  }).detach();
   m_poll_ = g_pmix_server->GetUvwLoop()->resource<uvw::poll_handle>(m_server_fd_);
   m_poll_->on<uvw::poll_event>([this](const uvw::poll_event&, uvw::poll_handle&) {
     OnUcxReadable_();
@@ -207,6 +211,7 @@ bool PmixUcxServer::Init(const Config& config) {
       (void)ucp_worker_arm(m_ucp_worker_);
     }
   }
+  
   m_poll_->start(uvw::details::uvw_poll_event::READABLE);
 
   return true;
@@ -298,6 +303,8 @@ void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
       m_service_impl_->PmixTreeUpwardForward(req->data);
       break;
     default:
+      CRANE_ERROR("Unknown UCX message type: %d", static_cast<int>(req->type));
+      break;
     }
     delete req;
   }

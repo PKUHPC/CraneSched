@@ -52,18 +52,20 @@ class PmixServer {
   PmixServer(PmixServer&&) = delete;
   PmixServer& operator=(PmixServer&&) = delete;
 
-  bool Init(const Config& config, const crane::grpc::TaskToD& task,
-            const std::unordered_map<std::string, std::string>& env_map);
+  bool Init(const Config& config, const crane::grpc::StepToD& step);
 
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(
       uint32_t rank);
 
   const std::string& GetHostname() const { return m_hostname_;}
-  task_id_t GetTaskId() const { return static_cast<task_id_t>(std::stoul(m_task_id_)); }
+  job_id_t GetJobId() const { return m_job_id_; }
+  step_id_t GetStepId() const { return m_step_id_; }
+
   const std::vector<std::string>& GetNodeList() { return m_node_list_; }
   const std::vector<std::string>& GetPeerNodeList() { return m_peer_node_list_; }
   const std::vector<uint32_t>& GetTaskMap() { return m_task_map_; }
   const std::string& GetNSpace() { return m_nspace_; }
+  
   uint32_t GetTaskNum() const { return m_task_num_; }
   uint64_t GetTimeout() const { return m_timeout_; }
 
@@ -75,8 +77,7 @@ class PmixServer {
   uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
 
  private:
-  void InfoSet_(const Config& config, const crane::grpc::TaskToD& task,
-                const std::unordered_map<std::string, std::string>& env_map);
+  void InfoSet_(const Config& config, const crane::grpc::StepToD& step);
 
   bool ConnInit_(const Config& config);
 
@@ -90,16 +91,16 @@ class PmixServer {
 
   uint32_t m_uid_{};
   uint32_t m_gid_{};
-  std::string m_task_id_;
-  uint32_t m_stepd_id_{0};
+  job_id_t m_job_id_{};
+  step_id_t m_step_id_{0};
 
-  std::string m_nspace_;  // crane.pmix.jobid
+  std::string m_nspace_;  // crane.pmix.jobid.stepid
   std::string m_hostname_;
   std::vector<std::string> m_node_list_;
   std::vector<std::string> m_peer_node_list_;
   std::string m_node_list_str_;
   uint32_t m_node_id_{};
-  uint32_t m_node_num_ = 1;
+  uint32_t m_node_num_{1};
   uint32_t m_ntasks_per_node_{}; /* number of tasks on *this* node */
   uint32_t m_task_num_{};
   std::vector<uint32_t>

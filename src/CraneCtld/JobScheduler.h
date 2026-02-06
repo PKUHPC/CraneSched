@@ -770,6 +770,14 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+  using PmixPortsMap = std::unordered_map<CranedId, std::pair<step_id_t, std::string>>;
+
+  using PmixPortsMetaMap = phmap::parallel_flat_hash_map<
+      job_id_t, PmixPortsMap, phmap::priv::hash_default_hash<job_id_t>,
+      phmap::priv::hash_default_eq<job_id_t>,
+      std::allocator<std::pair<const job_id_t, PmixPortsMap>>, 4,
+      std::shared_mutex>;
+
  public:
   JobScheduler();
 
@@ -960,6 +968,8 @@ class JobScheduler {
                         .dependee_job_id = dependee,
                         .event_time = timestamp});
   }
+
+  PmixPortsMetaMap& GetPmixPortsMetaMap() { return m_pmix_ports_meta_; }
 
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1190,6 +1200,9 @@ class JobScheduler {
   void CreateDeadlineTimerCb_();
 
   void DelDeadlineTimer_(job_id_t job_id);
+
+  PmixPortsMetaMap m_pmix_ports_meta_;
+
 };
 
 }  // namespace Ctld
