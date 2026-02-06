@@ -37,7 +37,7 @@ using crane::grpc::pmix::Pmix;
 class PmixGrpcServiceImpl final : public Pmix::CallbackService {
 public:
   PmixGrpcServiceImpl() = default;
-
+#ifdef HAVE_PMIX
   grpc::ServerUnaryReactor* SendPmixRingMsg(
     grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
     crane::grpc::pmix::SendPmixRingMsgReply *response) override;
@@ -57,6 +57,7 @@ public:
   grpc::ServerUnaryReactor* PmixDModexResponse(
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
     crane::grpc::pmix::PmixDModexResponseReply* response) override;
+#endif
 };
 
 class PmixGrpcServer: public PmixASyncServer {

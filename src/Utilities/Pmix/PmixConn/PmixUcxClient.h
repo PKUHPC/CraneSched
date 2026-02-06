@@ -25,6 +25,8 @@
 #include "crane/Lock.h"
 #include "protos/Pmix.grpc.pb.h"
 
+#include <parallel_hashmap/phmap.h>
+
 namespace pmix {
 
 class PmixUcxClient;
@@ -32,7 +34,7 @@ class PmixUcxClient;
 class PmixUcxStub : public PmixStub {
 public:
   explicit PmixUcxStub(PmixUcxClient *pmix_client);
-
+#ifdef HAVE_UCX
   ~PmixUcxStub() override {
     ucp_ep_destroy(m_ep_);
   }
@@ -63,6 +65,7 @@ private:
   CranedId m_craned_id_;
 
   friend class PmixUcxClient;
+#endif
 };
 
 
@@ -71,7 +74,7 @@ public:
   PmixUcxClient(int node_num) : m_node_num_(node_num) {}
 
   ~PmixUcxClient() override = default;
-
+#ifdef HAVE_UCX
   void InitUcxWorker(util::mutex& worker_lock, ucp_worker_h ucp_worker_) {
     m_ucp_worker_ = ucp_worker_;
     m_worker_lock_ = &worker_lock;
@@ -107,6 +110,8 @@ using NodeHashMap = absl::node_hash_map<K, V, Hash>;
 
   util::mutex* m_worker_lock_;
   ucp_worker_h m_ucp_worker_;
+#endif
+
   int m_node_num_;
 
   std::atomic_uint64_t m_channel_count_{0};

@@ -27,6 +27,8 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
+
 namespace {
 
 void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
@@ -226,4 +228,5 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
   }
 }
 
+#endif 
 }  // namespace pmix

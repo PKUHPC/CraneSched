@@ -17,7 +17,10 @@
  */
 
 #pragma once
+
+#ifdef HAVE_PMIX
 #include <pmix_common.h>
+#endif
 
 #include "PmixDModex.h"
 #include "PmixState.h"
@@ -62,6 +65,7 @@ inline std::string GetEnvVar(const std::string& key) {
     return val == nullptr ? "" : std::string(val);
 }
 
+#ifdef HAVE_PMIX
 inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
                         const char* data, size_t ndata, void* cbdata,
                         void* rel_fn, void* rel_data) {
@@ -88,5 +92,6 @@ inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
 
   cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
 }
+#endif
 
 } // namespace pmix

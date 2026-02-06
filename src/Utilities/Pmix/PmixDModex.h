@@ -18,7 +18,9 @@
 
 #pragma once
 
+#ifdef HAVE_PMIX
 #include <pmix_common.h>
+#endif
 
 #include <string>
 
@@ -38,6 +40,7 @@ class PmixDModexReqManager {
 public:
   PmixDModexReqManager() = default;
 
+  #ifdef HAVE_PMIX
   bool PmixDModexGet(const std::string& pmix_namespace, int rank,
                      pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
@@ -63,6 +66,7 @@ private:
   uint32_t m_dmdx_seq_num_ = 0;
   util::mutex m_dmodex_mutex_;
   std::list<PmixDModexReq> m_pmix_dmodex_req_list_;
+#endif
 };
 
 } // namespace pmix

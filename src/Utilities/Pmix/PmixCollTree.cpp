@@ -27,6 +27,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
   int max_depth;
   int width;
@@ -687,5 +688,7 @@ void Coll::TreeReleaseFn(void* rel_data) {
 exit:
     delete cb_data;
 }
+
+#endif
 
 } // namespace pmix

@@ -30,16 +30,18 @@
 namespace pmix {
 class PmixUcxServer;
 
+#ifdef HAVE_UCX
 struct PmixUcxReq {
   PmixUcxMsgType type;
   std::string data;
   PmixUcxServer* self{};
 };
+#endif
 
 class PmixUcxServiceImpl {
 public:
   explicit PmixUcxServiceImpl() = default;
-
+#ifdef HAVE_UCX
   void SendPmixRingMsg(const std::string& req_data);
 
   void PmixTreeUpwardForward(const std::string& req_data);
@@ -49,12 +51,13 @@ public:
   void PmixDModexRequest(const std::string& req_data);
 
   void PmixDModexResponse(const std::string& req_data);
+#endif
 };
 
 class PmixUcxServer: public PmixASyncServer {
 public:
   explicit PmixUcxServer() = default;
-
+#ifdef HAVE_UCX
   ~PmixUcxServer() override {
     if (m_ucp_worker_) ucp_worker_destroy(m_ucp_worker_);
     if (m_ucp_context_) ucp_cleanup(m_ucp_context_);
@@ -105,6 +108,7 @@ using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
   void EvCleanUcxProcessReqQueueCb_();
 
   friend class PmixUcxServiceImpl;
+#endif
 };
 
 } // namespace pmix

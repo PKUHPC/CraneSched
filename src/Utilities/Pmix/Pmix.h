@@ -18,12 +18,13 @@
 
 #pragma once
 
-#include <fmt/format.h>
+#ifdef HAVE_PMIX
 #include <pmix_common.h>
 #include <pmix_server.h>
+#endif
+
 #include <sys/types.h>
 
-#include <future>
 #include <uvw.hpp>
 #include <vector>
 
@@ -35,9 +36,7 @@
 #include "PmixConn/PmixUcxServer.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
-#include "absl/strings/str_join.h"
 #include "concurrentqueue/concurrentqueue.h"
-#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace pmix {
@@ -77,6 +76,7 @@ class PmixServer {
   uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
 
  private:
+ #ifdef HAVE_PMIX
   void InfoSet_(const Config& config, const crane::grpc::StepToD& step);
 
   bool ConnInit_(const Config& config);
@@ -88,6 +88,7 @@ class PmixServer {
   template <typename T>
   pmix_info_t InfoLoad_(const std::string& key, const T& val,
                         pmix_data_type_t data_type);
+#endif
 
   uint32_t m_uid_{};
   uint32_t m_gid_{};
@@ -117,8 +118,6 @@ class PmixServer {
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;
   std::unique_ptr<PmixASyncServer> m_pmix_async_server_;
-
-  bool m_is_init_{false};
 
   std::thread m_uvw_thread_;
   std::atomic_bool m_cq_closed_{false};

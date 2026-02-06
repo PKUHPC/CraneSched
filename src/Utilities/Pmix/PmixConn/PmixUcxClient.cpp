@@ -24,6 +24,7 @@
 #include "crane/Logger.h"
 
 namespace pmix {
+#ifdef HAVE_UCX
 
 PmixUcxStub::PmixUcxStub(PmixUcxClient *pmix_client) : m_pmix_client_(pmix_client) {}
 
@@ -122,7 +123,7 @@ void PmixUcxClient::EmplacePmixStub(const CranedId &craned_id, const std::string
 
   const auto *server_addr = reinterpret_cast<const ucp_address_t *>(port.data());
 
-  auto* craned = new PmixUcxStub(this);
+  auto craned = std::make_shared<PmixUcxStub>(this);
   craned->m_craned_id_ = craned_id;
 
   ucp_ep_params_t ep_params = {};
@@ -144,6 +145,7 @@ void PmixUcxClient::EmplacePmixStub(const CranedId &craned_id, const std::string
               port, cur_count, m_node_num_);
 
   m_craned_id_stub_map_.emplace(craned_id, craned);
+
   {
     std::lock_guard lock(m_mutex_);
     if (cur_count >= m_node_num_) {
@@ -166,5 +168,6 @@ std::shared_ptr<PmixStub> PmixUcxClient::GetPmixStub(const CranedId& craned_id) 
   }
   return nullptr;
 }
+#endif 
 
 }// namespace pmix

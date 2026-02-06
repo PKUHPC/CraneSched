@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <parallel_hashmap/phmap.h>
-
 #include <condition_variable>
 
 #include "PmixColl.h"

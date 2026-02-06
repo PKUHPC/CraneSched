@@ -25,6 +25,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 bool Coll::PmixCollRingInit_(const std::set<std::string>& hostset) {
 
   auto iter = hostset.find(g_pmix_server->GetHostname());
@@ -347,4 +348,5 @@ bool Coll::PmixCollRingNeighbor_(
   return true;
 }
 
+#endif
 } // namespace pmix

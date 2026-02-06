@@ -20,6 +20,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
 
@@ -46,4 +47,5 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   return coll;
 }
 
+#endif
 } // namespace pmix

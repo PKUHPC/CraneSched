@@ -18,15 +18,14 @@
 
 #include "Pmix.h"
 
-#include "PmixColl.h"
-#include "PmixCommon.h"
 #include "PmixConn/PmixGrpcClient.h"
 #include "PmixConn/PmixGrpcServer.h"
+
 #ifdef HAVE_UCX
 #include "PmixConn/PmixUcxClient.h"
 #include "PmixConn/PmixUcxServer.h"
 #endif
-#include "PmixDModex.h"
+
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "crane/OS.h"
@@ -35,6 +34,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 namespace {
 
 class PMIxServerModule {
@@ -240,14 +240,13 @@ void ErrHandler_(size_t evhdlr_registration_id,
 }
 
 }  // namespace
+#endif
 
 PmixServer::~PmixServer() {
-
+#ifdef HAVE_PMIX
   m_cq_closed_ = true;
   if (m_uvw_thread_.joinable()) 
     m_uvw_thread_.join();
-
-  if (!m_is_init_) return;
 
   util::os::DeleteFolders(m_server_tmpdir_);
 
@@ -265,10 +264,11 @@ PmixServer::~PmixServer() {
   m_pmix_async_server_.reset();
 
   CRANE_TRACE("Task#{} Finalize PmixServer.", m_job_id_);
+#endif
 }
 
 bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
-
+#ifdef HAVE_PMIX
   m_uvw_loop_ = uvw::loop::create();
 
   InfoSet_(config, step);
@@ -318,10 +318,15 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
               PMIX_VERSION_RELEASE);
 
   return true;
+#else
+  CRANE_ERROR("PMIx support is not enabled in this build.");
+  return false;
+#endif
 }
 
 std::optional<std::unordered_map<std::string, std::string>>
 PmixServer::SetupFork(uint32_t rank) {
+#ifdef HAVE_PMIX
   char** client_env = nullptr;
 
   pmix_proc_t proc;
@@ -355,9 +360,14 @@ PmixServer::SetupFork(uint32_t rank) {
     env_map.emplace("OMPI_MCA_orte_precondition_transports", key);
   }
 
-  return std::move(env_map);
+  return env_map;
+#else
+  CRANE_ERROR("PMIx support is not enabled in this build.");
+  return std::nullopt;
+#endif
 }
 
+#ifdef HAVE_PMIX
 void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step) {
 
   m_uid_ = step.uid();
@@ -644,5 +654,6 @@ pmix_info_t PmixServer::InfoLoad_(const std::string& key, const T& val,
 
   return info;
 }
+#endif
 
 }  // namespace pmix

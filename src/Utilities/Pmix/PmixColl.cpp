@@ -24,6 +24,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
                          size_t nprocs) {
   m_seq_ = 0;
@@ -99,4 +100,5 @@ bool Coll::PmixCollContribLocal(CollType type, const std::string& data,
   return result;
 }
 
+#endif
 }  // namespace pmix

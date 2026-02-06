@@ -29,12 +29,14 @@ class PmixState {
 public:
   PmixState() = default;
 
+#ifdef HAVE_PMIX
   std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
                          size_t nprocs);
 private:
 
   util::rw_mutex m_mutex_;
   std::list<std::shared_ptr<Coll>> m_coll_list_;
+#endif
 };
 
 } // namespace pmix
