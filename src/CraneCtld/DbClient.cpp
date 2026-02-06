@@ -2297,7 +2297,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string, bool>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>             /*41-42*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -2338,7 +2338,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey().wckey_name(), task_to_ctld.wckey().using_default_wckey()};
+             task_to_ctld.wckey().wckey_name(),
+             task_to_ctld.wckey().using_default_wckey()};
 
   return DocumentConstructor_(fields, values);
 }
