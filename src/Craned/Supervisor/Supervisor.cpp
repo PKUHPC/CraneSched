@@ -399,6 +399,10 @@ void StartServer(int grpc_output_fd) {
              static_cast<int>(g_config.StepSpec.step_type()));
 
   StepStatus status{StepStatus::Invalid};
+  g_thread_pool->detach_task([&]() {
+    g_server->Wait();
+  });
+
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
@@ -447,12 +451,18 @@ void StartServer(int grpc_output_fd) {
     status = ready ? StepStatus::Running : StepStatus::Failed;
   } else {
     // Common step is Starting after supervisor is ready.
-    status = StepStatus::Starting;
+    bool ready = true;
+
+    if (!g_task_mgr->InitPmixPreFork()) {
+      CRANE_ERROR("Failed to init pmix server for step.");
+      ready = false;
+    }
+    // Common step is CONFIGURED after supervisor is ready.
+    status = ready ? StepStatus::Starting : StepStatus::Failed;
   }
 
   g_task_mgr->SupervisorFinishInit(status);
 
-  g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();
   g_task_mgr.reset();

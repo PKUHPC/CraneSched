@@ -507,46 +507,48 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  // TODO: judge type
-  m_ctld_server_->m_pmix_mtx_.Lock();
 
-  m_ctld_server_->m_pmix_ports_.emplace(request->craned_id(), request->port());
+  auto& pmix_ports_map = g_task_scheduler->GetPmixPortsMetaMap();
 
-  if (m_ctld_server_->m_pmix_ports_.size() == request->craned_ids().size()) {
-    std::vector<std::pair<std::string, CranedId>> pmix_ports;
-    for(const auto& [craned_id, port] : m_ctld_server_->m_pmix_ports_) {
-      pmix_ports.emplace_back(port, craned_id);
+  bool pmix_broadcast_completed = false;
+
+  using PmixPortsMap = std::unordered_map<CranedId, std::pair<step_id_t, std::string>>;
+
+  pmix_ports_map.lazy_emplace_l(request->job_id(), [&](std::pair<const job_id_t, PmixPortsMap>& pair){
+
+    pair.second.emplace(request->craned_id(), std::make_pair(request->step_id(), request->port()));
+
+    if (pair.second.size() == request->craned_ids().size()) {
+      absl::BlockingCounter broadcast_bl(pair.second.size());
+      for (const auto& craned_id : request->craned_ids()) {
+        std::thread([&]() {
+          auto craned_stub  = g_craned_keeper->GetCranedStub(craned_id);
+          if (!craned_stub) {
+            CRANE_ERROR("Craned {} stub not found when broadcasting pmix port.", craned_id);
+            broadcast_bl.DecrementCount();
+            return;
+          }
+          auto result = craned_stub->ReceivePmixPort(request->job_id(), pair.second);
+          if (result != CraneErrCode::SUCCESS) {
+            CRANE_ERROR("Failed to broadcast pmix port to craned {} for job_id {}.", craned_id, request->job_id());
+          }
+          broadcast_bl.DecrementCount();
+        }).detach();
+      }
+      broadcast_bl.Wait();
+      pmix_broadcast_completed = true;
     }
-    m_ctld_server_->m_pmix_ports_.clear();
 
-    for (const auto& craned_id : request->craned_ids()) {
-      std::thread([craned_id, pmix_ports, request]() {
-        auto craned_stub  = g_craned_keeper->GetCranedStub(craned_id);
-        if (!craned_stub) return;
-        auto result = craned_stub->ReceivePmixPort(request->task_id(), pmix_ports);
-        if (result != CraneErrCode::SUCCESS) {
-          CRANE_DEBUG("taskId: #{} craned_id: {} failed.", request->task_id(), craned_id);
-        }
-      }).detach();
-    }
-  }
+  }, [&](auto&& ctor){
+    // First time insert
+    
+    PmixPortsMap value;
+    value.emplace(request->craned_id(), std::make_pair(request->step_id(), request->port()));
 
-  m_ctld_server_->m_pmix_mtx_.Unlock();
+    ctor(request->job_id(), std::move(value));
+  });
 
-
-  // for (const auto& craned_id : request->craned_ids()) {
-  //   auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-  //   if (!craned_stub) {
-  //     response->set_ok(false);
-  //     break;
-  //   }
-  //
-  //   auto result = craned_stub->ReceivePmixPort(request->task_id(), request->port(), request->craned_id());
-  //   if (!result) {
-  //     response->set_ok(false);
-  //     break;
-  //   }
-  // }
+  if (pmix_broadcast_completed) pmix_ports_map.erase(request->job_id());
 
   response->set_ok(true);
   return grpc::Status::OK;
