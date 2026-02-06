@@ -34,7 +34,7 @@ public:
 
   void InitChannelAndStub(const std::string& endpoint);
 
-  bool TerminateTasks();
+  void TerminateTasks();
 
   bool BroadcastPmixPort(const std::string& pmix_port);
 

@@ -33,7 +33,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Craned::NewStub(m_channel_);
 }
 
-bool CranedClient::TerminateTasks() {
+void CranedClient::TerminateTasks() {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 
@@ -41,14 +41,25 @@ bool CranedClient::TerminateTasks() {
   TerminateStepsRequest request;
   TerminateStepsReply reply;
 
-  request.mutable_task_id_list()->Add(g_pmix_server->GetTaskId());
+  auto &job_step_map = *request.mutable_job_step_ids_map();
 
-  if (m_stub_ == nullptr) return false;
+  job_step_map[g_pmix_server->GetJobId()]
+      .mutable_steps()->Add(g_pmix_server->GetStepId());
+
+  if (m_stub_ == nullptr) return;
 
   auto ok = m_stub_->TerminateSteps(&client_context, request, &reply);
-  if (!ok.ok() || !reply.ok()) return false;
+  if (!ok.ok()) {
+    CRANE_ERROR("Failed to terminate tasks, grpc error: {}", ok.error_message());
+    return;
+  }
 
-  return true;
+  if (!reply.ok()) {
+    CRANE_ERROR("Failed to terminate tasks, craned returned not ok, reason: {}",
+                reply.reason());
+    return;
+  }
+
 }
 
 bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
@@ -59,7 +70,7 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   BroadcastPmixPortRequest request;
   BroadcastPmixPortReply reply;
 
-  request.set_task_id(g_pmix_server->GetTaskId());
+  request.set_job_id(g_pmix_server->GetJobId());
   request.set_port(pmix_port);
   request.set_craned_id(g_pmix_server->GetHostname());
   request.mutable_craned_ids()->Add(g_pmix_server->GetNodeList().begin(),
@@ -68,9 +79,8 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   if (m_stub_ == nullptr) return false;
 
   auto ok = m_stub_->BroadcastPmixPort(&client_context, request, &reply);
-  if (!ok.ok() || !reply.ok()) return false; // Remove redundant boolean literal
 
-  return true;
+  return ok.ok() && reply.ok();
 }
 
 }  // namespace pmix

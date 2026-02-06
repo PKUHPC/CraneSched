@@ -353,7 +353,7 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
   return reply;
 }
 
-CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, const std::vector<std::pair<std::string, CranedId>>& pmix_ports) {
+CraneErrCode CranedStub::ReceivePmixPort(uint32_t job_id, const std::unordered_map<CranedId, std::pair<step_id_t, std::string>>& pmix_ports) {
   using crane::grpc::ReceivePmixPortRequest;
   using crane::grpc::ReceivePmixPortReply;
 
@@ -362,18 +362,19 @@ CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, const std::vector<std
   ReceivePmixPortRequest request;
   ReceivePmixPortReply reply;
 
-  request.set_task_id(task_id);
+  request.set_job_id(job_id);
   auto pmix_port_list = request.mutable_pmix_ports();
-  for (const auto& pmix_port : pmix_ports) {
+  for (const auto& [craned_id, value] : pmix_ports) {
     auto pmix_port_req = pmix_port_list->Add();
-    pmix_port_req->set_craned_id(pmix_port.second);
-    pmix_port_req->set_port(pmix_port.first);
+    pmix_port_req->set_craned_id(craned_id);
+    pmix_port_req->set_step_id(value.first);
+    pmix_port_req->set_port(value.second);
   }
 
   status = m_stub_->ReceivePmixPort(&context, request, &reply);
 
   if (!status.ok()) {
-    CRANE_ERROR("ReceivePmixPort to Craned {} failed: {} ",
+    CRANE_ERROR("ReceivePmixPort grpc to Craned {} failed: {} ",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
