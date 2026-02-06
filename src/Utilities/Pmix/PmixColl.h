@@ -18,7 +18,9 @@
 
 #pragma once
 
+#ifdef HAVE_PMIX
 #include <pmix.h>
+#endif
 
 #include <cassert>
 #include <cstring>
@@ -125,6 +127,7 @@ class Coll : public std::enable_shared_from_this<Coll> {
  public:
   Coll() = default;
 
+#ifdef HAVE_PMIX
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs);
 
   bool PmixCollContribLocal(CollType type, const std::string& data,
@@ -253,6 +256,7 @@ class Coll : public std::enable_shared_from_this<Coll> {
 
   CollTree m_tree_;
   CollRing m_ring_;
+#endif
 };
 
 } // namespace pmix

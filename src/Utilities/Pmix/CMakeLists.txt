@@ -34,8 +34,8 @@ target_link_libraries(Utility_Pmix PUBLIC
         crane_proto_lib
         fmt::fmt
         Utility_PublicHeader
-        libpmix
+        $<$<BOOL:${PMIx_FOUND}>:PMIx::pmix>
         phmap
         uvw
-        $<$<BOOL:${UCX_FOUND}>:${UCX_LIBS}>
+        $<$<BOOL:${UCX_FOUND}>:PkgConfig::UCX>
 )
