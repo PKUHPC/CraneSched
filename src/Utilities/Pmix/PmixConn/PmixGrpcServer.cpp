@@ -25,6 +25,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_PMIX
 grpc::ServerUnaryReactor* PmixGrpcServiceImpl::SendPmixRingMsg(
     grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
     crane::grpc::pmix::SendPmixRingMsgReply *response) {
@@ -190,5 +191,7 @@ bool PmixGrpcServer::Init(const Config& config) {
 
   return true;
 }
+
+#endif
 
 } // namespace pmix

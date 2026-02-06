@@ -99,7 +99,7 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   ip_addr = craned_id;
   // }
 
-  auto* craned = new PmixGrpcStub(this);
+  auto craned = std::make_shared<PmixGrpcStub>(this);
 
   grpc::ChannelArguments channel_args;
   // if (g_config.CompressedRpc)

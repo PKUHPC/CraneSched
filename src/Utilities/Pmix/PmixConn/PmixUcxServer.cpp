@@ -23,6 +23,7 @@
 
 namespace pmix {
 
+#ifdef HAVE_UCX
 void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
   crane::grpc::pmix::SendPmixRingMsgReq request;
   if (!request.ParseFromString(req_data)) return;
@@ -309,5 +310,7 @@ void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
     delete req;
   }
 }
+
+#endif
 
 }  // namespace pmix
