@@ -88,6 +88,7 @@ cbatch cbatch_test.sh
 - **--pod-user string**: 以指定 UID[:GID] 运行 Pod（默认：当 `--pod-userns=false` 时使用当前用户）
 - **--pod-userns**: 启用 Pod 用户命名空间（默认：`true`，容器内用户映射为 root）
 - **--pod-host-network**: 使用宿主机网络命名空间（默认：`false`）
+- **--pod-dns**: 为容器指定Dns服务器 仅支持IPv4格式 (默认：使用配置文件设置的Dns)
 
 ### 其他选项
 - **--interpreter string**: 指定脚本解释器（如 `/bin/bash`、`/usr/bin/python3`）

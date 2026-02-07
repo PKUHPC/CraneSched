@@ -196,6 +196,9 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 :   镜像拉取策略。支持：`Always`、`IfNotPresent`、`Never`。
 
+**--dns=&lt;ip-address&gt;**
+
+:   为容器设置使用的DNS解析服务器(仅支持ipv4格式)
 ### 示例
 
 基本容器作业：
