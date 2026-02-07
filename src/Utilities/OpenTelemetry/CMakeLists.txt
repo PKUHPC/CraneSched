@@ -14,7 +14,7 @@ if(CMAKE_TEST)
            opentelemetry-cpp::ostream_span_exporter
            opentelemetry-cpp::resources)
   
-  message(STATUS "OpenTelemetry tracing enabled (CMAKE_TEST=ON) - output to file")
+  message(STATUS "OpenTelemetry tracing enabled (CMAKE_TEST=ON)")
 else()
   message(STATUS "OpenTelemetry tracing disabled (CMAKE_TEST=OFF)")
 endif()
