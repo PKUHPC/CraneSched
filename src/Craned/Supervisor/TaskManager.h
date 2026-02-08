@@ -279,6 +279,13 @@ class PodInstance : public ITaskInstance {
   static CraneErrCode ResolveUserNsMapping_(
       const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
 
+  void SetPodLabels_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
+                     uid_t uid, job_id_t job_id, const std::string& job_name);
+  void SetPodAnnotations_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
+                          uid_t uid, job_id_t job_id,
+                          const std::string& job_name,
+                          const std::string& hostname);
+
   CraneErrCode SetPodSandboxConfig_(
       const crane::grpc::PodTaskAdditionalMeta& pod_meta);
   CraneErrCode PersistPodSandboxInfo_();
@@ -337,6 +344,10 @@ class ContainerInstance : public ITaskInstance {
   // NOTE: Called only after userns, run_as_* fields are set in config.
   CraneErrCode SetupIdMappedBindFs_(const PasswordEntry& pwd,
                                     cri::api::ContainerConfig* config);
+
+  void SetContainerLabels_(uid_t uid, job_id_t job_id, step_id_t step_id,
+                           const std::string& job_name,
+                           const std::string& step_name);
 
   CraneErrCode LoadPodSandboxInfo_(
       const crane::grpc::PodTaskAdditionalMeta* pod_meta);

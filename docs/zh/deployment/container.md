@@ -288,6 +288,11 @@ Container:
   TempDir: supervisor/containers/
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
+    Options: []
 ```
 
 修改配置文件后，保存并将其分发至各节点。
@@ -331,6 +336,13 @@ Container:
   # CRI 镜像服务套接字（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # DNS 配置
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
+    Options: []
+
   # SubUID/SubGID 配置
   SubId:
     # 是否自动管理 SubID 范围
@@ -356,6 +368,17 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | 容器运行期间的临时数据目录，相对于 `CraneBaseDir`。存储容器元数据、日志等 |
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
+
+### DNS 配置
+
+容器 DNS 用于向用户提供集群内容器的域名解析服务。鹤思会为每个容器生成独一的 hostname，需要容器 DNS 才能在其他容器中解析该 hostname。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|:-----|:-----|:-------|:-----|
+| `Dns.ClusterDomain` | string | `cluster.local` | 集群域名。会作为**首位**搜索域追加到 `searches` |
+| `Dns.Servers` | string[] | `['127.0.0.1']` | DNS 服务器列表（仅支持 IPv4） |
+| `Dns.Searches` | string[] | `[]` | 额外搜索域列表 |
+| `Dns.Options` | string[] | `[]` | DNS 选项（如 `ndots:5`） |
 
 ### SubID 配置
 

@@ -35,6 +35,7 @@
 #include <list>
 #include <ranges>
 #include <string>
+#include <string_view>
 
 #include "crane/PublicHeader.h"
 
@@ -129,6 +130,8 @@ std::string GenerateCommaSeparatedString(int val);
 uint32_t CalcConfigCRC32(const YAML::Node& config);
 
 std::string SlugDns1123(std::string_view s, size_t max_len);
+
+std::string NormalizeClusterDomain(std::string domain);
 
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string& cert_pem);

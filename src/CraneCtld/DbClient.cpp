@@ -1539,6 +1539,13 @@ void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
         }
       }));
     }
+    if (!v.dns_servers.empty()) {
+      pod_doc.append(kvp("dns_servers", [&v](sub_array dns_servers_array) {
+        for (const auto& dns_server : v.dns_servers) {
+          dns_servers_array.append(dns_server);
+        }
+      }));
+    }
   }));
 }
 
@@ -2209,6 +2216,17 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
         mapping.host_ip = host_ip_elem.get_string().value;
       }
       result.port_mappings.emplace_back(std::move(mapping));
+    }
+
+    if (auto dns_servers_elem = pod_doc["dns_servers"]; dns_servers_elem) {
+      if (dns_servers_elem.type() == bsoncxx::type::k_array) {
+        for (const auto& dns_server_val : dns_servers_elem.get_array().value) {
+          if (dns_server_val.type() != bsoncxx::type::k_string) continue;
+          result.dns_servers.emplace_back(dns_server_val.get_string().value);
+        }
+      } else if (dns_servers_elem.type() == bsoncxx::type::k_string) {
+        result.dns_servers.emplace_back(dns_servers_elem.get_string().value);
+      }
     }
 
   } catch (const std::exception& e) {

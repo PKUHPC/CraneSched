@@ -444,6 +444,7 @@ struct PodMetaInTask {
   gid_t run_as_group{0};
 
   std::vector<PortMapping> port_mappings;
+  std::vector<std::string> dns_servers;
 
   PodMetaInTask() = default;
   explicit PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs);

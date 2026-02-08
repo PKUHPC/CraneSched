@@ -88,6 +88,7 @@ Container-related options are used to create Pod jobs that support container exe
 - **--pod-user string**: Run Pod as specified UID[:GID] (default: current user when `--pod-userns=false`)
 - **--pod-userns**: Enable Pod user namespace (default: `true`, maps container user to root)
 - **--pod-host-network**: Use host network namespace (default: `false`)
+- **--pod-dns**: Set DNS servers for the Pod (IPv4 only). User-provided DNS servers are prepended (higher priority) before system defaults (default: `Container.Dns.Servers` in config file)
 
 ### Miscellaneous
 - **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
