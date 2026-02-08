@@ -2049,7 +2049,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 #ifdef CRANE_ENABLE_TEST
       if (g_tracer) {
         auto span = g_tracer->StartSpan("Task Status Change (finish)");
-        span->SetAttribute("service", "craned");
+        span->SetAttribute("service", "supervisor");
         span->SetAttribute("job_id", m_step_.job_id);
         span->SetAttribute("step_id", m_step_.step_id);
         span->SetAttribute("task_id", task_id);
@@ -2586,7 +2586,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 #ifdef CRANE_ENABLE_TEST
     if (g_tracer) {
       auto span = g_tracer->StartSpan("Execute Task");
-      span->SetAttribute("service", "craned");
+      span->SetAttribute("service", "supervisor");
       span->SetAttribute("job_id", m_step_.job_id);
       span->SetAttribute("step_id", m_step_.step_id);
       span->SetAttribute("task_id", task_id);
