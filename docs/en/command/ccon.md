@@ -198,7 +198,7 @@ These options configure container runtime parameters:
 
 **--dns=&lt;ip-address&gt;**
 
-:   Set the DNS servers for the container to use (IPv4 format only)
+:   Set DNS servers for the container (IPv4 only). User-provided DNS servers are prepended (higher priority) before system defaults.
 
 ### Examples
 

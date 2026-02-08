@@ -198,7 +198,7 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 **--dns=&lt;ip-address&gt;**
 
-:   为容器设置使用的DNS解析服务器(仅支持ipv4格式)
+:   为容器设置使用的 DNS 服务器（仅支持 IPv4）。指定的 DNS server 会被添加到系统默认 DNS 之前（优先级更高）。
 ### 示例
 
 基本容器作业：
