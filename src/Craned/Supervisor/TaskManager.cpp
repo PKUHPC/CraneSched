@@ -1274,7 +1274,7 @@ CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
         {std::string(kCriJobIdKey), std::to_string(g_config.JobId)},
         {std::string(kCriUidKey),
          std::to_string(m_parent_step_inst_->pwd.Uid())},
-        {std::string(kCriJobNameKey), g_config.StepSpec.name()}};
+        {std::string(kCriJobNameKey), g_config.JobName}};
 
     if (pod_meta != nullptr) {
       label_selector.insert(pod_meta->labels().begin(),

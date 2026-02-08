@@ -482,6 +482,7 @@ message PodTaskAdditionalMeta {
   }
 
   repeated PortMapping ports = 11;
+
   // User-specified DNS servers; prepended before system defaults.
   // Full DNSConfig (searches/options) is handled by backend only.
   repeated string dns_servers = 12;
