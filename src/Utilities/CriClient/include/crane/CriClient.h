@@ -48,12 +48,16 @@ namespace api = runtime::v1;
 inline constexpr std::string_view kCriDefaultPodNamespace = "cranesched";
 inline constexpr std::string_view kCriDefaultLabel = kCriDefaultPodNamespace;
 
-// Use for selecting containers created by CraneSched
+// Labels are used for selecting containers created by CraneSched
 inline constexpr std::string_view kCriLabelJobIdKey = "job_id";
 inline constexpr std::string_view kCriLabelStepIdKey = "step_id";
 inline constexpr std::string_view kCriLabelJobNameKey = "job_name";
 inline constexpr std::string_view kCriLabelStepNameKey = "step_name";
 inline constexpr std::string_view kCriLabelUidKey = "uid";
+inline constexpr std::string_view kCriLabelHostname = "hostname";
+
+// Annotations are used for external systems
+inline constexpr std::string_view kCriAnnotationPrefix = "cranesched.internal/";
 
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);

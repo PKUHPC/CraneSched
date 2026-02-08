@@ -703,15 +703,32 @@ void ParseConfig(int argc, char** argv) {
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
 
             if (container_config["Dns"]) {
-              const auto& dns = container_config["Dns"].as<std::string>();
-              ipv4_t dummy;
-              if (!crane::StrToIpv4(dns, &dummy)) {
-                CRANE_ERROR("Dns config is not a valid ipv4 address.");
-                std::exit(1);
+              auto dns_node = container_config["Dns"];
+              g_config.Container.Dns.ClusterDomain = YamlValueOr(
+                  dns_node["ClusterDomain"], std::string("cluster.local"));
+              if (dns_node["Servers"]) {
+                g_config.Container.Dns.Servers.clear();
+                for (const auto& s : dns_node["Servers"]) {
+                  auto addr = s.as<std::string>();
+                  ipv4_t dummy;
+                  if (!crane::StrToIpv4(addr, &dummy)) {
+                    CRANE_ERROR(
+                        "Dns.Servers entry '{}' is not a valid ipv4 address.",
+                        addr);
+                    std::exit(1);
+                  }
+                  g_config.Container.Dns.Servers.push_back(std::move(addr));
+                }
               }
-              g_config.Container.Dns = dns;
-            } else {
-              g_config.Container.Dns = "127.0.0.1";
+              if (dns_node["Searches"]) {
+                for (const auto& s : dns_node["Searches"])
+                  g_config.Container.Dns.Searches.push_back(
+                      s.as<std::string>());
+              }
+              if (dns_node["Options"]) {
+                for (const auto& s : dns_node["Options"])
+                  g_config.Container.Dns.Options.push_back(s.as<std::string>());
+              }
             }
 
             if (container_config["BindFs"]) {

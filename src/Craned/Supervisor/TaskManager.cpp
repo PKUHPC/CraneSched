@@ -745,12 +745,36 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   return CraneErrCode::SUCCESS;
 }
 
+void PodInstance::SetPodLabels_(
+    const crane::grpc::PodTaskAdditionalMeta& pod_meta, uid_t uid,
+    job_id_t job_id, const std::string& job_name, const std::string& hostname) {
+  m_pod_config_.mutable_labels()->insert(
+      {{std::string(cri::kCriLabelUidKey), std::to_string(uid)},
+       {std::string(cri::kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(cri::kCriLabelJobNameKey), job_name},
+       {std::string(cri::kCriLabelHostname), hostname}});
+  m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
+                                         pod_meta.labels().end());
+}
+
+void PodInstance::SetPodAnnotations_(
+    const crane::grpc::PodTaskAdditionalMeta& pod_meta, uid_t uid,
+    job_id_t job_id, const std::string& job_name, const std::string& hostname) {
+  auto prefix = [](std::string_view key) -> std::string {
+    return std::string(cri::kCriAnnotationPrefix) + std::string(key);
+  };
+
+  m_pod_config_.mutable_annotations()->insert(
+      {{prefix(cri::kCriLabelUidKey), std::to_string(uid)},
+       {prefix(cri::kCriLabelJobIdKey), std::to_string(job_id)},
+       {prefix(cri::kCriLabelJobNameKey), job_name},
+       {prefix(cri::kCriLabelHostname), hostname}});
+  m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
+                                              pod_meta.annotations().end());
+}
+
 CraneErrCode PodInstance::SetPodSandboxConfig_(
     const crane::grpc::PodTaskAdditionalMeta& pod_meta) {
-  using cri::kCriLabelJobIdKey;
-  using cri::kCriLabelJobNameKey;
-  using cri::kCriLabelUidKey;
-
   // All steps in a job share the same pod.
   job_id_t job_id = g_config.JobId;
 
@@ -773,24 +797,29 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   metadata->set_uid(std::move(h16));
 
   // labels
-  m_pod_config_.mutable_labels()->insert(
-      {{std::string(kCriLabelUidKey), std::to_string(uid)},
-       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-       {std::string(kCriLabelJobNameKey), job_name}});
-  m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
-                                         pod_meta.labels().end());
+  SetPodLabels_(pod_meta, uid, job_id, job_name, hostname);
 
-  m_pod_config_.mutable_annotations()->insert(
-      {{std::string(kCriLabelUidKey), std::to_string(uid)},
-       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-       {"hostname", hostname}});
-  m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
-                                              pod_meta.annotations().end());
+  // annotations
+  SetPodAnnotations_(pod_meta, uid, job_id, job_name, hostname);
 
   auto* dns_config = m_pod_config_.mutable_dns_config();
   dns_config->clear_servers();
-  auto dns = !pod_meta.dns().empty() ? pod_meta.dns() : g_config.Container.Dns;
-  dns_config->add_servers(std::move(dns));
+  dns_config->clear_searches();
+  dns_config->clear_options();
+
+  // User-specified DNS servers are prepended (higher priority)
+  for (const auto& s : pod_meta.dns_servers()) dns_config->add_servers(s);
+  // System default DNS servers follow
+  for (const auto& s : g_config.Container.Dns.Servers)
+    dns_config->add_servers(s);
+
+  // Prepend ClusterDomain as the first search domain
+  if (!g_config.Container.Dns.ClusterDomain.empty())
+    dns_config->add_searches(g_config.Container.Dns.ClusterDomain);
+  for (const auto& s : g_config.Container.Dns.Searches)
+    dns_config->add_searches(s);
+  for (const auto& s : g_config.Container.Dns.Options)
+    dns_config->add_options(s);
 
   // log directory
   m_pod_config_.set_log_directory(m_log_dir_);
@@ -1283,15 +1312,22 @@ CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
   return CraneErrCode::SUCCESS;
 }
 
+void ContainerInstance::SetContainerLabels_(uid_t uid, job_id_t job_id,
+                                            step_id_t step_id,
+                                            const std::string& job_name,
+                                            const std::string& step_name) {
+  m_container_config_.mutable_labels()->insert({
+      {std::string(cri::kCriLabelUidKey), std::to_string(uid)},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(job_id)},
+      {std::string(cri::kCriLabelStepIdKey), std::to_string(step_id)},
+      {std::string(cri::kCriLabelJobNameKey), job_name},
+      {std::string(cri::kCriLabelStepNameKey), step_name},
+  });
+}
+
 CraneErrCode ContainerInstance::SetContainerConfig_(
     const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
     const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
-  using cri::kCriLabelJobIdKey;
-  using cri::kCriLabelJobNameKey;
-  using cri::kCriLabelStepIdKey;
-  using cri::kCriLabelStepNameKey;
-  using cri::kCriLabelUidKey;
-
   // There is only one container in a step. So we use step_id and job_id here.
   job_id_t job_id = g_config.JobId;
   step_id_t step_id = g_config.StepId;
@@ -1302,18 +1338,12 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   uid_t uid = m_parent_step_inst_->pwd.Uid();
   gid_t gid = m_parent_step_inst_->pwd.Gid();
 
-  // Using job_id/step_id to generate unique name in pod metadata
+  // Using job_id/step_id to generate unique name in container metadata
   m_container_config_.mutable_metadata()->set_name(
       std::format("job-{}-{}", job_id, step_id));
 
   // labels
-  m_container_config_.mutable_labels()->insert({
-      {std::string(kCriLabelUidKey), std::to_string(uid)},
-      {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-      {std::string(kCriLabelStepIdKey), std::to_string(step_id)},
-      {std::string(kCriLabelJobNameKey), job_name},
-      {std::string(kCriLabelStepNameKey), step_name},
-  });
+  SetContainerLabels_(uid, job_id, step_id, job_name, step_name);
 
   // log_path (a relative path to pod log dir)
   m_container_config_.set_log_path(m_log_file_.filename());

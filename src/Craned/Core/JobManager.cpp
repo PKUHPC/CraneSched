@@ -638,7 +638,14 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
-      container_conf->set_dns(g_config.Container.Dns);
+      auto* dns_conf = container_conf->mutable_dns_config();
+      dns_conf->set_cluster_domain(g_config.Container.Dns.ClusterDomain);
+      for (const auto& s : g_config.Container.Dns.Servers)
+        dns_conf->add_servers(s);
+      for (const auto& s : g_config.Container.Dns.Searches)
+        dns_conf->add_searches(s);
+      for (const auto& s : g_config.Container.Dns.Options)
+        dns_conf->add_options(s);
       if (g_config.Container.BindFs.Enabled) {
         auto* bindfs_conf = container_conf->mutable_bindfs();
         bindfs_conf->set_bindfs_binary(
