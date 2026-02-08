@@ -704,8 +704,12 @@ void ParseConfig(int argc, char** argv) {
 
             if (container_config["Dns"]) {
               auto dns_node = container_config["Dns"];
-              g_config.Container.Dns.ClusterDomain = YamlValueOr(
-                  dns_node["ClusterDomain"], std::string("cluster.local"));
+
+              g_config.Container.Dns.ClusterDomain =
+                  util::NormalizeClusterDomain(
+                      YamlValueOr(dns_node["ClusterDomain"],
+                                  kDefaultContainerClusterDomain));
+
               if (dns_node["Servers"]) {
                 g_config.Container.Dns.Servers.clear();
                 for (const auto& s : dns_node["Servers"]) {

@@ -278,8 +278,7 @@ class PodInstance : public ITaskInstance {
       const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
 
   void SetPodLabels_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
-                     uid_t uid, job_id_t job_id, const std::string& job_name,
-                     const std::string& hostname);
+                     uid_t uid, job_id_t job_id, const std::string& job_name);
   void SetPodAnnotations_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
                           uid_t uid, job_id_t job_id,
                           const std::string& job_name,

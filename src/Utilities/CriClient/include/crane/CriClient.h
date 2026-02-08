@@ -49,12 +49,15 @@ inline constexpr std::string_view kCriDefaultPodNamespace = "cranesched";
 inline constexpr std::string_view kCriDefaultLabel = kCriDefaultPodNamespace;
 
 // Labels are used for selecting containers created by CraneSched
-inline constexpr std::string_view kCriLabelJobIdKey = "job_id";
-inline constexpr std::string_view kCriLabelStepIdKey = "step_id";
-inline constexpr std::string_view kCriLabelJobNameKey = "job_name";
-inline constexpr std::string_view kCriLabelStepNameKey = "step_name";
-inline constexpr std::string_view kCriLabelUidKey = "uid";
-inline constexpr std::string_view kCriLabelHostname = "hostname";
+inline constexpr std::string_view kCriJobIdKey = "job_id";
+inline constexpr std::string_view kCriStepIdKey = "step_id";
+inline constexpr std::string_view kCriJobNameKey = "job_name";
+inline constexpr std::string_view kCriStepNameKey = "step_name";
+inline constexpr std::string_view kCriUidKey = "uid";
+
+// These keys are not added in labels but in annotations.
+inline constexpr std::string_view kCriHostnameKey = "hostname";
+inline constexpr std::string_view kCriFQDNKey = "fqdn";
 
 // Annotations are used for external systems
 inline constexpr std::string_view kCriAnnotationPrefix = "cranesched.internal/";

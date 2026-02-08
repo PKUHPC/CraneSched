@@ -747,12 +747,11 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
 
 void PodInstance::SetPodLabels_(
     const crane::grpc::PodTaskAdditionalMeta& pod_meta, uid_t uid,
-    job_id_t job_id, const std::string& job_name, const std::string& hostname) {
+    job_id_t job_id, const std::string& job_name) {
   m_pod_config_.mutable_labels()->insert(
-      {{std::string(cri::kCriLabelUidKey), std::to_string(uid)},
-       {std::string(cri::kCriLabelJobIdKey), std::to_string(job_id)},
-       {std::string(cri::kCriLabelJobNameKey), job_name},
-       {std::string(cri::kCriLabelHostname), hostname}});
+      {{std::string(cri::kCriUidKey), std::to_string(uid)},
+       {std::string(cri::kCriJobIdKey), std::to_string(job_id)},
+       {std::string(cri::kCriJobNameKey), job_name}});
   m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
                                          pod_meta.labels().end());
 }
@@ -764,11 +763,15 @@ void PodInstance::SetPodAnnotations_(
     return std::string(cri::kCriAnnotationPrefix) + std::string(key);
   };
 
+  std::string fqdn =
+      std::format("{}.{}", hostname, g_config.Container.Dns.ClusterDomain);
+
   m_pod_config_.mutable_annotations()->insert(
-      {{prefix(cri::kCriLabelUidKey), std::to_string(uid)},
-       {prefix(cri::kCriLabelJobIdKey), std::to_string(job_id)},
-       {prefix(cri::kCriLabelJobNameKey), job_name},
-       {prefix(cri::kCriLabelHostname), hostname}});
+      {{prefix(cri::kCriUidKey), std::to_string(uid)},
+       {prefix(cri::kCriJobIdKey), std::to_string(job_id)},
+       {prefix(cri::kCriJobNameKey), job_name},
+       {prefix(cri::kCriHostnameKey), hostname},
+       {prefix(cri::kCriFQDNKey), std::move(fqdn)}});
   m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
                                               pod_meta.annotations().end());
 }
@@ -797,7 +800,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   metadata->set_uid(std::move(h16));
 
   // labels
-  SetPodLabels_(pod_meta, uid, job_id, job_name, hostname);
+  SetPodLabels_(pod_meta, uid, job_id, job_name);
 
   // annotations
   SetPodAnnotations_(pod_meta, uid, job_id, job_name, hostname);
@@ -814,8 +817,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
     dns_config->add_servers(s);
 
   // Prepend ClusterDomain as the first search domain
-  if (!g_config.Container.Dns.ClusterDomain.empty())
-    dns_config->add_searches(g_config.Container.Dns.ClusterDomain);
+  dns_config->add_searches(g_config.Container.Dns.ClusterDomain);
   for (const auto& s : g_config.Container.Dns.Searches)
     dns_config->add_searches(s);
   for (const auto& s : g_config.Container.Dns.Options)
@@ -1124,9 +1126,9 @@ CraneErrCode ContainerInstance::Prepare() {
 }
 
 CraneErrCode ContainerInstance::Spawn() {
-  using cri::kCriLabelJobIdKey;
-  using cri::kCriLabelStepIdKey;
-  using cri::kCriLabelUidKey;
+  using cri::kCriJobIdKey;
+  using cri::kCriStepIdKey;
+  using cri::kCriUidKey;
 
   job_id_t job_id = m_parent_step_inst_->job_id;
   step_id_t step_id = m_parent_step_inst_->step_id;
@@ -1150,10 +1152,9 @@ CraneErrCode ContainerInstance::Spawn() {
               ev.containers_statuses() |
               std::views::filter([](const auto& status) {
                 return cri::CriClient::ParseAndCompareLabel(
-                           status, std::string(kCriLabelJobIdKey),
-                           g_config.JobId) &&
+                           status, std::string(kCriJobIdKey), g_config.JobId) &&
                        cri::CriClient::ParseAndCompareLabel(
-                           status, std::string(kCriLabelStepIdKey),
+                           status, std::string(kCriStepIdKey),
                            g_config.StepId) &&
                        (status.state() ==
                             cri::api::ContainerState::CONTAINER_EXITED ||
@@ -1224,9 +1225,9 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
 CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
     const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
   using cri::kCriDefaultLabel;
-  using cri::kCriLabelJobIdKey;
-  using cri::kCriLabelJobNameKey;
-  using cri::kCriLabelUidKey;
+  using cri::kCriJobIdKey;
+  using cri::kCriJobNameKey;
+  using cri::kCriUidKey;
 
   auto* cri_client = m_parent_step_inst_->GetCriClient();
   auto pod_config_file =
@@ -1270,10 +1271,10 @@ CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
   if (pod_id.empty()) {
     std::unordered_map<std::string, std::string> label_selector{
         {std::string(kCriDefaultLabel), "true"},
-        {std::string(kCriLabelJobIdKey), std::to_string(g_config.JobId)},
-        {std::string(kCriLabelUidKey),
+        {std::string(kCriJobIdKey), std::to_string(g_config.JobId)},
+        {std::string(kCriUidKey),
          std::to_string(m_parent_step_inst_->pwd.Uid())},
-        {std::string(kCriLabelJobNameKey), g_config.StepSpec.name()}};
+        {std::string(kCriJobNameKey), g_config.StepSpec.name()}};
 
     if (pod_meta != nullptr) {
       label_selector.insert(pod_meta->labels().begin(),
@@ -1317,11 +1318,11 @@ void ContainerInstance::SetContainerLabels_(uid_t uid, job_id_t job_id,
                                             const std::string& job_name,
                                             const std::string& step_name) {
   m_container_config_.mutable_labels()->insert({
-      {std::string(cri::kCriLabelUidKey), std::to_string(uid)},
-      {std::string(cri::kCriLabelJobIdKey), std::to_string(job_id)},
-      {std::string(cri::kCriLabelStepIdKey), std::to_string(step_id)},
-      {std::string(cri::kCriLabelJobNameKey), job_name},
-      {std::string(cri::kCriLabelStepNameKey), step_name},
+      {std::string(cri::kCriUidKey), std::to_string(uid)},
+      {std::string(cri::kCriJobIdKey), std::to_string(job_id)},
+      {std::string(cri::kCriStepIdKey), std::to_string(step_id)},
+      {std::string(cri::kCriJobNameKey), job_name},
+      {std::string(cri::kCriStepNameKey), step_name},
   });
 }
 

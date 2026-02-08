@@ -28,6 +28,7 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
+#include "crane/String.h"
 
 using Craned::Supervisor::g_config;
 
@@ -131,9 +132,11 @@ int InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
+
     if (msg.container_config().has_dns_config()) {
       const auto& dc = msg.container_config().dns_config();
-      g_config.Container.Dns.ClusterDomain = dc.cluster_domain();
+      g_config.Container.Dns.ClusterDomain =
+          util::NormalizeClusterDomain(dc.cluster_domain());
       g_config.Container.Dns.Servers.assign(dc.servers().begin(),
                                             dc.servers().end());
       g_config.Container.Dns.Searches.assign(dc.searches().begin(),
@@ -141,6 +144,7 @@ int InitFromStdin(int argc, char** argv) {
       g_config.Container.Dns.Options.assign(dc.options().begin(),
                                             dc.options().end());
     }
+
     g_config.Container.BindFs.Enabled = msg.container_config().has_bindfs();
     if (g_config.Container.BindFs.Enabled) {
       const auto& bindfs_conf = msg.container_config().bindfs();

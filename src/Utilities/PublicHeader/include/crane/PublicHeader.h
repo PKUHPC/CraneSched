@@ -101,6 +101,7 @@ inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 
 inline const char* const kDefaultContainerTempDir = "craned/container";
+inline const char* const kDefaultContainerClusterDomain = "cluster.local";
 
 inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
 inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
