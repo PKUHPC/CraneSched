@@ -701,17 +701,16 @@ void ParseConfig(int argc, char** argv) {
                 fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
-            
-            if (container_config["Dns"]){
-              auto dns = container_config["Dns"].as<std::string>();
+
+            if (container_config["Dns"]) {
+              const auto& dns = container_config["Dns"].as<std::string>();
               ipv4_t dummy;
-              bool is_ok = !crane::StrToIpv4(dns, &dummy);
-              if (!is_ok){
-              CRANE_ERROR("Dns is invaild!");
-              std::exit(1);
+              if (!crane::StrToIpv4(dns, &dummy)) {
+                CRANE_ERROR("Dns config is not a valid ipv4 address.");
+                std::exit(1);
               }
               g_config.Container.Dns = dns;
-            }else{
+            } else {
               g_config.Container.Dns = "127.0.0.1";
             }
 
