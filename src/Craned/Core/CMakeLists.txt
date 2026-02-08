@@ -17,4 +17,5 @@ target_link_libraries(craned
     PRIVATE
         craned_common
         Utility_CriClient
+        crane_tracer
 )
