@@ -2302,7 +2302,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string, bool>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>             /*41-42*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
