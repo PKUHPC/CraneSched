@@ -384,12 +384,11 @@ void StartServer(int grpc_output_fd) {
       RunPrologEpilogArgs run_prolog_args{
           .scripts = g_config.JobLifecycleHook.Prologs,
           .envs = g_config.JobEnv,
+          .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
           .run_uid = 0,
           .run_gid = 0,
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
         run_prolog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
 

@@ -30,6 +30,7 @@
 #include <future>
 #include <string>
 #include <vector>
+#include <poll.h>
 
 #include "absl/strings/str_split.h"
 #include "crane/Logger.h"
@@ -422,40 +423,26 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+void kill_pg(pid_t pid) {
+  killpg(pid, SIGTERM);
+	usleep(10000);
+	killpg(pid, SIGKILL);
+}
+
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     const RunPrologEpilogArgs& args) {
-  auto read_stream = [](int fd, uint64_t max_size) {
-    std::string out;
-    out.reserve(max_size);
-
-    char buf[4096];
-    ssize_t bytes_read;
-
-    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
-      size_t space_left = max_size - out.size();
-      if (bytes_read > static_cast<ssize_t>(space_left)) {
-        out.append(buf, space_left);
-        break;
-      }
-
-      out.append(buf, bytes_read);
-
-      if (out.size() >= max_size) {
-        break;
-      }
-    }
-
-    return out;
-  };
 
   std::string output;
-
+  
   auto start_time = std::chrono::steady_clock::now();
+  auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(args.timeout_sec));
 
   for (const auto& script : args.scripts) {
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::steady_clock::now() - start_time);
-    if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
+    bool send_terminate = true;
+    
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start_time);
+    if (elapsed >= timeout) {
       CRANE_ERROR("Total timeout ({}s) reached before running {}.",
                   args.timeout_sec, script);
       return std::unexpected(
@@ -480,33 +467,104 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
-    if (pid > 0) {
+    if (pid > 0) { // parent proc
       close(stdout_pipe[1]);
+      int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
+      fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
 
       int status = 0;
-      auto fut = std::async(std::launch::async, [pid, &status]() {
-        return waitpid(pid, &status, 0);
-      });
+      while(true) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start_time);
+        if (elapsed >= timeout) {
+          CRANE_TRACE("{} Timeout.", script);
+          break;
+        }
 
-      auto now = std::chrono::steady_clock::now();
-      auto elapsed_now =
-          std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
-      uint32_t remaining_time = (args.timeout_sec > elapsed_now.count())
-                                    ? args.timeout_sec - elapsed_now.count()
-                                    : 0;
-      bool child_exited = false;
+        uint64_t remaining_time = timeout.count() - elapsed.count();
+  
+        struct pollfd fds;
+        fds.fd = stdout_pipe[0];
+        fds.events = POLLIN | POLLHUP | POLLRDHUP;
+        fds.revents = 0;
+        int max_poll_time_ms = 100;
+        int timeout_ms = static_cast<int>(std::min<uint64_t>(remaining_time, max_poll_time_ms));
 
-      if (args.timeout_sec == 0) {
-        if (fut.get() == pid) child_exited = true;
-      } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
-                 std::future_status::ready) {
-        if (fut.get() == pid) child_exited = true;
+        int pret = poll(&fds, 1, timeout_ms); // Poll with timeout based on remaining time
+        if (pret == 0) {
+          continue;
+        } else if (pret < 0) {
+          if (errno == EAGAIN || errno == EINTR)
+            continue;
+          CRANE_ERROR("{} poll() failed: {}", script, strerror(errno));
+          break;
+        }
+        if ((fds.revents & POLLIN) == 0) {
+          send_terminate = false;
+          break;
+        }
+        char buf[512];
+        auto bytes_read = read(stdout_pipe[0], buf, sizeof(buf));
+        if (bytes_read == 0) {
+          send_terminate = false;
+          break;
+        } else if (bytes_read < 0) {
+          if (errno == EAGAIN || errno == EWOULDBLOCK)
+            continue;
+          send_terminate = false;
+          CRANE_ERROR("{} read() failed: {}", script, strerror(errno));
+          break;
+        } else {
+          size_t remain = args.output_size > output.size()
+                              ? args.output_size - output.size()
+                              : 0;
+          if (remain > 0)
+            output.append(buf, std::min<size_t>(bytes_read, remain));
+        }
       }
 
-      if (!child_exited) {
-        kill(pid, SIGKILL);
+      close(stdout_pipe[0]);
+
+      if (send_terminate) {
+        kill_pg(pid);
         waitpid(pid, &status, 0);
-        CRANE_TRACE("{} Timeout.", script);
+      } else {
+        /*
+		     * If the STDOUT is closed from the script we may reach
+		     * this point without any input in read_fd, so just wait
+		     * for the process here until max_wait.
+		     */
+        int options = WNOHANG;
+        int rc;
+        int delay = 10;
+        int max_delay = 1000;
+        bool killed_pg = false;
+        while((rc = waitpid(pid, &status, options)) <= 0) {
+          if (rc < 0) {
+            if (errno == EINTR)
+              continue;
+            CRANE_ERROR("{} waitpid() failed: {}", script, strerror(errno));
+            break;
+          }
+
+          auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start_time);
+          if (elapsed >= timeout) {
+            CRANE_TRACE("{} Timeout while waiting for process to exit.", script);
+            kill_pg(pid);
+            options = 0;
+            killed_pg = true;
+            break;
+          }
+
+          uint64_t remaining_time = timeout.count() - elapsed.count();
+          poll(NULL, 0, delay);
+          delay = std::min<int>(
+            max_delay,
+            std::max<int>(1, std::min<int>(delay * 2, remaining_time))
+          );
+        }
+        if (!killed_pg) kill_pg(pid);
       }
 
       int exit_code = 0;
@@ -523,19 +581,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         signal_num = 0;
       }
 
-      auto tmp = read_stream(stdout_pipe[0], args.output_size);
-      if (!tmp.empty()) {
-        size_t remaining = args.output_size - output.size();
-        if (remaining > 0) {
-          if (tmp.size() > remaining) {
-            output.append(tmp, 0, remaining);
-          } else {
-            output.append(tmp);
-          }
-        }
-      }
-
-      close(stdout_pipe[0]);
 
       if (exit_code != 0) {
         CRANE_TRACE("{} Failed (exit status {}:{}), output: {}.", script,

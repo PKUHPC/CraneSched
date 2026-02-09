@@ -1727,12 +1727,12 @@ CraneErrCode ProcInstance::Spawn() {
       RunPrologEpilogArgs run_prolog_args{
           .scripts = g_config.JobLifecycleHook.TaskPrologs,
           .envs = m_env_,
+          .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
           .run_uid = m_parent_step_inst_->uid,
           .run_gid = m_parent_step_inst_->gids[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
         run_prolog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
@@ -1967,12 +1967,11 @@ TaskManager::~TaskManager() {
     RunPrologEpilogArgs run_epilog_args{
         .scripts = g_config.JobLifecycleHook.Epilogs,
         .envs = g_config.JobEnv,
+        .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
         .run_uid = 0,
         .run_gid = 0,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-    if (g_config.JobLifecycleHook.EpilogTimeout > 0)
-      run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
-    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
       run_epilog_args.timeout_sec =
           g_config.JobLifecycleHook.PrologEpilogTimeout;
 
@@ -2312,12 +2311,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
                                      task->GetParentStep().env().end()},
+          .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
-        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
@@ -2336,12 +2334,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .scripts = g_config.JobLifecycleHook.TaskEpilogs,
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
                                      task->GetParentStep().env().end()},
+          .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
-        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);

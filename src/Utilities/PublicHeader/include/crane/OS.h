@@ -46,7 +46,7 @@ struct NodeSpecInfo {
 struct RunPrologEpilogArgs {
   std::vector<std::string> scripts;
   std::unordered_map<std::string, std::string> envs;
-  uint32_t timeout_sec{0};
+  uint32_t timeout_sec{60};
   uid_t run_uid;
   gid_t run_gid;
   uint64_t output_size;
@@ -105,6 +105,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
                             std::filesystem::path const& p);
 
 absl::Time GetSystemBootTime();
+
+void kill_pg(pid_t pid);
 
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     const RunPrologEpilogArgs& args);

@@ -1156,16 +1156,16 @@ void TaskScheduler::ScheduleThread_() {
             RunPrologEpilogArgs run_prolog_args{
                 .scripts = g_config.JobLifecycleHook.CranectldPrologs,
                 .envs = env,
+                .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
                 .run_uid = 0,
                 .run_gid = 0,
                 .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-            if (g_config.JobLifecycleHook.PrologTimeout) {
-              run_prolog_args.timeout_sec =
+                run_prolog_args.timeout_sec =
                   g_config.JobLifecycleHook.PrologTimeout;
-            } else {
-              run_prolog_args.timeout_sec =
-                  g_config.JobLifecycleHook.PrologEpilogTimeout;
-            }
+              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
+                run_prolog_args.timeout_sec =
+                    g_config.JobLifecycleHook.PrologEpilogTimeout;
+              }
             CRANE_TRACE(
                 "#{}: Running CraneCtldProlog as UID {} with timeout {}s",
                 job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
@@ -3409,13 +3409,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
               RunPrologEpilogArgs run_epilog_ctld_args{
                   .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
                   .envs = env_copy,
+                  .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
                   .run_uid = 0,
                   .run_gid = 0,
                   .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-              if (g_config.JobLifecycleHook.EpilogTimeout) {
-                run_epilog_ctld_args.timeout_sec =
-                    g_config.JobLifecycleHook.EpilogTimeout;
-              } else {
+              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
                 run_epilog_ctld_args.timeout_sec =
                     g_config.JobLifecycleHook.PrologEpilogTimeout;
               }
