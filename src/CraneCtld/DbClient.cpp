@@ -2242,6 +2242,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
 
+  bool using_default_wckey = false;
+  if (g_config.WckeyValid && task_to_ctld.wckey().empty()) {
+    using_default_wckey = true;
+  }
+
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
     env_doc << entry.first << entry.second;
@@ -2262,10 +2267,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
-  // 40 licenses_alloc nodename_list wckey
+  // 40 licenses_alloc nodename_list wckey        using_default_wckey
 
   // clang-format off
-  std::array<std::string, 43> fields{
+  std::array<std::string, 44> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -2283,7 +2288,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info", 
     // 40 - 44
-    "licenses_alloc", "nodename_list", "wckey"
+    "licenses_alloc", "nodename_list", "wckey", "using_default_wckey"
   };
   // clang-format on
 
@@ -2297,7 +2302,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>                   /*41-42*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -2338,7 +2343,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey()};
+             task_to_ctld.wckey(), using_default_wckey};
 
   return DocumentConstructor_(fields, values);
 }
