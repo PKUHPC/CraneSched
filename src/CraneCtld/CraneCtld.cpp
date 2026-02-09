@@ -185,11 +185,11 @@ void ParseConfig(int argc, char** argv) {
             &g_config.JobLifecycleHook.CranectldEpilogs);
 
         g_config.JobLifecycleHook.PrologTimeout =
-            YamlValueOr<uint32_t>(hook_config["PrologTimeout"], 0);
+            YamlValueOr<uint32_t>(hook_config["PrologTimeout"], 60);
         g_config.JobLifecycleHook.EpilogTimeout =
-            YamlValueOr<uint32_t>(hook_config["EpilogTimeout"], 0);
+            YamlValueOr<uint32_t>(hook_config["EpilogTimeout"], 60);
         g_config.JobLifecycleHook.PrologEpilogTimeout =
-            YamlValueOr<uint32_t>(hook_config["PrologEpilogTimeout"], 0);
+            YamlValueOr<uint32_t>(hook_config["PrologEpilogTimeout"], 60);
         g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
             hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
       }
