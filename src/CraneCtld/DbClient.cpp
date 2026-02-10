@@ -4242,18 +4242,18 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
-             std::optional<ContainerMetaInTask>, bool,             /*38-39*/
-             std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string, bool, std::string>             /*41-44*/
-      values{                                                      // 0-4
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,     /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,    /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
+             std::string, int32_t, std::string, std::string, bool,  /*25-29*/
+             int32_t, std::string, std::string, bool, double,       /*30-34*/
+             int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
+             std::optional<ContainerMetaInTask>, bool,              /*38-39*/
+             std::unordered_map<std::string, uint32_t>,             /*40*/
+             bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
+      values{                                                       // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
              task_to_ctld.account(),
@@ -4293,7 +4293,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey(), using_default_wckey,g_config.CraneClusterName};
+             task_to_ctld.wckey(), using_default_wckey,
+             g_config.CraneClusterName};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4365,18 +4366,18 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
-             std::optional<ContainerMetaInTask>, bool,             /*38-39*/
-             std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string, bool, std::string>             /*41-44*/
-      values{                                                      // 0-4
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,     /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,    /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
+             std::string, int32_t, std::string, std::string, bool,  /*25-29*/
+             int32_t, std::string, std::string, bool, double,       /*30-34*/
+             int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
+             std::optional<ContainerMetaInTask>, bool,              /*38-39*/
+             std::unordered_map<std::string, uint32_t>,             /*40*/
+             bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
+      values{                                                       // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
@@ -4406,7 +4407,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 40-44
              task->licenses_count,
              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
-             task->using_default_wckey,g_config.CraneClusterName};
+             task->using_default_wckey, g_config.CraneClusterName};
 
   return DocumentConstructor_(fields, values);
 }
