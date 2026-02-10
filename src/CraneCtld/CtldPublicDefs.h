@@ -724,6 +724,8 @@ struct DaemonStepInCtld : StepInCtld {
   std::string account;
   std::string qos;
 
+  bool is_prolog_running{false};
+
   ~DaemonStepInCtld() override = default;
 
   void InitFromJob(const TaskInCtld& job);
@@ -738,6 +740,8 @@ struct DaemonStepInCtld : StepInCtld {
                    const std::string& reason, const CranedId& craned_id,
                    const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
+
+  bool PrologComplete() const;
 
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;

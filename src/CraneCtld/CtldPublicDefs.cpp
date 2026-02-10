@@ -565,7 +565,8 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
-    this->NodeConfigured(craned_id);
+    if (!craned_id.empty())
+      this->NodeConfigured(craned_id);
 
     switch (new_status) {
     case crane::grpc::TaskStatus::Running:
@@ -582,7 +583,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                   util::StepStatusToString(new_status));
     }
 
-    if (this->AllNodesConfigured()) {
+    if (this->AllNodesConfigured() && this->PrologComplete()) {
       if (this->PrevErrorStatus()) {
         job_finished = true;
       } else {
@@ -702,6 +703,12 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   }
 
   return std::nullopt;
+}
+
+bool DaemonStepInCtld::PrologComplete() const {
+  if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
+
+  return !is_prolog_running;
 }
 
 void DaemonStepInCtld::RecoverFromDb(

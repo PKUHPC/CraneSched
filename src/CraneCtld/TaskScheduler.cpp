@@ -1145,55 +1145,6 @@ void TaskScheduler::ScheduleThread_() {
       Mutex thread_pool_mtx;
       HashSet<task_id_t> failed_job_id_set;
 
-      if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
-        // TODO: cbatch job must be requeue
-        begin = std::chrono::steady_clock::now();
-        absl::BlockingCounter prolog_bl(jobs_to_run.size());
-        for (auto& job : jobs_to_run) {
-          const task_id_t job_id = job->TaskId();
-          g_thread_pool->detach_task([&, job_id, env = job->env]() {
-            // run prolog ctld script
-            RunPrologEpilogArgs run_prolog_args{
-                .scripts = g_config.JobLifecycleHook.CranectldPrologs,
-                .envs = env,
-                .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
-                .run_uid = 0,
-                .run_gid = 0,
-                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-                run_prolog_args.timeout_sec =
-                  g_config.JobLifecycleHook.PrologTimeout;
-              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
-                run_prolog_args.timeout_sec =
-                    g_config.JobLifecycleHook.PrologEpilogTimeout;
-              }
-            CRANE_TRACE(
-                "#{}: Running CraneCtldProlog as UID {} with timeout {}s",
-                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
-            auto run_prolog_result =
-                util::os::RunPrologOrEpiLog(run_prolog_args);
-            if (!run_prolog_result) {
-              auto status = run_prolog_result.error();
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
-                          job_id, status.exit_code, status.signal_num);
-              thread_pool_mtx.Lock();
-              failed_job_id_set.emplace(job_id);
-              thread_pool_mtx.Unlock();
-            } else {
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
-            }
-            prolog_bl.DecrementCount();
-          });
-        }
-        prolog_bl.Wait();
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "CraneCtldProlog running costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-      }
-
-      begin = std::chrono::steady_clock::now();
-
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
       // Map for AllocJobs rpc.
@@ -1216,7 +1167,6 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
-        if (failed_job_id_set.contains(job->TaskId())) continue;
         // IMPORTANT: job must be put into running_task_map before any
         // time-consuming operation, otherwise TaskStatusChange RPC will come
         // earlier before job is put into running_task_map.
@@ -1231,10 +1181,11 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
-        if (failed_job_id_set.contains(job->TaskId())) continue;
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*job);
+        if (!g_config.JobLifecycleHook.CranectldPrologs.empty())
+          daemon_step->is_prolog_running = true;
         step_in_ctld_vec.push_back(daemon_step.get());
         job->SetDaemonStep(std::move(daemon_step));
       }
@@ -1246,7 +1197,6 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
-          if (failed_job_id_set.contains(job->TaskId())) continue;
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
             craned_alloc_job_map[craned_id].push_back(
@@ -1387,9 +1337,13 @@ void TaskScheduler::ScheduleThread_() {
       // queue.
 
       // Set succeed tasks status and do callbacks.
+      std::vector<job_id_t> to_run_prolog_job_ids;
+      to_run_prolog_job_ids.reserve(jobs_created.size());
       for (auto& job : jobs_created) {
         job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                      job->StartTime());
+        if (!g_config.JobLifecycleHook.CranectldPrologs.empty())
+          to_run_prolog_job_ids.emplace_back(job->TaskId());
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
       }
@@ -1416,6 +1370,63 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(schedule_end -
                                                                 schedule_begin)
               .count());
+
+      // CraneCtldProlog must be executed prior to task execution, 
+      // specifically during the configure phase, and it requires the running map 
+      // for the task to be present. At present, the framework can only launch the 
+      // CraneCtldProlog thread after the step has started and before the task is executed.
+      if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
+        // TODO: cbatch job must be requeue
+        for (auto& job_id : to_run_prolog_job_ids) {
+          auto& job = m_running_task_map_.at(job_id);
+          
+          g_thread_pool->detach_task([this, job_id, env = job->env]() {
+            // run prolog ctld script
+            RunPrologEpilogArgs run_prolog_args{
+                .scripts = g_config.JobLifecycleHook.CranectldPrologs,
+                .envs = env,
+                .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
+                .run_uid = 0,
+                .run_gid = 0,
+                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+                run_prolog_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologTimeout;
+              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
+                run_prolog_args.timeout_sec =
+                    g_config.JobLifecycleHook.PrologEpilogTimeout;
+              }
+            CRANE_TRACE(
+                "[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
+                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
+            auto run_prolog_result =
+                util::os::RunPrologOrEpiLog(run_prolog_args);
+            
+            absl::MutexLock running_lk(&m_running_task_map_mtx_);
+            auto iter = m_running_task_map_.find(job_id);
+            if (iter == m_running_task_map_.end()) {
+              CRANE_DEBUG("[Job #{}]: Job not found in m_running_task_map_ when running CraneCtldProlog," 
+                " may be canceled.", job_id);
+              return;
+            }
+            auto& job = iter->second;
+            auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+            job->DaemonStep()->is_prolog_running = false;
+            if (!run_prolog_result) {
+              auto status = run_prolog_result.error();
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
+                          job_id, status.exit_code, status.signal_num);
+              this->StepStatusChangeAsync(job_id, kDaemonStepId, "",
+                                  crane::grpc::TaskStatus::Failed, ExitCode::EC_PROLOG_ERR,
+                                  "CraneCtldPrologError", now);
+            } else {
+              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
+              this->StepStatusChangeAsync(job_id, kDaemonStepId, "",
+                                  crane::grpc::TaskStatus::Running, 0,
+                                  "", now);
+            }
+          });
+        }
+      }
 
       // Note: If unlock pending_map here, jobs may be unable to be find
       // before transferring to DB.

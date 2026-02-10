@@ -438,6 +438,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
   auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(args.timeout_sec));
 
   for (const auto& script : args.scripts) {
+    // TODO: 判断是否是绝对路径
     bool send_terminate = true;
     
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
