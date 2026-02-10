@@ -213,10 +213,8 @@ Container:
   # DNS configuration for containers
   Dns:
     ClusterDomain: "cluster.local"
-    Servers:
-      - "127.0.0.1"
-    Searches:
-      - "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
     Options: []
   # SubID configuration
   SubId:

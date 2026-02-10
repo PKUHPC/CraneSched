@@ -338,7 +338,7 @@ Container:
   Dns:
     ClusterDomain: "cluster.local"
     Servers: ["127.0.0.1"]
-    Searches: ["cluster.local"]
+    Searches: []
     Options: []
 
   # SubUID/SubGID configuration
