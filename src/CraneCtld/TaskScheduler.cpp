@@ -4650,22 +4650,14 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
       }
 
       task->wckey = wckey;
-      // Only fetch default if needed for marking purposes
-      // Prefix with "*" to indicate default wckey is in use
-      if (auto result =
-              g_account_manager->GetExistedDefaultWckeyName(task->Username());
-          result && wckey == result.value()) {
-        task->using_default_wckey = true;
-      }
       // Note: Ignore error from GetExistedDefaultWckeyName since the user's
       // wckey was already validated; the default check is only for marking
     } else {
       // No wckey provided; use the default
       auto result =
           g_account_manager->GetExistedDefaultWckeyName(task->Username());
-      if (!result) return std::unexpected(result.error());
-      task->wckey = result.value();
       task->using_default_wckey = true;
+      if (result) task->wckey = result.value();
     }
   } else {
     task->wckey.clear();
