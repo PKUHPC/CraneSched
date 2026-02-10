@@ -28,6 +28,7 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
+#include "crane/TracePluginExporter.h"
 
 using Craned::Supervisor::g_config;
 
@@ -311,6 +312,17 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   PasswordEntry::InitializeEntrySize();
 
+#ifdef CRANE_ENABLE_TEST
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
+  if (crane::TracerManager::GetInstance().Initialize(
+          "Supervisor", std::move(plugin_exporter))) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
+
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
   g_thread_pool = std::make_unique<BS::thread_pool>(
@@ -421,10 +433,12 @@ void StartServer(int grpc_output_fd) {
   g_task_mgr.reset();
 
   g_craned_client.reset();
+#ifdef CRANE_ENABLE_TEST
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_plugin_client.reset();
 
   g_thread_pool->wait();
-  g_thread_pool.reset();
 
   std::exit(0);
 }

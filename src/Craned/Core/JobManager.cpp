@@ -258,8 +258,17 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 
   for (auto& job : jobs) {
     task_id_t job_id = job.job_id;
-    uid_t uid = job.Uid();
 
+#ifdef CRANE_ENABLE_TEST
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Alloc Job");
+      span->SetAttribute("service", "craned");
+      span->SetAttribute("job_id", job_id);
+      span->End();
+    }
+#endif
+
+    uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
@@ -276,6 +285,14 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   std::vector<StepInstance*> steps_to_free;
 
   for (job_id_t job_id : job_ids) {
+#ifdef CRANE_ENABLE_TEST
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Free Job");
+      span->SetAttribute("service", "craned");
+      span->SetAttribute("job_id", job_id);
+      span->End();
+    }
+#endif
     auto job = FreeJobInfo_(job_id);
     if (!job.has_value()) {
       CRANE_INFO("Try to free non-existent job #{}.", job_id);
@@ -434,7 +451,19 @@ bool JobManager::EvCheckSupervisorRunning_() {
                       }) | std::views::transform(util::StepIdPairToString),
                       ","));
     FreeStepAllocation_(std::move(steps_to_clean));
-    if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
+    if (!jobs_to_clean.empty()) {
+#ifdef CRANE_ENABLE_TEST
+      if (g_tracer) {
+        for (const auto& job : jobs_to_clean) {
+          auto span = g_tracer->StartSpan("Finish Release");
+          span->SetAttribute("service", "craned");
+          span->SetAttribute("job_id", job.job_id);
+          span->End();
+        }
+      }
+#endif
+      FreeJobAllocation_(std::move(jobs_to_clean));
+    }
   }
 
   return m_completing_step_retry_map_.empty();

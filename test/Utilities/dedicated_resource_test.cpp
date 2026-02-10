@@ -230,8 +230,7 @@ TEST(DEDICATED_RES_NODE, req_map5) {
   ASSERT_EQ(6, crane::GetIpAddrVer("3001:0da8:82a3:0:0:8B2E:0270:7224"));
   ASSERT_EQ(6, crane::GetIpAddrVer("::1"));
   ASSERT_EQ(6, crane::GetIpAddrVer("ff::1:2"));
-  ASSERT_EQ(
-      6, crane::GetIpAddrVer("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
+  ASSERT_EQ(6, crane::GetIpAddrVer("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
   ASSERT_EQ(6, crane::GetIpAddrVer("ff01::01"));
   ASSERT_EQ(4, crane::GetIpAddrVer("10.11.82.1"));
   ASSERT_EQ(4, crane::GetIpAddrVer("127.0.0.1"));
@@ -249,4 +248,3 @@ TEST(DEDICATED_RES_NODE, req_map5) {
   ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
                req, resourceInNode);
 }
-

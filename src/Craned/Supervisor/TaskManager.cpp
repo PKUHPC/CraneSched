@@ -2046,6 +2046,16 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     m_step_.StopCriClient();
 
     if (!orphaned && !m_step_.IsDaemon()) {
+#ifdef CRANE_ENABLE_TEST
+      if (g_tracer) {
+        auto span = g_tracer->StartSpan("Task Status Change (finish)");
+        span->SetAttribute("service", "supervisor");
+        span->SetAttribute("job_id", m_step_.job_id);
+        span->SetAttribute("step_id", m_step_.step_id);
+        span->SetAttribute("task_id", task_id);
+        span->End();
+      }
+#endif
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     }
@@ -2572,6 +2582,17 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
+
+#ifdef CRANE_ENABLE_TEST
+    if (g_tracer) {
+      auto span = g_tracer->StartSpan("Execute Task");
+      span->SetAttribute("service", "supervisor");
+      span->SetAttribute("job_id", m_step_.job_id);
+      span->SetAttribute("step_id", m_step_.step_id);
+      span->SetAttribute("task_id", task_id);
+      span->End();
+    }
+#endif
 
     auto* task = m_step_.GetTaskInstance(task_id);
     if (auto err = m_step_.Prepare(); err != CraneErrCode::SUCCESS) {

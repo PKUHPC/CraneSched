@@ -40,6 +40,8 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/TracePluginExporter.h"
+#include "crane/TracingMacros.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -876,6 +878,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+#ifdef CRANE_ENABLE_TEST
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_task_scheduler.reset();
   g_craned_keeper.reset();
 
@@ -909,6 +914,17 @@ void InitializeCtldGlobalVariables() {
 
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
+
+#ifdef CRANE_ENABLE_TEST
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
+  if (crane::TracerManager::GetInstance().Initialize(
+          "CraneCtld", std::move(plugin_exporter))) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
 
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),

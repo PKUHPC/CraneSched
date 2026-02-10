@@ -45,6 +45,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PasswordEntry
         Utility_PluginClient
         $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
+        crane_tracer
         uvw
 
         cxxopts
@@ -83,7 +84,7 @@ if (ENABLE_UNQLITE)
 endif ()
 
 if (CRANE_ENABLE_TESTS)
-    target_compile_definitions(cranectld PRIVATE CRANE_ENABLE_TESTS)
+    target_compile_definitions(cranectld PRIVATE CRANE_ENABLE_TEST)
 endif ()
 
 # Linker flag for c++ 17 filesystem library
