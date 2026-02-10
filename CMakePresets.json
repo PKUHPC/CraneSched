@@ -7,7 +7,11 @@
             "binaryDir": "${sourceDir}/cmake-build-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "ENABLE_UNQLITE": "ON",
+                "ENABLE_BERKELEY_DB": "OFF",
+                "CRANE_FULL_DYNAMIC": "OFF",
+                "CRANE_USE_GITEE_SOURCE": "OFF"
             }
         },
         {
@@ -16,8 +20,53 @@
             "binaryDir": "${sourceDir}/cmake-build-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "ENABLE_UNQLITE": "ON",
+                "ENABLE_BERKELEY_DB": "OFF",
+                "CRANE_FULL_DYNAMIC": "OFF",
+                "CRANE_USE_GITEE_SOURCE": "OFF"
             }
+        },
+        {
+            "name": "ci-debug",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/cmake-build-ci-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+                "CRANE_MIN_LOG_LEVEL": "TRACE",
+                "CRANE_NATIVE_ARCH_OPT": "OFF"
+            }
+        },
+        {
+            "name": "ci-release",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/cmake-build-ci-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+                "CRANE_NATIVE_ARCH_OPT": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "ci-debug",
+            "configurePreset": "ci-debug"
+        },
+        {
+            "name": "ci-release",
+            "configurePreset": "ci-release"
         }
     ]
 }
