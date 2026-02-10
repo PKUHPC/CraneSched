@@ -106,6 +106,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
+bool IsAbsolutePath(const std::string& path);
+
 void kill_pg(pid_t pid);
 
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
