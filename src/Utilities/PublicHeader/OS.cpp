@@ -423,6 +423,10 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+bool IsAbsolutePath(const std::string& path) {
+    return std::filesystem::path(path).is_absolute();
+}
+
 void kill_pg(pid_t pid) {
   killpg(pid, SIGTERM);
 	usleep(10000);
@@ -438,7 +442,13 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
   auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(args.timeout_sec));
 
   for (const auto& script : args.scripts) {
-    // TODO: 判断是否是绝对路径
+    
+    if (!IsAbsolutePath(script)) {
+      CRANE_ERROR("Script path {} is not absolute.", script);
+      return std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+    }
+    
     bool send_terminate = true;
     
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -459,6 +469,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     }
 
     pid_t pid = fork();
+    setpgid(0, 0);
 
     if (pid == -1) {
       CRANE_ERROR("{} pid fork failed: {}.", script, strerror(errno));
@@ -527,6 +538,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       close(stdout_pipe[0]);
 
       if (send_terminate) {
+        CRANE_TRACE("{} Sending termination signal to process group {}.", script, pid);
         kill_pg(pid);
         waitpid(pid, &status, 0);
       } else {
@@ -583,7 +595,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       }
 
 
-      if (exit_code != 0) {
+      if (exit_code != 0 || signal_num != 0) {
         CRANE_TRACE("{} Failed (exit status {}:{}), output: {}.", script,
                     exit_code, signal_num, output);
         return std::unexpected(RunPrologEpilogStatus{.exit_code = exit_code,
