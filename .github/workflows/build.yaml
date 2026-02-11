@@ -261,7 +261,7 @@ jobs:
               -v ./output:/Workspace/output \
               -v ./script:/Workspace/script \
               -v ./cache/ccache:/root/.ccache \
-              "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
+              "${CI_IMAGE_TAG}" /bin/bash --login script/build-crane.sh
 
       # Validate non-empty output
       - name: Validate non-empty output
@@ -492,7 +492,7 @@ jobs:
             -v /tmp/crane/tls:/etc/crane/tls:Z \
             $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
-          podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
+          podman exec autotest /bin/bash --login script/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
           podman stop autotest || true
 
       # Upload AutoTest results
