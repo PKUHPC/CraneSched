@@ -138,19 +138,32 @@ CraneSched allows users to connect to their running container jobs from any node
 
 CraneSched uses the Container Network Interface (CNI) to provide container network isolation and communication. Install a suitable CNI plugin based on the container runtime you choose.
 
-CraneSched provides the Crane Meta CNI plugin to flexibly integrate existing CNI plugins (such as Calico). The CNI plugins that have passed compatibility tests currently include Calico.
+To flexibly integrate existing CNI plugins, CraneSched provides a set of **Crane CNI tools**, currently including:
 
-#### Crane Meta CNI
+- **Meta CNI**: A bridge between CraneSched and other CNI plugins, responsible for passing job information to CNI plugins.
+- **DNS CNI (dns-register)**: Registers container FQDN and IP with CoreDNS during container creation, enabling containers within a cluster to access each other by hostname.
 
-In the CraneSched-FrontEnd root directory, run `make tool` to build the Meta CNI plugin. The build output is located at `build/tool/meta-cni`.
-The Meta CNI plugin must be configured before use.
+In practice, you can choose compatible third-party CNI plugins and combine them with the Crane CNI tools to implement container networking.
 
-!!! warning
-    Crane Meta CNI does not perform network configuration itself. It serves as a bridge between CraneSched and the actual CNI plugin. Different clusters and different CNI plugins require different Meta CNI configurations.
+The third-party CNI plugins that have passed compatibility testing include: **Calico**. Therefore, we recommend deploying Meta CNI + DNS CNI + Calico following the tutorial below.
 
-The example configuration file is located at `tool/meta-cni/config/00-meta.example.conf`. Edit it to match your environment.
+#### Crane CNI Tools
 
-After editing, place the file in `/etc/cni/net.d/` (the exact location is determined by the container runtime; keep the path consistent). Multiple configuration files may exist in this directory; the file with the lexicographically earliest name takes precedence.
+In the CraneSched-FrontEnd root directory, run `make tool` to build the Crane CNI tools. The build outputs are located in `build/tool/`.
+
+Below are the descriptions of each component in the Crane CNI tools:
+
+=== "Meta CNI"
+    Crane Meta CNI does not perform network configuration itself. It serves as a bridge between CraneSched and the actual CNI plugins. Meta CNI is the unified entry point for all CNI plugins in CraneSched; other CNI plugins are orchestrated and invoked by Meta CNI. Different clusters and different plugins require different Meta CNI configurations.
+
+    Refer to the [Meta CNI README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/README.md) for complete configuration instructions and examples.
+
+=== "DNS CNI"
+    Crane DNS CNI plugin (dns-register) registers the container's FQDN and IP in etcd during container creation, for CoreDNS to query.
+
+    Before using dns-register, you need to deploy [CoreDNS + etcd plugin](https://coredns.io/plugins/etcd/) and ensure the etcd `path` in the CoreDNS Corefile is set to `/coredns` (the prefix used by dns-register for writing records).
+
+    Refer to the [dns-register README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/dns-register/README.md) for complete configuration instructions.
 
 #### Example: Calico
 
@@ -159,73 +172,11 @@ After editing, place the file in `/etc/cni/net.d/` (the exact location is determ
 
 **[Calico](https://github.com/projectcalico/calico)** is a popular CNI plugin that supports network policy and high-performance networking. CraneSched has completed compatibility testing with Calico.
 
-The following is a Meta CNI + Calico + Port Mapping + Bandwidth configuration. Write it to `/etc/cni/net.d/00-crane-calico.conf`. If there is no higher-priority configuration file, it will take effect on the next container startup.
+The following is a Meta CNI + Calico + dns-register + Port Mapping + Bandwidth configuration. Write it to `/etc/cni/net.d/00-crane-calico.conf`. If there is no higher-priority configuration file, it will take effect on the next container startup.
 
 ??? "Example configuration"
-      ```json
-      {
-      "cniVersion": "1.0.0",
-      "name": "crane-meta",
-      "type": "meta-cni",
-      "logLevel": "debug",
-      "timeoutSeconds": 10,
-      "resultMode": "chained",
-      "runtimeOverride": {
-         "args": [
-            "-K8S_POD_NAMESPACE",
-            "-K8S_POD_NAME",
-            "-K8S_POD_INFRA_CONTAINER_ID",
-            "-K8S_POD_UID"
-         ],
-         "envs": []
-      },
-      "delegates": [
-         {
-            "name": "calico",
-            "conf": {
-            "type": "calico",
-            "log_level": "info",
-            "datastore_type": "etcdv3",
-            "etcd_endpoints": "http://192.168.24.2:2379",
-            "etcd_key_file": "",
-            "etcd_cert_file": "",
-            "etcd_ca_cert_file": "",
-            "ipam": {
-               "type": "calico-ipam"
-            },
-            "policy": {
-               "type": "none"
-            },
-            "container_settings": {
-               "allow_ip_forwarding": true
-            },
-            "capabilities": {
-               "portMappings": true
-            }
-            }
-         },
-         {
-            "name": "portmap",
-            "conf": {
-            "type": "portmap",
-            "snat": true,
-            "capabilities": {
-               "portMappings": true
-            }
-            }
-         },
-         {
-            "name": "bandwidth",
-            "conf": {
-            "type": "bandwidth",
-            "capabilities": {
-               "bandwidth": true
-            }
-            }
-         }
-      ]
-      }
-      ```
+    Refer to the [example configuration file](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico.conf).
+
     Some fields in this configuration file depend on your actual cluster deployment. Adjust them as needed.
 
 ### Advanced Features
