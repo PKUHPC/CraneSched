@@ -255,12 +255,14 @@ jobs:
       - name: Build in Container (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         run: |
-          podman run --rm \
+          podman run --rm --name ci-build \
               -v ./CraneSched:/Workspace/CraneSched \
               -v ./CraneSched-FrontEnd:/Workspace/CraneSched-FrontEnd \
               -v ./output:/Workspace/output \
               -v "${AUTOTEST_REPO}/docker/scripts":/Workspace/scripts \
               -v ccache:/root/.cache/ccache \
+              -v gomod:/root/go/pkg/mod \
+              -v gobuild:/root/.cache/go-build \
               -e CCACHE_DIR=/root/.cache/ccache \
               -e CCACHE_MAXSIZE=5G \
               "${CI_IMAGE_TAG}" /bin/bash --login scripts/build-crane.sh ci-debug
@@ -278,7 +280,7 @@ jobs:
       - name: Create bundle (tar.gz)
         run: |
           rm -f build-output.tar.gz
-          tar -czf build-output.tar.gz --exclude='*debug*' -C output .
+          tar -czf build-output.tar.gz --exclude='*debug*' --exclude='*.deb' -C output .
 
       # Generate meta.json
       - name: Generate meta.json
@@ -482,7 +484,7 @@ jobs:
           if [ -z "$NETWORK_ID" ]; then
             echo "WARN: mongodb container network not found; falling back to default podman network"
           fi
-          podman run -d --rm --name autotest \
+          podman run -d --rm --name ci-test \
             --privileged \
             --systemd true \
             -v /lib/modules:/lib/modules:ro \
@@ -492,8 +494,8 @@ jobs:
             -v /tmp/crane/tls:/etc/crane/tls:Z \
             $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
-          podman exec autotest /bin/bash --login docker/scripts/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
-          podman stop autotest || true
+          podman exec ci-test /bin/bash --login docker/scripts/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
+          podman stop ci-test || true
 
       # Upload AutoTest results
       - name: Upload AutoTest Results
