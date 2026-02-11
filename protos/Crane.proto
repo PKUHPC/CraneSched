@@ -1142,6 +1142,48 @@ message UpdateNodeDrainStateReply {
   bool ok = 1;
 }
 
+message QueryJobSummaryRequest {
+  enum JobSummaryReportType {
+    ACCOUNT_UTILIZATION_BY_USER = 0;
+    ACCOUNT_UTILIZATION_BY_QOS = 1;
+    USER_UTILIZATION_BY_ACCOUNT = 2;
+    USER_UTILIZATION_BY_WCKEY = 3;
+    WCKEY_UTILIZATION_BY_USER = 4;
+    USER_TOP_USAGE = 5;
+  }
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  repeated string filter_qoss = 3;
+  repeated string filter_wckeys = 4;
+  google.protobuf.Timestamp filter_start_time = 5;
+  google.protobuf.Timestamp filter_end_time = 6;
+  repeated uint32 filter_gids = 7;
+  uint32 num_limit = 8;
+  JobSummaryReportType report_type = 9;
+}
+
+message QueryJobSummaryReply {
+  repeated JobSummaryItem item_list = 1;
+}
+
+message QueryJobSizeSummaryRequest {
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  repeated string filter_qoss = 3;
+  repeated string filter_wckeys = 4;
+  repeated string filter_partitions = 5;
+  repeated string filter_nodename_list = 6;
+  google.protobuf.Timestamp filter_start_time = 7;
+  google.protobuf.Timestamp filter_end_time = 8;
+  repeated uint32 filter_grouping_list = 9;
+  repeated uint32 filter_job_ids = 10;
+  repeated uint32 filter_gids = 11;
+}
+
+message QueryJobSizeSummaryReply {
+  repeated JobSizeSummaryItem item_list = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1203,6 +1245,8 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);

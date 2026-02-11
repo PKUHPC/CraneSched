@@ -780,6 +780,16 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbName = "crane_db";
 
+      if (config["JobAggregationTimeoutMs"]) {
+        g_config.JobAggregationTimeoutMs =
+            config["JobAggregationTimeoutMs"].as<uint32_t>();
+      }
+
+      if (config["JobAggregationBatchSize"]) {
+        g_config.JobAggregationBatchSize =
+            config["JobAggregationBatchSize"].as<uint32_t>();
+      }
+
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
@@ -876,8 +886,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-  g_task_scheduler.reset();
   g_craned_keeper.reset();
+  // Craned keeper will query running job from scheduler
+  g_task_scheduler.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
@@ -987,6 +998,13 @@ void InitializeCtldGlobalVariables() {
     g_meta_container->CranedDown(craned_id);
   });
 
+  ok = g_db_client->Init();
+  if (!ok) {
+    CRANE_ERROR("The initialization of MongoDb client failed. Exiting...");
+    DestroyCtldGlobalVariables();
+    std::exit(1);
+  }
+
   using namespace std::chrono_literals;
 
   g_task_scheduler = std::make_unique<TaskScheduler>();
@@ -997,17 +1015,10 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
-
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
-  ok = g_db_client->Init();
-  if (!ok) {
-    CRANE_ERROR("The initialization of MongoDb client failed. Exiting...");
-    DestroyCtldGlobalVariables();
-    std::exit(1);
-  }
-
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  util::SetCurrentThreadName("CraneCtldMain");
 }
 
 void CreateFolders() {

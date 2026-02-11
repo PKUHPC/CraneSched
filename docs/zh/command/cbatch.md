@@ -385,3 +385,4 @@ cbatch --pod --pod-name my-training --pod-host-network train_job.sh
 - [ccontrol](ccontrol.md) - 控制作业和系统资源
 - [ccon](ccon.md) - 容器作业管理
 - [容器功能概览](../reference/container/index.md) - 容器功能介绍
+- [creport](creport.md) - 查询作业相关统计信息
