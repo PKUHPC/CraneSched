@@ -28,7 +28,10 @@ CranedClient::~CranedClient() {
   }
 }
 
-void CranedClient::Shutdown() { m_thread_stop_ = true; }
+void CranedClient::Shutdown() {
+  m_thread_stop_ = true;
+  m_cv_.Signal();
+}
 
 void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
@@ -47,6 +50,7 @@ void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
       .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
   absl::MutexLock lock(&m_mutex_);
   m_task_status_change_queue_.push_back(std::move(elem));
+  m_cv_.Signal();
 }
 
 void CranedClient::AsyncSendThread_() {
@@ -60,9 +64,15 @@ void CranedClient::AsyncSendThread_() {
     bool connected = m_channel_->WaitForConnected(
         std::chrono::system_clock::now() + std::chrono::seconds(3));
     if (!connected) {
-      CRANE_INFO("Channel to CraneD is not connected. Reconnecting...");
+      CRANE_INFO(
+          "Channel to CraneD is not connected. "
+          "Reconnecting...");
       m_channel_->GetState(true);
-      std::this_thread::sleep_for(std::chrono::seconds(10));
+
+      // Interruptible sleep: wake up immediately on Shutdown()
+      absl::MutexLock lock(&m_mutex_);
+      m_cv_.WaitWithTimeout(&m_mutex_, absl::Seconds(10));
+      if (m_thread_stop_) break;
       continue;
     }
 
@@ -112,7 +122,10 @@ void CranedClient::AsyncSendThread_() {
       }
       m_mutex_.Unlock();
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Interruptible wait for new queue items
+    absl::MutexLock lock(&m_mutex_);
+    m_cv_.WaitWithTimeout(&m_mutex_, absl::Milliseconds(50));
   }
 }
 
