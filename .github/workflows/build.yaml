@@ -259,8 +259,10 @@ jobs:
               -v ./output:/Workspace/output \
               -v "${AUTOTEST_REPO}/docker/scripts":/Workspace/scripts \
               -v ccache:/root/.cache/ccache \
+              -v "${RUNNER_DIR}/cache/fetchcontent":/cache/fetchcontent \
               -e CCACHE_DIR=/root/.cache/ccache \
               -e CCACHE_MAXSIZE=5G \
+              -e FETCHCONTENT_BASE_DIR=/cache/fetchcontent \
               "${CI_IMAGE_TAG}" /bin/bash --login scripts/build-crane.sh ci-debug
 
       # Validate non-empty output
