@@ -47,12 +47,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Self-hosted runner paths
-  SCRIPT_PATH: /opt/actions-runner-external/script
-  CACHE_PATH: /opt/actions-runner-external/cache
-
-  # Local cache directory
-  LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
+  # Runner working directory — contains the AutoTest repo and cache
+  RUNNER_DIR: /opt/AutoTest
+  # AutoTest repo (subdirectory of RUNNER_DIR)
+  AUTOTEST_REPO: /opt/AutoTest/CraneSched-AutoTest
 
   # Cache buster for forcing rebuilds on workflow_dispatch
   CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
@@ -112,7 +110,6 @@ jobs:
     env:
       BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
       FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
-
     defaults:
       run:
         shell: bash -leo pipefail {0}
@@ -194,8 +191,8 @@ jobs:
           FINGERPRINT="${CRANE_SHA}-${FE_REF}-${FE_SHA}-${CI_DIGEST}-${CACHE_BUSTER}"
 
           KEY_SHA256=$(printf '%s' "$FINGERPRINT" | sha256sum | awk '{print $1}')
-          CACHE_TGZ="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tar.gz"
-          CACHE_META="${LOCAL_CACHE_DIR}/${KEY_SHA256}.meta.json"
+          CACHE_TGZ="${BUILD_CACHE_DIR}/${KEY_SHA256}.tar.gz"
+          CACHE_META="${BUILD_CACHE_DIR}/${KEY_SHA256}.meta.json"
 
           echo "CRANE_SHA=${CRANE_SHA}" >> "$GITHUB_ENV"
           echo "FE_SHA=${FE_SHA}"       >> "$GITHUB_ENV"
@@ -205,16 +202,17 @@ jobs:
           echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
           echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
 
+      # Pull latest AutoTest scripts and set up derived paths
+      - name: Update AutoTest repo
+        run: |
+          git -C "$AUTOTEST_REPO" pull --ff-only origin master || echo "WARN: AutoTest pull failed, using existing version"
+          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
+
       # Prepare workspace & local cache dir
       - name: Prepare workspace & local cache
         run: |
           set -euo pipefail
-          ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
-          ln -sfT "$CACHE_PATH"  "$(pwd)/cache"
-          mkdir -p output log
-          mkdir -p "${LOCAL_CACHE_DIR}" || true
-          chown "$(id -u)":"$(id -g)" "${LOCAL_CACHE_DIR}" || true
-          ls -ld "${LOCAL_CACHE_DIR}"
+          mkdir -p "${BUILD_CACHE_DIR}" output log
 
       # Local cache lookup with checksum verification
       - name: Local cache lookup
@@ -259,9 +257,11 @@ jobs:
               -v ./CraneSched:/Workspace/CraneSched \
               -v ./CraneSched-FrontEnd:/Workspace/CraneSched-FrontEnd \
               -v ./output:/Workspace/output \
-              -v ./script:/Workspace/script \
-              -v ./cache/ccache:/root/.ccache \
-              "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
+              -v "${AUTOTEST_REPO}/docker/scripts":/Workspace/scripts \
+              -v ccache:/root/.cache/ccache \
+              -e CCACHE_DIR=/root/.cache/ccache \
+              -e CCACHE_MAXSIZE=5G \
+              "${CI_IMAGE_TAG}" /bin/bash --login scripts/build-crane.sh ci-debug
 
       # Validate non-empty output
       - name: Validate non-empty output
@@ -328,7 +328,7 @@ jobs:
         if: steps.local_cache.outputs.hit != 'true'
         run: |
           set -euo pipefail
-          TMP_DIR="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tmp"
+          TMP_DIR="${BUILD_CACHE_DIR}/${KEY_SHA256}.tmp"
           mkdir -p "${TMP_DIR}"
           cp -f build-output.tar.gz "${TMP_DIR}/"
           cp -f meta.json "${TMP_DIR}/${KEY_SHA256}.meta.json"
@@ -395,7 +395,7 @@ jobs:
           fi
           
           unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          ./script/upload.sh
+          "${AUTOTEST_REPO}/github-runner/upload.sh"
 
   test:
     needs: [ prepare, build ]
@@ -407,13 +407,11 @@ jobs:
       TEST_FAILED: false
       BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
       FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
-
     steps:
       # Prepare workspace for AutoTest
       - name: Prepare workspace
         run: |
-          ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
-          ln -sfT "$CACHE_PATH"  "$(pwd)/cache"
+          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
           mkdir -p output log
 
       # Download lightweight meta first (small; fast)
@@ -435,8 +433,8 @@ jobs:
           BUNDLE_SHA=$(jq -r '.sha256' "$META_FILE")
           echo "KEY_SHA256=$KEY_SHA256" | tee -a "$GITHUB_ENV"
 
-          CACHE_TGZ="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tar.gz"
-          CACHE_META="${LOCAL_CACHE_DIR}/${KEY_SHA256}.meta.json"
+          CACHE_TGZ="${BUILD_CACHE_DIR}/${KEY_SHA256}.tar.gz"
+          CACHE_META="${BUILD_CACHE_DIR}/${KEY_SHA256}.meta.json"
 
           HIT=false
           if [ -f "$CACHE_TGZ" ] && [ -f "$CACHE_META" ]; then
@@ -486,13 +484,13 @@ jobs:
             --privileged \
             --systemd true \
             -v /lib/modules:/lib/modules:ro \
-            -v ./script:/CraneSched-AutoTest/script \
+            -v "${AUTOTEST_REPO}/docker/scripts":/CraneSched-AutoTest/docker/scripts \
             -v ./output:/CraneSched-AutoTest/output \
             -v ./log:/CraneSched-AutoTest/log \
             -v /tmp/crane/tls:/etc/crane/tls:Z \
             $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
-          podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
+          podman exec autotest /bin/bash --login docker/scripts/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
           podman stop autotest || true
 
       # Upload AutoTest results
