@@ -296,6 +296,95 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
   return DeleteQos_(actor_name, name);
 }
 
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllAccounts(uint32_t uid) {
+  std::vector<crane::grpc::RichError> errors;
+  std::string actor_name;
+
+  // Get actor name under read lock
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return errors;
+    actor_name = user_result.value()->name;
+  }
+
+  // Phase 1: Delete all users under write lock
+  {
+    util::write_lock_guard user_guard(m_rw_user_mutex_);
+    util::write_lock_guard account_guard(m_rw_account_mutex_);
+
+    // Collect user→account pairs first to avoid modifying while iterating
+    std::vector<std::pair<std::string, std::string>> user_account_pairs;
+    for (const auto& [user_name, user_ptr] : m_user_map_) {
+      for (const auto& [acct_name, _] : user_ptr->account_to_attrs_map) {
+        user_account_pairs.emplace_back(user_name, acct_name);
+      }
+    }
+    for (const auto& [user_name, acct_name] : user_account_pairs) {
+      const User* user = GetExistedUserInfoNoLock_(user_name);
+      if (user) DeleteUser_(actor_name, *user, acct_name);
+    }
+  }
+
+  // Phase 2: Delete all accounts leaf-first under write lock
+  {
+    util::write_lock_guard account_guard(m_rw_account_mutex_);
+    util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
+    // Multi-pass: delete leaf accounts first, repeat until all deleted
+    for (int pass = 0; pass < 20; ++pass) {
+      bool progress = false;
+      for (auto it = m_account_map_.begin(); it != m_account_map_.end();) {
+        const Account* acct = it->second.get();
+        if (acct->child_accounts.empty() && acct->users.empty()) {
+          DeleteAccount_(actor_name, *acct);
+          it = m_account_map_.begin();  // Restart after modification
+          progress = true;
+        } else {
+          ++it;
+        }
+      }
+      if (m_account_map_.empty() || !progress) break;
+    }
+
+    for (const auto& [name, _] : m_account_map_) {
+      crane::grpc::RichError err;
+      err.set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err.set_description(name);
+      errors.push_back(err);
+    }
+  }
+
+  return errors;
+}
+
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllQos(uint32_t uid) {
+  std::vector<crane::grpc::RichError> errors;
+  std::string actor_name;
+
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return errors;
+    actor_name = user_result.value()->name;
+  }
+
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
+  std::vector<std::string> qos_names;
+  for (const auto& [name, _] : m_qos_map_) {
+    qos_names.emplace_back(name);
+  }
+  for (const auto& name : qos_names) {
+    auto res = DeleteQos_(actor_name, name);
+    if (!res) {
+      errors.push_back(res.error());
+    }
+  }
+
+  return errors;
+}
+
 CraneExpectedRich<void> AccountManager::DeleteWckey(
     uint32_t uid, const std::string& name, const std::string& user_name,
     bool force) {

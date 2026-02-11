@@ -69,6 +69,12 @@ class AccountManager {
 
   CraneExpectedRich<void> DeleteQos(uint32_t uid, const std::string& name);
 
+  // Force-delete all accounts (cascade: users first, then leaf-to-root accounts)
+  std::vector<crane::grpc::RichError> PurgeAllAccounts(uint32_t uid);
+
+  // Force-delete all QoS entries
+  std::vector<crane::grpc::RichError> PurgeAllQos(uint32_t uid);
+
   CraneExpectedRich<void> DeleteWckey(uint32_t uid, const std::string& name,
                                       const std::string& user_name, bool force);
 

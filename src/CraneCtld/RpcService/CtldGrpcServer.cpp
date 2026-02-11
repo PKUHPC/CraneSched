@@ -20,7 +20,10 @@
 
 #include <grpcpp/support/status.h>
 
+#include "absl/strings/ascii.h"
+
 #include "AccountManager.h"
+#include "EmbeddedDbClient.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
@@ -651,6 +654,45 @@ grpc::Status CraneCtldServiceImpl::CancelTask(
                         "CraneCtld Server is not ready"};
 
   *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ResetNextTaskId(
+    grpc::ServerContext* context,
+    const crane::grpc::ResetNextTaskIdRequest* request,
+    crane::grpc::ResetNextTaskIdReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason(res.error() == CraneErrCode::ERR_INVALID_USER
+                             ? "User is not a user of Crane"
+                             : "User has insufficient privilege");
+    return grpc::Status::OK;
+  }
+
+  // Field value 0 means "don't change"; >0 means "reset to this value"
+  task_id_t next_task_id = request->next_task_id();
+  int64_t next_task_db_id = request->next_task_db_id();
+
+  if (next_task_id == 0 && next_task_db_id == 0) {
+    response->set_ok(false);
+    response->set_reason("At least one of next_task_id or next_task_db_id must be specified (>0)");
+    return grpc::Status::OK;
+  }
+
+  if (g_embedded_db_client->ResetNextTaskId(next_task_id, next_task_db_id)) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to reset task ID counters in embedded DB");
+  }
+
   return grpc::Status::OK;
 }
 
@@ -1576,18 +1618,31 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  for (const auto& account_name : request->account_list()) {
-    auto res = g_account_manager->DeleteAccount(request->uid(), account_name);
-    if (!res) {
-      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
+  bool contains_all = std::ranges::any_of(
+      request->account_list(),
+      [](const std::string& s) { return absl::AsciiStrToUpper(s) == "ALL"; });
+
+  if (contains_all && request->force()) {
+    auto errors = g_account_manager->PurgeAllAccounts(request->uid());
+    for (auto& err : errors) {
+      response->mutable_rich_error_list()->Add()->CopyFrom(err);
+    }
+  } else if (contains_all && !request->force()) {
+    response->set_ok(false);
+    auto* err = response->mutable_rich_error_list()->Add();
+    err->set_description("all");
+    err->set_code(CraneErrCode::ERR_NOT_FORCE);
+    return grpc::Status::OK;
+  } else {
+    for (const auto& account_name : request->account_list()) {
+      auto res = g_account_manager->DeleteAccount(request->uid(), account_name);
+      if (!res) {
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
+      }
     }
   }
 
-  if (response->rich_error_list().empty()) {
-    response->set_ok(true);
-  } else {
-    response->set_ok(false);
-  }
+  response->set_ok(response->rich_error_list().empty());
   return grpc::Status::OK;
 }
 
@@ -1651,19 +1706,31 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  for (const auto& qos_name : request->qos_list()) {
-    auto res = g_account_manager->DeleteQos(request->uid(), qos_name);
-    if (!res) {
-      response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
+  bool contains_all = std::ranges::any_of(
+      request->qos_list(),
+      [](const std::string& s) { return absl::AsciiStrToUpper(s) == "ALL"; });
+
+  if (contains_all && request->force()) {
+    auto errors = g_account_manager->PurgeAllQos(request->uid());
+    for (auto& err : errors) {
+      response->mutable_rich_error_list()->Add()->CopyFrom(err);
+    }
+  } else if (contains_all && !request->force()) {
+    response->set_ok(false);
+    auto* err = response->mutable_rich_error_list()->Add();
+    err->set_description("all");
+    err->set_code(CraneErrCode::ERR_NOT_FORCE);
+    return grpc::Status::OK;
+  } else {
+    for (const auto& qos_name : request->qos_list()) {
+      auto res = g_account_manager->DeleteQos(request->uid(), qos_name);
+      if (!res) {
+        response->mutable_rich_error_list()->Add()->CopyFrom(res.error());
+      }
     }
   }
 
-  if (response->rich_error_list().empty()) {
-    response->set_ok(true);
-  } else {
-    response->set_ok(false);
-  }
-
+  response->set_ok(response->rich_error_list().empty());
   return grpc::Status::OK;
 }
 

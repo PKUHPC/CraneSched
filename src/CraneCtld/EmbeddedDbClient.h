@@ -183,6 +183,8 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
+  bool ResetNextTaskId(task_id_t next_task_id, db_id_t next_task_db_id);
+
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
   bool RetrieveStepInfo(StepDbSnapshot* snapshot);

@@ -293,6 +293,17 @@ message ModifyTasksExtraAttrsReply {
   repeated string not_modified_reasons = 3;
 }
 
+message ResetNextTaskIdRequest {
+  uint32 uid = 1;
+  uint32 next_task_id = 2;    // Reset to this value (0 = default to 1)
+  int64 next_task_db_id = 3;  // Reset to this value (0 = default to 1)
+}
+
+message ResetNextTaskIdReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message ModifyCranedStateRequest {
   uint32 uid = 1;
   repeated string craned_ids = 2;
@@ -349,6 +360,7 @@ message AddWckeyReply {
 message DeleteAccountRequest {
   uint32 uid = 1;
   repeated string account_list = 2;
+  bool force = 3;
 }
 
 message DeleteAccountReply {
@@ -371,6 +383,7 @@ message DeleteUserReply {
 message DeleteQosRequest {
   uint32 uid = 1;
   repeated string qos_list = 2;
+  bool force = 3;
 }
 
 message DeleteQosReply {
@@ -1164,6 +1177,7 @@ service CraneCtld {
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
   rpc ModifyTasksExtraAttrs(ModifyTasksExtraAttrsRequest) returns (ModifyTasksExtraAttrsReply);
+  rpc ResetNextTaskId(ResetNextTaskIdRequest) returns (ResetNextTaskIdReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
