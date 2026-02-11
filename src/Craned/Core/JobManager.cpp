@@ -145,7 +145,7 @@ JobManager::JobManager() {
         EvCheckSupervisorRunning_();
       });
   m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0ms},
-                                          std::chrono::milliseconds{1000ms});
+                                          std::chrono::milliseconds{200ms});
 
   // gRPC Alloc step Event
   m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
