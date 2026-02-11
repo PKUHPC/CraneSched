@@ -705,6 +705,39 @@ void ParseConfig(int argc, char** argv) {
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
 
+            if (container_config["Dns"]) {
+              auto dns_node = container_config["Dns"];
+
+              g_config.Container.Dns.ClusterDomain =
+                  util::NormalizeClusterDomain(
+                      YamlValueOr(dns_node["ClusterDomain"],
+                                  kDefaultContainerClusterDomain));
+
+              if (dns_node["Servers"]) {
+                g_config.Container.Dns.Servers.clear();
+                for (const auto& s : dns_node["Servers"]) {
+                  auto addr = s.as<std::string>();
+                  ipv4_t dummy;
+                  if (!crane::StrToIpv4(addr, &dummy)) {
+                    CRANE_ERROR(
+                        "Dns.Servers entry '{}' is not a valid ipv4 address.",
+                        addr);
+                    std::exit(1);
+                  }
+                  g_config.Container.Dns.Servers.push_back(std::move(addr));
+                }
+              }
+              if (dns_node["Searches"]) {
+                for (const auto& s : dns_node["Searches"])
+                  g_config.Container.Dns.Searches.push_back(
+                      s.as<std::string>());
+              }
+              if (dns_node["Options"]) {
+                for (const auto& s : dns_node["Options"])
+                  g_config.Container.Dns.Options.push_back(s.as<std::string>());
+              }
+            }
+
             if (container_config["BindFs"]) {
               const auto& bindfs_config = container_config["BindFs"];
               g_config.Container.BindFs.Enabled =

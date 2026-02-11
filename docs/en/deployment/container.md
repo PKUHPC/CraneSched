@@ -286,6 +286,11 @@ Container:
   TempDir: supervisor/containers/
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
+    Options: []
 ```
 
 After editing, save and distribute the configuration file to all nodes.
@@ -329,6 +334,13 @@ Container:
   # CRI image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # DNS configuration
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
+    Options: []
+
   # SubUID/SubGID configuration
   SubId:
     # Whether to automatically manage SubID ranges
@@ -354,6 +366,17 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | Temporary data directory during container runtime, relative to `CraneBaseDir`. Stores container metadata, logs, etc. |
 | `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
 | `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
+
+### DNS Configuration
+
+Container DNS is used to provide domain name resolution services for containers in the cluster. CraneSched generates a unique hostname for each container, and container DNS is required to resolve that hostname in other containers.
+
+| Field | Type | Default | Description |
+|:-----|:-----|:-------|:-----|
+| `Dns.ClusterDomain` | string | `cluster.local` | Cluster domain. It will be **prepended** as the first search domain in `searches` |
+| `Dns.Servers` | string[] | `['127.0.0.1']` | DNS server list (IPv4 only) |
+| `Dns.Searches` | string[] | `[]` | Additional search domains |
+| `Dns.Options` | string[] | `[]` | DNS options (e.g., `ndots:5`) |
 
 ### SubID Configuration
 

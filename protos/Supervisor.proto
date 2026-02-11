@@ -60,6 +60,14 @@ message InitSupervisorRequest {
       uint64 base_offset = 3;
     }
     SubIdConfig subid = 5;
+
+    message DnsConfig {
+      string cluster_domain = 1;
+      repeated string servers = 2;
+      repeated string searches = 3;
+      repeated string options = 4;
+    }
+    DnsConfig dns_config = 6;
   }
   ContainerConfig container_config = 15;
 

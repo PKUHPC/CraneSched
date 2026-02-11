@@ -170,7 +170,6 @@ Licenses:
 
 AllLicenseResourcesAbsolute: false
 
-
 #HealthCheck:
 #  Program: /usr/sbin/nhc
 #  Interval: 60
@@ -216,6 +215,12 @@ Container:
   RuntimeEndpoint: /run/containerd/containerd.sock
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   ImageEndpoint: /run/containerd/containerd.sock
+  # DNS configuration for containers
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers: ["127.0.0.1"]
+    Searches: []
+    Options: []
   # SubID configuration
   SubId:
     Managed: true
@@ -227,6 +232,7 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+
 
 Cfored:
   DebugLevel: info

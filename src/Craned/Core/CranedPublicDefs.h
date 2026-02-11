@@ -104,6 +104,15 @@ struct Config {
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+
+    struct DnsConfig {
+      std::string ClusterDomain{"cluster.local"};
+      std::vector<std::string> Servers{"127.0.0.1"};
+      std::vector<std::string> Searches;
+      std::vector<std::string> Options;
+    };
+    DnsConfig Dns;
+
     struct BindFsConfig {
       bool Enabled{false};
       std::filesystem::path BindfsBinary{"bindfs"};

@@ -368,6 +368,14 @@ Container:
 
   # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
+
+  # DNS 配置
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers:
+      - "127.0.0.1"
+    Searches: []
+    Options: []
 ```
 
 更多容器相关配置请参见[容器运行时配置指南](../container.md)。
