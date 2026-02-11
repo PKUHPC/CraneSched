@@ -135,6 +135,12 @@ jobs:
           path: CraneSched-FrontEnd
           ref: ${{ env.FRONTEND_REF }}
 
+      # Pull latest AutoTest scripts and set up derived paths
+      - name: Update AutoTest repo
+        run: |
+          git -C "$AUTOTEST_REPO" pull --ff-only origin master || echo "WARN: AutoTest pull failed, using existing version"
+          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
+
       # Resolve CI image digest (kept for metadata/fingerprint; not pinning run)
       - name: Resolve CI image digest
         id: imagedigest
@@ -201,12 +207,6 @@ jobs:
           echo "KEY_SHA256=${KEY_SHA256}"   >> "$GITHUB_ENV"
           echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
           echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
-
-      # Pull latest AutoTest scripts and set up derived paths
-      - name: Update AutoTest repo
-        run: |
-          git -C "$AUTOTEST_REPO" pull --ff-only origin master || echo "WARN: AutoTest pull failed, using existing version"
-          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
 
       # Prepare workspace & local cache dir
       - name: Prepare workspace & local cache
