@@ -491,7 +491,7 @@ jobs:
             -v "${AUTOTEST_REPO}/docker/scripts":/CraneSched-AutoTest/docker/scripts \
             -v ./output:/CraneSched-AutoTest/output \
             -v ./log:/CraneSched-AutoTest/log \
-            -v /tmp/crane/tls:/etc/crane/tls:Z \
+            -v docker_crane-tls:/etc/crane/tls:ro \
             $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
           podman exec ci-test /bin/bash --login docker/scripts/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
