@@ -1707,21 +1707,30 @@ bool DedicatedResourceAllocator::Allocate(
       all_request_slots.insert(slots.cbegin(), slots.cend());
   };
 
+  // No devices registered on this node — nothing to restrict
+  if (g_this_node_device.empty()) return true;
+
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
                            CgConstant::kCgLimitDeviceMknod)) {
-    if (CgroupManager::GetCgroupVersion() ==
-        CgConstant::CgroupVersion::CGROUP_V1) {
-      CRANE_WARN("Allocate devices access failed in Cgroup V1.");
-      return false;
-    }
+    // On cgroup v2 without BPF, device isolation is unavailable.
+    // If job doesn't request devices, warn and continue.
+    // If job requests devices, fail — can't guarantee isolation.
     if (CgroupManager::GetCgroupVersion() ==
         CgConstant::CgroupVersion::CGROUP_V2) {
-      CRANE_WARN("Allocate devices access failed in Cgroup V2.");
+      if (all_request_slots.empty()) {
+        CRANE_WARN(
+            "Device access control unavailable on Cgroup V2 (BPF disabled). "
+            "Skipping for job with no device request.");
+        return true;
+      }
+      CRANE_ERROR(
+          "Allocate devices access failed in Cgroup V2. "
+          "Job requests devices but BPF is not available.");
       return false;
     }
-
-    return true;
+    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    return false;
   }
 
   return true;
@@ -1738,21 +1747,27 @@ bool DedicatedResourceAllocator::Allocate(
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 
+  // No devices registered on this node — nothing to restrict
+  if (g_this_node_device.empty()) return true;
+
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
                            CgConstant::kCgLimitDeviceMknod)) {
     if (CgroupManager::GetCgroupVersion() ==
-        CgConstant::CgroupVersion::CGROUP_V1) {
-      CRANE_WARN("Allocate devices access failed in Cgroup V1.");
-      return false;
-    }
-    if (CgroupManager::GetCgroupVersion() ==
         CgConstant::CgroupVersion::CGROUP_V2) {
-      CRANE_WARN("Allocate devices access failed in Cgroup V2.");
+      if (all_request_slots.empty()) {
+        CRANE_WARN(
+            "Device access control unavailable on Cgroup V2 (BPF disabled). "
+            "Skipping for job with no device request.");
+        return true;
+      }
+      CRANE_ERROR(
+          "Allocate devices access failed in Cgroup V2. "
+          "Job requests devices but BPF is not available.");
       return false;
     }
-
-    return true;
+    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    return false;
   }
 
   return true;
