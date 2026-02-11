@@ -26,6 +26,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
@@ -94,9 +95,22 @@ bool TaskScheduler::Init() {
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
-
-      auto result = AcquireTaskAttributes(task.get());
+      CraneExpected<void> result;
+      {
+        const auto& user_ptr =
+            g_account_manager->GetExistedUserInfo(task->Username());
+        if (!user_ptr) {
+          CRANE_ERROR(
+              "The current user {} is not in the user list when recover the "
+              "task",
+              task->Username());
+          result = std::unexpected(CraneErrCode::ERR_INVALID_USER);
+        }
+        g_account_meta_container->UserAddTask(task->Username());
+      }
+      if (result) result = AcquireTaskAttributes(task.get());
       if (!result || task->type == crane::grpc::Interactive) {
+        g_account_meta_container->UserReduceTask(task->Username());
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -174,6 +188,19 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
         mark_task_as_failed = true;
+      }
+
+      if (!mark_task_as_failed) {
+        const auto& user_ptr =
+            g_account_manager->GetExistedUserInfo(task->Username());
+        if (!user_ptr) {
+          CRANE_ERROR(
+              "The current user {} is not in the user list when submitting the "
+              "task",
+              task->Username());
+          mark_task_as_failed = true;
+        } else
+          g_account_meta_container->UserAddTask(task->Username());
       }
 
       if (!mark_task_as_failed) {
@@ -696,12 +723,10 @@ bool TaskScheduler::Init() {
 
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  CRANE_ASSERT_MSG(
-      g_account_meta_container->TryMallocQosResource(*task) ==
-          CraneErrCode::SUCCESS,
-      fmt::format(
-          "ApplyQosLimitOnTask failed when recovering pending task #{}.",
-          task->TaskId()));
+  // The newly modified QoS resource limits do not apply to tasks that have
+  // already been evaluated, which is the same as before the restart.
+  g_account_meta_container->MallocQosSubmitResource(*task);
+
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
@@ -709,12 +734,10 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  auto res = g_account_meta_container->TryMallocQosResource(*task);
-  CRANE_ASSERT_MSG(
-      res == CraneErrCode::SUCCESS,
-      fmt::format(
-          "ApplyQosLimitOnTask failed when recovering running task #{}.",
-          task->TaskId()));
+  // The newly modified QoS resource limits do not apply to tasks that have
+  // already been evaluated, which is the same as before the restart.
+  g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
+
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->AllocatedRes());
@@ -1068,6 +1091,18 @@ void TaskScheduler::ScheduleThread_() {
               job->pending_reason = "Licenses";
               continue;
             }
+          }
+
+          if (auto result = g_account_meta_container->CheckAndMallocQosResource(
+                  *job_in_scheduler);
+              !result) {
+            // free licenses
+            if (!job_in_scheduler->actual_licenses.empty()) {
+              g_licenses_manager->FreeLicense(
+                  job_in_scheduler->actual_licenses);
+            }
+            job->pending_reason = result.error();
+            continue;
           }
 
           PartitionId const& partition_id = job->partition_id;
@@ -1845,9 +1880,10 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      CRANE_DEBUG("The requested QoS resources have reached the limit.");
+      g_account_meta_container->UserReduceTask(task->Username());
       return std::unexpected(res);
     }
     std::future<CraneExpected<task_id_t>> future =
@@ -2959,7 +2995,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
       task->SetStatus(crane::grpc::Cancelled);
       task->SetStartTime(cancel_time);
       task->SetEndTime(cancel_time);
-      g_account_meta_container->FreeQosResource(*task);
+      g_account_meta_container->FreeQosSubmitResource(*task);
 
       task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                     cancel_time);
@@ -3094,7 +3130,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
-        g_account_meta_container->FreeQosResource(*pair.first);
+        g_account_meta_container->FreeQosSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(
             std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
@@ -3137,7 +3173,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
         }
         if (missing_deps) {
           CRANE_WARN("Job #{} rejected: missing dependencies.", id);
-          g_account_meta_container->FreeQosResource(*job);
+          g_account_meta_container->FreeQosSubmitResource(*job);
           task_id_promise.set_value(
               std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
           tasks_to_purge[id] = job->TaskDbId();
@@ -3174,7 +3210,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
+      g_account_meta_container->FreeQosSubmitResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(
           std::unexpected(CraneErrCode::ERR_BEYOND_TASK_ID));
     }

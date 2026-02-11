@@ -828,6 +828,8 @@ enum ErrCode {
   ERR_INVALID_ARGUMENT = 95;
 
   ERR_RESOURCE_ALREADY_EXIST = 96;
+  ERR_MAX_JOB_COUNT_PER_ACCOUNT = 97;
+  ERR_USER_HAS_TASK = 98;
 }
 
 enum EntityType {
@@ -846,16 +848,18 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  // account and qos
-  Description = 10;
+  Description = 3;  // account and qos
   // user
-  AdminLevel = 20;
-  DefaultAccount = 21;
+  AdminLevel = 4;
+  DefaultAccount = 5;
   // qos
   Priority = 30;
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  MaxJobsPerAccount = 34;
+  MaxSubmitJobsPerUser = 35;
+  MaxSubmitJobsPerAccount = 36;
   // wckey
   DefaultWckey = 40;
 }
@@ -911,6 +915,9 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+  uint32 max_jobs_per_account = 7;
+  uint32 max_submit_jobs_per_user = 8;
+  uint32 max_submit_jobs_per_account = 9;
 }
 
 message QueryWckeyInfo {

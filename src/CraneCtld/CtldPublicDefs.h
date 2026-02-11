@@ -825,6 +825,8 @@ struct TaskInCtld {
   bool using_default_wckey{false};
   std::string wckey;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -1124,10 +1126,13 @@ struct Qos {
   uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
+  uint32_t max_jobs_per_account;
   uint32_t max_running_tasks_per_user;
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+  uint32_t max_submit_jobs_per_user;
+  uint32_t max_submit_jobs_per_account;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -1141,6 +1146,9 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxJobsPerUser() {
     return "max_jobs_per_user";
   }
+  static constexpr const char* FieldStringOfMaxJobsPerAccount() {
+    return "max_jobs_per_account";
+  }
   static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
     return "max_time_limit_per_task";
   }
@@ -1150,17 +1158,25 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
   }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
+    return "max_submit_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
+    return "max_submit_jobs_per_account";
+  }
 
   std::string QosToString() const {
     return fmt::format(
         "name: {}, description: {}, reference_count: {}, priority: {}, "
         "max_jobs_per_user: {}, max_running_tasks_per_user: {}, "
         "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
-        "max_cpus_per_account: {}",
+        "max_cpus_per_account: {}, max_jobs_per_account: {}, "
+        "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}",
         name, description, reference_count, priority, max_jobs_per_user,
         max_running_tasks_per_user,
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
-        max_cpus_per_account);
+        max_cpus_per_account, max_jobs_per_account, max_submit_jobs_per_user,
+        max_submit_jobs_per_account);
   }
 
   static const std::string GetModifyFieldStr(
@@ -1176,6 +1192,12 @@ struct Qos {
       return "max_cpus_per_user";
     case crane::grpc::ModifyField::MaxTimeLimitPerTask:
       return "max_time_limit_per_task";
+    case crane::grpc::ModifyField::MaxJobsPerAccount:
+      return "max_jobs_per_account";
+    case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
+      return "max_submit_jobs_per_user";
+    case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
+      return "max_submit_jobs_per_account";
     default:
       std::unreachable();
     }
@@ -1348,9 +1370,11 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   return CheckIfTimeLimitSecIsValid(sec);
 }
 
+// TODO: Overload the += and -= operators?
 struct QosResource {
   ResourceView resource;
-  uint32_t jobs_per_user;
+  uint32_t jobs_count{};
+  uint32_t submit_jobs_count{};
 };
 
 // Transaction
@@ -1360,61 +1384,6 @@ struct Txn {
   std::string target;
   crane::grpc::TxnAction action;
   std::string info;
-};
-
-struct PdJobInScheduler {
-  task_id_t job_id;
-  absl::Duration time_limit;
-
-  PartitionId partition_id;
-  std::string reservation;
-
-  ResourceView requested_node_res_view;
-  uint32_t node_num;
-  uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
-  bool exclusive;
-
-  std::unordered_set<std::string> included_nodes;
-  std::unordered_set<std::string> excluded_nodes;
-
-  absl::Time submit_time;
-  uint32_t partition_priority;
-  uint32_t qos_priority;
-  std::string account;
-
-  double priority;
-
-  absl::Time start_time;
-  ResourceV2 allocated_res;
-  std::vector<CranedId> craned_ids;
-
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-      req_licenses;
-  bool is_license_or;
-  std::unordered_map<LicenseId, uint32_t> actual_licenses;
-
-  std::string reason;
-
-  PdJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
-        time_limit(job->time_limit),
-        partition_id(job->partition_id),
-        reservation(job->reservation),
-        requested_node_res_view(job->requested_node_res_view),
-        node_num(job->node_num),
-        ntasks_per_node(job->ntasks_per_node),
-        cpus_per_task(job->cpus_per_task),
-        exclusive(job->exclusive),
-        included_nodes(job->included_nodes),
-        excluded_nodes(job->excluded_nodes),
-        submit_time(job->SubmitTime()),
-        partition_priority(job->partition_priority),
-        qos_priority(job->qos_priority),
-        account(job->account),
-        priority(job->mandated_priority),
-        req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()) {}
 };
 
 }  // namespace Ctld
