@@ -96,6 +96,8 @@ class CranedMetaContainer final {
       const std::string& partition_name, bool is_allowed_list,
       std::unordered_set<std::string>&& accounts);
 
+  void ResetAllPartitionAcls(bool reload_from_config);
+
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
 
@@ -211,6 +213,9 @@ class CranedMetaContainer final {
       craned_id_part_ids_map_;
 
  private:  // Helper functions
+  void LoadPartitionAclFromConfig_(const std::string& part_name,
+                                   PartitionGlobalMeta& meta);
+
   void SetGrpcCranedInfoByCranedMeta_(const CranedMeta& craned_meta,
                                       crane::grpc::CranedInfo* craned_info);
 

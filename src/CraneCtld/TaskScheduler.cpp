@@ -2785,6 +2785,36 @@ std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
   return {};
 }
 
+crane::grpc::DeleteReservationReply TaskScheduler::PurgeAllReservations() {
+  crane::grpc::DeleteReservationReply reply;
+
+  // Collect all reservation names first
+  std::vector<ResvId> resv_names;
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapConstPtr();
+    for (const auto& [name, _] : *resv_meta_map) {
+      resv_names.push_back(name);
+    }
+  }
+
+  std::vector<std::string> failed_reasons;
+  for (const auto& name : resv_names) {
+    auto res = DeleteResvMeta_(name);
+    if (!res) {
+      failed_reasons.push_back(res.error());
+    }
+  }
+
+  if (failed_reasons.empty()) {
+    reply.set_ok(true);
+  } else {
+    reply.set_ok(false);
+    reply.set_reason(fmt::format("{}", fmt::join(failed_reasons, "; ")));
+  }
+
+  return reply;
+}
+
 void TaskScheduler::CleanTaskTimerCb_() {
   m_clean_task_timer_queue_handle_->send();
 }

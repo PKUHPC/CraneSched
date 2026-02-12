@@ -304,6 +304,15 @@ message ResetNextTaskIdReply {
   string reason = 2;
 }
 
+message ResetNextStepDbIdRequest {
+  uint32 uid = 1;
+}
+
+message ResetNextStepDbIdReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message ModifyCranedStateRequest {
   uint32 uid = 1;
   repeated string craned_ids = 2;
@@ -658,11 +667,21 @@ message CreateReservationReply {
 message DeleteReservationRequest {
   uint32 uid = 1;
   string reservation_name = 2;
+  bool force = 3;
 }
 
 message DeleteReservationReply {
   bool ok = 1;
   string reason = 2;
+}
+
+message ResetPartitionAclRequest {
+  uint32 uid = 1;
+  bool reload_from_config = 2;  // true: reload defaults from config, false: clear all
+}
+
+message ResetPartitionAclReply {
+  bool ok = 1;
 }
 
 message StreamCallocRequest {
@@ -1125,6 +1144,7 @@ message DeleteLicenseResourceRequest {
   string resource_name = 2;
   string server = 3;
   repeated string clusters = 4;
+  bool force = 5;
 }
 
 message DeleteLicenseResourceReply {
@@ -1178,6 +1198,7 @@ service CraneCtld {
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
   rpc ModifyTasksExtraAttrs(ModifyTasksExtraAttrsRequest) returns (ModifyTasksExtraAttrsReply);
   rpc ResetNextTaskId(ResetNextTaskIdRequest) returns (ResetNextTaskIdReply);
+  rpc ResetNextStepDbId(ResetNextStepDbIdRequest) returns (ResetNextStepDbIdReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -1217,6 +1238,7 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc ResetPartitionAcl(ResetPartitionAclRequest) returns (ResetPartitionAclReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);

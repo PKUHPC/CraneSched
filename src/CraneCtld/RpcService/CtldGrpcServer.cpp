@@ -696,6 +696,35 @@ grpc::Status CraneCtldServiceImpl::ResetNextTaskId(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ResetNextStepDbId(
+    grpc::ServerContext* context,
+    const crane::grpc::ResetNextStepDbIdRequest* request,
+    crane::grpc::ResetNextStepDbIdReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason(res.error() == CraneErrCode::ERR_INVALID_USER
+                             ? "User is not a user of Crane"
+                             : "User has insufficient privilege");
+    return grpc::Status::OK;
+  }
+
+  if (g_embedded_db_client->ResetNextStepDbId()) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to reset step ID counters in embedded DB");
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryCranedInfoRequest* request,
@@ -1043,6 +1072,27 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
     response->set_ok(true);
   }
 
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ResetPartitionAcl(
+    grpc::ServerContext* context,
+    const crane::grpc::ResetPartitionAclRequest* request,
+    crane::grpc::ResetPartitionAclReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  g_meta_container->ResetAllPartitionAcls(request->reload_from_config());
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 
@@ -1743,6 +1793,23 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  if (absl::AsciiStrToUpper(request->name()) == "ALL" && request->force()) {
+    auto errors = g_account_manager->PurgeAllWckeys(request->uid());
+    for (auto& err : errors) {
+      response->mutable_rich_error()->CopyFrom(err);
+    }
+    response->set_ok(errors.empty());
+    return grpc::Status::OK;
+  }
+
+  if (absl::AsciiStrToUpper(request->name()) == "ALL" && !request->force()) {
+    response->set_ok(false);
+    response->mutable_rich_error()->set_description("all");
+    response->mutable_rich_error()->set_code(CraneErrCode::ERR_NOT_FORCE);
+    return grpc::Status::OK;
+  }
+
   auto res = g_account_manager->DeleteWckey(
       request->uid(), request->name(), request->user_name(), request->force());
   if (!res) {
@@ -1960,6 +2027,26 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
     return grpc::Status::OK;
   }
 
+  if (absl::AsciiStrToUpper(request->resource_name()) == "ALL" &&
+      request->force()) {
+    auto errors = g_licenses_manager->PurgeAllLicenseResources();
+    if (!errors.empty()) {
+      response->set_ok(false);
+      response->mutable_rich_err()->CopyFrom(errors.front());
+    } else {
+      response->set_ok(true);
+    }
+    return grpc::Status::OK;
+  }
+
+  if (absl::AsciiStrToUpper(request->resource_name()) == "ALL" &&
+      !request->force()) {
+    response->set_ok(false);
+    response->mutable_rich_err()->set_description("all");
+    response->mutable_rich_err()->set_code(CraneErrCode::ERR_NOT_FORCE);
+    return grpc::Status::OK;
+  }
+
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
   auto del_result = g_licenses_manager->RemoveLicenseResource(
@@ -2069,6 +2156,19 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
   if (!res) {
     response->set_ok(false);
     response->set_reason(CraneErrStr(res.error()));
+    return grpc::Status::OK;
+  }
+
+  if (absl::AsciiStrToUpper(request->reservation_name()) == "ALL" &&
+      request->force()) {
+    *response = g_task_scheduler->PurgeAllReservations();
+    return grpc::Status::OK;
+  }
+
+  if (absl::AsciiStrToUpper(request->reservation_name()) == "ALL" &&
+      !request->force()) {
+    response->set_ok(false);
+    response->set_reason("Use --force to delete all reservations");
     return grpc::Status::OK;
   }
 

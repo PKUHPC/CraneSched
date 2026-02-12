@@ -92,6 +92,9 @@ class LicensesManager {
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters);
 
+  // Force-delete all license resources
+  std::vector<crane::grpc::RichError> PurgeAllLicenseResources();
+
   CraneExpectedRich<void> QueryLicenseResource(
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters,

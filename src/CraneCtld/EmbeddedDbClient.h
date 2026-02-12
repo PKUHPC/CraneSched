@@ -185,6 +185,8 @@ class EmbeddedDbClient {
 
   bool ResetNextTaskId(task_id_t next_task_id, db_id_t next_task_db_id);
 
+  bool ResetNextStepDbId();
+
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
   bool RetrieveStepInfo(StepDbSnapshot* snapshot);

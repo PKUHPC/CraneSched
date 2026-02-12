@@ -652,6 +652,39 @@ bool EmbeddedDbClient::ResetNextTaskId(task_id_t next_task_id,
   return true;
 }
 
+bool EmbeddedDbClient::ResetNextStepDbId() {
+  txn_id_t txn_id;
+  std::expected<void, DbErrorCode> result;
+
+  absl::MutexLock lock_steps(&s_step_id_mtx_);
+
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+
+  db_id_t new_step_db_id = 1;
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            s_next_step_db_id_str_, &new_step_db_id);
+  if (!result) {
+    CRANE_ERROR("Failed to reset next_step_db_id.");
+    return false;
+  }
+
+  crane::grpc::StepNextIdInEmbeddedDb new_step_id_map;
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            s_next_step_id_str_, &new_step_id_map);
+  if (!result) {
+    CRANE_ERROR("Failed to reset next_step_id_map.");
+    return false;
+  }
+
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  s_next_step_db_id_ = new_step_db_id;
+  s_next_step_id_map_ = new_step_id_map;
+
+  CRANE_INFO("Step ID counters reset: next_step_db_id={}.", s_next_step_db_id_);
+  return true;
+}
+
 bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   using TaskStatus = crane::grpc::TaskStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfTask;
