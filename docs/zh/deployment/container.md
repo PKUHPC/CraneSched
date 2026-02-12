@@ -151,7 +151,7 @@ RuntimeApiVersion:  v1
 
 #### 鹤思 CNI 套件
 
-在 CraneSched-FrontEnd 根目录下，执行 `make tool` 可构建鹤思 CNI 套件中的插件，编译后的产物在 `build/tool/meta-cni`。
+在 CraneSched-FrontEnd 根目录下，执行 `make tool` 可构建鹤思 CNI 套件中的插件，编译后的产物在 `build/tool/` 下。
 
 以下是鹤思 CNI 套件中各组件的功能说明：
 

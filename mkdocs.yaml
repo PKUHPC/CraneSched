@@ -162,7 +162,7 @@ plugins:
             Cluster Configuration: 集群配置
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
-            Multi-node Deployment: 多节点部署
+            Multi-Node Deployment: 多节点部署
             PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Container Deployment: 容器功能部署
