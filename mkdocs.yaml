@@ -63,7 +63,7 @@ nav:
       - Cluster Configuration: deployment/configuration/config.md
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
-      - Multi-node Deployment: deployment/configuration/multi-node.md
+      - Multi-Node Deployment: deployment/configuration/multi-node.md
       - PKI+TLS Deployment: deployment/configuration/pki.md
       - License Usage Guide: deployment/configuration/license_guide.md
       - Keepalived Guide: deployment/configuration/keepalived.md
@@ -141,10 +141,10 @@ plugins:
             Job Steps: 作业步
             Job Dependency: 作业依赖
             Pending Reason: 作业排队原因
-            License Usage Guide: 许可证使用指南
-            Keepalived Guide: Keepalived 使用指南
+            License Usage Guide: 许可证功能配置指南
+            Keepalived Guide: Keepalived 配置指南
             Lua Guide: Lua 脚本配置指南
-            Prolog Epilog Guide: Prolog/Epilog 配置指南
+            Prolog & Epilog Guide: Prolog/Epilog 配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
@@ -162,7 +162,7 @@ plugins:
             Cluster Configuration: 集群配置
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
-            Multi-node Deployment: 多节点部署
+            Multi-Node Deployment: 多节点部署
             PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Container Deployment: 容器功能部署
