@@ -210,6 +210,8 @@ int InitFromStdin(int argc, char** argv) {
         msg.job_lifecycle_hook_config().max_output_size();
   }
 
+  g_config.EnableSlurmCompatibleEnv = msg.enable_slurm_compatible_env();
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,

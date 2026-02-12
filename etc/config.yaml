@@ -94,6 +94,8 @@ PriorityWeightJobSize: 0
 
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
+  
+EnableSlurmCompatibleEnv: false
 
 #JobSubmitLuaScript: /path/to/your/job_submit.lua
 

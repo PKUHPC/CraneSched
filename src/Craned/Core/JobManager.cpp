@@ -109,6 +109,24 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+
+  // SLURM
+  if (g_config.EnableSlurmCompatibleEnv) {
+    env_map.emplace("SLURM_JOBID", std::to_string(job_id));
+    env_map.emplace("SLURM_NODEID", node_id_to_str());
+    env_map.emplace("SLURMD_NODENAME", g_config.Hostname);
+    env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
+    std::list<std::string> slurm_node_list;
+    std::list<std::string> host_list{daemon_step_to_d.nodelist().begin(),
+                                     daemon_step_to_d.nodelist().end()};
+    if (!util::HostNameListToStr_(host_list, &slurm_node_list)) {
+      CRANE_ERROR(
+          "cannot emplace SLURM_NODELIST, because HostNameListToStr_ failed");
+    } else {
+      env_map.emplace("SLURM_NODELIST", absl::StrJoin(slurm_node_list, ","));
+    }
+  }
+
   return env_map;
 }
 
@@ -698,6 +716,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       job_lifecycle_hook_conf->set_max_output_size(
           g_config.JobLifecycleHook.MaxOutputSize);
     }
+
+    init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
