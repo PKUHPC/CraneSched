@@ -8,6 +8,9 @@
 
 鹤思通过 CRI 接口与容器运行时交互，支持 **containerd** 和 **CRI-O** 等兼容 CRI 的运行时。
 
+!!! warning "版本要求"
+    容器运行时必须支持 **CRI v1 API**。对于 containerd，要求版本 **≥ 1.7**（推荐 2.0+）。
+
 #### 安装容器运行时
 
 === "containerd（推荐）"

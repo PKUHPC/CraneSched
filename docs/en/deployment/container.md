@@ -8,6 +8,9 @@ This guide explains how to enable and configure the container feature in CraneSc
 
 CraneSched interacts with container runtimes via the CRI interface, supporting CRI-compatible runtimes like **containerd** and **CRI-O**.
 
+!!! warning "Version Requirement"
+    The container runtime must support **CRI v1 API**. For containerd, version **≥ 1.7** is required (2.0+ recommended).
+
 #### Install Container Runtime
 
 === "containerd (Recommended)"
