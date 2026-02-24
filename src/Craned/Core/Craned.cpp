@@ -742,16 +742,16 @@ void ParseConfig(int argc, char** argv) {
               const auto& bindfs_config = container_config["BindFs"];
               g_config.Container.BindFs.Enabled =
                   YamlValueOr<bool>(bindfs_config["Enabled"], false);
-              
+
               if (g_config.Container.BindFs.Enabled) {
-                  g_config.Container.BindFs.BindfsBinary =
-                      YamlValueOr(bindfs_config["BindfsBinary"],
-                                  g_config.Container.BindFs.BindfsBinary.string());
-                  g_config.Container.BindFs.FusermountBinary =
-                      YamlValueOr(bindfs_config["FusermountBinary"],
-                                  g_config.Container.BindFs.FusermountBinary.string());
+                g_config.Container.BindFs.BindfsBinary = YamlValueOr(
+                    bindfs_config["BindfsBinary"],
+                    g_config.Container.BindFs.BindfsBinary.string());
+                g_config.Container.BindFs.FusermountBinary = YamlValueOr(
+                    bindfs_config["FusermountBinary"],
+                    g_config.Container.BindFs.FusermountBinary.string());
               }
-              
+
               std::filesystem::path mount_base_dir =
                   YamlValueOr(bindfs_config["MountBaseDir"],
                               g_config.Container.BindFs.MountBaseDir.string());
