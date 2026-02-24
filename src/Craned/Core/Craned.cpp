@@ -750,16 +750,15 @@ void ParseConfig(int argc, char** argv) {
                 g_config.Container.BindFs.FusermountBinary = YamlValueOr(
                     bindfs_config["FusermountBinary"],
                     g_config.Container.BindFs.FusermountBinary.string());
-              }
+                std::filesystem::path mount_base_dir =
+                    YamlValueOr(bindfs_config["MountBaseDir"],
+                                g_config.Container.BindFs.MountBaseDir.string());
 
-              std::filesystem::path mount_base_dir =
-                  YamlValueOr(bindfs_config["MountBaseDir"],
-                              g_config.Container.BindFs.MountBaseDir.string());
-              if (mount_base_dir.is_relative()) {
-                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+                if (mount_base_dir.is_relative())
+                  mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+                g_config.Container.BindFs.MountBaseDir =
+                    std::move(mount_base_dir);
               }
-              g_config.Container.BindFs.MountBaseDir =
-                  std::move(mount_base_dir);
             }
             if (container_config["SubId"]) {
               const auto& subid_config = container_config["SubId"];
