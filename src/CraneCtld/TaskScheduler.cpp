@@ -190,19 +190,6 @@ bool TaskScheduler::Init() {
       }
 
       if (!mark_task_as_failed) {
-        const auto& user_ptr =
-            g_account_manager->GetExistedUserInfo(task->Username());
-        if (!user_ptr) {
-          CRANE_ERROR(
-              "The current user {} is not in the user list when submitting the "
-              "task",
-              task->Username());
-          mark_task_as_failed = true;
-        } else
-          g_account_meta_container->UserAddTask(task->Username());
-      }
-
-      if (!mark_task_as_failed) {
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
         // If a batch task failed to requeue the task into pending queue due to
