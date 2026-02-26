@@ -468,7 +468,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     }
 
     pid_t pid = fork();
-    setpgid(0, 0);
 
     if (pid == -1) {
       CRANE_ERROR("{} pid fork failed: {}.", script, strerror(errno));
@@ -607,6 +606,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       close(stdout_pipe[1]);
 
       CloseFdFrom(3);
+      setpgid(0, 0);
 
       if (args.at_child_setup_cb) {
         bool result = args.at_child_setup_cb(getpid());
