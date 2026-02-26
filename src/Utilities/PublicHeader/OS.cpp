@@ -20,6 +20,7 @@
 
 #include <absl/cleanup/cleanup.h>
 #include <grp.h>
+#include <poll.h>
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -30,7 +31,6 @@
 #include <future>
 #include <string>
 #include <vector>
-#include <poll.h>
 
 #include "absl/strings/str_split.h"
 #include "crane/Logger.h"
@@ -424,35 +424,34 @@ absl::Time GetSystemBootTime() {
 }
 
 bool IsAbsolutePath(const std::string& path) {
-    return std::filesystem::path(path).is_absolute();
+  return std::filesystem::path(path).is_absolute();
 }
 
 void kill_pg(pid_t pid) {
   killpg(pid, SIGTERM);
-	usleep(10000);
-	killpg(pid, SIGKILL);
+  usleep(10000);
+  killpg(pid, SIGKILL);
 }
 
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     const RunPrologEpilogArgs& args) {
-
   std::string output;
-  
+
   auto start_time = std::chrono::steady_clock::now();
-  auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(args.timeout_sec));
+  auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::seconds(args.timeout_sec));
 
   for (const auto& script : args.scripts) {
-    
     if (!IsAbsolutePath(script)) {
       CRANE_ERROR("Script path {} is not absolute.", script);
       return std::unexpected(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
-    
+
     bool send_terminate = true;
-    
+
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now() - start_time);
+        std::chrono::steady_clock::now() - start_time);
     if (elapsed >= timeout) {
       CRANE_ERROR("Total timeout ({}s) reached before running {}.",
                   args.timeout_sec, script);
@@ -479,35 +478,36 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
     }
 
-    if (pid > 0) { // parent proc
+    if (pid > 0) {  // parent proc
       close(stdout_pipe[1]);
       int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
       fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
 
       int status = 0;
-      while(true) {
+      while (true) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now() - start_time);
+            std::chrono::steady_clock::now() - start_time);
         if (elapsed >= timeout) {
           CRANE_TRACE("{} Timeout.", script);
           break;
         }
 
         uint64_t remaining_time = timeout.count() - elapsed.count();
-  
+
         struct pollfd fds;
         fds.fd = stdout_pipe[0];
         fds.events = POLLIN | POLLHUP | POLLRDHUP;
         fds.revents = 0;
         int max_poll_time_ms = 100;
-        int timeout_ms = static_cast<int>(std::min<uint64_t>(remaining_time, max_poll_time_ms));
+        int timeout_ms = static_cast<int>(
+            std::min<uint64_t>(remaining_time, max_poll_time_ms));
 
-        int pret = poll(&fds, 1, timeout_ms); // Poll with timeout based on remaining time
+        int pret = poll(
+            &fds, 1, timeout_ms);  // Poll with timeout based on remaining time
         if (pret == 0) {
           continue;
         } else if (pret < 0) {
-          if (errno == EAGAIN || errno == EINTR)
-            continue;
+          if (errno == EAGAIN || errno == EINTR) continue;
           CRANE_ERROR("{} poll() failed: {}", script, strerror(errno));
           break;
         }
@@ -521,8 +521,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           send_terminate = false;
           break;
         } else if (bytes_read < 0) {
-          if (errno == EAGAIN || errno == EWOULDBLOCK)
-            continue;
+          if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
           send_terminate = false;
           CRANE_ERROR("{} read() failed: {}", script, strerror(errno));
           break;
@@ -538,32 +537,33 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       close(stdout_pipe[0]);
 
       if (send_terminate) {
-        CRANE_TRACE("{} Sending termination signal to process group {}.", script, pid);
+        CRANE_TRACE("{} Sending termination signal to process group {}.",
+                    script, pid);
         kill_pg(pid);
         waitpid(pid, &status, 0);
       } else {
         /*
-		     * If the STDOUT is closed from the script we may reach
-		     * this point without any input in read_fd, so just wait
-		     * for the process here until max_wait.
-		     */
+         * If the STDOUT is closed from the script we may reach
+         * this point without any input in read_fd, so just wait
+         * for the process here until max_wait.
+         */
         int options = WNOHANG;
         int rc;
         int delay = 10;
         int max_delay = 1000;
         bool killed_pg = false;
-        while((rc = waitpid(pid, &status, options)) <= 0) {
+        while ((rc = waitpid(pid, &status, options)) <= 0) {
           if (rc < 0) {
-            if (errno == EINTR)
-              continue;
+            if (errno == EINTR) continue;
             CRANE_ERROR("{} waitpid() failed: {}", script, strerror(errno));
             break;
           }
 
           auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now() - start_time);
+              std::chrono::steady_clock::now() - start_time);
           if (elapsed >= timeout) {
-            CRANE_TRACE("{} Timeout while waiting for process to exit.", script);
+            CRANE_TRACE("{} Timeout while waiting for process to exit.",
+                        script);
             kill_pg(pid);
             options = 0;
             killed_pg = true;
@@ -573,9 +573,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           uint64_t remaining_time = timeout.count() - elapsed.count();
           poll(NULL, 0, delay);
           delay = std::min<int>(
-            max_delay,
-            std::max<int>(1, std::min<int>(delay * 2, remaining_time))
-          );
+              max_delay,
+              std::max<int>(1, std::min<int>(delay * 2, remaining_time)));
         }
         if (!killed_pg) kill_pg(pid);
       }
@@ -593,7 +592,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         exit_code = status;
         signal_num = 0;
       }
-
 
       if (exit_code != 0 || signal_num != 0) {
         CRANE_TRACE("{} Failed (exit status {}:{}), output: {}.", script,

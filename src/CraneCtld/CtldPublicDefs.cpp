@@ -1007,8 +1007,7 @@ void CommonStepInCtld::StepStatusChange(
 
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
     // Configuring -> Configured / Failed / Cancelled,
-    if (!craned_id.empty())
-      this->NodeConfigured(craned_id);
+    if (!craned_id.empty()) this->NodeConfigured(craned_id);
     if (new_status != crane::grpc::TaskStatus::Configured) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);

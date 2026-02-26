@@ -1780,7 +1780,7 @@ CraneErrCode ProcInstance::Spawn() {
           .run_uid = m_parent_step_inst_->uid,
           .run_gid = m_parent_step_inst_->gids[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      
+
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_prolog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
