@@ -95,22 +95,8 @@ bool TaskScheduler::Init() {
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
-      CraneExpected<void> result;
-      {
-        const auto& user_ptr =
-            g_account_manager->GetExistedUserInfo(task->Username());
-        if (!user_ptr) {
-          CRANE_ERROR(
-              "The current user {} is not in the user list when recover the "
-              "task",
-              task->Username());
-          result = std::unexpected(CraneErrCode::ERR_INVALID_USER);
-        }
-        g_account_meta_container->UserAddTask(task->Username());
-      }
-      if (result) result = AcquireTaskAttributes(task.get());
+      auto result = AcquireTaskAttributes(task.get());
       if (!result || task->type == crane::grpc::Interactive) {
-        g_account_meta_container->UserReduceTask(task->Username());
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -1893,11 +1879,17 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
-    if (res != CraneErrCode::SUCCESS) {
-      CRANE_DEBUG("The requested QoS resources have reached the limit.");
-      g_account_meta_container->UserReduceTask(task->Username());
-      return std::unexpected(res);
+    {
+      const auto& user_ptr =
+        g_account_manager->GetExistedUserInfo(task->Username());
+      if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+      auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
+      if (res != CraneErrCode::SUCCESS) {
+        CRANE_DEBUG("The requested QoS resources have reached the limit.");
+        return std::unexpected(res);
+      }
+      g_account_meta_container->UserAddTask(user_ptr->name);
     }
     std::future<CraneExpected<task_id_t>> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));

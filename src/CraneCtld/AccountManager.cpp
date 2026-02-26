@@ -1329,28 +1329,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_submit_jobs_per_account = value_number;
       log += fmt::format("max_submit_jobs_per_account: {}\n", value);
-      log += fmt::format("max_cpus_per_user: {}\n", name, value);
-      break;
-    }
-    case crane::grpc::ModifyField::MaxJobsPerAccount: {
-      int64_t value_number;
-      util::ConvertStringToInt64(value, &value_number);
-      res_qos.max_jobs_per_account = value_number;
-      log += fmt::format("max_jobs_per_account: {}\n", name, value);
-      break;
-    }
-    case crane::grpc::ModifyField::MaxSubmitJobsPerUser: {
-      int64_t value_number;
-      util::ConvertStringToInt64(value, &value_number);
-      res_qos.max_submit_jobs_per_user = value_number;
-      log += fmt::format("max_jobs_per_account: {}\n", name, value);
-      break;
-    }
-    case crane::grpc::ModifyField::MaxSubmitJobsPerAccount: {
-      int64_t value_number;
-      util::ConvertStringToInt64(value, &value_number);
-      res_qos.max_submit_jobs_per_account = value_number;
-      log += fmt::format("max_submit_jobs_per_account: {}\n", name, value);
       break;
     }
     case crane::grpc::ModifyField::MaxTresPerUser: {
