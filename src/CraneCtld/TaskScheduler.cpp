@@ -3273,7 +3273,7 @@ void TaskScheduler::StartCraneCtldPrologThread(TaskInCtld* job) {
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
         run_prolog_args.timeout_sec =
           g_config.JobLifecycleHook.PrologTimeout;
-        if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
+        if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
           run_prolog_args.timeout_sec =
                     g_config.JobLifecycleHook.PrologEpilogTimeout;
         }
@@ -3457,7 +3457,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                   .run_uid = 0,
                   .run_gid = 0,
                   .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60) {
+              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
                 run_epilog_ctld_args.timeout_sec =
                     g_config.JobLifecycleHook.PrologEpilogTimeout;
               }

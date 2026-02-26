@@ -1773,7 +1773,7 @@ CraneErrCode ProcInstance::Spawn() {
           .run_gid = m_parent_step_inst_->gids[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
       
-      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_prolog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
@@ -2012,7 +2012,7 @@ TaskManager::~TaskManager() {
         .run_uid = 0,
         .run_gid = 0,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
+    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
       run_epilog_args.timeout_sec =
           g_config.JobLifecycleHook.PrologEpilogTimeout;
 
@@ -2356,7 +2356,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
@@ -2379,7 +2379,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 60)
+      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
