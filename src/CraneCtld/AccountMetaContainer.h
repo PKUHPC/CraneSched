@@ -21,8 +21,6 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "AccountManager.h"
-
 namespace Ctld {
 
 struct PdJobInScheduler;
@@ -37,9 +35,12 @@ struct MetaResource {
 
   MetaResource& operator+=(const MetaResource& rhs);
   MetaResource& operator-=(const MetaResource& rhs);
-};
 
-constexpr int kNumStripes = 128;
+  bool IsZero() const {
+    return resource.IsZero() && jobs_count == 0 && submit_jobs_count == 0 &&
+           wall_time == absl::ZeroDuration();
+  }
+};
 
 class AccountMetaContainer final {
  public:
@@ -95,6 +96,9 @@ class AccountMetaContainer final {
   bool UserHasTask(const std::string& username);
 
  private:
+
+  const static int kNumStripes = 128;
+
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
