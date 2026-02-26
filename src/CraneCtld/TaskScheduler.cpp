@@ -1370,13 +1370,9 @@ void TaskScheduler::ScheduleThread_() {
       // queue.
 
       // Set succeed tasks status and do callbacks.
-      std::vector<job_id_t> to_run_prolog_job_ids;
-      to_run_prolog_job_ids.reserve(jobs_created.size());
       for (auto& job : jobs_created) {
         job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                      job->StartTime());
-        if (!g_config.JobLifecycleHook.CranectldPrologs.empty())
-          to_run_prolog_job_ids.emplace_back(job->TaskId());
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
       }
