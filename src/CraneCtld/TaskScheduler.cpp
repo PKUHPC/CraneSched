@@ -3251,59 +3251,62 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
 }
 
 void TaskScheduler::StartCraneCtldPrologThread(TaskInCtld* job) {
-  // CraneCtldProlog must be executed prior to task execution, 
-  // specifically during the configure phase, and it requires the running map 
-  // for the task to be present. At present, the framework can only launch the 
-  // CraneCtldProlog thread after the step has started and before the task is executed.
+  // CraneCtldProlog must be executed prior to task execution,
+  // specifically during the configure phase, and it requires the running map
+  // for the task to be present. At present, the framework can only launch the
+  // CraneCtldProlog thread after the step has started and before the task is
+  // executed.
   if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
     // TODO: cbatch job must be requeue
     job->is_prolog_running = true;
-    g_thread_pool->detach_task([this, job_id = job->TaskId(), env = job->env]() {
-      // run prolog ctld script
-      RunPrologEpilogArgs run_prolog_args{
-        .scripts = g_config.JobLifecycleHook.CranectldPrologs,
-        .envs = env,
-        .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
-        .run_uid = 0,
-        .run_gid = 0,
-        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-        run_prolog_args.timeout_sec =
-          g_config.JobLifecycleHook.PrologTimeout;
-        if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
-          run_prolog_args.timeout_sec =
-                    g_config.JobLifecycleHook.PrologEpilogTimeout;
-        }
-        CRANE_TRACE(
-            "[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
-            job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
-        auto run_prolog_result =
-                util::os::RunPrologOrEpiLog(run_prolog_args);
-            
-        absl::MutexLock running_lk(&m_running_task_map_mtx_);
-        auto iter = m_running_task_map_.find(job_id);
-        if (iter == m_running_task_map_.end()) {
-          CRANE_DEBUG("[Job #{}]: Job not found in m_running_task_map_ when running CraneCtldProlog," 
-                " may be canceled.", job_id);
-              return;
-        }
-        auto& job = iter->second;
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-        job->is_prolog_running = false;
-        if (!run_prolog_result) {
-              auto status = run_prolog_result.error();
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
-                          job_id, status.exit_code, status.signal_num);
-              this->StepStatusChangeAsync(job_id, kPrimaryStepId, "",
-                                  crane::grpc::TaskStatus::Cancelled, ExitCode::EC_PROLOG_ERR,
-                                  "CraneCtldPrologError", now);
-        } else {
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
-              this->StepStatusChangeAsync(job_id, kPrimaryStepId, "",
-                                  crane::grpc::TaskStatus::Configured, 0,
-                                  "", now);
-            }
-      });
-    }
+    g_thread_pool->detach_task(
+        [this, job_id = job->TaskId(), env = job->env]() {
+          // run prolog ctld script
+          RunPrologEpilogArgs run_prolog_args{
+              .scripts = g_config.JobLifecycleHook.CranectldPrologs,
+              .envs = env,
+              .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
+              .run_uid = 0,
+              .run_gid = 0,
+              .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+          run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+          if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
+            run_prolog_args.timeout_sec =
+                g_config.JobLifecycleHook.PrologEpilogTimeout;
+          }
+          CRANE_TRACE(
+              "[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
+              job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
+          auto run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
+
+          absl::MutexLock running_lk(&m_running_task_map_mtx_);
+          auto iter = m_running_task_map_.find(job_id);
+          if (iter == m_running_task_map_.end()) {
+            CRANE_DEBUG(
+                "[Job #{}]: Job not found in m_running_task_map_ when running "
+                "CraneCtldProlog,"
+                " may be canceled.",
+                job_id);
+            return;
+          }
+          auto& job = iter->second;
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          job->is_prolog_running = false;
+          if (!run_prolog_result) {
+            auto status = run_prolog_result.error();
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
+                        job_id, status.exit_code, status.signal_num);
+            this->StepStatusChangeAsync(
+                job_id, kPrimaryStepId, "", crane::grpc::TaskStatus::Cancelled,
+                ExitCode::EC_PROLOG_ERR, "CraneCtldPrologError", now);
+          } else {
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
+            this->StepStatusChangeAsync(job_id, kPrimaryStepId, "",
+                                        crane::grpc::TaskStatus::Configured, 0,
+                                        "", now);
+          }
+        });
+  }
 }
 
 void TaskScheduler::StepStatusChangeAsync(
