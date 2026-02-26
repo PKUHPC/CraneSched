@@ -567,8 +567,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
-    if (!craned_id.empty())
-      this->NodeConfigured(craned_id);
+    this->NodeConfigured(craned_id);
 
     switch (new_status) {
     case crane::grpc::TaskStatus::Running:
