@@ -725,8 +725,6 @@ struct DaemonStepInCtld : StepInCtld {
   std::string account;
   std::string qos;
 
-  bool is_prolog_running{false};
-
   ~DaemonStepInCtld() override = default;
 
   void InitFromJob(const TaskInCtld& job);
@@ -741,8 +739,6 @@ struct DaemonStepInCtld : StepInCtld {
                    const std::string& reason, const CranedId& craned_id,
                    const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
-
-  bool PrologComplete() const;
 
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
@@ -830,6 +826,8 @@ struct TaskInCtld {
   std::string wckey;
 
   std::list<std::string> account_chain;
+
+  bool is_prolog_running{false};
 
  private:
   /* ------------- [2] -------------
@@ -930,6 +928,8 @@ struct TaskInCtld {
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
+
+  bool PrologComplete() const;
 
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }

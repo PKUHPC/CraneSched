@@ -805,6 +805,8 @@ class TaskScheduler {
                           reason.value_or(""), std::move(timestamp));
   }
 
+  void StartCraneCtldPrologThread(TaskInCtld* job);
+
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              const CranedId& craned_index,
                              crane::grpc::TaskStatus new_status,
