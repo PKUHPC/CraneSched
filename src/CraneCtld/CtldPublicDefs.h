@@ -1208,9 +1208,8 @@ struct Qos {
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
         max_jobs_per_account, max_submit_jobs_per_user,
         max_submit_jobs_per_account, max_jobs, max_submit_jobs,
-        absl::FormatDuration(max_wall), flags, max_tres.ResourceViewToString(),
-        max_tres_per_user.ResourceViewToString(),
-        max_tres_per_account.ResourceViewToString());
+        absl::FormatDuration(max_wall), flags, util::ReadableResourceView(max_tres), util::ReadableResourceView(max_tres_per_user),
+        util::ReadableResourceView(max_tres_per_account));
   }
 
   static const std::string GetModifyFieldStr(
