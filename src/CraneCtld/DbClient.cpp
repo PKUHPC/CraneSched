@@ -3756,7 +3756,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxTimeLimitPerTask(),
       Qos::FieldStringOfMaxJobsPerAccount(),
       Qos::FieldStringOfMaxSubmitJobsPerUser(),
-      Qos::FieldStringOfMaxSubmitJobsPerAccount()};
+      Qos::FieldStringOfMaxSubmitJobsPerAccount(),
       Qos::FieldStringOfMaxJobs(),
       Qos::FieldStringOfMaxSubmitJobs(),
       Qos::FieldStringOfMaxWall(),
