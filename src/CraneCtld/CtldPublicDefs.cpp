@@ -585,7 +585,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                   util::StepStatusToString(new_status));
     }
 
-    if (this->AllNodesConfigured() && this->PrologComplete()) {
+    if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus()) {
         job_finished = true;
       } else if (job->CancelRequested()) {
@@ -638,6 +638,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           context->craned_step_alloc_map[node_id].emplace_back(
               job->PrimaryStep()->GetStepToD(node_id));
         }
+        g_task_scheduler->StartCraneCtldPrologThread(job);
       }
     }
 
@@ -716,12 +717,6 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   }
 
   return std::nullopt;
-}
-
-bool DaemonStepInCtld::PrologComplete() const {
-  if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
-
-  return !is_prolog_running;
 }
 
 void DaemonStepInCtld::RecoverFromDb(
@@ -1013,12 +1008,13 @@ void CommonStepInCtld::StepStatusChange(
 
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
     // Configuring -> Configured / Failed / Cancelled,
-    this->NodeConfigured(craned_id);
+    if (!craned_id.empty())
+      this->NodeConfigured(craned_id);
     if (new_status != crane::grpc::TaskStatus::Configured) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
-    if (this->AllNodesConfigured()) {
+    if (this->AllNodesConfigured() && job->PrologComplete()) {
       if (this->PrevErrorStatus().has_value()) {
         // Configuring -> Failed
         step_configure_failed = true;
@@ -1253,6 +1249,12 @@ bool TaskInCtld::ShouldLaunchOnAllNodes() const {
   } else {
     std::unreachable();
   }
+}
+
+bool TaskInCtld::PrologComplete() const {
+  if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
+
+  return !is_prolog_running;
 }
 
 void TaskInCtld::SetTaskId(task_id_t id) {
