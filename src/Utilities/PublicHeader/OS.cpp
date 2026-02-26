@@ -479,8 +479,12 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     if (pid > 0) {  // parent proc
       close(stdout_pipe[1]);
-      int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
-      fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
+      if (!SetFdNonBlocking(stdout_pipe[0])) {
+        CRANE_ERROR("Failed to set non-blocking mode for stdout pipe.");
+        close(stdout_pipe[0]);
+        return std::unexpected(
+            RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+      }
 
       int status = 0;
       while (true) {
