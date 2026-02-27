@@ -40,6 +40,10 @@ struct MetaResource {
     return resource.IsZero() && jobs_count == 0 && submit_jobs_count == 0 &&
            wall_time == absl::ZeroDuration();
   }
+
+  void SetToZero();
+
+  std::string DebugString() const;
 };
 
 class AccountMetaContainer final {
@@ -121,11 +125,8 @@ class AccountMetaContainer final {
   static bool CheckGres_(const DeviceMap& device_req,
                          const DeviceMap& device_total);
 
-  template <typename T>
-  static void CheckAndSubResource_(T& current, T need,
-                                   const std::string& resource_name,
-                                   const std::string& username,
-                                   const std::string& qos, task_id_t task_id);
+  void DoMallocResource_(job_id_t job_id, const std::string& username, const std::list<std::string>& account_chain, const std::string& qos, MetaResource& meta_resource);
+  void DoFreeResource_(job_id_t job_id, const std::string& username, const std::list<std::string>& account_chain, const std::string& qos, MetaResource& meta_resource);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:
