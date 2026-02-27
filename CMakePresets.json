@@ -47,7 +47,7 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
-                "CRANE_NATIVE_ARCH_OPT": "ON"
+                "CRANE_NATIVE_ARCH_OPT": "OFF"
             }
         }
     ],

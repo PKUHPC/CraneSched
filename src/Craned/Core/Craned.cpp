@@ -742,18 +742,23 @@ void ParseConfig(int argc, char** argv) {
               const auto& bindfs_config = container_config["BindFs"];
               g_config.Container.BindFs.Enabled =
                   YamlValueOr<bool>(bindfs_config["Enabled"], false);
-              g_config.Container.BindFs.BindfsBinary =
-                  bindfs_config["BindfsBinary"].as<std::string>();
-              g_config.Container.BindFs.FusermountBinary =
-                  bindfs_config["FusermountBinary"].as<std::string>();
-              std::filesystem::path mount_base_dir =
-                  YamlValueOr(bindfs_config["MountBaseDir"],
-                              g_config.Container.BindFs.MountBaseDir.string());
-              if (mount_base_dir.is_relative()) {
-                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+
+              if (g_config.Container.BindFs.Enabled) {
+                g_config.Container.BindFs.BindfsBinary = YamlValueOr(
+                    bindfs_config["BindfsBinary"],
+                    g_config.Container.BindFs.BindfsBinary.string());
+                g_config.Container.BindFs.FusermountBinary = YamlValueOr(
+                    bindfs_config["FusermountBinary"],
+                    g_config.Container.BindFs.FusermountBinary.string());
+                std::filesystem::path mount_base_dir = YamlValueOr(
+                    bindfs_config["MountBaseDir"],
+                    g_config.Container.BindFs.MountBaseDir.string());
+
+                if (mount_base_dir.is_relative())
+                  mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+                g_config.Container.BindFs.MountBaseDir =
+                    std::move(mount_base_dir);
               }
-              g_config.Container.BindFs.MountBaseDir =
-                  std::move(mount_base_dir);
             }
             if (container_config["SubId"]) {
               const auto& subid_config = container_config["SubId"];
