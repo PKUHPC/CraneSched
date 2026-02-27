@@ -523,7 +523,7 @@ AccountMetaContainer::LockAccountStripes_(
 void AccountMetaContainer::DoMallocResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
-    MetaResource& meta_resource) {
+    const MetaResource& meta_resource) {
   m_user_meta_map_.try_emplace_l(
       username,
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -566,7 +566,7 @@ void AccountMetaContainer::DoMallocResource_(
 void AccountMetaContainer::DoFreeResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
-    MetaResource& meta_resource) {
+    const MetaResource& meta_resource) {
   m_user_meta_map_.if_contains(username, [&](std::pair<const std::string,
                                                        QosToResourceMap>&
                                                  pair) {
