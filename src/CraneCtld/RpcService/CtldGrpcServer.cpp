@@ -1290,8 +1290,10 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.max_jobs = qos_info->max_jobs();
   qos.max_submit_jobs = qos_info->max_submit_jobs();
   qos.max_tres = static_cast<ResourceView>(qos_info->max_tres());
-  qos.max_tres_per_user = static_cast<ResourceView>(qos_info->max_tres_per_user());
-  qos.max_tres_per_account = static_cast<ResourceView>(qos_info->max_tres_per_account());
+  qos.max_tres_per_user =
+      static_cast<ResourceView>(qos_info->max_tres_per_user());
+  qos.max_tres_per_account =
+      static_cast<ResourceView>(qos_info->max_tres_per_account());
   qos.flags = qos_info->flags();
 
   int64_t sec = qos_info->max_time_limit_per_task();
@@ -1694,9 +1696,12 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_jobs(qos.max_jobs);
     qos_info->set_max_submit_jobs(qos.max_submit_jobs);
     qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
-    qos_info->mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres));
-    qos_info->mutable_max_tres_per_user()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
-    qos_info->mutable_max_tres_per_account()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->mutable_max_tres()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    qos_info->mutable_max_tres_per_user()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    qos_info->mutable_max_tres_per_account()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
     qos_info->set_flags(qos.flags);
   }
 

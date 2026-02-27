@@ -240,7 +240,6 @@ void ParsePrologEpilogHookPaths(const std::string& log_hook_config,
                                 const std::string& config_file_path,
                                 std::vector<std::string>* result);
 
-
 bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map);
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res);

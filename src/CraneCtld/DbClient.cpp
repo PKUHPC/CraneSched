@@ -3728,11 +3728,15 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_submit_jobs = ViewValueOr_(
         qos_view[Qos::FieldStringOfMaxSubmitJobs()],
         int64_t(std::numeric_limits<decltype(qos->max_submit_jobs)>::max()));
-    qos->max_wall = absl::Seconds(ViewValueOr_(qos_view[Qos::FieldStringOfMaxWall()], int64_t(kTaskMaxTimeLimitSec)));
+    qos->max_wall = absl::Seconds(ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxWall()], int64_t(kTaskMaxTimeLimitSec)));
     qos->flags = ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0));
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(), &qos->max_tres);
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(), &qos->max_tres_per_user);
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(), &qos->max_tres_per_account);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(),
+                           &qos->max_tres);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(),
+                           &qos->max_tres_per_user);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(),
+                           &qos->max_tres_per_account);
 
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -4340,29 +4344,32 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 void MongodbClient::QosResourceViewFromDb_(
     const bsoncxx::document::view& qos_view, const std::string& field,
     ResourceView* resource) {
-
   auto max_tres = ViewValueOr_(qos_view[field], bsoncxx::document::view{});
-  auto allocatable_res = ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
+  auto allocatable_res =
+      ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
 
-  resource->GetAllocatableRes().cpu_count =
-      static_cast<cpu_t>(ViewValueOr_(allocatable_res["cpu_count"], INT32_MAX/256));
-  resource->GetAllocatableRes().memory_bytes =
-      std::stoull(ViewValueOr_(allocatable_res["mem"], std::to_string(UINT64_MAX)));
-  resource->GetAllocatableRes().memory_sw_bytes =
-      std::stoull(ViewValueOr_(allocatable_res["mem_sw"], std::to_string(UINT64_MAX)));
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(
+      ViewValueOr_(allocatable_res["cpu_count"], INT32_MAX / 256));
+  resource->GetAllocatableRes().memory_bytes = std::stoull(
+      ViewValueOr_(allocatable_res["mem"], std::to_string(UINT64_MAX)));
+  resource->GetAllocatableRes().memory_sw_bytes = std::stoull(
+      ViewValueOr_(allocatable_res["mem_sw"], std::to_string(UINT64_MAX)));
 
-  auto device_map_view = ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});
+  auto device_map_view =
+      ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});
   for (auto&& device_item : device_map_view) {
     auto device_doc = device_item.get_document().value;
-    uint64_t untyped_req_count = std::stoull(std::string(device_doc["untyped_req_count"].get_string().value));
+    uint64_t untyped_req_count = std::stoull(
+        std::string(device_doc["untyped_req_count"].get_string().value));
     std::unordered_map<std::string, uint64_t> type_total;
     auto type_total_ele = device_doc["type_total"];
     for (auto&& sub_item : type_total_ele.get_document().value) {
       uint64_t total = std::stoull(std::string(sub_item.get_string().value));
       type_total[std::string(sub_item.key())] = total;
     }
-    resource->GetDeviceMap().emplace(std::string(device_item.key()),
-            std::make_pair(untyped_req_count, std::move(type_total)));
+    resource->GetDeviceMap().emplace(
+        std::string(device_item.key()),
+        std::make_pair(untyped_req_count, std::move(type_total)));
   }
 }
 

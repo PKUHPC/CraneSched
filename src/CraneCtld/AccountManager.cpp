@@ -1333,17 +1333,21 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     }
     case crane::grpc::ModifyField::MaxTresPerUser: {
       util::ConvertStringToResourceView(value, &res_qos.max_tres_per_user);
-      log += fmt::format("max_tres_per_user: {}\n", util::ReadableResourceView(res_qos.max_tres_per_user));
+      log += fmt::format("max_tres_per_user: {}\n",
+                         util::ReadableResourceView(res_qos.max_tres_per_user));
       break;
     }
     case crane::grpc::ModifyField::MaxTresPerAccount: {
       util::ConvertStringToResourceView(value, &res_qos.max_tres_per_account);
-      log += fmt::format("max_tres_per_account: {}\n", util::ReadableResourceView(res_qos.max_tres_per_account));
+      log +=
+          fmt::format("max_tres_per_account: {}\n",
+                      util::ReadableResourceView(res_qos.max_tres_per_account));
       break;
     }
     case crane::grpc::ModifyField::MaxTres: {
       util::ConvertStringToResourceView(value, &res_qos.max_tres);
-      log += fmt::format("max_tres: {}\n", util::ReadableResourceView(res_qos.max_tres));
+      log += fmt::format("max_tres: {}\n",
+                         util::ReadableResourceView(res_qos.max_tres));
       break;
     }
     case crane::grpc::ModifyField::MaxJobs: {
