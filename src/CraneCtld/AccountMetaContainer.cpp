@@ -401,20 +401,9 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
 
   std::expected<void, std::string> result;
 
-  auto do_check = [&](const MetaResource& meta_resource)
-      -> std::expected<void, std::string> {
-    if (meta_resource.jobs_count + 1 > qos.max_jobs_per_user)
-      return std::unexpected("QosJobsAccountResourceLimit");
-    if (meta_resource.wall_time + job.time_limit > qos.max_wall)
-      return std::unexpected("QosWallTimeLimit");
-    auto resource_use = job.allocated_res.View();
-    resource_use += meta_resource.resource;
-    return CheckTres_(resource_use, qos.max_tres_per_user);
-  };
-
-  m_user_meta_map_.if_contains(job.username, [&](std::pair<const std::string,
-                                                           QosToResourceMap>&
-                                                     pair) {
+  m_user_meta_map_.if_contains(
+    job.username, 
+    [&](std::pair<const std::string, QosToResourceMap>& pair) {
     auto iter = pair.second.find(job.qos);
     if (iter == pair.second.end()) {
       CRANE_ERROR(
@@ -431,7 +420,15 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
       result = std::unexpected("QosCpuResourceLimit");
       return;
     }
-    result = do_check(val);
+    if (val.jobs_count + 1 > qos.max_jobs_per_user) {
+      result = std::unexpected("QosJobsResourceLimit");
+      return;
+    }
+    if (val.wall_time + job.time_limit > qos.max_wall) {
+      result = std::unexpected("QosWallTimeLimit");
+      return;
+    }
+    result = CheckTres_(resource_use, qos.max_tres_per_user);
   });
 
   if (!result) return result;
@@ -450,7 +447,17 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
             return;
           }
           auto& val = iter->second;
-          result = do_check(val);
+              auto resource_use = job.allocated_res.View();
+          resource_use += val.resource;
+          if (val.jobs_count + 1 > qos.max_jobs_per_account) {
+            result = std::unexpected("QosJobsResourceLimit");
+            return;
+          }
+        if (val.wall_time + job.time_limit > qos.max_wall) {
+          result = std::unexpected("QosWallTimeLimit");
+          return;
+        }
+        result = CheckTres_(resource_use, qos.max_tres_per_account);
         });
     if (!result) break;
   }
@@ -460,7 +467,17 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
   m_qos_meta_map_.if_contains(
       job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         auto& val = pair.second;
-        result = do_check(val);
+        auto resource_use = job.allocated_res.View();
+        resource_use += val.resource;
+        if (val.jobs_count + 1 > qos.max_jobs) {
+          result = std::unexpected("QosJobsResourceLimit");
+          return;
+        }
+        if (val.wall_time + job.time_limit > qos.max_wall) {
+          result = std::unexpected("QosWallTimeLimit");
+          return;
+        }
+        result = CheckTres_(resource_use, qos.max_tres);
       });
 
   return result;
