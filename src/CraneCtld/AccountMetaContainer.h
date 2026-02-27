@@ -126,10 +126,12 @@ class AccountMetaContainer final {
 
   void DoMallocResource_(job_id_t job_id, const std::string& username,
                          const std::list<std::string>& account_chain,
-                         const std::string& qos, const MetaResource& meta_resource);
+                         const std::string& qos,
+                         const MetaResource& meta_resource);
   void DoFreeResource_(job_id_t job_id, const std::string& username,
                        const std::list<std::string>& account_chain,
-                       const std::string& qos, const MetaResource& meta_resource);
+                       const std::string& qos,
+                       const MetaResource& meta_resource);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:

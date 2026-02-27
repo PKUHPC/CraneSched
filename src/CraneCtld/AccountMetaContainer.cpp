@@ -401,9 +401,9 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
 
   std::expected<void, std::string> result;
 
-  m_user_meta_map_.if_contains(
-    job.username, 
-    [&](std::pair<const std::string, QosToResourceMap>& pair) {
+  m_user_meta_map_.if_contains(job.username, [&](std::pair<const std::string,
+                                                           QosToResourceMap>&
+                                                     pair) {
     auto iter = pair.second.find(job.qos);
     if (iter == pair.second.end()) {
       CRANE_ERROR(
@@ -447,17 +447,17 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
             return;
           }
           auto& val = iter->second;
-              auto resource_use = job.allocated_res.View();
+          auto resource_use = job.allocated_res.View();
           resource_use += val.resource;
           if (val.jobs_count + 1 > qos.max_jobs_per_account) {
             result = std::unexpected("QosJobsResourceLimit");
             return;
           }
-        if (val.wall_time + job.time_limit > qos.max_wall) {
-          result = std::unexpected("QosWallTimeLimit");
-          return;
-        }
-        result = CheckTres_(resource_use, qos.max_tres_per_account);
+          if (val.wall_time + job.time_limit > qos.max_wall) {
+            result = std::unexpected("QosWallTimeLimit");
+            return;
+          }
+          result = CheckTres_(resource_use, qos.max_tres_per_account);
         });
     if (!result) break;
   }
