@@ -79,8 +79,8 @@ CraneExpected<uint64_t> ParseMemory(const std::string &mem) {
   return memory_bytes;
 }
 
-std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
-  static const LazyRE2 mem_regex = { R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)" } ;
+std::optional<uint64_t> ParseMemStringAsByte(const std::string &mem) {
+  static const LazyRE2 mem_regex = {R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)"};
   std::string num_str, unit;
   if (!RE2::FullMatch(mem, *mem_regex, &num_str, &unit)) {
     CRANE_ERROR("invalid memory format: {}", mem);
@@ -90,34 +90,33 @@ std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
   double sz = 0.0;
   try {
     sz = std::stod(num_str);
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     CRANE_ERROR("invalid memory format: {}", mem);
     return std::nullopt;
   }
 
-  if (unit.empty())
-    return sz * 1024 * 1024;
+  if (unit.empty()) return sz * 1024 * 1024;
 
   uint64_t bytes = 0;
   switch (unit[0]) {
-    case 'K':
-    case 'k':
-      bytes = sz * 1024;
-      break;
-    case 'M':
-    case 'm':
-      bytes = sz * 1024 * 1024;
-      break;
-    case 'G':
-    case 'g':
-      bytes = sz * 1024 * 1024 * 1024;
-      break;
-    case 'B':
-    case 'b':
-      bytes = sz;
-      break;
-    default:
-      bytes = sz * 1024 * 1024;
+  case 'K':
+  case 'k':
+    bytes = sz * 1024;
+    break;
+  case 'M':
+  case 'm':
+    bytes = sz * 1024 * 1024;
+    break;
+  case 'G':
+  case 'g':
+    bytes = sz * 1024 * 1024 * 1024;
+    break;
+  case 'B':
+  case 'b':
+    bytes = sz;
+    break;
+  default:
+    bytes = sz * 1024 * 1024;
   }
 
   return bytes;
@@ -686,7 +685,7 @@ void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
   std::ranges::sort(*result, std::greater());
 }
 
-bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
+bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
   DeviceMap tmp = *device_map;
 
   std::vector<std::string> items = absl::StrSplit(s, ":");
@@ -698,7 +697,7 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
     } else {
       try {
         value = std::stoull(items[1]);
-      } catch (const std::exception& e) {
+      } catch (const std::exception &e) {
         return false;
       }
     }
@@ -707,8 +706,8 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
       iter->second.first = value;
     } else {
       tmp.insert_or_assign(
-        key,
-        std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
+          key,
+          std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
     }
   } else if (items.size() == 3) {
     std::string type = items[1];
@@ -718,7 +717,7 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
     } else {
       try {
         value = std::stoull(items[2]);
-      } catch (const std::exception& e) {
+      } catch (const std::exception &e) {
         return false;
       }
     }
@@ -727,8 +726,9 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
       iter->second.second.insert_or_assign(type, value);
     } else {
       tmp.insert_or_assign(
-        key,
-        std::make_pair(UINT64_MAX, std::unordered_map<std::string, uint64_t>{{type,value}}));
+          key, std::make_pair(
+                   UINT64_MAX,
+                   std::unordered_map<std::string, uint64_t>{{type, value}}));
     }
   } else {
     return false;
@@ -738,10 +738,10 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
   return true;
 }
 
-bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
+bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
   ResourceView tmp = *res;
   std::vector<std::string> items = absl::StrSplit(s, ",");
-  for (const auto& item : items) {
+  for (const auto &item : items) {
     if (item.starts_with("gres/") && item.size() > 5) {
       if (!ConvertStringToDeviceMap(item.substr(5), &tmp.GetDeviceMap()))
         return false;
@@ -750,22 +750,23 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
       if (kv.size() == 2) {
         if (kv[0] == "cpu") {
           if (kv[1] == "-1") {
-            tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX/256);
+            tmp.GetAllocatableRes().cpu_count =
+                static_cast<cpu_t>(INT32_MAX / 256);
             continue;
           }
           double cpu_count;
           try {
             cpu_count = std::stod(kv[1]);
-          } catch (const std::exception& e) {
+          } catch (const std::exception &e) {
             return false;
           }
-          if (cpu_count > static_cast<double>(INT32_MAX/256))
-            return false;
+          if (cpu_count > static_cast<double>(INT32_MAX / 256)) return false;
 
           tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
         } else if (kv[0] == "mem") {
           if (kv[1] == "-1") {
-            uint64_t mem = std::numeric_limits<decltype(tmp.GetAllocatableRes().memory_bytes)>::max();
+            uint64_t mem = std::numeric_limits<
+                decltype(tmp.GetAllocatableRes().memory_bytes)>::max();
             tmp.GetAllocatableRes().memory_bytes = mem;
             tmp.GetAllocatableRes().memory_sw_bytes = mem;
             continue;
@@ -776,7 +777,10 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
 
           uint64_t value = result.value();
 
-          if (value > std::numeric_limits<decltype(tmp.GetAllocatableRes().memory_bytes)>::max()) return false;
+          if (value >
+              std::numeric_limits<
+                  decltype(tmp.GetAllocatableRes().memory_bytes)>::max())
+            return false;
           tmp.GetAllocatableRes().memory_bytes = value;
           tmp.GetAllocatableRes().memory_sw_bytes = value;
         } else {

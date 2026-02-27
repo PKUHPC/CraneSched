@@ -1826,7 +1826,7 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (result) {
     {
       const auto& user_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
+          g_account_manager->GetExistedUserInfo(task->Username());
       if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
       auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);

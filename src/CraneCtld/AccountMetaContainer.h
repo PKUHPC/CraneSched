@@ -100,7 +100,6 @@ class AccountMetaContainer final {
   bool UserHasTask(const std::string& username);
 
  private:
-
   const static int kNumStripes = 128;
 
   static int StripeForKey_(const std::string& key) {
@@ -125,8 +124,12 @@ class AccountMetaContainer final {
   static bool CheckGres_(const DeviceMap& device_req,
                          const DeviceMap& device_total);
 
-  void DoMallocResource_(job_id_t job_id, const std::string& username, const std::list<std::string>& account_chain, const std::string& qos, MetaResource& meta_resource);
-  void DoFreeResource_(job_id_t job_id, const std::string& username, const std::list<std::string>& account_chain, const std::string& qos, MetaResource& meta_resource);
+  void DoMallocResource_(job_id_t job_id, const std::string& username,
+                         const std::list<std::string>& account_chain,
+                         const std::string& qos, MetaResource& meta_resource);
+  void DoFreeResource_(job_id_t job_id, const std::string& username,
+                       const std::list<std::string>& account_chain,
+                       const std::string& qos, MetaResource& meta_resource);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:

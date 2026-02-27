@@ -562,7 +562,8 @@ class MongodbClient {
   PodMetaInTask BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInTask BsonToContainerMeta(const bsoncxx::document::view& doc);
 
-  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view, const std::string& field, ResourceView* resource);
+  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view,
+                              const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
@@ -630,13 +631,12 @@ void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
 
 template <>
 void MongodbClient::DocumentAppendItem_<ResourceView>(
-  document& doc, const std::string& key,
-  const ResourceView& value);
+    document& doc, const std::string& key, const ResourceView& value);
 
 template <>
-void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
-  sub_document& doc, const std::string& key,
-  const DeviceMap& value);
+void MongodbClient::SubDocumentAppendItem_<DeviceMap>(sub_document& doc,
+                                                      const std::string& key,
+                                                      const DeviceMap& value);
 
 }  // namespace Ctld
 
