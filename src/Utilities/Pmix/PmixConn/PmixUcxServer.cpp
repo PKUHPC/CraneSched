@@ -108,7 +108,7 @@ void PmixUcxServiceImpl::PmixDModexRequest(const std::string& req_data) {
   snprintf(proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
   proc.rank = request.pmix_proc().rank();
 
-  g_dmodex_req_manager->PmixProcessRequest(
+  g_pmix_server->GetDmodexReqManager()->PmixProcessRequest(
       request.seq_num(), request.craned_id(), proc, request.local_namespace());
 }
 
@@ -116,7 +116,7 @@ void PmixUcxServiceImpl::PmixDModexResponse(const std::string& req_data) {
   crane::grpc::pmix::PmixDModexResponseReq request;
   if (!request.ParseFromString(req_data)) return ;
 
-  g_dmodex_req_manager->PmixProcessResponse(
+  g_pmix_server->GetDmodexReqManager()->PmixProcessResponse(
       request.seq_num(), request.craned_id(), request.data(), request.status());
 }
 
