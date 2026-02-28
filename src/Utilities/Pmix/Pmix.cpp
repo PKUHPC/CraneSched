@@ -132,7 +132,7 @@ class PMIxServerModule {
                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
 
      CRANE_DEBUG("dmodex func called");
-     auto rc = g_dmodex_req_manager->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
+     auto rc = g_pmix_server->GetDmodexReqManager()->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 
      if (!rc) return PMIX_ERROR;
 
@@ -257,7 +257,7 @@ PmixServer::~PmixServer() {
   if (rc != PMIX_SUCCESS)
     CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
 
-  g_dmodex_req_manager.reset();
+  m_dmodex_mgr_.reset();
   g_pmix_state.reset();
   m_craned_client_.reset();
   m_pmix_client_.reset();
@@ -275,7 +275,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 
   if (!PmixInit_()) return false;
 
-  g_dmodex_req_manager = std::make_unique<PmixDModexReqManager>();
+  m_dmodex_mgr_ = std::make_unique<PmixDModexReqManager>();
   g_pmix_state = std::make_unique<PmixState>();
 
   if (!ConnInit_(config)) return false;
@@ -284,7 +284,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 
   m_cleanup_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-         g_dmodex_req_manager->CleanupTimeoutRequests();
+         m_dmodex_mgr_->CleanupTimeoutRequests();
       }
   );
 

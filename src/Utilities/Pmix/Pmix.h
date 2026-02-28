@@ -73,6 +73,7 @@ class PmixServer {
   PmixASyncServer* GetPmixAsyncServer() const {
     return m_pmix_async_server_.get();
   }
+  PmixDModexReqManager* GetDmodexReqManager() const { return m_dmodex_mgr_.get(); }
   uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
 
  private:
@@ -118,6 +119,8 @@ class PmixServer {
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;
   std::unique_ptr<PmixASyncServer> m_pmix_async_server_;
+
+  std::unique_ptr<PmixDModexReqManager> m_dmodex_mgr_;
 
   std::thread m_uvw_thread_;
   std::atomic_bool m_cq_closed_{false};
