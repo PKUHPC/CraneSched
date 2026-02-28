@@ -125,11 +125,20 @@ Nodes:
     gres:
       - name: gpu
         type: a100
-        # Each file will be parsed as a device.
+        # Choose ONE of DeviceFileRegex or DeviceFileList.
+        #
+        # DeviceFileRegex: each expanded path is treated as one device (one slot).
         DeviceFileRegex: /dev/nvidia[0-3]
-        # Following device files will belong to a single device.
-        DeviceFileList:
-          - /dev/dri/renderer[0-3]
+        #
+        # DeviceFileList: each YAML list item is treated as one device (one slot).
+        # Comma-separated paths in the same item belong to the same device.
+        # The FIRST path of each item is used as slot_id.
+        # Example (replace with your real device nodes):
+        # DeviceFileList:
+        #   - /dev/accel0,/dev/accel0_ctl
+        #   - /dev/accel1,/dev/accel1_ctl
+        #   - /dev/accel2,/dev/accel2_ctl
+        #   - /dev/accel3,/dev/accel3_ctl
         EnvInjector: nvidia
 
 # partition information list
