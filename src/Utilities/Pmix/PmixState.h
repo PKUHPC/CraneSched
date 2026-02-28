@@ -20,7 +20,7 @@
 
 #include <list>
 
-#include "PmixColl.h"
+#include "PmixColl/PmixColl.h"
 #include "crane/Lock.h"
 
 namespace pmix {
@@ -40,5 +40,3 @@ private:
 };
 
 } // namespace pmix
-
-inline std::unique_ptr<pmix::PmixState> g_pmix_state;

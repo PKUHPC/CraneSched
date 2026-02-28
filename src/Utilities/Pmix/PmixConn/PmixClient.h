@@ -20,7 +20,7 @@
 
 #include <condition_variable>
 
-#include "PmixColl.h"
+#include "PmixColl/PmixColl.h"
 #include "absl/container/node_hash_map.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"

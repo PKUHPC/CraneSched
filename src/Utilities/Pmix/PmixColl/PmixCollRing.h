@@ -1,0 +1,106 @@
+/**
+* Copyright (c) 2026 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
+#pragma once
+
+#include "PmixColl.h"
+#include "crane/Logger.h"
+
+namespace pmix {
+
+#define PMIX_COLL_RING_CTX_NUM 3
+
+enum class CollRingState : std::uint8_t {
+  SYNC,
+  PROGRESS,
+  FINALIZE,
+};
+
+inline std::string ToString(CollRingState state) {
+  switch(state) {
+  case CollRingState::SYNC:      return "SYNC";
+  case CollRingState::PROGRESS:  return "PROGRESS";
+  case CollRingState::FINALIZE:  return "FINALIZE";
+  default:                       return "UNKNOWN";
+  }
+};
+
+struct CollRingCtx {
+    int peers_cnt;
+    bool in_use;
+    uint32_t seq;
+    bool contrib_local;
+    uint32_t contrib_prev;
+    uint32_t forward_cnt;
+    std::vector<bool> contrib_map;
+    CollRingState state;
+    std::string ring_buf;
+};
+
+class PmixCollRing : public Coll, public std::enable_shared_from_this<PmixCollRing> {
+public:
+  PmixCollRing() = default;
+#ifdef HAVE_PMIX
+  bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) override;
+
+  bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) override;
+
+  bool ProcessRingRequest(
+      const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+      const std::string& msg) override;
+
+  bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
+                         const std::string& data) override { CRANE_ERROR("Not implemented");  return false;};
+
+  bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
+                          const std::string& data) override { CRANE_ERROR("Not implemented");  return false;};
+
+  static void RingReleaseFn(void* rel_data);         
+private:
+  /* ring coll functions */
+  bool PmixCollRingInit_(const std::set<std::string>& hostset);
+  bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
+                          void* cbdata);
+
+  CollRingCtx* CollRingCtxNew_();
+
+  bool CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
+                        uint32_t hop_seq, const std::string& data);
+
+  void ProgressCollectRing_(CollRingCtx& coll_ring_ctx);
+
+  void InvokeCallBackRing_(CollRingCtx& coll_ring_ctx);
+
+  void ResetCollRing_(CollRingCtx& coll_ring_ctx);
+
+  bool PmixCollRingNeighbor_(const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
+
+  struct CbData {
+    PmixCollRing* coll;
+    CollRingCtx* coll_ring_ctx;
+    uint32_t seq;
+  };
+
+  int m_next_peerid_{};
+  CranedId m_next_craned_id_;
+  std::array<CollRingCtx, PMIX_COLL_RING_CTX_NUM> m_ctx_array_;
+#endif
+};
+
+} // namespace pmix

@@ -19,7 +19,7 @@
 #include "PmixGrpcServer.h"
 
 #include "Pmix.h"
-#include "PmixColl.h"
+#include "PmixColl/PmixColl.h"
 #include "PmixDModex.h"
 #include "crane/GrpcHelper.h"
 
@@ -43,7 +43,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::SendPmixRingMsg(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_state->PmixStateCollGet(
+      g_pmix_server->GetPmixState()->PmixStateCollGet(
           pmix::CollType::FENCE_RING, procs, procs.size());
 
   if (!coll) {
@@ -76,7 +76,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeUpwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_state->PmixStateCollGet(
+      g_pmix_server->GetPmixState()->PmixStateCollGet(
           pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -108,7 +108,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeDownwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-    g_pmix_state->PmixStateCollGet(
+      g_pmix_server->GetPmixState()->PmixStateCollGet(
         pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {

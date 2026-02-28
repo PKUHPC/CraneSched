@@ -20,6 +20,7 @@
 
 #include "PmixConn/PmixGrpcClient.h"
 #include "PmixConn/PmixGrpcServer.h"
+#include "PmixColl/PmixColl.h"
 
 #ifdef HAVE_UCX
 #include "PmixConn/PmixUcxClient.h"
@@ -112,14 +113,14 @@ class PMIxServerModule {
          type = CollType::FENCE_RING;
      }
 
-     auto coll = g_pmix_state->PmixStateCollGet(type, procs, nprocs);
+     auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs, nprocs);
 
      if (coll == nullptr) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
      }
 
-     if (!coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
+     if (!coll->PmixCollContribLocal(std::string(data, ndata), cbfunc, cbdata)) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
      }
@@ -258,7 +259,7 @@ PmixServer::~PmixServer() {
     CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
 
   m_dmodex_mgr_.reset();
-  g_pmix_state.reset();
+  m_pmix_state_.reset();
   m_craned_client_.reset();
   m_pmix_client_.reset();
   m_pmix_async_server_.reset();
@@ -276,7 +277,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
   if (!PmixInit_()) return false;
 
   m_dmodex_mgr_ = std::make_unique<PmixDModexReqManager>();
-  g_pmix_state = std::make_unique<PmixState>();
+  m_pmix_state_ = std::make_unique<PmixState>();
 
   if (!ConnInit_(config)) return false;
 
