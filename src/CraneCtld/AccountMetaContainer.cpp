@@ -409,7 +409,6 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
           "Qos '{}' not found for user '{}', cannot free resource for task {}.",
           job.qos, job.username, job.job_id);
       result = std::unexpected("QosResourceLimit");
-      ;
       return;
     }
     auto& val = iter->second;
