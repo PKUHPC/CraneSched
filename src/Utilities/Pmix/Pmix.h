@@ -31,7 +31,6 @@
 #include "CranedClient.h"
 #include "PmixConn/PmixASyncServer.h"
 #include "PmixConn/PmixClient.h"
-#include "PmixColl.h"
 #include "PmixCommon.h"
 #include "PmixConn/PmixUcxServer.h"
 #include "PmixDModex.h"
@@ -74,6 +73,8 @@ class PmixServer {
     return m_pmix_async_server_.get();
   }
   PmixDModexReqManager* GetDmodexReqManager() const { return m_dmodex_mgr_.get(); }
+  PmixState* GetPmixState() const { return m_pmix_state_.get(); }
+
   uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
 
  private:
@@ -121,6 +122,7 @@ class PmixServer {
   std::unique_ptr<PmixASyncServer> m_pmix_async_server_;
 
   std::unique_ptr<PmixDModexReqManager> m_dmodex_mgr_;
+  std::unique_ptr<pmix::PmixState> m_pmix_state_;
 
   std::thread m_uvw_thread_;
   std::atomic_bool m_cq_closed_{false};
