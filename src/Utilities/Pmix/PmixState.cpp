@@ -18,6 +18,10 @@
 
 #include "PmixState.h"
 
+#include "PmixColl/PmixCollTree.h"
+#include "PmixColl/PmixCollRing.h"
+#include "crane/PublicHeader.h"
+
 namespace pmix {
 
 #ifdef HAVE_PMIX
@@ -39,7 +43,19 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     }
   }
 
-  std::shared_ptr<Coll> coll = std::make_shared<Coll>();
+  std::shared_ptr<Coll> coll = nullptr;
+  switch (type) {
+    case CollType::FENCE_TREE:
+      coll = std::make_shared<PmixCollTree>();
+      break;
+    case CollType::FENCE_RING:
+      coll = std::make_shared<PmixCollRing>();
+      break;
+    default:
+      CRANE_ERROR("Unsupported collective type: {}", ToString(type));
+      return nullptr;
+  }
+
   if (!coll->PmixCollInit(type, procs, nprocs)) return nullptr;
 
   m_coll_list_.emplace_back(coll);
