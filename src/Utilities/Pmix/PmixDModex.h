@@ -71,4 +71,5 @@ private:
 
 } // namespace pmix
 
+// TODO: std::unique_ptr<DModexManager> m_dmodex_mgr_;
 inline std::unique_ptr<pmix::PmixDModexReqManager> g_dmodex_req_manager;
