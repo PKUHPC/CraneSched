@@ -851,7 +851,7 @@ bool CtldClient::CranedRegister_(
   *ready_request.mutable_token() = token;
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
-  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
+  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
@@ -1192,8 +1192,7 @@ void CtldClient::NodeHealthCheck_() {
   CRANE_DEBUG("Start node health checking....");
 
   std::string reason;
-  int64_t cpu_count =
-      static_cast<int64_t>(node_config->allocatable_res.cpu_count);
+  auto cpu_count = static_cast<int64_t>(node_config->GetCpuSet().cpu_count);
   if (node_real.cpu < cpu_count) {
     reason = fmt::format(
         "Node health check fail. config cpu_count: {}, real cpu_count: {}",
@@ -1203,7 +1202,7 @@ void CtldClient::NodeHealthCheck_() {
     return;
   }
 
-  uint64_t mem_bytes_config = node_config->allocatable_res.memory_bytes;
+  uint64_t mem_bytes_config = node_config->GetMemoryBytes();
   double mem_gb_config =
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 

@@ -55,7 +55,7 @@ message EndHookReply {
 message CreateCgroupHookRequest {
   uint32 job_id = 1;
   string cgroup = 2;
-  ResourceInNode resource = 3;
+  ResourceInNodeV3 resource = 3;
 }
 
 message CreateCgroupHookReply {

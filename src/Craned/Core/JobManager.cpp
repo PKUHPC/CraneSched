@@ -49,14 +49,14 @@ EnvMap JobInD::GetJobEnvMap() {
   };
 
   auto alloc_node_num = daemon_step_to_d.nodelist().size();
+  ResourceInNodeV3 step_res_v3(daemon_step_to_d.res());
   auto mem_in_node =
-      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
-      (static_cast<uint64_t>(1024 * 1024));
+      step_res_v3.GetMemoryBytes() / (static_cast<uint64_t>(1024 * 1024));
 
-  auto cpus_on_node =
-      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
-  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
-                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
+  cpu_t cpus_on_node = step_res_v3.GetCpuSet().cpu_count;
+  auto mem_per_cpu = (cpus_on_node > cpu_t{0})
+                         ? (static_cast<double>(mem_in_node) /
+                            static_cast<double>(cpus_on_node))
                          : 0.0;
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
@@ -88,7 +88,8 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
   env_map.emplace("CRANE_NTASKS", std::to_string(daemon_step_to_d.ntasks()));
   env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
-  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  env_map.emplace("CRANE_CPUS_ON_NODE",
+                  std::format("{:.2f}", static_cast<double>(cpus_on_node)));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
 
@@ -516,6 +517,9 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
+// NOTE: V3 changed dedicated_res_in_node() -> gres() in proto.
+// This change needs to be applied in StepInstance.cpp which now holds
+// the SpawnSupervisor logic (moved there by x11_task branch).
 CraneErrCode JobManager::ExecuteStepAsync(
     std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps) {
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
@@ -674,6 +678,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
   std::vector<uid_t> uid_vec;
 
   for (auto& job : jobs) {
+    CgroupManager::ReleaseJobCpuPool(job.job_id, job.job_to_d.res());
     job_cg_map[job.job_id] = job.cgroup.release();
   }
 
@@ -810,11 +815,13 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // Create job cgroup first.
   // TODO: Create step cgroup later.
   if (!job->cgroup) {
-    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-        CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(),
-        false, Common::CgConstant::kCgMinMem);
+    auto cg_expt = CgroupManager::AllocateAndGetCgroupForJob(
+        job->job_id, job->job_to_d.res(), false, Common::CgConstant::kCgMinMem);
     if (cg_expt.has_value()) {
       job->cgroup = std::move(cg_expt.value());
+      ResourceInNodeV3 res_v3(job->job_to_d.res());
+      job->path_info =
+          CgroupManager::MakeCgroupPathInfo(job->job_id, res_v3.GetCpuSet());
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
       ActivateStepStatusChangeAsync_(
@@ -836,7 +843,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this job, and
   // we should send StepStatusChange manually.
-  CraneErrCode err = step_ptr->Prepare();
+  CraneErrCode err = step_ptr->Prepare(job->path_info);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;

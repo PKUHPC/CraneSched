@@ -36,6 +36,20 @@ using job_id_t = uint32_t;
 using task_id_t = uint32_t;  // Task ID within a step (Supervisor layer)
 using step_id_t = uint32_t;
 
+using PartitionId = std::string;
+using CranedId = std::string;
+inline const CranedId kCtldPrologInternalNodeIndex{
+    "__CRANE_INTERNAL_PROLOG_CTLD_NODE_INDEX"};
+using ResvId = std::string;
+using cpu_t = fpm::fixed<int64_t, __int128, 8>;
+using LicenseId = std::string;
+
+// QoS "unlimited" CPU sentinel.
+// Must fit in double mantissa (53 bits) to survive int64 → double → int64
+// round-trip, and be divisible by 256 (FractionBits) to avoid fractional
+// representation. (1LL << 53) / 256 = 35184372088832 CPUs.
+inline const cpu_t kUnlimitedCpu = cpu_t::from_raw_value(int64_t{1} << 53);
+
 using CraneErrCode = crane::grpc::ErrCode;
 
 using CraneRichError = crane::grpc::RichError;
@@ -66,6 +80,7 @@ inline const char* const kDefaultDbConfigPath = "/etc/crane/database.yaml";
 inline const char* const kDefaultPluginConfigPath = "/etc/crane/plugin.yaml";
 
 inline const char* const kUnlimitedQosName = "UNLIMITED";
+
 inline const char* const kHostFilePath = "/etc/hosts";
 
 inline constexpr size_t kDefaultQueryJobNumLimit = 1000;
@@ -377,48 +392,9 @@ class FlagSet {
 
 /* ----------- Public definitions for all components */
 
-using PartitionId = std::string;
-using CranedId = std::string;
-inline const CranedId kCtldPrologInternalNodeIndex{
-    "__CRANE_INTERNAL_PROLOG_CTLD_NODE_INDEX"};
-using ResvId = std::string;
-using cpu_t = fpm::fixed_24_8;
-using LicenseId = std::string;
-
 // TODO: refactor SlotId, it should not be a string of file path.
 // Device path. e.g. /dev/nvidia0
 using SlotId = std::string;
-
-// Model the allocatable resources on a craned node.
-// It contains CPU and memory by now.
-struct AllocatableResource {
-  cpu_t cpu_count{0};
-
-  // See documentation of cgroup memory.
-  // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
-  uint64_t memory_bytes = 0;     // limit of memory usage
-  uint64_t memory_sw_bytes = 0;  // limit of memory+Swap usage
-
-  AllocatableResource() = default;
-  explicit AllocatableResource(const crane::grpc::AllocatableResource&);
-  AllocatableResource& operator=(const crane::grpc::AllocatableResource&);
-
-  AllocatableResource& operator+=(const AllocatableResource& rhs);
-  AllocatableResource& operator-=(const AllocatableResource& rhs);
-  AllocatableResource& operator*=(uint32_t rhs);
-
-  explicit operator crane::grpc::AllocatableResource() const;
-
-  double CpuCount() const;
-
-  bool IsZero() const;
-  bool IsAnyZero() const;
-  void SetToZero();
-};
-
-bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
-bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
-bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
 struct TypeSlotsMap {
   std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
@@ -481,7 +457,6 @@ struct DedicatedResourceInNode {
   bool IsZero() const;
   void SetToZero();
 
-  explicit operator crane::grpc::DeviceMap() const;
   explicit operator crane::grpc::DedicatedResourceInNode() const;
 
  public:
@@ -495,97 +470,191 @@ bool operator<=(const DedicatedResourceInNode& lhs,
 bool operator==(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs);
 
-using DeviceMap =
-    std::unordered_map<std::string /*name*/,
-                       std::pair<uint64_t /*untyped req count*/,
-                                 std::unordered_map<std::string /*type*/,
-                                                    uint64_t /*type total*/>>>;
+// GresCount: tracks total count and per-type specified counts for a GRES
+// Example: {total: 8, specified: {"A100": 4, "H100": 4}}
+// - total: the total count of this GRES (includes all types)
+// - specified: per-type counts for specific scheduling requirements
+struct GresCount {
+  uint64_t total{0};
+  std::unordered_map<std::string /*type*/, uint64_t /*count*/> specified;
 
-crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
-DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
+  GresCount() = default;
+  GresCount(uint64_t t) : total(t) {}
+  GresCount(uint64_t t, std::unordered_map<std::string, uint64_t> spec)
+      : total(t), specified(std::move(spec)) {}
 
-void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
-void operator-=(DeviceMap& lhs, const DeviceMap& rhs);
+  // gRPC conversion
+  explicit GresCount(const crane::grpc::GresCount& rhs);
+  explicit operator crane::grpc::GresCount() const;
 
-void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
-void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
-void operator*=(DeviceMap& lhs, uint32_t rhs);
+  bool IsZero() const { return total == 0 && specified.empty(); }
 
-bool operator<=(const DeviceMap& lhs, const DeviceMap& rhs);
-bool operator<=(const DeviceMap& lhs, const DedicatedResourceInNode& rhs);
+  GresCount& operator+=(const GresCount& rhs);
+  GresCount& operator-=(const GresCount& rhs);
+  GresCount& operator*=(uint32_t rhs);
+};
+
+bool operator==(const GresCount& lhs, const GresCount& rhs);
+bool operator<=(const GresCount& lhs, const GresCount& rhs);
+
+// Division: returns how many copies of rhs can fit in lhs
+// For specified types: use specified / specified
+// For total: use total / total
+// Returns the minimum across all dimensions
+uint64_t operator/(const GresCount& lhs, const GresCount& rhs);
+
+GresCount GresCountMax(const GresCount& lhs, const GresCount& rhs);
+GresCount GresCountMin(const GresCount& lhs, const GresCount& rhs);
+
+// GresMap: maps GRES name to its count info
+using GresMap = std::unordered_map<std::string /*name*/, GresCount>;
+
+// GresMap gRPC conversion helper functions
+crane::grpc::GresMap ToGrpcGresMap(const GresMap& gres_map);
+GresMap FromGrpcGresMap(const crane::grpc::GresMap& grpc_gres_map);
 
 DedicatedResourceInNode Intersection(const DedicatedResourceInNode& lhs,
                                      const DedicatedResourceInNode& rhs);
 
-struct ResourceInNode {
-  AllocatableResource allocatable_res;
-  DedicatedResourceInNode dedicated_res;
-
-  ResourceInNode() = default;
-  explicit ResourceInNode(const crane::grpc::ResourceInNode& rhs);
-
-  explicit operator crane::grpc::ResourceInNode() const;
-
-  ResourceInNode& operator+=(const ResourceInNode& rhs);
-  ResourceInNode& operator-=(const ResourceInNode& rhs);
-
-  void ckmin(const ResourceInNode& rhs);
-
-  bool IsZero() const;
-  void SetToZero();
-};
-
-bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs);
-bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs);
-
 class ResourceView;
 
-class ResourceV2 {
- public:
-  ResourceV2() = default;
+// CpuSet: Tracks CPU resources for execution phase
+// - core_ids: specific CPU core IDs, valid only for integer allocation
+// - cpu_count: total CPU amount (supports fractional, e.g. 0.5)
+// When IsInteger(): core_ids contains the bound cores, cpu_count ==
+// core_ids.size() When fractional: core_ids is empty, cpu_count holds the
+// fractional amount
+struct CpuSet {
+  std::set<uint32_t> core_ids;
+  cpu_t cpu_count{0};
 
-  // Grpc conversion
-  explicit ResourceV2(const crane::grpc::ResourceV2& rhs);
-  explicit operator crane::grpc::ResourceV2() const;
-  ResourceV2& operator=(const crane::grpc::ResourceV2& rhs);
+  CpuSet() = default;
+  // Integer allocation: bind to specific cores
+  explicit CpuSet(std::set<uint32_t> ids);
+  // Fractional allocation: quota only
+  explicit CpuSet(cpu_t count);
 
-  // ResourceInNode& operator[](const std::string& craned_id);
-  ResourceInNode& at(const std::string& craned_id);
-  const ResourceInNode& at(const std::string& craned_id) const;
-
-  ResourceV2& operator+=(const ResourceV2& rhs);
-  ResourceV2& operator-=(const ResourceV2& rhs);
-  ResourceV2& AddResourceInNode(const std::string& craned_id,
-                                const ResourceInNode& rhs);
-  ResourceV2& SubtractResourceInNode(const std::string& craned_id,
-                                     const ResourceInNode& rhs);
+  CpuSet& operator+=(const CpuSet& rhs);
+  CpuSet& operator-=(const CpuSet& rhs);
 
   bool IsZero() const;
   void SetToZero();
+
+  // True if this is an integer-core allocation (core_ids non-empty)
+  bool IsInteger() const;
+};
+
+// ResourceInNodeV3: Execution phase resource tracking for a single node
+// Tracks actual hardware resources with specific slot IDs for affinity
+class ResourceInNodeV3 {
+ public:
+  ResourceInNodeV3() = default;
+
+  ResourceInNodeV3(const ResourceInNodeV3& rhs) = default;
+  ResourceInNodeV3& operator=(const ResourceInNodeV3& rhs) = default;
+  ResourceInNodeV3(ResourceInNodeV3&& rhs) = default;
+  ResourceInNodeV3& operator=(ResourceInNodeV3&& rhs) = default;
+
+  // gRPC conversion
+  explicit ResourceInNodeV3(const crane::grpc::ResourceInNodeV3& rhs);
+  explicit operator crane::grpc::ResourceInNodeV3() const;
+
+  // Only addition and subtraction for maintaining real resource state
+  ResourceInNodeV3& operator+=(const ResourceInNodeV3& rhs);
+  ResourceInNodeV3& operator-=(const ResourceInNodeV3& rhs);
+
+  bool IsZero() const;
+  bool IsExhausted() const;
+  void SetToZero();
+
+  // CPU (core IDs + fractional amount)
+  const CpuSet& GetCpuSet() const;
+  CpuSet& GetCpuSet();
+
+  // Memory limits
+  uint64_t GetMemoryBytes() const;
+  void SetMemoryBytes(uint64_t bytes);
+  uint64_t GetMemorySwBytes() const;
+  void SetMemorySwBytes(uint64_t bytes);
+
+  // GRES with specific slot IDs (reuses DedicatedResourceInNode structure)
+  const DedicatedResourceInNode& GetGres() const;
+  DedicatedResourceInNode& GetGres();
+
+  // Deprecated: will be removed after TimeResMap migrates to ResourceView.
+  // Use ResourceView::Min() for new code.
+  [[deprecated("Use ResourceView::Min() after TimeResMap migration")]]
+  void ckmin(const ResourceInNodeV3& rhs);
+
+  // Convert to ResourceView (aggregates to counts only)
+  ResourceView ToResourceView() const;
+
+ private:
+  CpuSet cpu_set_;
+  uint64_t memory_bytes_{0};
+  uint64_t memory_sw_bytes_{0};
+  DedicatedResourceInNode gres_;
+
+  friend ResourceInNodeV3 operator+(const ResourceInNodeV3& lhs,
+                                    const ResourceInNodeV3& rhs);
+  friend ResourceInNodeV3 operator-(const ResourceInNodeV3& lhs,
+                                    const ResourceInNodeV3& rhs);
+};
+
+ResourceInNodeV3 operator+(const ResourceInNodeV3& lhs,
+                           const ResourceInNodeV3& rhs);
+ResourceInNodeV3 operator-(const ResourceInNodeV3& lhs,
+                           const ResourceInNodeV3& rhs);
+bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs);
+
+// ResourceV3: Cluster-level execution phase resource tracking
+// Maps node IDs to their specific resource allocations
+class ResourceV3 {
+ public:
+  ResourceV3() = default;
+
+  // gRPC conversion
+  explicit ResourceV3(const crane::grpc::ResourceV3& rhs);
+  explicit operator crane::grpc::ResourceV3() const;
+
+  ResourceV3& operator+=(const ResourceV3& rhs);
+  ResourceV3& operator-=(const ResourceV3& rhs);
+
+  ResourceV3& AddResourceInNode(const std::string& craned_id,
+                                const ResourceInNodeV3& rhs);
+  ResourceV3& SubtractResourceInNode(const std::string& craned_id,
+                                     const ResourceInNodeV3& rhs);
+
+  ResourceInNodeV3& at(const std::string& craned_id);
+  const ResourceInNodeV3& at(const std::string& craned_id) const;
+
+  bool IsZero() const;
+  void SetToZero();
+
+  // Convert to ResourceView (aggregates all nodes to counts only)
   ResourceView View() const noexcept;
 
-  std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
-    return each_node_res_map;
+  std::unordered_map<std::string, ResourceInNodeV3>& EachNodeResMap() {
+    return each_node_res_map_;
   }
-  const std::unordered_map<std::string, ResourceInNode>& EachNodeResMap()
+  const std::unordered_map<std::string, ResourceInNodeV3>& EachNodeResMap()
       const {
-    return each_node_res_map;
+    return each_node_res_map_;
   }
 
  private:
-  std::unordered_map<std::string /*craned id*/, ResourceInNode>
-      each_node_res_map;
+  std::unordered_map<std::string /*craned id*/, ResourceInNodeV3>
+      each_node_res_map_;
 
- public:
-  friend bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs);
-  friend bool operator==(const ResourceV2& lhs, const ResourceV2& rhs);
-
-  friend class ResourceView;
+  friend ResourceV3 operator+(const ResourceV3& lhs, const ResourceV3& rhs);
+  friend ResourceV3 operator-(const ResourceV3& lhs, const ResourceV3& rhs);
 };
 
-bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs);
-bool operator==(const ResourceV2& lhs, const ResourceV2& rhs);
+ResourceV3 operator+(const ResourceV3& lhs, const ResourceV3& rhs);
+ResourceV3 operator-(const ResourceV3& lhs, const ResourceV3& rhs);
 
+// ResourceView: Flat structure for scheduling phase resource tracking
+// Only tracks quantities, not specific slot IDs
 class ResourceView {
  public:
   ResourceView() = default;
@@ -596,15 +665,12 @@ class ResourceView {
   explicit operator crane::grpc::ResourceView() const;
 
   // Cluster level resource operations
-  ResourceView& operator+=(const ResourceV2& rhs);
-  ResourceView& operator-=(const ResourceV2& rhs);
+  ResourceView& operator+=(const ResourceV3& rhs);
+  ResourceView& operator-=(const ResourceV3& rhs);
 
   // Node level resource operations
-  ResourceView& operator+=(const ResourceInNode& rhs);
-  ResourceView& operator-=(const ResourceInNode& rhs);
-
-  ResourceView& operator+=(const AllocatableResource& rhs);
-  ResourceView& operator-=(const AllocatableResource& rhs);
+  ResourceView& operator+=(const ResourceInNodeV3& rhs);
+  ResourceView& operator-=(const ResourceInNodeV3& rhs);
 
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
@@ -612,41 +678,61 @@ class ResourceView {
   // Account level resource operations
   ResourceView& operator+=(const ResourceView& rhs);
   ResourceView& operator-=(const ResourceView& rhs);
+  ResourceView& operator*=(uint32_t rhs);
 
   bool IsZero() const;
   void SetToZero();
 
-  bool GetFeasibleResourceInNode(const ResourceInNode& avail_res,
-                                 ResourceInNode* feasible_res) const;
+  bool GetFeasibleResourceInNode(const ResourceInNodeV3& avail_res,
+                                 ResourceInNodeV3* feasible_res) const;
 
-  double CpuCount() const;
-  uint64_t MemoryBytes() const;
+  // Accessors
+  cpu_t GetCpuCount() const;
+  void SetCpuCount(cpu_t count);
+
+  uint64_t GetMemoryBytes() const;
+  void SetMemoryBytes(uint64_t bytes);
+
+  uint64_t GetMemorySwBytes() const;
+  void SetMemorySwBytes(uint64_t bytes);
+
+  const GresMap& GetGresMap() const;
+  GresMap& GetGresMap();
+
+  // Convenience methods
+  double CpuCountDouble() const;
   uint64_t GpuCount() const;
 
-  AllocatableResource& GetAllocatableRes() { return allocatable_res; }
-  const AllocatableResource& GetAllocatableRes() const {
-    return allocatable_res;
-  }
-
-  DeviceMap& GetDeviceMap() { return device_map; }
-  const DeviceMap& GetDeviceMap() const { return device_map; }
+  // Element-wise max/min operations
+  static ResourceView Max(const ResourceView& lhs, const ResourceView& rhs);
+  static ResourceView Min(const ResourceView& lhs, const ResourceView& rhs);
 
  private:
-  AllocatableResource allocatable_res;
-  DeviceMap device_map;
+  cpu_t cpu_count_{0};
+  uint64_t memory_bytes_{0};
+  uint64_t memory_sw_bytes_{0};
+  GresMap gres_map_;
 
   friend ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
   friend ResourceView operator+(const ResourceView& lhs,
                                 const ResourceView& rhs);
-  friend bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
+  friend ResourceView operator-(const ResourceView& lhs,
+                                const ResourceView& rhs);
+  friend bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs);
   friend bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
+  friend uint64_t operator/(const ResourceView& lhs, const ResourceView& rhs);
 };
 
 ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 ResourceView operator+(const ResourceView& lhs, const ResourceView& rhs);
+ResourceView operator-(const ResourceView& lhs, const ResourceView& rhs);
 
-bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
+bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
+
+// Returns the minimum quotient across all resource dimensions
+// (i.e., how many tasks with resource `rhs` can fit in `lhs`)
+uint64_t operator/(const ResourceView& lhs, const ResourceView& rhs);
 
 template <class... Ts>
 struct VariantVisitor : Ts... {

@@ -405,6 +405,7 @@ bool StepInstance::EvaluateOomOnExit() {
   return oom_kill > baseline_oom_kill_count;
 }
 
+
 void ITaskInstance::InitEnvMap() {
   // Job env from CraneD
   for (const auto& [name, value] : g_config.JobEnv) {
@@ -2114,7 +2115,7 @@ CraneErrCode ContainerInstance::SetupIdMappedMounts_(
 CraneErrCode ProcInstance::Prepare() {
   // Create cgroup for task.
   auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+      CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
                                        task_id),
       m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
   if (!cg_expt.has_value()) {
@@ -2425,6 +2426,10 @@ CraneErrCode ProcInstance::Spawn() {
                          [](const std::string& s) { return s.c_str(); }) |
                      std::ranges::to<std::vector<const char*>>();
     argv_ptrs.push_back(nullptr);
+
+    // TODO: Before exec, bind integer CPU cores from ResourceInNodeV3::CpuSet
+    // using sched_setaffinity(). Fractional CPU is handled by cgroup quota
+    // only. Integer cores should be pinned to the task process here.
 
     // Exec
     // fmt::print(stderr, "DEBUG\n");
@@ -3616,7 +3621,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-        CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+        CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
                                          false),
         m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
     if (!cg_expt.has_value()) {
@@ -3682,7 +3687,7 @@ void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
     }
     if (!m_step_.step_user_cg) {
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-          CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+          CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
                                            false),
           m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
       if (!cg_expt.has_value()) {

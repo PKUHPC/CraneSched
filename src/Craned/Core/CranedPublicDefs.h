@@ -191,7 +191,7 @@ struct Config {
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;
   std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
       Ipv6ToCranedHostname;
-  std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
+  std::unordered_map<std::string, std::shared_ptr<ResourceInNodeV3>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
 
   struct JobLifecycleHookConfig {

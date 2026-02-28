@@ -76,6 +76,7 @@ enum class ControllerFile : uint8_t {
   DEVICES_ALLOW,
 
   CPUSET_CPUS,
+  CPUSET_MEMS,
 
   // V2
   CPU_WEIGHT_V2,
@@ -88,6 +89,7 @@ enum class ControllerFile : uint8_t {
   IO_WEIGHT_V2,
 
   CPUSET_CPUS_V2,
+  CPUSET_MEMS_V2,
   // root cgroup controller can't be change or created
 
   CONTROLLER_FILE_COUNT,
@@ -108,11 +110,13 @@ inline constexpr std::string kRootCgNamePrefix = "crane";
 inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
+inline constexpr std::string kOverflowCgName = "overflow";
 
 constexpr int kParsedJobIdIdx = 0;
 constexpr int kParsedStepIdIdx = 1;
 constexpr int kParsedSystemFlagIdx = 2;
 constexpr int kParsedTaskIdIdx = 3;
+constexpr int kParsedOverflowIdx = 4;
 
 // Common cgroup filename constants
 // cgroup v2 memory events file used to read OOM and OOM_KILL counters
@@ -165,6 +169,7 @@ constexpr std::array<std::string_view,
         "devices.allow",
 
         "cpuset.cpus",
+        "cpuset.mems",
 
         // V2
         "cpu.weight",
@@ -177,6 +182,7 @@ constexpr std::array<std::string_view,
         "io.weight",
 
         "cpuset.cpus",
+        "cpuset.mems",
     };
 
 }  // namespace Internal
@@ -303,6 +309,10 @@ constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 // handles this for us and no additional care needs to be taken.
 constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
+// CPUSET is NOT included here for cgroupv1. In v1 each controller has its own
+// hierarchy and overflow uses a flat cpuset structure (no per-job children).
+// CPUSET cgroups are managed separately by CpuPoolManager.
+// See .claude/docs/cpu_pool/overflow_cg.md for the design rationale.
 constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
@@ -312,7 +322,8 @@ constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
 constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
     CgConstant::Controller::MEMORY_CONTROLLER_V2 |
-    CgConstant::Controller::IO_CONTROLLER_V2;
+    CgConstant::Controller::IO_CONTROLLER_V2 |
+    CgConstant::Controller::CPUSET_CONTROLLER_V2;
 // NOLINTEND(readability-identifier-naming)
 
 #ifdef CRANE_ENABLE_BPF
@@ -395,6 +406,7 @@ class CgroupInterface {
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
   virtual bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) = 0;
+  virtual bool SetCpusetMems(const std::string &mems) = 0;
   virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
   virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
   virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
@@ -429,6 +441,7 @@ class CgroupV1 : public CgroupInterface {
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) override;
+  bool SetCpusetMems(const std::string &mems) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
   bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
@@ -457,6 +470,7 @@ class CgroupV2 : public CgroupInterface {
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) override;
+  bool SetCpusetMems(const std::string &mems) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
   bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
@@ -492,7 +506,7 @@ class CgroupV2 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromResInNode(const crane::grpc::ResourceInNode &resource);
+  bool RecoverFromCgSpec(const crane::grpc::ResourceInNodeV3 &resource);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses(int signum) override;
@@ -510,14 +524,6 @@ class CgroupV2 : public CgroupInterface {
 
 CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids);
 
-class AllocatableResourceAllocator {
- public:
-  static bool Allocate(const AllocatableResource &resource,
-                       CgroupInterface *cg);
-  static bool Allocate(const crane::grpc::AllocatableResource &resource,
-                       CgroupInterface *cg);
-};
-
 class DedicatedResourceAllocator {
  public:
   static bool Allocate(const DedicatedResourceInNode &request_resource,
@@ -527,9 +533,34 @@ class DedicatedResourceAllocator {
       CgroupInterface *cg);
 };
 
+// Allocates cgroup resources from ResourceInNodeV3:
+// CPU quota, memory limits, and GRES device access.
+// Note: cpuset is managed by CpuPoolManager separately.
+class ResourceInNodeV3Allocator {
+ public:
+  static bool Allocate(const ResourceInNodeV3 &resource, CgroupInterface *cg);
+};
+
 using CgroupStrParsedIds =
     std::tuple<std::optional<job_id_t>, std::optional<step_id_t>,
-               bool /*true if system step*/, std::optional<task_id_t>>;
+               bool /*true if system step*/, std::optional<task_id_t>,
+               bool /*true if overflow (fractional CPU pool)*/>;
+
+// Encapsulates cgroup path knowledge for a job.
+// In cgroupv1, cpu/memory and cpuset are in separate hierarchies.
+// In cgroupv2, everything is in a unified hierarchy.
+struct CgroupPathInfo {
+  // Cgroup name for cpu/memory/devices (w/o "crane/" prefix).
+  //   v1: "job_1" (no overflow layer)
+  //   v2: "overflow/job_1" or "job_1"
+  std::string cg_str;
+
+  // Cpuset cgroup name for process migration (v1 only, w/o "crane/" prefix).
+  //   overflow job: "overflow"  →  /sys/fs/cgroup/cpuset/crane/overflow
+  //   INT job: "" (cpuset is self-managed within the job's own cgroup)
+  //   v2: always "" (cpuset is in unified hierarchy, no separate migration)
+  std::string cpuset_cg_str;
+};
 
 class CgroupManager {
  public:
@@ -547,10 +578,10 @@ class CgroupManager {
   // Use CreateOrOpen_() to generate cgroup name with prefix.
   static std::string CgroupStrByJobId(job_id_t job_id);
   static std::string CgroupStrByStepId(
-      job_id_t job_id, step_id_t step_id,
+      const std::string &job_cg_name, step_id_t step_id,
       bool system = false /* system = true is only for supervisor itself. */);
-  static std::string CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
-                                       task_id_t task_id);
+  static std::string CgroupStrByTaskId(const std::string &job_cg_name,
+                                       step_id_t step_id, task_id_t task_id);
   static std::string CgroupStrByParsedIds(const CgroupStrParsedIds &ids);
 
   /**
@@ -578,18 +609,48 @@ class CgroupManager {
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,
-      const crane::grpc::ResourceInNode &resource, bool recover,
+      const crane::grpc::ResourceInNodeV3 &resource, bool recover,
       std::uint64_t min_mem = 0U);
   static CraneExpected<std::unique_ptr<CgroupInterface>> CreateOrOpenCgroup(
       const std::string &cgroup_str, bool retrieve);
   static CraneErrCode SetCgroupResource(
-      CgroupInterface *cg, const crane::grpc::ResourceInNode &resource,
+      CgroupInterface *cg, const crane::grpc::ResourceInNodeV3 &resource,
       std::uint64_t min_mem = 0U);
   static CraneErrCode RecoverCgroupWithResource(
-      CgroupInterface *cg, const crane::grpc::ResourceInNode &resource);
+      CgroupInterface *cg, const crane::grpc::ResourceInNodeV3 &resource);
+
+  /**
+   * \brief Job-level cgroup allocation with INT/overflow CPU pool routing.
+   * INT jobs → crane/job_<id> (cpuset bound), overflow →
+   * crane/overflow/job_<id>.
+   */
+  static CraneExpected<std::unique_ptr<CgroupInterface>>
+  AllocateAndGetCgroupForJob(job_id_t job_id,
+                             const crane::grpc::ResourceInNodeV3 &resource,
+                             bool recover, std::uint64_t min_mem = 0U);
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
-      const crane::grpc::ResourceInNode &res_in_node);
+      const crane::grpc::ResourceInNodeV3 &res_in_node);
+
+  // --- CPU Pool Management ---
+  // Initialize overflow cgroup and CPU pool state. Call after Init().
+  static bool InitCpuPool(const std::set<uint32_t> &node_cpus);
+  static void ShutdownCpuPool();
+
+  // Release CPU pool state for a completed job.
+  // INT jobs: removes core_ids from int pool, updates overflow cpuset.
+  // Overflow jobs: no-op (no pool state to update).
+  static void ReleaseJobCpuPool(job_id_t job_id,
+                                const crane::grpc::ResourceInNodeV3 &resource);
+
+  // Construct cgroup path info for a job based on its CPU allocation and
+  // the active cgroup version. See CgroupPathInfo struct for semantics.
+  static CgroupPathInfo MakeCgroupPathInfo(job_id_t job_id,
+                                           const CpuSet &cpu_set);
+
+  // Migrate a process into the specified cpuset cgroup (v1 only).
+  // If cpuset_cg_str is empty or running v2, this is a no-op.
+  static bool MigrateToCpuset(pid_t pid, const std::string &cpuset_cg_str);
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
     m_cg_version_ = v;
@@ -616,6 +677,9 @@ class CgroupManager {
       const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
+  // Scan all cgroups (jobs, steps, tasks). Returns set of parsed IDs.
+  // overflow flag is set based on whether the cgroup is under the overflow
+  // path.
   static std::set<CgroupStrParsedIds> GetIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
@@ -646,9 +710,36 @@ class CgroupManager {
   static std::unordered_map<ino_t, CgroupStrParsedIds>
   GetCgInoJobIdMapCgroupV2_(const std::filesystem::path &root_cgroup_path);
 
+  // --- CPU Pool internals ---
+  // Recompute overflow cpuset = m_node_cpus_ \ m_int_cpus_ and write to cgroup.
+  static void UpdateOverflowCpuset_();
+  // Format CPU set as cgroup cpuset string (e.g. "0-3,5,7")
+  static std::string FormatCpusetString_(const std::set<uint32_t> &cpus);
+
+  // cgroupv1 only: write a value to a cpuset hierarchy file directly.
+  // path is relative to /sys/fs/cgroup/cpuset/ (e.g.
+  // "crane/overflow/cpuset.cpus")
+  static bool WriteCpusetFile_(const std::filesystem::path &rel_path,
+                               std::string_view value);
+
+  // cgroupv1 only: get the cpuset hierarchy path for a cgroup name.
+  // e.g. "overflow" -> "/sys/fs/cgroup/cpuset/crane/overflow"
+  static std::filesystem::path CpusetHierarchyPath_(
+      const std::string &cg_name = "");
+
+  // cgroupv1 only: ensure a cpuset cgroup directory exists and has
+  // cpuset.mems and cpuset.cpus initialized.
+  static bool InitCpusetCgroup_(const std::string &cg_name,
+                                const std::string &cpus);
+
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 
   inline static CgConstant::CgroupVersion m_cg_version_;
+
+  // CPU pool state
+  inline static std::set<uint32_t> m_node_cpus_;
+  inline static std::set<uint32_t> m_int_cpus_;
+  inline static std::unique_ptr<CgroupInterface> m_overflow_cg_;
 };
 
 }  // namespace Craned::Common

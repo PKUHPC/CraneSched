@@ -431,46 +431,40 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   return convert_result.ec == std::errc();
 }
 
-std::string ReadableResourceView(const ResourceView &resource) {
-  return fmt::format("cpu:{},mem:{},gres:[{}]", resource.CpuCount(),
-                     ReadableMemory(resource.MemoryBytes()),
-                     ReadableTypedDeviceMap(resource.GetDeviceMap()));
-}
+std::string ReadableGresMap(const GresMap &gres_map) {
+  if (gres_map.empty()) return "None";
 
-std::string ReadableTypedDeviceMap(const DeviceMap &device_map) {
-  if (device_map.empty()) return "None";
-
-  std::vector<std::string> typed_device_str_vec;
-  for (const auto &[dev_name, p] : device_map) {
-    const auto &type_size_map = p.second;
-
-    for (const auto &[dev_type, size] : type_size_map) {
-      typed_device_str_vec.push_back(
-          fmt::format("{}:{}:{}", dev_name, dev_type, size));
+  std::vector<std::string> gres_str_vec;
+  for (const auto &[name, gc] : gres_map) {
+    // Format: name:total[:type:count[:type:count...]]
+    // e.g., gpu:4:A100:2:V100:2 or npu:1
+    std::string entry = fmt::format("{}:{}", name, gc.total);
+    for (const auto &[type, cnt] : gc.specified) {
+      entry += fmt::format(":{}:{}", type, cnt);
     }
+    gres_str_vec.push_back(std::move(entry));
   }
 
-  return absl::StrJoin(typed_device_str_vec, ",");
+  return absl::StrJoin(gres_str_vec, ",");
 }
 
-std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
-  const DedicatedResourceInNode &dedicated_resource_in_node =
-      resource_in_node.dedicated_res;
+std::string ReadableResourceView(const ResourceView &resource) {
+  return fmt::format("cpu:{},mem:{},gres:[{}]", resource.CpuCountDouble(),
+                     ReadableMemory(resource.GetMemoryBytes()),
+                     ReadableGresMap(resource.GetGresMap()));
+}
 
-  if (dedicated_resource_in_node.IsZero()) {
-    return "0";
-  }
-  std::vector<std::string> node_gres_string_vector;
-  for (const auto &[device_name, type_slots_map] :
-       dedicated_resource_in_node.name_type_slots_map) {
+std::string ReadableDresInNode(const DedicatedResourceInNode &dres) {
+  if (dres.IsZero()) return "0";
+
+  std::vector<std::string> parts;
+  for (const auto &[device_name, type_slots_map] : dres.name_type_slots_map) {
     for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
-      // name:type:count
-      node_gres_string_vector.emplace_back(
+      parts.emplace_back(
           fmt::format("{}:{}:{}", device_name, device_type, slots.size()));
     }
   }
-
-  return absl::StrJoin(node_gres_string_vector, ",");
+  return absl::StrJoin(parts, ",");
 }
 
 std::string ReadableGrpcDresInNode(
@@ -685,19 +679,13 @@ void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
   std::ranges::sort(*result, std::greater());
 }
 
-bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
+bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
+  // Format: "name:count" or "name:type:count" or "name:unlimited"
   std::vector<std::string> items = absl::StrSplit(s, ":");
   std::string key = items[0];
   if (items.size() == 2) {
     if (items[1] == "unlimited") {
-      auto iter = device_map->find(key);
-      if (iter != device_map->end()) {
-        if (iter->second.second.empty()) {
-          device_map->erase(key);
-        } else {
-          iter->second.first = UINT32_MAX;
-        }
-      }
+      gres_map->erase(key);
       return true;
     }
     uint64_t value;
@@ -706,25 +694,15 @@ bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
     } catch (const std::exception &e) {
       return false;
     }
-    auto iter = device_map->find(key);
-    if (iter != device_map->end()) {
-      iter->second.first = value;
-    } else {
-      device_map->insert_or_assign(
-          key,
-          std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
-    }
+    (*gres_map)[key].total = value;
   } else if (items.size() == 3) {
     std::string type = items[1];
     if (items[2] == "unlimited") {
-      auto iter = device_map->find(key);
-      if (iter != device_map->end()) {
-        if (iter->second.second.contains(type)) {
-          iter->second.second.erase(type);
-        }
-        if (iter->second.second.empty()) {
-          device_map->erase(key);
-        }
+      auto it = gres_map->find(key);
+      if (it != gres_map->end()) {
+        it->second.specified.erase(type);
+        if (it->second.specified.empty() && it->second.total == 0)
+          gres_map->erase(it);
       }
       return true;
     }
@@ -732,32 +710,26 @@ bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
     try {
       value = std::stoull(items[2]);
     } catch (const std::exception &e) {
-      CRANE_ERROR("Failed to parse device map string: {}", s);
+      CRANE_ERROR("Failed to parse gres map string: {}", s);
       return false;
     }
-    auto iter = device_map->find(key);
-    if (iter != device_map->end()) {
-      iter->second.second.insert_or_assign(type, value);
-    } else {
-      device_map->insert_or_assign(
-          key, std::make_pair(
-                   UINT32_MAX,
-                   std::unordered_map<std::string, uint64_t>{{type, value}}));
-    }
+    auto& gc = (*gres_map)[key];
+    auto old = gc.specified[type];
+    gc.specified[type] = value;
+    gc.total += value - old;
   } else {
-    CRANE_ERROR("Failed to parse device map string: {}", s);
+    CRANE_ERROR("Failed to parse gres map string: {}", s);
     return false;
   }
-
   return true;
 }
 
 bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
   if (s.empty()) {
-    res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX / 256);
-    res->GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
-    res->GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
-    res->GetDeviceMap().clear();
+    res->SetCpuCount(kUnlimitedCpu);
+    res->SetMemoryBytes(kMaxJobMemoryBytes);
+    res->SetMemorySwBytes(kMaxJobMemoryBytes);
+    res->GetGresMap().clear();
     return true;
   }
 
@@ -765,15 +737,14 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
   std::vector<std::string> items = absl::StrSplit(s, ",");
   for (const auto &item : items) {
     if (item.starts_with("gres/") && item.size() > 5) {
-      if (!ConvertStringToDeviceMap(item.substr(5), &tmp.GetDeviceMap()))
+      if (!ConvertStringToGresMap(item.substr(5), &tmp.GetGresMap()))
         return false;
     } else {
       std::vector<std::string> kv = absl::StrSplit(item, ":");
       if (kv.size() == 2) {
         if (kv[0] == "cpu") {
           if (kv[1] == "unlimited") {
-            tmp.GetAllocatableRes().cpu_count =
-                static_cast<cpu_t>(INT32_MAX / 256);
+            tmp.SetCpuCount(kUnlimitedCpu);
             continue;
           }
           double cpu_count;
@@ -782,30 +753,24 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
           } catch (const std::exception &e) {
             return false;
           }
-          if (cpu_count > static_cast<double>(INT32_MAX / 256)) return false;
-
-          tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
+          tmp.SetCpuCount(cpu_t(cpu_count));
         } else if (kv[0] == "mem") {
           if (kv[1] == "unlimited") {
-            tmp.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
-            tmp.GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
+            tmp.SetMemoryBytes(kMaxJobMemoryBytes);
+            tmp.SetMemorySwBytes(kMaxJobMemoryBytes);
             continue;
           }
-
           auto result = ParseMemStringAsByte(kv[1]);
           if (!result) return false;
-
           uint64_t value = result.value();
-
           if (value > kMaxJobMemoryBytes) {
             CRANE_ERROR(
                 "Memory value {} exceeds the maximum allowed memory bytes {}",
                 value, kMaxJobMemoryBytes);
             return false;
           }
-
-          tmp.GetAllocatableRes().memory_bytes = value;
-          tmp.GetAllocatableRes().memory_sw_bytes = value;
+          tmp.SetMemoryBytes(value);
+          tmp.SetMemorySwBytes(value);
         } else {
           CRANE_ERROR("Unknown resource type: {}", kv[0]);
           return false;
@@ -815,9 +780,48 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
       }
     }
   }
-
   *res = std::move(tmp);
   return true;
+}
+
+std::string ReadableResourceInNodeV3(const ResourceInNodeV3 &res) {
+  std::vector<std::string> parts;
+
+  const auto &cpu_set = res.GetCpuSet();
+  if (cpu_set.cpu_count > cpu_t{0}) {
+    if (cpu_set.IsInteger()) {
+      parts.push_back(
+          fmt::format("cpu:[{}]", fmt::join(cpu_set.core_ids, ",")));
+    } else {
+      parts.push_back(
+          fmt::format("cpu:{:.2f}", static_cast<double>(cpu_set.cpu_count)));
+    }
+  }
+
+  if (res.GetMemoryBytes() > 0) {
+    parts.push_back(
+        fmt::format("mem:{}", ReadableMemory(res.GetMemoryBytes())));
+  }
+
+  const auto &gres = res.GetGres();
+  if (!gres.IsZero()) {
+    parts.push_back(fmt::format("gres:[{}]", ReadableDresInNode(gres)));
+  }
+
+  if (parts.empty()) return "None";
+  return absl::StrJoin(parts, ",");
+}
+
+std::string ReadableResourceV3(const ResourceV3 &res) {
+  if (res.IsZero()) return "None";
+
+  std::vector<std::string> node_parts;
+  for (const auto &[node_id, res_in_node] : res.EachNodeResMap()) {
+    node_parts.push_back(fmt::format("{}:{{{}}}", node_id,
+                                     ReadableResourceInNodeV3(res_in_node)));
+  }
+
+  return absl::StrJoin(node_parts, ";");
 }
 
 }  // namespace util

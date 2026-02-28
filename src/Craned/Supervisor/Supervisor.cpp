@@ -125,6 +125,10 @@ int InitFromStdin(int argc, char** argv) {
   // Cgroup path of this supervisor (crane system cgroup)
   g_config.SupvCgroupPath = msg.supv_cgroup_path();
 
+  // Job cgroup path info from craned (no fragile path parsing needed)
+  g_config.JobCgStr = msg.job_cg_str();
+  g_config.CpusetCgStr = msg.cpuset_cg_str();
+
   // Container config
   g_config.Container.Enabled = msg.has_container_config();
   if (g_config.Container.Enabled) {

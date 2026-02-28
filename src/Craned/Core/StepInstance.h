@@ -43,6 +43,13 @@ struct StepInstance {
   // job_id/step_id/system group
   std::unique_ptr<CgroupInterface> crane_cgroup{nullptr};
 
+  // Cgroup str for this step's system cgroup (w/o "crane/" prefix).
+  // e.g. "job_1/step_0/system" (v1) or "overflow/job_1/step_0/system" (v2).
+  std::string cg_str;
+
+  // Job's cgroup path info (for constructing child paths and cpuset migration).
+  Common::CgroupPathInfo job_path_info;
+
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
@@ -67,7 +74,7 @@ struct StepInstance {
     return std::format("{}.{}", job_id, step_id);
   }
 
-  CraneErrCode Prepare();
+  CraneErrCode Prepare(const Common::CgroupPathInfo& job_path_info);
 
   CraneErrCode SpawnSupervisor(const EnvMap& job_env_map);
 

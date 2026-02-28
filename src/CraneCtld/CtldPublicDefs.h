@@ -259,7 +259,7 @@ struct CranedStaticMeta {
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
-  ResourceInNode res;
+  ResourceInNodeV3 res;
 };
 
 struct CranedRemoteMeta {
@@ -288,16 +288,16 @@ struct CranedMeta {
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 
   // total = avail + in-use
-  ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
-  ResourceInNode res_avail;
-  ResourceInNode res_in_use;
+  ResourceInNodeV3 res_total;  // A copy of res in CranedStaticMeta,
+  ResourceInNodeV3 res_avail;
+  ResourceInNodeV3 res_in_use;
 
   bool drain{false};
   std::string state_reason{""};
   absl::Time last_busy_time;
   absl::Time craned_down_time;
 
-  absl::flat_hash_map<job_id_t, ResourceInNode> rn_job_res_map;
+  absl::flat_hash_map<job_id_t, ResourceInNodeV3> rn_job_res_map;
 
   absl::flat_hash_map<ResvId, std::pair<absl::Time, absl::Time>>
       resv_in_node_map;
@@ -315,9 +315,9 @@ struct ResvMeta {
   std::unordered_set<std::string> users;
 
   absl::flat_hash_set<CranedId> craned_ids;
-  ResourceV2 res_total;
-  ResourceV2 res_avail;
-  absl::flat_hash_map<job_id_t, ResourceV2> rn_job_res_map;
+  ResourceV3 res_total;
+  ResourceV3 res_avail;
+  absl::flat_hash_map<job_id_t, ResourceV3> rn_job_res_map;
   absl::flat_hash_set<job_id_t> pd_job_ids;
 };
 
@@ -612,7 +612,7 @@ struct StepInCtld {
 
   /* Fields that may change at run time.*/
   std::int32_t m_requeue_count_{0};
-  ResourceV2 m_allocated_res_;
+  ResourceV3 m_allocated_res_;
 
   // craned_id must be ordered;
   std::vector<CranedId> m_craned_ids_;
@@ -674,8 +674,8 @@ struct StepInCtld {
   void SetRequeueCount(std::int32_t count);
   std::int32_t RequeueCount() const { return m_requeue_count_; }
 
-  void SetAllocatedRes(const ResourceV2& res);
-  ResourceV2 AllocatedRes() const { return m_allocated_res_; }
+  void SetAllocatedRes(const ResourceV3& res);
+  ResourceV3 AllocatedRes() const { return m_allocated_res_; }
 
   void SetCranedIds(const std::vector<CranedId>& craned_list);
   const std::vector<CranedId>& CranedIds() const { return m_craned_ids_; }
@@ -788,7 +788,7 @@ struct CommonStepInCtld : StepInCtld {
 
   std::string allocated_craneds_regex;
   // TODO: Schedule thread should fill in following job map
-  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
+  std::unordered_map<task_id_t, ResourceInNodeV3> task_res_map;
   std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
@@ -897,7 +897,7 @@ struct JobInCtld {
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;
 
   std::queue<step_id_t> pending_step_ids_;
-  ResourceV2 step_res_avail_;
+  ResourceV3 step_res_avail_;
 
   // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -910,7 +910,7 @@ struct JobInCtld {
   double cached_priority{0.0};
 
   // Might change at each scheduling cycle.
-  ResourceV2 allocated_res;
+  ResourceV3 allocated_res;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
@@ -1072,15 +1072,15 @@ struct JobInCtld {
     return m_steps_;
   }
 
-  ResourceV2& StepResAvail() { return step_res_avail_; }
-  void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
+  ResourceV3& StepResAvail() { return step_res_avail_; }
+  void SetStepResAvail(const ResourceV3& val) { step_res_avail_ = val; }
 
   int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
   void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
-  void SetAllocatedRes(ResourceV2&& val);
-  ResourceV2 const& AllocatedRes() const { return allocated_res; }
+  void SetAllocatedRes(ResourceV3&& val);
+  ResourceV3 const& AllocatedRes() const { return allocated_res; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
@@ -1112,7 +1112,7 @@ struct Qos {
   uint32_t max_jobs_per_account;
   uint32_t max_running_jobs_per_user;
   absl::Duration max_time_limit_per_job;
-  uint32_t max_cpus_per_user;
+  cpu_t max_cpus_per_user;
   uint32_t max_submit_jobs_per_user;
   uint32_t max_submit_jobs_per_account;
   uint32_t max_jobs;

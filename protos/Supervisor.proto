@@ -88,6 +88,8 @@ message InitSupervisorRequest {
 
   string log_dir = 23;
   string supv_cgroup_path = 24;
+  string job_cg_str = 9;      // job cgroup name (w/o "crane/"), e.g. "job_1" (v1) or "overflow/job_1" (v2)
+  string cpuset_cg_str = 10;  // cpuset cgroup for v1 migration, e.g. "overflow" or "" (v2/INT)
 
   message CforedListenConf {
     message TlsCertificates {

@@ -345,8 +345,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_running_jobs_per_user =
         std::numeric_limits<decltype(qos.max_running_jobs_per_user)>::max();
     qos.max_time_limit_per_job = absl::Seconds(kJobMaxTimeLimitSec);
-    qos.max_cpus_per_user =
-        std::numeric_limits<decltype(qos.max_cpus_per_user)>::max();
+    qos.max_cpus_per_user = kUnlimitedCpu;
     qos.reference_count = 1;
     qos.max_submit_jobs_per_user =
         std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
@@ -362,16 +361,15 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
     qos.max_jobs = std::numeric_limits<decltype(qos.max_jobs)>::max();
     qos.max_wall = absl::ZeroDuration();
-    qos.max_tres.GetAllocatableRes().cpu_count =
-        static_cast<cpu_t>(INT32_MAX / 256);
-    qos.max_tres.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
-    qos.max_tres_per_user.GetAllocatableRes().cpu_count =
-        static_cast<cpu_t>(INT32_MAX / 256);
-    qos.max_tres_per_user.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
-    qos.max_tres_per_account.GetAllocatableRes().cpu_count =
-        static_cast<cpu_t>(INT32_MAX / 256);
-    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
-        kMaxJobMemoryBytes;
+    qos.max_tres.SetCpuCount(kUnlimitedCpu);
+    qos.max_tres.SetMemoryBytes(kMaxJobMemoryBytes);
+    qos.max_tres.SetMemorySwBytes(kMaxJobMemoryBytes);
+    qos.max_tres_per_user.SetCpuCount(kUnlimitedCpu);
+    qos.max_tres_per_user.SetMemoryBytes(kMaxJobMemoryBytes);
+    qos.max_tres_per_user.SetMemorySwBytes(kMaxJobMemoryBytes);
+    qos.max_tres_per_account.SetCpuCount(kUnlimitedCpu);
+    qos.max_tres_per_account.SetMemoryBytes(kMaxJobMemoryBytes);
+    qos.max_tres_per_account.SetMemorySwBytes(kMaxJobMemoryBytes);
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -771,27 +769,24 @@ bool MongodbClient::FetchJobRecords(
 
         auto* mutable_req_total_res_view =
             job_info.mutable_req_total_res_view();
-        auto* mutable_req_alloc_res =
-            mutable_req_total_res_view->mutable_allocatable_res();
-        mutable_req_alloc_res->set_cpu_core_limit(
-            view["cpus_req"].get_double().value);
-        mutable_req_alloc_res->set_memory_limit_bytes(
+        mutable_req_total_res_view->set_cpu_count(static_cast<double>(
+            cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
+        mutable_req_total_res_view->set_memory_bytes(
             view["mem_req"].get_int64().value);
-        mutable_req_alloc_res->set_memory_sw_limit_bytes(
+        mutable_req_total_res_view->set_memory_sw_bytes(
             view["mem_req"].get_int64().value);
 
         auto* mutable_allocated_res_view =
             job_info.mutable_allocated_res_view();
-        auto* mutable_allocated_alloc_res =
-            mutable_allocated_res_view->mutable_allocatable_res();
-        mutable_allocated_alloc_res->set_cpu_core_limit(
-            view["cpus_alloc"].get_double().value);
-        mutable_allocated_alloc_res->set_memory_limit_bytes(
+        mutable_allocated_res_view->set_cpu_count(static_cast<double>(
+            cpu_t::from_raw_value(view["cpus_alloc"].get_int64().value)));
+        mutable_allocated_res_view->set_memory_bytes(
             view["mem_alloc"].get_int64().value);
-        mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
+        mutable_allocated_res_view->set_memory_sw_bytes(
             view["mem_alloc"].get_int64().value);
-        auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
-        *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
+        auto* gres_map_ptr = mutable_allocated_res_view->mutable_gres_map();
+        *gres_map_ptr = ToGrpcGresMap(
+            BsonToGresMap(view["device_map"].get_document().value));
         job_info.set_name(std::string(view["job_name"].get_string().value));
         job_info.set_qos(std::string(view["qos"].get_string().value));
         job_info.set_uid(view["id_user"].get_int32().value);
@@ -1274,12 +1269,13 @@ void MongodbClient::AppendToAccUsageTable(
       return;
     }
     auto time_end = ViewGetArithmeticValue_<int64_t>(job_doc["time_end"]);
-    auto cpus_alloc = ViewGetArithmeticValue_<double>(job_doc["cpus_alloc"]);
-    auto nodes_alloc = ViewGetArithmeticValue_<double>(job_doc["nodes_alloc"]);
+    auto cpus_alloc = cpu_t::from_raw_value(
+        ViewGetArithmeticValue_<int64_t>(job_doc["cpus_alloc"]));
+    auto nodes_alloc = ViewGetArithmeticValue_<int64_t>(job_doc["nodes_alloc"]);
 
     auto start_time = sys_seconds(seconds(time_start));
     auto end_time = sys_seconds(seconds(time_end));
-    double total_cpus = cpus_alloc * nodes_alloc;
+    cpu_t total_cpus = cpus_alloc * nodes_alloc;
 
     // Create aggregation info struct
     JobAggregationInfo info{.account = account,
@@ -1318,8 +1314,7 @@ void MongodbClient::AppendToAccUsageTable(const JobInCtld* job,
         .wckey = job->wckey,
         .start_time = sys_seconds(seconds(job->StartTimeInUnixSecond())),
         .end_time = sys_seconds(seconds(job->EndTimeInUnixSecond())),
-        .total_cpus = job->allocated_res_view.CpuCount() *
-                      static_cast<double>(job->nodes_alloc)};
+        .total_cpus = job->allocated_res_view.GetCpuCount() * job->nodes_alloc};
 
     // Append to all three granularity tables
     AppendToHourTable_(info, session);
@@ -1359,7 +1354,8 @@ void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
         duration_cast<seconds>(hour_end_in_job - hour_start_in_job).count();
 
     if (duration_this_hour > 0) {
-      double cpu_time_this_hour = info.total_cpus * duration_this_hour;
+      int64_t cpu_time_this_hour =
+          (info.total_cpus * duration_this_hour).raw_value();
 
       // Upsert to hour table
       auto filter = make_document(
@@ -1424,7 +1420,8 @@ void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
         duration_cast<seconds>(day_end_in_job - day_start_in_job).count();
 
     if (duration_this_day > 0) {
-      double cpu_time_this_day = info.total_cpus * duration_this_day;
+      int64_t cpu_time_this_day =
+          (info.total_cpus * duration_this_day).raw_value();
 
       // Upsert to day table
       auto filter = make_document(
@@ -1497,7 +1494,8 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
         duration_cast<seconds>(month_end_in_job - month_start_in_job).count();
 
     if (duration_this_month > 0) {
-      double cpu_time_this_month = info.total_cpus * duration_this_month;
+      int64_t cpu_time_this_month =
+          (info.total_cpus * duration_this_month).raw_value();
 
       // Upsert to month table
       auto filter = make_document(
@@ -1928,32 +1926,33 @@ bool MongodbClient::QueryJobSizeSummary(
   if (grouping_list.empty()) {
     stage3.append(kvp("group_key", "$total_cpus"));
   } else {
-    // Build $switch expression for bucket grouping
+    // Build $switch expression for bucket grouping.
+    // $total_cpus is in cpu_t raw_value format, so convert thresholds
+    // and bucket labels via cpu_t to match.
+    auto to_raw = [](uint32_t v) -> int64_t {
+      return cpu_t(static_cast<int>(v)).raw_value();
+    };
     array branches;
     branches.append(make_document(
         kvp("case",
             make_document(kvp(
-                "$lt", make_array("$total_cpus",
-                                  static_cast<int32_t>(grouping_list[0]))))),
-        kvp("then", 0)));
+                "$lt", make_array("$total_cpus", to_raw(grouping_list[0]))))),
+        kvp("then", int64_t{0})));
     for (int i = 1; i < grouping_list.size(); ++i) {
-      uint32_t threshold = grouping_list[i];
-      uint32_t bucket = grouping_list[i - 1];
       branches.append(make_document(
-          kvp("case", make_document(kvp(
-                          "$lt", make_array("$total_cpus",
-                                            static_cast<int32_t>(threshold))))),
-          kvp("then", static_cast<int32_t>(bucket))));
+          kvp("case",
+              make_document(kvp(
+                  "$lt", make_array("$total_cpus", to_raw(grouping_list[i]))))),
+          kvp("then", to_raw(grouping_list[i - 1]))));
     }
     stage3.append(
         kvp("group_key",
-            make_document(
-                kvp("$switch",
-                    make_document(
-                        kvp("branches", branches),
-                        kvp("default",
-                            static_cast<int32_t>(
-                                grouping_list[grouping_list.size() - 1])))))));
+            make_document(kvp(
+                "$switch",
+                make_document(
+                    kvp("branches", branches),
+                    kvp("default",
+                        to_raw(grouping_list[grouping_list.size() - 1])))))));
   }
   pipeline.add_fields(stage3.view());
 
@@ -1979,10 +1978,11 @@ bool MongodbClient::QueryJobSizeSummary(
       item.set_cluster(g_config.CraneClusterName);
       item.set_account(std::string(id["account"].get_string().value));
       item.set_wckey(std::string(id["wckey"].get_string().value));
-      item.set_cpus_alloc(static_cast<uint32_t>(
-          ViewGetArithmeticValue_<double>(id["cpus_alloc"])));
-      item.set_total_cpu_time(
-          ViewGetArithmeticValue_<double>(doc["total_cpu_time"]));
+      item.set_cpus_alloc(
+          static_cast<uint32_t>(static_cast<double>(cpu_t::from_raw_value(
+              ViewGetArithmeticValue_<int64_t>(id["cpus_alloc"])))));
+      item.set_total_cpu_time(static_cast<double>(cpu_t::from_raw_value(
+          ViewGetArithmeticValue_<int64_t>(doc["total_cpu_time"]))));
       item.set_total_count(
           ViewGetArithmeticValue_<int64_t>(doc["total_count"]));
       reply.add_item_list()->CopyFrom(item);
@@ -2257,7 +2257,8 @@ grpc::Status MongodbClient::QueryJobSummary(
       item->set_cluster(g_config.CraneClusterName);
       set_item_field(item, dim1, std::string(id[dim1].get_string().value));
       set_item_field(item, dim2, std::string(id[dim2].get_string().value));
-      item->set_total_cpu_time(ViewValueOr_(doc["total_cpu_time"], 0.0));
+      item->set_total_cpu_time(static_cast<double>(cpu_t::from_raw_value(
+          ViewValueOr_(doc["total_cpu_time"], int64_t{0}))));
       result_count++;
 
       if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
@@ -3225,13 +3226,13 @@ void MongodbClient::SubDocumentAppendItem_(
 }
 
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
-                                        const DeviceMap& value) {
+                                        const GresMap& value) {
   doc.append(kvp(key, [&value](sub_document map_value_document) {
     for (const auto& map_item : value) {
       const auto& device_name = map_item.first;
-      const auto& pair_val = map_item.second;
-      uint64_t total = pair_val.first;
-      const auto& type_count_map = pair_val.second;
+      const auto& gres_count = map_item.second;
+      uint64_t total = gres_count.total;
+      const auto& type_count_map = gres_count.specified;
 
       map_value_document.append(
           kvp(device_name, [&total, &type_count_map](sub_document device_doc) {
@@ -3274,20 +3275,23 @@ void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
   }));
 }
 
+// Serializes ResourceInNodeV3 as counts only (no core_ids/slot_ids).
+// DB format: { "cpu": <int64 raw_value>, "memory": <int64>, "gres": <GresMap> }
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
-                                        const ResourceInNode& value) {
+                                        const ResourceInNodeV3& value) {
   document sub_doc{};
+  sub_doc.append(kvp("cpu", value.GetCpuSet().cpu_count.raw_value()));
   sub_doc.append(
-      kvp("cpu", static_cast<double>(value.allocatable_res.cpu_count)));
-  sub_doc.append(kvp(
-      "memory", static_cast<std::int64_t>(value.allocatable_res.memory_bytes)));
+      kvp("memory", static_cast<std::int64_t>(value.GetMemoryBytes())));
 
-  DocumentAppendItem_(sub_doc, "gres", value.dedicated_res);
+  // Store gres as GresMap (counts), not DedicatedResourceInNode (slot IDs)
+  DocumentAppendItem_(sub_doc, "gres", value.ToResourceView().GetGresMap());
   doc.append(kvp(key, sub_doc));
 }
 
+// Serializes ResourceV3 as per-node counts (no slot IDs).
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
-                                        const ResourceV2& value) {
+                                        const ResourceV3& value) {
   document node_res_doc{};
   for (const auto& [node, res] : value.EachNodeResMap()) {
     DocumentAppendItem_(node_res_doc, node, res);
@@ -3424,28 +3428,25 @@ void MongodbClient::DocumentAppendItem_(
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
                                         const ResourceView& value) {
   doc.append(kvp(key, [&](sub_document valueDocument) {
-    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
-      allocDoc.append(kvp("cpu_count", static_cast<double>(value.CpuCount())));
-      allocDoc.append(kvp("mem", static_cast<int64_t>(value.MemoryBytes())));
-      allocDoc.append(kvp("mem_sw", static_cast<int64_t>(value.MemoryBytes())));
-    }));
-    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+    valueDocument.append(kvp("cpu", value.GetCpuCount().raw_value()));
+    valueDocument.append(
+        kvp("mem", static_cast<int64_t>(value.GetMemoryBytes())));
+    valueDocument.append(
+        kvp("mem_sw", static_cast<int64_t>(value.GetMemorySwBytes())));
+    SubDocumentAppendItem_(valueDocument, "gres", value.GetGresMap());
   }));
 }
 
 void MongodbClient::SubDocumentAppendItem_(sub_document& doc,
                                            const std::string& key,
-                                           const DeviceMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& [dev_name, pair_val] : value) {
-      uint64_t untyped_req_count = pair_val.first;
-      const auto& type_map = pair_val.second;
-      mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
-        devDoc.append(
-            kvp("untyped_req_count", std::to_string(untyped_req_count)));
-        devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
-          for (const auto& [type, total] : type_map) {
-            typeDoc.append(kvp(type, std::to_string(total)));
+                                           const GresMap& value) {
+  doc.append(kvp(key, [&value](sub_document gresDoc) {
+    for (const auto& [dev_name, gc] : value) {
+      gresDoc.append(kvp(dev_name, [&](sub_document devDoc) {
+        devDoc.append(kvp("total", static_cast<int64_t>(gc.total)));
+        devDoc.append(kvp("type_count_map", [&](sub_document typeDoc) {
+          for (const auto& [type, cnt] : gc.specified) {
+            typeDoc.append(kvp(type, static_cast<int64_t>(cnt)));
           }
         }));
       }));
@@ -3677,9 +3678,9 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         qos_view[Qos::FieldStringOfMaxJobsPerAccount()],
         int64_t(
             std::numeric_limits<decltype(qos->max_jobs_per_account)>::max()));
-    qos->max_cpus_per_user = ViewValueOr_(
-        qos_view[Qos::FieldStringOfMaxCpusPerUser()],
-        int64_t(std::numeric_limits<decltype(qos->max_cpus_per_user)>::max()));
+    qos->max_cpus_per_user = cpu_t::from_raw_value(
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxCpusPerUser()],
+                     kUnlimitedCpu.raw_value()));
     qos->max_submit_jobs_per_user =
         ViewValueOr_(qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()],
                      int64_t(std::numeric_limits<
@@ -3743,7 +3744,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.reference_count,
              qos.priority,
              qos.max_jobs_per_user,
-             qos.max_cpus_per_user,
+             qos.max_cpus_per_user.raw_value(),
              absl::ToInt64Seconds(qos.max_time_limit_per_job),
              qos.max_jobs_per_account,
              qos.max_submit_jobs_per_user,
@@ -3841,17 +3842,11 @@ MongodbClient::document MongodbClient::LicenseResourceToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
-DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
-  DeviceMap device_map;
+GresMap MongodbClient::BsonToGresMap(const bsoncxx::document::view& doc) {
+  GresMap gres_map;
 
   try {
-    auto device_map_elem = doc["device_map"];
-    if (!device_map_elem || device_map_elem.type() != bsoncxx::type::k_document)
-      return device_map;
-
-    auto device_map_doc = device_map_elem.get_document().view();
-
-    for (const auto& device_elem : device_map_doc) {
+    for (const auto& device_elem : doc) {
       std::string device_name = std::string(device_elem.key());
       if (device_elem.type() != bsoncxx::type::k_document) {
         CRANE_LOGGER_ERROR(m_logger_,
@@ -3892,14 +3887,15 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
                            "type_count_map: BSON type is not a document.");
       }
 
-      device_map[device_name] = {total, type_count_map};
+      gres_map[device_name] = GresCount{total, type_count_map};
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
-  return device_map;
+  return gres_map;
 }
+
 DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
     const bsoncxx::document::view& doc) {
   DedicatedResourceInNode res;
@@ -3923,17 +3919,30 @@ DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
   }
   return res;
 }
-ResourceInNode MongodbClient::BsonToResourceInNode(
+// Deserializes counts-only ResourceInNodeV3 from DB.
+// core_ids/slot_ids are not stored; only cpu_count, memory, and gres counts.
+// TODO: DB migration script needed to convert old gres format
+// (DedicatedResourceInNode with slot IDs) to new GresMap format (counts).
+ResourceInNodeV3 MongodbClient::BsonToResourceInNodeV3(
     const bsoncxx::document::view& doc) {
-  ResourceInNode res;
+  ResourceInNodeV3 res;
   try {
-    res.allocatable_res.cpu_count =
-        static_cast<cpu_t>(doc["cpu"].get_double().value);
-    res.allocatable_res.memory_bytes = doc["memory"].get_int64().value;
-    res.allocatable_res.memory_sw_bytes = doc["memory"].get_int64().value;
-    if (doc["gres"]) {
-      res.dedicated_res =
-          BsonToDedicatedResourceInNode(doc["gres"].get_document().view());
+    res.GetCpuSet().cpu_count =
+        cpu_t::from_raw_value(doc["cpu"].get_int64().value);
+    res.SetMemoryBytes(doc["memory"].get_int64().value);
+    res.SetMemorySwBytes(doc["memory"].get_int64().value);
+    if (doc["gres"] && doc["gres"].type() == bsoncxx::type::k_document) {
+      GresMap gres = BsonToGresMap(doc["gres"].get_document().view());
+      // Convert GresMap counts to DedicatedResourceInNode (slot IDs empty)
+      for (const auto& [name, gc] : gres) {
+        TypeSlotsMap tsm;
+        for (const auto& [type, cnt] : gc.specified) {
+          std::set<SlotId> slots;
+          for (uint64_t i = 0; i < cnt; i++) slots.emplace(std::to_string(i));
+          tsm.type_slots_map[type] = std::move(slots);
+        }
+        res.GetGres().name_type_slots_map[name] = std::move(tsm);
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -3941,14 +3950,14 @@ ResourceInNode MongodbClient::BsonToResourceInNode(
   return res;
 }
 
-ResourceV2 MongodbClient::BsonToResourceV2(const bsoncxx::document::view& doc) {
-  ResourceV2 res;
+ResourceV3 MongodbClient::BsonToResourceV3(const bsoncxx::document::view& doc) {
+  ResourceV3 res;
   try {
     for (auto&& node_elem : doc) {
       std::string node_name = std::string(node_elem.key());
       res.AddResourceInNode(
           node_name,
-          BsonToResourceInNode(node_elem.get_value().get_document().value));
+          BsonToResourceInNodeV3(node_elem.get_value().get_document().value));
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -4199,16 +4208,16 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
         static_cast<ContainerMetaInJob>(job_to_ctld.container_meta());
   }
 
-  auto resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
+  auto resources = static_cast<ResourceV3>(runtime_attr.allocated_res());
   ResourceView allocated_res_view;
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
 
-  double cpus_req = 0.0;
+  cpu_t cpus_req{0};
   int64_t mem_req = 0;
 
   if (job_to_ctld.has_cpus_per_task()) {
-    cpus_req = job_to_ctld.cpus_per_task() * job_to_ctld.ntasks();
+    cpus_req = cpu_t(job_to_ctld.cpus_per_task()) * job_to_ctld.ntasks();
   }
 
   if (job_to_ctld.has_mem_per_node()) {
@@ -4299,13 +4308,13 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // clang-format on
 
   std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,    /*5-9*/
+             int64_t, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
-             int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             int32_t, std::string, std::string, bool, int64_t,      /*30-34*/
+             int64_t, GresMap, std::optional<PodMetaInJob>,         /*35-37*/
              std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
@@ -4316,7 +4325,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
           absl::ToUnixSeconds(absl::Now()), false, job_to_ctld.account(),
           // 5-9
-          cpus_req, mem_req, job_to_ctld.name(), env_str,
+          cpus_req.raw_value(), mem_req, job_to_ctld.name(), env_str,
           static_cast<int32_t>(job_to_ctld.uid()),
           // 10-14
           static_cast<int32_t>(job_to_ctld.gid()),
@@ -4337,10 +4346,10 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           // 30-34
           job_to_ctld.type(), job_to_ctld.extra_attr(),
           job_to_ctld.reservation(), job_to_ctld.exclusive(),
-          allocated_res_view.CpuCount(),
+          allocated_res_view.GetCpuCount().raw_value(),
           // 35-39
-          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-          allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+          static_cast<int64_t>(allocated_res_view.GetMemoryBytes()),
+          allocated_res_view.GetGresMap(), pod_meta, container_meta,
           true /* Mark the document having complete job info */,
           // 40-44
           std::unordered_map<std::string, uint32_t>{
@@ -4359,31 +4368,39 @@ void MongodbClient::QosResourceViewFromDb_(
     const bsoncxx::document::view& qos_view, const std::string& field,
     ResourceView* resource) {
   auto max_tres = ViewValueOr_(qos_view[field], bsoncxx::document::view{});
-  auto allocatable_res =
-      ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
+  // Read CPU as raw_value (int64) or fallback to old double format
+  auto cpu_ele = max_tres["cpu"];
+  if (cpu_ele) {
+    resource->SetCpuCount(cpu_t::from_raw_value(
+        ViewValueOr_(cpu_ele, kUnlimitedCpu.raw_value())));
+  } else {
+    // Legacy: old format stored as allocatable_res.cpu_count (double)
+    auto allocatable_res =
+        ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
+    resource->SetCpuCount(static_cast<cpu_t>(ViewValueOr_(
+        allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256))));
+  }
 
-  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(ViewValueOr_(
-      allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256)));
-  resource->GetAllocatableRes().memory_bytes = ViewValueOr_(
-      allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
-  resource->GetAllocatableRes().memory_sw_bytes = ViewValueOr_(
-      allocatable_res["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes));
+  resource->SetMemoryBytes(
+      ViewValueOr_(max_tres["mem"], static_cast<int64_t>(kMaxJobMemoryBytes)));
+  resource->SetMemorySwBytes(ViewValueOr_(
+      max_tres["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes)));
 
-  auto device_map_view =
-      ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});
-  for (auto&& device_item : device_map_view) {
+  // Read GRES as GresMap
+  auto gres_view = ViewValueOr_(max_tres["gres"], bsoncxx::document::view{});
+  for (auto&& device_item : gres_view) {
     auto device_doc = device_item.get_document().value;
-    uint64_t untyped_req_count = std::stoull(
-        std::string(device_doc["untyped_req_count"].get_string().value));
-    std::unordered_map<std::string, uint64_t> type_total;
-    auto type_total_ele = device_doc["type_total"];
-    for (auto&& sub_item : type_total_ele.get_document().value) {
-      uint64_t total = std::stoull(std::string(sub_item.get_string().value));
-      type_total.emplace(std::string(sub_item.key()), total);
+    GresCount gc;
+    gc.total = static_cast<uint64_t>(
+        ViewValueOr_(device_doc["total"], static_cast<int64_t>(0)));
+    auto type_count_ele = device_doc["type_count_map"];
+    if (type_count_ele) {
+      for (auto&& sub_item : type_count_ele.get_document().value) {
+        gc.specified[std::string(sub_item.key())] =
+            static_cast<uint64_t>(sub_item.get_int64().value);
+      }
     }
-    resource->GetDeviceMap().emplace(
-        std::string(device_item.key()),
-        std::make_pair(untyped_req_count, std::move(type_total)));
+    resource->GetGresMap()[std::string(device_item.key())] = gc;
   }
 }
 
@@ -4447,13 +4464,13 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // clang-format on
 
   std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,    /*5-9*/
+             int64_t, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
-             int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             int32_t, std::string, std::string, bool, int64_t,      /*30-34*/
+             int64_t, GresMap, std::optional<PodMetaInJob>,         /*35-37*/
              std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
@@ -4464,8 +4481,8 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
              // 5-9
-             job->req_total_res_view.CpuCount(),
-             static_cast<int64_t>(job->req_total_res_view.MemoryBytes()),
+             job->req_total_res_view.GetCpuCount().raw_value(),
+             static_cast<int64_t>(job->req_total_res_view.GetMemoryBytes()),
              job->name, env_str, static_cast<int32_t>(job->uid),
              // 10-14
              static_cast<int32_t>(job->gid), job->allocated_craneds_regex,
@@ -4481,10 +4498,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->get_user_env,
              // 30-34
              job->type, job->extra_attr, job->reservation,
-             job->JobToCtld().exclusive(), job->allocated_res_view.CpuCount(),
+             job->JobToCtld().exclusive(),
+             job->allocated_res_view.GetCpuCount().raw_value(),
              // 35-39
-             static_cast<int64_t>(job->allocated_res_view.MemoryBytes()),
-             job->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+             static_cast<int64_t>(job->allocated_res_view.GetMemoryBytes()),
+             job->allocated_res_view.GetGresMap(), pod_meta, container_meta,
              true /* Mark the document having complete job info */,
              // 40-44
              job->licenses_count, job->CranedIds(), job->wckey,
@@ -4539,13 +4557,13 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
   };
 
   // clang-format on
-  std::tuple<int32_t, int64_t, bool, double, int64_t,          /*0-4*/
+  std::tuple<int32_t, int64_t, bool, int64_t, int64_t,          /*0-4*/
              std::string, std::string, int32_t,                /*5-7*/
              std::vector<gid_t>, std::string,                  /*8-9*/
              int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/
              int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
              std::string, std::string, int32_t, bool, int32_t, /*20-24*/
-             std::string, ResourceV2, int32_t,                 /*25-27*/
+             std::string, ResourceV3, int32_t,                 /*25-27*/
              std::optional<PodMetaInJob>,                      /*28*/
              std::optional<ContainerMetaInJob>,                /*29*/
              std::unordered_set<std::string>,                  /*30*/
@@ -4554,8 +4572,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       values{                                                  // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             step->req_total_res_view.CpuCount(),
-             static_cast<int64_t>(step->req_total_res_view.MemoryBytes()),
+             step->req_total_res_view.GetCpuCount().raw_value(),
+             static_cast<int64_t>(step->req_total_res_view.GetMemoryBytes()),
              // 5-9
              step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
              util::HostNameListToStr(step->CranedIds()),
@@ -4594,11 +4612,11 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
     }
   }
 
-  double cpus_req = 0.0;
+  cpu_t cpus_req{0};
   int64_t mem_req = 0;
 
   if (step_to_ctld.has_cpus_per_task()) {
-    cpus_req = step_to_ctld.cpus_per_task() * step_to_ctld.ntasks();
+    cpus_req = cpu_t(step_to_ctld.cpus_per_task()) * step_to_ctld.ntasks();
   }
 
   if (step_to_ctld.has_mem_per_node()) {
@@ -4648,13 +4666,13 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   };
 
   // clang-format on
-  std::tuple<int32_t, int64_t, bool, double, int64_t, /*0-4*/
+  std::tuple<int32_t, int64_t, bool, int64_t, int64_t, /*0-4*/
              std::string, std::string, int32_t, std::vector<gid_t>,
              std::string,                                      /*5-9*/
              int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/
              int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
              std::string, std::string, int32_t, bool, int32_t, /*20-24*/
-             std::string, ResourceV2, int32_t,
+             std::string, ResourceV3, int32_t,
              std::optional<PodMetaInJob>,                    /*25-28*/
              std::optional<ContainerMetaInJob>,              /*29-29*/
              std::list<std::string>, std::list<std::string>, /*30-31*/
@@ -4665,7 +4683,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           static_cast<int32_t>(runtime_attr.step_id()),
           absl::ToUnixSeconds(absl::Now()),
           false,
-          cpus_req,
+          cpus_req.raw_value(),
           mem_req,
           // 5-9
           step_to_ctld.name(),
@@ -4694,7 +4712,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           step_to_ctld.type(),
           // 25-29
           step_to_ctld.extra_attr(),
-          ResourceV2(runtime_attr.allocated_res()),
+          ResourceV3(runtime_attr.allocated_res()),
           runtime_attr.step_type(),
           pod_meta,
           container_meta,
@@ -4719,13 +4737,11 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
-  auto* mutable_req_alloc_res =
-      mutable_req_total_res_view->mutable_allocatable_res();
-  mutable_req_alloc_res->set_cpu_core_limit(
-      view["cpus_req"].get_double().value);
-  mutable_req_alloc_res->set_memory_limit_bytes(
+  mutable_req_total_res_view->set_cpu_count(static_cast<double>(
+      cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
+  mutable_req_total_res_view->set_memory_bytes(
       view["mem_req"].get_int64().value);
-  mutable_req_alloc_res->set_memory_sw_limit_bytes(
+  mutable_req_total_res_view->set_memory_sw_bytes(
       view["mem_req"].get_int64().value);
 
   step_info->set_name(view["step_name"].get_string().value);
@@ -4768,7 +4784,7 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
   *step_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(
-          BsonToResourceV2(view["res_alloc"].get_document().value).View());
+          BsonToResourceV3(view["res_alloc"].get_document().value).View());
   step_info->set_step_type(
       static_cast<crane::grpc::StepType>(view["step_type"].get_int32().value));
 
