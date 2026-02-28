@@ -136,7 +136,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
   snprintf(proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
   proc.rank = request->pmix_proc().rank();
 
-  g_dmodex_req_manager->PmixProcessRequest(request->seq_num(),
+  g_pmix_server->GetDmodexReqManager()->PmixProcessRequest(request->seq_num(),
                                            request->craned_id(), proc,
                                            request->local_namespace());
 
@@ -150,7 +150,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
     crane::grpc::pmix::PmixDModexResponseReply* response) {
   auto* reactor = context->DefaultReactor();
 
-  g_dmodex_req_manager->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());
+  g_pmix_server->GetDmodexReqManager()->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());
 
   reactor->Finish(Status::OK);
   return reactor;
