@@ -1,8 +1,10 @@
 add_library(Utility_Pmix
         Pmix.cpp
         Pmix.h
-        PmixASyncServer.h
+        
 
+        PmixConn/PmixASyncServer.h
+        PmixConn/PmixClient.h
         PmixConn/PmixGrpcServer.h
         PmixConn/PmixGrpcServer.cpp
         PmixConn/PmixUcxServer.h
@@ -11,8 +13,7 @@ add_library(Utility_Pmix
         PmixConn/PmixGrpcClient.cpp
         PmixConn/PmixUcxClient.h
         PmixConn/PmixUcxClient.cpp
-
-        PmixClient.h
+        
         CranedClient.h
         CranedClient.cpp
         PmixColl.h

@@ -29,8 +29,8 @@
 #include <vector>
 
 #include "CranedClient.h"
-#include "PmixASyncServer.h"
-#include "PmixClient.h"
+#include "PmixConn/PmixASyncServer.h"
+#include "PmixConn/PmixClient.h"
 #include "PmixColl.h"
 #include "PmixCommon.h"
 #include "PmixConn/PmixUcxServer.h"
