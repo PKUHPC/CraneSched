@@ -50,6 +50,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
 - **-h, --help**: Display help information
 - **-v, --version**: Display calloc version
+- **--signal**: Send signal to job
 
 ## Usage Examples
 
@@ -177,6 +178,14 @@ calloc --mail-type=ALL --mail-user=user@example.com -N 1 -p CPU
 Allocate GPU resources:
 ```bash
 calloc --gres=gpu:a100:2 -N 1 -p GPU
+```
+
+### Signal
+
+When a job is within sig_time seconds of its end time, the system will send it the signal sig_num. sig_num can be either a signal number or name (e.g., "10" or "USR1"). sig_time must be an integer between 0 and 65535. By default, no signal is sent before the job's end time. If only sig_num is specified without sig_time, the default lead time is 60 seconds.
+
+```bash
+calloc --signal=SIGUSR1@60 -N 1 -p CPU
 ```
 
 ## Interactive Usage

@@ -145,7 +145,7 @@ JobManager::JobManager() {
         EvCheckSupervisorRunning_();
       });
   m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0ms},
-                                          std::chrono::milliseconds{1000ms});
+                                          std::chrono::milliseconds{200ms});
 
   // gRPC Alloc step Event
   m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -667,6 +667,14 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
+      auto* dns_conf = container_conf->mutable_dns_config();
+      dns_conf->set_cluster_domain(g_config.Container.Dns.ClusterDomain);
+      for (const auto& s : g_config.Container.Dns.Servers)
+        dns_conf->add_servers(s);
+      for (const auto& s : g_config.Container.Dns.Searches)
+        dns_conf->add_searches(s);
+      for (const auto& s : g_config.Container.Dns.Options)
+        dns_conf->add_options(s);
       if (g_config.Container.BindFs.Enabled) {
         auto* bindfs_conf = container_conf->mutable_bindfs();
         bindfs_conf->set_bindfs_binary(

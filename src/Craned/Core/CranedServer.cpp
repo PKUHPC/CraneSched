@@ -377,10 +377,9 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
   // directly.
   std::unordered_map<std::string, std::string> label_selector{
       {std::string(cri::kCriDefaultLabel), "true"},
-      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->job_id())},
-      {std::string(cri::kCriLabelStepIdKey),
-       std::to_string(request->step_id())},
-      {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
+      {std::string(cri::kCriJobIdKey), std::to_string(request->job_id())},
+      {std::string(cri::kCriStepIdKey), std::to_string(request->step_id())},
+      {std::string(cri::kCriUidKey), std::to_string(request->uid())},
   };
   auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
@@ -458,10 +457,9 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
   // directly.
   std::unordered_map<std::string, std::string> label_selector{
       {std::string(cri::kCriDefaultLabel), "true"},
-      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->job_id())},
-      {std::string(cri::kCriLabelStepIdKey),
-       std::to_string(request->step_id())},
-      {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
+      {std::string(cri::kCriJobIdKey), std::to_string(request->job_id())},
+      {std::string(cri::kCriStepIdKey), std::to_string(request->step_id())},
+      {std::string(cri::kCriUidKey), std::to_string(request->uid())},
   };
   auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {

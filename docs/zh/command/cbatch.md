@@ -88,6 +88,7 @@ cbatch cbatch_test.sh
 - **--pod-user string**: 以指定 UID[:GID] 运行 Pod（默认：当 `--pod-userns=false` 时使用当前用户）
 - **--pod-userns**: 启用 Pod 用户命名空间（默认：`true`，容器内用户映射为 root）
 - **--pod-host-network**: 使用宿主机网络命名空间（默认：`false`）
+- **--pod-dns**: 为 Pod 设置 DNS 服务器（仅支持 IPv4）。指定的 DNS server 会被添加到系统默认 DNS 之前（优先级更高，默认使用配置文件 `Container.Dns.Servers`）
 
 ### 其他选项
 - **--interpreter string**: 指定脚本解释器（如 `/bin/bash`、`/usr/bin/python3`）
@@ -99,6 +100,7 @@ cbatch cbatch_test.sh
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）
 - **-h, --help**: 显示帮助信息
 - **-v, --version**: 显示 cbatch 版本
+- **--signal**: 发送信号给作业
 
 ## 使用示例
 
@@ -331,6 +333,20 @@ cbatch --json my_script.sh
 ```bash
 cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
+
+### Signal信号
+
+当作业距离结束时间还有 sig_time 秒时，系统会向其发送信号 sig_num。sig_num 可以是信号编号或名称（如 "10" 或 "USR1"）。sig_time 必须是 0 到 65535 之间的整数。默认情况下，作业结束前不会发送任何信号。如果只指定了 sig_num 而未指定 sig_time，则默认提前 60 秒发送信号。
+
+默认情况下，除了batch shell 本身，其他所有作业步骤都会收到信号。使用 "B:" 选项可以只向 batch shell 发送信号，其他进程不会收到信号。
+```bash
+# 在timelimit前60秒发送SIGUSR1信号，除batch进程外其他step都会收到该信号
+cbatch --signal=SIGUSR1@60 my_script.sh
+
+# 在timelimit前60秒发送SIGUSR1信号，只有batch进程会收到信号
+cbatch --signal=B:SIGUSR1@60 my_script.sh
+```
+
 
 ### 容器作业
 

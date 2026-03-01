@@ -229,6 +229,10 @@ CraneExpectedRich<void> AccountManager::DeleteUser(uint32_t uid,
         FormatRichErr(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
                       fmt::format("user: {}, account: {}", name, account))};
 
+  if (g_account_meta_container->UserHasTask(user->name))
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_USER_HAS_TASK,
+                                         fmt::format("user: {}", name)));
+
   return DeleteUser_(op_user->name, *user, account);
 }
 
@@ -293,7 +297,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey(
-    uint32_t uid, const std::string& name, const std::string& user_name) {
+    uint32_t uid, const std::string& name, const std::string& user_name,
+    bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -303,14 +308,19 @@ CraneExpectedRich<void> AccountManager::DeleteWckey(
   if (!p_target_user)
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_USER, user_name));
+
   if (op_user->uid != 0) {
     auto result =
         CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
     if (!result) return result;
   }
-  if (p_target_user->default_wckey == name) {
+
+  bool to_delete_default = false;
+  if (!force && p_target_user->default_wckey == name) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_DEL_DEFAULT_WCKEY, name));
+  } else if (force && p_target_user->default_wckey == name) {
+    to_delete_default = true;
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -319,7 +329,7 @@ CraneExpectedRich<void> AccountManager::DeleteWckey(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_WCKEY, name));
 
-  return DeleteWckey_(name, user_name);
+  return DeleteWckey_(name, user_name, to_delete_default);
 }
 
 AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
@@ -1170,43 +1180,63 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
   }
 
   Qos res_qos(*p);
-  std::string log = "";
+  std::string log;
 
   for (const auto& operation : operations) {
     auto value = operation.value_list()[0];
     switch (operation.modify_field()) {
     case crane::grpc::ModifyField::Description: {
       res_qos.description = value;
-      log += fmt::format("Set: qos: {}, description: {}\n", name, value);
+      log += fmt::format("description: {}\n", value);
       break;
     }
     case crane::grpc::ModifyField::Priority: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.priority = value_number;
-      log += fmt::format("Set: qos: {}, priority: {}\n", name, value);
+      log += fmt::format("priority: {}\n", value);
       break;
     }
     case crane::grpc::ModifyField::MaxJobsPerUser: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_jobs_per_user = value_number;
-      log += fmt::format("Set: qos: {}, max_jobs_per_user: {}\n", name, value);
+      log += fmt::format("max_jobs_per_user: {}\n", value);
       break;
     }
     case crane::grpc::ModifyField::MaxCpusPerUser: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_cpus_per_user = value_number;
-      log += fmt::format("Set: qos: {}, max_cpus_per_user: {}\n", name, value);
+      log += fmt::format("max_cpus_per_user: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxJobsPerAccount: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_jobs_per_account = value_number;
+      log += fmt::format("max_jobs_per_account: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobsPerUser: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs_per_user = value_number;
+      log += fmt::format("max_submit_jobs_per_user: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobsPerAccount: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs_per_account = value_number;
+      log += fmt::format("max_submit_jobs_per_account: {}\n", value);
       break;
     }
     case crane::grpc::ModifyField::MaxTimeLimitPerTask: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
       res_qos.max_time_limit_per_task = absl::Seconds(value_number);
-      log += fmt::format("Set: qos: {}, max_time_limit_per_task: {}\n", name,
-                         value);
+      log += fmt::format("max_time_limit_per_task: {}\n", value);
       break;
     }
     default:
@@ -1366,6 +1396,16 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
 CraneExpected<void> AccountManager::CheckQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  {
+    task->account_chain.clear();
+    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+    std::string account_name = task->account;
+    do {
+      task->account_chain.emplace_back(account_name);
+      account_name = account_map_ptr->at(account_name)->parent_account;
+    } while (!account_name.empty());
+  }
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
@@ -2599,7 +2639,7 @@ CraneExpectedRich<void> AccountManager::DeleteUser_(
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
+  g_account_meta_container->DeleteUserMeta(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
@@ -2641,6 +2681,8 @@ CraneExpectedRich<void> AccountManager::DeleteAccount_(
     m_qos_map_[qos]->reference_count--;
   }
 
+  g_account_meta_container->DeleteAccountMeta(name);
+
   return {};
 }
 
@@ -2663,7 +2705,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos_(
 }
 
 CraneExpectedRich<void> AccountManager::DeleteWckey_(
-    const std::string& name, const std::string& user_name) {
+    const std::string& name, const std::string& user_name,
+    bool to_delete_default) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2672,6 +2715,8 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
         g_db_client->UpdateEntityOneByFields(MongodbClient::EntityType::WCKEY,
                                              "$set", filter_fields, "deleted",
                                              true);
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     user_name, "default_wckey", "");
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2681,6 +2726,8 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
 
   if (m_wckey_map_[{name, user_name}])
     m_wckey_map_[{name, user_name}]->deleted = true;
+
+  if (to_delete_default) m_user_map_[user_name]->default_wckey.clear();
 
   return {};
 }

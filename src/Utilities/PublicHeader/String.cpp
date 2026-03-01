@@ -485,6 +485,16 @@ std::string SlugDns1123(std::string_view s, size_t max_len) {
   return str;
 }
 
+std::string NormalizeClusterDomain(std::string domain) {
+  absl::StripAsciiWhitespace(&domain);
+
+  while (!domain.empty() && domain.front() == '.') domain.erase(domain.begin());
+  while (!domain.empty() && domain.back() == '.') domain.pop_back();
+
+  if (domain.empty()) domain = std::string(kDefaultContainerClusterDomain);
+  return domain;
+}
+
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string &cert_pem) {
   // Load the certificate content into a BIO (memory buffer).

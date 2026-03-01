@@ -70,6 +70,12 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_cpus_per_account =
         std::numeric_limits<decltype(qos.max_cpus_per_account)>::max();
     qos.reference_count = 1;
+    qos.max_submit_jobs_per_user =
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
+    qos.max_submit_jobs_per_account =
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
+    qos.max_jobs_per_account =
+        std::numeric_limits<decltype(qos.max_jobs_per_account)>::max();
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -472,6 +478,13 @@ bool MongodbClient::FetchJobRecords(
                         job_id);
           }
         }
+
+        std::string wckey_info;
+        bool using_default_wckey =
+            ViewValueOr_(view["using_default_wckey"], false);
+        if (using_default_wckey) wckey_info += "*";
+        wckey_info += ViewValueOr_(view["wckey"], std::string(""));
+        job_info.set_wckey(wckey_info);
 
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
@@ -1539,6 +1552,13 @@ void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
         }
       }));
     }
+    if (!v.dns_servers.empty()) {
+      pod_doc.append(kvp("dns_servers", [&v](sub_array dns_servers_array) {
+        for (const auto& dns_server : v.dns_servers) {
+          dns_servers_array.append(dns_server);
+        }
+      }));
+    }
   }));
 }
 
@@ -1766,8 +1786,21 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->priority = qos_view[Qos::FieldStringOfPriority()].get_int64().value;
     qos->max_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxJobsPerUser()].get_int64().value;
-    qos->max_cpus_per_user =
-        qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
+    qos->max_jobs_per_account = ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxJobsPerAccount()],
+        int64_t(
+            std::numeric_limits<decltype(qos->max_jobs_per_account)>::max()));
+    qos->max_cpus_per_user = ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxCpusPerUser()],
+        int64_t(std::numeric_limits<decltype(qos->max_cpus_per_user)>::max()));
+    qos->max_submit_jobs_per_user =
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()],
+                     int64_t(std::numeric_limits<
+                             decltype(qos->max_submit_jobs_per_user)>::max()));
+    qos->max_submit_jobs_per_account = ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()],
+        int64_t(std::numeric_limits<
+                decltype(qos->max_submit_jobs_per_account)>::max()));
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
   } catch (const bsoncxx::exception& e) {
@@ -1777,7 +1810,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{
+  std::array<std::string, 11> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -1786,9 +1819,11 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
       Qos::FieldStringOfMaxTimeLimitPerTask(),
-  };
+      Qos::FieldStringOfMaxJobsPerAccount(),
+      Qos::FieldStringOfMaxSubmitJobsPerUser(),
+      Qos::FieldStringOfMaxSubmitJobsPerAccount()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t>
+             int64_t, int64_t, int64_t, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -1796,7 +1831,10 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             qos.max_jobs_per_account,
+             qos.max_submit_jobs_per_user,
+             qos.max_submit_jobs_per_account};
 
   return DocumentConstructor_(fields, values);
 }
@@ -2211,6 +2249,17 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
       result.port_mappings.emplace_back(std::move(mapping));
     }
 
+    if (auto dns_servers_elem = pod_doc["dns_servers"]; dns_servers_elem) {
+      if (dns_servers_elem.type() == bsoncxx::type::k_array) {
+        for (const auto& dns_server_val : dns_servers_elem.get_array().value) {
+          if (dns_server_val.type() != bsoncxx::type::k_string) continue;
+          result.dns_servers.emplace_back(dns_server_val.get_string().value);
+        }
+      } else if (dns_servers_elem.type() == bsoncxx::type::k_string) {
+        result.dns_servers.emplace_back(dns_servers_elem.get_string().value);
+      }
+    }
+
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -2235,6 +2284,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
 
+  bool using_default_wckey = false;
+  if (g_config.WckeyValid && task_to_ctld.wckey().empty()) {
+    using_default_wckey = true;
+  }
+
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
     env_doc << entry.first << entry.second;
@@ -2255,10 +2309,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
-  // 40 licenses_alloc nodename_list wckey
+  // 40 licenses_alloc nodename_list wckey        using_default_wckey
 
   // clang-format off
-  std::array<std::string, 43> fields{
+  std::array<std::string, 44> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -2276,7 +2330,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info", 
     // 40 - 44
-    "licenses_alloc", "nodename_list", "wckey"
+    "licenses_alloc", "nodename_list", "wckey", "using_default_wckey"
   };
   // clang-format on
 
@@ -2290,7 +2344,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>             /*41-42*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -2331,7 +2385,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey()};
+             task_to_ctld.wckey(), using_default_wckey};
 
   return DocumentConstructor_(fields, values);
 }
@@ -2378,10 +2432,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
-  // 40 licenses_alloc nodename_list wckey
+  // 40 licenses_alloc nodename_list wckey  using_default_wckey
 
   // clang-format off
-  std::array<std::string, 43> fields{
+  std::array<std::string, 44> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -2399,7 +2453,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info", 
       // 40 - 44
-      "licenses_alloc", "nodename_list", "wckey"
+      "licenses_alloc", "nodename_list", "wckey", "using_default_wckey"
   };
   // clang-format on
 
@@ -2413,7 +2467,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
-             bsoncxx::array::value, std::string>                   /*41-42*/
+             bsoncxx::array::value, std::string, bool>             /*41-43*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -2443,7 +2497,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              // 40-44
              task->licenses_count,
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey};
+             bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
+             task->using_default_wckey};
 
   return DocumentConstructor_(fields, values);
 }

@@ -709,22 +709,60 @@ void ParseConfig(int argc, char** argv) {
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
 
+            if (container_config["Dns"]) {
+              auto dns_node = container_config["Dns"];
+
+              g_config.Container.Dns.ClusterDomain =
+                  util::NormalizeClusterDomain(
+                      YamlValueOr(dns_node["ClusterDomain"],
+                                  kDefaultContainerClusterDomain));
+
+              if (dns_node["Servers"]) {
+                g_config.Container.Dns.Servers.clear();
+                for (const auto& s : dns_node["Servers"]) {
+                  auto addr = s.as<std::string>();
+                  ipv4_t dummy;
+                  if (!crane::StrToIpv4(addr, &dummy)) {
+                    CRANE_ERROR(
+                        "Dns.Servers entry '{}' is not a valid ipv4 address.",
+                        addr);
+                    std::exit(1);
+                  }
+                  g_config.Container.Dns.Servers.push_back(std::move(addr));
+                }
+              }
+              if (dns_node["Searches"]) {
+                for (const auto& s : dns_node["Searches"])
+                  g_config.Container.Dns.Searches.push_back(
+                      s.as<std::string>());
+              }
+              if (dns_node["Options"]) {
+                for (const auto& s : dns_node["Options"])
+                  g_config.Container.Dns.Options.push_back(s.as<std::string>());
+              }
+            }
+
             if (container_config["BindFs"]) {
               const auto& bindfs_config = container_config["BindFs"];
               g_config.Container.BindFs.Enabled =
                   YamlValueOr<bool>(bindfs_config["Enabled"], false);
-              g_config.Container.BindFs.BindfsBinary =
-                  bindfs_config["BindfsBinary"].as<std::string>();
-              g_config.Container.BindFs.FusermountBinary =
-                  bindfs_config["FusermountBinary"].as<std::string>();
-              std::filesystem::path mount_base_dir =
-                  YamlValueOr(bindfs_config["MountBaseDir"],
-                              g_config.Container.BindFs.MountBaseDir.string());
-              if (mount_base_dir.is_relative()) {
-                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+
+              if (g_config.Container.BindFs.Enabled) {
+                g_config.Container.BindFs.BindfsBinary = YamlValueOr(
+                    bindfs_config["BindfsBinary"],
+                    g_config.Container.BindFs.BindfsBinary.string());
+                g_config.Container.BindFs.FusermountBinary = YamlValueOr(
+                    bindfs_config["FusermountBinary"],
+                    g_config.Container.BindFs.FusermountBinary.string());
+                std::filesystem::path mount_base_dir = YamlValueOr(
+                    bindfs_config["MountBaseDir"],
+                    g_config.Container.BindFs.MountBaseDir.string());
+
+                if (mount_base_dir.is_relative())
+                  mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+                g_config.Container.BindFs.MountBaseDir =
+                    std::move(mount_base_dir);
               }
-              g_config.Container.BindFs.MountBaseDir =
-                  std::move(mount_base_dir);
             }
             if (container_config["SubId"]) {
               const auto& subid_config = container_config["SubId"];

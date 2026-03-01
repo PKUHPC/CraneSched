@@ -369,6 +369,14 @@ Container:
 
   # Path to image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
+
+  # DNS configuration (optional)
+  Dns:
+    ClusterDomain: "cluster.local"
+    Servers:
+      - "127.0.0.1"
+    Searches: []
+    Options: []
 ```
 
 For more container-related configuration, see the [Container runtime configuration guide](../container.md).

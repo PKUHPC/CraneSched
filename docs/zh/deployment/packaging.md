@@ -163,7 +163,7 @@ systemctl enable --now craned
 
 要构建前端软件包：
 
-1. **Golang 1.22+** - Go 编程语言
+1. **Golang 1.24+** - Go 编程语言
 2. **Protoc 30.2+** - Protocol buffer 编译器
 3. **GoReleaser v2** - 软件包生成工具
 

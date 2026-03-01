@@ -102,6 +102,7 @@ inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 
 inline const char* const kDefaultContainerTempDir = "craned/container";
+inline const char* const kDefaultContainerClusterDomain = "cluster.local";
 
 inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
 inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
@@ -296,7 +297,9 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 95-99
         "ERR_INVALID_ARGUMENT",
-        "ERR_RESOURCE_ALREADY_EXIST"
+        "ERR_RESOURCE_ALREADY_EXIST",
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
+        "ERR_USER_HAS_TASK"
     };
 // clang-format on
 }  // namespace Internal

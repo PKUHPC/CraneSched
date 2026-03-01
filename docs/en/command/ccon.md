@@ -196,6 +196,10 @@ These options configure container runtime parameters:
 
 :   Image pull policy. Supported: `Always`, `IfNotPresent`, `Never`.
 
+**--dns=&lt;ip-address&gt;**
+
+:   Set DNS servers for the container (IPv4 only). User-provided DNS servers are prepended (higher priority) before system defaults.
+
 ### Examples
 
 Basic container job:

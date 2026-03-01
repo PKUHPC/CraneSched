@@ -23,7 +23,8 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
                 "${OUTDIR}/${FIL_WE}.grpc.pb.h")
 
         add_custom_command(
-                OUTPUT "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h"
+                OUTPUT "${OUTDIR}/${FIL_WE}.pb.cc" "${OUTDIR}/${FIL_WE}.pb.h"
+                       "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h"
                 COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_PROTOBUF_LIBS_PATH}:$LD_LIBRARY_PATH"  ${_PROTOBUF_PROTOC}
                 ARGS --grpc_out "${OUTDIR}" --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR}
                 -I ${SYSTEM_PROTO_DIR}

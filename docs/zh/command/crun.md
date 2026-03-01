@@ -177,6 +177,11 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 :   **适用于：** `作业`, `作业步`  
 如果指定了--mail-type，则接收作业状态通知的电子邮件地址。
 
+**--signal=&lt;sig_num&gt;[@sig_time]**
+
+:   **适用于：** `作业`  
+如果指定了--signal，则发送给作业信号。格式为"&lt;sig_num&gt;[@sig_time]"，其中sig_num是信号编号，sig_time是信号发送时间，距离time limit前sig_time秒发送。
+
 ## 作业模式 vs 作业步模式
 
 ### 作业模式

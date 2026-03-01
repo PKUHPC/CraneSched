@@ -43,6 +43,7 @@ class CranedClient {
     google::protobuf::Timestamp timestamp{};
   };
   absl::Mutex m_mutex_;
+  absl::CondVar m_cv_;
   std::list<StepStatusChangeQueueElem> m_task_status_change_queue_
       ABSL_GUARDED_BY(m_mutex_);
 
