@@ -41,7 +41,6 @@
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 #include "crane/TracePluginExporter.h"
-#include "crane/TracingMacros.h"
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
