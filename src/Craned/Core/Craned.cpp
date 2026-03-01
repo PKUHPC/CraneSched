@@ -44,7 +44,6 @@
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "crane/TracePluginExporter.h"
-#include "crane/TracingMacros.h"
 
 using namespace Craned::Common;
 using Craned::g_config;
