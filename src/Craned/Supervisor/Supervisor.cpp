@@ -28,8 +28,8 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
-#include "crane/TracePluginExporter.h"
 #include "crane/String.h"
+#include "crane/TracePluginExporter.h"
 
 using Craned::Supervisor::g_config;
 
