@@ -1443,6 +1443,8 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   exclusive = val.exclusive();
 
+  submit_node = val.submit_hostname();
+
   SetHeld(val.hold());
 
   SetDependency(val.dependencies());
@@ -1518,6 +1520,8 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->set_extra_attr(extra_attr);
   task_info->set_reservation(reservation);
+
+  task_info->set_submit_node(submit_node);
 
   // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
