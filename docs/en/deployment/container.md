@@ -119,6 +119,8 @@ CraneSched allows users to connect to their running container jobs from any node
 !!! note
     Enable this only when GPU/NPU resources are configured on cluster nodes. This feature depends on the container runtime and vendor plugins.
 
+    Alternatively, you can also use CraneSched's "Container Device Interface" feature to inject various types of devices such as GPU/NPU/RDMA NICs into containers.
+
 === "NVIDIA GPU"
 
     Refer to the [NVIDIA Container Toolkit installation guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) to install the NVIDIA Container Toolkit.
@@ -136,6 +138,77 @@ CraneSched allows users to connect to their running container jobs from any node
     Refer to the [AMD Container Toolkit installation guide](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html) to install AMD Container Toolkit.
 
     **Note:** CraneSched container support for AMD GPU is still under testing and evaluation.
+
+### Container Device Interface
+
+In addition to the vendor-specific runtime hooks described above, CraneSched also supports injecting devices into containers via the **Container Device Interface (CDI)** standard. CDI is a vendor-agnostic device injection specification that uses JSON specification files (CDI Specs) to describe devices and the device nodes, mounts, and environment variables required for injection. It is particularly suitable for:
+
+- RDMA/InfiniBand and other non-GPU devices
+- Scenarios where one physical device corresponds to multiple device file nodes
+- Devices that require additional mounts or environment variables to be injected into containers
+
+The container runtime reads CDI Specs when creating containers and automatically injects devices according to the specification. When submitting container jobs, CraneSched passes the CDI Fully Qualified Device Names of allocated devices to the container runtime via the CRI interface, which then completes the device injection.
+
+#### Enable CDI Support
+
+=== "containerd"
+
+    Edit `/etc/containerd/config.toml` to enable CDI and configure CDI Spec directories:
+
+    ```toml
+    [plugins.'io.containerd.grpc.v1.cri']
+      enable_cdi = true
+      cdi_spec_dirs = ["/etc/cdi", "/var/run/cdi"]
+    ```
+
+    After configuration, restart the containerd service:
+
+    ```bash
+    systemctl restart containerd
+    ```
+
+=== "CRI-O"
+
+    CRI-O enables CDI support by default since v1.23. No additional configuration is needed. CDI Specs are searched in `/etc/cdi` and `/var/run/cdi` by default.
+
+#### Generate CDI Configuration
+
+CDI Spec files are in JSON format and should be placed in the `/etc/cdi/` directory. Different hardware vendors provide different generation tools. For example:
+
+| Device Type | Generation Tool | Reference |
+|:-----------|:---------------|:----------|
+| NVIDIA GPU | `nvidia-ctk cdi generate` | [NVIDIA CDI Documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
+| RDMA/InfiniBand | `rdma-cdi` or manual creation | [RDMA NIC CDI Generation Tool](https://github.com/Nativu5/rdma-cdi) |
+
+After generating the configuration with the tool, verify with:
+
+```bash
+# Inspect the spec file directory
+ls /etc/cdi/
+```
+
+#### Configure GRES to Use CDI
+
+In the Gres configuration of `/etc/crane/config.yaml`, use the `DeviceCDIRegex` or `DeviceCDIList` fields to specify the CDI Fully Qualified Device Name for each device. CDI names correspond to device files (DeviceFileRegex / DeviceFileList) in order, one-to-one.
+
+??? "Example Configuration"
+    ```yaml
+    Nodes:
+    - name: "node01"
+        cpu: 64
+        memory: 256G
+        gres:
+        - name: rdma
+            type: cx5vf
+            DeviceFileList:
+            - /dev/infiniband/uverbs3,/dev/infiniband/rdma_cm
+            - /dev/infiniband/uverbs4,/dev/infiniband/rdma_cm
+            DeviceCDIList:
+            - rdma/mlx5_3=0000:17:00.2
+            - rdma/mlx5_4=0000:17:00.3
+    ```
+
+For the complete Gres configuration documentation, see [Cluster Configuration - Gres Configuration](./configuration/config.md#gres-configuration).
 
 ### Container Network Plugins
 

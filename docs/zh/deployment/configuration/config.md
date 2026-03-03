@@ -229,6 +229,18 @@ Nodes:
         #   - /dev/accel1,/dev/accel1_ctl
         #   - /dev/accel2,/dev/accel2_ctl
         #   - /dev/accel3,/dev/accel3_ctl
+        #
+        # CDI 设备名称配置（可选，用于容器场景的设备注入）二选一：
+        # 1) DeviceCDIRegex：CDI 完全限定名称，使用 hostlist 语法展开。
+        # DeviceCDIRegex: nvidia.com/gpu=GPU[0-3]
+        #
+        # 2) DeviceCDIList：显式列出 CDI 完全限定名称，每个设备一项。
+        # DeviceCDIList:
+        #   - nvidia.com/gpu=GPU0
+        #   - nvidia.com/gpu=GPU1
+        #   - nvidia.com/gpu=GPU2
+        #   - nvidia.com/gpu=GPU3
+        #
         # 运行时的环境注入器
         EnvInjector: nvidia
 ```
@@ -244,6 +256,14 @@ Nodes:
   - 注意：系统使用“展开后的第一个路径”作为该设备的 slot id，建议把主设备节点（如 `/dev/nvidiaX`）放在最前面。
 
 DeviceFileRegex 与 DeviceFileList 二选一；以上设备文件必须存在，**否则 Craned 启动时将报错退出**。
+
+- **DeviceCDIRegex**：用于容器场景的 [CDI（Container Device Interface）](https://github.com/cncf-tags/container-device-interface) 设备注入。通过 hostlist 语法批量展开 CDI 完全限定名称（Fully Qualified Device Name），格式为 `vendor/class=device`，如 `nvidia.com/gpu=GPU[0-3]`。展开后的数量**必须**与 DeviceFileRegex / DeviceFileList 展开的设备数量相同。
+- **DeviceCDIList**：显式列出每个设备对应的 CDI 完全限定名称，每个列表项对应一个设备。
+
+DeviceCDIRegex 与 DeviceCDIList 二选一，且同 name:type 下的**所有设备必须全部配置 CDI 或全部不配**，不允许部分配置，否则 Craned 启动时将报错退出。CDI 名称数量必须与设备文件数量一一对应。
+
+!!! note "CDI 配置何时需要"
+    CDI 配置仅在使用容器功能（`ccon`）运行作业且需要在容器内访问设备时需要。非容器作业（`cbatch`、`crun`）不需要 CDI 配置，它们直接通过 cgroup 访问设备文件。如果集群不使用容器功能，或设备厂商已通过运行时 Hook（如 NVIDIA Container Toolkit）注入设备，也无需配置 CDI。
 
 - **EnvInjector**: 设备需要注入的环境变量
 
