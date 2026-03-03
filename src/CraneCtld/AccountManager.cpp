@@ -1381,8 +1381,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     case crane::grpc::ModifyField::Flags: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
-      res_qos.flags = value_number;
-      log += fmt::format("flags: {}\n", value);
+      res_qos.flags.FromInt64(value_number);
+      log += fmt::format("flags: {}\n", res_qos.flags.ToString());
       break;
     }
     default:
