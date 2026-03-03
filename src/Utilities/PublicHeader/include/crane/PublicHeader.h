@@ -329,30 +329,27 @@ inline std::string_view CraneErrStr(CraneErrCode err) {
 
 template <typename EnumType>
 class FlagSet {
-    static_assert(std::is_enum<EnumType>::value, "FlagSet can only be used with enum types");
-    static constexpr size_t BitSize = std::to_underlying(EnumType::_Count);
-    std::bitset<BitSize> bits;
+  static_assert(std::is_enum<EnumType>::value,
+                "FlagSet can only be used with enum types");
+  static constexpr size_t BitSize = std::to_underlying(EnumType::_Count);
+  std::bitset<BitSize> bits;
 
-public:
-    constexpr FlagSet() = default;
+ public:
+  constexpr FlagSet() = default;
 
-    decltype(auto) operator[](EnumType flag) {
-        return bits[std::to_underlying(flag)]; 
-    }
+  decltype(auto) operator[](EnumType flag) {
+    return bits[std::to_underlying(flag)];
+  }
 
-    bool operator[](EnumType flag) const {
-        return bits[std::to_underlying(flag)];
-    }
+  bool operator[](EnumType flag) const {
+    return bits[std::to_underlying(flag)];
+  }
 
-    void FromInt64(int64_t value) { bits = value; }
+  void FromInt64(int64_t value) { bits = value; }
 
-    int64_t ToInt64() const {
-        return static_cast<int64_t>(bits.to_ullong());
-    }
+  int64_t ToInt64() const { return static_cast<int64_t>(bits.to_ullong()); }
 
-    std::string ToString() const {
-        return bits.to_string();
-    }
+  std::string ToString() const { return bits.to_string(); }
 };
 
 /* ----------- Public definitions for all components */

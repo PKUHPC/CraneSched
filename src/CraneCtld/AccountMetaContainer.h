@@ -107,13 +107,13 @@ class AccountMetaContainer final {
   }
 
   CraneErrCode CheckUserQosSubmitResourceUsage_(const TaskInCtld& task,
-                                              const Qos& qos);
+                                                const Qos& qos);
 
   CraneErrCode CheckAccountQosSubmitResourceUsage_(const TaskInCtld& task,
-                                                 const Qos& qos);
+                                                   const Qos& qos);
 
   CraneErrCode CheckQosSubmitResourceUsage_(const TaskInCtld& task,
-                                             const Qos& qos);
+                                            const Qos& qos);
 
   std::expected<void, std::string> CheckQosResource_(
       const Qos& qos, const PdJobInScheduler& job);

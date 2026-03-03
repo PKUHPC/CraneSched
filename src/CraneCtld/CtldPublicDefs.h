@@ -1080,11 +1080,7 @@ struct TaskInCtld {
   void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info);
 };
 
-enum class QosFlags {
-  None,
-  DenyOnLimit,
-  _Count
-};
+enum class QosFlags { None, DenyOnLimit, _Count };
 
 struct Qos {
   bool deleted = false;
