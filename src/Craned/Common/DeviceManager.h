@@ -58,6 +58,7 @@ struct DeviceMetaInConfig {
   std::string type;
   std::vector<std::string> path;
   std::optional<std::string> EnvInjectorStr;
+  std::optional<std::string> CdiName;  // CDI fully-qualified name for this slot
 };
 
 struct DeviceFileMeta {
@@ -78,9 +79,14 @@ struct BasicDevice {
   DeviceEnvInjectorEnum env_injector;
   std::vector<DeviceFileMeta> device_file_metas;
 
+  // CDI fully-qualified name, e.g. "nvidia.com/gpu=0". Set only when
+  // configured.
+  std::optional<std::string> cdi_name;
+
   BasicDevice(const std::string& device_name, const std::string& device_type,
               const std::vector<std::string>& device_path,
-              DeviceEnvInjectorEnum env_injector);
+              DeviceEnvInjectorEnum env_injector,
+              std::optional<std::string> cdi_name = std::nullopt);
 
   BasicDevice(const BasicDevice& another) = default;
 
@@ -97,7 +103,8 @@ class DeviceManager {
   static std::unique_ptr<BasicDevice> ConstructDevice(
       const std::string& device_name, const std::string& device_type,
       const std::vector<std::string>& device_path,
-      DeviceEnvInjectorEnum env_injector);
+      DeviceEnvInjectorEnum env_injector,
+      std::optional<std::string> cdi_name = std::nullopt);
 
   static CraneErrCode GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);

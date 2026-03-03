@@ -476,6 +476,8 @@ struct ContainerMetaInTask {
   bool stdin_once{false};
 
   std::unordered_map<std::string, std::string> mounts;
+  // CDI device is only meaningful in craned/supervisor.
+  // No need to define it here.
 
  public:
   ContainerMetaInTask() = default;
