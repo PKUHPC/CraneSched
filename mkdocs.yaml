@@ -59,6 +59,7 @@ nav:
       - eBPF Support: deployment/backend/eBPF.md
     - Packaging Guide: deployment/packaging.md
     - Container Deployment: deployment/container.md
+    - PowerControl Deployment: deployment/powercontrol.md
     - Configuration:
       - Cluster Configuration: deployment/configuration/config.md
       - Database Configuration: deployment/configuration/database.md
@@ -166,6 +167,7 @@ plugins:
             PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Container Deployment: 容器功能部署
+            PowerControl Deployment: 节能功能部署
             Plugins: 插件部署
         - locale: en
           name: English

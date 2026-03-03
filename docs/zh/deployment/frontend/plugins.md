@@ -37,6 +37,7 @@
 | **Monitor** | 将作业资源使用指标收集到 InfluxDB（支持 Grafana 集成）|
 | **Energy** | 监控节点和作业的功耗到 InfluxDB |
 | **Event** | 将节点状态更改记录到 InfluxDB |
+| **powerControl** | 节点能耗状态控制 |
 
 ## 安装 cplugind
 

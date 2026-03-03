@@ -9,7 +9,7 @@ cinfo
 
 **cinfo Output Example**
 
-![cinfo](../../images/cinfo/cinfo_running.png)
+![cinfo](../../images/cinfo/cinfo_poweridle.png)
 
 ## Main Output Fields
 
@@ -19,10 +19,22 @@ cinfo
   - down: Unavailable
 - **NODES**: Number of nodes
 - **STATE**: Node states
-  - **idle**: Idle
-  - mix: Some cores on node are available
-  - alloc: Node is fully allocated
-  - down: Node is unavailable
+  -   **Resource state**
+    -     idle: Idle
+    -     mix: Some cores on node are available
+    -     alloc: Node is fully allocated
+    -     down: Node is unavailable
+  -   **Control state**
+    -     power_idle: Idle state. Counted as power_to_sleeping when scheduled to sleep; transitions to power_activate when there is a job.
+    -     power_activate: Active state, initial state. After a period of no jobs, some nodes will transition to power_idle.
+    -     power_sleeping: Sleeping state. Transitions to power_waking_up when scheduled to wake up; transitions to power_powering_off when scheduled to power off.
+    -     power_poweroff: Powered off.
+    -     power_to_sleeping: Transitioning to sleep. Enters power_sleeping after a period of time.
+    -     power_waking_up: Waking up state. Transitions to power_idle after a period of time.
+    -     power_powering_on: Powering on. Transitions to power_idle after a period of time.
+    -     power_powering_off: Powering off. Transitions to power_powering_on when scheduled to power on.
+    -     failed: Control state unavailable.
+
 - **NODELIST**: List of nodes
 
 ## Main Options
@@ -36,7 +48,7 @@ cinfo
 - **-N/--noheader**: Hide table headers in output
 - **-p/--partition string**: Display specified partition information (comma-separated for multiple partitions). Example: `cinfo -p CPU,GPU`
 - **-r/--responding**: Display responding nodes only
-- **-t/--states string**: Display nodes with specified states only. States can be (case-insensitive): IDLE, MIX, ALLOC, and DOWN. Examples:
+- **-t/--states string**: Display nodes with specified resource states only. States can be (case-insensitive): IDLE, MIX, ALLOC, and DOWN. Examples:
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**: Query version number
@@ -70,6 +82,15 @@ cinfo --format "%.5partition %.6a %s"
 cinfo
 ```
 ![cinfo](../../images/cinfo/cinfo_running.png)
+
+**Common Node Control State Descriptions**
+```bash
+cinfo
+```
+The node has been scheduled to power off and is in sleep state, node resources are unavailable
+![cinfo](../../images/cinfo/cinfo_poweroff.png)
+The node is being woken up
+![cinfo](../../images/cinfo/cinfo_wakeup.png)
 
 **Display help:**
 ```bash
