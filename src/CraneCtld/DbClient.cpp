@@ -3730,7 +3730,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         int64_t(std::numeric_limits<decltype(qos->max_submit_jobs)>::max()));
     qos->max_wall = absl::Seconds(ViewValueOr_(
         qos_view[Qos::FieldStringOfMaxWall()], int64_t(kTaskMaxTimeLimitSec)));
-    qos->flags = ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0));
+    qos->flags.FromInt64(ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0)));
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(),
                            &qos->max_tres);
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(),
@@ -3784,7 +3784,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_tres,
              qos.max_tres_per_user,
              qos.max_tres_per_account,
-             qos.flags};
+             qos.flags.ToInt64()};
 
   return DocumentConstructor_(fields, values);
 }

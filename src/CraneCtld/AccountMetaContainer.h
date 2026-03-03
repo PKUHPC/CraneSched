@@ -106,13 +106,13 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+  CraneErrCode CheckUserQosSubmitResourceUsage_(const TaskInCtld& task,
                                               const Qos& qos);
 
-  CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
+  CraneErrCode CheckAccountQosSubmitResourceUsage_(const TaskInCtld& task,
                                                  const Qos& qos);
 
-  CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
+  CraneErrCode CheckQosSubmitResourceUsage_(const TaskInCtld& task,
                                              const Qos& qos);
 
   std::expected<void, std::string> CheckQosResource_(

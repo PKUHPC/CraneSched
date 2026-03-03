@@ -82,7 +82,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs_per_account == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
-  if (qos->max_submit_jobs == 0) return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+  if (qos->max_submit_jobs == 0) return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
   if (static_cast<double>(task.cpus_per_task) * task.node_num >
       qos->max_cpus_per_user)
@@ -108,13 +108,13 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   auto account_locks = LockAccountStripes_(task.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
-  result = CheckQosSubmitResourceForUser_(task, *qos);
+  result = CheckUserQosSubmitResourceUsage_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceForAccount_(task, *qos);
+  result = CheckAccountQosSubmitResourceUsage_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceForQos_(task, *qos);
+  result = CheckQosSubmitResourceUsage_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
   MallocQosSubmitResource(task);
@@ -267,7 +267,7 @@ void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
+CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
@@ -285,7 +285,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
           return;
         }
 
-        if (qos.flags & QosFlags::DenyOnLimit) {
+        if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs_per_user) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
             return;
@@ -306,7 +306,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
   return result;
 }
 
-CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
+CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
@@ -325,7 +325,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
             return;
           }
 
-          if (qos.flags & QosFlags::DenyOnLimit) {
+          if (qos.flags[QosFlags::DenyOnLimit]) {
             if (val.jobs_count + 1 > qos.max_jobs_per_account) {
               result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
               return;
@@ -342,19 +342,19 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
   return result;
 }
 
-CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
+CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
   m_qos_meta_map_.if_contains(
       task.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         auto& val = pair.second;
         if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
-          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+          result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
           return;
         }
-        if (qos.flags & QosFlags::DenyOnLimit) {
+        if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs) {
-            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+            result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
             return;
           }
 
