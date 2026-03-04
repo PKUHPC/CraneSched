@@ -56,9 +56,6 @@ class PmixServer {
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(
       uint32_t rank);
 
-  job_id_t GetJobId() const { return m_pmix_job_info_.job_id; }
-  step_id_t GetStepId() const { return m_pmix_job_info_.step_id; }
-
   uint64_t GetTimeout() const { return m_timeout_; }
 
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
