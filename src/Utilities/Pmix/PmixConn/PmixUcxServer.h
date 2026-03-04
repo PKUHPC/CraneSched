@@ -20,9 +20,15 @@
 #pragma once
 
 #include "PmixASyncServer.h"
+
 #include "PmixCommon.h"
+#include "PmixDModex.h"
+#include "PmixState.h"
+#include "CranedClient.h"
+
 #include "concurrentqueue/concurrentqueue.h"
 #include "uvw/async.h"
+
 #ifdef HAVE_UCX
 #include <ucp/api/ucp.h>
 #endif
@@ -40,7 +46,8 @@ struct PmixUcxReq {
 
 class PmixUcxServiceImpl {
 public:
-  explicit PmixUcxServiceImpl() = default;
+  explicit PmixUcxServiceImpl(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state) :
+      m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {};
 #ifdef HAVE_UCX
   void SendPmixRingMsg(const std::string& req_data);
 
@@ -52,11 +59,16 @@ public:
 
   void PmixDModexResponse(const std::string& req_data);
 #endif
+
+private:
+  PmixDModexReqManager* m_dmodex_mgr_;
+  PmixState* m_pmix_state_;
 };
 
 class PmixUcxServer: public PmixASyncServer {
 public:
-  explicit PmixUcxServer() = default;
+  explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state, CranedClient* craned_client)
+      : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state), m_craned_client_(craned_client) {};
 #ifdef HAVE_UCX
   ~PmixUcxServer() override {
     if (m_ucp_worker_) ucp_worker_destroy(m_ucp_worker_);
@@ -101,6 +113,10 @@ using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
   std::list<std::shared_ptr<PmixUcxReq>> m_pending_reqs_;
 
   std::unique_ptr<PmixUcxServiceImpl> m_service_impl_;
+
+  PmixDModexReqManager* m_dmodex_mgr_;
+  PmixState* m_pmix_state_;
+  CranedClient* m_craned_client_;
 
   std::shared_ptr<uvw::poll_handle> m_poll_;
   std::shared_ptr<uvw::async_handle> m_ucx_process_req_async_handle_;

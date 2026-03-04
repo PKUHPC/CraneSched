@@ -43,7 +43,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::SendPmixRingMsg(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      m_pmix_state_->PmixStateCollGet(
           pmix::CollType::FENCE_RING, procs, procs.size());
 
   if (!coll) {
@@ -76,7 +76,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeUpwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      m_pmix_state_->PmixStateCollGet(
           pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -108,7 +108,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeDownwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      m_pmix_state_->PmixStateCollGet(
         pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -136,7 +136,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
   snprintf(proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
   proc.rank = request->pmix_proc().rank();
 
-  g_pmix_server->GetDmodexReqManager()->PmixProcessRequest(request->seq_num(),
+  m_dmodex_mgr_->PmixProcessRequest(request->seq_num(),
                                            request->craned_id(), proc,
                                            request->local_namespace());
 
@@ -150,7 +150,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
     crane::grpc::pmix::PmixDModexResponseReply* response) {
   auto* reactor = context->DefaultReactor();
 
-  g_pmix_server->GetDmodexReqManager()->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());
+  m_dmodex_mgr_->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());
 
   reactor->Finish(Status::OK);
   return reactor;
@@ -158,7 +158,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
 
 
 bool PmixGrpcServer::Init(const Config& config) {
-  m_service_impl_ = std::make_unique<PmixGrpcServiceImpl>();
+  m_service_impl_ = std::make_unique<PmixGrpcServiceImpl>(m_dmodex_mgr_, m_pmix_state_);
 
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
@@ -181,7 +181,7 @@ bool PmixGrpcServer::Init(const Config& config) {
     return false;
   }
 
-  auto result = g_pmix_server->GetCranedClient()->BroadcastPmixPort(std::to_string(selected_port));
+  auto result = m_craned_client_->BroadcastPmixPort(std::to_string(selected_port));
   if (!result) {
     CRANE_ERROR("Failed to broadcast PMIx port");
     return false;

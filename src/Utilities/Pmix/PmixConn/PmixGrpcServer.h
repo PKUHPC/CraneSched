@@ -19,7 +19,12 @@
 #pragma once
 
 #include "PmixASyncServer.h"
+
 #include "PmixCommon.h"
+#include "PmixDModex.h"
+#include "PmixState.h"
+#include "CranedClient.h"
+
 #include "grpcpp/server.h"
 #include "protos/Pmix.grpc.pb.h"
 #include "protos/Pmix.pb.h"
@@ -36,7 +41,8 @@ using crane::grpc::pmix::Pmix;
 
 class PmixGrpcServiceImpl final : public Pmix::CallbackService {
 public:
-  PmixGrpcServiceImpl() = default;
+  PmixGrpcServiceImpl(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state) :
+      m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {}
 #ifdef HAVE_PMIX
   grpc::ServerUnaryReactor* SendPmixRingMsg(
     grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
@@ -58,11 +64,16 @@ public:
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
     crane::grpc::pmix::PmixDModexResponseReply* response) override;
 #endif
+
+private:
+  PmixDModexReqManager* m_dmodex_mgr_;
+  PmixState* m_pmix_state_;
 };
 
 class PmixGrpcServer: public PmixASyncServer {
 public:
-  explicit PmixGrpcServer() = default;
+  explicit PmixGrpcServer(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state, CranedClient* craned_client)
+      :m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state), m_craned_client_(craned_client) {}
 
   bool Init(const Config& config) override;
 
@@ -71,10 +82,15 @@ public:
   void Wait() override { m_server_->Wait(); }
 
 private:
+
+  PmixDModexReqManager* m_dmodex_mgr_;
+  PmixState* m_pmix_state_;
+  CranedClient* m_craned_client_;
+
   std::unique_ptr<PmixGrpcServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
-  friend class PmixASyncServiceImpl;
+  friend class PmixGrpcServiceImpl;
 };
 
 } // namespace pmix
