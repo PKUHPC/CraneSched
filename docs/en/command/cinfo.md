@@ -15,25 +15,32 @@ cinfo
 
 - **PARTITION**: Partition name
 - **AVAIL**: Partition availability status
-  - **up**: Available
-  - **down**: Unavailable
+
+  - up: Available
+  - down: Unavailable
+
 - **NODES**: Number of nodes
 - **STATE**: Node states
+
   - **Resource state**
-    - **idle**: Idle
-    - **mix**: Some cores on node are available
-    - **alloc**: Node is fully allocated
-    - **down**: Node is unavailable
+
+    - idle: Idle
+    - mix: Some cores on node are available
+    - alloc: Node is fully allocated
+    - down: Node is unavailable
+
   - **Control state**
-    - **power_idle**: Idle state. Counted as power_to_sleeping when scheduled to sleep; transitions to power_activate when there is a job.
-    - **power_activate**: Active state, initial state. After a period of no jobs, some nodes will transition to power_idle.
-    - **power_sleeping**: Sleeping state. Transitions to power_waking_up when scheduled to wake up; transitions to power_powering_off when scheduled to power off.
-    - **power_poweroff**: Powered off.
-    - **power_to_sleeping**: Transitioning to sleep. Enters power_sleeping after a period of time.
-    - **power_waking_up**: Waking up state. Transitions to power_idle after a period of time.
-    - **power_powering_on**: Powering on. Transitions to power_idle after a period of time.
-    - **power_powering_off**: Powering off. Transitions to power_powering_on when scheduled to power on.
-    - **failed**: Control state unavailable.
+
+    - power_idle: Idle state. Counted as power_to_sleeping when scheduled to sleep; transitions to power_activate when there is a job.
+    - power_activate: Active state, initial state. After a period of no jobs, some nodes will transition to power_idle.
+    - power_sleeping: Sleeping state. Transitions to power_waking_up when scheduled to wake up; transitions to power_powering_off when scheduled to power off.
+    - power_poweroff: Powered off.
+    - power_to_sleeping: Transitioning to sleep. Enters power_sleeping after a period of time.
+    - power_waking_up: Waking up state. Transitions to power_idle after a period of time.
+    - power_powering_on: Powering on. Transitions to power_idle after a period of time.
+    - power_powering_off: Powering off. Transitions to power_powering_on when scheduled to power on.
+    - failed: Control state unavailable.
+
 - **NODELIST**: List of nodes
 
 ## Main Options
