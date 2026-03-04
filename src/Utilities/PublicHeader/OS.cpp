@@ -482,8 +482,13 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     if (pid == 0) { // child
       close(stdout_pipe[0]);
-      dup2(stdout_pipe[1], STDOUT_FILENO);
-      dup2(stdout_pipe[1], STDERR_FILENO);
+      if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 ||
+          dup2(stdout_pipe[1], STDERR_FILENO) == -1) {
+       close(stdout_pipe[1]);
+       fmt::print(stderr, "[Subprocess] Error: dup2 failed: {} ({})\n",
+                  strerror(errno), errno);
+       _exit(EXIT_FAILURE);     
+      }
       close(stdout_pipe[1]);
 
       CloseFdFrom(3); // close all other fds
@@ -521,12 +526,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     } else { // parent
       close(stdout_pipe[1]);
-      if (!SetFdNonBlocking(stdout_pipe[0])) {
-        CRANE_ERROR("Failed to set non-blocking mode for stdout pipe.");
-        close(stdout_pipe[0]);
-        result = std::unexpected(RunPrologEpilogStatus{.exit_code=1, .signal_num=0});
-        return;
-      }
 
       auto loop = uvw::loop::create();
       auto pipe_handle = loop->uninitialized_resource<uvw::pipe_handle>(false);
