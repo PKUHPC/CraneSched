@@ -18,6 +18,7 @@
 
 #include "Pmix.h"
 
+#include "PmixCommon.h"
 #include "PmixConn/PmixGrpcClient.h"
 #include "PmixConn/PmixGrpcServer.h"
 #include "PmixColl/PmixColl.h"
@@ -430,10 +431,10 @@ bool PmixServer::ConnInit_(const Config& config) {
 
 #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_node_num_);
-    m_pmix_async_server_ = std::make_unique<PmixUcxServer>();
+    m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
 #else
     m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
-    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
+    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
 #endif
     if (!m_pmix_async_server_->Init(config))
       return false;

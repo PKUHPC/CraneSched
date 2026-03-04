@@ -40,7 +40,7 @@ void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
   }
 
   std::shared_ptr<Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(CollType::FENCE_RING, procs, procs.size());
+      m_pmix_state_->PmixStateCollGet(CollType::FENCE_RING, procs, procs.size());
 
   if (!coll) {
     return;
@@ -64,7 +64,7 @@ void PmixUcxServiceImpl::PmixTreeUpwardForward(const std::string& req_data) {
   }
 
   std::shared_ptr<Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      m_pmix_state_->PmixStateCollGet(
           CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -88,7 +88,7 @@ void PmixUcxServiceImpl::PmixTreeDownwardForward(const std::string& req_data) {
   }
 
   std::shared_ptr<Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      m_pmix_state_->PmixStateCollGet(
        CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -108,7 +108,7 @@ void PmixUcxServiceImpl::PmixDModexRequest(const std::string& req_data) {
   snprintf(proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
   proc.rank = request.pmix_proc().rank();
 
-  g_pmix_server->GetDmodexReqManager()->PmixProcessRequest(
+  m_dmodex_mgr_->PmixProcessRequest(
       request.seq_num(), request.craned_id(), proc, request.local_namespace());
 }
 
@@ -116,12 +116,12 @@ void PmixUcxServiceImpl::PmixDModexResponse(const std::string& req_data) {
   crane::grpc::pmix::PmixDModexResponseReq request;
   if (!request.ParseFromString(req_data)) return ;
 
-  g_pmix_server->GetDmodexReqManager()->PmixProcessResponse(
+  m_dmodex_mgr_->PmixProcessResponse(
       request.seq_num(), request.craned_id(), request.data(), request.status());
 }
 
 bool PmixUcxServer::Init(const Config& config) {
-  m_service_impl_ = std::make_unique<PmixUcxServiceImpl>();
+  m_service_impl_ = std::make_unique<PmixUcxServiceImpl>(m_dmodex_mgr_, m_pmix_state_);
 
 #if UCP_API_VERSION < UCP_VERSION(1, 5)
   setenv("UCX_MEM_MMAP_RELOC", "no", 1);
@@ -180,7 +180,7 @@ bool PmixUcxServer::Init(const Config& config) {
 
   addr_str = std::string(reinterpret_cast<const char*>(m_ucx_addr_), m_ucx_alen_);
 
-  result = g_pmix_server->GetCranedClient()->BroadcastPmixPort(addr_str);
+  result = m_craned_client_->BroadcastPmixPort(addr_str);
   if (!result) {
     CRANE_ERROR("Failed to broadcast UCX address");
     goto err_efd;
