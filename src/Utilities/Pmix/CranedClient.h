@@ -18,9 +18,12 @@
 
 #pragma once
 
+#include "PmixCommon.h"
+
 #include "crane/Lock.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
+
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
@@ -28,7 +31,7 @@ namespace pmix {
 
 class CranedClient {
 public:
-  CranedClient() = default;
+  CranedClient(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
 
   ~CranedClient() = default;
 
@@ -39,6 +42,8 @@ public:
   bool BroadcastPmixPort(const std::string& pmix_port);
 
 private:
+  PmixJobInfo m_pmix_job_info_;
+
   std::shared_ptr<grpc::Channel> m_channel_;
 
   std::unique_ptr<crane::grpc::Craned::Stub> m_stub_;

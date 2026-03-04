@@ -22,10 +22,12 @@
 #include <pmix_common.h>
 #endif
 
-#include "PmixDModex.h"
-#include "PmixState.h"
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
+
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace pmix {
 
@@ -36,6 +38,31 @@ struct Config {
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
+};
+
+struct PmixJobInfo {
+    uint32_t uid{};
+  uint32_t gid{};
+  job_id_t job_id{};
+  step_id_t step_id{0};
+
+  std::string nspace;  // crane.pmix.jobid.stepid
+  std::string hostname;
+  std::vector<std::string> node_list;
+  std::vector<std::string> peer_node_list;
+  std::string node_list_str;
+  uint32_t node_id{};
+  uint32_t node_num{1};
+  uint32_t ntasks_per_node{}; /* number of tasks on *this* node */
+  uint32_t task_num{};
+  std::vector<uint32_t>
+      task_map; /* i'th task is located on task_map[i] node */
+
+  uint32_t ncpus{}; /* total possible number of cpus in job */
+
+  std::string server_tmpdir;
+  std::string cli_tmpdir_base;
+  std::string cli_tmpdir;
 };
 
 constexpr const char* CRANE_PMIX_FENCE = "CRANE_PMIX_FENCE";

@@ -41,6 +41,13 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   request.set_data(data, sz);
   request.set_status(PMIX_SUCCESS);
 
+  if (!g_pmix_server->GetPmixClient()) {
+    CRANE_ERROR("Cannot send direct modex response to {}",
+                dmo_modex_cb_data->craned_id);
+    delete dmo_modex_cb_data;
+    return;
+  }
+
   auto stub =
       g_pmix_server->GetPmixClient()->GetPmixStub(dmo_modex_cb_data->craned_id);
   if (!stub) {
@@ -67,18 +74,18 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
                                          int rank, pmix_modex_cbfunc_t cbfunc,
                                          void *cbdata) {
   // Find the node host corresponding to the nspace-rank.
-  if (g_pmix_server->GetNSpace() != pmix_namespace) {
+  if (m_pmix_job_info_.nspace != pmix_namespace) {
     CRANE_ERROR("Cannot find pmix namespace {}", pmix_namespace);
     return false;
   }
 
-  if (rank >= g_pmix_server->GetTaskMap().size()) {
+  if (rank >= m_pmix_job_info_.task_map.size()) {
     CRANE_ERROR("The rank is out of the range of the task_map.");
     return false;
   }
 
   CranedId craned_id =
-      g_pmix_server->GetNodeList()[g_pmix_server->GetTaskMap()[rank]];
+      m_pmix_job_info_.node_list[m_pmix_job_info_.task_map[rank]];
 
   crane::grpc::pmix::PmixDModexRequestReq request{};
 
@@ -97,7 +104,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   pmix_proc->set_rank(rank);
 
   request.set_local_namespace(pmix_namespace);
-  request.set_craned_id(g_pmix_server->GetHostname());
+  request.set_craned_id(m_pmix_job_info_.hostname);
 
   auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(craned_id);
   if (!stub) {
@@ -127,17 +134,17 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
                                               const CranedId &craned_id,
                                               const pmix_proc_t &pmix_proc,
                                               const std::string &send_nspace) {
-  if (pmix_proc.nspace != g_pmix_server->GetNSpace()) {
+  if (pmix_proc.nspace != m_pmix_job_info_.nspace) {
     CRANE_ERROR("Bad request from {}: asked for nspace = {}", craned_id,
                 send_nspace);
     ResponseWithError_(seq_num, craned_id, PMIX_ERR_INVALID_NAMESPACE);
     return;
   }
 
-  if (g_pmix_server->GetTaskNum() <= pmix_proc.rank) {
+  if (m_pmix_job_info_.task_num <= pmix_proc.rank) {
     CRANE_ERROR(
         "Bad request from {}: nspace {} has only {} ranks, asked for {}",
-        craned_id, pmix_proc.nspace, g_pmix_server->GetTaskNum(),
+        craned_id, pmix_proc.nspace, m_pmix_job_info_.task_num,
         pmix_proc.rank);
     ResponseWithError_(seq_num, craned_id, PMIX_ERR_BAD_PARAM);
     return;
@@ -146,9 +153,6 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
   CRANE_TRACE("PmixProcessRequest from {} for nspace={}, rank={}", craned_id,
               pmix_proc.nspace, pmix_proc.rank);
 
-  // DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num,
-  // .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank =
-  // pmix_proc.rank};
   auto dmo_modex_cb_data = std::make_unique<DModexCbData>();
   dmo_modex_cb_data->seq_num = seq_num;
   dmo_modex_cb_data->craned_id = craned_id;

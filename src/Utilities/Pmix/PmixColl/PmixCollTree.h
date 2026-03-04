@@ -20,6 +20,9 @@
 #pragma once
 
 #include "PmixColl.h"
+
+#include "PmixCommon.h"
+
 #include "crane/Logger.h"
 
 namespace pmix {
@@ -64,8 +67,9 @@ inline std::string ToString(CollTreeSndState state) {
 
 class PmixCollTree : public Coll, public std::enable_shared_from_this<PmixCollTree> {
 public:
-  PmixCollTree() = default;
 #ifdef HAVE_PMIX
+  PmixCollTree(const PmixJobInfo& job_info)
+      : m_pmix_job_info_(job_info) {};
 
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) override;
 
@@ -109,6 +113,8 @@ private:
     PmixCollTree* coll;
     uint32_t seq;
   };
+
+  PmixJobInfo m_pmix_job_info_;
 
   CollTreeState m_state_;
   bool m_contrib_local_;

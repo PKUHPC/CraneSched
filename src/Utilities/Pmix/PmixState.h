@@ -21,18 +21,22 @@
 #include <list>
 
 #include "PmixColl/PmixColl.h"
+#include "PmixCommon.h"
+
 #include "crane/Lock.h"
 
 namespace pmix {
 
 class PmixState {
 public:
-  PmixState() = default;
+  PmixState(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
 
 #ifdef HAVE_PMIX
   std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
                          size_t nprocs);
 private:
+
+  PmixJobInfo m_pmix_job_info_;
 
   util::rw_mutex m_mutex_;
   std::list<std::shared_ptr<Coll>> m_coll_list_;

@@ -43,8 +43,8 @@ void CranedClient::TerminateTasks() {
 
   auto &job_step_map = *request.mutable_job_step_ids_map();
 
-  job_step_map[g_pmix_server->GetJobId()]
-      .mutable_steps()->Add(g_pmix_server->GetStepId());
+  job_step_map[m_pmix_job_info_.job_id]
+      .mutable_steps()->Add(m_pmix_job_info_.step_id);
 
   if (m_stub_ == nullptr) return;
 
@@ -70,11 +70,11 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   BroadcastPmixPortRequest request;
   BroadcastPmixPortReply reply;
 
-  request.set_job_id(g_pmix_server->GetJobId());
+  request.set_job_id(m_pmix_job_info_.job_id);
   request.set_port(pmix_port);
-  request.set_craned_id(g_pmix_server->GetHostname());
-  request.mutable_craned_ids()->Add(g_pmix_server->GetNodeList().begin(),
-                                    g_pmix_server->GetNodeList().end());
+  request.set_craned_id(m_pmix_job_info_.hostname);
+  request.mutable_craned_ids()->Add(m_pmix_job_info_.node_list.begin(),
+                                    m_pmix_job_info_.node_list.end());
 
   if (m_stub_ == nullptr) return false;
 

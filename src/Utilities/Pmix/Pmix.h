@@ -34,6 +34,8 @@
 #include "PmixConn/PmixUcxServer.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
+#include "PmixCommon.h"
+
 #include "concurrentqueue/concurrentqueue.h"
 #include "crane/PublicHeader.h"
 
@@ -54,23 +56,13 @@ class PmixServer {
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(
       uint32_t rank);
 
-  const std::string& GetHostname() const { return m_hostname_;}
-  job_id_t GetJobId() const { return m_job_id_; }
-  step_id_t GetStepId() const { return m_step_id_; }
+  job_id_t GetJobId() const { return m_pmix_job_info_.job_id; }
+  step_id_t GetStepId() const { return m_pmix_job_info_.step_id; }
 
-  const std::vector<std::string>& GetNodeList() { return m_node_list_; }
-  const std::vector<std::string>& GetPeerNodeList() { return m_peer_node_list_; }
-  const std::vector<uint32_t>& GetTaskMap() { return m_task_map_; }
-  const std::string& GetNSpace() { return m_nspace_; }
-  
-  uint32_t GetTaskNum() const { return m_task_num_; }
   uint64_t GetTimeout() const { return m_timeout_; }
 
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
   PmixClient* GetPmixClient() const { return m_pmix_client_.get(); }
-  PmixASyncServer* GetPmixAsyncServer() const {
-    return m_pmix_async_server_.get();
-  }
   PmixDModexReqManager* GetDmodexReqManager() const { return m_dmodex_mgr_.get(); }
   PmixState* GetPmixState() const { return m_pmix_state_.get(); }
 
@@ -91,30 +83,9 @@ class PmixServer {
                         pmix_data_type_t data_type);
 #endif
 
-  uint32_t m_uid_{};
-  uint32_t m_gid_{};
-  job_id_t m_job_id_{};
-  step_id_t m_step_id_{0};
+  PmixJobInfo m_pmix_job_info_;
 
-  std::string m_nspace_;  // crane.pmix.jobid.stepid
-  std::string m_hostname_;
-  std::vector<std::string> m_node_list_;
-  std::vector<std::string> m_peer_node_list_;
-  std::string m_node_list_str_;
-  uint32_t m_node_id_{};
-  uint32_t m_node_num_{1};
-  uint32_t m_ntasks_per_node_{}; /* number of tasks on *this* node */
-  uint32_t m_task_num_{};
-  std::vector<uint32_t>
-      m_task_map_; /* i'th task is located on task_map[i] node */
-
-  uint32_t m_ncpus_{}; /* total possible number of cpus in job */
-
-  uint64_t m_timeout_{10}; // TODO: PMIXP_TIMEOUT
-
-  std::string m_server_tmpdir_;
-  std::string m_cli_tmpdir_base_;
-  std::string m_cli_tmpdir_;
+  uint64_t m_timeout_{5}; // TODO: PMIXP_TIMEOUT
 
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;
