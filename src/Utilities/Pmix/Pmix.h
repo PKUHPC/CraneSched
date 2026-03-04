@@ -31,7 +31,6 @@
 #include "CranedClient.h"
 #include "PmixConn/PmixASyncServer.h"
 #include "PmixConn/PmixClient.h"
-#include "PmixCommon.h"
 #include "PmixConn/PmixUcxServer.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
