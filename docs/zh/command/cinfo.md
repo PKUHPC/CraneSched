@@ -15,26 +15,25 @@ cinfo
 
 - **PARTITION**：分区名
 - **AVAIL**： 分区状态
-  - up: 可用
-  - down: 不可用
+  - **up**: 可用
+  - **down**: 不可用
 - **NODES**：节点数
-- **STATE**： 节点状态，包括资源状态和控制状态
-  -   **资源状态**
-    -     idle： 空闲
-    -     mix： 节点部分核心可以使用
-    -     alloc： 节点已被占用
-    -     down： 节点不可用
-  -   **控制状态**
-    -     power_idle：空闲态。被调度睡眠时计入power_to_sleeping；有作业则进入power_activate
-    -     power_activate：活跃态，初始状态。没有作业等待一段时间后，部分节点会进入power_idle
-    -     power_sleeping：睡眠态。被调度wakeup时进入power_waking_up;被调度挂机后，进入power_powering_off
-    -     power_poweroff：关机
-    -     power_to_sleeping: 睡眠切换中。等待一段时间后进入power_sleeping
-    -     power_waking_up: 唤醒态。等待一段时间后计入power_idle
-    -     power_powering_on: 开机。等待一段时间后进入power_idle
-    -     power_powering_off: 关机。被调度开机后，进入powering_on
-    -     failed: 控制状态不可用
-
+- **STATE**：节点状态，包括资源状态和控制状态
+  - **资源状态**
+    - **idle**：空闲
+    - **mix**：节点部分核心可以使用
+    - **alloc**：节点已被占用
+    - **down**：节点不可用
+  - **控制状态**
+    - **power_idle**：空闲态。被调度睡眠时计入power_to_sleeping；有作业则进入power_activate
+    - **power_activate**：活跃态，初始状态。没有作业等待一段时间后，部分节点会进入power_idle
+    - **power_sleeping**：睡眠态。被调度wakeup时进入power_waking_up;被调度挂机后，进入power_powering_off
+    - **power_poweroff**：关机
+    - **power_to_sleeping**：睡眠切换中。等待一段时间后进入power_sleeping
+    - **power_waking_up**：唤醒态。等待一段时间后计入power_idle
+    - **power_powering_on**：开机。等待一段时间后进入power_idle
+    - **power_powering_off**：关机。被调度开机后，进入powering_on
+    - **failed**：控制状态不可用
 - **NODELIST**： 节点列表
 
 ## 主要参数
