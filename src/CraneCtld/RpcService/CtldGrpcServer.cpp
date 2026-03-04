@@ -725,6 +725,33 @@ grpc::Status CraneCtldServiceImpl::ResetNextStepDbId(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::PurgeTaskHistory(
+    grpc::ServerContext* context,
+    const crane::grpc::PurgeTaskHistoryRequest* request,
+    crane::grpc::PurgeTaskHistoryReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason("User has insufficient privilege");
+    return grpc::Status::OK;
+  }
+
+  if (g_embedded_db_client->PurgeAllTaskHistory()) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to purge task history from embedded DB");
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryCranedInfoRequest* request,

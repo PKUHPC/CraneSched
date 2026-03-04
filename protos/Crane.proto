@@ -313,6 +313,15 @@ message ResetNextStepDbIdReply {
   string reason = 2;
 }
 
+message PurgeTaskHistoryRequest {
+  uint32 uid = 1;
+}
+
+message PurgeTaskHistoryReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message ModifyCranedStateRequest {
   uint32 uid = 1;
   repeated string craned_ids = 2;
@@ -1199,6 +1208,7 @@ service CraneCtld {
   rpc ModifyTasksExtraAttrs(ModifyTasksExtraAttrsRequest) returns (ModifyTasksExtraAttrsReply);
   rpc ResetNextTaskId(ResetNextTaskIdRequest) returns (ResetNextTaskIdReply);
   rpc ResetNextStepDbId(ResetNextStepDbIdRequest) returns (ResetNextStepDbIdReply);
+  rpc PurgeTaskHistory(PurgeTaskHistoryRequest) returns (PurgeTaskHistoryReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

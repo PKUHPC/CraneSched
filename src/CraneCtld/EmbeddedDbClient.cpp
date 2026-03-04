@@ -685,6 +685,111 @@ bool EmbeddedDbClient::ResetNextStepDbId() {
   return true;
 }
 
+bool EmbeddedDbClient::PurgeAllTaskHistory() {
+  txn_id_t txn_id;
+  std::expected<void, DbErrorCode> res;
+
+  // Collect all task data keys from variable_db (keys ending with 'S')
+  std::vector<std::string> var_keys;
+  res = m_variable_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&&) {
+        if (IsVariableDbTaskDataEntry_(key)) var_keys.push_back(key);
+        return true;
+      });
+  if (!res) {
+    CRANE_ERROR("Failed to iterate variable_db for purge.");
+    return false;
+  }
+
+  // Delete variable entries
+  if (!var_keys.empty()) {
+    if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
+    for (const auto& key : var_keys) {
+      res = m_variable_db_->Delete(txn_id, key);
+      if (!res) {
+        CRANE_ERROR("Failed to delete variable entry: {}", key);
+        return false;
+      }
+    }
+    if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
+  }
+
+  // Collect all task data keys from fixed_db (keys ending with 'T')
+  std::vector<std::string> fixed_keys;
+  res = m_fixed_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&&) {
+        fixed_keys.push_back(key);
+        return true;
+      });
+  if (!res) {
+    CRANE_ERROR("Failed to iterate fixed_db for purge.");
+    return false;
+  }
+
+  if (!fixed_keys.empty()) {
+    if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
+    for (const auto& key : fixed_keys) {
+      res = m_fixed_db_->Delete(txn_id, key);
+      if (!res) {
+        CRANE_ERROR("Failed to delete fixed entry: {}", key);
+        return false;
+      }
+    }
+    if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
+  }
+
+  // Collect and delete all step data from step_var_db and step_fixed_db
+  std::vector<std::string> step_var_keys, step_fixed_keys;
+
+  res = m_step_var_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&&) {
+        if (key != s_next_step_id_str_ && key != s_next_step_db_id_str_)
+          step_var_keys.push_back(key);
+        return true;
+      });
+  if (!res) {
+    CRANE_ERROR("Failed to iterate step_var_db for purge.");
+    return false;
+  }
+
+  if (!step_var_keys.empty()) {
+    if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+    for (const auto& key : step_var_keys) {
+      res = m_step_var_db_->Delete(txn_id, key);
+      if (!res) {
+        CRANE_ERROR("Failed to delete step var entry: {}", key);
+        return false;
+      }
+    }
+    if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+  }
+
+  res = m_step_fixed_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&&) {
+        step_fixed_keys.push_back(key);
+        return true;
+      });
+  if (!res) {
+    CRANE_ERROR("Failed to iterate step_fixed_db for purge.");
+    return false;
+  }
+
+  if (!step_fixed_keys.empty()) {
+    if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
+    for (const auto& key : step_fixed_keys) {
+      res = m_step_fixed_db_->Delete(txn_id, key);
+      if (!res) {
+        CRANE_ERROR("Failed to delete step fixed entry: {}", key);
+        return false;
+      }
+    }
+    if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
+  }
+
+  CRANE_INFO("All task/step history purged from embedded DB.");
+  return true;
+}
+
 bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   using TaskStatus = crane::grpc::TaskStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfTask;

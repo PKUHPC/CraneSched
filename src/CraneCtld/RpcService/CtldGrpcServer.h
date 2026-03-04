@@ -288,6 +288,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ResetNextStepDbIdRequest *request,
       crane::grpc::ResetNextStepDbIdReply *response) override;
 
+  grpc::Status PurgeTaskHistory(
+      grpc::ServerContext *context,
+      const crane::grpc::PurgeTaskHistoryRequest *request,
+      crane::grpc::PurgeTaskHistoryReply *response) override;
+
   grpc::Status ModifyNode(
       grpc::ServerContext *context,
       const crane::grpc::ModifyCranedStateRequest *request,

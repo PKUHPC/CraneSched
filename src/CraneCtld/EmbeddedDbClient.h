@@ -187,6 +187,8 @@ class EmbeddedDbClient {
 
   bool ResetNextStepDbId();
 
+  bool PurgeAllTaskHistory();
+
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
   bool RetrieveStepInfo(StepDbSnapshot* snapshot);
