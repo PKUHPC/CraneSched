@@ -20,6 +20,9 @@
 #pragma once
 
 #include "PmixColl.h"
+
+#include "PmixCommon.h"
+
 #include "crane/Logger.h"
 
 namespace pmix {
@@ -55,8 +58,10 @@ struct CollRingCtx {
 
 class PmixCollRing : public Coll, public std::enable_shared_from_this<PmixCollRing> {
 public:
-  PmixCollRing() = default;
 #ifdef HAVE_PMIX
+  PmixCollRing(const PmixJobInfo& job_info)
+      : m_pmix_job_info_(job_info) {};
+
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) override;
 
   bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) override;
@@ -96,6 +101,8 @@ private:
     CollRingCtx* coll_ring_ctx;
     uint32_t seq;
   };
+
+  PmixJobInfo m_pmix_job_info_;
 
   int m_next_peerid_{};
   CranedId m_next_craned_id_;

@@ -24,6 +24,8 @@
 
 #include <string>
 
+#include "PmixCommon.h"
+
 #include "crane/Lock.h"
 #include "crane/PublicHeader.h"
 
@@ -38,7 +40,7 @@ struct DModexCbData {
 
 class PmixDModexReqManager {
 public:
-  PmixDModexReqManager() = default;
+  PmixDModexReqManager(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
 
   #ifdef HAVE_PMIX
   bool PmixDModexGet(const std::string& pmix_namespace, int rank,
@@ -55,6 +57,8 @@ public:
 private:
   static void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
                                 int status);
+
+  PmixJobInfo m_pmix_job_info_;
 
    struct PmixDModexReq {
      uint32_t seq_num;

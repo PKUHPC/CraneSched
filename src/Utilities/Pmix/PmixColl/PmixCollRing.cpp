@@ -33,19 +33,19 @@ bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
   std::set<std::string> hostname_set;
 
   for (const auto& proc : procs) {
-    if (g_pmix_server->GetNSpace() != proc.nspace) return false;
+    if (m_pmix_job_info_.nspace != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : g_pmix_server->GetNodeList()) {
+      for (const auto& hostname : m_pmix_job_info_.node_list) {
         hostname_set.emplace(hostname);
       }
     } else {
-      if (proc.rank > g_pmix_server->GetTaskMap().size()) {
+      if (proc.rank > m_pmix_job_info_.task_map.size()) {
         CRANE_ERROR("The rank is out of the task number range.");
         return false;
       }
-      uint32_t node_id = g_pmix_server->GetTaskMap()[proc.rank];
-      hostname_set.insert(g_pmix_server->GetNodeList()[node_id]);
+      uint32_t node_id = m_pmix_job_info_.task_map[proc.rank];
+      hostname_set.insert(m_pmix_job_info_.node_list[node_id]);
     }
   }
 
@@ -56,15 +56,15 @@ bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
     return false;
   }
 
-  auto it = hostname_set.find(g_pmix_server->GetHostname());
+  auto it = hostname_set.find(m_pmix_job_info_.hostname);
   if (it != hostname_set.end())
     m_peerid_ = std::distance(hostname_set.begin(), it);
   else {
-    CRANE_ERROR("unkown hostname");
+    CRANE_ERROR("unknown hostname");
     return false;
   }
 
-  auto iter = hostname_set.find(g_pmix_server->GetHostname());
+  auto iter = hostname_set.find(m_pmix_job_info_.hostname);
   if (iter != hostname_set.end()) {
     auto next_iter = std::next(iter);
     if (next_iter == hostname_set.end()) {
@@ -72,7 +72,7 @@ bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
     }
     m_next_craned_id_ = *next_iter;
   } else {
-    CRANE_ERROR("cannot find hostname: {}", g_pmix_server->GetHostname());
+    CRANE_ERROR("cannot find hostname: {}", m_pmix_job_info_.hostname);
     return false;
   }
 
@@ -87,7 +87,7 @@ bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
   }
 
   CRANE_TRACE("ring coll {:p}: crane_id = {}, m_next_craned_id_ = {}",
-              static_cast<void*>(this), g_pmix_server->GetHostname(), m_next_craned_id_);
+              static_cast<void*>(this), m_pmix_job_info_.hostname, m_next_craned_id_);
 
   return true;
 }
@@ -167,7 +167,7 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(data.size());
-    pmix_ring_msg_hdr->set_craned_id(g_pmix_server->GetHostname());
+    pmix_ring_msg_hdr->set_craned_id(m_pmix_job_info_.hostname);
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx.seq);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);
