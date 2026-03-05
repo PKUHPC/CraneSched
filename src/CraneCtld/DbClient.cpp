@@ -160,7 +160,7 @@ void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
   }
 }
 
-void SetJobSummeryQueryTimeFilter(const std::string& time_field,
+void SetJobSummaryQueryTimeFilter(const std::string& time_field,
                                   const std::vector<TimeRange>& range,
                                   bsoncxx::builder::basic::document& document) {
   bsoncxx::builder::basic::array time_array;
@@ -180,11 +180,10 @@ template <typename T>
                           crane::grpc::QueryJobSizeSummaryRequest> ||
            std::is_same_v<std::remove_cvref_t<T>,
                           crane::grpc::QueryJobSummaryRequest>
-bsoncxx::document::value GetJobSummeryQueryCommonFilter(const T* request) {
+void SetJobSummaryQueryCommonFilter(const T* request,bsoncxx::builder::basic::document& match_doc) {
   constexpr bool is_size_request =
       std::is_same_v<std::remove_cvref_t<T>,
                      crane::grpc::QueryJobSizeSummaryRequest>;
-  bsoncxx::builder::basic::document match_doc;
   // account
   if (request && request->filter_accounts_size() > 0) {
     bsoncxx::builder::basic::array arr;
@@ -245,7 +244,7 @@ bsoncxx::document::value GetJobSummeryQueryCommonFilter(const T* request) {
     }
   }
 
-  return match_doc.extract();
+  return;
 }
 
 }  // namespace
@@ -1844,8 +1843,8 @@ bool MongodbClient::QueryJobSizeSummary(
 
   int64_t query_start_sec = query_start_time.time_since_epoch().count();
   int64_t query_end_sec = query_end_time.time_since_epoch().count();
-
-  document filter;
+    bsoncxx::builder::basic::document filter;
+  SetJobSummaryQueryCommonFilter(request,filter);
   auto& grouping_list = request->filter_grouping_list();
 
   // Match jobs that overlap with the query time range
@@ -1854,94 +1853,6 @@ bool MongodbClient::QueryJobSizeSummary(
   filter.append(kvp("time_end", make_document(kvp("$gt", query_start_sec))),
                 kvp("time_start", make_document(kvp("$lt", query_end_sec))));
 
-  bool has_accounts_constraint = !request->filter_accounts().empty();
-  if (has_accounts_constraint) {
-    filter.append(kvp("account", [&request](sub_document account_doc) {
-      array account_array;
-      for (const auto& account : request->filter_accounts()) {
-        account_array.append(account);
-      }
-      account_doc.append(kvp("$in", account_array));
-    }));
-  }
-
-  bool has_users_constraint = !request->filter_users().empty();
-  if (has_users_constraint) {
-    filter.append(kvp("username", [&request](sub_document user_doc) {
-      array user_array;
-      for (const auto& user : request->filter_users()) {
-        user_array.append(user);
-      }
-      user_doc.append(kvp("$in", user_array));
-    }));
-  }
-
-  bool has_qos_constraint = !request->filter_qoss().empty();
-  if (has_qos_constraint) {
-    filter.append(kvp("qos", [&request](sub_document qos_doc) {
-      array qos_array;
-      for (const auto& qos : request->filter_qoss()) {
-        qos_array.append(qos);
-      }
-      qos_doc.append(kvp("$in", qos_array));
-    }));
-  }
-
-  bool has_task_ids_constraint = !request->filter_job_ids().empty();
-  if (has_task_ids_constraint) {
-    filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
-      array task_id_array;
-      for (const auto& task_id : request->filter_job_ids()) {
-        task_id_array.append(static_cast<std::int32_t>(task_id));
-      }
-      task_id_doc.append(kvp("$in", task_id_array));
-    }));
-  }
-
-  bool has_partitions_constraint = !request->filter_partitions().empty();
-  if (has_partitions_constraint) {
-    filter.append(kvp("partition_name", [&request](sub_document partition_doc) {
-      array partition_array;
-      for (const auto& partition : request->filter_partitions()) {
-        partition_array.append(partition);
-      }
-      partition_doc.append(kvp("$in", partition_array));
-    }));
-  }
-
-  bool has_nodename_list_constraint = !request->filter_nodename_list().empty();
-  if (has_nodename_list_constraint) {
-    filter.append(
-        kvp("nodename_list", [&request](sub_document nodename_list_doc) {
-          array nodename_list_array;
-          for (const auto& nodename : request->filter_nodename_list()) {
-            nodename_list_array.append(nodename);
-          }
-          nodename_list_doc.append(kvp("$in", nodename_list_array));
-        }));
-  }
-
-  bool has_wckeys_constraint = !request->filter_wckeys().empty();
-  if (has_wckeys_constraint) {
-    filter.append(kvp("wckey", [&request](sub_document wckey_doc) {
-      array wckey_array;
-      for (const auto& wckey : request->filter_wckeys()) {
-        wckey_array.append(wckey);
-      }
-      wckey_doc.append(kvp("$in", wckey_array));
-    }));
-  }
-
-  bool has_gids_constraint = !request->filter_gids().empty();
-  if (has_gids_constraint) {
-    filter.append(kvp("id_group", [&request](sub_document gid_doc) {
-      array gid_array;
-      for (const auto& gid : request->filter_gids()) {
-        gid_array.append(static_cast<std::int32_t>(gid));
-      }
-      gid_doc.append(kvp("$in", gid_array));
-    }));
-  }
 
   auto timer_start = steady_clock::now();
 
@@ -2173,7 +2084,8 @@ grpc::Status MongodbClient::QueryJobSummary(
   mongocxx::pipeline pipeline;
 
   try {
-    auto common_filter = GetJobSummeryQueryCommonFilter(request);
+    bsoncxx::builder::basic::document common_filter;
+    SetJobSummaryQueryCommonFilter(request, common_filter);
     bool is_first_filter = true;
 
     if (!hour_ranges.empty()) {
@@ -2183,7 +2095,7 @@ grpc::Status MongodbClient::QueryJobSummary(
       }
       document hour_filter;
       hour_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("hour", hour_ranges, hour_filter);
+      SetJobSummaryQueryTimeFilter("hour", hour_ranges, hour_filter);
       AppendUnionWithRanges(pipeline, m_acc_usage_hour_collection_name_,
                             hour_filter.view(),
                             entry_table == &hour_job_summ_table);
@@ -2195,7 +2107,7 @@ grpc::Status MongodbClient::QueryJobSummary(
       }
       document day_filter;
       day_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("day", day_ranges, day_filter);
+      SetJobSummaryQueryTimeFilter("day", day_ranges, day_filter);
       AppendUnionWithRanges(pipeline, m_acc_usage_day_collection_name_,
                             day_filter.view(),
                             entry_table == &day_job_summ_table);
@@ -2207,7 +2119,7 @@ grpc::Status MongodbClient::QueryJobSummary(
       }
       document month_filter;
       month_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
-      SetJobSummeryQueryTimeFilter("month", month_ranges, month_filter);
+      SetJobSummaryQueryTimeFilter("month", month_ranges, month_filter);
       AppendUnionWithRanges(pipeline, m_acc_usage_month_collection_name_,
                             month_filter.view(),
                             entry_table == &month_job_summ_table);
