@@ -103,30 +103,28 @@ class PMIxServerModule {
        }
      }
 
-    // TIXME: must superviser env
-    CollType type = StrToCollType(GetEnvVar(CRANE_PMIX_FENCE));
+      CollType type = StrToCollType(g_pmix_server->GetFenceType());
 
-     if (type == CollType::FENCE_MAX) {
-       type = CollType::FENCE_TREE;
+      if (type == CollType::FENCE_MAX) {
+        type = CollType::FENCE_TREE;
+        if (collect && ndata > 0)
+          type = CollType::FENCE_RING;
+      }
 
-       if (collect && ndata > 0)
-         type = CollType::FENCE_RING;
-     }
+    auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs, nprocs);
 
-     auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs, nprocs);
-
-     if (coll == nullptr) {
+    if (coll == nullptr) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
-     }
+    }
 
-     if (!coll->PmixCollContribLocal(std::string(data, ndata), cbfunc, cbdata)) {
-       cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
-       return PMIX_ERROR;
-     }
+    if (!coll->PmixCollContribLocal(std::string(data, ndata), cbfunc, cbdata)) {
+      cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+      return PMIX_ERROR;
+    }
 
-     return PMIX_SUCCESS;
-   }
+    return PMIX_SUCCESS;
+  }
 
    static pmix_status_t DmodexFn(const pmix_proc_t *proc,
                                   const pmix_info_t info[], size_t ninfo,
@@ -405,22 +403,27 @@ void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
     std::fill_n(m_pmix_job_info_.task_map.begin() + node * m_pmix_job_info_.ntasks_per_node, m_pmix_job_info_.ntasks_per_node, node);
   }
 
-  // FIXME: must superviser env
-  auto timeout_str = GetEnvVar(CRANE_PMIX_TIMEOUT);
+  auto timeout_str = config.CranePmixTimeout;
   if (timeout_str != "") {
     try {
       m_timeout_ = std::stoul(timeout_str);
     } catch (const std::exception& e) {
       CRANE_WARN("Failed to parse {} with error {}, use default timeout {}s",
-                 CRANE_PMIX_TIMEOUT, e.what(), m_timeout_);
+                 timeout_str, e.what(), m_timeout_);
     }
   }
 
   m_pmix_job_info_.server_tmpdir = fmt::format("{}pmix.crane.{}/pmix.{}.{}", config.CraneBaseDir, m_pmix_job_info_.hostname, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
 
-  // TODO: cli base env PMIXP_TMPDIR_CLI
-  m_pmix_job_info_.cli_tmpdir_base = fmt::format("{}pmix.crane.cli", config.CraneBaseDir);
+  if (config.PmixpPmixlibTmpDir != "") {
+    m_pmix_job_info_.cli_tmpdir_base = fmt::format("{}pmix.crane.cli", config.PmixpPmixlibTmpDir);
+  } else {
+    m_pmix_job_info_.cli_tmpdir_base = fmt::format("{}pmix.crane.cli", config.CraneBaseDir);
+  }
+  
   m_pmix_job_info_.cli_tmpdir = fmt::format("{}/spmix_appdir_{}.{}.{}", m_pmix_job_info_.cli_tmpdir_base, m_pmix_job_info_.uid, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
+
+  m_pmix_job_info_.fence_type = config.CranePmixFence;
 }
 
 bool PmixServer::ConnInit_(const Config& config) {

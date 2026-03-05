@@ -2065,6 +2065,22 @@ bool TaskManager::InitPmixPreFork() {
         .CraneBaseDir = g_config.CraneBaseDir,
         .CraneScriptDir = g_config.CraneScriptDir,
         .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+    
+    if (g_config.JobEnv.contains("CRANE_PMIX_FENCE")) {
+      pmix_config.CranePmixFence = g_config.JobEnv.at("CRANE_PMIX_FENCE");
+    }
+
+    if (g_config.JobEnv.contains("CRANE_PMIX_TIMEOUT")) {
+      pmix_config.CranePmixTimeout = g_config.JobEnv.at("CRANE_PMIX_TIMEOUT");
+    }
+
+    if (g_config.JobEnv.contains("CRANE_PMIX_DIRECT_CONN_UCX")) {
+      pmix_config.CranePmixDirectConnUcx = g_config.JobEnv.at("CRANE_PMIX_DIRECT_CONN_UCX");
+    }
+
+    if (g_config.JobEnv.contains("PMIXP_PMIXLIB_TMPDIR")) {
+      pmix_config.PmixpPmixlibTmpDir = g_config.JobEnv.at("PMIXP_PMIXLIB_TMPDIR");
+    }
 
     if (!g_pmix_server->Init(pmix_config, m_step_.GetStep()))
       return false;
