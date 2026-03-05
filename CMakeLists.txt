@@ -343,12 +343,7 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
-if(DEFINED WITH_PMIX AND NOT "${WITH_PMIX}" STREQUAL "")
-    message(STATUS "WITH_PMIX is set to: ${WITH_PMIX}")
-    find_package(PMIx REQUIRED)
-else()
-    message(STATUS "WITH_PMIX not set, PMIx support will be disabled.")
-endif()
+find_package(PMIx REQUIRED)
 
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")

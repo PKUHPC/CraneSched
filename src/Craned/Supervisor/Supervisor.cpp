@@ -439,8 +439,10 @@ void StartServer(int grpc_output_fd) {
   g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
                                          std::nullopt);
 
-  g_server.reset();
+  
   g_task_mgr->Wait();
+
+  g_server.reset();
   g_task_mgr.reset();
 
   g_craned_client.reset();

@@ -67,9 +67,10 @@ private:
 
 class PmixUcxServer: public PmixASyncServer {
 public:
+#ifdef HAVE_UCX
   explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state, CranedClient* craned_client)
       : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state), m_craned_client_(craned_client) {};
-#ifdef HAVE_UCX
+      
   ~PmixUcxServer() override {
     if (m_ucp_worker_) ucp_worker_destroy(m_ucp_worker_);
     if (m_ucp_context_) ucp_cleanup(m_ucp_context_);

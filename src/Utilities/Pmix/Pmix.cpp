@@ -430,18 +430,24 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_ = std::make_unique<CranedClient>(m_pmix_job_info_);
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
-#ifdef HAVE_UCX
+  if (config.CranePmixDirectConnUcx == "true") {
+  #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_job_info_.node_num);
     m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
-#else
+  #else
+    CRANE_ERROR("UCX support is not enabled in this build, cannot use UCX for PMIx communication.");
+    return false;
+  #endif
+  } else {
     m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num);
     m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
-#endif
-    if (!m_pmix_async_server_->Init(config))
-      return false;
+  }
 
-    // must ensure that both sides have received [the message] and are ready.
-    m_pmix_client_->WaitAllStubReady();
+  if (!m_pmix_async_server_->Init(config))
+    return false;
+
+  // must ensure that both sides have received [the message] and are ready.
+  m_pmix_client_->WaitAllStubReady();
   return true;
 }
 
