@@ -38,10 +38,15 @@ struct Config {
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
+  
+  std::string CranePmixFence;
+  std::string CranePmixTimeout;
+  std::string CranePmixDirectConnUcx;
+  std::string PmixpPmixlibTmpDir;
 };
 
 struct PmixJobInfo {
-    uint32_t uid{};
+  uint32_t uid{};
   uint32_t gid{};
   job_id_t job_id{};
   step_id_t step_id{0};
@@ -63,13 +68,8 @@ struct PmixJobInfo {
   std::string server_tmpdir;
   std::string cli_tmpdir_base;
   std::string cli_tmpdir;
+  std::string fence_type;
 };
-
-constexpr const char* CRANE_PMIX_FENCE = "CRANE_PMIX_FENCE";
-constexpr const char* CRANE_PMIX_TIMEOUT = "CRANE_PMIX_TIMEOUT";
-constexpr const char* CRANE_PMIX_DIRECT_CONN_UCX = "CRANE_PMIX_DIRECT_CONN_UCX";
-constexpr const char* PMIXP_PMIXLIB_TMPDIR = "PMIXP_PMIXLIB_TMPDIR";
-constexpr const char* PMIXP_TREE_WIDTH = "PMIXP_TREE_WIDTH";
 
 static constexpr uint64_t kTagTypeShift   = 48;
 static constexpr uint64_t kTagTypeMask    = 0xFFFF000000000000ULL;
@@ -86,11 +86,6 @@ enum class PmixUcxMsgType : uint16_t {
   PMIX_UCX_DMDEX_RESPONSE,
   PMIX_UCX_SEND_PMIX_RING_MSG
 };
-
-inline std::string GetEnvVar(const std::string& key) {
-    const char* val = std::getenv(key.c_str());
-    return val == nullptr ? "" : std::string(val);
-}
 
 #ifdef HAVE_PMIX
 inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
