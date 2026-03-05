@@ -463,8 +463,10 @@ void StartServer(int grpc_output_fd) {
 
   g_task_mgr->SupervisorFinishInit(status);
 
-  g_server.reset();
+  
   g_task_mgr->Wait();
+
+  g_server.reset();
   g_task_mgr.reset();
 
   g_craned_client.reset();

@@ -350,14 +350,24 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           job->meta = std::move(meta);
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
-          if (lua_result) {
-            auto rich_err = lua_result.value().get();
-            if (rich_err.code() != CraneErrCode::SUCCESS) {
-              if (rich_err.description().empty()) {
-                result = std::unexpected(CraneErrStr(rich_err.code()));
-              } else {
-                result = std::unexpected(rich_err.description());
+
+          if (task->IsCrun() && task->TaskToCtld().interactive_meta().mpi() == "pmix") {
+            #ifndef HAVE_PMIX
+              result = std::unexpected(
+                  "MPI type pmix is not supported.");
+            #endif
+          }
+
+          if (result) {
+            auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
+            if (lua_result) {
+              auto rich_err = lua_result.value().get();
+              if (rich_err.code() != CraneErrCode::SUCCESS) {
+                if (rich_err.description().empty()) {
+                  result = std::unexpected(CraneErrStr(rich_err.code()));
+                } else {
+                  result = std::unexpected(rich_err.description());
+                }
               }
             }
           }
@@ -412,16 +422,26 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_step_completed = cb_step_completed;
           step->ia_meta = std::move(meta);
 
-          auto submit_result =
-              g_job_scheduler->SubmitStepAsync(std::move(step));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto submit_expt = submit_result.get();
-          if (submit_expt.has_value()) {
-            step_id_t step_id = submit_expt.value();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, step_id)};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_expt.error()));
+
+          if (step->StepToCtld().interactive_meta().mpi() == "pmix") {
+            #ifndef HAVE_PMIX
+              result = std::unexpected(
+                  "MPI type pmix is not supported.");
+            #endif
+          }
+
+          if (result) {
+            auto submit_result =
+              g_job_scheduler->SubmitStepAsync(std::move(step));
+            auto submit_expt = submit_result.get();
+            if (submit_expt.has_value()) {
+              step_id_t step_id = submit_expt.value();
+              result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                  std::pair(job_id, step_id)};
+            } else {
+              result = std::unexpected(CraneErrStr(submit_expt.error()));
+            }
           }
 
           // Track in map before Write so kCleanData can always find
