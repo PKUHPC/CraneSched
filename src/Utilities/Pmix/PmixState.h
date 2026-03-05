@@ -29,9 +29,9 @@ namespace pmix {
 
 class PmixState {
 public:
-  PmixState(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
-
 #ifdef HAVE_PMIX
+  PmixState(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
+  
   std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
                          size_t nprocs);
 private:

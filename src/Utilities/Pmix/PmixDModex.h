@@ -40,9 +40,9 @@ struct DModexCbData {
 
 class PmixDModexReqManager {
 public:
+#ifdef HAVE_PMIX
   PmixDModexReqManager(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
-
-  #ifdef HAVE_PMIX
+  
   bool PmixDModexGet(const std::string& pmix_namespace, int rank,
                      pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
