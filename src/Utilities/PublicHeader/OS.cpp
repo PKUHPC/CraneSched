@@ -634,6 +634,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
                   RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
               return;
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
           });
 
       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
