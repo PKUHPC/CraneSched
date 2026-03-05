@@ -58,6 +58,8 @@ class PmixServer {
 
   uint64_t GetTimeout() const { return m_timeout_; }
 
+  std::string GetFenceType() const { return m_pmix_job_info_.fence_type; }
+
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
   PmixClient* GetPmixClient() const { return m_pmix_client_.get(); }
   PmixDModexReqManager* GetDmodexReqManager() const { return m_dmodex_mgr_.get(); }
