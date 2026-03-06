@@ -598,31 +598,29 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     const crane::grpc::ReceivePmixPortRequest *request,
     crane::grpc::ReceivePmixPortReply *response) {
 
-  step_id_t step_id;
-
-  std::vector<std::pair<std::string, CranedId>> pmix_ports;
+  std::vector<std::pair<CranedId, std::string>> pmix_ports;
   for (const auto& pmix_port : request->pmix_ports()) {
     if (pmix_port.craned_id() == g_config.CranedIdOfThisNode) {
       CRANE_TRACE("[Step{}.{}] ReceivePmixPort: Ignore pmix port {} for self craned id {}", 
-        request->job_id(), pmix_port.step_id(),
+        request->job_id(), request->step_id(),
         pmix_port.port(), pmix_port.craned_id());
-      step_id = pmix_port.step_id();
       continue;
     }
-    pmix_ports.emplace_back(pmix_port.port(), pmix_port.craned_id());
+    pmix_ports.emplace_back(pmix_port.craned_id(), pmix_port.port());
   }
 
-  auto stub = g_supervisor_keeper->GetStub(request->job_id(), step_id);
+  CRANE_TRACE("[Step{}.{}] Delivering pmix ports to supervisor", request->job_id(), request->step_id());
+  auto stub = g_supervisor_keeper->GetStub(request->job_id(), request->step_id());
   if (!stub) {
-    CRANE_ERROR("[Step{}.{}] Failed to get stub", request->job_id(), step_id);
+    CRANE_ERROR("[Step{}.{}] Failed to get stub", request->job_id(), request->step_id());
     response->set_ok(false);
     return Status::OK;
   }
 
-  auto result = stub->ReceivePmixPort(request->job_id(), pmix_ports);
+  auto result = stub->ReceivePmixPort(pmix_ports);
   if (result != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step{}.{}] Failed to deliver pmix ports: {}", 
-      request->job_id(), step_id, CraneErrStr(result));
+      request->job_id(), request->step_id(), CraneErrStr(result));
     response->set_ok(false);
   } else {
     response->set_ok(true);

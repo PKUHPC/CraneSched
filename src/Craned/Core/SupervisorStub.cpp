@@ -211,18 +211,16 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ReceivePmixPort(job_id_t job_id, const std::vector<std::pair<std::string, CranedId>>& pmix_ports) {
+CraneErrCode SupervisorStub::ReceivePmixPort(const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
   ClientContext context;
   crane::grpc::supervisor::ReceivePmixPortRequest request;
   crane::grpc::supervisor::ReceivePmixPortReply reply;
 
-  request.set_job_id(job_id);
-
   auto pmix_port_list = request.mutable_pmix_ports();
   for (const auto& pmix_port : pmix_ports) {
     auto pmix_port_req = pmix_port_list->Add();
-    pmix_port_req->set_craned_id(pmix_port.second);
-    pmix_port_req->set_port(pmix_port.first);
+    pmix_port_req->set_craned_id(pmix_port.first);
+    pmix_port_req->set_port(pmix_port.second);
   }
 
   auto ok = m_stub_->ReceivePmixPort(&context, request, &reply);
