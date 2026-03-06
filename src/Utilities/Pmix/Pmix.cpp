@@ -268,6 +268,7 @@ PmixServer::~PmixServer() {
 
 bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 #ifdef HAVE_PMIX
+  CRANE_TRACE("[Step#{}.{}] Initializing PmixServer...", step.job_id(), step.step_id());
   m_uvw_loop_ = uvw::loop::create();
 
   InfoSet_(config, step);
@@ -278,6 +279,8 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
   m_pmix_state_ = std::make_unique<PmixState>(m_pmix_job_info_);
 
   if (!ConnInit_(config)) return false;
+
+  CRANE_TRACE("[Step#{}.{}] PmixServer conn initialized.", step.job_id(), step.step_id());
 
   m_cleanup_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
 

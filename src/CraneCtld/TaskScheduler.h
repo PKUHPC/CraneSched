@@ -759,12 +759,12 @@ class TaskScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
-  using PmixPortsMap = std::unordered_map<CranedId, std::pair<step_id_t, std::string>>;
-
+  using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
+  using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
   using PmixPortsMetaMap = phmap::parallel_flat_hash_map<
-      job_id_t, PmixPortsMap, phmap::priv::hash_default_hash<job_id_t>,
-      phmap::priv::hash_default_eq<job_id_t>,
-      std::allocator<std::pair<const job_id_t, PmixPortsMap>>, 4,
+      PmixPortsMetaMapKey, PmixPortsMetaMapValue, phmap::priv::hash_default_hash<PmixPortsMetaMapKey>,
+      phmap::priv::hash_default_eq<PmixPortsMetaMapKey>,
+      std::allocator<std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>>, 4,
       std::shared_mutex>;
 
  public:

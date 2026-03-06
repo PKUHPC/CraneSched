@@ -1198,10 +1198,11 @@ message BroadcastPmixPortReply {
 
 message ReceivePmixPortRequest {
   uint32 job_id = 1;
+  uint32 step_id = 2;
+
   message PmixPorts{
     string craned_id = 1;
-    uint32 step_id = 2;
-    string port = 3; // grpc port or ucx addr
+    string port = 2; // grpc port or ucx addr
   }
   repeated PmixPorts pmix_ports = 3;
 }
