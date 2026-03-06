@@ -87,6 +87,8 @@ public:
   uint64_t GetChannelCount() const override { return m_channel_count_.load(); }
 
   void WaitAllStubReady() override {
+    if (m_node_num_ == 1) return;
+    
     std::unique_lock<std::mutex> lock(m_mutex_);
     if (GetChannelCount() >= m_node_num_) return ;
     m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_node_num_; });

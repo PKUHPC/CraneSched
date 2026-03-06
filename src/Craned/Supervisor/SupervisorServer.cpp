@@ -117,7 +117,10 @@ grpc::Status SupervisorServiceImpl::ReceivePmixPort(
     const crane::grpc::supervisor::ReceivePmixPortRequest* request,
     crane::grpc::supervisor::ReceivePmixPortReply* response) {
 
+  CRANE_TRACE("Received ReceivePmixPort gRPC with {} pmix ports.", request->pmix_ports().size());
+
   if (!g_pmix_server || !g_pmix_server->GetPmixClient()) {
+    CRANE_ERROR("PMIx server/client is not initialized.");
     response->set_ok(false);
     return Status::OK;
   }

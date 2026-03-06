@@ -121,7 +121,7 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   {
     std::lock_guard<std::mutex> lock(m_mutex_);
-    if (cur_count >= m_node_num_) {
+    if (cur_count+1 >= m_node_num_) {
       m_cv_.notify_one();
     }
   }

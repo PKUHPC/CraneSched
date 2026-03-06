@@ -63,6 +63,12 @@ void CranedClient::TerminateTasks() {
 }
 
 bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
+
+  if (m_pmix_job_info_.node_list.size() == 1) {
+    CRANE_TRACE("Only one node in job, no need to broadcast pmix port.");
+    return true;
+  }
+
   using crane::grpc::BroadcastPmixPortReply;
   using crane::grpc::BroadcastPmixPortRequest;
 
@@ -71,6 +77,7 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   BroadcastPmixPortReply reply;
 
   request.set_job_id(m_pmix_job_info_.job_id);
+  request.set_step_id(m_pmix_job_info_.step_id);
   request.set_port(pmix_port);
   request.set_craned_id(m_pmix_job_info_.hostname);
   request.mutable_craned_ids()->Add(m_pmix_job_info_.node_list.begin(),
