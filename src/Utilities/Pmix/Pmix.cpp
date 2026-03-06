@@ -354,8 +354,7 @@ PmixServer::SetupFork(uint32_t rank) {
   env_map.emplace("SLURM_NODELIST", m_pmix_job_info_.node_list_str);
   env_map.emplace("SLURM_STEP_ID", std::to_string(m_pmix_job_info_.step_id));
 
-  // FIXME: superviser env
-  if (!std::getenv("OMPI_MCA_orte_precondition_transports")) {
+  if (!env_map.contains("OMPI_MCA_orte_precondition_transports")) {
     char key[64];
     std::snprintf(key, sizeof(key), "%08x%08x-%08x%08x", m_pmix_job_info_.job_id, 0, m_pmix_job_info_.step_id, 0);
     env_map.emplace("OMPI_MCA_orte_precondition_transports", key);
