@@ -628,7 +628,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
               pipe_handle->close();
               h.parent().walk([](auto&& h) { h.close(); });
               h.parent().stop();
-              CRANE_ERROR("waitpid failed for script {}, pid:{} : {}", script, pid, strerror(errno));
+              CRANE_ERROR("waitpid failed for script {}, pid:{} : {}", script,
+                          pid, strerror(errno));
               result = std::unexpected(
                   RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
               return;
