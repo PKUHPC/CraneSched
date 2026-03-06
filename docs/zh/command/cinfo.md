@@ -9,7 +9,7 @@ cinfo
 
 **cinfo运行结果展示**
 
-![cinfo](../../images/cinfo/cinfo_poweridle.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 ## 主要输出项
 
@@ -34,7 +34,7 @@ cinfo
     - power_idle：空闲态。被调度睡眠时计入power_to_sleeping；有作业则进入power_activate
     - power_activate：活跃态，初始状态。没有作业等待一段时间后，部分节点会进入power_idle
     - power_sleeping：睡眠态。被调度wakeup时进入power_waking_up;被调度挂机后，进入power_powering_off
-    - power_poweroff：关机
+    - power_poweredoff：关机
     - power_to_sleeping：睡眠切换中。等待一段时间后进入power_sleeping
     - power_waking_up：唤醒态。等待一段时间后计入power_idle
     - power_powering_on：开机。等待一段时间后进入power_idle
@@ -90,13 +90,26 @@ cinfo
 ![cinfo](../../images/cinfo/cinfo_running.png)
 
 **常见节点控制状态说明：**
-```bash
-cinfo
-```
 节点已经被调度关机和睡眠中，节点资源不可用
-![cinfo](../../images/cinfo/cinfo_poweroff.png)
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                  NODELIST
+CPU*      down  4     down[power_sleeping]   cn[06-09]
+CPU*      down  5     down[power_poweredoff] cn[01, 03-05, 11]
+GPU       down  4     down[power_sleeping]   cn[06-09]
+GPU       down  5     down[power_poweredoff] cn[01, 03-05, 11]
+```
 节点正在被唤醒中
-![cinfo](../../images/cinfo/cinfo_power_wakeup.png)
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                 NODELIST
+GPU       down  3     idle[power_idle]      cn[03, 08-09]
+GPU       down  5     mix[power_active]     cn[01, 04-07]
+GPU       down  1     down[power_waking_up] cn11
+CPU*      down  3     idle[power_idle]      cn[03, 08-09]
+CPU*      down  5     mix[power_active]     cn[01, 04-07]
+CPU*      down  1     down[power_waking_up] cn11
+```
 
 **显示帮助：**
 ```bash

@@ -9,7 +9,7 @@ cinfo
 
 **cinfo Output Example**
 
-![cinfo](../../images/cinfo/cinfo_poweridle.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 ## Main Output Fields
 
@@ -34,7 +34,7 @@ cinfo
     - power_idle: Idle state. Counted as power_to_sleeping when scheduled to sleep; transitions to power_activate when there is a job.
     - power_activate: Active state, initial state. After a period of no jobs, some nodes will transition to power_idle.
     - power_sleeping: Sleeping state. Transitions to power_waking_up when scheduled to wake up; transitions to power_powering_off when scheduled to power off.
-    - power_poweroff: Powered off.
+    - power_poweredoff: Powered off.
     - power_to_sleeping: Transitioning to sleep. Enters power_sleeping after a period of time.
     - power_waking_up: Waking up state. Transitions to power_idle after a period of time.
     - power_powering_on: Powering on. Transitions to power_idle after a period of time.
@@ -94,9 +94,25 @@ cinfo
 cinfo
 ```
 The node has been scheduled to power off and is in sleep state, node resources are unavailable
-![cinfo](../../images/cinfo/cinfo_poweroff.png)
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                  NODELIST
+CPU*      down  4     down[power_sleeping]   cn[06-09]
+CPU*      down  5     down[power_poweredoff] cn[01, 03-05, 11]
+GPU       down  4     down[power_sleeping]   cn[06-09]
+GPU       down  5     down[power_poweredoff] cn[01, 03-05, 11]
+```
 The node is being woken up
-![cinfo](../../images/cinfo/cinfo_power_wakeup.png)
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                 NODELIST
+GPU       down  3     idle[power_idle]      cn[03, 08-09]
+GPU       down  5     mix[power_active]     cn[01, 04-07]
+GPU       down  1     down[power_waking_up] cn11
+CPU*      down  3     idle[power_idle]      cn[03, 08-09]
+CPU*      down  5     mix[power_active]     cn[01, 04-07]
+CPU*      down  1     down[power_waking_up] cn11
+```
 
 **Display help:**
 ```bash
