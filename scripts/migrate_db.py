@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, List, Optional
 
 import pymongo
 import yaml
@@ -50,7 +50,7 @@ class Migration:
 
 
 # Global migration registry, ordered by registration.
-_migrations: list[Migration] = []
+_migrations: List[Migration] = []
 
 
 def register_migration(name: str, description: str):
@@ -63,12 +63,12 @@ def register_migration(name: str, description: str):
     return decorator
 
 
-def get_migrations() -> list[Migration]:
+def get_migrations() -> List[Migration]:
     """Return all registered migrations."""
     return list(_migrations)
 
 
-def get_migration_by_name(name: str) -> Migration | None:
+def get_migration_by_name(name: str) -> Optional[Migration]:
     """Return a migration by name, or None if not found."""
     for m in _migrations:
         if m.name == name:
