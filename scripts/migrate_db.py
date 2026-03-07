@@ -125,6 +125,190 @@ def migrate_has_job_info(db: pymongo.database.Database, dry_run: bool = False):
     )
 
 
+@register_migration(
+    name="add_exclusive",
+    description="Add 'exclusive: false' to legacy task records (pre-v1.1.3).",
+)
+def migrate_exclusive(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'exclusive: false' to task records missing this field."""
+    collection = db[TASK_COLLECTION]
+    query = {"exclusive": {"$exists": False}}
+    count = collection.count_documents(query)
+    logger.info(f"[add_exclusive] Found {count} record(s) missing 'exclusive' field.")
+
+    if count == 0:
+        logger.info("[add_exclusive] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_exclusive] [Dry run] Would update {count} record(s).")
+        return
+
+    result = collection.update_many(query, {"$set": {"exclusive": False}})
+    logger.info(f"[add_exclusive] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_cpus_mem_alloc",
+    description="Add 'cpus_alloc'/'mem_alloc' fields (copy from req values).",
+)
+def migrate_cpus_mem_alloc(db: pymongo.database.Database, dry_run: bool = False):
+    """
+    Add 'cpus_alloc' and 'mem_alloc' to task records missing these fields.
+    Values are copied from cpus_req and mem_req respectively.
+    """
+    collection = db[TASK_COLLECTION]
+    query = {
+        "$or": [
+            {"cpus_alloc": {"$exists": False}},
+            {"mem_alloc": {"$exists": False}},
+        ]
+    }
+    count = collection.count_documents(query)
+    logger.info(f"[add_cpus_mem_alloc] Found {count} record(s) missing alloc fields.")
+
+    if count == 0:
+        logger.info("[add_cpus_mem_alloc] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_cpus_mem_alloc] [Dry run] Would update {count} record(s).")
+        return
+
+    # Use aggregation pipeline to copy cpus_req -> cpus_alloc, mem_req -> mem_alloc
+    pipeline = [
+        {
+            "$set": {
+                "cpus_alloc": {"$ifNull": ["$cpus_alloc", "$cpus_req"]},
+                "mem_alloc": {"$ifNull": ["$mem_alloc", "$mem_req"]},
+            }
+        }
+    ]
+    result = collection.update_many(query, pipeline)
+    logger.info(f"[add_cpus_mem_alloc] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_device_map",
+    description="Add 'device_map: {}' to legacy task records (pre-v1.1.3).",
+)
+def migrate_device_map(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'device_map: {}' to task records missing this field."""
+    collection = db[TASK_COLLECTION]
+    query = {"device_map": {"$exists": False}}
+    count = collection.count_documents(query)
+    logger.info(f"[add_device_map] Found {count} record(s) missing 'device_map'.")
+
+    if count == 0:
+        logger.info("[add_device_map] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_device_map] [Dry run] Would update {count} record(s).")
+        return
+
+    result = collection.update_many(query, {"$set": {"device_map": {}}})
+    logger.info(f"[add_device_map] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_wckey_fields",
+    description="Add 'wckey'/'using_default_wckey' fields to legacy records.",
+)
+def migrate_wckey_fields(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'wckey: ""' and 'using_default_wckey: false' to records missing them."""
+    collection = db[TASK_COLLECTION]
+    query = {
+        "$or": [
+            {"wckey": {"$exists": False}},
+            {"using_default_wckey": {"$exists": False}},
+        ]
+    }
+    count = collection.count_documents(query)
+    logger.info(f"[add_wckey_fields] Found {count} record(s) missing wckey fields.")
+
+    if count == 0:
+        logger.info("[add_wckey_fields] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_wckey_fields] [Dry run] Would update {count} record(s).")
+        return
+
+    pipeline = [
+        {
+            "$set": {
+                "wckey": {"$ifNull": ["$wckey", ""]},
+                "using_default_wckey": {"$ifNull": ["$using_default_wckey", False]},
+            }
+        }
+    ]
+    result = collection.update_many(query, pipeline)
+    logger.info(f"[add_wckey_fields] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_licenses_alloc",
+    description="Add 'licenses_alloc: {}' to legacy task records (pre-v1.1.3).",
+)
+def migrate_licenses_alloc(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'licenses_alloc: {}' to task records missing this field."""
+    collection = db[TASK_COLLECTION]
+    query = {"licenses_alloc": {"$exists": False}}
+    count = collection.count_documents(query)
+    logger.info(f"[add_licenses_alloc] Found {count} record(s) missing 'licenses_alloc'.")
+
+    if count == 0:
+        logger.info("[add_licenses_alloc] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_licenses_alloc] [Dry run] Would update {count} record(s).")
+        return
+
+    result = collection.update_many(query, {"$set": {"licenses_alloc": {}}})
+    logger.info(f"[add_licenses_alloc] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_nodename_list",
+    description="Add 'nodename_list: []' to legacy task records (pre-v1.1.3).",
+)
+def migrate_nodename_list(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'nodename_list: []' to task records missing this field."""
+    collection = db[TASK_COLLECTION]
+    query = {"nodename_list": {"$exists": False}}
+    count = collection.count_documents(query)
+    logger.info(f"[add_nodename_list] Found {count} record(s) missing 'nodename_list'.")
+
+    if count == 0:
+        logger.info("[add_nodename_list] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_nodename_list] [Dry run] Would update {count} record(s).")
+        return
+
+    result = collection.update_many(query, {"$set": {"nodename_list": []}})
+    logger.info(f"[add_nodename_list] Updated {result.modified_count} record(s).")
+
+
+@register_migration(
+    name="add_cluster",
+    description="Add 'cluster: \"\"' to legacy task records (pre-v1.1.3).",
+)
+def migrate_cluster(db: pymongo.database.Database, dry_run: bool = False):
+    """Add 'cluster: ""' to task records missing this field."""
+    collection = db[TASK_COLLECTION]
+    query = {"cluster": {"$exists": False}}
+    count = collection.count_documents(query)
+    logger.info(f"[add_cluster] Found {count} record(s) missing 'cluster' field.")
+
+    if count == 0:
+        logger.info("[add_cluster] No migration needed.")
+        return
+    if dry_run:
+        logger.info(f"[add_cluster] [Dry run] Would update {count} record(s).")
+        return
+
+    result = collection.update_many(query, {"$set": {"cluster": ""}})
+    logger.info(f"[add_cluster] Updated {result.modified_count} record(s).")
+
+
 # ======================== Config & Connection ========================
 
 
