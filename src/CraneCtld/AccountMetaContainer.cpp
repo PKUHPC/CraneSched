@@ -358,12 +358,9 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
             return;
           }
 
-          // When max wall = 0, it means unlimited.
-          if (qos.max_wall > absl::ZeroDuration()) {
-            if (val.wall_time + task.time_limit > qos.max_wall) {
-              result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
-              return;
-            }
+          if (val.wall_time + task.time_limit > qos.max_wall) {
+            result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+            return;
           }
 
           ResourceView resource_use{task.requested_node_res_view *

@@ -359,21 +359,15 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_wall = absl::Seconds(kTaskMaxTimeLimitSec);
     qos.max_tres.GetAllocatableRes().cpu_count = std::numeric_limits<
         decltype(qos.max_tres.GetAllocatableRes().cpu_count)>::max();
-    qos.max_tres.GetAllocatableRes().memory_bytes = std::numeric_limits<
-        decltype(qos.max_tres.GetAllocatableRes().memory_bytes)>::max();
+    qos.max_tres.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
     qos.max_tres_per_user.GetAllocatableRes().cpu_count = std::numeric_limits<
         decltype(qos.max_tres_per_user.GetAllocatableRes().cpu_count)>::max();
-    qos.max_tres_per_user.GetAllocatableRes().memory_bytes =
-        std::numeric_limits<decltype(qos.max_tres_per_user.GetAllocatableRes()
-                                         .memory_bytes)>::max();
+    qos.max_tres_per_user.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
     qos.max_tres_per_account.GetAllocatableRes().cpu_count =
         std::numeric_limits<decltype(qos.max_tres_per_account
                                          .GetAllocatableRes()
                                          .cpu_count)>::max();
-    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
-        std::numeric_limits<decltype(qos.max_tres_per_account
-                                         .GetAllocatableRes()
-                                         .memory_bytes)>::max();
+    qos.max_tres_per_account.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -3459,8 +3453,8 @@ void MongodbClient::DocumentAppendItem_<ResourceView>(
   doc.append(kvp(key, [&](sub_document valueDocument) {
     valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
       allocDoc.append(kvp("cpu_count", value.CpuCount()));
-      allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
-      allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
+      allocDoc.append(kvp("mem", static_cast<int64_t>(value.MemoryBytes())));
+      allocDoc.append(kvp("mem_sw", static_cast<int64_t>(value.MemoryBytes())));
     }));
     SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
   }));
@@ -4370,10 +4364,10 @@ void MongodbClient::QosResourceViewFromDb_(
 
   resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(
       ViewValueOr_(allocatable_res["cpu_count"], INT32_MAX / 256));
-  resource->GetAllocatableRes().memory_bytes = std::stoull(
-      ViewValueOr_(allocatable_res["mem"], std::to_string(UINT64_MAX)));
-  resource->GetAllocatableRes().memory_sw_bytes = std::stoull(
-      ViewValueOr_(allocatable_res["mem_sw"], std::to_string(UINT64_MAX)));
+  resource->GetAllocatableRes().memory_bytes =
+    ViewValueOr_(allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
+  resource->GetAllocatableRes().memory_sw_bytes =
+    ViewValueOr_(allocatable_res["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes));
 
   auto device_map_view =
       ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});
