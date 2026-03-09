@@ -40,6 +40,7 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   request.set_seq_num(dmo_modex_cb_data->seq_num);
   request.set_data(data, sz);
   request.set_status(PMIX_SUCCESS);
+  request.set_craned_id(dmo_modex_cb_data->craned_id);
 
   if (!g_pmix_server->GetPmixClient()) {
     CRANE_ERROR("Cannot send direct modex response to {}",
@@ -51,8 +52,7 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   auto stub =
       g_pmix_server->GetPmixClient()->GetPmixStub(dmo_modex_cb_data->craned_id);
   if (!stub) {
-    CRANE_ERROR("Cannot send direct modex response to {}",
-                dmo_modex_cb_data->craned_id);
+    CRANE_ERROR("Stub for craned_id {} not found, cannot send direct modex response.", dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
   }
@@ -121,7 +121,6 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   stub->PmixDModexRequestNoBlock(request, [cbfunc, cbdata](bool ok) {
     if (!ok) {
       CRANE_ERROR("PmixDModex rpc failed.");
-      // TODO: Is it needed?
       PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
                          nullptr);
     }
@@ -222,6 +221,7 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
     auto it = m_pmix_dmodex_req_list_.begin();
     while (it != m_pmix_dmodex_req_list_.end()) {
       if (now - it->ts > g_pmix_server->GetTimeout()) {
+        CRANE_ERROR("DModex request with seq_num={} timed out!", it->seq_num);
         PmixLibModexInvoke(it->cb_func, PMIX_ERR_TIMEOUT, nullptr, 0,
                            it->cb_data, nullptr, nullptr);
         it = m_pmix_dmodex_req_list_.erase(it);

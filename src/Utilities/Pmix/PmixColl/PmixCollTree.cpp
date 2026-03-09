@@ -71,7 +71,7 @@ bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
 
   m_state_ = CollTreeState::SYNC;
 
-  width = 2; // TODO: config the width of the tree
+  width = 5; // TODO: config the width of the tree
   ReverseTreeInfo(m_peerid_, m_peers_cnt_, width,
                           &m_parent_peerid_, &m_childrn_cnt_, &depth,
                           &max_depth);
@@ -280,8 +280,8 @@ bool PmixCollTree::ProgressCollect_() {
         [ seq = this->m_seq_, self](bool ok) {
           std::lock_guard lock(self->m_lock_);
           if (!ok) {
-            CRANE_ERROR("Cannot send data (size = {}), to {}",
-                        self->m_upfwd_buf_.size(), self->m_parent_host_);
+            CRANE_ERROR("Cannot send data (size = {}), to {}, seq = {}",
+                        self->m_upfwd_buf_.size(), self->m_parent_host_, seq);
             self->m_upfwd_buf_.clear();
             self->m_upfwd_status_ = CollTreeSndState::FAILED;
             return;
@@ -371,7 +371,7 @@ bool PmixCollTree::ProgressUpFwd_() {
 
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(host);
     if (!stub) {
-      CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_downfwd_buf_.size(), host);
+      CRANE_ERROR("stub is null, cannot send data (size = {}), to {}", this->m_downfwd_buf_.size(), host);
       this->m_downfwd_buf_.clear();
       this->m_downfwd_status_ = CollTreeSndState::FAILED;
       return false;
