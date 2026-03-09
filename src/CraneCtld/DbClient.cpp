@@ -180,7 +180,8 @@ template <typename T>
                           crane::grpc::QueryJobSizeSummaryRequest> ||
            std::is_same_v<std::remove_cvref_t<T>,
                           crane::grpc::QueryJobSummaryRequest>
-void SetJobSummaryQueryCommonFilter(const T* request,bsoncxx::builder::basic::document& match_doc) {
+void SetJobSummaryQueryCommonFilter(
+    const T* request, bsoncxx::builder::basic::document& match_doc) {
   constexpr bool is_size_request =
       std::is_same_v<std::remove_cvref_t<T>,
                      crane::grpc::QueryJobSizeSummaryRequest>;
@@ -1843,8 +1844,8 @@ bool MongodbClient::QueryJobSizeSummary(
 
   int64_t query_start_sec = query_start_time.time_since_epoch().count();
   int64_t query_end_sec = query_end_time.time_since_epoch().count();
-    bsoncxx::builder::basic::document filter;
-  SetJobSummaryQueryCommonFilter(request,filter);
+  bsoncxx::builder::basic::document filter;
+  SetJobSummaryQueryCommonFilter(request, filter);
   auto& grouping_list = request->filter_grouping_list();
 
   // Match jobs that overlap with the query time range
@@ -1852,7 +1853,6 @@ bool MongodbClient::QueryJobSizeSummary(
   // query_start
   filter.append(kvp("time_end", make_document(kvp("$gt", query_start_sec))),
                 kvp("time_start", make_document(kvp("$lt", query_end_sec))));
-
 
   auto timer_start = steady_clock::now();
 
