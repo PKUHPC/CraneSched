@@ -60,7 +60,49 @@ calloc 必须在运行 `cfored` 的节点上启动。当任务启动时，会进
 ```bash
 calloc -h
 ```
-![calloc](../../images/calloc/calloc_h.png)
+
+```text
+[cranetest@crane01 ~]$ calloc -h
+Allocate resource and create terminal
+
+Usage:
+  calloc [flags]
+
+Flags:
+  -A, --account string           Account used for the job
+  -D, --chdir string             Working directory of the job
+      --comment string           Comment of the job
+  -C, --config string            Path to configuration file (default "/etc/crane/config.yaml")
+  -c, --cpus-per-task float      Number of cpus required per task (default 1)
+      --debug-level string       Available debug level: trace, debug, info (default "info")
+  -d, --dependency string        Conditions for job to execute
+  -x, --exclude string           Exclude specific nodes from allocating (commas separated list)
+      --exclusive                Exclusive node resources
+      --export string            Propagate environment variables
+      --extra-attr string        Extra attributes of the job (in JSON format)
+      --get-user-env             Load login environment variables of the user
+      --gpus-per-node string     Gpus required per node, format: [type:]<number>[,[type:]<number>...]. eg: "4" or "a100:1,volta:1"
+      --gres string              Gres required per task,format: "gpu:a100:1" or "gpu:1"
+  -h, --help                     help for calloc
+  -H, --hold                     Hold the job until it is released
+  -J, --job-name string          Name of job
+  -L, --licenses string          Licenses used for the job
+      --mail-type string         Notify user by mail when certain events occur, supported values: NONE, BEGIN, END, FAIL, TIMELIMIT, ALL (default is NONE)
+      --mail-user string         Mail address of the notification receiver
+      --mem string               Maximum amount of real memory, support GB(G, g), MB(M, m), KB(K, k) and Bytes(B), default unit is MB
+      --mem-per-cpu string       Maximum amount of real memory per CPU, support GB(G, g), MB(M, m), KB(K, k) and Bytes(B), default unit is MB
+  -w, --nodelist string          Nodes to be allocated to the job (commas separated list)
+  -N, --nodes uint32             Number of nodes on which to run (default 1)
+      --ntasks-per-node uint32   Number of tasks to invoke on each node (default 1)
+  -p, --partition string         Partition requested
+  -q, --qos string               QoS used for the job
+  -Q, --quiet                    Quiet mode (suppress informational messages)
+  -r, --reservation string       Use reserved resources
+  -s, --signal string            Send signal when time limit within time seconds, format: [{R}:]<sig_num>[@sig_time]
+  -t, --time string              Time limit, format: "day-hours:minutes:seconds" 5-0:0:1 for 5 days, 1 second or "hours:minutes:seconds" 10:1:2 for 10 hours, 1 minute, 2 seconds
+  -v, --version                  version for calloc
+      --wckey string             Wckey of the job
+```
 
 ### 基本资源分配
 
@@ -71,9 +113,16 @@ calloc -c 1 --mem 200M -p CPU -N 2
 
 **运行结果：**
 
-![calloc](../../images/calloc/calloc_c1.png)
-![calloc](../../images/calloc/calloc_c2.png)
-
+```text
+[cranetest@crane01 ~]$ calloc -c 1 --mem 200M -p CPU -N 2
+Task id allocated: 30688
+Allocated craned nodes: crane[01-02].
+```
+```text
+[cranetest@crane01 ~]$ exit
+exit
+Task completed.
+```
 ### 指定账户和节点列表
 
 在 GPU 分区分配 1 个节点，每个节点 2 个任务，使用特定账户和节点列表：
@@ -82,46 +131,78 @@ calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
 ```
 
 **运行结果：**
+```text
+[cranetest@crane01 ~]$ calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
+Task id allocated: 30736
+Allocated craned nodes: crane03.
+```
 
-![calloc](../../images/calloc/calloc_A1.png)
-![calloc](../../images/calloc/calloc_A2.png)
-
+```text
+[cranetest@crane01 ~]$ exit
+exit
+Task completed.
+```
 ### 时间限制和 QoS
 
 使用时间限制和特定 QoS 分配资源：
 ```bash
 calloc --mem 200M -p CPU -q test-qos -t 00:25:25
 ```
-
-![calloc](../../images/calloc/calloc_mem1.png)
-![calloc](../../images/calloc/calloc_mem2.png)
-
+```text
+[cranetest@crane01 ~]$ calloc --mem 200M -p CPU -q test-qos -t 00:25:25
+Task id allocated: 30737
+Allocated craned nodes: crane02.
+```
+```text
+[cranetest@crane01 ~]$ exit
+exit
+Task completed.
+```
 ### 工作目录
 
 指定工作目录：
 ```bash
 calloc -D /path
 ```
-
-![calloc](../../images/calloc/calloc_D.png)
-
+```text
+[root@cranetest01 zhouhao]# calloc -D /nfs/home/zhouhao/test --debug-level trace --export ALL
+Task id allocated: 208
+Allocated craned nodes: cranetest02.
+Oct 12 15:56:04.488 [TRAC] Pgrp: 6419
+Oct 12 15:56:04.488 [TRAC] IsForeground: true
+Oct 12 15:56:04.488 [TRAC] Proc.Pid: 6426
+Oct 12 15:56:04.489 [TRAC] Proc.Pgid: 6426
+[root@cranetest01 zhouhao]# exit
+exit
+```
 ### 调试级别
 
 设置调试级别为 trace：
 ```bash
 calloc --debug-level trace
 ```
-
-![calloc](../../images/calloc/calloc_debug.png)
-
+```text
+[root@cranetest01 zhouhao]# calloc -D /nfs/home/zhouhao/test --debug-level trace --export ALL
+Task id allocated: 208
+Allocated craned nodes: cranetest02.
+Oct 12 15:56:04.488 [TRAC] Pgrp: 6419
+Oct 12 15:56:04.488 [TRAC] IsForeground: true
+Oct 12 15:56:04.488 [TRAC] Proc.Pid: 6426
+Oct 12 15:56:04.489 [TRAC] Proc.Pgid: 6426
+[root@cranetest01 zhouhao]# exit
+exit
+```
 ### 排除节点
 
 从分配中排除特定节点：
 ```bash
 calloc -x cranetest02
 ```
-
-![calloc](../../images/calloc/calloc_x.png)
+```text
+[zhouhao@cranetest02 zhouhao]# calloc -A ROOT -x cranetest02 -J test_calloc -N 2 --ntasks-per-node 2 -t 00:25:00 --get-user-env
+Task id allocated: 184
+Allocated craned nodes: cranetest[03-04].
+```
 
 ### 用户环境
 
@@ -129,8 +210,11 @@ calloc -x cranetest02
 ```bash
 calloc --get-user-env
 ```
-
-![calloc](../../images/calloc/calloc_get_user.png)
+```text
+[zhouhao@cranetest02 zhouhao]# calloc -A ROOT -x cranetest02 -J test_calloc -N 2 --ntasks-per-node 2 -t 00:25:00 --get-user-env
+Task id allocated: 184
+Allocated craned nodes: cranetest[03-04].
+```
 
 ### 作业名称
 
@@ -139,7 +223,11 @@ calloc --get-user-env
 calloc -J job_name
 ```
 
-![calloc](../../images/calloc/calloc_j.png)
+```text
+[root@cranetest01 zhouhao]# calloc -A ROOT -x cranetest02 -J test_calloc -N 2 --ntasks-per-node 2 -t 00:25:00 --get-user-env
+Task id allocated: 184
+Allocated craned nodes: cranetest[03-04].
+```
 
 ## 高级功能
 

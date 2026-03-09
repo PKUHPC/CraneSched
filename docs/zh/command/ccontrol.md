@@ -56,8 +56,16 @@ ccontrol show node <节点名>
 ccontrol show node
 ccontrol show node crane01
 ```
-
-![ccontrol](../../images/ccontrol/ccontrol_shownode2.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol show node
+NodeName=CraneProject State=idle[power_idle] CPU=2.00 AllocCPU=0.00 FreeCPU=2.00
+    RealMemory=2048M AllocMem=0 FreeMem=2048M
+    Gres=None AllocGres=None FreeGres=None
+    Patition=CPU RunningJob=0 Version=unknown
+    Os=Linux 5.14.0-570.23.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Jun 26 19:29:53 UTC 2025
+    BootTime=2025-07-04 16:09:10 CranedStartTime=2025-07-04 16:57:15
+    LastBusyTime=unknown
+```
 
 #### 显示分区
 
@@ -76,8 +84,17 @@ ccontrol show partition <分区名>
 ccontrol show partition
 ccontrol show partition CPU
 ```
-
-![ccontrol](../../images/ccontrol/ccontrol_showp2.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol show partition
+PartitionName=CPU State=UP
+    AllowedAccounts=ALL DeniedAccounts=None
+    TotalNodes=1 AliveNodes=1
+    TotalCPU=2.00 AvailCPU=2.00 AllocCPU=0.00
+    TotalMem=2048M AvailMem=2048M AllocMem=0
+    TotalGres=None AvailGres=None AllocGres=None
+    DefaultMemPerCPU=1024M MaxMemPerCPU=0
+    HostList=CraneProject
+```
 
 #### 显示作业
 
@@ -97,7 +114,10 @@ ccontrol show job
 ccontrol show job 12345
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_showjob2.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol show job
+No job is running.
+```
 
 #### 显示步骤
 
@@ -174,7 +194,10 @@ ccontrol show reservation
 ccontrol show reservation my_reservation
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_showreservation.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol show reservation
+No reservation is available.
+```
 
 
 #### 显示许可证
@@ -228,7 +251,12 @@ ccontrol update nodename=crane01 state=drain reason="维护"
 ccontrol update nodename=crane01 state=resume
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_updatens.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol update nodename=test_node state=drain reason="test"
+Failed to modify node: test_node. Reason: Invalid node name specified..
+ERRO[0000] change node state failed:                     
+ERRO[0000] command execution failed
+```
 
 #### 更新作业
 
@@ -262,7 +290,14 @@ ccontrol update jobid=11 priority=1 timelimit=01:00:00 comment="高优先级作�
 ccontrol update jobid=11 mailuser=user@example.com mailtype=END
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_updatejp.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol update jobid=11 priority=1 timelimit=01:00:00
+Failed to modify job: 11. Reason: Task #11 was not found in pending queue..
+ERRO[0000] change task priority failed:
+Failed to modify job: 11. Reason: Task #11 was not found in running or pending queue..
+ERRO[0000] change task time limit failed:
+ERRO[0000] command execution failed
+```
 
 #### 更新分区
 
@@ -289,7 +324,11 @@ ccontrol update partition=GPU accounts=research,staff
 ccontrol update partition=CPU deniedaccounts=guest
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_updatepa.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol update partition=test accounts=test_user
+ERRO[0000] Modify partition test failed: The entered account does not exist.
+ERRO[0000] command execution failed
+```
 
 ### Hold 和 Release 命令
 
@@ -314,8 +353,12 @@ ccontrol hold 1
 # 暂挂作业1小时
 ccontrol hold 1 timelimit=01:00:00
 ```
-
-![ccontrol](../../images/ccontrol/ccontrol_hold1t.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol hold 1 timelimit=01:00:00
+Failed to modify job: 1. Reason: Task #1 was not found in pending queue..
+ERRO[0000] hold jobs failed:
+ERRO[0000] command execution failed
+```
 
 #### 释放作业
 
@@ -330,7 +373,12 @@ ccontrol release <作业ID>
 ccontrol release 1
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_release_1.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# ccontrol release 1
+Failed to modify job: 1. Reason: Task #1 was not found in pending queue..
+ERRO[0000] release jobs failed:
+ERRO[0000] command execution failed
+```
 
 ### Create 和 Delete 命令
 
@@ -362,7 +410,11 @@ ccontrol create reservation my_reservation startTime=2024-12-01T10:00:00 duratio
 ccontrol create reservation test_reservation startTime=2024-12-01T14:00:00 duration=02:00:00 partition=GPU nodeCnt=2 account=staff user=alice
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_create.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# control create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
+ERRO[0000] missing required fields: starttime          
+ERRO[0000] command execution failed
+```
 
 #### 删除预留
 
@@ -377,7 +429,12 @@ ccontrol delete reservation <名称>
 ccontrol delete reservation my_reservation
 ```
 
-![ccontrol](../../images/ccontrol/ccontrol_delete.png)
+```text
+[root@CraneProject CraneSched-FrontEnd]# control delete reservation test_reservation
+ERRO[0000] Failed to delete reservation: Reservation test_reservation not found.
+ERRO[0000]
+ERRO[0000] command execution failed
+```
 
 ## JSON 输出
 

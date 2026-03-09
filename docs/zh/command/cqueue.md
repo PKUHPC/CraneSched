@@ -200,7 +200,15 @@ cqueue
 cqueue
 ```
 
-![cqueue](../../images/cqueue/cqueue.png)
+```text
+[cranetest@crane01 ~]$ cqueue
+JOBID  PARTITION  NAME      USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT  NODES  NODELIST/REASON
+30685  CPU        Test_Job  cranetest  CraneTest  Pending  Batch  -         00:30:01   2      Priority
+30686  CPU        Test_Job  cranetest  CraneTest  Pending  Batch  -         00:30:01   2      Priority
+30687  CPU        Test_Job  cranetest  CraneTest  Pending  Batch  -         00:30:01   2      Priority
+30683  CPU        Test_Job  cranetest  CraneTest  Running  Batch  00:01:33   00:30:01   2      crane[02-03]
+30684  CPU        Test_Job  cranetest  CraneTest  Running  Batch  00:01:31   00:30:01   2      crane[02-03]
+```
 
 **显示帮助：**
 
@@ -208,7 +216,88 @@ cqueue
 cqueue -h
 ```
 
-![cqueue](../../images/cqueue/cqueue_h.png)
+```text
+[cranetest@crane01 ~]$ cqueue -h
+Display the job information and queue status
+
+Usage:
+  cqueue [flags]
+
+Flags:
+  -A, --account string        Specify accounts to view (comma separated list), 
+                              default is all accounts
+  -C, --config string         Path to configuration file (default "/etc/crane/config.yaml")
+  -o, --format string         Specify the output format.
+                                Fields are identified by a percent sign (%) followed by a character or string.
+                                Format specification: %[[.]size]type
+                                  - Without size: field uses natural width
+                                  - With size only (%5j): field uses minimum width, left-aligned (padding on right)
+                                  - With dot and size (%.5j): field uses minimum width, right-aligned (padding on left)
+                              
+                              Supported format identifiers or string, string case insensitive:
+                                %a/%Account            - Display the account associated with the job/step.
+                                %C/%ReqCpus            - Display the cpus requested to the job. (For jobs only)
+                                %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
+                                %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
+                                %h/%Held               - Display the hold state of the job. (For jobs only)
+                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
+                                %j/%JobID              - Display the ID of the job (or parent job ID for steps).
+                                %k/%Comment            - Display the comment of the job. (For jobs only)
+                                %K/%Wckey              - Display the wckey of the job.
+                                %L/%NodeList           - Display the list of nodes the job/step is running on.
+                                %l/%TimeLimit          - Display the time limit for the job/step.
+                                %M/%ReqMemPerNode      - Display the requested mem per node of the job. (For jobs only)
+                                %m/%AllocMemPerNode    - Display the requested mem per node of the job. (For jobs only)
+                                %N/%NodeNum            - Display the number of nodes requested by the job/step.
+                                %n/%Name               - Display the name of the job/step.
+                                %o/%Command            - Display the command line of the job/step.
+                                %P/%Partition          - Display the partition the job/step is running in.
+                                %p/%Priority           - Display the priority of the job. (For jobs only)
+                                %Q/%ReqCpuPerNode      - Display the requested cpu per node of the job. (For jobs only)
+                                %q/%QoS                - Display the Quality of Service level for the job/step.
+                                %R/%Reason             - Display the reason of pending. (For jobs only)
+                                %r/%ReqNodes           - Display the reqnodes of the job. (For jobs only)
+                                %S/%StartTime          - Display the start time of the job. (For jobs only)
+                                %s/%SubmitTime         - Display the submission time of the job. (For jobs only)
+                                %t/%State              - Display the current state of the job/step.
+                                %T/%JobType            - Display the job type. (For jobs only)
+                                %U/%Uid                - Display the uid of the job/step.
+                                %u/%User               - Display the user who submitted the job/step.
+                                %X/%Exclusive          - Display the exclusive status of the job. (For jobs only)
+                                %x/%ExcludeNodes       - Display the exclude nodes of the job. (For jobs only)
+                              
+                              Examples:
+                                --format "%j %n %t"              # Natural width for all fields
+                                --format "%5j %20n %t"           # Left-aligned: JobID (min 5), Name (min 20), State
+                                --format "%.5j %.20n %t"         # Right-aligned: JobID (min 5), Name (min 20), State
+                                --format "ID:%8j | Name:%.15n"   # Mixed: left-aligned JobID, right-aligned Name with prefix
+                              
+                              Note: If the format is invalid or unrecognized, the program will terminate with an error message.
+                              
+  -F, --full                  Display full information (If not set, only display 30 characters per cell)
+  -h, --help                  help for cqueue
+  -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
+  -j, --job string            Specify job ids to view (comma separated list), default is all
+      --json                  Output in JSON format
+  -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
+  -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 1000)
+  -n, --name string           Specify job names to view (comma separated list), default is all
+  -w, --nodelist string       Specify node names to view (comma separated list or patterns like node[1-10]), default is all
+  -N, --noheader              Do not print header line in the output
+  -p, --partition string      Specify partitions to view (comma separated list), 
+                              default is all partitions
+  -q, --qos string            Specify QoS of jobs to view (comma separated list), 
+                              default is all QoS
+      --self                  Display only the jobs submitted by current user
+  -S, --start                 Display expected start time of pending jobs
+  -t, --state string          Specify job states to view. Valid value are 'pending(p)', 'running(r)' and 'all'.
+                              By default, 'all' is specified and all pending and running jobs will be reported (default "all")
+  -s, --step string[="ALL"]   Specify step ids to view (comma separated list), default is all
+      --type string           Specify task types to view (comma separated list), 
+                              valid values are 'Interactive', 'Batch', 'Container', default is all types
+  -u, --user string           Specify users to view (comma separated list), default is all users
+  -v, --version               version for cqueue
+  ```
 
 **隐藏表头：**
 
@@ -216,7 +305,14 @@ cqueue -h
 cqueue -N
 ```
 
-![cqueue](../../images/cqueue/cqueue_N.png)
+```text
+[cranetest@crane01 ~]$ cqueue -N
+30685 CPU Test_Job cranetest CraneTest Pending Batch -         00:30:01 2 Priority
+30686 CPU Test_Job cranetest CraneTest Pending Batch -         00:30:01 2 Priority
+30687 CPU Test_Job cranetest CraneTest Pending Batch -         00:30:01 2 Priority
+30683 CPU Test_Job cranetest CraneTest Running Batch 00:03:33 00:30:01 2 crane[02-03]
+30684 CPU Test_Job cranetest CraneTest Running Batch 00:03:31 00:30:01 2 crane[02-03]
+```
 
 **显示开始时间：**
 
@@ -224,7 +320,15 @@ cqueue -N
 cqueue -S
 ```
 
-![cqueue](../../images/cqueue/cqueue_S.png)
+```text
+[cranetest@crane01 ~]$ cqueue -S
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:03:38   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:03:36   00:30:01   2     crane[02-03]
+```
 
 ### 过滤作业
 
@@ -234,7 +338,12 @@ cqueue -S
 cqueue -j 30674,30675
 ```
 
-![cqueue](../../images/cqueue/cqueue_j.png)
+```text
+[cranetest@crane01 ~]$ cqueue -j 30686,30687
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS  TYPE  TIME TIMELIMIT NODES NODELIST/REASON
+30686 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+```
 
 **按状态过滤（pending作业）：**
 
@@ -242,7 +351,13 @@ cqueue -j 30674,30675
 cqueue -t Pending
 ```
 
-![cqueue](../../images/cqueue/cqueue_t.png)
+```text
+[cranetest@crane01 ~]$ cqueue -t Pending
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS  TYPE  TIME TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+```
 
 **按状态过滤（running作业，简写）：**
 
@@ -250,15 +365,26 @@ cqueue -t Pending
 cqueue -t r
 ```
 
-![cqueue](../../images/cqueue/cqueue_tr.png)
+```text
+[zhouhao@cranetest01 ~]$ cqueue -t r
+JOBID PARTITION NAME        USER     ACCOUNT         STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+246   CPU       Test_Job_003 zhouhao  subAccountTest  Running  Batch  00:01:49   00:03:01   1     cranetest03
+```
 
 **查询特定用户的作业：**
 
 ```bash
 cqueue -u cranetest
 ```
-
-![cqueue](../../images/cqueue/cqueue_u.png)
+```text
+[cranetest@crane01 ~]$ cqueue -u cranetest
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:11   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:09   00:30:01   2     crane[02-03]
+```
 
 **仅显示当前用户的作业：**
 
@@ -266,7 +392,11 @@ cqueue -u cranetest
 cqueue --self
 ```
 
-![cqueue](../../images/cqueue/cqueue_self.png)
+```text
+[zhouhao@cranetest01 ~]$ cqueue --self
+JOBID PARTITION NAME        USER     ACCOUNT         STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+246   CPU       Test_Job_003 zhouhao  subAccountTest  Running  Batch  00:01:12   00:03:01   1     cranetest03
+```
 
 **查询特定账户的作业：**
 
@@ -274,7 +404,15 @@ cqueue --self
 cqueue -A CraneTest
 ```
 
-![cqueue](../../images/cqueue/cqueue_A.png)
+```text
+[cranetest@crane01 ~]$ cqueue -A CraneTest
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:32   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:30   00:30:01   2     crane[02-03]
+```
 
 **按分区过滤：**
 
@@ -282,7 +420,15 @@ cqueue -A CraneTest
 cqueue -p CPU
 ```
 
-![cqueue](../../images/cqueue/cqueue_p.png)
+```text
+[cranetest@crane01 ~]$ cqueue -p CPU
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:50   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:48   00:30:01   2     crane[02-03]
+```
 
 **按作业名过滤：**
 
@@ -290,7 +436,11 @@ cqueue -p CPU
 cqueue -n test
 ```
 
-![cqueue](../../images/cqueue/cqueue_n1.png)
+```text
+[root@cranetest-rocky01 zhouhao]# cqueue -n test
+JOBID   PARTITION   NAME   USER   ACCOUNT   STATUS   TYPE   TIME   TIMELIMIT   NODES   NODELIST/REASON
+1276686 CPU         test   root   ROOT      Pending  Batch  -      00:03:01    1       Priority
+```
 
 **按QoS过滤：**
 
@@ -298,7 +448,11 @@ cqueue -n test
 cqueue -q test_qos
 ```
 
-![cqueue](../../images/cqueue/cqueue_q.png)
+```text
+[zhouhao@cranetest01 ~]$ cqueue -q test_qos
+JOBID PARTITION NAME        USER     ACCOUNT         STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON QOS
+246   CPU       Test_Job_003 zhouhao  subAccountTest  Running  Batch  00:02:40   00:03:01   1     cranetest03     test_qos
+```
 
 ### 输出控制
 
@@ -308,7 +462,13 @@ cqueue -q test_qos
 cqueue -m 3
 ```
 
-![cqueue](../../images/cqueue/cqueue_m.png)
+```text
+[cranetest@crane01 ~]$ cqueue -m 3
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS  TYPE  TIME TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending Batch -    00:30:01   2     Priority
+```
 
 **每3秒自动刷新：**
 
@@ -316,7 +476,32 @@ cqueue -m 3
 cqueue -i 3
 ```
 
-![cqueue](../../images/cqueue/cqueue_i.png)
+```text
+[cranetest@crane01 ~]$ cqueue -i 3
+2024-07-24 11:39:02
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:36   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:34   00:30:01   2     crane[02-03]
+
+2024-07-24 11:39:05
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:39   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:37   00:30:01   2     crane[02-03]
+
+2024-07-24 11:39:08
+JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIMIT NODES NODELIST/REASON
+30685 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30686 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30687 CPU       Test_Job cranetest CraneTest  Pending  Batch  -         00:30:01   2     Priority
+30683 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:42   00:30:01   2     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest  Running  Batch  00:04:40   00:30:01   2     crane[02-03]
+```
 
 **JSON输出：**
 
@@ -355,8 +540,15 @@ cqueue --format "ID:%8j | Name:%.15n | State:%t"
 ```bash
 cqueue -o="%n %u %.5j %.5t %.3T %.5T"
 ```
-
-![cqueue](../../images/cqueue/cqueue_o.png)
+```text
+[cranetest@crane01 ~]$ cqueue -o="%n %u %.5j %.5t %.3T %.5T"
+NAME     USER       JOBID  STATU TYP TYPE
+Test_Job cranetest  30685  Pendi Bat Batch
+Test_Job cranetest  30686  Pendi Bat Batch
+Test_Job cranetest  30687  Pendi Bat Batch
+Test_Job cranetest  30683  Runni Bat Batch
+Test_Job cranetest  30684  Runni Bat Batch
+```
 
 ### 作业步查询
 

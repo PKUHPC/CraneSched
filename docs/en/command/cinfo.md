@@ -9,7 +9,12 @@ cinfo
 
 **cinfo Output Example**
 
-![cinfo](../../images/cinfo/cinfo_running.png)
+```text
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 ## Main Output Fields
 
@@ -69,61 +74,157 @@ cinfo --format "%.5partition %.6a %s"
 ```bash
 cinfo
 ```
-![cinfo](../../images/cinfo/cinfo_running.png)
+```text
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Display help:**
 ```bash
 cinfo -h
 ```
-![cinfo](../../images/cinfo/cinfo_h.png)
+```text
+[cranetest@crane01 ~]$ cinfo -h
+Display the state of partitions and nodes
+
+Usage:
+  cinfo [flags]
+
+Flags:
+  -C, --config string       Path to configuration file (default "/etc/crane/config.yaml")
+  -d, --dead                Display non-responding nodes only
+  -o, --format string       Specify the output format.
+                                Fields are identified by a percent sign (%) followed by a character or string. 
+                                Use a dot (.) and a number between % and the format character or string to specify a minimum width for the field.
+                            
+                            Supported format identifiers or string, string case insensitive:
+                                %p/%Partition     - Display all partitions in the current environment.
+                                %a/%Avail         - Displays the state of the node.
+                                %n/%Nodes         - Display the number of partition nodes. 
+                                %s/%State         - Display the status of partition nodes
+                                %l/%NodeList      - Display all node list in the partition.
+                            
+                            Each format specifier or string can be modified with a width specifier (e.g., "%.5j").
+                            If the width is specified, the field will be formatted to at least that width. 
+                            If the format is invalid or unrecognized, the program will terminate with an error message.
+                            
+                            Example: --format "%.5partition %.6a %s" would output the partition's name in the current environment 
+                                     with a minimum width of 5, state of the node with a minimum width of 6, and the State.
+                            
+  -h, --help                help for cinfo
+  -i, --iterate uint        Display at specified intervals (seconds)
+      --json                Output in JSON format
+  -n, --nodes strings       Display the specified nodes only
+  -N, --noheader            Do not print header line in the output
+  -p, --partition strings   Display nodes in the specified partition only
+  -r, --responding          Display responding nodes only
+  -t, --states strings      Display nodes with the specified states only. 
+                            The state can take IDLE, MIX, ALLOC, DOWN (case-insensitive). 
+                            Example: 
+                                 -t idle,mix 
+                                 -t=alloc 
+                            
+  -v, --version             version for cinfo
+```
+
 
 **Hide table header:**
 ```bash
 cinfo -N
 ```
-![cinfo](../../images/cinfo/cinfo_n.png)
+```text
+[cranetest@crane01 ~]$ cinfo -N
+CPU* up infinite 3 idle crane[01-03]
+GPU  up infinite 1 idle crane03
+```
 
 **Show only non-responding nodes:**
 ```bash
 cinfo -d
 ```
-![cinfo](../../images/cinfo/cinfo_d.png)
+```text
+[cranetest@crane01 ~]$ cinfo -d
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+CPU*      up    infinite   1     down  crane02
+```
 
 **Auto-refresh every 3 seconds:**
 ```bash
 cinfo -i 3
 ```
-![cinfo](../../images/cinfo/cinfo_i3.png)
+```text
+[cranetest@crane01 ~]$ cinfo -i 3
+2024-07-24 11:14:46
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+
+2024-07-24 11:14:49
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+
+2024-07-24 11:14:52
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Display specific nodes:**
 ```bash
 cinfo -n crane01,crane02,crane03
 ```
-![cinfo](../../images/cinfo/cinfo_n123.png)
+```text
+[cranetest@crane01 ~]$ cinfo -n crane01,crane02,crane03
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Display specific partitions:**
 ```bash
 cinfo -p GPU,CPU
 ```
-![cinfo](../../images/cinfo/cinfo_p.png)
+```text
+[cranetest@crane01 ~]$ cinfo -p GPU,CPU
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Show only responding nodes:**
 ```bash
 cinfo -r
 ```
-![cinfo](../../images/cinfo/cinfo_r.png)
+```text
+[cranetest@crane01 ~]$ cinfo -r
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Filter by node state:**
 ```bash
 cinfo -t IDLE
 ```
-![cinfo](../../images/cinfo/cinfo_t.png)
+```text
+[cranetest@crane01 ~]$ cinfo -t IDLE
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **Display version:**
 ```bash
 cinfo -v
 ```
-![cinfo](../../images/cinfo/cinfo_v.png)
+```text
+[root@cranetest01 TestFramecode]# cinfo -v
+Version: 0.8.0-rc.3+dev
+Build Time: Wed, 09 Oct 2024 17:11:48 +0800
+```
 
 **JSON output:**
 ```bash
