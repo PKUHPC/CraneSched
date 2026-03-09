@@ -367,7 +367,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         std::numeric_limits<decltype(qos.max_tres_per_account
                                          .GetAllocatableRes()
                                          .cpu_count)>::max();
-    qos.max_tres_per_account.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
+        kMaxJobMemoryBytes;
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -4364,10 +4365,10 @@ void MongodbClient::QosResourceViewFromDb_(
 
   resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(
       ViewValueOr_(allocatable_res["cpu_count"], INT32_MAX / 256));
-  resource->GetAllocatableRes().memory_bytes =
-    ViewValueOr_(allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
-  resource->GetAllocatableRes().memory_sw_bytes =
-    ViewValueOr_(allocatable_res["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes));
+  resource->GetAllocatableRes().memory_bytes = ViewValueOr_(
+      allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
+  resource->GetAllocatableRes().memory_sw_bytes = ViewValueOr_(
+      allocatable_res["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes));
 
   auto device_map_view =
       ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});

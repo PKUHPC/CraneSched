@@ -131,7 +131,7 @@ enum PrologFlagEnum : std::uint8_t {
 
 constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
 
-constexpr uint64_t kMaxJobMemoryBytes = 10737418240000; // 10000GB
+constexpr uint64_t kMaxJobMemoryBytes = 10737418240000;  // 10000GB
 
 namespace ExitCode {
 
