@@ -4331,7 +4331,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
              true /* Mark the document having complete job info */,
-             // 40-45
+             // 40-44
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
@@ -4404,7 +4404,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info",
       // 40 - 44
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
-      // 45-47
+      // 45 - 47
       "req_nodes","exclude_nodes","execution_nodes"
   };
   // clang-format on
