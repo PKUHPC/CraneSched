@@ -853,6 +853,7 @@ struct TaskInCtld {
   uint32_t primary_exit_code{};
   uint32_t exit_code{};
   bool held{false};
+  bool cancel_requested{false};
   DependenciesInJob dependencies;
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
@@ -985,6 +986,9 @@ struct TaskInCtld {
 
   void SetHeld(bool val);
   bool const& Held() const { return held; }
+
+  void SetCancelRequested(bool val) { cancel_requested = val; }
+  bool CancelRequested() const { return cancel_requested; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

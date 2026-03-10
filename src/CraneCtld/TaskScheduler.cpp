@@ -2123,6 +2123,23 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           job_steps.add_steps(step->StepId());
         }
       } else {
+        if (task->Status() == crane::grpc::TaskStatus::Configuring) {
+          // Daemon step is still being configured on Craned nodes.
+          // Record the cancel intent; DaemonStepInCtld::StepStatusChange will
+          // act on it once all nodes have reported their configuring status,
+          // and the existing Configuring-failed path will handle frontend
+          // notification for interactive jobs at that point.
+          task->SetCancelRequested(true);
+
+          auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+          cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
+
+          CRANE_INFO(
+              "[Job #{}] Cancel requested during Configuring state. "
+              "Deferring until all nodes finish configuring.",
+              task_id);
+          return;
+        }
         // User cancel jobs with node/name... filter
         auto daemon_step = task->DaemonStep();
         if (!daemon_step) {
