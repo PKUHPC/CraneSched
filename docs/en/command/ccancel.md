@@ -282,3 +282,4 @@ Common errors:
 - [cqueue](cqueue.md) - View job queue
 - [cacct](cacct.md) - View job accounting information
 - [ccontrol](ccontrol.md) - Control jobs and system resources
+- [creport](creport.md) - Query job-related statistics

@@ -1705,8 +1705,8 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   case crane::grpc::Account:
     if (request->entity_list().empty()) {
       const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-      for (const auto& account_name : *account_map_ptr | std::views::keys) {
-        if (account_name == "ROOT") continue;
+      for (const auto& [account_name, account] : *account_map_ptr) {
+        if (account_name == "ROOT" || account->deleted) continue;
         entity_list.insert(account_name);
       }
     }
@@ -1770,7 +1770,8 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
 
   if (request->user_list().empty()) {
     const auto user_map_ptr = g_account_manager->GetAllUserInfo();
-    for (const auto& username : *user_map_ptr | std::views::keys) {
+    for (const auto& [username, user] : *user_map_ptr) {
+      if (user->deleted) continue;
       user_list.insert(username);
     }
   }
@@ -2313,6 +2314,35 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   }
 
   return std::nullopt;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryJobSummary(
+    ::grpc::ServerContext* context,
+    const ::crane::grpc::QueryJobSummaryRequest* request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  if (!g_db_client->JobSummaryEnabled()) {
+    return {grpc::StatusCode::UNIMPLEMENTED,
+            "Job summary requires MongoDB >= 4.4"};
+  }
+
+  return g_db_client->QueryJobSummary(request, writer);
+}
+
+grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
+    ::grpc::ServerContext* context,
+    const ::crane::grpc::QueryJobSizeSummaryRequest* request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  bool ok = g_db_client->QueryJobSizeSummary(request, writer);
+  if (!ok) {
+    return {grpc::StatusCode::INTERNAL, "QueryJobSizeSummary failed"};
+  }
+  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf& listen_conf) {
