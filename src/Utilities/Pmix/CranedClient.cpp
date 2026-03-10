@@ -38,6 +38,8 @@ void CranedClient::TerminateTasks() {
   using crane::grpc::TerminateStepsRequest;
 
   grpc::ClientContext client_context;
+  client_context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(kRpcTimeoutSeconds));
   TerminateStepsRequest request;
   TerminateStepsReply reply;
 
@@ -72,6 +74,8 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   using crane::grpc::BroadcastPmixPortRequest;
 
   grpc::ClientContext client_context;
+  client_context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(kRpcTimeoutSeconds));
   BroadcastPmixPortRequest request;
   BroadcastPmixPortReply reply;
 

@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "crane/PublicHeader.h"
+#include "crane/Logger.h"
 #include "protos/Pmix.pb.h"
 
 namespace pmix {
@@ -71,9 +72,11 @@ inline CollType StrToCollType(const std::string& str) {
 class Coll {
  public:
   Coll() = default;
+  Coll(const Coll&) = delete;
+  Coll& operator=(const Coll&) = delete;
 
 #ifdef HAVE_PMIX
-  virtual bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) = 0;
+  virtual bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) = 0;
 
   virtual bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) = 0;
 
@@ -86,26 +89,26 @@ class Coll {
   virtual bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
                           const std::string& data) = 0;
 
-  size_t GetProcNum() const { return m_pset_.nprocs; }
+  size_t GetProcNum() const { return m_procs_.size(); }
 
-  const pmix_proc_t& GetProcs(size_t index) const {
-    if (index >= m_pset_.procs.size())
-        throw std::out_of_range("Index out of range in get_procs");
+  const pmix_proc_t* GetProcs(size_t index) const {
+    if (index >= m_procs_.size()) {
+      CRANE_ERROR("Index {} out of range in get_procs, proc num is {}", index, m_procs_.size());
+      return nullptr;
+    }
 
-    return m_pset_.procs[index];
+    return &m_procs_[index];
   }
 
-  const std::vector<pmix_proc_t>& GetProcs() const { return m_pset_.procs; }
+  const std::vector<pmix_proc_t>& GetProcs() const { return m_procs_; }
   CollType GetType() const { return m_type_; }
 
  protected:
   std::mutex m_lock_;
   uint32_t m_seq_{};
   CollType m_type_ {CollType::FENCE_MAX};
-  struct {
-    std::vector<pmix_proc_t> procs;
-    size_t nprocs;
-  } m_pset_;
+  
+  std::vector<pmix_proc_t> m_procs_;
   uint32_t m_peerid_{};
   uint32_t m_peers_cnt_{};
   pmix_modex_cbfunc_t m_cbfunc_{};

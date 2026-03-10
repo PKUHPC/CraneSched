@@ -25,11 +25,10 @@ namespace pmix {
 
 #ifdef HAVE_PMIX
 
-bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
+bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) {
   m_seq_ = 0;
   m_type_ = type;
-  m_pset_.nprocs = nprocs;
-  m_pset_.procs.assign(procs.begin(), procs.end());
+  m_procs_.assign(procs.begin(), procs.end());
 
   std::set<std::string> hostname_set;
 
@@ -257,8 +256,7 @@ bool PmixCollTree::ProgressCollect_() {
 
     crane::grpc::pmix::PmixTreeUpwardForwardReq request{};
 
-    for (size_t i = 0; i < m_pset_.nprocs; i++) {
-      auto proc = m_pset_.procs[i];
+    for (auto& proc : m_procs_) {
       auto* pmix_procs = request.mutable_pmix_procs()->Add();
       pmix_procs->set_nspace(proc.nspace);
       pmix_procs->set_rank(proc.rank);
@@ -359,12 +357,12 @@ bool PmixCollTree::ProgressUpFwd_() {
     CRANE_DEBUG("{:p}: ProgressUpFwd_: send data to parent {}, seq: {}", static_cast<void*>(this), m_parent_host_, m_seq_);
     crane::grpc::pmix::PmixTreeDownwardForwardReq request{};
 
-    for (size_t i = 0; i < m_pset_.nprocs; i++) {
-      auto proc = m_pset_.procs[i];
+    for (auto& proc : m_procs_) {
       auto* pmix_procs = request.mutable_pmix_procs()->Add();
       pmix_procs->set_nspace(proc.nspace);
       pmix_procs->set_rank(proc.rank);
     }
+
     request.set_peer_host(m_pmix_job_info_.hostname);
     request.set_msg(m_downfwd_buf_);
     request.set_seq(this->m_seq_);

@@ -32,14 +32,15 @@ public:
 #ifdef HAVE_PMIX
   PmixState(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
   
-  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
-                         size_t nprocs);
+  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs);
+
+  // TODO: pmixp_state_coll_cleanup();
 private:
 
   PmixJobInfo m_pmix_job_info_;
 
   util::rw_mutex m_mutex_;
-  std::list<std::shared_ptr<Coll>> m_coll_list_;
+  std::vector<std::shared_ptr<Coll>> m_coll_list_;
 #endif
 };
 

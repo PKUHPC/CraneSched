@@ -26,19 +26,20 @@ namespace pmix {
 
 #ifdef HAVE_PMIX
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(
-    CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
+    CollType type, const std::vector<pmix_proc_t>& procs) {
 
   util::write_lock_guard lock_guard(m_mutex_);
 
   for (const auto& coll : m_coll_list_) {
-    if (coll->GetProcNum() != nprocs) continue;
+    if (coll->GetProcNum() != procs.size()) continue;
     if (coll->GetType() != type) continue;
     if (!coll->GetProcNum()) return coll;
 
-    for (size_t i = 0; i < nprocs; i++) {
-      const auto& proc = coll->GetProcs(i);
-      if (std::strcmp(proc.nspace, procs[i].nspace) == 0 &&
-          proc.rank == procs[i].rank)
+    for (size_t i = 0; i < procs.size(); i++) {
+      if (i > coll->GetProcNum()) break;
+      const auto proc = coll->GetProcs(i);
+      if (proc && std::strcmp(proc->nspace, procs[i].nspace) == 0 &&
+          proc->rank == procs[i].rank)
         return coll;
     }
   }
@@ -56,7 +57,7 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
       return nullptr;
   }
 
-  if (!coll->PmixCollInit(type, procs, nprocs)) return nullptr;
+  if (!coll->PmixCollInit(type, procs)) return nullptr;
 
   m_coll_list_.emplace_back(coll);
 

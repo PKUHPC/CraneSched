@@ -40,7 +40,7 @@ void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
   }
 
   std::shared_ptr<Coll> coll =
-      m_pmix_state_->PmixStateCollGet(CollType::FENCE_RING, procs, procs.size());
+      m_pmix_state_->PmixStateCollGet(CollType::FENCE_RING, procs);
 
   if (!coll) {
     return;
@@ -65,7 +65,7 @@ void PmixUcxServiceImpl::PmixTreeUpwardForward(const std::string& req_data) {
 
   std::shared_ptr<Coll> coll =
       m_pmix_state_->PmixStateCollGet(
-          CollType::FENCE_TREE, procs, procs.size());
+          CollType::FENCE_TREE, procs);
 
   if (!coll) {
     return;
@@ -88,8 +88,7 @@ void PmixUcxServiceImpl::PmixTreeDownwardForward(const std::string& req_data) {
   }
 
   std::shared_ptr<Coll> coll =
-      m_pmix_state_->PmixStateCollGet(
-       CollType::FENCE_TREE, procs, procs.size());
+      m_pmix_state_->PmixStateCollGet(CollType::FENCE_TREE, procs);
 
   if (!coll) {
     return ;
