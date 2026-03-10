@@ -603,6 +603,7 @@ void ParseConfig(int argc, char** argv) {
                     "At least one of DeviceFileRegex or DeviceFileList must be "
                     "configured for GRES {}:{} device.",
                     device_name, device_type);
+                std::exit(1);
               }
             }
           }
