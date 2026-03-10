@@ -19,9 +19,8 @@
 #pragma once
 #include <sched.h>
 
-#include <string_view>
-
 #include <expected>
+#include <string_view>
 
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"

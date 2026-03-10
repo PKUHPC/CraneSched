@@ -1130,7 +1130,7 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
       CgConstant::ControllerFile::CPU_SHARES, share);
 }
 
-bool CgroupV1::SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) {
+bool CgroupV1::SetCpuSet(const std::unordered_set<uint32_t>& cpu_set) {
   // For cgroup v1, cpuset controller is separate
   if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
     CRANE_WARN(
@@ -1208,7 +1208,7 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
 bool CgroupV1::KillAllProcesses() {
   using namespace CgConstant::Internal;
 
-  const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
+  const char* cg_name = m_cgroup_info_.GetCgroupName().c_str();
   auto controller_count =
       cgroup_get_controller_count(m_cgroup_info_.NativeHandle());
   if (controller_count == -1) {
@@ -1217,20 +1217,20 @@ bool CgroupV1::KillAllProcesses() {
   }
 
   for (int i = 0; i < controller_count; ++i) {
-    struct cgroup_controller *controller =
+    struct cgroup_controller* controller =
         cgroup_get_controller_by_index(m_cgroup_info_.NativeHandle(), i);
     if (controller == nullptr) {
       CRANE_ERROR("Failed to get controller by index {} for cgroup \"{}\"", i,
                   cg_name);
       continue;
     }
-    const char *controller_str = cgroup_get_controller_name(controller);
+    const char* controller_str = cgroup_get_controller_name(controller);
 
     int size, rc;
-    pid_t *pids;
+    pid_t* pids;
 
-    rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                          const_cast<char *>(controller_str), &pids, &size);
+    rc = cgroup_get_procs(const_cast<char*>(cg_name),
+                          const_cast<char*>(controller_str), &pids, &size);
 
     if (rc == 0) {
       for (int j = 0; j < size; ++j) {
@@ -1275,7 +1275,7 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 
 // Custom libbpf print callback that forwards logs to Crane's logging system
 static int LibbpfPrintCallback(enum libbpf_print_level level,
-                               const char *format, va_list args) {
+                               const char* format, va_list args) {
   // Create a buffer for the formatted message - 4KB should be sufficient for
   // most messages
   constexpr size_t kBufferSize = 4096;
@@ -1504,7 +1504,7 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
       CgConstant::ControllerFile::CPU_WEIGHT_V2, share);
 }
 
-bool CgroupV2::SetCpuSet(const std::unordered_set<uint32_t> &cpu_set) {
+bool CgroupV2::SetCpuSet(const std::unordered_set<uint32_t>& cpu_set) {
   // For cgroup v2, cpuset.cpus is under the cpuset controller
   if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
     CRANE_WARN(
@@ -1775,7 +1775,7 @@ CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids) {
   int cpu_size = std::ranges::max(cpu_ids) + 1;
 
   size_t cpu_set_size = CPU_ALLOC_SIZE(cpu_size);
-  cpu_set_t *cpu_mask = CPU_ALLOC(cpu_size);
+  cpu_set_t* cpu_mask = CPU_ALLOC(cpu_size);
   if (cpu_mask == nullptr) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -1793,8 +1793,8 @@ CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids) {
   return CraneErrCode::SUCCESS;
 }
 
-bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            CgroupInterface *cg) {
+bool AllocatableResourceAllocator::Allocate(const AllocatableResource& resource,
+                                            CgroupInterface* cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);

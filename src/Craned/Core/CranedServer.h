@@ -113,14 +113,14 @@ class CranedServiceImpl : public Craned::Service {
       crane::grpc::StepStatusChangeReply* response) override;
 
   grpc::Status AttachContainerStep(
-      grpc::ServerContext *context,
-      const crane::grpc::AttachContainerStepRequest *request,
-      crane::grpc::AttachContainerStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::AttachContainerStepRequest* request,
+      crane::grpc::AttachContainerStepReply* response) override;
 
   grpc::Status ExecInContainerStep(
-      grpc::ServerContext *context,
-      const crane::grpc::ExecInContainerStepRequest *request,
-      crane::grpc::ExecInContainerStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ExecInContainerStepRequest* request,
+      crane::grpc::ExecInContainerStepReply* response) override;
 };
 
 class CranedServer {

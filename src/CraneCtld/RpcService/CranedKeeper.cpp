@@ -298,7 +298,7 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
 }
 
 crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(
-    const crane::grpc::AttachContainerStepRequest &request) {
+    const crane::grpc::AttachContainerStepRequest& request) {
   using crane::grpc::AttachContainerStepReply;
   using crane::grpc::AttachContainerStepRequest;
 
@@ -326,7 +326,7 @@ crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(
 }
 
 crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
-    const crane::grpc::ExecInContainerStepRequest &request) {
+    const crane::grpc::ExecInContainerStepRequest& request) {
   using crane::grpc::ExecInContainerStepReply;
   using crane::grpc::ExecInContainerStepRequest;
 

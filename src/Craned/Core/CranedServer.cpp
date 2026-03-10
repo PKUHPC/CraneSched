@@ -467,9 +467,9 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
 }
 
 grpc::Status CranedServiceImpl::AttachContainerStep(
-    grpc::ServerContext *context,
-    const crane::grpc::AttachContainerStepRequest *request,
-    crane::grpc::AttachContainerStepReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::AttachContainerStepRequest* request,
+    crane::grpc::AttachContainerStepReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto* err = response->mutable_status();
@@ -483,7 +483,7 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
     // Should never happen.
     CRANE_ERROR(
         "AttachContainerStep request received but Container is not enabled.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
     response->set_ok(false);
@@ -500,13 +500,13 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
   };
   auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
-    const auto &rich_err = container_expt.error();
+    const auto& rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for step #{} in job #{}: {}",
                 request->step_id(), request->job_id(), rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later.
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
         std::format("Container not found, possibly initializing or exited: {}",
@@ -521,10 +521,10 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
                            request->stdout(), request->stderr());
 
   if (!url_expt) {
-    const auto &rich_err = url_expt.error();
+    const auto& rich_err = url_expt.error();
     CRANE_ERROR("Failed to attach to container for step #{} in job #{}: {}",
                 request->step_id(), request->job_id(), rich_err.description());
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;
@@ -537,9 +537,9 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
 }
 
 grpc::Status CranedServiceImpl::ExecInContainerStep(
-    grpc::ServerContext *context,
-    const crane::grpc::ExecInContainerStepRequest *request,
-    crane::grpc::ExecInContainerStepReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::ExecInContainerStepRequest* request,
+    crane::grpc::ExecInContainerStepReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto* err = response->mutable_status();
@@ -553,7 +553,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     // Should never happen.
     CRANE_ERROR(
         "ExecInContainerStep request received but Container is not enabled.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
     response->set_ok(false);
@@ -563,7 +563,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
   // Validate command
   if (request->command_size() == 0) {
     CRANE_ERROR("ExecInContainerStep request has empty command.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
     err->set_description("Command cannot be empty.");
     response->set_ok(false);
@@ -580,7 +580,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
   };
   auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
-    const auto &rich_err = container_expt.error();
+    const auto& rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for step #{} in job #{}: {}",
                 request->step_id(), request->job_id(), rich_err.description());
 
@@ -609,10 +609,10 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
                                      request->stderr());
 
   if (!url_expt) {
-    const auto &rich_err = url_expt.error();
+    const auto& rich_err = url_expt.error();
     CRANE_ERROR("Failed to exec in container for step #{} in job #{}: {}",
                 request->step_id(), request->job_id(), rich_err.description());
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;

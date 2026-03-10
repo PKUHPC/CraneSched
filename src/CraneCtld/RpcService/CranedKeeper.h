@@ -92,10 +92,10 @@ class CranedStub {
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
   crane::grpc::AttachContainerStepReply AttachContainerStep(
-      const crane::grpc::AttachContainerStepRequest &request);
+      const crane::grpc::AttachContainerStepRequest& request);
 
   crane::grpc::ExecInContainerStepReply ExecInContainerStep(
-      const crane::grpc::ExecInContainerStepRequest &request);
+      const crane::grpc::ExecInContainerStepRequest& request);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
@@ -195,7 +195,7 @@ class CranedKeeper {
 
   // Remove stub from unavail/connecting set. Must be called with
   // `m_connect_craned_mtx_` held.
-  static void CranedChannelConnFailNoLock_(CranedStub *stub);
+  static void CranedChannelConnFailNoLock_(CranedStub* stub);
 
   static void CranedChannelConnFailNoLock_(CranedStub* stub);
 
