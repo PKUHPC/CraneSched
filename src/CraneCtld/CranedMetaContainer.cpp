@@ -760,20 +760,14 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
             craned_list->set_count(craned_name_lists[i][j][k].size());
             craned_list->set_craned_list_regex(
                 util::HostNameListToStr(craned_name_lists[i][j][k]));
-            std::vector<std::string> reasons;
             for (const auto& node_name : craned_name_lists[i][j][k]) {
+              auto* node_info = craned_list->add_node_state_list();
+              node_info->set_node_name(node_name);
+
               auto it = state_reason_map.find(node_name);
               if (it != state_reason_map.end() && !it->second.empty()) {
-                reasons.push_back(it->second);
+                node_info->set_state_reason(it->second);
               }
-            }
-
-            std::sort(reasons.begin(), reasons.end());
-            reasons.erase(std::unique(reasons.begin(), reasons.end()),
-                          reasons.end());
-
-            if (!reasons.empty()) {
-              craned_list->set_state_reason(absl::StrJoin(reasons, "; "));
             }
           }
         }

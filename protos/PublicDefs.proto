@@ -695,13 +695,17 @@ message ReservationInfo {
 }
 
 message TrimmedPartitionInfo {
+  message SingleNodeInfo{
+    string node_name = 1;
+    string state_reason = 2;
+  }
   message TrimmedCranedInfo {
     CranedResourceState resource_state = 1;
     CranedControlState control_state = 2;
     CranedPowerState power_state = 3;
     uint32 count = 4;
     string craned_list_regex = 5;
-    string state_reason = 6;
+    repeated SingleNodeInfo node_state_list = 6;
   }
 
   string name = 1;
