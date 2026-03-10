@@ -4419,7 +4419,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
-             bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
+             bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
       std::unordered_set<CranedId>,                                 /*45*/
       std::unordered_set<CranedId>,
       std::vector < CranedId >> /*46-47*/
