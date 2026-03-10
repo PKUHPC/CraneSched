@@ -4172,9 +4172,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-
+  // 45 submit_hostname
   // clang-format off
-  std::array<std::string, 45> fields{
+  std::array<std::string, 46> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4192,7 +4192,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info",
     // 40 - 44
-    "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster"
+    "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
+    // 45 - 49
+    "submit_hostname"
   };
   // clang-format on
 
@@ -4206,7 +4208,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
-             bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
+             bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
+             std::string>                                           /*45-49*/
       values{                                                       // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -4248,7 +4251,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
              task_to_ctld.wckey(), using_default_wckey,
-             g_config.CraneClusterName};
+             g_config.CraneClusterName,
+            task_to_ctld.submit_hostname()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4296,9 +4300,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
+  // 45 submit_hostname
 
   // clang-format off
-  std::array<std::string, 45> fields{
+  std::array<std::string, 46> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4316,7 +4321,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info",
       // 40 - 44
-      "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster"
+      "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
+      // 45 - 49
+      "submit_hostname"
   };
   // clang-format on
 
@@ -4330,7 +4337,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
-             bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
+             bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
+             std::string>                                           /*45-49*/
       values{                                                       // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -4361,7 +4369,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 40-44
              task->licenses_count,
              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
-             task->using_default_wckey, g_config.CraneClusterName};
+             task->using_default_wckey, g_config.CraneClusterName,task->submit_hostname};
 
   return DocumentConstructor_(fields, values);
 }
