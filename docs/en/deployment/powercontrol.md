@@ -35,7 +35,7 @@ ethtool eth0 | grep -i wake-on
 #### influxDB
 Used to collect task and node energy consumption data. Can be deployed on a standalone node or on the ctld node.
 
-##### influxDB安装
+##### influxDB install
 ```bash
 ## Add repository
 sudo tee /etc/yum.repos.d/influxdb.repo > /dev/null <<EOF
@@ -65,7 +65,7 @@ influx version
 ```
 
 ##### Initialize and Record Configuration Information
-Initialize, set and record username, password, organization, bucket and other information.
+Initialize, set and record username, password, **organization EXAMPLE_ORG, bucket EXAMPLE_BUCKET** and other information.
 ```bash
 ## Initialize
 influx setup
@@ -75,7 +75,7 @@ influx version
 influx ping
 ```
 
-Get the token for subsequent configuration in the .yaml file.
+Get **EXAMPLE_TOKEN** for subsequent configuration in the .yaml file.
 ```bash
 influx auth list
 ```
@@ -165,11 +165,11 @@ Predictor:
 # Used to obtain data collected by the energy collection plugin on the craned side
 InfluxDB:
   URL: "http://localhost:8086"
-  Token: "T011VN2UYr2PujyWH26oqUhsuk9lei4AQfvae6texcKj6NJyygTVlLXf9916VogAhV4g-9L2ADLRoPpZ_9mMwQ=="
-  Org: "pku"
-  # Table name in InfluxDB, stores node energy consumption data
-  # Bucket is equivalent to a table. This is the corresponding table name in InfluxDB. Org refers to organization, can be configured arbitrarily.
-  Bucket: "energy_node"
+  Token: "EXAMPLE_TOKEN"
+  Org: "EXAMPLE_ORG"
+  # Table name in InfluxDB, stores node energy consumption data, like energy_node
+  # Bucket is equivalent to a table. This is the corresponding table name in InfluxDB. Org refers to organization, like pku.
+  Bucket: "EXAMPLE_BUCKET"
 
 IPMI:
   # BMC username and password for nodes. Configuration should be the same for all nodes.
@@ -248,12 +248,12 @@ Database:
   Type: "influxdb"
   Influxdb:
     Url: "http://192.168.11.109:8086"
-    Token: "T011VN2UYr2PujyWH26oqUhsuk9lei4AQfvae6texcKj6NJyygTVlLXf9916VogAhV4g-9L2ADLRoPpZ_9mMwQ=="
-    Org: "pku"
-    # Table name in InfluxDB, stores node energy consumption data
-    NodeBucket: "energy_node"
-    # Table name in InfluxDB, stores job energy consumption data
-    JobBucket: "energy_task"
+    Token: "EXAMPLE_TOKEN"
+    Org: "EXAMPLE_ORG"
+    # Table name in InfluxDB, stores node energy consumption data, like energy_node
+    NodeBucket: "EXAMPLE_BUCKET1"
+    # Table name in InfluxDB, stores job energy consumption data, like energy_task
+    JobBucket: "EXAMPLE_BUCKET2"
 ```
 
 ## Service Startup
@@ -298,12 +298,12 @@ On the craned node, verify read and write access to InfluxDB:
 ```bash
 ## Attempt to write data 123 to the energy_node table in InfluxDB
 curl -i -XPOST "http://192.168.234.1:8086/api/v2/write?org=pku&bucket=energy_node&precision=s" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   --data-binary "test_node,node=cn01 value=123 $(date +%s)"
   
 ## Query data 123 from the energy_node table in InfluxDB
 curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   -H "Content-type: application/vnd.flux" \
   -d 'from(bucket:"energy_node")
       |> range(start: -5m)
@@ -314,12 +314,12 @@ curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
 ```bash
 ## Attempt to write data 456 to the energy_task table in InfluxDB
 curl -i -XPOST "http://192.168.234.1:8086/api/v2/write?org=pku&bucket=energy_task&precision=s" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   --data-binary "test_task,job=testjob value=456 $(date +%s)"
 
 ## Query data 456 from the energy_task table in InfluxDB
 curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   -H "Content-type: application/vnd.flux" \
   -d 'from(bucket:"energy_task")
       |> range(start: -5m)

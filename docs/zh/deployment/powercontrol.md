@@ -64,7 +64,7 @@ influx version
 ```
 
 ##### 初始化并记录配置信息
-初始化，设置并记录用户名，密码，组织，bucket等信息
+初始化，设置并记录用户名，密码，**组织EXAMPLE_ORG，存储桶EXAMPLE_BUCKET**等信息
 ```bash
 ## 初始化
 influx setup
@@ -74,7 +74,7 @@ influx version
 influx ping
 ```
 
-获取token，用于后续配置.yaml
+获取**EXAMPLE_TOKEN**，用于后续配置.yaml
 ```bash
 influx auth list
 ```
@@ -164,11 +164,11 @@ Predictor:
 # 用于获取craned端能耗收集插件搜集的数据
 InfluxDB:
   URL: "http://localhost:8086"
-  Token: "T011VN2UYr2PujyWH26oqUhsuk9lei4AQfvae6texcKj6NJyygTVlLXf9916VogAhV4g-9L2ADLRoPpZ_9mMwQ=="
-  Org: "pku"
+  Token: "EXAMPLE_TOKEN"
+  Org: "EXAMPLE_ORG"
   # influxDB的表名，存储节点的能耗数据表
-  # bucket相等于表，这里就是对应的influxdb中的表名，org指组织 随意配就行
-  Bucket: "energy_node"
+  # bucket相等于表，这里就是对应的influxdb中的表名，例如energy_node，org指组织，例如pku
+  Bucket: "EXAMPLE_BUCKET"
 
 IPMI:
   # 节点的对应的BMC的用户名和密码，所有节点的配置应该相同
@@ -247,12 +247,12 @@ Database:
   Type: "influxdb"            
   Influxdb:
     Url: "http://192.168.11.109:8086"
-    Token: "T011VN2UYr2PujyWH26oqUhsuk9lei4AQfvae6texcKj6NJyygTVlLXf9916VogAhV4g-9L2ADLRoPpZ_9mMwQ=="
-    Org: "pku"
-    # influxDB的表名，存储节点的能耗数据表
-    NodeBucket: "energy_node"
-    # influxDB的表名，存储job能耗数据的表
-    JobBucket: "energy_task"
+    Token: "EXAMPLE_TOKEN"
+    Org: "EXAMPLE_ORG"
+    # influxDB的表名，存储节点的能耗数据表energy_node
+    NodeBucket: "EXAMPLE_BUCKET1"
+    # influxDB的表名，存储job能耗数据的表energy_task
+    JobBucket: "EXAMPLE_BUCKET2"
 ```
 
 ## 服务启动
@@ -297,12 +297,12 @@ systemctl enable cplugind
 ```bash
 ## 尝试写入数据123到influxDB的energy_node表
 curl -i -XPOST "http://192.168.234.1:8086/api/v2/write?org=pku&bucket=energy_node&precision=s" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   --data-binary "test_node,node=cn01 value=123 $(date +%s)"
   
 ## 查询数据123从influxDB的energy_node表
 curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   -H "Content-type: application/vnd.flux" \
   -d 'from(bucket:"energy_node")
       |> range(start: -5m)
@@ -313,12 +313,12 @@ curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
 ```bash
 ## 尝试写入数据456到influxDB的energy_task表
 curl -i -XPOST "http://192.168.234.1:8086/api/v2/write?org=pku&bucket=energy_task&precision=s" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   --data-binary "test_task,job=testjob value=456 $(date +%s)"
 
 ## 查询数据456从influxDB的energy_task表
 curl -s -XPOST "http://192.168.234.1:8086/api/v2/query?org=pku" \
-  -H "Authorization: Token UImiPmWA_TSQCt2j8YbE7c8G6K-o1W_xk8nbN28TvahQuOG7ol8Q6DFiO4Y8mDhPdoFGIrl2xB3Xr8oaivEnpQ==" \
+  -H "Authorization: Token EXAMPLE_TOKEN" \
   -H "Content-type: application/vnd.flux" \
   -d 'from(bucket:"energy_task")
       |> range(start: -5m)
