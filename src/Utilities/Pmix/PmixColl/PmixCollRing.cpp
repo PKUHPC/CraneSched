@@ -24,11 +24,10 @@ namespace pmix {
 
 #ifdef HAVE_PMIX
 
-bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
+bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) {
   m_seq_ = 0;
   m_type_ = type;
-  m_pset_.nprocs = nprocs;
-  m_pset_.procs.assign(procs.begin(), procs.end());
+  m_procs_.assign(procs.begin(), procs.end());
 
   std::set<std::string> hostname_set;
 
@@ -172,8 +171,7 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);
 
-    for (size_t i = 0; i < m_pset_.nprocs; i++) {
-      auto proc = m_pset_.procs[i];
+    for (auto& proc : m_procs_) {
       auto* pmix_procs = request.mutable_pmix_procs()->Add();
       pmix_procs->set_nspace(proc.nspace);
       pmix_procs->set_rank(proc.rank);

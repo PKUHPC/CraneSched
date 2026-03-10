@@ -62,7 +62,7 @@ public:
   PmixCollRing(const PmixJobInfo& job_info)
       : m_pmix_job_info_(job_info) {};
 
-  bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) override;
+  bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) override;
 
   bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) override;
 
