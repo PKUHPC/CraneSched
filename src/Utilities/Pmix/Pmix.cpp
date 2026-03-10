@@ -333,8 +333,8 @@ PmixServer::SetupFork(uint32_t rank) {
   pmix_proc_t proc;
   PMIX_LOAD_NSPACE(proc.nspace, m_pmix_job_info_.nspace.c_str());
   proc.rank = m_pmix_job_info_.ntasks_per_node * m_pmix_job_info_.node_id + rank;
-  pmix_status_t rc;
-  if (PMIX_SUCCESS != PMIx_server_setup_fork(&proc, &client_env)) {
+  pmix_status_t rc = PMIx_server_setup_fork(&proc, &client_env);
+  if (PMIX_SUCCESS != rc) {
     CRANE_ERROR("Server fork setup failed with error {}", rc);
     return std::nullopt;
   }
@@ -358,6 +358,13 @@ PmixServer::SetupFork(uint32_t rank) {
     char key[64];
     std::snprintf(key, sizeof(key), "%08x%08x-%08x%08x", m_pmix_job_info_.job_id, 0, m_pmix_job_info_.step_id, 0);
     env_map.emplace("OMPI_MCA_orte_precondition_transports", key);
+  }
+
+  if (client_env != nullptr) {
+    for (int i = 0; client_env[i] != nullptr; ++i) {
+      free(client_env[i]);
+    }
+    free(client_env);
   }
 
   return env_map;
@@ -449,7 +456,12 @@ bool PmixServer::ConnInit_(const Config& config) {
     return false;
 
   // must ensure that both sides have received [the message] and are ready.
-  m_pmix_client_->WaitAllStubReady();
+  if (!m_pmix_client_->WaitAllStubReady()) {
+    CRANE_ERROR("Not all PMIx stubs are ready after waiting for 5 seconds, node num: {}, channel count: {}",
+                m_pmix_job_info_.node_num, m_pmix_client_->GetChannelCount());
+    return false;
+  }
+
   return true;
 }
 
