@@ -79,6 +79,8 @@ static constexpr int      kInflightPerType = 256;
 // 每条消息最大长度（可配置/调优；若需要超大消息建议用 AM 或 pipeline）
 static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
 
+static constexpr uint64_t kRpcTimeoutSeconds = 5;
+
 enum class PmixUcxMsgType : uint16_t {
   PMIX_UCX_TREE_UPWARD_FORWARD = 0,
   PMIX_UCX_TREE_DOWNWARD_FORWARD,

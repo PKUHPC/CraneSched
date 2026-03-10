@@ -42,6 +42,9 @@ extern "C" {
                                pmix_op_cbfunc_t cbfunc, void *cbdata) {
     /* we don't do anything by now */
     CRANE_DEBUG("ClientConnected is called");
+    if (nullptr != cbfunc) {
+     cbfunc(PMIX_SUCCESS, cbdata);
+    }
     return PMIX_SUCCESS;
   }
 
@@ -96,6 +99,11 @@ extern "C" {
      }
    }
 
+   if (data == nullptr && ndata > 0) {
+      cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+      return PMIX_ERROR;
+   }
+
     CollType type = StrToCollType(g_pmix_server->GetFenceType());
 
     if (type == CollType::FENCE_MAX) {
@@ -104,7 +112,7 @@ extern "C" {
         type = CollType::FENCE_RING;
     }
 
-  auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs, nprocs);
+  auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs);
 
   if (coll == nullptr) {
       cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
