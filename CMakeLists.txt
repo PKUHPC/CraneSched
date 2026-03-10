@@ -55,7 +55,14 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
-option(CMAKE_TEST "Enable testing features" OFF)
+option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+
+if (DEFINED CMAKE_TEST)
+    message(WARNING "CMAKE_TEST is deprecated and reserved for CMake internals. Use CRANE_ENABLE_TRACING instead.")
+    if (CMAKE_TEST)
+        set(CRANE_ENABLE_TRACING ON CACHE BOOL "Enable OpenTelemetry tracing pipeline" FORCE)
+    endif ()
+endif ()
 
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 

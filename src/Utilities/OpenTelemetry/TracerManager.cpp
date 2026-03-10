@@ -35,22 +35,25 @@
 
 namespace crane {
 
-namespace _internal {
-#ifdef CRANE_ENABLE_TEST
-thread_local opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-    g_current_span;
-#endif
-}  // namespace _internal
-
 TracerManager& TracerManager::GetInstance() {
   static TracerManager instance;
   return instance;
 }
 
+bool TracerManager::Initialize(const std::string& service_name) {
+#ifdef CRANE_ENABLE_TEST
+  return Initialize(service_name, nullptr);
+#else
+  service_name_ = service_name;
+  initialized_ = false;
+  return false;
+#endif
+}
+
+#ifdef CRANE_ENABLE_TEST
 bool TracerManager::Initialize(
     const std::string& service_name,
     std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter) {
-#ifdef CRANE_ENABLE_TEST
   namespace trace_api = opentelemetry::trace;
   namespace trace_sdk = opentelemetry::sdk::trace;
   namespace resource = opentelemetry::sdk::resource;
@@ -91,10 +94,8 @@ bool TracerManager::Initialize(
 
   initialized_ = true;
   return true;
-#else
-  return false;
-#endif
 }
+#endif
 
 void TracerManager::Shutdown() {
 #ifdef CRANE_ENABLE_TEST
@@ -103,8 +104,8 @@ void TracerManager::Shutdown() {
         tracer_provider_.get())
         ->Shutdown();
   }
-  initialized_ = false;
 #endif
+  initialized_ = false;
 }
 
 #ifdef CRANE_ENABLE_TEST
@@ -115,16 +116,7 @@ TracerManager::CreateSpan(const std::string& span_name) {
         nullptr);
   }
 
-  // Check if there is an active parent span in the current thread
-  if (_internal::g_current_span &&
-      _internal::g_current_span->GetContext().IsValid()) {
-    opentelemetry::trace::StartSpanOptions options;
-    options.parent = _internal::g_current_span->GetContext();
-    return tracer_->StartSpan(span_name, options);
-  }
-
-  auto span = tracer_->StartSpan(span_name);
-  return span;
+  return tracer_->StartSpan(span_name);
 }
 
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>

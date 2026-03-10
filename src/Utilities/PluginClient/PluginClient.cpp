@@ -236,7 +236,7 @@ grpc::Status PluginClient::SendTraceHook_(grpc::ClientContext* context,
 
   CRANE_TRACE("[Plugin] Sending TraceHook.");
   /* We don't want to trace the TraceHook itself, it will cause infinite loop if
-   * not handled carefuly. */
+   * not handled carefully. */
   return m_stub_->TraceHook(context, *request, &reply);
 }
 
