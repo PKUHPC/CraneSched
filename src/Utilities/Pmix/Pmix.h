@@ -84,7 +84,7 @@ class PmixServer {
 
   PmixJobInfo m_pmix_job_info_;
 
-  uint64_t m_timeout_{5}; // TODO: PMIXP_TIMEOUT
+  uint64_t m_timeout_{5};
 
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;

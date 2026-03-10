@@ -59,7 +59,6 @@ void CranedClient::TerminateTasks() {
                 reply.reason());
     return;
   }
-
 }
 
 bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {

@@ -181,12 +181,11 @@ message ShutdownSupervisorRequest {}
 message ShutdownSupervisorReply {}
 
 message ReceivePmixPortRequest {
-  uint32 job_id = 1;
   message PmixPort{
     string port = 1;
     string craned_id = 2;
   }
-  repeated PmixPort pmix_ports = 2;
+  repeated PmixPort pmix_ports = 1;
 }
 
 message ReceivePmixPortReply {
