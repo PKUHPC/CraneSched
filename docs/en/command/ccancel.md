@@ -61,12 +61,6 @@ JOBID  PARTITION  NAME     USER        ACCOUNT    STATUS  TYPE   TIME     TIMELI
 ```text
 [cranetest@crane01 ~]$ cqueue
 JOBID  PARTITION  NAME     USER        ACCOUNT    STATUS  TYPE   TIME     TIMELIMIT  NODES  NODELIST/REASON
-30686  CPU        Test_Job cranetest   CraneTest  Running Batch  00:00:19  00:30:01   2      crane[02-03]
-30685  CPU        Test_Job cranetest   CraneTest  Running Batch  00:00:19  00:25:25   2      crane[02-03]
-```
-```text
-[cranetest@crane01 ~]$ cqueue
-JOBID  PARTITION  NAME     USER        ACCOUNT    STATUS  TYPE   TIME     TIMELIMIT  NODES  NODELIST/REASON
 30685  CPU        Test_Job cranetest   CraneTest  Running Batch  00:00:37  00:25:25   2      crane[02-03]
 ```
 

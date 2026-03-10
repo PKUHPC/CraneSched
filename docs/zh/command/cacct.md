@@ -102,7 +102,7 @@ cacct
 **-m, --max-lines=&lt;number&gt;**
 
 :   **适用于：** `作业`, `作业步`  
-指定输出结果的最大条数。例如，`-m=500` 将输出限制为500行。默认：100条。
+指定输出结果的最大条数。例如，`-m=500` 将输出限制为500行。默认：1000条。
 
 **--json**
 
@@ -308,7 +308,7 @@ cacct -j=30618,30619,30620
 [cranetest@crane01 ~]$ cacct -j=30618,30619,30620
 JOBID JOBNAME  PARTITION ACCOUNT ALLOCCPUS STATE          EXITCODE
 30620 Test_Job CPU       ROOT    0.00     Cancelled      0:0
-30619 Test_Job CPU       ROOT    2.00     ExceededTimeLimit 0:15
+30619 Test_Job CPU       ROOT    2.00     ExceedTimeLimit 0:15
 30618 Test_Job CPU       ROOT    2.00     Cancelled      0:15
 ```
 
@@ -649,11 +649,10 @@ cacct -m 10 -j 783925,783889 -t=c -F
 ```
 
 ```text
-[root@cranetest-rocky01 zhouhao]# cacct -m 10 -j 783925,783889,783884,106040,106035 -t=c -F
+[root@cranetest-rocky01 zhouhao]# cacct -m 10 -j 783925,783889 -t=c -F
 JOBID   JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
 783925          CPU       ROOT    1.00     Completed 0:0
 783889          CPU       ROOT    1.00     Completed 0:0
-783884          CPU       ROOT    2.00     Completed 0:0
 ```
 
 **复杂组合查询：**

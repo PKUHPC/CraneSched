@@ -335,7 +335,7 @@ JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIM
 **查询特定作业：**
 
 ```bash
-cqueue -j 30674,30675
+cqueue -j 30686,30687
 ```
 
 ```text

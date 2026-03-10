@@ -344,7 +344,7 @@ JOBID PARTITION NAME     USER       ACCOUNT    STATUS   TYPE   TIME      TIMELIM
 **Query specific jobs:**
 
 ```bash
-cqueue -j 30674,30675
+cqueue -j 30686,30687
 ```
 
 ```text

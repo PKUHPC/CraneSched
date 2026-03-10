@@ -3,9 +3,9 @@
 **cinfo queries resource information for partition nodes.**
 
 View the status of partition nodes:
-~~~bash
+```bash
 cinfo
-~~~
+```
 
 **cinfo Output Example**
 

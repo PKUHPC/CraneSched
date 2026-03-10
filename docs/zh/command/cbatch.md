@@ -211,7 +211,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -x crane01,crane02 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -x crane01,crane02 cbatch_test.sh
 Job id allocated: 30727
 ```
 ```text
@@ -227,7 +227,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -J testjob01 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -J testjob01 cbatch_test.sh
 Job id allocated: 30728
 ```
 ```text
@@ -242,7 +242,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -w crane01,crane03 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -w crane01,crane03 cbatch_test.sh
 Job id allocated: 30729
 ```
 ```text
@@ -258,7 +258,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -p GPU cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -p GPU cbatch_test.sh
 Job id allocated: 30730
 ```
 
@@ -275,7 +275,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -t 00:25:25 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -t 00:25:25 cbatch_test.sh
 Job id allocated: 30731
 ```
 
@@ -292,7 +292,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE    TIME      TIMELIMIT N
 cbatch -c 2 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -c 2 cbatch_test.sh
 Job id allocated: 30752
 ```
 ```text
@@ -314,7 +314,7 @@ NodeName=crane02 State=alloc CPU=2.00 AllocCPU=2.00 FreeCPU=0.00
 cbatch --mem 123M cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch --mem 123M cbatch_test.sh
 Job id allocated: 30755
 ```
 ```text
@@ -336,7 +336,7 @@ NodeName=crane02 State=mix CPU=2.00 AllocCPU=1.00 FreeCPU=1.00
 cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 Job id allocated: 30756
 ```
 ```text

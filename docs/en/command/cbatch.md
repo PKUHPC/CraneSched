@@ -212,7 +212,7 @@ Exclude nodes from allocation:
 cbatch -x crane01,crane02 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -x crane01,crane02 cbatch_test.sh
 Job id allocated: 30727
 ```
 ```text
@@ -228,7 +228,7 @@ Specify job name:
 cbatch -J testjob01 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -J testjob01 cbatch_test.sh
 Job id allocated: 30728
 ```
 ```text
@@ -244,7 +244,7 @@ Request specific nodes:
 cbatch -w crane01,crane03 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -w crane01,crane03 cbatch_test.sh
 Job id allocated: 30729
 ```
 ```text
@@ -260,7 +260,7 @@ Submit to specific partition:
 cbatch -p GPU cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -p GPU cbatch_test.sh
 Job id allocated: 30730
 ```
 
@@ -277,7 +277,7 @@ Set time limit:
 cbatch -t 00:25:25 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -t 00:25:25 cbatch_test.sh
 Job id allocated: 30731
 ```
 
@@ -294,7 +294,7 @@ Request specific number of CPU cores:
 cbatch -c 2 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -c 2 cbatch_test.sh
 Job id allocated: 30752
 ```
 ```text
@@ -316,7 +316,7 @@ Specify memory requirements:
 cbatch --mem 123M cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch --mem 123M cbatch_test.sh
 Job id allocated: 30755
 ```
 ```text
@@ -338,7 +338,7 @@ Request multiple nodes with tasks per node:
 cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```
 ```bash
-[cranetest@crane01 ~]$ cbatch cbatch_test.sh
+[cranetest@crane01 ~]$ cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 Job id allocated: 30756
 ```
 ```text

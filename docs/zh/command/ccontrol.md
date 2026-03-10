@@ -325,7 +325,7 @@ ccontrol update partition=CPU deniedaccounts=guest
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol update partition=test accounts=test_user
+[root@CraneProject CraneSched-FrontEnd]# ccontrol update partitionName=test accounts=test_user
 ERRO[0000] Modify partition test failed: The entered account does not exist.
 ERRO[0000] command execution failed
 ```
@@ -411,7 +411,7 @@ ccontrol create reservation test_reservation startTime=2024-12-01T14:00:00 durat
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# control create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
+[root@CraneProject CraneSched-FrontEnd]# ccontrol create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
 ERRO[0000] missing required fields: starttime          
 ERRO[0000] command execution failed
 ```
@@ -430,7 +430,7 @@ ccontrol delete reservation my_reservation
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# control delete reservation test_reservation
+[root@CraneProject CraneSched-FrontEnd]# ccontrol delete reservation test_reservation
 ERRO[0000] Failed to delete reservation: Reservation test_reservation not found.
 ERRO[0000]
 ERRO[0000] command execution failed

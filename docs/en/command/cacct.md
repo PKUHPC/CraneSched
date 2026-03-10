@@ -98,7 +98,7 @@ Hide table header in output.
 **-m, --max-lines=&lt;number&gt;**
 
 :   **Applies to:** `Job`, `Step`  
-Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 100 lines.
+Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 1000 lines.
 
 **--json**
 
@@ -305,7 +305,7 @@ cacct -j=30618,30619,30620
 [cranetest@crane01 ~]$ cacct -j=30618,30619,30620
 JOBID JOBNAME  PARTITION ACCOUNT ALLOCCPUS STATE          EXITCODE
 30620 Test_Job CPU       ROOT    0.00     Cancelled      0:0
-30619 Test_Job CPU       ROOT    2.00     ExceededTimeLimit 0:15
+30619 Test_Job CPU       ROOT    2.00     ExceedTimeLimit 0:15
 30618 Test_Job CPU       ROOT    2.00     Cancelled      0:15
 ```
 
@@ -654,11 +654,10 @@ cacct -m 10 -j 783925,783889 -t=c -F
 ```
 
 ```text
-[root@cranetest-rocky01 zhouhao]# cacct -m 10 -j 783925,783889,783884,106040,106035 -t=c -F
+[root@cranetest-rocky01 zhouhao]# cacct -m 10 -j 783925,783889 -t=c -F
 JOBID   JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
 783925          CPU       ROOT    1.00     Completed 0:0
 783889          CPU       ROOT    1.00     Completed 0:0
-783884          CPU       ROOT    2.00     Completed 0:0
 ```
 
 
