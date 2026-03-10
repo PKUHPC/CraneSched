@@ -4338,8 +4338,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              bsoncxx::array::value{nodename_list_array.view()},
              task_to_ctld.wckey(), using_default_wckey,
              g_config.CraneClusterName,
-              // 45-47
-             req_node_list,exclude_node_list, execution_nodes};
+             // 45-47
+             req_node_list, exclude_node_list, execution_nodes};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4381,7 +4381,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
-  // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster        
+  // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 req_nodes      exclude_nodes execution_nodes
 
   // clang-format off
@@ -4420,42 +4420,44 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string> /*41-44*/
-             std::unordered_set<CranedId>,                         /*45*/
-             std::unordered_set<CranedId>, std::vector<CranedId>>  /*46-47*/
-      values{                                                       // 0-4
-             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->account,
-             // 5-9
-             task->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
-             task->name, env_str, static_cast<int32_t>(task->uid),
-             // 10-14
-             static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-             // 15-19
-             static_cast<int64_t>(task->CachedPriority()), 0,
-             task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
-             // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-             task->SubmitTimeInUnixSecond(), task->cwd,
-             // 25-29
-             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env,
-             // 30-34
-             task->type, task->extra_attr, task->reservation,
-             task->TaskToCtld().exclusive(),
-             task->allocated_res_view.CpuCount(),
-             // 35-39
-             static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             task->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
-             true /* Mark the document having complete job info */,
-             // 40-44
-             task->licenses_count,
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
-             task->using_default_wckey, g_config.CraneClusterName,
-             // 45-47
-            task->included_nodes, task->excluded_nodes,
-             task->executing_craned_ids};
+      std::unordered_set<CranedId>,                                 /*45*/
+      std::unordered_set<CranedId>,
+      std::vector < CranedId >> /*46-47*/
+          values{
+              // 0-4
+              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+              absl::ToUnixSeconds(absl::Now()), false, task->account,
+              // 5-9
+              task->requested_node_res_view.CpuCount(),
+              static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+              task->name, env_str, static_cast<int32_t>(task->uid),
+              // 10-14
+              static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
+              static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+              // 15-19
+              static_cast<int64_t>(task->CachedPriority()), 0,
+              task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+              // 20-24
+              script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+              task->SubmitTimeInUnixSecond(), task->cwd,
+              // 25-29
+              task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+              task->get_user_env,
+              // 30-34
+              task->type, task->extra_attr, task->reservation,
+              task->TaskToCtld().exclusive(),
+              task->allocated_res_view.CpuCount(),
+              // 35-39
+              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
+              task->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+              true /* Mark the document having complete job info */,
+              // 40-44
+              task->licenses_count,
+              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
+              task->using_default_wckey, g_config.CraneClusterName,
+              // 45-47
+              task->included_nodes, task->excluded_nodes,
+              task->executing_craned_ids};
 
   return DocumentConstructor_(fields, values);
 }
