@@ -20,18 +20,17 @@
 
 #include <grpcpp/support/status.h>
 
-#include "absl/strings/ascii.h"
-
 #include "AccountManager.h"
-#include "EmbeddedDbClient.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "EmbeddedDbClient.h"
 #include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
+#include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -682,7 +681,9 @@ grpc::Status CraneCtldServiceImpl::ResetNextTaskId(
 
   if (next_task_id == 0 && next_task_db_id == 0) {
     response->set_ok(false);
-    response->set_reason("At least one of next_task_id or next_task_db_id must be specified (>0)");
+    response->set_reason(
+        "At least one of next_task_id or next_task_db_id must be specified "
+        "(>0)");
     return grpc::Status::OK;
   }
 

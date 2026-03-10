@@ -351,8 +351,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.res_in_use.SetToZero();
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
-    LoadPartitionAclFromConfig_(part_name,
-                                part_meta.partition_global_meta);
+    LoadPartitionAclFromConfig_(part_name, part_meta.partition_global_meta);
 
     CRANE_DEBUG(
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "

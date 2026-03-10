@@ -296,7 +296,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
   return DeleteQos_(actor_name, name);
 }
 
-std::vector<crane::grpc::RichError> AccountManager::PurgeAllAccounts(uint32_t uid) {
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllAccounts(
+    uint32_t uid) {
   std::vector<crane::grpc::RichError> errors;
   std::string actor_name;
 

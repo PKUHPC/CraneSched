@@ -596,8 +596,8 @@ bool EmbeddedDbClient::ResetNextTaskId(task_id_t next_task_id,
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
   if (next_task_id > 0) {
-    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                              s_next_task_id_str_, &next_task_id);
+    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
+                              &next_task_id);
     if (!result) {
       CRANE_ERROR("Failed to reset next_task_id.");
       return false;
@@ -630,8 +630,8 @@ bool EmbeddedDbClient::ResetNextTaskId(task_id_t next_task_id,
     }
 
     crane::grpc::StepNextIdInEmbeddedDb new_step_id_map;
-    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
-                              s_next_step_id_str_, &new_step_id_map);
+    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                              &new_step_id_map);
     if (!result) {
       CRANE_ERROR("Failed to reset next_step_id_map.");
       return false;
@@ -669,8 +669,8 @@ bool EmbeddedDbClient::ResetNextStepDbId() {
   }
 
   crane::grpc::StepNextIdInEmbeddedDb new_step_id_map;
-  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
-                            s_next_step_id_str_, &new_step_id_map);
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                            &new_step_id_map);
   if (!result) {
     CRANE_ERROR("Failed to reset next_step_id_map.");
     return false;
@@ -716,8 +716,8 @@ bool EmbeddedDbClient::PurgeAllTaskHistory() {
 
   // Collect all task data keys from fixed_db (keys ending with 'T')
   std::vector<std::string> fixed_keys;
-  res = m_fixed_db_->IterateAllKv(
-      [&](std::string&& key, std::vector<uint8_t>&&) {
+  res =
+      m_fixed_db_->IterateAllKv([&](std::string&& key, std::vector<uint8_t>&&) {
         fixed_keys.push_back(key);
         return true;
       });

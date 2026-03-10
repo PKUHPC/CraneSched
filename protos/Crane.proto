@@ -1291,7 +1291,7 @@ service CraneCtld {
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
   rpc ResetPartitionAcl(ResetPartitionAclRequest) returns (ResetPartitionAclReply);
-  
+
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
   rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 

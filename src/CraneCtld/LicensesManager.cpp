@@ -575,7 +575,8 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
   return {};
 }
 
-std::vector<crane::grpc::RichError> LicensesManager::PurgeAllLicenseResources() {
+std::vector<crane::grpc::RichError>
+LicensesManager::PurgeAllLicenseResources() {
   std::vector<crane::grpc::RichError> errors;
 
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
@@ -598,9 +599,9 @@ std::vector<crane::grpc::RichError> LicensesManager::PurgeAllLicenseResources() 
         };
 
     if (!g_db_client->CommitTransaction(callback)) {
-      errors.push_back(
-          FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE,
-                        "Failed to delete license resource {}@{}", name, server));
+      errors.push_back(FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE,
+                                     "Failed to delete license resource {}@{}",
+                                     name, server));
       continue;
     }
 
