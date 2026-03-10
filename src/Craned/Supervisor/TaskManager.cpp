@@ -233,11 +233,12 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   if (g_config.EnableSlurmCompatibleEnv) {
     auto total_task_num =
         m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
-    std::vector<int> gtids(total_task_num);
-    std::iota(gtids.begin(), gtids.end(), 0);
     env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(total_task_num));
-    env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
     env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
+    // TODO: Add this after we have real tasks.
+    // std::vector<int> gtids(total_task_num);
+    // std::iota(gtids.begin(), gtids.end(), 0);
+    // env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
   }
 
   return env_map;
