@@ -507,13 +507,15 @@ void ParseConfig(int argc, char** argv) {
               if (gres_node["DeviceFileList"]) {
                 if (!gres_node["DeviceFileList"].IsSequence()) {
                   CRANE_ERROR(
-                      "Illegal gres {}:{} DeviceFileList type. It must be a YAML sequence.",
+                      "Illegal gres {}:{} DeviceFileList type. It must be a "
+                      "YAML sequence.",
                       device_name, device_type);
                   std::exit(1);
                 }
 
                 for (const auto& file_regex :
-                     gres_node["DeviceFileList"].as<std::vector<std::string>>()) {
+                     gres_node["DeviceFileList"]
+                         .as<std::vector<std::string>>()) {
                   std::list<std::string> device_path_list;
                   if (!util::ParseHostList(file_regex, &device_path_list)) {
                     CRANE_ERROR(
@@ -523,7 +525,8 @@ void ParseConfig(int argc, char** argv) {
                   }
                   if (device_path_list.empty()) {
                     CRANE_ERROR(
-                        "Illegal gres {}:{} DeviceFileList entry expands to empty device file list.",
+                        "Illegal gres {}:{} DeviceFileList entry expands to "
+                        "empty device file list.",
                         device_name, device_type);
                     std::exit(1);
                   }

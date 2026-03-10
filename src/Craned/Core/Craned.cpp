@@ -552,12 +552,21 @@ void ParseConfig(int argc, char** argv) {
                       device_name, device_type);
                   std::exit(1);
                 }
+                if (device_path_list.empty()) {
+                  CRANE_ERROR(
+                      "GRES {}:{} DeviceFileRegex expanded to zero paths.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
                 for (const auto& device_path : device_path_list) {
                   devices.push_back(
-                      {device_name, device_type, std::vector{device_path},
-                       !env_injector.empty() ? std::optional(env_injector)
+                      {.name = device_name,
+                       .type = device_type,
+                       .path = std::vector{device_path},
+                       .EnvInjectorStr = !env_injector.empty()
+                                             ? std::optional(env_injector)
                                              : std::nullopt,
-                       std::nullopt});
+                       .CdiName = std::nullopt});
                 }
               }
               if (gres_node["DeviceFileList"] &&
@@ -570,6 +579,13 @@ void ParseConfig(int argc, char** argv) {
                   if (!util::ParseHostList(file_regex, &device_path_list)) {
                     CRANE_ERROR(
                         "Illegal gres {}:{} DeviceFileList path string format.",
+                        device_name, device_type);
+                    std::exit(1);
+                  }
+                  if (device_path_list.empty()) {
+                    CRANE_ERROR(
+                        "GRES {}:{} DeviceFileList entry expanded to zero "
+                        "paths.",
                         device_name, device_type);
                     std::exit(1);
                   }
