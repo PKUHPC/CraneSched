@@ -43,9 +43,9 @@ class TracerManager {
   bool Initialize(const std::string& service_name);
 
 #ifdef CRANE_ENABLE_TEST
-  bool Initialize(const std::string& service_name,
-                  std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>
-                      extra_exporter);
+  bool Initialize(
+      const std::string& service_name,
+      std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter);
 #endif
 
   void Shutdown();
