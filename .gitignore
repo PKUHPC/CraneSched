@@ -5,6 +5,7 @@ build/
 site/
 .cache/
 
+CMakeUserPresets.json
 third_party/*
 
 # Header only

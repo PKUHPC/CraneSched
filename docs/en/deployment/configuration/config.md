@@ -217,11 +217,31 @@ Nodes:
     gres:
       - name: gpu
         type: a100
-        # Regex matching device files
+        # Choose ONE: DeviceFileRegex or DeviceFileList
+        # 1) DeviceFileRegex: each expanded entry corresponds to ONE device
         DeviceFileRegex: /dev/nvidia[0-3]
-        # Additional device files per GPU
-        DeviceFileList:
-          - /dev/dri/renderer[0-3]
+        #
+        # 2) DeviceFileList: must be a YAML sequence; each element corresponds
+        #    to ONE device, and can expand into multiple device files for that device.
+        #    Note: the FIRST expanded path will be used as the device slot id.
+        # DeviceFileList:
+        #   - /dev/accel0,/dev/accel0_ctl
+        #   - /dev/accel1,/dev/accel1_ctl
+        #   - /dev/accel2,/dev/accel2_ctl
+        #   - /dev/accel3,/dev/accel3_ctl
+        #
+        # CDI device name configuration (optional, for device injection in containers):
+        # Choose ONE: DeviceCDIRegex or DeviceCDIList
+        # 1) DeviceCDIRegex: CDI fully qualified names expanded via hostlist syntax.
+        # DeviceCDIRegex: nvidia.com/gpu=GPU[0-3]
+        #
+        # 2) DeviceCDIList: explicit list of CDI fully qualified names, one per device.
+        # DeviceCDIList:
+        #   - nvidia.com/gpu=GPU0
+        #   - nvidia.com/gpu=GPU1
+        #   - nvidia.com/gpu=GPU2
+        #   - nvidia.com/gpu=GPU3
+        #
         # Environment injector for runtime
         EnvInjector: nvidia
 ```
@@ -231,9 +251,20 @@ Nodes:
 - **name**: Generally the resource type such as: `GPU`, `NPU`, etc.
 - **type**: Generally the resource model such as: `A100`, `3090`, etc.
 - **DeviceFileRegex**: The device files under the /dev directory corresponding to the resource, suitable for resources where one physical device corresponds to one device file, **each file corresponds to one Gres resource in the system**, supports Regex format. Common device corresponding device files. Such as Nvidia, AMD, Hygon DCU, Ascend, etc.
-- **DeviceFileList**: Suitable for **Gres resources where one physical device corresponds to multiple device files under the /dev directory**, each group of files corresponds to one Gres resource in the system, supports Regex format.
+- **DeviceFileList**: Suitable for **Gres resources where one physical device corresponds to multiple device files under /dev**.
+  - Type: must be a YAML sequence (list).
+  - Semantics: each element corresponds to ONE Gres device; the element can expand to multiple device file paths for that device.
+  - Note: the system uses the FIRST expanded path as the device slot id; put the primary device node (e.g. `/dev/nvidiaX`) first.
 
-Choose one between DeviceFileRegex and DeviceFileList, the above device files must exist, **otherwise Craned will report an error and exit during startup**
+Choose one between DeviceFileRegex and DeviceFileList. The device files must exist, **otherwise Craned will report an error and exit during startup**.
+
+- **DeviceCDIRegex**: Used for [CDI (Container Device Interface)](https://github.com/cncf-tags/container-device-interface) device injection in container scenarios. Expands CDI Fully Qualified Device Names via hostlist syntax, in the format `vendor/class=device`, e.g., `nvidia.com/gpu=GPU[0-3]`. The number of expanded names **must** equal the number of devices expanded from DeviceFileRegex / DeviceFileList.
+- **DeviceCDIList**: Explicitly list the CDI Fully Qualified Device Name for each device, one list item per device.
+
+Choose one between DeviceCDIRegex and DeviceCDIList. Within the same name:type, **all devices must either all have CDI configured or none at all** — partial configuration is not allowed. Craned will report an error and exit during startup if this constraint is violated. The number of CDI names must match the number of device files one-to-one.
+
+!!! note "When is CDI configuration needed?"
+    CDI configuration is only required when running jobs with the container feature (`ccon`) and needing to access devices inside the container. Non-container jobs (`cbatch`, `crun`) do not need CDI configuration as they access device files directly via cgroups. If the cluster does not use the container feature, or the device vendor already injects devices via runtime hooks (e.g., NVIDIA Container Toolkit), CDI configuration is also not needed.
 
 - **EnvInjector**: Environment variables that the device needs to inject
 
@@ -248,7 +279,7 @@ Choose one between DeviceFileRegex and DeviceFileList, the above device files mu
 | Vendor | Device File Path | EnvInjector |
 | :---------- | :---------------------- | :---------- |
 | Nvidia | /dev/nvidia0 ... | nvidia |
-| AMD/Hygon DCU | /dev/dri/renderer128... | hip |
+| AMD/Hygon DCU | /dev/dri/renderD128... | hip |
 | Ascend | /dev/davinci0 ... | ascend |
 | Iluvatar | /dev/iluvatar0 ... | nvidia |
 

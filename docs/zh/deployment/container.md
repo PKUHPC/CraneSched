@@ -119,6 +119,8 @@ RuntimeApiVersion:  v1
 
 !!! note
     仅在集群节点配置 GPU/NPU 资源时，才需启用此功能。该功能依赖容器运行时和来自硬件厂商的插件支持。
+    
+    除此之外，您也可以使用鹤思的 “容器设备接口” 功能将 GPU/NPU/RDMA 网卡 等各种类型的设备注入容器。
 
 === "NVIDIA GPU"
 
@@ -183,6 +185,78 @@ RuntimeApiVersion:  v1
     参见 [实例配置文件](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico.conf)。
 
     该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
+
+### 容器设备接口
+
+除了上述厂商提供的运行时 Hook 方式，鹤思还支持通过 **容器设备接口（Container Device Interface, CDI）** 标准将设备注入容器。CDI 是一种与厂商无关的设备注入规范，使用 JSON 规范文件（CDI Spec）描述设备及其注入所需的设备节点、挂载和环境变量。特别适用于以下场景：
+
+- RDMA/InfiniBand 等非 GPU 设备
+- 一个物理设备对应多个设备文件节点的场景
+- 需要向容器注入额外挂载或环境变量的设备
+
+容器运行时在创建容器时读取 CDI Spec，按照规范将设备自动注入容器。鹤思在提交容器作业时，会将分配到的设备对应的 CDI 完全限定名称（Fully Qualified Device Name）通过 CRI 接口传递给容器运行时，运行时据此完成设备注入。
+
+#### 启用 CDI 支持
+
+=== "containerd"
+
+    编辑 `/etc/containerd/config.toml`，启用 CDI 并配置 CDI Spec 目录：
+
+    ```toml
+    [plugins.'io.containerd.grpc.v1.cri']
+      enable_cdi = true
+      cdi_spec_dirs = ["/etc/cdi", "/var/run/cdi"]
+    ```
+
+    配置完毕后，重启 containerd 服务：
+
+    ```bash
+    systemctl restart containerd
+    ```
+
+=== "CRI-O"
+
+    CRI-O 自 v1.23 起默认启用 CDI 支持，无需额外配置。CDI Spec 默认搜索 `/etc/cdi` 和 `/var/run/cdi` 目录。
+
+#### 生成 CDI 配置
+
+CDI Spec 文件为 JSON 格式，放置在 `/etc/cdi/` 目录下。不同硬件厂商有不同的生成工具。例如：
+
+| 设备类型 | 生成工具 | 参考文档 |
+|:--------|:--------|:--------|
+| NVIDIA GPU | `nvidia-ctk cdi generate` | [NVIDIA CDI 文档](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
+| RDMA/InfiniBand | `rdma-cdi` 或手动编写 | [RDMA 网卡 CDI 生成工具](https://github.com/Nativu5/rdma-cdi) |
+
+使用工具生成配置后，可使用以下命令验证：
+
+```bash
+# 直接查看 spec 文件目录
+ls /etc/cdi/
+```
+
+#### 配置 GRES 使用 CDI
+
+在 `/etc/crane/config.yaml` 的 Gres 配置中，通过 `DeviceCDIRegex` 或 `DeviceCDIList` 字段为每个设备指定 CDI 完全限定名称。CDI 名称与设备文件（DeviceFileRegex / DeviceFileList）按顺序一一对应。
+
+??? "示例配置"
+    ```yaml
+    Nodes:
+    - name: "node01"
+        cpu: 64
+        memory: 256G
+        gres:
+        - name: rdma
+            type: cx5vf
+            DeviceFileList:
+            - /dev/infiniband/uverbs3,/dev/infiniband/rdma_cm
+            - /dev/infiniband/uverbs4,/dev/infiniband/rdma_cm
+            DeviceCDIList:
+            - rdma/mlx5_3=0000:17:00.2
+            - rdma/mlx5_4=0000:17:00.3
+    ```
+
+完整的 Gres 配置说明请参见 [集群配置 - Gres 配置](./configuration/config.md#gres配置)。
+
 
 ### 高级特性
 

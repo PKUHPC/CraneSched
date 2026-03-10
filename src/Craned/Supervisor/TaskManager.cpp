@@ -1450,6 +1450,14 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
     env->set_value(value);
   }
 
+  // CDI devices injection — read from container_meta populated by craned.
+  if (ca_meta.cdi_devices_size() > 0) {
+    for (const auto& cdi_name : ca_meta.cdi_devices())
+      m_container_config_.add_cdi_devices()->set_name(cdi_name);
+    CRANE_INFO("Injected {} CDI devices into container config for #{}.{}",
+               ca_meta.cdi_devices_size(), job_id, step_id);
+  }
+
   return CraneErrCode::SUCCESS;
 }
 

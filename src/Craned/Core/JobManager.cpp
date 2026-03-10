@@ -25,6 +25,7 @@
 
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
+#include "DeviceManager.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -697,6 +698,29 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
           g_config.JobLifecycleHook.PrologEpilogTimeout);
       job_lifecycle_hook_conf->set_max_output_size(
           g_config.JobLifecycleHook.MaxOutputSize);
+    }
+
+    // Populate CDI devices into container_meta for container tasks.
+    // CDI consistency (all-or-none per name/type) is validated at config
+    // parse time in Craned.cpp, so here we only need to fill the list.
+    if (step->IsContainer() &&
+        init_req.mutable_step_spec()->has_container_meta()) {
+      auto* cm = init_req.mutable_step_spec()->mutable_container_meta();
+      const auto& dedicated_res = step->step_to_d.res().dedicated_res_in_node();
+      for (const auto& [dev_name, type_slots_map] :
+           dedicated_res.name_type_map()) {
+        for (const auto& [dev_type, slots] : type_slots_map.type_slots_map()) {
+          for (const auto& slot_id : slots.slots()) {
+            auto dev_it = Common::g_this_node_device.find(slot_id);
+            if (dev_it != Common::g_this_node_device.end() &&
+                dev_it->second->cdi_name.has_value()) {
+              cm->add_cdi_devices(dev_it->second->cdi_name.value());
+              CRANE_TRACE("[Step #{}.{}] CDI device: {} (slot: {})", job_id,
+                          step_id, dev_it->second->cdi_name.value(), slot_id);
+            }
+          }
+        }
+      }
     }
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);

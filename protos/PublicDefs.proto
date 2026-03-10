@@ -529,6 +529,10 @@ message ContainerTaskAdditionalMeta {
   bool stdin_once = 18;
 
   map<string, string> mounts = 24;
+
+  // CDI fully-qualified names for devices allocated to this container.
+  // Populated by craned at step dispatch time; NOT persisted to database.
+  repeated string cdi_devices = 25;
 }
 
 message TaskInfo {
