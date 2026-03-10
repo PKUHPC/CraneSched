@@ -4460,8 +4460,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-  std::string,std::unordered_set<CranedId>,                         /*45-49*/
-  std::unordered_set<CranedId>, std::vector<CranedId>>                                           /*45-49*/
+             std::string,std::unordered_set<CranedId>,                          /*45-49*/
+             std::unordered_set<CranedId>, std::vector<CranedId>>   /*45-49*/
       values{                                                       // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -4493,8 +4493,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->licenses_count,
              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
              task->using_default_wckey, g_config.CraneClusterName,
-        // 45-49
-        task->submit_hostname,task->included_nodes, task->excluded_nodes,
+             // 45-49
+             task->submit_hostname,task->included_nodes, task->excluded_nodes,
              task->executing_craned_ids};
 
   return DocumentConstructor_(fields, values);
