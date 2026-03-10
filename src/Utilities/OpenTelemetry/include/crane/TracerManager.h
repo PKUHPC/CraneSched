@@ -34,25 +34,19 @@
 #  include "opentelemetry/trace/tracer.h"
 #endif
 
-#ifndef CRANE_ENABLE_TEST
-namespace opentelemetry {
-namespace sdk {
-namespace trace {
-class SpanExporter;
-}  // namespace trace
-}  // namespace sdk
-}  // namespace opentelemetry
-#endif
-
 namespace crane {
 
 class TracerManager {
  public:
   static TracerManager& GetInstance();
 
+  bool Initialize(const std::string& service_name);
+
+#ifdef CRANE_ENABLE_TEST
   bool Initialize(const std::string& service_name,
                   std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>
-                      extra_exporter = nullptr);
+                      extra_exporter);
+#endif
 
   void Shutdown();
 

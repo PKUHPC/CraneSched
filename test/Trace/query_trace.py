@@ -3,12 +3,19 @@ import os
 import argparse
 import sys
 import re
-from datetime import datetime
+
 try:
     from influxdb_client import InfluxDBClient
 except ImportError:
     print("Error: 'influxdb-client' is not installed. Please install it using: pip install influxdb-client")
     sys.exit(1)
+
+
+def positive_int(value):
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(f"Expected a positive integer, got: {value}")
+    return ivalue
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Query traces from InfluxDB for CraneSched")
@@ -27,8 +34,8 @@ def setup_args():
     parser.add_argument("--service", type=str, help="Filter by Service name (e.g. craned, cranectld)")
     
     # Time and Limits
-    parser.add_argument("--minutes", type=int, default=60, help="Look back N minutes (default: 60)")
-    parser.add_argument("--limit", type=int, default=50, help="Max number of spans to return (default: 50)")
+    parser.add_argument("--minutes", type=positive_int, default=60, help="Look back N minutes (default: 60)")
+    parser.add_argument("--limit", type=positive_int, default=50, help="Max number of spans to return (default: 50)")
     
     # Output format
     parser.add_argument("--verbose", "-v", action="store_true", help="Show all attributes")
@@ -43,6 +50,8 @@ def validate_input(val, pattern, name):
 def build_flux_query(args):
     validate_input(args.trace_id, r'^[a-fA-F0-9]+$', "trace-id")
     validate_input(args.service, r'^[a-zA-Z0-9_\-\.]+$', "service")
+    validate_input(args.bucket, r'^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$', "bucket")
+    validate_input(args.org, r'^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$', "org")
 
     # Base query
     query = f'''from(bucket: "{args.bucket}")
@@ -92,58 +101,59 @@ def main():
     print(f"Connecting to {args.url}, Org: {args.org}, Bucket: {args.bucket}")
     
     try:
-        client = InfluxDBClient(url=args.url, token=args.token, org=args.org)
-        query_api = client.query_api()
-        
-        flux_query = build_flux_query(args)
-        # print(f"Executing Query:\n{flux_query}") # Debug
-        
-        tables = query_api.query(flux_query)
-        
-        if not tables:
-            print("No traces found matching the criteria.")
-            return
+        with InfluxDBClient(url=args.url, token=args.token, org=args.org) as client:
+            query_api = client.query_api()
 
-        print(f"\nFound spans (Last {args.minutes} minutes):")
-        print("-" * 100)
-        # Header
-        print(f"{'Time':<25} | {'Service':<10} | {'Operation':<20} | {'Duration (us)':<13} | {'Details'}")
-        print("-" * 100)
+            flux_query = build_flux_query(args)
+            # print(f"Executing Query:\n{flux_query}") # Debug
 
-        for table in tables:
-            for record in table.records:
-                vals = record.values
-                
-                time_str = record.get_time().strftime("%Y-%m-%d %H:%M:%S.%f")
-                service = str(vals.get("service", "-"))
-                name = str(vals.get("name", "-"))
-                duration = vals.get("duration_us", 0)
-                
-                # Construct Details string from key IDs
-                details_parts = []
-                if "job_id" in vals and vals["job_id"] is not None:
-                    details_parts.append(f"Job:{vals['job_id']}")
-                if "step_id" in vals and vals["step_id"] is not None:
-                    details_parts.append(f"Step:{vals['step_id']}")
-                if "task_id" in vals and vals["task_id"] is not None:
-                    details_parts.append(f"Task:{vals['task_id']}")
-                
-                details = ", ".join(details_parts)
-                
-                print(f"{time_str:<25} | {service:<10} | {name:<20} | {str(duration):<13} | {details}")
-                
-                if args.verbose:
-                    # Print all other attributes indented
-                    exclude = ["result", "table", "_start", "_stop", "_time", "_value", "_field", "_measurement", 
-                               "trace_id", "span_id", "name", "duration_us", "service", "job_id", "step_id", "task_id"]
-                    for k, v in vals.items():
-                        if k not in exclude and v is not None:
-                            print(f"    {k}: {v}")
-                    print("") # Space after verbose block
+            tables = query_api.query(flux_query)
+
+            if not tables:
+                print("No traces found matching the criteria.")
+                return
+
+            print(f"\nFound spans (Last {args.minutes} minutes):")
+            print("-" * 100)
+            # Header
+            print(f"{'Time':<25} | {'Service':<10} | {'Operation':<20} | {'Duration (us)':<13} | {'Details'}")
+            print("-" * 100)
+
+            for table in tables:
+                for record in table.records:
+                    vals = record.values
+
+                    time_str = record.get_time().strftime("%Y-%m-%d %H:%M:%S.%f")
+                    service = str(vals.get("service", "-"))
+                    name = str(vals.get("name", "-"))
+                    duration = vals.get("duration_us", 0)
+
+                    # Construct Details string from key IDs
+                    details_parts = []
+                    if "job_id" in vals and vals["job_id"] is not None:
+                        details_parts.append(f"Job:{vals['job_id']}")
+                    if "step_id" in vals and vals["step_id"] is not None:
+                        details_parts.append(f"Step:{vals['step_id']}")
+                    if "task_id" in vals and vals["task_id"] is not None:
+                        details_parts.append(f"Task:{vals['task_id']}")
+
+                    details = ", ".join(details_parts)
+
+                    print(f"{time_str:<25} | {service:<10} | {name:<20} | {str(duration):<13} | {details}")
+
+                    if args.verbose:
+                        # Print all other attributes indented
+                        exclude = ["result", "table", "_start", "_stop", "_time", "_value", "_field", "_measurement",
+                                   "trace_id", "span_id", "name", "duration_us", "service", "job_id", "step_id", "task_id"]
+                        for k, v in vals.items():
+                            if k not in exclude and v is not None:
+                                print(f"    {k}: {v}")
+                        print("") # Space after verbose block
 
     except Exception as e:
         print(f"\nError: {e}")
         print("Please check your InfluxDB connection settings and ensure the service is running.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

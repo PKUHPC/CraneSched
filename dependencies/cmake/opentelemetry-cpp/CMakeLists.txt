@@ -3,7 +3,7 @@ include(FetchContent)
 FetchContent_Declare(
   opentelemetry-cpp
   GIT_REPOSITORY https://github.com/open-telemetry/opentelemetry-cpp.git
-  GIT_TAG v1.16.1
+  GIT_TAG baecbb95bd63df53e0af16e87bc683967962c5f8
 )
 
 set(WITH_OTLP_GRPC OFF CACHE BOOL "" FORCE)
