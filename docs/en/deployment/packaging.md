@@ -163,7 +163,7 @@ The frontend packages contain CLI tools and plugins written in Golang.
 
 To build frontend packages:
 
-1. **Golang 1.22+** - Go programming language
+1. **Golang 1.24+** - Go programming language
 2. **Protoc 30.2+** - Protocol buffer compiler
 3. **GoReleaser v2** - Package generation tool
 

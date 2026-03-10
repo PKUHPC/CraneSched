@@ -505,17 +505,34 @@ void ParseConfig(int argc, char** argv) {
               }
 
               if (gres_node["DeviceFileList"]) {
-                std::list<std::string> device_path_list;
-                if (!util::ParseHostList(gres_node["DeviceFileList"].Scalar(),
-                                         &device_path_list)) {
+                if (!gres_node["DeviceFileList"].IsSequence()) {
                   CRANE_ERROR(
-                      "Illegal gres {}:{} DeviceFileList path string format.",
+                      "Illegal gres {}:{} DeviceFileList type. It must be a "
+                      "YAML sequence.",
                       device_name, device_type);
                   std::exit(1);
                 }
 
-                resourceInNode.name_type_slots_map[device_name][device_type]
-                    .emplace(device_path_list.front());
+                for (const auto& file_regex :
+                     gres_node["DeviceFileList"]
+                         .as<std::vector<std::string>>()) {
+                  std::list<std::string> device_path_list;
+                  if (!util::ParseHostList(file_regex, &device_path_list)) {
+                    CRANE_ERROR(
+                        "Illegal gres {}:{} DeviceFileList path string format.",
+                        device_name, device_type);
+                    std::exit(1);
+                  }
+                  if (device_path_list.empty()) {
+                    CRANE_ERROR(
+                        "Illegal gres {}:{} DeviceFileList entry expands to "
+                        "empty device file list.",
+                        device_name, device_type);
+                    std::exit(1);
+                  }
+                  resourceInNode.name_type_slots_map[device_name][device_type]
+                      .emplace(device_path_list.front());
+                }
               }
             }
           }
@@ -780,6 +797,16 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbName = "crane_db";
 
+      if (config["JobAggregationTimeoutMs"]) {
+        g_config.JobAggregationTimeoutMs =
+            config["JobAggregationTimeoutMs"].as<uint32_t>();
+      }
+
+      if (config["JobAggregationBatchSize"]) {
+        g_config.JobAggregationBatchSize =
+            config["JobAggregationBatchSize"].as<uint32_t>();
+      }
+
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
@@ -876,8 +903,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-  g_task_scheduler.reset();
   g_craned_keeper.reset();
+  // Craned keeper will query running job from scheduler
+  g_task_scheduler.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
@@ -987,6 +1015,13 @@ void InitializeCtldGlobalVariables() {
     g_meta_container->CranedDown(craned_id);
   });
 
+  ok = g_db_client->Init();
+  if (!ok) {
+    CRANE_ERROR("The initialization of MongoDb client failed. Exiting...");
+    DestroyCtldGlobalVariables();
+    std::exit(1);
+  }
+
   using namespace std::chrono_literals;
 
   g_task_scheduler = std::make_unique<TaskScheduler>();
@@ -997,17 +1032,10 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
-
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
-  ok = g_db_client->Init();
-  if (!ok) {
-    CRANE_ERROR("The initialization of MongoDb client failed. Exiting...");
-    DestroyCtldGlobalVariables();
-    std::exit(1);
-  }
-
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  util::SetCurrentThreadName("CraneCtldMain");
 }
 
 void CreateFolders() {

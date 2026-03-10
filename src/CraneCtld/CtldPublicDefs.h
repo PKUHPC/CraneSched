@@ -210,6 +210,9 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
+  uint32_t JobAggregationTimeoutMs{
+      600000};  // Job aggregation timeout (ms, default 10 minutes)
+  uint32_t JobAggregationBatchSize{100};  // Job aggregation batch size
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
@@ -476,6 +479,8 @@ struct ContainerMetaInTask {
   bool stdin_once{false};
 
   std::unordered_map<std::string, std::string> mounts;
+  // CDI device is only meaningful in craned/supervisor.
+  // No need to define it here.
 
  public:
   ContainerMetaInTask() = default;

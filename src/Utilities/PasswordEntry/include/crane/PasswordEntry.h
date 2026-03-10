@@ -37,8 +37,12 @@ extern "C" {
 }
 
 #if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 4
-// For older libsubid versions, map the function names to their legacy
-// equivalents
+// For older libsubid versions (shadow-utils < 4.11), the shared library
+// has undefined references to 'Prog' and 'shadow_logfd' — it expects
+// the calling program to provide them.  The strong definitions are
+// provided by SubidCompat.cpp (compiled into Utility_PasswordEntry).
+//
+// Also map the newer API names to their legacy equivalents.
 #  define subid_free free
 #  define subid_get_uid_ranges get_subuid_ranges
 #  define subid_get_gid_ranges get_subgid_ranges

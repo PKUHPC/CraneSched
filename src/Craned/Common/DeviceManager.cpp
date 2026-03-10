@@ -46,8 +46,12 @@ DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
 BasicDevice::BasicDevice(const std::string& device_name,
                          const std::string& device_type,
                          const std::vector<std::string>& device_path,
-                         DeviceEnvInjectorEnum env_injector)
-    : name(device_name), type(device_type), env_injector(env_injector) {
+                         DeviceEnvInjectorEnum env_injector,
+                         std::optional<std::string> cdi_name)
+    : name(device_name),
+      type(device_type),
+      env_injector(env_injector),
+      cdi_name(std::move(cdi_name)) {
   device_file_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
     device_file_metas.emplace_back(
@@ -64,7 +68,8 @@ bool BasicDevice::Init() {
 }
 
 BasicDevice::operator std::string() const {
-  std::vector<std::string> device_files(device_file_metas.size());
+  std::vector<std::string> device_files;
+  device_files.reserve(device_file_metas.size());
   for (const auto& device_meta : device_file_metas) {
     device_files.push_back(device_meta.path);
   }
@@ -96,9 +101,9 @@ CraneErrCode DeviceManager::GetDeviceFileMajorMinorOpType(
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
     const std::vector<std::string>& device_path,
-    DeviceEnvInjectorEnum env_injector) {
+    DeviceEnvInjectorEnum env_injector, std::optional<std::string> cdi_name) {
   return std::make_unique<BasicDevice>(device_name, device_type, device_path,
-                                       env_injector);
+                                       env_injector, std::move(cdi_name));
 }
 
 std::unordered_map<std::string, std::string>

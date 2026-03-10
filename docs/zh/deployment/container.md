@@ -8,6 +8,9 @@
 
 鹤思通过 CRI 接口与容器运行时交互，支持 **containerd** 和 **CRI-O** 等兼容 CRI 的运行时。
 
+!!! warning "版本要求"
+    容器运行时必须支持 **CRI v1 API**。对于 containerd，要求版本 **≥ 1.7**（推荐 2.0+）。
+
 #### 安装容器运行时
 
 === "containerd（推荐）"
@@ -116,6 +119,8 @@ RuntimeApiVersion:  v1
 
 !!! note
     仅在集群节点配置 GPU/NPU 资源时，才需启用此功能。该功能依赖容器运行时和来自硬件厂商的插件支持。
+    
+    除此之外，您也可以使用鹤思的 “容器设备接口” 功能将 GPU/NPU/RDMA 网卡 等各种类型的设备注入容器。
 
 === "NVIDIA GPU"
 
@@ -140,95 +145,118 @@ RuntimeApiVersion:  v1
 
 鹤思系统通过调用容器网络接口（CNI），实现容器网络隔离与通信。请根据所选容器运行时安装恰当的 CNI 插件。
 
-鹤思提供 Crane Meta CNI 插件，用于灵活地适配现有的 CNI 插件（如 Calico）。目前通过兼容性测试的 CNI 插件有：Calico。
+为了灵活地适配现有的 CNI 插件，鹤思提供了一组 **鹤思 CNI 套件**，目前包括：
 
-#### 鹤思 Meta CNI
+- **Meta CNI**：连接鹤思系统与其他 CNI 插件的桥梁，负责传递作业信息给 CNI 插件。
+- **DNS CNI (dns-register)**：在容器创建时向 CoreDNS 注册容器的 FQDN 和 IP，实现集群内容器通过 hostname 互相访问。
 
-在 CraneSched-FrontEnd 根目录下，执行 make tool 可构建 Meta CNI 插件，编译后的产物在：build/tool/meta-cni。
-Meta CNI 需要经过配置才能正常使用。
+在实际部署中，您可以根据需求选择兼容的第三方 CNI 插件，搭配鹤思 CNI 套件实现容器网络功能。
 
-!!! warning
-    鹤思 Meta CNI 本身不进行网络配置，仅作为桥梁连接鹤思系统与实际的 CNI 插件。不同的集群、不同的 CNI 插件，需要不同的 Meta CNI 配置。
+当前通过兼容性测试的第三方 CNI 插件有：**Calico**。因此，我们推荐您按照以下教程部署 Meta CNI + DNS CNI + Calico 实现鹤思容器网络功能。
 
-示例配置文件位于 tool/meta-cni/config/00-meta.example.conf，请根据实际情况进行编写。
+#### 鹤思 CNI 套件
 
-填写配置文件后，将其放置到 /etc/cni/net.d/ 中（具体位置由容器运行时决定，请保持路径一致）。此目录下可能同时存在多个配置文件，字典序靠前的配置文件优先生效。
+在 CraneSched-FrontEnd 根目录下，执行 `make tool` 可构建鹤思 CNI 套件中的插件，编译后的产物在 `build/tool/` 下。
 
-#### 案例：Calico
+以下是鹤思 CNI 套件中各组件的功能说明：
+
+=== "Meta CNI"
+    鹤思 Meta CNI 本身不进行网络配置，仅作为桥梁连接鹤思系统与实际的 CNI 插件。Meta CNI 是鹤思系统中所有 CNI 的统一入口，其他 CNI 插件由 Meta CNI 负责编排、调用。不同的集群、不同的插件，需要不同的 Meta CNI 配置。
+
+    请参阅 [Meta CNI README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/README.md) 了解完整的配置说明与示例。
+
+=== "DNS CNI"
+    鹤思 DNS CNI 插件（dns-register）负责在容器创建时，将容器的 FQDN 和 IP 注册到 etcd，供 CoreDNS 查询。
+
+    使用 dns-register 前，您需要部署 [CoreDNS + etcd 插件](https://coredns.io/plugins/etcd/)，并确保 CoreDNS Corefile 中的 etcd `path` 设置为 `/coredns`（dns-register 写入记录的前缀）。
+
+    请参阅 [dns-register README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/dns-register/README.md) 了解完整的配置说明。
+
+#### 示例：Calico
 
 !!! warning
     此部分文档尚在完善中，后续将补充更多细节。
 
 **[Calico](https://github.com/projectcalico/calico)** 是一个流行的容器网络插件，支持网络策略和高性能网络通信。鹤思已完成对 Calico 的兼容性测试。
 
-以下是 Meta CNI + Calico + Port Mapping + Bandwidth 配置，请将其写入 `/etc/cni/net.d/00-crane-calico.conf`。如没有更优先的配置文件，该配置将在下一次启动容器时生效。
+以下是 Meta CNI + Calico + dns-register + Port Mapping + Bandwidth 配置，请将其写入 `/etc/cni/net.d/00-crane-calico.conf`。如没有更优先的配置文件，该配置将在下一次启动容器时生效。
 
 ??? "示例配置"
-      ```json
-      {
-      "cniVersion": "1.0.0",
-      "name": "crane-meta",
-      "type": "meta-cni",
-      "logLevel": "debug",
-      "timeoutSeconds": 10,
-      "resultMode": "chained",
-      "runtimeOverride": {
-         "args": [
-            "-K8S_POD_NAMESPACE",
-            "-K8S_POD_NAME",
-            "-K8S_POD_INFRA_CONTAINER_ID",
-            "-K8S_POD_UID"
-         ],
-         "envs": []
-      },
-      "delegates": [
-         {
-            "name": "calico",
-            "conf": {
-            "type": "calico",
-            "log_level": "info",
-            "datastore_type": "etcdv3",
-            "etcd_endpoints": "http://192.168.24.2:2379",
-            "etcd_key_file": "",
-            "etcd_cert_file": "",
-            "etcd_ca_cert_file": "",
-            "ipam": {
-               "type": "calico-ipam"
-            },
-            "policy": {
-               "type": "none"
-            },
-            "container_settings": {
-               "allow_ip_forwarding": true
-            },
-            "capabilities": {
-               "portMappings": true
-            }
-            }
-         },
-         {
-            "name": "portmap",
-            "conf": {
-            "type": "portmap",
-            "snat": true,
-            "capabilities": {
-               "portMappings": true
-            }
-            }
-         },
-         {
-            "name": "bandwidth",
-            "conf": {
-            "type": "bandwidth",
-            "capabilities": {
-               "bandwidth": true
-            }
-            }
-         }
-      ]
-      }
-      ```
+    参见 [实例配置文件](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico.conf)。
+
     该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
+
+### 容器设备接口
+
+除了上述厂商提供的运行时 Hook 方式，鹤思还支持通过 **容器设备接口（Container Device Interface, CDI）** 标准将设备注入容器。CDI 是一种与厂商无关的设备注入规范，使用 JSON 规范文件（CDI Spec）描述设备及其注入所需的设备节点、挂载和环境变量。特别适用于以下场景：
+
+- RDMA/InfiniBand 等非 GPU 设备
+- 一个物理设备对应多个设备文件节点的场景
+- 需要向容器注入额外挂载或环境变量的设备
+
+容器运行时在创建容器时读取 CDI Spec，按照规范将设备自动注入容器。鹤思在提交容器作业时，会将分配到的设备对应的 CDI 完全限定名称（Fully Qualified Device Name）通过 CRI 接口传递给容器运行时，运行时据此完成设备注入。
+
+#### 启用 CDI 支持
+
+=== "containerd"
+
+    编辑 `/etc/containerd/config.toml`，启用 CDI 并配置 CDI Spec 目录：
+
+    ```toml
+    [plugins.'io.containerd.grpc.v1.cri']
+      enable_cdi = true
+      cdi_spec_dirs = ["/etc/cdi", "/var/run/cdi"]
+    ```
+
+    配置完毕后，重启 containerd 服务：
+
+    ```bash
+    systemctl restart containerd
+    ```
+
+=== "CRI-O"
+
+    CRI-O 自 v1.23 起默认启用 CDI 支持，无需额外配置。CDI Spec 默认搜索 `/etc/cdi` 和 `/var/run/cdi` 目录。
+
+#### 生成 CDI 配置
+
+CDI Spec 文件为 JSON 格式，放置在 `/etc/cdi/` 目录下。不同硬件厂商有不同的生成工具。例如：
+
+| 设备类型 | 生成工具 | 参考文档 |
+|:--------|:--------|:--------|
+| NVIDIA GPU | `nvidia-ctk cdi generate` | [NVIDIA CDI 文档](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
+| RDMA/InfiniBand | `rdma-cdi` 或手动编写 | [RDMA 网卡 CDI 生成工具](https://github.com/Nativu5/rdma-cdi) |
+
+使用工具生成配置后，可使用以下命令验证：
+
+```bash
+# 直接查看 spec 文件目录
+ls /etc/cdi/
+```
+
+#### 配置 GRES 使用 CDI
+
+在 `/etc/crane/config.yaml` 的 Gres 配置中，通过 `DeviceCDIRegex` 或 `DeviceCDIList` 字段为每个设备指定 CDI 完全限定名称。CDI 名称与设备文件（DeviceFileRegex / DeviceFileList）按顺序一一对应。
+
+??? "示例配置"
+    ```yaml
+    Nodes:
+    - name: "node01"
+        cpu: 64
+        memory: 256G
+        gres:
+        - name: rdma
+            type: cx5vf
+            DeviceFileList:
+            - /dev/infiniband/uverbs3,/dev/infiniband/rdma_cm
+            - /dev/infiniband/uverbs4,/dev/infiniband/rdma_cm
+            DeviceCDIList:
+            - rdma/mlx5_3=0000:17:00.2
+            - rdma/mlx5_4=0000:17:00.3
+    ```
+
+完整的 Gres 配置说明请参见 [集群配置 - Gres 配置](./configuration/config.md#gres配置)。
+
 
 ### 高级特性
 

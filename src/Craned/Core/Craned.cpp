@@ -508,6 +508,40 @@ void ParseConfig(int argc, char** argv) {
               if (gres_node["EnvInjector"]) {
                 env_injector = gres_node["EnvInjector"].as<std::string>();
               }
+              // Parse CDI names (optional, mutually exclusive)
+              std::vector<std::string> cdi_names;
+              bool has_cdi_regex =
+                  gres_node["DeviceCDIRegex"] &&
+                  !gres_node["DeviceCDIRegex"].Scalar().empty();
+              bool has_cdi_list = gres_node["DeviceCDIList"] &&
+                                  gres_node["DeviceCDIList"].IsSequence();
+              if (has_cdi_regex && has_cdi_list) {
+                CRANE_ERROR(
+                    "GRES {}:{} has both DeviceCDIRegex and DeviceCDIList "
+                    "configured. Only one is allowed.",
+                    device_name, device_type);
+                std::exit(1);
+              }
+              if (has_cdi_regex) {
+                std::list<std::string> cdi_name_list;
+                if (!util::ParseHostList(gres_node["DeviceCDIRegex"].Scalar(),
+                                         &cdi_name_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceCDIRegex string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+                cdi_names.assign(cdi_name_list.begin(), cdi_name_list.end());
+              }
+              if (has_cdi_list) {
+                for (const auto& cdi_entry :
+                     gres_node["DeviceCDIList"]
+                         .as<std::vector<std::string>>()) {
+                  cdi_names.push_back(cdi_entry);
+                }
+              }
+
+              size_t device_count_before = devices.size();
               if (gres_node["DeviceFileRegex"]) {
                 device_file_configured = true;
                 std::list<std::string> device_path_list;
@@ -518,11 +552,21 @@ void ParseConfig(int argc, char** argv) {
                       device_name, device_type);
                   std::exit(1);
                 }
+                if (device_path_list.empty()) {
+                  CRANE_ERROR(
+                      "GRES {}:{} DeviceFileRegex expanded to zero paths.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
                 for (const auto& device_path : device_path_list) {
                   devices.push_back(
-                      {device_name, device_type, std::vector{device_path},
-                       !env_injector.empty() ? std::optional(env_injector)
-                                             : std::nullopt});
+                      {.name = device_name,
+                       .type = device_type,
+                       .path = std::vector{device_path},
+                       .EnvInjectorStr = !env_injector.empty()
+                                             ? std::optional(env_injector)
+                                             : std::nullopt,
+                       .CdiName = std::nullopt});
                 }
               }
               if (gres_node["DeviceFileList"] &&
@@ -538,12 +582,36 @@ void ParseConfig(int argc, char** argv) {
                         device_name, device_type);
                     std::exit(1);
                   }
+                  if (device_path_list.empty()) {
+                    CRANE_ERROR(
+                        "GRES {}:{} DeviceFileList entry expanded to zero "
+                        "paths.",
+                        device_name, device_type);
+                    std::exit(1);
+                  }
                   devices.push_back({device_name, device_type,
                                      std::vector(device_path_list.begin(),
                                                  device_path_list.end()),
                                      !env_injector.empty()
                                          ? std::optional(env_injector)
-                                         : std::nullopt});
+                                         : std::nullopt,
+                                     std::nullopt});
+                }
+              }
+
+              // Assign CDI names to the devices just added (same-index mapping)
+              size_t new_device_count = devices.size() - device_count_before;
+              if (!cdi_names.empty()) {
+                if (cdi_names.size() != new_device_count) {
+                  CRANE_ERROR(
+                      "GRES {}:{} CDI name count ({}) does not match device "
+                      "count ({}). They must be equal.",
+                      device_name, device_type, cdi_names.size(),
+                      new_device_count);
+                  std::exit(1);
+                }
+                for (size_t i = 0; i < cdi_names.size(); ++i) {
+                  devices[device_count_before + i].CdiName = cdi_names[i];
                 }
               }
               if (!device_file_configured) {
@@ -551,6 +619,7 @@ void ParseConfig(int argc, char** argv) {
                     "At least one of DeviceFileRegex or DeviceFileList must be "
                     "configured for GRES {}:{} device.",
                     device_name, device_type);
+                std::exit(1);
               }
             }
           }
@@ -742,18 +811,23 @@ void ParseConfig(int argc, char** argv) {
               const auto& bindfs_config = container_config["BindFs"];
               g_config.Container.BindFs.Enabled =
                   YamlValueOr<bool>(bindfs_config["Enabled"], false);
-              g_config.Container.BindFs.BindfsBinary =
-                  bindfs_config["BindfsBinary"].as<std::string>();
-              g_config.Container.BindFs.FusermountBinary =
-                  bindfs_config["FusermountBinary"].as<std::string>();
-              std::filesystem::path mount_base_dir =
-                  YamlValueOr(bindfs_config["MountBaseDir"],
-                              g_config.Container.BindFs.MountBaseDir.string());
-              if (mount_base_dir.is_relative()) {
-                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+
+              if (g_config.Container.BindFs.Enabled) {
+                g_config.Container.BindFs.BindfsBinary = YamlValueOr(
+                    bindfs_config["BindfsBinary"],
+                    g_config.Container.BindFs.BindfsBinary.string());
+                g_config.Container.BindFs.FusermountBinary = YamlValueOr(
+                    bindfs_config["FusermountBinary"],
+                    g_config.Container.BindFs.FusermountBinary.string());
+                std::filesystem::path mount_base_dir = YamlValueOr(
+                    bindfs_config["MountBaseDir"],
+                    g_config.Container.BindFs.MountBaseDir.string());
+
+                if (mount_base_dir.is_relative())
+                  mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+                g_config.Container.BindFs.MountBaseDir =
+                    std::move(mount_base_dir);
               }
-              g_config.Container.BindFs.MountBaseDir =
-                  std::move(mount_base_dir);
             }
             if (container_config["SubId"]) {
               const auto& subid_config = container_config["SubId"];
@@ -910,7 +984,7 @@ void ParseConfig(int argc, char** argv) {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
-      auto& [name, type, path_vec, env_injector] = dev_arg;
+      auto& [name, type, path_vec, env_injector, cdi_name] = dev_arg;
       auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
@@ -918,8 +992,8 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      std::unique_ptr dev = DeviceManager::ConstructDevice(name, type, path_vec,
-                                                           env_injector_enum);
+      std::unique_ptr dev = DeviceManager::ConstructDevice(
+          name, type, path_vec, env_injector_enum, cdi_name);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
@@ -928,9 +1002,39 @@ void ParseConfig(int argc, char** argv) {
       dev->slot_id = dev->device_file_metas.front().path;
       node_res->dedicated_res.name_type_slots_map[dev->name][dev->type].emplace(
           dev->slot_id);
+
       g_this_node_device[dev->slot_id] = std::move(dev);
     }
     each_node_device.clear();
+
+    // Validate CDI consistency: for each (name, type), either ALL slots
+    // have CDI names or NONE do. Partial CDI is a config error.
+    // key: (name, type) -> {has_cdi_count, missing_cdi_count, example_slot}
+    std::map<std::pair<std::string, std::string>,
+             std::tuple<size_t, size_t, std::string>>
+        cdi_consistency;
+    for (const auto& [slot_id, dev] : g_this_node_device) {
+      auto& [has_cnt, miss_cnt, example] =
+          cdi_consistency[{dev->name, dev->type}];
+      if (dev->cdi_name.has_value()) {
+        ++has_cnt;
+      } else {
+        ++miss_cnt;
+        if (example.empty()) example = slot_id;
+      }
+    }
+    for (const auto& [name_type, counts] : cdi_consistency) {
+      const auto& [has_cnt, miss_cnt, example] = counts;
+      if (has_cnt > 0 && miss_cnt > 0) {
+        CRANE_ERROR(
+            "GRES {}:{} has inconsistent CDI configuration: {} slot(s) have "
+            "CDI names but {} slot(s) do not (e.g. '{}'). "
+            "When CDI is configured for a GRES name/type, ALL devices of "
+            "that name/type must have CDI names.",
+            name_type.first, name_type.second, has_cnt, miss_cnt, example);
+        std::exit(1);
+      }
+    }
   }
 
   uint32_t part_id, node_index;
