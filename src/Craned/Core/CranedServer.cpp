@@ -553,7 +553,7 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     pmix_ports.emplace_back(pmix_port.craned_id(), pmix_port.port());
   }
 
-  CRANE_TRACE("[Step{}.{}] Delivering pmix ports to supervisor", request->job_id(), request->step_id());
+  CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor", request->job_id(), request->step_id(), pmix_ports.size());
   auto stub = g_supervisor_keeper->GetStub(request->job_id(), request->step_id());
   if (!stub) {
     CRANE_ERROR("[Step{}.{}] Failed to get stub", request->job_id(), request->step_id());

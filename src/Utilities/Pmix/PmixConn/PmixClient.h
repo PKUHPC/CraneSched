@@ -62,7 +62,7 @@ class PmixClient {
 
   virtual uint64_t GetChannelCount() const = 0;
 
-  virtual void WaitAllStubReady() = 0;
+  virtual bool WaitAllStubReady() = 0;
 };
 
 }  // namespace pmix
