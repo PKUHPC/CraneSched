@@ -43,10 +43,13 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/TracePluginExporter.h"
 
 using namespace Craned::Common;
 using Craned::g_config;
 using Craned::JobInD;
+
+/* Trace Handle */
 
 CraneErrCode RecoverCgForJobs(
     std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
@@ -1198,6 +1201,17 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+#ifdef CRANE_ENABLE_TEST
+  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
+      []() { return g_plugin_client.get(); },
+      []() { return g_config.Plugin.Enabled; });
+
+  if (crane::TracerManager::GetInstance().Initialize(
+          "Craned", std::move(plugin_exporter))) {
+    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+  }
+#endif
+
   // It is always ok to create thread pool first.
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
@@ -1318,6 +1332,9 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
+#ifdef CRANE_ENABLE_TEST
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();

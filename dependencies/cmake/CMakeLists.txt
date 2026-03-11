@@ -35,6 +35,9 @@ add_subdirectory(fpm)
 add_subdirectory(parallel-hashmap)
 add_subdirectory(libvault)
 add_subdirectory(lua_sol)
+if (CRANE_ENABLE_TRACING)
+    add_subdirectory(opentelemetry-cpp)
+endif ()
 
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
