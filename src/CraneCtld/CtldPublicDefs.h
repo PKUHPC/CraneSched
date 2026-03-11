@@ -832,6 +832,8 @@ struct TaskInCtld {
 
   std::list<std::string> account_chain;
 
+  bool is_prolog_running{false};
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -931,6 +933,8 @@ struct TaskInCtld {
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
+
+  bool PrologComplete() const;
 
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }

@@ -1004,6 +1004,7 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
     RunPrologEpilogArgs args{
         .scripts = g_config.JobLifecycleHook.Prologs,
         .envs = job_env,
+        .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
         .run_uid = 0,
         .run_gid = 0,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
@@ -1014,10 +1015,9 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
       };
     }
 
-    if (g_config.JobLifecycleHook.PrologTimeout > 0)
-      args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-    else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
       args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+
     auto result = util::os::RunPrologOrEpiLog(args);
     if (script_lock) m_prolog_serial_mutex_.Unlock();
     if (!result) {
@@ -1442,12 +1442,11 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         RunPrologEpilogArgs run_epilog_args{
             .scripts = g_config.JobLifecycleHook.Epilogs,
             .envs = env_map,
+            .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
             .run_uid = 0,
             .run_gid = 0,
             .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-        if (g_config.JobLifecycleHook.EpilogTimeout > 0)
-          run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
-        else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
           run_epilog_args.timeout_sec =
               g_config.JobLifecycleHook.PrologEpilogTimeout;
 
