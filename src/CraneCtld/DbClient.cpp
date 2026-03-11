@@ -4373,6 +4373,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  bsoncxx::builder::basic::array nodename_list_array;
+  for (const auto& nodename : task->CranedIds()) {
+    nodename_list_array.append(nodename);
+  }
+
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
