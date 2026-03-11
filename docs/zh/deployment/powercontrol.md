@@ -4,7 +4,7 @@
 
 本指南说明如何在鹤思集群中启用和配置节能模块。
 
-!!! warning "重要注意事项"
+!!! warning "注意事项"
 
     修改 `powerControl.yaml` 后，需要先通过 IPMI 命令将所有处于 sleep / off 状态的节点全部开启，然后再启动 CraneCtld 和 powerControl 插件。否则，这些未注册到 CraneCtld 的节点将无法被 powerControl 插件识别，后续也无法参与调度。主控节点的 cplugind 在启动时需要获取到所有 Craned 的注册信息。
 
@@ -100,7 +100,9 @@ sudo dnf install ipmitool -y   # 安装
 ipmitool -V                     # 验证
 ```
 
-#### 节能数据训练模型
+#### 节能数据模型
+
+节能模块包含一个机器学习模型，用于预估未来一段时间内的节点活跃趋势。模型推理依赖 Python 环境和相关库，需在 CraneCtld 节点部署。
 
 此部分暂未开源，请联系维护团队。
 

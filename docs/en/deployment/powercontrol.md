@@ -100,7 +100,9 @@ sudo dnf install ipmitool -y   # Install
 ipmitool -V                     # Verify
 ```
 
-#### Power Saving Data Training Model
+#### Power Saving Data Model
+
+The power saving module includes a machine learning model for predicting node activity trends over upcoming time periods. Model inference depends on a Python environment and related libraries, and must be deployed on the CraneCtld node.
 
 This part is not yet open source. Please contact the maintenance team.
 
