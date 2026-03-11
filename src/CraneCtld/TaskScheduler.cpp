@@ -1657,7 +1657,7 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       auto iter = m_running_task_map_.find(task_id);
       if (iter == m_running_task_map_.end()) {
         CRANE_TRACE("Task #{} not in Rn queue for suspend", task_id);
-        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
         continue;
       }
 
@@ -1692,7 +1692,8 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
     }
 
     auto handle_failure = [&](CraneErrCode code, const char* failure_reason) {
-      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      CraneErrCode terminate_err =
+          TerminateRunningStep({{task_id, {kDaemonStepId}}});
       if (terminate_err != CraneErrCode::SUCCESS &&
           terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
         CRANE_ERROR("Failed to terminate task #{} after {} failure: {}",
@@ -1835,7 +1836,8 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
     }
 
     auto handle_failure = [&](CraneErrCode code, const char* failure_reason) {
-      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      CraneErrCode terminate_err =
+          TerminateRunningStep({{task_id, {kDaemonStepId}}});
       if (terminate_err != CraneErrCode::SUCCESS &&
           terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
         CRANE_ERROR("Failed to terminate task #{} after {} failure: {}",

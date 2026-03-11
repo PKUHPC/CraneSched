@@ -187,6 +187,66 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t>& task) {
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t>& task) {
+  using crane::grpc::SuspendJobsReply;
+  using crane::grpc::SuspendJobsRequest;
+
+  Status status;
+  SuspendJobsRequest request;
+  SuspendJobsReply reply;
+
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  request.mutable_job_id_list()->Assign(task.begin(), task.end());
+
+  status = m_stub_->SuspendJobs(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("SuspendJobs RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_ERROR("SuspendJobs RPC for Node {} declined: {}", m_craned_id_,
+              reply.reason());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t>& task) {
+  using crane::grpc::ResumeJobsReply;
+  using crane::grpc::ResumeJobsRequest;
+
+  Status status;
+  ResumeJobsRequest request;
+  ResumeJobsReply reply;
+
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  request.mutable_job_id_list()->Assign(task.begin(), task.end());
+
+  status = m_stub_->ResumeJobs(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("ResumeJobs RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_ERROR("ResumeJobs RPC for Node {} declined: {}", m_craned_id_,
+              reply.reason());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
 CraneErrCode CranedStub::AllocSteps(
     const std::vector<crane::grpc::StepToD>& steps) {
   using crane::grpc::AllocStepsReply;
@@ -824,7 +884,7 @@ void CranedKeeper::ConnectCranedNode_(const CranedId& craned_id,
 
   craned->m_craned_id_ = craned_id;
   craned->SetRegToken(token);
-  craned->m_clean_up_cb_ = CranedChannelConnectFail_;
+  craned->m_clean_up_cb_ = CranedChannelConnFailNoLock_;
 
   CqTag* tag = m_tag_sync_allocator_->new_object<CqTag>(
       CqTag{CqTag::kInitializingCraned, craned});

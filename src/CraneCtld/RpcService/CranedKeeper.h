@@ -75,6 +75,10 @@ class CranedStub {
 
   CraneErrCode FreeJobs(const std::vector<task_id_t>& task);
 
+  CraneErrCode SuspendJobs(const std::vector<task_id_t>& task);
+
+  CraneErrCode ResumeJobs(const std::vector<task_id_t>& task);
+
   CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD>& steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
@@ -195,8 +199,6 @@ class CranedKeeper {
 
   // Remove stub from unavail/connecting set. Must be called with
   // `m_connect_craned_mtx_` held.
-  static void CranedChannelConnFailNoLock_(CranedStub* stub);
-
   static void CranedChannelConnFailNoLock_(CranedStub* stub);
 
   void ConnectCranedNode_(const CranedId& craned_id, const RegToken& token);
