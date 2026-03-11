@@ -4699,6 +4699,12 @@ bool MongodbClient::Init() {
     return false;
   }
 
+  // Check and migrate database schema before any data operations
+  if (!CheckAndMigrateDbSchema_()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Database schema migration failed!");
+    return false;
+  }
+
   // Recover missing aggregations on startup
   if (m_job_summary_enabled_) {
     try {
@@ -4747,5 +4753,230 @@ MongodbClient::MongodbClient() {
 }
 
 MongodbClient::~MongodbClient() { m_thread_stop_ = true; }
+
+// ======================== Database Schema Migration ========================
+
+int MongodbClient::GetDbSchemaVersion_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+    auto result =
+        (*client)[m_db_name_][m_metadata_collection_name_].find_one(
+            make_document(kvp("_id", "db_schema_version")));
+
+    if (result) {
+      auto view = result->view();
+      return ViewGetArithmeticValue_<int32_t>(view["version"]);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_WARN(m_logger_,
+                      "Failed to read db schema version: {}", e.what());
+  }
+  return 0;
+}
+
+void MongodbClient::SetDbSchemaVersion_(int version) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+    (*client)[m_db_name_][m_metadata_collection_name_].update_one(
+        make_document(kvp("_id", "db_schema_version")),
+        make_document(kvp(
+            "$set", make_document(kvp("version", version),
+                                  kvp("updated_at",
+                                      bsoncxx::types::b_date{
+                                          std::chrono::system_clock::now()})))),
+        mongocxx::options::update{}.upsert(true));
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Failed to set db schema version: {}", e.what());
+  }
+}
+
+bool MongodbClient::BackupTaskTable_(int from_version) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  std::string backup_name =
+      fmt::format("task_table_backup_v{}", from_version);
+
+  try {
+    auto client = GetClient_();
+
+    // Check if backup collection already exists (idempotent)
+    auto cursor =
+        (*client)[m_db_name_].list_collections(
+            make_document(kvp("name", backup_name)));
+    if (cursor.begin() != cursor.end()) {
+      CRANE_LOGGER_WARN(m_logger_,
+                        "Backup collection '{}' already exists, "
+                        "skipping backup.",
+                        backup_name);
+      return true;
+    }
+
+    // Use aggregation $out to copy task_table to backup collection
+    mongocxx::pipeline pipeline;
+    pipeline.out(backup_name);
+
+    (*client)[m_db_name_][m_task_collection_name_].aggregate(pipeline);
+
+    CRANE_LOGGER_INFO(m_logger_,
+                      "Backed up task_table to '{}'.",
+                      backup_name);
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Failed to backup task_table: {}", e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::MigrateV0ToV1_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+  using bsoncxx::builder::basic::make_array;
+
+  CRANE_LOGGER_INFO(m_logger_,
+                    "Migrating task_table schema v0 -> v1: "
+                    "adding missing fields for all records...");
+
+  try {
+    auto client = GetClient_();
+    auto collection =
+        (*client)[m_db_name_][m_task_collection_name_];
+
+    // Use aggregation pipeline update to set all missing fields at once.
+    // $ifNull preserves existing values, only setting defaults for missing
+    // fields, making this operation idempotent.
+    mongocxx::pipeline pipeline;
+    pipeline.add_fields(make_document(
+        kvp("has_job_info",
+            make_document(
+                kvp("$ifNull", make_array("$has_job_info", true)))),
+        kvp("exclusive",
+            make_document(
+                kvp("$ifNull", make_array("$exclusive", false)))),
+        kvp("cpus_alloc",
+            make_document(
+                kvp("$ifNull", make_array("$cpus_alloc", "$cpus_req")))),
+        kvp("mem_alloc",
+            make_document(
+                kvp("$ifNull", make_array("$mem_alloc", "$mem_req")))),
+        kvp("device_map",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$device_map", make_document())))),
+        kvp("nodename_list",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$nodename_list", make_array())))),
+        kvp("wckey",
+            make_document(
+                kvp("$ifNull", make_array("$wckey", "")))),
+        kvp("using_default_wckey",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$using_default_wckey", false)))),
+        kvp("licenses_alloc",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$licenses_alloc", make_document())))),
+        kvp("cluster",
+            make_document(
+                kvp("$ifNull", make_array("$cluster", ""))))));
+
+    // $merge back into the same collection (upsert on _id)
+    pipeline.merge(make_document(
+        kvp("into", m_task_collection_name_),
+        kvp("whenMatched", "merge")));
+
+    collection.aggregate(pipeline);
+
+    CRANE_LOGGER_INFO(m_logger_,
+                      "Schema migration v0 -> v1 completed.");
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Schema migration v0 -> v1 failed: {}",
+                       e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::CheckAndMigrateDbSchema_() {
+  int current = GetDbSchemaVersion_();
+
+  if (current == kCurrentDbSchemaVersion) {
+    CRANE_LOGGER_DEBUG(m_logger_,
+                       "Database schema version {} is up to date.",
+                       current);
+    return true;
+  }
+
+  if (current > kCurrentDbSchemaVersion) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "Database schema version {} is newer than the supported "
+        "version {}. Please upgrade CraneCtld.",
+        current, kCurrentDbSchemaVersion);
+    return false;
+  }
+
+  if (current < kCurrentDbSchemaVersion - 1) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "Database schema version {} is too old. Only migration from "
+        "version {} is supported. Please migrate manually.",
+        current, kCurrentDbSchemaVersion - 1);
+    return false;
+  }
+
+  CRANE_LOGGER_INFO(m_logger_,
+                    "Database schema version {} detected, "
+                    "migrating to version {}...",
+                    current, kCurrentDbSchemaVersion);
+
+  // Execute migration chain
+  for (int v = current; v < kCurrentDbSchemaVersion; ++v) {
+    if (!BackupTaskTable_(v)) {
+      CRANE_LOGGER_ERROR(m_logger_,
+                         "Failed to backup task_table before "
+                         "migration v{} -> v{}. Aborting.",
+                         v, v + 1);
+      return false;
+    }
+
+    bool ok = false;
+    switch (v) {
+      case 0:
+        ok = MigrateV0ToV1_();
+        break;
+      default:
+        CRANE_LOGGER_ERROR(m_logger_,
+                           "No migration path from v{} to v{}.",
+                           v, v + 1);
+        return false;
+    }
+
+    if (!ok) {
+      CRANE_LOGGER_ERROR(m_logger_,
+                         "Migration v{} -> v{} failed. "
+                         "Backup is in 'task_table_backup_v{}'.",
+                         v, v + 1, v);
+      return false;
+    }
+
+    SetDbSchemaVersion_(v + 1);
+    CRANE_LOGGER_INFO(m_logger_,
+                      "Migrated db schema v{} -> v{}.", v, v + 1);
+  }
+
+  return true;
+}
 
 }  // namespace Ctld
