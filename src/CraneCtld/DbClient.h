@@ -52,6 +52,14 @@ struct BsonFieldTrait<bool> {
 };
 
 template <>
+struct BsonFieldTrait<double> {
+  static double get(const bsoncxx::document::element& ele) {
+    return ele.get_double().value;
+  }
+  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_double;
+};
+
+template <>
 struct BsonFieldTrait<std::string> {
   static std::string get(const bsoncxx::document::element& ele) {
     return std::string(ele.get_string().value);
