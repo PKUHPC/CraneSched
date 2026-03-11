@@ -4886,6 +4886,13 @@ bool MongodbClient::InitTableIndexes() {
 }
 
 bool MongodbClient::Init() {
+  // Migrate schema first — migration renames collections, so indexes
+  // created beforehand would end up on the backup table.
+  if (!CheckAndMigrateDbSchema_()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Database schema migration failed!");
+    return false;
+  }
+
   if (!InitTableIndexes()) {
     CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
     return false;
@@ -4939,5 +4946,450 @@ MongodbClient::MongodbClient() {
 }
 
 MongodbClient::~MongodbClient() { m_thread_stop_ = true; }
+
+// ======================== Database Schema Migration ========================
+
+std::optional<int> MongodbClient::GetDbSchemaVersion_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+    auto result = (*client)[m_db_name_][m_metadata_collection_name_].find_one(
+        make_document(kvp("_id", "db_schema_version")));
+
+    if (result) {
+      auto view = result->view();
+      return ViewGetArithmeticValue_<int32_t>(view["version"]);
+    }
+    return 0;  // No document exists — genuine fresh install (v0)
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Failed to read db schema version: {}",
+                       e.what());
+    return std::nullopt;
+  }
+}
+
+bool MongodbClient::SetDbSchemaVersion_(int version) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+    (*client)[m_db_name_][m_metadata_collection_name_].update_one(
+        make_document(kvp("_id", "db_schema_version")),
+        make_document(kvp(
+            "$set", make_document(kvp("version", version),
+                                  kvp("updated_at",
+                                      bsoncxx::types::b_date{
+                                          std::chrono::system_clock::now()})))),
+        mongocxx::options::update{}.upsert(true));
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Failed to set db schema version: {}",
+                       e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::CopyTaskTableForMigration_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+
+    // Drop existing temp collection to ensure clean state
+    auto cursor = (*client)[m_db_name_].list_collections(
+        make_document(kvp("name", m_migration_temp_collection_name_)));
+    if (cursor.begin() != cursor.end()) {
+      CRANE_LOGGER_WARN(m_logger_,
+                        "Temp collection '{}' already exists, "
+                        "dropping it first.",
+                        m_migration_temp_collection_name_);
+      (*client)[m_db_name_][m_migration_temp_collection_name_].drop();
+    }
+
+    // Use aggregation $out to copy task_table to temp collection
+    mongocxx::pipeline pipeline;
+    pipeline.out(m_migration_temp_collection_name_);
+
+    (*client)[m_db_name_][m_task_collection_name_].aggregate(pipeline);
+
+    CRANE_LOGGER_INFO(m_logger_, "Copied task_table to '{}' for migration.",
+                      m_migration_temp_collection_name_);
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Failed to copy task_table for migration: {}",
+                       e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::SwapMigratedTaskTable_(int from_version, int to_version) {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  std::string backup_name = fmt::format("task_table_backup_v{}", from_version);
+
+  try {
+    auto client = GetClient_();
+    auto admin_db = (*client)["admin"];
+
+    // Check if backup already exists — indicates a previous swap succeeded
+    // but the version bump failed. Skip renames and just set the version.
+    auto cursor = (*client)[m_db_name_].list_collections(
+        make_document(kvp("name", backup_name)));
+    bool backup_exists = cursor.begin() != cursor.end();
+
+    if (backup_exists) {
+      CRANE_LOGGER_WARN(
+          m_logger_,
+          "Backup collection '{}' already exists. A previous migration "
+          "likely completed but the version was not persisted. "
+          "Skipping renames.",
+          backup_name);
+      CleanupMigrationTemp_();
+    } else {
+      std::string src_ns =
+          fmt::format("{}.{}", m_db_name_, m_task_collection_name_);
+      std::string backup_ns = fmt::format("{}.{}", m_db_name_, backup_name);
+      std::string temp_ns =
+          fmt::format("{}.{}", m_db_name_, m_migration_temp_collection_name_);
+
+      // Step 1: Rename task_table -> task_table_backup_vN
+      //
+      // After this point, if step 2 fails and rollback also fails (or the
+      // process crashes), task_table will be missing. This is recovered on
+      // next startup by RecoverInterruptedMigration_() (scenario A), which
+      // renames backup_vN back to task_table.
+      admin_db.run_command(
+          make_document(kvp("renameCollection", src_ns), kvp("to", backup_ns)));
+
+      CRANE_LOGGER_INFO(m_logger_, "Renamed '{}' to '{}'.",
+                        m_task_collection_name_, backup_name);
+
+      // Step 2: Rename task_table_migrating -> task_table
+      try {
+        admin_db.run_command(
+            make_document(kvp("renameCollection", temp_ns), kvp("to", src_ns)));
+      } catch (const std::exception& e) {
+        // Best-effort rollback: rename backup back to task_table.
+        // If this rollback also fails, RecoverInterruptedMigration_()
+        // will handle it on the next startup.
+        CRANE_LOGGER_ERROR(m_logger_,
+                           "Failed to rename '{}' to '{}': {}. "
+                           "Rolling back...",
+                           m_migration_temp_collection_name_,
+                           m_task_collection_name_, e.what());
+        admin_db.run_command(make_document(kvp("renameCollection", backup_ns),
+                                           kvp("to", src_ns)));
+        return false;
+      }
+
+      CRANE_LOGGER_INFO(m_logger_,
+                        "Swapped migrated data into '{}'. "
+                        "Backup is in '{}'.",
+                        m_task_collection_name_, backup_name);
+    }
+
+    // Persist the version immediately after swap to minimize the
+    // inconsistency window (renameCollection cannot join a transaction).
+    // If this fails, the data is already migrated but the version is
+    // stale. RecoverInterruptedMigration_() (scenario B) will detect
+    // the backup collection on next startup and set the version without
+    // re-running the migration.
+    if (!SetDbSchemaVersion_(to_version)) {
+      CRANE_LOGGER_ERROR(m_logger_,
+                         "Failed to persist schema version {} after swap.",
+                         to_version);
+      return false;
+    }
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Failed to swap migrated task_table: {}",
+                       e.what());
+    return false;
+  }
+}
+
+void MongodbClient::CleanupMigrationTemp_() {
+  try {
+    auto client = GetClient_();
+    (*client)[m_db_name_][m_migration_temp_collection_name_].drop();
+    CRANE_LOGGER_DEBUG(m_logger_, "Cleaned up temp collection '{}'.",
+                       m_migration_temp_collection_name_);
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_WARN(m_logger_, "Failed to clean up temp collection '{}': {}",
+                      m_migration_temp_collection_name_, e.what());
+  }
+}
+
+bool MongodbClient::MigrateV0ToV1_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  CRANE_LOGGER_INFO(m_logger_,
+                    "Migrating task_table schema v0 -> v1: "
+                    "backfilling fields [has_job_info(=true), "
+                    "exclusive(=false), cpus_alloc(=cpus_req), "
+                    "mem_alloc(=mem_req), device_map(={{}}), "
+                    "nodename_list(=[]), wckey(=\"\"), "
+                    "using_default_wckey(=false), "
+                    "licenses_alloc(={{}}), cluster(=\"\")]...");
+
+  try {
+    auto client = GetClient_();
+    auto collection = (*client)[m_db_name_][m_migration_temp_collection_name_];
+
+    // Use aggregation pipeline update to set all missing fields at once.
+    // $ifNull preserves existing values, only setting defaults for missing
+    // fields, making this operation idempotent.
+    mongocxx::pipeline pipeline;
+    pipeline.add_fields(make_document(
+        kvp("has_job_info",
+            make_document(kvp("$ifNull", make_array("$has_job_info", true)))),
+        kvp("exclusive",
+            make_document(kvp("$ifNull", make_array("$exclusive", false)))),
+        kvp("cpus_alloc",
+            make_document(
+                kvp("$ifNull", make_array("$cpus_alloc", "$cpus_req")))),
+        kvp("mem_alloc", make_document(kvp(
+                             "$ifNull", make_array("$mem_alloc", "$mem_req")))),
+        kvp("device_map",
+            make_document(
+                kvp("$ifNull", make_array("$device_map", make_document())))),
+        kvp("nodename_list",
+            make_document(
+                kvp("$ifNull", make_array("$nodename_list", make_array())))),
+        kvp("wckey", make_document(kvp("$ifNull", make_array("$wckey", "")))),
+        kvp("using_default_wckey",
+            make_document(
+                kvp("$ifNull", make_array("$using_default_wckey", false)))),
+        kvp("licenses_alloc",
+            make_document(kvp("$ifNull",
+                              make_array("$licenses_alloc", make_document())))),
+        kvp("cluster",
+            make_document(kvp("$ifNull", make_array("$cluster", ""))))));
+
+    // $merge back into the temp collection (upsert on _id)
+    pipeline.merge(make_document(kvp("into", m_migration_temp_collection_name_),
+                                 kvp("whenMatched", "merge")));
+    mongocxx::options::aggregate opt;
+    opt.allow_disk_use(true);
+    collection.aggregate(pipeline, opt);
+
+    CRANE_LOGGER_INFO(m_logger_, "Schema migration v0 -> v1 completed.");
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Schema migration v0 -> v1 failed: {}",
+                       e.what());
+    return false;
+  }
+}
+
+// Detect and recover from interrupted migration on startup.
+//
+// SwapMigratedTaskTable_ performs two non-atomic renameCollection calls:
+//   Step 1: task_table -> task_table_backup_v{N}
+//   Step 2: task_table_migrating -> task_table
+//
+// Two failure scenarios can leave the database in an inconsistent state:
+//
+//   Scenario A (swap interrupted): Step 1 succeeded but step 2 failed
+//   and rollback also failed (or the process crashed between the two
+//   renames). Result: task_table is gone, only backup_v{N} remains.
+//   Recovery: rename backup back to task_table, then let the caller
+//   re-run migration from scratch.
+//
+//   Scenario B (version not persisted): Both renames succeeded but
+//   SetDbSchemaVersion_ failed. Result: task_table has migrated data,
+//   backup_v{N} still exists, version is stale.
+//   Recovery: set version to kCurrentDbSchemaVersion directly — the
+//   data is already migrated, no need to redo the migration.
+//
+// This function uses list_collections with a regex to find backup
+// collections, so it does not depend on the (potentially stale) schema
+// version stored in the metadata table.
+bool MongodbClient::RecoverInterruptedMigration_() {
+  using bsoncxx::builder::basic::kvp;
+  using bsoncxx::builder::basic::make_document;
+
+  try {
+    auto client = GetClient_();
+    auto db = (*client)[m_db_name_];
+
+    auto task_cursor = db.list_collections(
+        make_document(kvp("name", m_task_collection_name_)));
+    bool task_table_exists = task_cursor.begin() != task_cursor.end();
+
+    // Find any task_table_backup_v* collection left by a previous swap.
+    auto backup_cursor = db.list_collections(make_document(kvp(
+        "name",
+        make_document(kvp("$regex", "^task_table_backup_v\\\\d+$")))));
+    std::string backup_name;
+    auto it = backup_cursor.begin();
+    if (it != backup_cursor.end()) {
+      backup_name = std::string{(*it)["name"].get_string().value};
+    }
+
+    // No backup collection found — either a clean state or a fresh
+    // cluster. Nothing to recover.
+    if (backup_name.empty()) return true;
+
+    if (task_table_exists) {
+      // Scenario B: swap completed (both renames succeeded) but the
+      // schema version was not persisted. The data in task_table is
+      // already migrated. Just persist the version and clean up.
+      CRANE_LOGGER_WARN(
+          m_logger_,
+          "Detected completed migration with unpersisted version. "
+          "Backup '{}' exists alongside task_table. "
+          "Setting schema version to {}.",
+          backup_name, kCurrentDbSchemaVersion);
+      CleanupMigrationTemp_();
+      return SetDbSchemaVersion_(kCurrentDbSchemaVersion);
+    }
+
+    // Scenario A: swap was interrupted — task_table was renamed to
+    // backup but the migrating collection was never renamed back.
+    // Restore the backup to task_table so migration can be retried.
+    CRANE_LOGGER_WARN(m_logger_,
+                      "Detected interrupted migration: '{}' missing, "
+                      "restoring from '{}'.",
+                      m_task_collection_name_, backup_name);
+    auto admin_db = (*client)["admin"];
+    std::string backup_ns = fmt::format("{}.{}", m_db_name_, backup_name);
+    std::string src_ns =
+        fmt::format("{}.{}", m_db_name_, m_task_collection_name_);
+    admin_db.run_command(
+        make_document(kvp("renameCollection", backup_ns), kvp("to", src_ns)));
+    CRANE_LOGGER_INFO(m_logger_, "Restored '{}' from '{}'.",
+                      m_task_collection_name_, backup_name);
+    CleanupMigrationTemp_();
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "Failed to recover from interrupted migration: {}", e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::CheckAndMigrateDbSchema_() {
+  // Recover from any interrupted migration before reading the version,
+  // because the version may be stale if a previous swap completed but
+  // the version was not persisted.
+  if (!RecoverInterruptedMigration_()) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Failed to recover from interrupted migration.");
+    return false;
+  }
+
+  auto version_opt = GetDbSchemaVersion_();
+  if (!version_opt) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "Cannot read database schema version. Aborting initialization.");
+    return false;
+  }
+  int current = *version_opt;
+
+  if (current == kCurrentDbSchemaVersion) {
+    CRANE_LOGGER_DEBUG(m_logger_, "Database schema version {} is up to date.",
+                       current);
+    return true;
+  }
+
+  if (current > kCurrentDbSchemaVersion) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Database schema version {} is newer than the supported "
+                       "version {}. Please upgrade CraneCtld.",
+                       current, kCurrentDbSchemaVersion);
+    return false;
+  }
+
+  if (current < kCurrentDbSchemaVersion - 1) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "Database schema version {} is too old. Only migration from "
+        "version {} is supported. Please migrate manually.",
+        current, kCurrentDbSchemaVersion - 1);
+    return false;
+  }
+
+  CRANE_LOGGER_INFO(m_logger_,
+                    "Database schema version {} detected, "
+                    "migrating to version {}...",
+                    current, kCurrentDbSchemaVersion);
+
+  // If task_table is empty, skip the copy-migrate-swap process entirely.
+  // MongoDB's $out does not create the target collection when the source
+  // has zero documents, which would cause the swap step to fail.
+  {
+    auto client = GetClient_();
+    if (!(*client)[m_db_name_][m_task_collection_name_].find_one({})) {
+      CRANE_LOGGER_INFO(m_logger_,
+                        "task_table is empty, skipping migration "
+                        "and setting schema version to {}.",
+                        kCurrentDbSchemaVersion);
+      if (!SetDbSchemaVersion_(kCurrentDbSchemaVersion)) return false;
+      return true;
+    }
+  }
+
+  // Copy-migrate-swap strategy:
+  // 1. Copy task_table to temp collection (once)
+  // 2. Run all migration steps on temp collection
+  // 3. Swap temp with original + persist version (once)
+  // Original data is never modified until swap succeeds.
+
+  // Step 1: Copy task_table to temp collection
+  if (!CopyTaskTableForMigration_()) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Failed to copy task_table for migration. Aborting.");
+    return false;
+  }
+
+  // Step 2: Run all migration steps on temp collection
+  for (int v = current; v < kCurrentDbSchemaVersion; ++v) {
+    bool ok = false;
+    switch (v) {
+    case 0:
+      ok = MigrateV0ToV1_();
+      break;
+    default:
+      CRANE_LOGGER_ERROR(m_logger_, "No migration path from v{} to v{}.", v,
+                         v + 1);
+      CleanupMigrationTemp_();
+      return false;
+    }
+
+    if (!ok) {
+      CRANE_LOGGER_ERROR(m_logger_,
+                         "Migration v{} -> v{} failed. "
+                         "Original task_table is unchanged.",
+                         v, v + 1);
+      CleanupMigrationTemp_();
+      return false;
+    }
+  }
+
+  // Step 3: Swap temp collection with original + persist version
+  if (!SwapMigratedTaskTable_(current, kCurrentDbSchemaVersion)) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Failed to swap migrated data for "
+                       "v{} -> v{}. Original task_table "
+                       "is unchanged.",
+                       current, kCurrentDbSchemaVersion);
+    CleanupMigrationTemp_();
+    return false;
+  }
+
+  CRANE_LOGGER_INFO(m_logger_, "Migrated db schema v{} -> v{}.", current,
+                    kCurrentDbSchemaVersion);
+  return true;
+}
 
 }  // namespace Ctld

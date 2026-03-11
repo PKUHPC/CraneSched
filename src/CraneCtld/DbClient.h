@@ -229,6 +229,17 @@ class MongodbClient {
                                       bool month_done);
   void RecoverExistingClusterAggregations_();
 
+  // Database schema migration
+  static constexpr int kCurrentDbSchemaVersion = 1;
+  bool CheckAndMigrateDbSchema_();
+  bool RecoverInterruptedMigration_();
+  std::optional<int> GetDbSchemaVersion_();
+  bool SetDbSchemaVersion_(int version);
+  bool CopyTaskTableForMigration_();
+  bool SwapMigratedTaskTable_(int from_version, int to_version);
+  void CleanupMigrationTemp_();
+  bool MigrateV0ToV1_();
+
   /* ----- Method of operating the account table ----------- */
  public:
   bool InsertUser(const User& new_user);
@@ -661,6 +672,8 @@ class MongodbClient {
   const std::string m_license_resource_collection_name_{
       "license_resource_table"};
 
+  const std::string m_migration_temp_collection_name_{"task_table_migrating"};
+  const std::string m_metadata_collection_name_{"metadata_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
   const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
   const std::string m_acc_usage_day_collection_name_{"acc_usage_day_table"};
