@@ -686,59 +686,83 @@ void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
 }
 
 bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
-  DeviceMap tmp = *device_map;
-
   std::vector<std::string> items = absl::StrSplit(s, ":");
   std::string key = items[0];
   if (items.size() == 2) {
-    uint64_t value;
-    if (items[1] == "-1") {
-      value = UINT64_MAX;
-    } else {
-      try {
-        value = std::stoull(items[1]);
-      } catch (const std::exception &e) {
-        return false;
+    if (items[1] == "unlimited") {
+      auto iter = device_map->find(key);
+      if (iter != device_map->end()) {        
+        if (iter->second.second.empty()) {
+          device_map->erase(key);
+        } else {
+          iter->second.first = UINT32_MAX;
+        }
       }
+      return true;
     }
-    auto iter = tmp.find(key);
-    if (iter != tmp.end()) {
+    uint64_t value;
+    try {
+      value = std::stoull(items[1]);
+    } catch (const std::exception &e) {
+      return false;
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
       iter->second.first = value;
     } else {
-      tmp.insert_or_assign(
+      device_map->insert_or_assign(
           key,
           std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
     }
   } else if (items.size() == 3) {
     std::string type = items[1];
-    uint64_t value;
-    if (items[2] == "-1") {
-      value = UINT64_MAX;
-    } else {
-      try {
-        value = std::stoull(items[2]);
-      } catch (const std::exception &e) {
-        return false;
+    if (items[2] == "unlimited") {
+      auto iter = device_map->find(key);
+      if (iter != device_map->end()) {
+        if (iter->second.second.contains(type)) {
+          iter->second.second.erase(type);
+        }
+        if (iter->second.second.empty()) {
+          device_map->erase(key);
+        }
       }
+      return true;
     }
-    auto iter = tmp.find(key);
-    if (iter != tmp.end()) {
+    uint64_t value;
+    try {
+      value = std::stoull(items[2]);
+    } catch (const std::exception &e) {
+      CRANE_ERROR("Failed to parse device map string: {}", s);
+      return false;
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
       iter->second.second.insert_or_assign(type, value);
     } else {
-      tmp.insert_or_assign(
+      device_map->insert_or_assign(
           key, std::make_pair(
-                   UINT64_MAX,
+                   UINT32_MAX,
                    std::unordered_map<std::string, uint64_t>{{type, value}}));
     }
   } else {
+    CRANE_ERROR("Failed to parse device map string: {}", s);
     return false;
   }
-  *device_map = std::move(tmp);
 
   return true;
 }
 
 bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
+
+  if (s.empty()) {
+    res->GetAllocatableRes().cpu_count =
+                static_cast<cpu_t>(INT32_MAX / 256);
+    res->GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+    res->GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
+    res->GetDeviceMap().clear();
+    return true;
+  }
+
   ResourceView tmp = *res;
   std::vector<std::string> items = absl::StrSplit(s, ",");
   for (const auto &item : items) {
@@ -749,7 +773,7 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
       std::vector<std::string> kv = absl::StrSplit(item, ":");
       if (kv.size() == 2) {
         if (kv[0] == "cpu") {
-          if (kv[1] == "-1") {
+          if (kv[1] == "unlimited") {
             tmp.GetAllocatableRes().cpu_count =
                 static_cast<cpu_t>(INT32_MAX / 256);
             continue;
@@ -764,11 +788,9 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
 
           tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
         } else if (kv[0] == "mem") {
-          if (kv[1] == "-1") {
-            uint64_t mem = std::numeric_limits<
-                decltype(tmp.GetAllocatableRes().memory_bytes)>::max();
-            tmp.GetAllocatableRes().memory_bytes = mem;
-            tmp.GetAllocatableRes().memory_sw_bytes = mem;
+          if (kv[1] == "unlimited") {
+            tmp.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+            tmp.GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
             continue;
           }
 
@@ -777,13 +799,17 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
 
           uint64_t value = result.value();
 
-          if (value >
-              std::numeric_limits<
-                  decltype(tmp.GetAllocatableRes().memory_bytes)>::max())
+          if (value > kMaxJobMemoryBytes) {
+            CRANE_ERROR(
+                "Memory value {} exceeds the maximum allowed memory bytes {}",
+                value, kMaxJobMemoryBytes);
             return false;
+          }
+            
           tmp.GetAllocatableRes().memory_bytes = value;
           tmp.GetAllocatableRes().memory_sw_bytes = value;
         } else {
+          CRANE_ERROR("Unknown resource type: {}", kv[0]);
           return false;
         }
       } else {

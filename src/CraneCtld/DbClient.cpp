@@ -3449,7 +3449,7 @@ void MongodbClient::DocumentAppendItem_<ResourceView>(
     document& doc, const std::string& key, const ResourceView& value) {
   doc.append(kvp(key, [&](sub_document valueDocument) {
     valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
-      allocDoc.append(kvp("cpu_count", value.CpuCount()));
+      allocDoc.append(kvp("cpu_count", static_cast<double>(value.CpuCount())));
       allocDoc.append(kvp("mem", static_cast<int64_t>(value.MemoryBytes())));
       allocDoc.append(kvp("mem_sw", static_cast<int64_t>(value.MemoryBytes())));
     }));
@@ -4345,7 +4345,7 @@ void MongodbClient::QosResourceViewFromDb_(
       ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
 
   resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(
-      ViewValueOr_(allocatable_res["cpu_count"], INT32_MAX / 256));
+      ViewValueOr_(allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256)));
   resource->GetAllocatableRes().memory_bytes = ViewValueOr_(
       allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
   resource->GetAllocatableRes().memory_sw_bytes = ViewValueOr_(
