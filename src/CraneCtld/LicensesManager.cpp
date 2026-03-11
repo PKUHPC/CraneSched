@@ -575,6 +575,43 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
   return {};
 }
 
+std::vector<crane::grpc::RichError>
+LicensesManager::PurgeAllLicenseResources() {
+  std::vector<crane::grpc::RichError> errors;
+
+  util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  // Collect all (name, server) pairs
+  std::vector<std::pair<std::string, std::string>> keys;
+  for (const auto& [key, _] : m_license_resource_map_) {
+    keys.emplace_back(key);
+  }
+
+  for (const auto& [name, server] : keys) {
+    // Remove from licenses_map (in-memory license tracking)
+    auto license_id = std::format("{}@{}", name, server);
+    m_licenses_map_.Erase(license_id);
+
+    // Remove from database
+    mongocxx::client_session::with_transaction_cb callback =
+        [&](mongocxx::client_session* session) {
+          g_db_client->DeleteLicenseResource(name, server);
+        };
+
+    if (!g_db_client->CommitTransaction(callback)) {
+      errors.push_back(FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE,
+                                     "Failed to delete license resource {}@{}",
+                                     name, server));
+      continue;
+    }
+
+    // Remove from resource map
+    m_license_resource_map_.erase(std::make_pair(name, server));
+  }
+
+  return errors;
+}
+
 CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
