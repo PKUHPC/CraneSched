@@ -587,6 +587,17 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
     if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus()) {
         job_finished = true;
+      } else if (job->CancelRequested()) {
+        // User cancelled the job while daemon step was being configured.
+        // Treat it as a user-initiated cancellation rather than transitioning
+        // to Running and creating the primary step.
+        CRANE_INFO(
+            "[Step #{}.{}] Cancel was requested during Configuring. "
+            "Finishing as Cancelled.",
+            job_id, this->StepId());
+        this->SetErrorStatus(crane::grpc::TaskStatus::Cancelled);
+        this->SetErrorExitCode(ExitCode::EC_TERMINATED);
+        job_finished = true;
       } else {
         CRANE_TRACE("[Step #{}.{}] CONFIGURING->RUNNING", job_id,
                     this->StepId());
