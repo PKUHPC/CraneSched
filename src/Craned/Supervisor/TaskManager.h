@@ -257,6 +257,8 @@ class PodInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
@@ -606,6 +608,16 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  struct TaskSignalQueueElem {
+    enum class Action {
+      Suspend,
+      Resume,
+    };
+
+    Action action{Action::Suspend};
+    std::promise<CraneErrCode> prom;
+  };
+
   void EvShutdownSupervisorCb_();
 
   // Process exited
@@ -676,6 +688,7 @@ class TaskManager {
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
   std::atomic_bool m_active_shutdown_{false};
+  bool m_tasks_suspended_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
