@@ -727,7 +727,7 @@ bool MongodbClient::FetchJobRecords(
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
   // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
-  // 40 nodename_list wckey
+  // 40 nodename_list wckey          submit_hostname
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["task_id"].get_int32().value;
@@ -805,6 +805,8 @@ bool MongodbClient::FetchJobRecords(
               view["reservation"].get_string().value.data());
         }
         job_info.set_exclusive(view["exclusive"].get_bool().value);
+
+        job_info.set_submit_hostname(view["submit_hostname"].get_string().value);
 
         if (job_info.type() == crane::grpc::Container) {
           if (auto pod_elem = view["meta_pod"];
