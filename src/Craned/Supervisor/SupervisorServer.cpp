@@ -41,13 +41,18 @@ grpc::Status SupervisorServiceImpl::QueryEnvMap(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::QueryStepEnvRequest* request,
     crane::grpc::supervisor::QueryStepEnvReply* response) {
+  response->set_ok(false);
   auto env_future = g_task_mgr->QueryStepEnvAsync();
   std::expected env_expt = env_future.get();
   if (env_expt.has_value()) {
+    response->set_ok(true);
     auto* grep_env = response->mutable_env();
     for (auto& [key, value] : env_expt.value()) {
       (*grep_env)[key] = value;
     }
+  } else {
+    // For now, the action never fail
+    std::unreachable();
   }
   return Status::OK;
 }
@@ -56,11 +61,7 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::CheckStatusRequest* request,
     crane::grpc::supervisor::CheckStatusReply* response) {
-  response->set_job_id(g_config.JobId);
-  response->set_step_id(g_config.StepId);
-  response->set_supervisor_pid(getpid());
-  response->set_status(g_runtime_status.Status);
-  response->set_ok(true);
+  g_task_mgr->CheckStatusAsync(response);
   return Status::OK;
 }
 
@@ -91,29 +92,21 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
   return Status::OK;
 }
 
+grpc::Status SupervisorServiceImpl::MigrateSshProcToCgroup(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::MigrateSshProcToCgroupRequest* request,
+    crane::grpc::supervisor::MigrateSshProcToCgroupReply* response) {
+  auto code_fut = g_task_mgr->MigrateSshProcToCgroupAsync(request->pid());
+  auto code = code_fut.get();
+  response->set_err_code(code);
+  return Status::OK;
+}
+
 grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  CRANE_INFO("Daemon step is requested to shutdown.");
-
-  // Set actively shutdown flag so that the daemon step can exit.
-  g_task_mgr->SetActivelyShutdown();
-
-  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
-      g_config.StepSpec.has_pod_meta() &&
-      g_runtime_status.Status == StepStatus::Running) {
-    // For daemon step with pod, there are two cases:
-    // 1. Normal case: Pod remains running with no container (Running)
-    // 2. Abnormal case: Pod failed to launch before (Failed)
-
-    // Here is the case #1. Trigger task killing and wait for pod exit,
-    // where ShutdownSupervisor will be called.
-    g_task_mgr->TerminateTaskAsync(false, TerminatedBy::CANCELLED_BY_USER);
-    return Status::OK;
-  }
-
-  // In any other case, we can shutdown directly.
+  CRANE_INFO("Grpc shutdown request received.");
   g_task_mgr->ShutdownSupervisorAsync();
   return Status::OK;
 }

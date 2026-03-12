@@ -77,22 +77,30 @@ class CforedStreamWriter {
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
-    auto &[job_id, step_id, allocated_craned_expt] = args;
+    auto &[job_id, step_id, allocated_res_info_expt] = args;
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
     task_res_alloc_reply->set_job_id(job_id);
     task_res_alloc_reply->set_step_id(step_id);
 
-    if (allocated_craned_expt.has_value()) {
+    if (allocated_res_info_expt.has_value()) {
       task_res_alloc_reply->set_ok(true);
+      auto &res_info = allocated_res_info_expt.value();
       task_res_alloc_reply->set_allocated_craned_regex(
-          allocated_craned_expt.value().first);
-      auto &craned_list = allocated_craned_expt.value().second;
-      task_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
-                                                         craned_list.end());
+          res_info.allocated_craned_regex);
+      task_res_alloc_reply->mutable_craned_ids()->Assign(
+          res_info.allocated_craned_ids.begin(),
+          res_info.allocated_craned_ids.end());
+      for (auto &[craned_name, tasks] : res_info.craned_task_map) {
+        auto &craned_res_info_pb =
+            (*task_res_alloc_reply->mutable_craned_task_map())[craned_name];
+        craned_res_info_pb.mutable_task_ids()->Assign(tasks.begin(),
+                                                      tasks.end());
+      }
+      task_res_alloc_reply->set_ntasks_total(res_info.ntasks_total);
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(
-          std::move(allocated_craned_expt.error()));
+          std::move(allocated_res_info_expt.error()));
     }
 
     return m_stream_->Write(reply);

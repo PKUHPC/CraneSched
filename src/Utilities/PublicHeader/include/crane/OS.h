@@ -29,6 +29,7 @@
 #include <string>
 
 #include "crane/Logger.h"
+#include "crane/PublicHeader.h"
 
 struct SystemRelInfo {
   std::string name;
@@ -108,6 +109,8 @@ absl::Time GetSystemBootTime();
 
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     const RunPrologEpilogArgs& args);
+
+CraneExpected<std::string> GetHostname();
 
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,

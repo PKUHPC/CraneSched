@@ -4227,7 +4227,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              runtime_attr.start_time().seconds(),
              runtime_attr.end_time().seconds(), 0,
              // 20-24
-             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+             task_to_ctld.sh_script(), runtime_attr.status(),
              task_to_ctld.time_limit().seconds(),
              runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
              // 25-29
@@ -4254,23 +4254,17 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
-  std::string script;
+  std::string script = task->TaskToCtld().sh_script();
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
   std::optional<PodMetaInTask> pod_meta{std::nullopt};
 
-  if (task->type == crane::grpc::Batch)
-    script = task->TaskToCtld().batch_meta().sh_script();
-  else if (task->type == crane::grpc::Container) {
+  if (task->type == crane::grpc::Container) {
     // All container job has pod_meta
     pod_meta = task->pod_meta;
 
     // Jobs from ccon has container_meta
     if (std::holds_alternative<ContainerMetaInTask>(task->meta))
       container_meta = std::get<ContainerMetaInTask>(task->meta);
-
-    // Jobs from cbatch has batch_meta
-    if (task->TaskToCtld().has_batch_meta())
-      script = task->TaskToCtld().batch_meta().sh_script();
   }
 
   // TODO: Interactive meta?
@@ -4367,13 +4361,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 }
 
 MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
-  std::string script;
-  if (step->type == crane::grpc::Batch)
-    script = step->StepToCtld().batch_meta().sh_script();
-  else if (step->type == crane::grpc::Container &&
-           step->StepToCtld().has_batch_meta())
-    // Container job primary step submitted via cbatch --pod
-    script = step->StepToCtld().batch_meta().sh_script();
+  std::string script = step->StepToCtld().sh_script();
 
   std::optional<PodMetaInTask> pod_meta{std::nullopt};
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
@@ -4449,12 +4437,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   const auto& step_to_ctld = step.step_to_ctld();
   const auto& runtime_attr = step.runtime_attr();
 
-  std::string script;
-  if (step_to_ctld.type() == crane::grpc::Batch)
-    script = step_to_ctld.batch_meta().sh_script();
-  else if (step_to_ctld.type() == crane::grpc::Container &&
-           step_to_ctld.has_batch_meta())
-    script = step_to_ctld.batch_meta().sh_script();
+  std::string script = step_to_ctld.sh_script();
 
   std::optional<PodMetaInTask> pod_meta{std::nullopt};
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};

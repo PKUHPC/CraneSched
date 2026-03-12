@@ -372,63 +372,7 @@ void StartServer(int grpc_output_fd) {
 
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
-
-  if (g_config.StepSpec.step_type() == StepType::DAEMON) {
-    // For container jobs, the daemon step need to setup a pod per node,
-    // then the following common steps will launch containers inside the pod.
-    bool ready = true;
-    if (g_config.StepSpec.has_pod_meta()) {
-      if (!g_config.Container.Enabled) {
-        CRANE_ERROR(
-            "Container config is required for daemon step with pod spec.");
-        ready = false;
-      } else {
-        // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto ok_prom = g_task_mgr->ExecuteTaskAsync();
-        if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to start daemon step, code: {}",
-                      static_cast<int>(err));
-          ready = false;
-        }
-      }
-    }
-
-    if (!g_config.JobLifecycleHook.Prologs.empty()) {
-      CRANE_TRACE("Running Prologs...");
-      RunPrologEpilogArgs run_prolog_args{
-          .scripts = g_config.JobLifecycleHook.Prologs,
-          .envs = g_config.JobEnv,
-          .run_uid = 0,
-          .run_gid = 0,
-          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec =
-            g_config.JobLifecycleHook.PrologEpilogTimeout;
-
-      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
-      if (!result) {
-        auto status = result.error();
-        CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
-                    status.signal_num);
-        ready = false;
-      } else {
-        CRANE_DEBUG("Prolog success");
-      }
-    }
-
-    // Daemon step is RUNNING after supervisor and related resources are ready.
-    g_runtime_status.Status = ready ? StepStatus::Running : StepStatus::Failed;
-
-  } else {
-    // Common step is CONFIGURED after supervisor is ready.
-    g_runtime_status.Status = StepStatus::Configured;
-  }
-
-  g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
-                                         std::nullopt);
-
+  g_task_mgr->SupervisorFinishInit();
   g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();
