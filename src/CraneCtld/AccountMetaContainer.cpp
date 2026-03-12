@@ -20,6 +20,7 @@
 
 #include "AccountManager.h"
 #include "TaskScheduler.h"
+#include <absl/time/time.h>
 
 namespace Ctld {
 
@@ -298,8 +299,10 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
             return;
           }
-          if (!CheckTres_(resource_use, qos.max_tres_per_user))
+          if (!CheckTres_(resource_use, qos.max_tres_per_user)) {
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
+            return;
+          }
         }
       });
 
@@ -333,8 +336,10 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
-            if (!CheckTres_(resource_use, qos.max_tres_per_account))
+            if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
+              return ;
+            }
           }
         });
   }
@@ -357,17 +362,20 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
             result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
             return;
           }
-
-          if (val.wall_time + task.time_limit > qos.max_wall) {
-            result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
-            return;
+          
+          if (qos.max_wall > absl::ZeroDuration()) {
+            if (val.wall_time + task.time_limit > qos.max_wall) {
+              result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+              return;
+            }
           }
-
           ResourceView resource_use{task.requested_node_res_view *
                                     task.node_num};
           resource_use += val.resource;
-          if (!CheckTres_(resource_use, qos.max_tres))
+          if (!CheckTres_(resource_use, qos.max_tres)) {
             result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+            return ;
+          }
         }
       });
 
@@ -420,9 +428,11 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
       result = std::unexpected("QosJobsResourceLimit");
       return;
     }
-    if (val.wall_time + job.time_limit > qos.max_wall) {
-      result = std::unexpected("QosWallTimeLimit");
-      return;
+    if (qos.max_wall > absl::ZeroDuration()) {
+      if (val.wall_time + job.time_limit > qos.max_wall) {
+        result = std::unexpected("QosWallTimeLimit");
+        return;
+      }
     }
     result = CheckTres_(resource_use, qos.max_tres_per_user);
   });
@@ -449,9 +459,11 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
             result = std::unexpected("QosJobsResourceLimit");
             return;
           }
-          if (val.wall_time + job.time_limit > qos.max_wall) {
-            result = std::unexpected("QosWallTimeLimit");
-            return;
+          if (qos.max_wall > absl::ZeroDuration()) {
+            if (val.wall_time + job.time_limit > qos.max_wall) {
+              result = std::unexpected("QosWallTimeLimit");
+              return;
+            }
           }
           result = CheckTres_(resource_use, qos.max_tres_per_account);
         });
@@ -469,9 +481,11 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
           result = std::unexpected("QosJobsResourceLimit");
           return;
         }
-        if (val.wall_time + job.time_limit > qos.max_wall) {
-          result = std::unexpected("QosWallTimeLimit");
-          return;
+        if (qos.max_wall > absl::ZeroDuration()) {
+          if (val.wall_time + job.time_limit > qos.max_wall) {
+            result = std::unexpected("QosWallTimeLimit");
+            return;
+          }
         }
         result = CheckTres_(resource_use, qos.max_tres);
       });
