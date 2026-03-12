@@ -356,7 +356,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_submit_jobs_per_account =
         std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
     qos.max_jobs = std::numeric_limits<decltype(qos.max_jobs)>::max();
-    qos.max_wall = absl::Seconds(kTaskMaxTimeLimitSec);
+    qos.max_wall = absl::ZeroDuration();
     qos.max_tres.GetAllocatableRes().cpu_count = std::numeric_limits<
         decltype(qos.max_tres.GetAllocatableRes().cpu_count)>::max();
     qos.max_tres.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
@@ -3724,7 +3724,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         qos_view[Qos::FieldStringOfMaxSubmitJobs()],
         int64_t(std::numeric_limits<decltype(qos->max_submit_jobs)>::max()));
     qos->max_wall = absl::Seconds(ViewValueOr_(
-        qos_view[Qos::FieldStringOfMaxWall()], int64_t(kTaskMaxTimeLimitSec)));
+        qos_view[Qos::FieldStringOfMaxWall()], int64_t(0)));
     qos->flags.FromInt64(
         ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0)));
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(),
