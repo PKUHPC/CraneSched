@@ -98,7 +98,7 @@ Hide table header in output.
 **-m, --max-lines=&lt;number&gt;**
 
 :   **Applies to:** `Job`, `Step`  
-Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 100 lines.
+Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 1000 lines.
 
 **--json**
 
@@ -168,15 +168,105 @@ The following format identifiers are supported (case-insensitive):
 cacct
 ```
 
-![cacct](../../images/cacct/cacct.png)
+```text
+[cranetest@crane01 ~]$ cacct
+JOBID   JOBNAME   PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
+222112  Test_Job  CPU       PKU     1.00     Completed 0:0
+222111  Test_Job  CPU       PKU     1.00     Completed 0:0
+222110  Test_Job  CPU       PKU     1.00     Completed 0:0
+222109  Test_Job  CPU       PKU     1.00     Completed 0:0
+222108  Test_Job  CPU       PKU     1.00     Completed 0:0
+222107  Test_Job  CPU       PKU     1.00     Completed 0:0
+222106  Test_Job  CPU       PKU     1.00     Completed 0:0
+222105  Test_Job  CPU       PKU     1.00     Completed 0:0
+222104  Test_Job  CPU       PKU     1.00     Completed 0:0
+222103  Test_Job  CPU       PKU     1.00     Completed 0:0
+```
 
 **Display help:**
 
 ```bash
 cacct -h
 ```
+```text
+[cranetest@crane01 ~]$ cacct -h
+Display the recent job information
 
-![cacct](../../images/cacct/h.png)
+Usage:
+  cacct [flags]
+
+Flags:
+  -A, --account string       Select accounts to view (comma separated list)
+  -C, --config string        Path to configuration file (default "/etc/crane/config.yaml")
+  -E, --end-time string      Filter jobs with an end time within a certain time period, which can use closed intervals(timeFormat: 2024-01-02T15:04:05~2024-01-11T11:12:41) or semi open intervals(timeFormat: 2024-01-02T15:04:05~ or ~2024-01-11T11:12:41)
+  -o, --format string        Specify the output format.
+                             
+                             Fields are identified by a percent sign (%) followed by a character or string.
+                             Format specification: %[[.]size]type
+                               - Without size: field uses natural width
+                               - With size only (%5j): field uses minimum width, left-aligned (padding on right)
+                               - With dot and size (%.5j): field uses minimum width, right-aligned (padding on left)
+                             
+                             Supported format identifiers or string, string case insensitive:
+                                %a/%Account           - Display the account associated with the job.
+                                %C/%ReqCpus           - Display the number of requested CPUs, formatted to two decimal places
+                                %c/%AllocCpus         - Display the number of allocated CPUs, formatted to two decimal places.
+                                %D/%ElapsedTime       - Display the elapsed time from the start of the job.
+                                %E/%EndTime           - Display the end time of the job.
+                                %e/%ExitCode          - Display the exit code of the job. 
+                                                          If the exit code is based on a specific base (e.g., kCraneExitCodeBase),
+                                                          it formats as "0:<code>" or "<code>:0" based on the condition.
+                                %h/%Held              - Display the hold status of the job.
+                                %j/%JobID             - Display the ID of the job.
+                                %K/%Wckey             - Display the wckey of the job.
+                                %k/%Comment           - Display the comment of the job.
+                                %L/%NodeList          - Display the list of nodes the job is running on.
+                                %l/%TimeLimit         - Display the time limit of the job.
+                                %M/%ReqMemPerNode     - Display the requested mem per node of the job.
+                                %m/%AllocMemPerNode   - Display the allocted mem per node of the job.
+                                %N/%NodeNum           - Display the node num of the job.
+                                %n/%JobName           - Display the name of the job.
+                                %P/%Partition         - Display the partition associated with the job.
+                                %p/%Priority          - Display the priority of the job.
+                                %q/%Qos               - Display the QoS of the job.
+                                %R/%Reason            - Display the reason of pending.
+                                %r/%ReqNodes          - Display the reqnodes of the job.
+                                %S/%StartTime         - Display the start time of the job.
+                                %s/%SubmitTime        - Display the submit time num of the job.
+                                %t/%State             - Display the state of the job.
+                                %T/%JobType           - Display the job type.
+                                %U/%UserName          - Display the username of the job.
+                                %u/%Uid               - Display the uid of the job.
+                                %x/%ExcludeNodes      - Display the excludenodes of the job.
+                                %X/%Exclusive         - Display the exclusive status of the job.
+                             
+                             Examples:
+                               --format "%j %n %t"              # Natural width for all fields
+                               --format "%5j %20n %t"           # Left-aligned: JobID (min 5), JobName (min 20), State
+                               --format "%.5j %.20n %t"         # Right-aligned: JobID (min 5), JobName (min 20), State
+                               --format "ID:%8j | Name:%.15n"   # Mixed: left-aligned JobID, right-aligned JobName with prefix
+                             
+                             Note: If the format is invalid or unrecognized, the program will terminate with an error message.
+                             
+  -F, --full                 Display full information (If not set, only display 30 characters per cell)
+  -h, --help                 help for cacct
+  -j, --job string           Select job ids to view (comma separated list), default is all
+      --json                 Output in JSON format
+  -m, --max-lines uint32     Limit the number of lines in the output, 0 means no limit (default 1000)
+  -n, --name string          Select job names to view (comma separated list), default is all
+  -w, --nodelist string      Specify node names to view (comma separated list or patterns like node[1-10]), default is all
+  -N, --noheader             Do not print header line in the output
+  -p, --partition string     Specify partitions to view (comma separated list), default is all
+  -q, --qos string           Specify QoS of jobs to view (comma separated list), default is all.
+  -S, --start-time string    Filter jobs with a start time within a certain time period, which can use closed intervals(timeFormat: 2024-01-02T15:04:05~2024-01-11T11:12:41) or semi open intervals(timeFormat: 2024-01-02T15:04:05~ or ~2024-01-11T11:12:41)
+  -t, --state string         Specify job states to view, supported states: pending(p), running(r), completed(c), failed(f), cancelled(x), time-limit-exceeded(t), all. (default "all")
+  -s, --submit-time string   Filter jobs with a submit time within a certain time period, which can use closed intervals(timeFormat: 2024-01-02T15:04:05~2024-01-11T11:12:41) or semi open intervals(timeFormat: 2024-01-02T15:04:05~ or ~2024-01-11T11:12:41)
+      --type string          Specify task types to view (comma separated list), 
+                             valid values are 'Interactive', 'Batch', 'Container', default is all types
+  -u, --user string          Select users to view (comma separated list)
+  -v, --version              version for cacct
+```
+
 
 **Hide table header:**
 
@@ -184,7 +274,24 @@ cacct -h
 cacct -N
 ```
 
-![cacct](../../images/cacct/N.png)
+```text
+[cranetest@crane01 ~]$ cacct -N
+222112 Test_Job  CPU PKU     1.00 Completed   0:0
+222111 Test_Job  CPU PKU     1.00 Completed   0:0
+222110 Test_Job  CPU PKU     1.00 Completed   0:0
+222109 Test_Job  CPU PKU     1.00 Completed   0:0
+222108 Test_Job  CPU PKU     1.00 Completed   0:0
+222107 Test_Job  CPU PKU     1.00 Completed   0:0
+222106 Test_Job  CPU PKU     1.00 Completed   0:0
+222105 Test_Job  CPU PKU     1.00 Completed   0:0
+222104 Test_Job  CPU PKU     1.00 Completed   0:0
+222103 Test_Job  CPU PKU     1.00 Completed   0:0
+222102 Test_Job  CPU PKU     1.00 Completed   0:0
+222101 Test_Job  CPU PKU     1.00 Completed   0:0
+222100 Test_Job  CPU PKU     1.00 Completed   0:0
+222099 Test_Job  CPU PKU     1.00 Completed   0:0
+```
+
 
 ### Filter by ID and Name
 
@@ -194,7 +301,13 @@ cacct -N
 cacct -j=30618,30619,30620
 ```
 
-![cacct](../../images/cacct/j.png)
+```text
+[cranetest@crane01 ~]$ cacct -j=30618,30619,30620
+JOBID JOBNAME  PARTITION ACCOUNT ALLOCCPUS STATE          EXITCODE
+30620 Test_Job CPU       ROOT    0.00     Cancelled      0:0
+30619 Test_Job CPU       ROOT    2.00     ExceedTimeLimit 0:15
+30618 Test_Job CPU       ROOT    2.00     Cancelled      0:15
+```
 
 **Query by job name:**
 
@@ -202,7 +315,23 @@ cacct -j=30618,30619,30620
 cacct -n=Test_Job
 ```
 
-![cacct](../../images/cacct/nt.png)
+```text
+[cranetest@crane01 ~]$ cacct -n=Test_Job
+JOBID   JOBNAME   PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
+222112  Test_Job  CPU       PKU     1.00     Completed 0:0
+222111  Test_Job  CPU       PKU     1.00     Completed 0:0
+222110  Test_Job  CPU       PKU     1.00     Completed 0:0
+222109  Test_Job  CPU       PKU     1.00     Completed 0:0
+222108  Test_Job  CPU       PKU     1.00     Completed 0:0
+222107  Test_Job  CPU       PKU     1.00     Completed 0:0
+222106  Test_Job  CPU       PKU     1.00     Completed 0:0
+222105  Test_Job  CPU       PKU     1.00     Completed 0:0
+222104  Test_Job  CPU       PKU     1.00     Completed 0:0
+222103  Test_Job  CPU       PKU     1.00     Completed 0:0
+222102  Test_Job  CPU       PKU     1.00     Completed 0:0
+222101  Test_Job  CPU       PKU     1.00     Completed 0:0
+222100  Test_Job  CPU       PKU     1.00     Completed 0:0
+```
 
 **Query by name pattern:**
 
@@ -210,7 +339,11 @@ cacct -n=Test_Job
 cacct -n test
 ```
 
-![cacct](../../images/cacct/ntest.png)
+```text
+[root@cranetest-rocky01 zhouhao]# cacct -n test
+JOBID     JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
+1276686  test    CPU       ROOT    0.00     Cancelled 0:0
+```
 
 ### Filter by User and Account
 
@@ -220,7 +353,17 @@ cacct -n test
 cacct -u=cranetest
 ```
 
-![cacct](../../images/cacct/u.png)
+```text
+[cranetest@crane01 ~]$ cacct -u=cranetest
+JOBID   JOBNAME     PARTITION ACCOUNT   ALLOCCPUS STATE          EXITCODE
+30689   Interactive CPU       CraneTest 2.00     Completed      0:0
+30688   Interactive CPU       CraneTest 2.00     Completed      0:64
+30687   Test_Job    CPU       CraneTest 0.00     Cancelled      0:0
+30686   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+30685   Test_Job    CPU       CraneTest 2.00     ExceedTimeLimit 0:15
+30684   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+30683   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+```
 
 **Query jobs by account:**
 
@@ -228,7 +371,17 @@ cacct -u=cranetest
 cacct -A=CraneTest
 ```
 
-![cacct](../../images/cacct/A.png)
+```text
+[cranetest@crane01 ~]$ cacct -A=CraneTest
+JOBID   JOBNAME     PARTITION ACCOUNT   ALLOCCPUS STATE          EXITCODE
+30689   Interactive CPU       CraneTest 2.00     Completed      0:0
+30688   Interactive CPU       CraneTest 2.00     Completed      0:64
+30687   Test_Job    CPU       CraneTest 0.00     Cancelled      0:0
+30686   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+30685   Test_Job    CPU       CraneTest 2.00     ExceedTimeLimit 0:15
+30684   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+30683   Test_Job    CPU       CraneTest 2.00     Cancelled      0:15
+```
 
 **Combine account and max lines:**
 
@@ -236,7 +389,21 @@ cacct -A=CraneTest
 cacct -A ROOT -m 10
 ```
 
-![cacct](../../images/cacct/am.png)
+```text
+[zhouhao@cranetest-rocky02 ~]$ cacct -A ROOT -m 10
+JOBID     JOBNAME   PARTITION ACCOUNT ALLOCCPUS STATE    EXITCODE
+1418574   CPU       CPU       ROOT    0.00     Pending  0:0
+1418573   CPU       CPU       ROOT    0.00     Pending  0:0
+1418572   CPU       CPU       ROOT    0.00     Pending  0:0
+1418571   CPU       CPU       ROOT    0.00     Pending  0:0
+1418570   CPU       CPU       ROOT    0.00     Pending  0:0
+1418569   CPU       CPU       ROOT    0.00     Pending  0:0
+1418568   CPU       CPU       ROOT    0.00     Pending  0:0
+1418567   CPU       CPU       ROOT    0.00     Pending  0:0
+1418566   CPU       CPU       ROOT    0.00     Pending  0:0
+1412536   Test_Job  CPU       ROOT    0.00     Pending  0:0
+```
+
 
 ### Filter by Partition and QoS
 
@@ -246,7 +413,23 @@ cacct -A ROOT -m 10
 cacct -p GPU
 ```
 
-![cacct](../../images/cacct/p.png)
+```text
+[cranetest@crane01 ~]$ cacct -p GPU
+JOBID   JOBNAME     PARTITION ACCOUNT   ALLOCCPUS STATE          EXITCODE
+30736   Interactive GPU       acct-test 2.00     Completed      0:64
+30735   Interactive GPU       acct-test 0.00     Cancelled      0:0
+30734   Interactive GPU       acct-test 0.00     Cancelled      0:0
+30733   Interactive GPU       acct-test 2.00     Completed      0:64
+30730   Test_Job    GPU       CraneTest 1.00     ExceedTimeLimit 0:15
+30691   Interactive GPU       yanyan    1.00     Completed      0:64
+30690   Interactive GPU       yanyan    1.00     Completed      0:64
+21670   Test_Job    GPU       ROOT      1.00     Completed      0:0
+21669   Test_Job    GPU       ROOT      1.00     Completed      0:0
+21668   Test_Job    GPU       ROOT      1.00     Completed      0:0
+21667   Test_Job    GPU       ROOT      1.00     Completed      0:0
+21666   Test_Job    GPU       ROOT      1.00     Completed      0:0
+```
+
 
 **Query by QoS:**
 
@@ -254,7 +437,22 @@ cacct -p GPU
 cacct -q test_qos
 ```
 
-![cacct](../../images/cacct/qt.png)
+```text
+[root@cranetest01 zhouhao]# cacct -q test_qos
+JOBID JOBNAME     PARTITION ACCOUNT ALLOCCPUS STATE          EXITCODE
+231              CPU       ROOT    2.00     ExceedTimeLimit 0:15
+230              CPU       ROOT    2.00     Cancelled      0:15
+229              CPU       ROOT    2.00     ExceedTimeLimit 0:15
+217              CPU       ROOT    2.00     Completed      0:0
+216              CPU       ROOT    2.00     Completed      0:0
+188  test_crun    computing ROOT    2.00     Completed      0:0
+185  test_calloc  CPU       ROOT    8.00     Completed      0:64
+183  Interactive  CPU       ROOT    2.00     Completed      0:64
+182  Interactive  CPU       ROOT    2.00     Completed      0:64
+179  Test_Job     CPU       ROOT    4.00     Completed      0:0
+178  Test_Job     CPU       ROOT    4.00     Completed      0:0
+177  Test_Job     CPU       ROOT    1.00     Completed      0:0
+```
 
 ### Time Range Filtering
 
@@ -264,7 +462,29 @@ cacct -q test_qos
 cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
 
-![cacct](../../images/cacct/S.png)
+```text
+[cranetest@crane01 ~]$ cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
+JOBID   JOBNAME     PARTITION ACCOUNT ALLOCCPUS STATE          EXITCODE STARTTIME
+30680   Test_Job    CPU       yanyan  2.00     ExceedTimeLimit 0:15   2024-07-24 09:48:27 +0800 CST
+30679   Test_Job    CPU       yanyan  2.00     ExceedTimeLimit 0:15   2024-07-24 09:47:51 +0800 CST
+30678   Interactive CPU       yanyan  2.00     Completed      0:0    2024-07-24 09:45:23 +0800 CST
+30677   Interactive CPU       yanyan  2.00     Completed      0:64   2024-07-24 09:44:03 +0800 CST
+30674   Test_Job    CPU       yanyan  2.00     Cancelled      0:15   2024-07-24 09:38:30 +0800 CST
+30673   Test_Job    CPU       yanyan  2.00     Cancelled      0:15   2024-07-24 09:38:29 +0800 CST
+30672   Test_Job    CPU       yanyan  2.00     Failed         0:66   2024-07-24 09:38:29 +0800 CST
+30671   Test_Job    CPU       yanyan  2.00     Cancelled      0:15   2024-07-24 09:24:56 +0800 CST
+30670   Test_Job    CPU       yanyan  2.00     Cancelled      0:15   2024-07-24 09:24:54 +0800 CST
+30669   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:43:20 +0800 CST
+30668   Interactive CPU       ROOT    2.00     Completed      0:64   2024-07-23 14:43:12 +0800 CST
+30667   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:42:26 +0800 CST
+30666   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:42:22 +0800 CST
+30665   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:42:14 +0800 CST
+30664   Interactive CPU       ROOT    2.00     Completed      0:64   2024-07-23 14:42:06 +0800 CST
+30663   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:41:28 +0800 CST
+30662   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:41:27 +0800 CST
+30661   Interactive CPU       ROOT    1.00     Completed      0:0    2024-07-23 14:41:19 +0800 CST
+```
+
 
 **Filter by end time range:**
 
@@ -272,7 +492,25 @@ cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
 
-![cacct](../../images/cacct/E.png)
+```text
+[cranetest@crane01 ~]$ cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
+JOBID   JOBNAME     PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE ENDTIME
+30678   Interactive CPU       yanyan  2.00     Completed 0:0    2024-07-24 09:45:42 +0800 CST
+30677   Interactive CPU       yanyan  2.00     Completed 0:64   2024-07-24 09:44:10 +0800 CST
+30676   Interactive CPU       yanyan  0.00     Cancelled 0:0    2024-07-24 09:27:25 +0800 CST
+30675   Test_Job    CPU       yanyan  0.00     Cancelled 0:0    2024-07-24 09:38:38 +0800 CST
+30674   Test_Job    CPU       yanyan  2.00     Cancelled 0:15   2024-07-24 09:38:11 +0800 CST
+30673   Test_Job    CPU       yanyan  2.00     Cancelled 0:15   2024-07-24 09:39:57 +0800 CST
+30672   Test_Job    CPU       yanyan  2.00     Failed    0:66   2024-07-24 09:38:29 +0800 CST
+30671   Test_Job    CPU       yanyan  2.00     Cancelled 0:15   2024-07-24 09:38:28 +0800 CST
+30670   Test_Job    CPU       yanyan  2.00     Cancelled 0:15   2024-07-24 09:38:28 +0800 CST
+30669   Interactive CPU       ROOT    1.00     Completed 0:0    2024-07-23 14:43:21 +0800 CST
+30668   Interactive CPU       ROOT    2.00     Completed 0:64   2024-07-23 16:54:40 +0800 CST
+30667   Interactive CPU       ROOT    1.00     Completed 0:0    2024-07-23 14:42:27 +0800 CST
+30666   Interactive CPU       ROOT    1.00     Completed 0:0    2024-07-23 14:42:23 +0800 CST
+30665   Interactive CPU       ROOT    1.00     Completed 0:0    2024-07-23 14:42:15 +0800 CST
+```
+
 
 **Query jobs submitted in a time range:**
 
@@ -336,7 +574,21 @@ cacct --type Interactive
 cacct -m=10
 ```
 
-![cacct](../../images/cacct/m.png)
+```text
+[cranetest@crane01 ~]$ cacct -m=10
+JOBID   JOBNAME   PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
+222112  Test_Job  CPU       PKU     1.00     Completed 0:0
+222111  Test_Job  CPU       PKU     1.00     Completed 0:0
+222110  Test_Job  CPU       PKU     1.00     Completed 0:0
+222109  Test_Job  CPU       PKU     1.00     Completed 0:0
+222108  Test_Job  CPU       PKU     1.00     Completed 0:0
+222107  Test_Job  CPU       PKU     1.00     Completed 0:0
+222106  Test_Job  CPU       PKU     1.00     Completed 0:0
+222105  Test_Job  CPU       PKU     1.00     Completed 0:0
+222104  Test_Job  CPU       PKU     1.00     Completed 0:0
+222103  Test_Job  CPU       PKU     1.00     Completed 0:0
+```
+
 
 **JSON output:**
 
@@ -352,7 +604,22 @@ cacct --json -j 12345
 cacct -o="%j %.10n %P %a %t"
 ```
 
-![cacct](../../images/cacct/o.png)
+```text
+[cranetest@crane01 ~]$ cacct -o="%j %.10n %P %a %t"
+JOBID   JOBNAME     PARTITION ACCOUNT STATE
+30558   Test_Jo     CPU       PKU     Completed
+30571   Test_Jo     CPU       PKU     Completed
+30570   Test_Jo     CPU       PKU     Completed
+30569   Test_Jo     CPU       PKU     Completed
+30568   Test_Jo     CPU       PKU     Completed
+30567   Test_Jo     CPU       PKU     Completed
+30566   Test_Jo     CPU       PKU     Completed
+30565   Test_Jo     CPU       PKU     Completed
+30564   Test_Jo     CPU       PKU     Completed
+30563   Test_Jo     CPU       PKU     Completed
+30562   Test_Jo     CPU       PKU     Completed
+```
+
 
 **All fields using natural width:**
 
@@ -386,7 +653,13 @@ cacct -o="%.8j %20n %-10P %.15U %t"
 cacct -m 10 -j 783925,783889 -t=c -F
 ```
 
-![cacct](../../images/cacct/mj.png)
+```text
+[root@cranetest-rocky01 zhouhao]# cacct -m 10 -j 783925,783889 -t=c -F
+JOBID   JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE
+783925          CPU       ROOT    1.00     Completed 0:0
+783889          CPU       ROOT    1.00     Completed 0:0
+```
+
 
 **Complex combined query:**
 
@@ -394,7 +667,21 @@ cacct -m 10 -j 783925,783889 -t=c -F
 cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 ```
 
-![cacct](../../images/cacct/me.png)
+```text
+[root@cranetest-rocky01 zhouhao]# cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t=c
+JOBID     JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE ENDTIME
+783446            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:55:47 +0800 CST
+783433            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:57:10 +0800 CST
+783309            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:29:07 +0800 CST
+783272            CPU       ROOT    1.00     Completed 0:0    2024-10-10 07:08:05 +0800 CST
+783267            CPU       ROOT    1.00     Completed 0:0    2024-10-10 07:55:35 +0800 CST
+783249            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:58:43 +0800 CST
+783192            CPU       ROOT    2.00     Completed 0:0    2024-10-10 09:34:04 +0800 CST
+783180            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:34:58 +0800 CST
+783177            CPU       ROOT    1.00     Completed 0:0    2024-10-10 09:29:34 +0800 CST
+783176            CPU       ROOT    2.00     Completed 0:0    2024-10-10 09:59:51 +0800 CST
+```
+
 
 ## Related Commands
 
