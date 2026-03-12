@@ -4251,8 +4251,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().end()},
              bsoncxx::array::value{nodename_list_array.view()},
              task_to_ctld.wckey(), using_default_wckey,
-             g_config.CraneClusterName,
-            task_to_ctld.submit_hostname()};
+             g_config.CraneClusterName, task_to_ctld.submit_hostname()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4369,7 +4368,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 40-44
              task->licenses_count,
              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
-             task->using_default_wckey, g_config.CraneClusterName,task->submit_hostname};
+             task->using_default_wckey, g_config.CraneClusterName,
+             task->submit_hostname};
 
   return DocumentConstructor_(fields, values);
 }
