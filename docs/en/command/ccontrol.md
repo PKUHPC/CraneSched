@@ -62,7 +62,7 @@ ccontrol show node crane01
 NodeName=CraneProject State=idle[power_idle] CPU=2.00 AllocCPU=0.00 FreeCPU=2.00
     RealMemory=2048M AllocMem=0 FreeMem=2048M
     Gres=None AllocGres=None FreeGres=None
-    Patition=CPU RunningJob=0 Version=unknown
+    Partition=CPU RunningJob=0 Version=unknown
     Os=Linux 5.14.0-570.23.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Jun 26 19:29:53 UTC 2025
     BootTime=2025-07-04 16:09:10 CranedStartTime=2025-07-04 16:57:15
     LastBusyTime=unknown

@@ -16,7 +16,7 @@
 #CBATCH --nodes 1
 #CBATCH -c 1
 #CBATCH --mem 20M
-#CBATCH --time 0:3:1
+#CBATCH --time 00:30:01
 #CBATCH -o job.out
 #CBATCH -p CPU
 #CBATCH -J Test_Job
@@ -40,11 +40,11 @@ Job id allocated: 30687
 ```bash hl_lines="5"
 [cranetest@crane01 ~]$ cqueue -p CPU
 JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE TIME    TIMELIMIT NODES NODELIST/REASON
-30685 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   2     Priority
-30686 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   2     Priority
-30687 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   2     Priority
-30683 CPU       Test_Job cranetest CraneTest Running Batch 00:00:12 00:30:01   2     crane[02-03]
-30684 CPU       Test_Job cranetest CraneTest Running Batch 00:00:10 00:30:01   2     crane[02-03]
+30685 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   1     Priority
+30686 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   1     Priority
+30687 CPU       Test_Job cranetest CraneTest Pending Batch -      00:30:01   1     Priority
+30683 CPU       Test_Job cranetest CraneTest Running Batch 00:00:12 00:30:01   1     crane[02-03]
+30684 CPU       Test_Job cranetest CraneTest Running Batch 00:00:10 00:30:01   1     crane[02-03]
 ```
 ## 命令行选项
 
