@@ -832,7 +832,7 @@ struct TaskInCtld {
 
   std::list<std::string> account_chain;
 
-  std::string submit_node;
+  std::string submit_hostname;
 
  private:
   /* ------------- [2] -------------

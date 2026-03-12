@@ -592,7 +592,7 @@ message TaskInfo {
   ResourceView allocated_res_view = 40;
   string wckey = 41;
   map<string, string> env = 42;
-  string submit_node = 43;
+  string submit_hostname = 43;
 }
 
 message StepInfo {
