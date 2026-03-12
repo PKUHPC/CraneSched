@@ -25,8 +25,6 @@
 
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
-#include "DeviceManager.h"
-#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
