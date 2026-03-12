@@ -18,9 +18,10 @@
 
 #include "AccountMetaContainer.h"
 
+#include <absl/time/time.h>
+
 #include "AccountManager.h"
 #include "TaskScheduler.h"
-#include <absl/time/time.h>
 
 namespace Ctld {
 
@@ -339,7 +340,7 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
             resource_use += val.resource;
             if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
-              return ;
+              return;
             }
           }
         });
@@ -363,7 +364,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
             result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
             return;
           }
-          
+
           if (qos.max_wall > absl::ZeroDuration()) {
             if (val.wall_time + task.time_limit > qos.max_wall) {
               result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
@@ -375,7 +376,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
           resource_use += val.resource;
           if (!CheckTres_(resource_use, qos.max_tres)) {
             result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
-            return ;
+            return;
           }
         }
       });

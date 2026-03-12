@@ -3723,8 +3723,8 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_submit_jobs = ViewValueOr_(
         qos_view[Qos::FieldStringOfMaxSubmitJobs()],
         int64_t(std::numeric_limits<decltype(qos->max_submit_jobs)>::max()));
-    qos->max_wall = absl::Seconds(ViewValueOr_(
-        qos_view[Qos::FieldStringOfMaxWall()], int64_t(0)));
+    qos->max_wall = absl::Seconds(
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxWall()], int64_t(0)));
     qos->flags.FromInt64(
         ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0)));
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(),
@@ -4344,8 +4344,8 @@ void MongodbClient::QosResourceViewFromDb_(
   auto allocatable_res =
       ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
 
-  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(
-      ViewValueOr_(allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256)));
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(ViewValueOr_(
+      allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256)));
   resource->GetAllocatableRes().memory_bytes = ViewValueOr_(
       allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
   resource->GetAllocatableRes().memory_sw_bytes = ViewValueOr_(

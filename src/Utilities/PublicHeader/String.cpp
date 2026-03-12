@@ -691,7 +691,7 @@ bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
   if (items.size() == 2) {
     if (items[1] == "unlimited") {
       auto iter = device_map->find(key);
-      if (iter != device_map->end()) {        
+      if (iter != device_map->end()) {
         if (iter->second.second.empty()) {
           device_map->erase(key);
         } else {
@@ -753,10 +753,8 @@ bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
 }
 
 bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
-
   if (s.empty()) {
-    res->GetAllocatableRes().cpu_count =
-                static_cast<cpu_t>(INT32_MAX / 256);
+    res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX / 256);
     res->GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
     res->GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
     res->GetDeviceMap().clear();
@@ -805,7 +803,7 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
                 value, kMaxJobMemoryBytes);
             return false;
           }
-            
+
           tmp.GetAllocatableRes().memory_bytes = value;
           tmp.GetAllocatableRes().memory_sw_bytes = value;
         } else {

@@ -1698,10 +1698,13 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
     qos_info->mutable_max_tres()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres));
-    // When type_count.second is 0, you need to insert it manually; otherwise, it will not be recorded.
+    // When type_count.second is 0, you need to insert it manually; otherwise,
+    // it will not be recorded.
     for (auto& [name, type_count] : qos.max_tres.GetDeviceMap()) {
-      auto* type_count_map = 
-    (*qos_info->mutable_max_tres()->mutable_device_map()->mutable_name_type_map())[name].mutable_type_count_map();
+      auto* type_count_map = (*qos_info->mutable_max_tres()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
       for (auto& [type, value] : type_count.second) {
         (*type_count_map)[type] = value;
       }
@@ -1709,8 +1712,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->mutable_max_tres_per_user()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
     for (auto& [name, type_count] : qos.max_tres_per_user.GetDeviceMap()) {
-      auto* type_count_map = 
-    (*qos_info->mutable_max_tres_per_user()->mutable_device_map()->mutable_name_type_map())[name].mutable_type_count_map();
+      auto* type_count_map = (*qos_info->mutable_max_tres_per_user()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
       for (auto& [type, value] : type_count.second) {
         (*type_count_map)[type] = value;
       }
@@ -1718,8 +1723,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
     for (auto& [name, type_count] : qos.max_tres_per_account.GetDeviceMap()) {
-      auto* type_count_map = 
-    (*qos_info->mutable_max_tres_per_account()->mutable_device_map()->mutable_name_type_map())[name].mutable_type_count_map();
+      auto* type_count_map = (*qos_info->mutable_max_tres_per_account()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
       for (auto& [type, value] : type_count.second) {
         (*type_count_map)[type] = value;
       }
