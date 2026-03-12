@@ -2241,7 +2241,7 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");
@@ -2383,7 +2383,7 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");

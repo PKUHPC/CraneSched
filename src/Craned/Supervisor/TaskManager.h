@@ -410,6 +410,10 @@ struct ProcInstanceMeta {
   ProcInstanceMeta& operator=(ProcInstanceMeta&&) = delete;
 
   std::string parsed_sh_script_path;
+  // Empty parsed pattern will redirect to /dev/null
+  std::string parsed_input_file_pattern;
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 struct BatchInstanceMeta final : ProcInstanceMeta {
@@ -419,9 +423,6 @@ struct BatchInstanceMeta final : ProcInstanceMeta {
   BatchInstanceMeta(BatchInstanceMeta&&) = delete;
   BatchInstanceMeta& operator=(const BatchInstanceMeta&) = delete;
   BatchInstanceMeta& operator=(BatchInstanceMeta&&) = delete;
-
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
 };
 
 struct CrunInstanceMeta final : ProcInstanceMeta {
@@ -434,8 +435,14 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
 
   int stdin_write{};
   int stdout_write{};
+  int stderr_write{};
   int stdin_read{};
   int stdout_read{};
+  int stderr_read{};
+
+  bool fwd_stdin{};
+  bool fwd_stdout{};
+  bool fwd_stderr{};
 
   std::string x11_target;
   uint16_t x11_port{};

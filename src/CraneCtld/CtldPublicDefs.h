@@ -945,11 +945,6 @@ struct TaskInCtld {
            task_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveTaskType::Calloc;
   }
-  bool IsCrun() const {
-    return type == crane::grpc::TaskType::Interactive &&
-           task_to_ctld.interactive_meta().interactive_type() ==
-               crane::grpc::InteractiveTaskType::Crun;
-  }
   bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
