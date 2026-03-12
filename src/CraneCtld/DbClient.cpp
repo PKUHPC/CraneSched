@@ -4380,7 +4380,7 @@ void MongodbClient::QosResourceViewFromDb_(
     auto type_total_ele = device_doc["type_total"];
     for (auto&& sub_item : type_total_ele.get_document().value) {
       uint64_t total = std::stoull(std::string(sub_item.get_string().value));
-      type_total[std::string(sub_item.key())] = total;
+      type_total.emplace(std::string(sub_item.key()), total);
     }
     resource->GetDeviceMap().emplace(
         std::string(device_item.key()),
