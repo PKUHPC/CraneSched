@@ -29,11 +29,11 @@ on:
       backend_ref:
         description: 'Backend ref to use (branch name, tag, or commit SHA)'
         required: false
-        default: ''
+        default: 'master'
       frontend_ref:
         description: 'FrontEnd ref to use (branch name, tag, or commit SHA)'
         required: false
-        default: ''
+        default: 'master'
       cache_buster:
         description: 'Optional cache buster to force rebuild (any non-empty string)'
         required: false
@@ -43,7 +43,9 @@ concurrency:
   group: >-
     ${{ github.event_name == 'pull_request'
         && format('pr-{0}', github.event.pull_request.number)
-        || format('ref-{0}', github.ref) }}
+        || github.event_name == 'workflow_dispatch'
+        && format('manual-{0}-{1}', inputs.backend_ref,inputs.frontend_ref)
+        || format('{0}-{1}', github.event_name, github.ref)}}
   cancel-in-progress: true
 
 env:
