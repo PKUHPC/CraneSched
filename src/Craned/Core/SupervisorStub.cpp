@@ -151,9 +151,6 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
   }
   CRANE_ERROR("TerminateTask failed: reply {},{}", reply.ok(),
               ok.error_message());
-
-  CRANE_WARN("TerminateTask failed: reply {},{}", reply.ok(),
-             ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 

@@ -287,7 +287,6 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           auto& meta = this->m_fwd_meta_map.at(tid);
           meta.output_stopped = true;
           if (meta.err_stopped) on_finish();
-          on_finish();
         });
 
         ph->on<uvw::error_event>([this, tid = meta.task_id, on_finish](
@@ -298,7 +297,6 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           auto& meta = this->m_fwd_meta_map.at(tid);
           meta.output_stopped = true;
           if (meta.err_stopped) on_finish();
-          on_finish();
         });
 
         ph->on<uvw::close_event>(

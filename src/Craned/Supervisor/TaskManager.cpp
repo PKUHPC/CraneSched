@@ -159,6 +159,8 @@ bool StepInstance::IsInteractive() const noexcept {
   return interactive_type.has_value();
 }
 
+bool StepInstance::IsBatch() const noexcept { return !IsInteractive(); }
+
 bool StepInstance::IsCrun() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Crun;
@@ -240,7 +242,7 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Running: {
-    if (this->IsDaemonStep()) {
+    if (this->IsDaemon()) {
       if (m_status_ != StepStatus::Configuring)
         CRANE_WARN(
             "[Step {}.{}] Daemon step status is not 'Configuring' when "
@@ -256,7 +258,7 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
     break;
   }
   case StepStatus::Starting: {
-    if (this->IsDaemonStep()) {
+    if (this->IsDaemon()) {
       CRANE_WARN(
           "[Step {}.{}] Daemon step got invalid status 'Starting' current "
           "status: {}.",
@@ -2045,7 +2047,7 @@ CraneErrCode ProcInstance::Prepare() {
       auto [path, fwd] =
           CrunParseFilePattern_(GetParentStep().io_meta().input_file_pattern());
       meta->fwd_stdin = fwd;
-      meta->parsed_output_file_pattern = path;
+      meta->parsed_input_file_pattern = path;
     }
     {
       auto [path, fwd] =
@@ -2719,7 +2721,7 @@ void TaskManager::EvShutdownSupervisorCb_() {
     got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
     if (!got_final_status) continue;
     auto& [status, exit_code, reason] = final_status;
-    if (m_step_.IsDaemonStep()) {
+    if (m_step_.IsDaemon()) {
       CRANE_DEBUG("Sending a {} status as daemon step.", status);
       m_step_.GotNewStatus(status);
       if (!m_step_.orphaned)
@@ -3009,7 +3011,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
-    if (m_step_.IsDaemonStep()) {
+    if (m_step_.IsDaemon()) {
       if (elem.mark_as_orphaned)
         g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       else {
@@ -3264,7 +3266,7 @@ void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
   while (m_grpc_migrate_ssh_proc_to_cgroup_queue_.try_dequeue(elem)) {
     auto& pid = elem.first;
     auto& prom = elem.second;
-    if (!m_step_.IsDaemonStep()) {
+    if (!m_step_.IsDaemon()) {
       CRANE_ERROR("Trying to move pid {} to no daemon step", pid);
       prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;

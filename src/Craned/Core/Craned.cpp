@@ -176,6 +176,7 @@ CraneErrCode RecoverCgForJobSteps(
                     step_id);
         clean_invalid_cg(ids);
       }
+      continue;
     }
 
     // Job cgroup recovery

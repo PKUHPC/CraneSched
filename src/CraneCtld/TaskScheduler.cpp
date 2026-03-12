@@ -2144,7 +2144,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         auto primary_step = task->PrimaryStep();
         if (!primary_step) {
           CRANE_ERROR(
-              "[Job #{}] Daemon step not found when cancelling running job",
+              "[Job #{}] Primary step not found when cancelling running job",
               task_id);
           return;
         }

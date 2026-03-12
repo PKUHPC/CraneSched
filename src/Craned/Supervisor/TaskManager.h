@@ -137,6 +137,7 @@ class StepInstance {
 
   // Perspective 1: Interactivity
   [[nodiscard]] bool IsInteractive() const noexcept;
+  [[nodiscard]] bool IsBatch() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
 
@@ -220,35 +221,6 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
-struct TaskInstanceMeta {
-  virtual ~TaskInstanceMeta() = default;
-
-  std::string parsed_sh_script_path{};
-  // Empty parsed pattern will redirect to /dev/null
-  std::string parsed_input_file_pattern{};
-  std::string parsed_output_file_pattern{};
-  std::string parsed_error_file_pattern{};
-};
-
-struct BatchInstanceMeta : TaskInstanceMeta {
-  ~BatchInstanceMeta() override = default;
-};
-
-struct CrunInstanceMeta : TaskInstanceMeta {
-  ~CrunInstanceMeta() override = default;
-
-  int stdin_write;
-  int stdout_write;
-  int stderr_write;
-  int stdin_read;
-  int stdout_read;
-  int stderr_read;
-
-  bool fwd_stdin;
-  bool fwd_stdout;
-  bool fwd_stderr;
-};
-
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
@@ -304,7 +276,7 @@ class ITaskInstance {
 
 class PodInstance : public ITaskInstance {
  public:
-  explicit PodInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  explicit PodInstance(StepInstance* step_spec, task_id_t task_id) : ITaskInstance(step_spec, task_id) {}
   ~PodInstance() override = default;
 
   PodInstance(const PodInstance&) = delete;
@@ -698,9 +670,6 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   std::shared_ptr<uvw::async_handle> m_supervisor_finish_init_handle_;
-  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
-      m_shutdown_status_queue_;
-  std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;

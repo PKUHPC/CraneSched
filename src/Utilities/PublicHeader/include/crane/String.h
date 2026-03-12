@@ -192,7 +192,6 @@ template <MapRange Map>
                           step_id_t>;
   }
 std::string JobStepsToString(const Map& m) {
-  typename std::ranges::range_value_t<Map>::second_type values;
   auto step_strs_view =
       m | std::views::transform([](const auto& kv) {
         return kv.second |

@@ -987,13 +987,6 @@ message CranedRemoteMeta {
   uint32 config_crc = 9;
 }
 
-message LicenseInfo {
-  string name = 1;
-  uint32 total = 2;
-  uint32 used = 3;
-  uint32 free = 4;
-}
-
 enum TxnAction {
   AddAccount = 0;
   ModifyAccount = 1;

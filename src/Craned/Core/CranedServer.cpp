@@ -304,7 +304,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
 
   auto task_env_map =
       g_job_mgr->QuerySshStepEnvVariables(request->task_id(), kDaemonStepId);
-  if (task_env_map.error()) {
+  if (!task_env_map) {
     CRANE_ERROR("Failed to get step env of job #{}", request->task_id());
     return Status::OK;
   }
@@ -328,7 +328,7 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
   auto err = g_job_mgr->ChangeStepTimelimit(request->task_id(), kPrimaryStepId,
                                             request->time_limit_seconds());
 
-  if (err.error()) {
+  if (!err) {
     CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
                 request->task_id(), kPrimaryStepId);
     return Status::OK;
@@ -534,9 +534,10 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
 
   builder.RegisterService(m_service_impl_.get());
 
+  m_server_ = builder.BuildAndStart();
+
   chmod(g_config.CranedUnixSockPath.c_str(), 0600);
 
-  m_server_ = builder.BuildAndStart();
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
