@@ -832,6 +832,8 @@ struct TaskInCtld {
 
   std::list<std::string> account_chain;
 
+  std::string submit_hostname;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
