@@ -118,6 +118,7 @@ jobs:
       output_bundle_artifact: build-output
       output_meta_artifact: build-meta
       key_sha256: ${{ env.KEY_SHA256 }}
+      autotest_changed: ${{ steps.update_autotest.outputs.changed }}
 
     steps:
       # Checkout backend repository
@@ -139,8 +140,18 @@ jobs:
 
       # Pull latest AutoTest scripts and set up derived paths
       - name: Update AutoTest repo
+        id: update_autotest
         run: |
+          BEFORE=$(git -C "$AUTOTEST_REPO" rev-parse HEAD)
           git -C "$AUTOTEST_REPO" pull --ff-only origin master || echo "WARN: AutoTest pull failed, using existing version"
+          AFTER=$(git -C "$AUTOTEST_REPO" rev-parse HEAD)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "AutoTest updated: $BEFORE -> $AFTER"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "AutoTest unchanged at $BEFORE"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
 
       # Resolve CI image digest (kept for metadata/fingerprint; not pinning run)
@@ -475,6 +486,13 @@ jobs:
           set -euo pipefail
           rm -rf output/*; mkdir -p output
           tar -xzf build-output.tar.gz -C output
+
+      # Rebuild AutoTest image if the framework code changed
+      - name: Rebuild AutoTest image
+        if: needs.build.outputs.autotest_changed == 'true'
+        run: |
+          echo "AutoTest repo changed, rebuilding localhost/autotest image..."
+          podman build -t localhost/autotest -f "${AUTOTEST_REPO}/docker/autotest/Dockerfile" "${AUTOTEST_REPO}"
 
       # Run AutoTest
       - name: Run AutoTest
