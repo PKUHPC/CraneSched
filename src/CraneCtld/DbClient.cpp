@@ -806,7 +806,8 @@ bool MongodbClient::FetchJobRecords(
         }
         job_info.set_exclusive(view["exclusive"].get_bool().value);
 
-        job_info.set_submit_hostname(view["submit_hostname"].get_string().value);
+        job_info.set_submit_hostname(
+            view["submit_hostname"].get_string().value);
 
         if (job_info.type() == crane::grpc::Container) {
           if (auto pod_elem = view["meta_pod"];
