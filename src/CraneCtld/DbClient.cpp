@@ -749,7 +749,8 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_account(view["account"].get_string().value.data());
         job_info.set_username(view["username"].get_string().value.data());
 
-        auto* mutable_req_total_res_view = job_info.mutable_req_total_res_view();
+        auto* mutable_req_total_res_view =
+            job_info.mutable_req_total_res_view();
         auto* mutable_req_alloc_res =
             mutable_req_total_res_view->mutable_allocatable_res();
         mutable_req_alloc_res->set_cpu_core_limit(
@@ -4581,7 +4582,8 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
-  auto* mutable_req_alloc_res = mutable_req_total_res_view->mutable_allocatable_res();
+  auto* mutable_req_alloc_res =
+      mutable_req_total_res_view->mutable_allocatable_res();
   mutable_req_alloc_res->set_cpu_core_limit(
       view["cpus_req"].get_double().value);
   mutable_req_alloc_res->set_memory_limit_bytes(
