@@ -159,7 +159,7 @@ Same as the return values of `crane_job_submit`.
 | cwd            | string         | Job working directory                    |
 | username       | string         | Username who submitted the job           |
 | qos            | string         | QoS associated with the job              |
-| req_res_view   | ResourceView   | Requested resource information           |
+| req_total_res_view   | ResourceView   | Requested resource information           |
 | licenses_count | table(map)     | License information                     |
 | req_nodes      | string         | Requested nodes                          |
 | exclude_nodes  | string         | Excluded nodes                           |
@@ -323,8 +323,8 @@ function crane_job_submit(job_desc, part_list, uid)
         for k, v in pairs(job.env) do
             crane.log_info("      %s %s", k, v)
         end
-        crane.log_info("    req_res_view.cpu_count: %d", job.req_res_view.cpu_count)
-        crane.log_info("    req_res_view.memory_bytes: %d", job.req_res_view.memory_bytes)
+        crane.log_info("    req_total_res_view.cpu_count: %d", job.req_total_res_view.cpu_count)
+        crane.log_info("    req_total_res_view.memory_bytes: %d", job.req_total_res_view.memory_bytes)
     end
 
     -- crane.reservations

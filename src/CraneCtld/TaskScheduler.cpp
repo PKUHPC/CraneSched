@@ -4144,7 +4144,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
   absl::Time earliest_end_time = now + job->time_limit;
 
   const ResourceView min_res_view =
-      job->node_res_view + job->task_res_view * job->ntasks_per_node_min;
+      job->req_node_res_view +
+      job->req_task_res_view * job->ntasks_per_node_min;
   ResourceV2 job_alloc_res;
   struct node_info {
     int ntasks_on_node;
@@ -4169,8 +4170,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     res_avail -= feasible_res;
     int ntasks_on_node = job->ntasks_per_node_min;
     while (ntasks_on_node < static_cast<int>(job->ntasks_per_node_max) &&
-           job->task_res_view.GetFeasibleResourceInNode(res_avail,
-                                                        &feasible_res)) {
+           job->req_task_res_view.GetFeasibleResourceInNode(res_avail,
+                                                            &feasible_res)) {
       ++ntasks_on_node;
       res_avail -= feasible_res;
     }
@@ -4302,8 +4303,9 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         job->allocated_res.AddResourceInNode(*info.craned_id, res);
       } else {
         ResourceInNode feasible_res;
-        bool ok = (job->node_res_view + job->task_res_view * ntasks_on_node)
-                      .GetFeasibleResourceInNode(res, &feasible_res);
+        bool ok =
+            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+                .GetFeasibleResourceInNode(res, &feasible_res);
         CRANE_ASSERT_MSG(
             ok, fmt("Failed to get feasible resource on craned {} for job #{}",
                     *info.craned_id, job->job_id));
@@ -4340,8 +4342,9 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         job->allocated_res.AddResourceInNode(*info.craned_id, res);
       } else {
         ResourceInNode feasible_res;
-        bool ok = (job->node_res_view + job->task_res_view * ntasks_on_node)
-                      .GetFeasibleResourceInNode(res, &feasible_res);
+        bool ok =
+            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+                .GetFeasibleResourceInNode(res, &feasible_res);
         CRANE_ASSERT_MSG(
             ok, fmt("Failed to get feasible resource on craned {} for job #{}",
                     *info.craned_id, job->job_id));
@@ -4746,8 +4749,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   CRANE_TRACE(
       "Task {} node res:{}, task res:{}, part default_mem_per_cpu:{}, "
       "default_mem_per_node:{}, max_mem_per_cpu:{}, max_mem_per_node:{}",
-      task->TaskId(), util::ReadableResourceView(task->node_res_view),
-      util::ReadableResourceView(task->task_res_view),
+      task->TaskId(), util::ReadableResourceView(task->req_node_res_view),
+      util::ReadableResourceView(task->req_task_res_view),
       part_meta.default_mem_per_cpu, part_meta.default_mem_per_node,
       part_meta.max_mem_per_cpu, part_meta.max_mem_per_node);
 
@@ -4762,24 +4765,24 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
   }
 
-  CRANE_ASSERT(task->node_res_view.CpuCount() == 0);
+  CRANE_ASSERT(task->req_node_res_view.CpuCount() == 0);
 
   if (!user_set_mem_per_cpu && !user_set_mem_per_node) {
     if (part_meta.default_mem_per_node != 0) {
-      task->node_res_view.GetAllocatableRes().memory_bytes =
+      task->req_node_res_view.GetAllocatableRes().memory_bytes =
           part_meta.default_mem_per_node;
-      task->node_res_view.GetAllocatableRes().memory_sw_bytes =
+      task->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
           part_meta.default_mem_per_node;
       user_set_mem_per_node = true;
       CRANE_TRACE("default_mem_per_node for job #{} is set to {}",
                   task->TaskId(), part_meta.default_mem_per_node);
     } else if (part_meta.default_mem_per_cpu != 0) {
       auto task_mem_per_cpu = part_meta.default_mem_per_cpu;
-      task->task_res_view.GetAllocatableRes().memory_bytes =
-          static_cast<double>(task->task_res_view.CpuCount()) *
+      task->req_task_res_view.GetAllocatableRes().memory_bytes =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
           task_mem_per_cpu;
-      task->task_res_view.GetAllocatableRes().memory_sw_bytes =
-          static_cast<double>(task->task_res_view.CpuCount()) *
+      task->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
           task_mem_per_cpu;
       user_set_mem_per_cpu = true;
       CRANE_TRACE("default_mem_per_cpu for job #{} is set to {}",
@@ -4795,21 +4798,23 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   if (part_meta.max_mem_per_cpu != 0) {
     if (user_set_mem_per_cpu) {
-      auto max_task_mem = static_cast<double>(task->task_res_view.CpuCount()) *
-                          part_meta.max_mem_per_cpu;
-      if (task->task_res_view.MemoryBytes() > max_task_mem) {
-        task->task_res_view.GetAllocatableRes().memory_bytes = max_task_mem;
-        task->task_res_view.GetAllocatableRes().memory_sw_bytes = max_task_mem;
+      auto max_task_mem =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
+          part_meta.max_mem_per_cpu;
+      if (task->req_task_res_view.MemoryBytes() > max_task_mem) {
+        task->req_task_res_view.GetAllocatableRes().memory_bytes = max_task_mem;
+        task->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+            max_task_mem;
       }
     } else {
       // mem_per_node / (ntasks_per_node * cpus_per_task) <= max_mem_per_cpu
       // ntasks_per_node >= ceil(mem_per_node / (max_mem_per_cpu *
       // cpus_per_task))
-      double cpus_per_task = task->task_res_view.CpuCount();
+      double cpus_per_task = task->req_task_res_view.CpuCount();
       if (cpus_per_task > 0) {
-        auto required_min = static_cast<uint32_t>(
-            std::ceil(static_cast<double>(task->node_res_view.MemoryBytes()) /
-                      (part_meta.max_mem_per_cpu * cpus_per_task)));
+        auto required_min = static_cast<uint32_t>(std::ceil(
+            static_cast<double>(task->req_node_res_view.MemoryBytes()) /
+            (part_meta.max_mem_per_cpu * cpus_per_task)));
         task->ntasks_per_node_min =
             std::max(task->ntasks_per_node_min, required_min);
       }
@@ -4818,16 +4823,16 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   if (part_meta.max_mem_per_node != 0) {
     if (user_set_mem_per_node) {
-      if (task->node_res_view.MemoryBytes() > part_meta.max_mem_per_node) {
-        task->node_res_view.GetAllocatableRes().memory_bytes =
+      if (task->req_node_res_view.MemoryBytes() > part_meta.max_mem_per_node) {
+        task->req_node_res_view.GetAllocatableRes().memory_bytes =
             part_meta.max_mem_per_node;
-        task->node_res_view.GetAllocatableRes().memory_sw_bytes =
+        task->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
             part_meta.max_mem_per_node;
       }
     } else {
       // ntasks_per_node * task_memory <= max_mem_per_node
       // ntasks_per_node_max <= floor(max_mem_per_node / task_memory)
-      auto task_mem = task->task_res_view.MemoryBytes();
+      auto task_mem = task->req_task_res_view.MemoryBytes();
       if (task_mem > 0) {
         auto required_max = static_cast<uint32_t>(
             static_cast<double>(part_meta.max_mem_per_node) / task_mem);
@@ -4869,14 +4874,14 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   CRANE_TRACE(
       "Job #{} after mem adjust: node res:{}, task res:{}, "
       "ntasks_per_node_min:{}, ntasks_per_node_max:{}",
-      task->TaskId(), util::ReadableResourceView(task->node_res_view),
-      util::ReadableResourceView(task->task_res_view),
+      task->TaskId(), util::ReadableResourceView(task->req_node_res_view),
+      util::ReadableResourceView(task->req_task_res_view),
       task->ntasks_per_node_min, task->ntasks_per_node_max);
 
-  task->total_res_view =
-      task->node_res_view * task->node_num + task->task_res_view * task->ntasks;
+  task->req_total_res_view = task->req_node_res_view * task->node_num +
+                             task->req_task_res_view * task->ntasks;
   CRANE_TRACE("Job #{} total res:{}", task->TaskId(),
-              util::ReadableResourceView(task->total_res_view));
+              util::ReadableResourceView(task->req_total_res_view));
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);
@@ -4947,11 +4952,11 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
   // Check res req valid
-  if (task->total_res_view.MemoryBytes() == 0) {
+  if (task->req_total_res_view.MemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
-  if (task->task_res_view.CpuCount() == 0) {
+  if (task->req_task_res_view.CpuCount() == 0) {
     CRANE_DEBUG("Job #{} has zero cpu request.", task->TaskId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
@@ -4965,7 +4970,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     // Since we do not access the elements in partition_metas_m
 
     // Check whether the selected partition is able to run this task.
-    if (!(task->total_res_view <=
+    if (!(task->req_total_res_view <=
           metas_ptr->partition_global_meta.res_total_inc_dead)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
@@ -5045,7 +5050,8 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (task->node_res_view + task->task_res_view <= craned_meta->res_total &&
+      if (task->req_node_res_view + task->req_task_res_view <=
+              craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||
@@ -5099,22 +5105,24 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
       return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
     }
 
-    bool no_memory_set = (step->node_res_view.MemoryBytes() == 0 &&
-                          step->task_res_view.MemoryBytes() == 0);
+    bool no_memory_set = (step->req_node_res_view.MemoryBytes() == 0 &&
+                          step->req_task_res_view.MemoryBytes() == 0);
 
     if (no_memory_set) {
       if (part_meta.default_mem_per_node != 0) {
-        step->node_res_view.GetAllocatableRes().memory_bytes =
+        step->req_node_res_view.GetAllocatableRes().memory_bytes =
             part_meta.default_mem_per_node;
-        step->node_res_view.GetAllocatableRes().memory_sw_bytes =
+        step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
             part_meta.default_mem_per_node;
         user_set_mem_per_node = true;
       } else if (part_meta.default_mem_per_cpu != 0) {
         auto mem_per_cpu = part_meta.default_mem_per_cpu;
-        step->task_res_view.GetAllocatableRes().memory_bytes =
-            static_cast<double>(step->task_res_view.CpuCount()) * mem_per_cpu;
-        step->task_res_view.GetAllocatableRes().memory_sw_bytes =
-            static_cast<double>(step->task_res_view.CpuCount()) * mem_per_cpu;
+        step->req_task_res_view.GetAllocatableRes().memory_bytes =
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            mem_per_cpu;
+        step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            mem_per_cpu;
         user_set_mem_per_cpu = true;
       } else {
         CRANE_ERROR(
@@ -5128,19 +5136,20 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
     if (part_meta.max_mem_per_cpu != 0) {
       if (user_set_mem_per_cpu) {
         auto max_task_mem =
-            static_cast<double>(step->task_res_view.CpuCount()) *
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
             part_meta.max_mem_per_cpu;
-        if (step->task_res_view.MemoryBytes() > max_task_mem) {
-          step->task_res_view.GetAllocatableRes().memory_bytes = max_task_mem;
-          step->task_res_view.GetAllocatableRes().memory_sw_bytes =
+        if (step->req_task_res_view.MemoryBytes() > max_task_mem) {
+          step->req_task_res_view.GetAllocatableRes().memory_bytes =
+              max_task_mem;
+          step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
               max_task_mem;
         }
       } else if (user_set_mem_per_node) {
-        double cpus_per_task = step->task_res_view.CpuCount();
+        double cpus_per_task = step->req_task_res_view.CpuCount();
         if (cpus_per_task > 0) {
-          auto required_min = static_cast<uint32_t>(
-              std::ceil(static_cast<double>(step->node_res_view.MemoryBytes()) /
-                        (part_meta.max_mem_per_cpu * cpus_per_task)));
+          auto required_min = static_cast<uint32_t>(std::ceil(
+              static_cast<double>(step->req_node_res_view.MemoryBytes()) /
+              (part_meta.max_mem_per_cpu * cpus_per_task)));
           step->ntasks_per_node_min =
               std::max(step->ntasks_per_node_min, required_min);
         }
@@ -5149,14 +5158,15 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
 
     if (part_meta.max_mem_per_node != 0) {
       if (user_set_mem_per_node) {
-        if (step->node_res_view.MemoryBytes() > part_meta.max_mem_per_node) {
-          step->node_res_view.GetAllocatableRes().memory_bytes =
+        if (step->req_node_res_view.MemoryBytes() >
+            part_meta.max_mem_per_node) {
+          step->req_node_res_view.GetAllocatableRes().memory_bytes =
               part_meta.max_mem_per_node;
-          step->node_res_view.GetAllocatableRes().memory_sw_bytes =
+          step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
               part_meta.max_mem_per_node;
         }
       } else if (user_set_mem_per_cpu) {
-        auto task_mem = step->task_res_view.MemoryBytes();
+        auto task_mem = step->req_task_res_view.MemoryBytes();
         if (task_mem > 0) {
           auto required_max = static_cast<uint32_t>(
               static_cast<double>(part_meta.max_mem_per_node) / task_mem);
@@ -5194,8 +5204,8 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
     return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
   }
 
-  step->total_res_view =
-      step->node_res_view * step->node_num + step->task_res_view * step->ntasks;
+  step->req_total_res_view = step->req_node_res_view * step->node_num +
+                             step->req_task_res_view * step->ntasks;
 
   return {};
 }
@@ -5205,12 +5215,12 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
-  if (step->total_res_view.MemoryBytes() == 0) {
+  if (step->req_total_res_view.MemoryBytes() == 0) {
     CRANE_DEBUG("Step #{}.{} has zero memory request.", step->job_id,
                 step->StepId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
-  if (step->task_res_view.CpuCount() == 0) {
+  if (step->req_task_res_view.CpuCount() == 0) {
     CRANE_DEBUG("Step #{}.{} has zero cpu request.", step->job_id,
                 step->StepId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
@@ -5231,7 +5241,8 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   std::unordered_set<std::string> avail_nodes;
   for (const auto& craned_id : job->CranedIds()) {
     const auto& job_res = job->AllocatedRes();
-    if (step->node_res_view + step->task_res_view <= job_res.at(craned_id) &&
+    if (step->req_node_res_view + step->req_task_res_view <=
+            job_res.at(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
         (step->excluded_nodes.empty() ||
@@ -5351,11 +5362,12 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_req, bound.node_num_min);
     bound.node_num_max = std::max(nodes_req, bound.node_num_max);
 
-    uint64_t job_mem_req = job->total_res_view.MemoryBytes();
+    uint64_t job_mem_req = job->req_total_res_view.MemoryBytes();
     bound.mem_alloc_min = std::min(job_mem_req, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(job_mem_req, bound.mem_alloc_max);
 
-    double job_cpus_req = static_cast<double>(job->total_res_view.CpuCount());
+    double job_cpus_req =
+        static_cast<double>(job->req_total_res_view.CpuCount());
     bound.cpus_alloc_min = std::min(job_cpus_req, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(job_cpus_req, bound.cpus_alloc_max);
 
@@ -5438,8 +5450,9 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
   uint32_t job_qos_priority = job->qos_priority;
   uint32_t job_part_priority = job->partition_priority;
   uint32_t job_nodes_alloc = job->node_num;
-  uint64_t job_mem_alloc = job->total_res_view.MemoryBytes();
-  double job_cpus_alloc = static_cast<double>(job->total_res_view.CpuCount());
+  uint64_t job_mem_alloc = job->req_total_res_view.MemoryBytes();
+  double job_cpus_alloc =
+      static_cast<double>(job->req_total_res_view.CpuCount());
   double job_service_val = bound.acc_service_val_map.at(job->account);
 
   double qos_factor{0};

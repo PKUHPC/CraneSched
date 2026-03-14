@@ -567,7 +567,7 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
-  ResourceView req_res_view = 17;
+  ResourceView req_total_res_view = 17;
   map<string, uint32> licenses_count = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
@@ -627,7 +627,7 @@ message StepInfo {
   string cmd_line = 13;
   string cwd = 14;
   uint32 ntasks = 15;
-  ResourceView req_res_view = 17;
+  ResourceView req_total_res_view = 17;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 

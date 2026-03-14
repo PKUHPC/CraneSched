@@ -141,7 +141,7 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | cwd            | string       | 作业执行目录   |
 | username       | string       | 作业提交用户名  |
 | qos            | string       | 作业所属qos  |
-| req_res_view   | ResourceView | 需求资源信息   |
+| req_total_res_view   | ResourceView | 需求资源信息   |
 | licenses_count | table(map)   | 许可证信息    |
 | req_nodes      | string       | 需求节点信息   |
 | exclude_nodes  | string       | 排除节点     |
@@ -302,8 +302,8 @@ function crane_job_submit(job_desc, part_list, uid)
         for k, v in pairs(job.env) do
             crane.log_info("      %s %s", k, v)
         end
-        crane.log_info("    req_res_view.cpu_count: %d", job.req_res_view.cpu_count)
-        crane.log_info("    req_res_view.memory_bytes: %d", job.req_res_view.memory_bytes)
+        crane.log_info("    req_total_res_view.cpu_count: %d", job.req_total_res_view.cpu_count)
+        crane.log_info("    req_total_res_view.memory_bytes: %d", job.req_total_res_view.memory_bytes)
     end
 
     -- crane.reservations

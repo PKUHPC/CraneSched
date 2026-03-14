@@ -44,7 +44,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     return CraneErrCode::ERR_INVALID_QOS;
   }
 
-  if (static_cast<double>(task.total_res_view.GetAllocatableRes().cpu_count) >
+  if (static_cast<double>(
+          task.req_total_res_view.GetAllocatableRes().cpu_count) >
       qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
@@ -367,7 +368,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
-  const ResourceView& resource_view = task.total_res_view;
+  const ResourceView& resource_view = task.req_total_res_view;
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {

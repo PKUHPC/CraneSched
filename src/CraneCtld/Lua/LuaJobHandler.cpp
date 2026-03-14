@@ -331,8 +331,8 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "qos", sol::property([](const TaskInfo& t) {
       return t.qos();
     }),
-    "req_res_view", sol::property([](const TaskInfo& t) {
-      return static_cast<ResourceView>(t.req_res_view());
+    "req_total_res_view", sol::property([](const TaskInfo& t) {
+      return static_cast<ResourceView>(t.req_total_res_view());
     }),
     "licenses_count", sol::property([&](const TaskInfo& t) {
       sol::table tbl = lua_env.GetLuaState().create_table();
