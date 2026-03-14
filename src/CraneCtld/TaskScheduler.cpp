@@ -4293,14 +4293,18 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       const auto& info = topk_nodes_avail.top();
       const auto& res = info.res;
       int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
-      ResourceInNode feasible_res;
-      bool ok = (job->node_res_view + job->task_res_view * ntasks_on_node)
-                    .GetFeasibleResourceInNode(res, &feasible_res);
-      CRANE_ASSERT_MSG(
-          ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                  *info.craned_id, job->job_id));
+      if (job->exclusive) {
+        job->allocated_res.AddResourceInNode(*info.craned_id, res);
+      } else {
+        ResourceInNode feasible_res;
+        bool ok = (job->node_res_view + job->task_res_view * ntasks_on_node)
+                      .GetFeasibleResourceInNode(res, &feasible_res);
+        CRANE_ASSERT_MSG(
+            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
+                    *info.craned_id, job->job_id));
+        job->allocated_res.AddResourceInNode(*info.craned_id, feasible_res);
+      }
       job->craned_id_to_task_num[*info.craned_id] = ntasks_on_node;
-      job->allocated_res.AddResourceInNode(*info.craned_id, feasible_res);
       rest_ntasks -= ntasks_on_node - 1;
       topk_nodes_avail.pop();
     }
