@@ -409,8 +409,8 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->set_node_num(node_num);
   step_info->set_ntasks(ntasks);
 
-  // *step_info->mutable_req_res_view() =
-  //     static_cast<crane::grpc::ResourceView>(requested_node_res_view);
+  *step_info->mutable_req_res_view() =
+      static_cast<crane::grpc::ResourceView>(total_res_view);
   step_info->mutable_req_nodes()->Assign(included_nodes.begin(),
                                          included_nodes.end());
   step_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
