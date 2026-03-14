@@ -5081,6 +5081,15 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
 
     bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
     bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
+
+    if (user_set_mem_per_cpu && user_set_mem_per_node) {
+      CRANE_ERROR(
+          "Step #{}.{} has both mem_per_cpu and mem_per_node set, "
+          "which is not allowed.",
+          step->job_id, step->StepId());
+      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+    }
+
     bool no_memory_set = (step->node_res_view.MemoryBytes() == 0 &&
                           step->task_res_view.MemoryBytes() == 0);
 
@@ -5098,6 +5107,12 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->task_res_view.GetAllocatableRes().memory_sw_bytes =
             static_cast<double>(step->task_res_view.CpuCount()) * mem_per_cpu;
         user_set_mem_per_cpu = true;
+      } else {
+        CRANE_ERROR(
+            "Step #{}.{}: neither mem_per_cpu nor mem_per_node is "
+            "set, and partition {} has no default.",
+            step->job_id, step->StepId(), step->job->partition_id);
+        return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
       }
     }
 

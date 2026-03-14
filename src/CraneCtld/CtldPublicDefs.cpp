@@ -350,6 +350,8 @@ void StepInCtld::RecoverFromDb(
       task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
       task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
     }
+  } else {
+    task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
   }
 
   total_res_view = node_res_view * node_num + task_res_view * ntasks;
@@ -448,6 +450,10 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   time_limit = job.time_limit;
   extra_attr = job.extra_attr;
 
+  ntasks = job.ntasks;
+  ntasks_per_node_min = job.ntasks_per_node_min;
+  ntasks_per_node_max = job.ntasks_per_node_max;
+
   node_res_view = job.node_res_view;
   task_res_view = job.task_res_view;
   total_res_view = job.total_res_view;
@@ -516,6 +522,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   // No batch or ia meta need to set
 
   step.set_node_num(node_num);
+  step.set_ntasks(ntasks);
   step.set_ntasks_per_node(ntasks_per_node_max);
 
   step.set_get_user_env(get_user_env);
