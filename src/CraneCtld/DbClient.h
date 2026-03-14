@@ -582,8 +582,7 @@ class MongodbClient {
   const std::string m_license_resource_collection_name_{
       "license_resource_table"};
 
-  const std::string m_migration_temp_collection_name_{
-      "task_table_migrating"};
+  const std::string m_migration_temp_collection_name_{"task_table_migrating"};
   const std::string m_metadata_collection_name_{"metadata_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
   const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
