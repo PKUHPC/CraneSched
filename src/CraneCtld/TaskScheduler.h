@@ -86,9 +86,9 @@ struct PdJobInScheduler {
   PartitionId partition_id;
   std::string reservation;
 
-  ResourceView node_res_view;
-  ResourceView task_res_view;
-  ResourceView total_res_view;
+  ResourceView req_node_res_view;
+  ResourceView req_task_res_view;
+  ResourceView req_total_res_view;
 
   uint32_t node_num;
   uint32_t ntasks_per_node_min;
@@ -127,9 +127,9 @@ struct PdJobInScheduler {
         time_limit(job->time_limit),
         partition_id(job->partition_id),
         reservation(job->reservation),
-        node_res_view(job->node_res_view),
-        task_res_view(job->task_res_view),
-        total_res_view(job->total_res_view),
+        req_node_res_view(job->req_node_res_view),
+        req_task_res_view(job->req_task_res_view),
+        req_total_res_view(job->req_total_res_view),
         node_num(job->node_num),
         ntasks_per_node_min(job->ntasks_per_node_min),
         ntasks_per_node_max(job->ntasks_per_node_max),

@@ -581,9 +581,9 @@ struct StepInCtld {
 
   absl::Duration time_limit;
 
-  ResourceView node_res_view;
-  ResourceView task_res_view;
-  ResourceView total_res_view;
+  ResourceView req_node_res_view;
+  ResourceView req_task_res_view;
+  ResourceView req_total_res_view;
 
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
@@ -793,9 +793,9 @@ struct TaskInCtld {
 
   PartitionId partition_id;
 
-  ResourceView node_res_view;
-  ResourceView task_res_view;
-  ResourceView total_res_view;
+  ResourceView req_node_res_view;
+  ResourceView req_task_res_view;
+  ResourceView req_total_res_view;
 
   crane::grpc::TaskType type;
 

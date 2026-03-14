@@ -749,9 +749,9 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_account(view["account"].get_string().value.data());
         job_info.set_username(view["username"].get_string().value.data());
 
-        auto* mutable_req_res_view = job_info.mutable_req_res_view();
+        auto* mutable_req_total_res_view = job_info.mutable_req_total_res_view();
         auto* mutable_req_alloc_res =
-            mutable_req_res_view->mutable_allocatable_res();
+            mutable_req_total_res_view->mutable_allocatable_res();
         mutable_req_alloc_res->set_cpu_core_limit(
             view["cpus_req"].get_double().value);
         mutable_req_alloc_res->set_memory_limit_bytes(
@@ -4357,8 +4357,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
-             task->total_res_view.CpuCount(),
-             static_cast<int64_t>(task->total_res_view.MemoryBytes()),
+             task->req_total_res_view.CpuCount(),
+             static_cast<int64_t>(task->req_total_res_view.MemoryBytes()),
              task->name, env_str, static_cast<int32_t>(task->uid),
              // 10-14
              static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
@@ -4446,8 +4446,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       values{                                                     // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             step->total_res_view.CpuCount(),
-             static_cast<int64_t>(step->total_res_view.MemoryBytes()),
+             step->req_total_res_view.CpuCount(),
+             static_cast<int64_t>(step->req_total_res_view.MemoryBytes()),
              // 5-9
              step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
              util::HostNameListToStr(step->CranedIds()),
@@ -4580,8 +4580,8 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   // 25 extra_attr      res_alloc     step_type     meta_container
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
-  auto* mutable_req_res_view = step_info->mutable_req_res_view();
-  auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+  auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
+  auto* mutable_req_alloc_res = mutable_req_total_res_view->mutable_allocatable_res();
   mutable_req_alloc_res->set_cpu_core_limit(
       view["cpus_req"].get_double().value);
   mutable_req_alloc_res->set_memory_limit_bytes(
