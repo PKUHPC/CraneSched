@@ -27,11 +27,11 @@ on:
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: 'Backend ref to use (branch name, tag, or commit SHA)'
+        description: 'Backend ref to use (branch name, tag, commit SHA or refs/pull/${pr_number}/head)'
         required: false
         default: 'master'
       frontend_ref:
-        description: 'FrontEnd ref to use (branch name, tag, or commit SHA)'
+        description: 'FrontEnd ref to use (branch name, tag, commit SHA or refs/pull/${pr_number}/head)'
         required: false
         default: 'master'
       cache_buster:
