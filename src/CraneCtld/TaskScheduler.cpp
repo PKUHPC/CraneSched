@@ -4144,8 +4144,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
   ResourceV2 job_alloc_res;
   struct node_info {
     int ntasks_on_node;
-    const CranedId* craned_id;
     ResourceInNode res;
+    NodeState* node_state;
     bool operator<(const node_info& other) const {
       return ntasks_on_node > other.ntasks_on_node;
     }
@@ -4222,7 +4222,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         topk_ntasks_sum_total < job->ntasks) {
       topk_ntasks_sum_total += ntasks_on_node_total;
       topk_nodes_total.push(
-          node_info{ntasks_on_node_total, &craned_id, node_state->res_total});
+          node_info{ntasks_on_node_total, node_state->res_total, node_state});
       if (topk_nodes_total.size() > job->node_num) {
         topk_ntasks_sum_total -= topk_nodes_total.top().ntasks_on_node;
         topk_nodes_total.pop();
@@ -4248,7 +4248,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       }
       topk_ntasks_sum_avail += ntasks_on_node_total;
       topk_nodes_avail.push(
-          node_info{ntasks_on_node_total, &craned_id, node_state->res_total});
+          node_info{ntasks_on_node_total, node_state->res_total, node_state});
       if (topk_nodes_avail.size() > job->node_num) {
         topk_ntasks_sum_avail -= topk_nodes_avail.top().ntasks_on_node;
         topk_nodes_avail.pop();
@@ -4274,7 +4274,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       if (ntasks_on_node_avail) {
         topk_ntasks_sum_avail += ntasks_on_node_avail;
         topk_nodes_avail.push(
-            node_info{ntasks_on_node_avail, &craned_id, min_res_on_node});
+            node_info{ntasks_on_node_avail, min_res_on_node, node_state});
         if (topk_nodes_avail.size() > job->node_num) {
           topk_ntasks_sum_avail -= topk_nodes_avail.top().ntasks_on_node;
           topk_nodes_avail.pop();
@@ -4295,7 +4295,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       const auto& res = info.res;
       int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
       if (job->exclusive) {
-        job->allocated_res.AddResourceInNode(*info.craned_id, res);
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
       } else {
         ResourceInNode feasible_res;
         bool ok =
@@ -4303,10 +4303,11 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
                 .GetFeasibleResourceInNode(res, &feasible_res);
         CRANE_ASSERT_MSG(
             ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                    *info.craned_id, job->job_id));
-        job->allocated_res.AddResourceInNode(*info.craned_id, feasible_res);
+                    info.node_state->craned_id, job->job_id));
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                             feasible_res);
       }
-      job->craned_id_to_task_num[*info.craned_id] = ntasks_on_node;
+      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
       rest_ntasks -= ntasks_on_node - 1;
       topk_nodes_avail.pop();
     }
@@ -4334,7 +4335,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       const auto& res = info.res;
       int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
       if (job->exclusive) {
-        job->allocated_res.AddResourceInNode(*info.craned_id, res);
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
       } else {
         ResourceInNode feasible_res;
         bool ok =
@@ -4342,10 +4343,12 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
                 .GetFeasibleResourceInNode(res, &feasible_res);
         CRANE_ASSERT_MSG(
             ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                    *info.craned_id, job->job_id));
-        job->allocated_res.AddResourceInNode(*info.craned_id, feasible_res);
+                    info.node_state->craned_id, job->job_id));
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                             feasible_res);
       }
-      job->craned_id_to_task_num[*info.craned_id] = ntasks_on_node;
+      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
+      nodes_to_sched.push_back(info.node_state);
       rest_ntasks -= ntasks_on_node - 1;
       topk_nodes_total.pop();
     }
