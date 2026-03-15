@@ -2144,7 +2144,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         auto primary_step = task->PrimaryStep();
         if (!primary_step) {
           CRANE_DEBUG(
-              "[Job #{}] Primary step not found when cancelling running job",
+              "[Job #{}] Primary step not found when cancelling running job, "
+              "maybe completing.",
               task_id);
         }
         TerminateRunningStepNoLock_(primary_step);
