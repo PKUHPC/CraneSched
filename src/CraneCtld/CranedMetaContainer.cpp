@@ -21,7 +21,6 @@
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
-
 namespace Ctld {
 
 void CranedMetaContainer::CranedUp(
@@ -351,9 +350,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.res_in_use.SetToZero();
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
-    part_meta.partition_global_meta.allowed_accounts =
-        partition.allowed_accounts;
-    part_meta.partition_global_meta.denied_accounts = partition.denied_accounts;
+    LoadPartitionAclFromConfig_(part_name, part_meta.partition_global_meta);
 
     CRANE_DEBUG(
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "
@@ -697,11 +694,9 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
                                : crane::grpc::PartitionState::PARTITION_DOWN);
       craned_ids = part_meta->craned_ids;
     }
-
-    std::list<std::string> craned_name_lists[control_state_num]
-                                            [resource_state_num]
-                                            [power_state_num];
-
+    std::map<std::string, std::vector<std::string>>
+        craned_name_lists[control_state_num][resource_state_num]
+                         [power_state_num];
     auto craned_rng =
         craned_ids |
         ranges::views::transform(
@@ -740,7 +735,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
           power_filters[static_cast<int>(craned_meta->power_state)]) {
         craned_name_lists[static_cast<int>(control_state)][static_cast<int>(
             resource_state)][static_cast<int>(craned_meta->power_state)]
-            .emplace_back(craned_meta->static_meta.hostname);
+                         [craned_meta->state_reason]
+                             .emplace_back(craned_meta->static_meta.hostname);
       }
     });
 
@@ -749,14 +745,18 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       for (int j = 0; j < resource_state_num; j++) {
         for (int k = 0; k < power_state_num; k++) {
           if (craned_name_lists[i][j][k].size() > 0) {
-            auto* craned_list = craned_lists->Add();
-            craned_list->set_control_state(crane::grpc::CranedControlState(i));
-            craned_list->set_resource_state(
-                crane::grpc::CranedResourceState(j));
-            craned_list->set_power_state(crane::grpc::CranedPowerState(k));
-            craned_list->set_count(craned_name_lists[i][j][k].size());
-            craned_list->set_craned_list_regex(
-                util::HostNameListToStr(craned_name_lists[i][j][k]));
+            for (const auto& [key, value] : craned_name_lists[i][j][k]) {
+              auto* craned_list = craned_lists->Add();
+              craned_list->set_control_state(
+                  crane::grpc::CranedControlState(i));
+              craned_list->set_resource_state(
+                  crane::grpc::CranedResourceState(j));
+              craned_list->set_power_state(crane::grpc::CranedPowerState(k));
+              craned_list->set_count(value.size());
+              craned_list->set_craned_list_regex(
+                  util::HostNameListToStr(value));
+              craned_list->set_reason(key);
+            }
           }
         }
       }
@@ -918,6 +918,31 @@ CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
   }
 
   return result;
+}
+
+void CranedMetaContainer::LoadPartitionAclFromConfig_(
+    const std::string& part_name, PartitionGlobalMeta& meta) {
+  auto it = g_config.Partitions.find(part_name);
+  if (it != g_config.Partitions.end()) {
+    meta.allowed_accounts = it->second.allowed_accounts;
+    meta.denied_accounts = it->second.denied_accounts;
+  } else {
+    meta.allowed_accounts.clear();
+    meta.denied_accounts.clear();
+  }
+}
+
+void CranedMetaContainer::ResetAllPartitionAcls(bool reload_from_config) {
+  auto part_metas_map = partition_meta_map_.GetMapSharedPtr();
+  for (auto& [part_name, part_meta_ptr] : *part_metas_map) {
+    auto part_meta = part_meta_ptr.GetExclusivePtr();
+    if (reload_from_config) {
+      LoadPartitionAclFromConfig_(part_name, part_meta->partition_global_meta);
+    } else {
+      part_meta->partition_global_meta.allowed_accounts.clear();
+      part_meta->partition_global_meta.denied_accounts.clear();
+    }
+  }
 }
 
 CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(

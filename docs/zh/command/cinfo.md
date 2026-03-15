@@ -3,26 +3,49 @@
 **cinfo可查询各分区节点的队列资源信息。**
 
 查看分区节点状态：
-~~~bash
+```bash
 cinfo
-~~~
+```
 
 **cinfo运行结果展示**
 
-![cinfo](../../images/cinfo/cinfo_running.png)
+```text
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 ## 主要输出项
 
 - **PARTITION**：分区名
 - **AVAIL**： 分区状态
+
   - up: 可用
   - down: 不可用
+
 - **NODES**：节点数
-- **STATE**： 节点状态
-  - **idle**： 空闲
-  - mix： 节点部分核心可以使用
-  - alloc： 节点已被占用
-  - down： 节点不可用
+- **STATE**：节点状态，包括资源状态和控制状态
+
+  - **资源状态**
+
+    - idle：空闲
+    - mix：节点部分核心可以使用
+    - alloc：节点已被占用
+    - down：节点不可用
+
+  - **控制状态**
+
+    - power_idle：空闲态。被调度睡眠时计入power_to_sleeping；有作业则进入power_activate
+    - power_activate：活跃态，初始状态。没有作业等待一段时间后，部分节点会进入power_idle
+    - power_sleeping：睡眠态。被调度wakeup时进入power_waking_up;被调度挂机后，进入power_powering_off
+    - power_poweredoff：关机
+    - power_to_sleeping：睡眠切换中。等待一段时间后进入power_sleeping
+    - power_waking_up：唤醒态。等待一段时间后计入power_idle
+    - power_powering_on：开机。等待一段时间后进入power_idle
+    - power_powering_off：关机。被调度开机后，进入powering_on
+    - failed：控制状态不可用
+
 - **NODELIST**： 节点列表
 
 ## 主要参数
@@ -36,7 +59,7 @@ cinfo
 - **-N/--noheader**：输出隐藏表头
 - **-p/--partition string**：显示指定分区信息，多个分区用逗号隔开。例：`cinfo -p CPU,GPU`
 - **-r/--responding**：只显示有响应节点
-- **-t/--states string**：仅显示具有指定状态的节点信息。状态可以为（不区分大小写）: IDLE, MIX, ALLOC和DOWN。示例：
+- **-t/--states string**：仅显示具有指定资源状态的节点信息。状态可以为（不区分大小写）: IDLE, MIX, ALLOC和DOWN。示例：
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**：查询版本号
@@ -69,61 +92,178 @@ cinfo --format "%.5partition %.6a %s"
 ```bash
 cinfo
 ```
-![cinfo](../../images/cinfo/cinfo_running.png)
+```text
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
+
+**常见节点控制状态说明：**
+节点已经被调度关机和睡眠中，节点资源不可用
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                  NODELIST
+CPU*      down  4     down[power_sleeping]   cn[06-09]
+CPU*      down  5     down[power_poweredoff] cn[01, 03-05, 11]
+GPU       down  4     down[power_sleeping]   cn[06-09]
+GPU       down  5     down[power_poweredoff] cn[01, 03-05, 11]
+```
+节点正在被唤醒中
+```bash
+[cranetest@crane01 ~]$ cinfo
+PARTITION AVAIL NODES STATE                 NODELIST
+GPU       down  3     idle[power_idle]      cn[03, 08-09]
+GPU       down  5     mix[power_active]     cn[01, 04-07]
+GPU       down  1     down[power_waking_up] cn11
+CPU*      down  3     idle[power_idle]      cn[03, 08-09]
+CPU*      down  5     mix[power_active]     cn[01, 04-07]
+CPU*      down  1     down[power_waking_up] cn11
+```
 
 **显示帮助：**
 ```bash
 cinfo -h
 ```
-![cinfo](../../images/cinfo/cinfo_h.png)
+```text
+[cranetest@crane01 ~]$ cinfo -h
+Display the state of partitions and nodes
+
+Usage:
+  cinfo [flags]
+
+Flags:
+  -C, --config string       Path to configuration file (default "/etc/crane/config.yaml")
+  -d, --dead                Display non-responding nodes only
+  -o, --format string       Specify the output format.
+                                Fields are identified by a percent sign (%) followed by a character or string. 
+                                Use a dot (.) and a number between % and the format character or string to specify a minimum width for the field.
+                            
+                            Supported format identifiers or string, string case insensitive:
+                                %p/%Partition     - Display all partitions in the current environment.
+                                %a/%Avail         - Displays the state of the node.
+                                %n/%Nodes         - Display the number of partition nodes. 
+                                %s/%State         - Display the status of partition nodes
+                                %l/%NodeList      - Display all node list in the partition.
+                            
+                            Each format specifier or string can be modified with a width specifier (e.g., "%.5j").
+                            If the width is specified, the field will be formatted to at least that width. 
+                            If the format is invalid or unrecognized, the program will terminate with an error message.
+                            
+                            Example: --format "%.5partition %.6a %s" would output the partition's name in the current environment 
+                                     with a minimum width of 5, state of the node with a minimum width of 6, and the State.
+                            
+  -h, --help                help for cinfo
+  -i, --iterate uint        Display at specified intervals (seconds)
+      --json                Output in JSON format
+  -n, --nodes strings       Display the specified nodes only
+  -N, --noheader            Do not print header line in the output
+  -p, --partition strings   Display nodes in the specified partition only
+  -r, --responding          Display responding nodes only
+  -t, --states strings      Display nodes with the specified states only. 
+                            The state can take IDLE, MIX, ALLOC, DOWN (case-insensitive). 
+                            Example: 
+                                 -t idle,mix 
+                                 -t=alloc 
+                            
+  -v, --version             version for cinfo
+```
 
 **隐藏表头：**
 ```bash
 cinfo -N
 ```
-![cinfo](../../images/cinfo/cinfo_n.png)
+```text
+[cranetest@crane01 ~]$ cinfo -N
+CPU* up infinite 3 idle crane[01-03]
+GPU  up infinite 1 idle crane03
+```
 
 **仅显示无响应节点：**
 ```bash
 cinfo -d
 ```
-![cinfo](../../images/cinfo/cinfo_d.png)
+```text
+[cranetest@crane01 ~]$ cinfo -d
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+CPU*      up    infinite   1     down  crane02
+```
 
 **每3秒自动刷新：**
 ```bash
 cinfo -i 3
 ```
-![cinfo](../../images/cinfo/cinfo_i3.png)
+```text
+[cranetest@crane01 ~]$ cinfo -i 3
+2024-07-24 11:14:46
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+
+2024-07-24 11:14:49
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+
+2024-07-24 11:14:52
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **显示特定节点：**
 ```bash
 cinfo -n crane01,crane02,crane03
 ```
-![cinfo](../../images/cinfo/cinfo_n123.png)
+```text
+[cranetest@crane01 ~]$ cinfo -n crane01,crane02,crane03
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **显示特定分区：**
 ```bash
 cinfo -p GPU,CPU
 ```
-![cinfo](../../images/cinfo/cinfo_p.png)
+```text
+[cranetest@crane01 ~]$ cinfo -p GPU,CPU
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **仅显示有响应节点：**
 ```bash
 cinfo -r
 ```
-![cinfo](../../images/cinfo/cinfo_r.png)
+```text
+[cranetest@crane01 ~]$ cinfo -r
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **按节点状态过滤：**
 ```bash
 cinfo -t IDLE
 ```
-![cinfo](../../images/cinfo/cinfo_t.png)
+```text
+[cranetest@crane01 ~]$ cinfo -t IDLE
+PARTITION AVAIL TIMELIMIT NODES STATE NODELIST
+GPU       up    infinite   1     idle  crane03
+CPU*      up    infinite   3     idle  crane[01-03]
+```
 
 **显示版本：**
 ```bash
 cinfo -v
 ```
-![cinfo](../../images/cinfo/cinfo_v.png)
+```text
+[root@cranetest01 TestFramecode]# cinfo -v
+Version: 0.8.0-rc.3+dev
+Build Time: Wed, 09 Oct 2024 17:11:48 +0800
+```
 
 **JSON输出：**
 ```bash

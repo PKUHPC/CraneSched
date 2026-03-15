@@ -278,6 +278,21 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ModifyTasksExtraAttrsRequest *request,
       crane::grpc::ModifyTasksExtraAttrsReply *response) override;
 
+  grpc::Status ResetNextTaskId(
+      grpc::ServerContext *context,
+      const crane::grpc::ResetNextTaskIdRequest *request,
+      crane::grpc::ResetNextTaskIdReply *response) override;
+
+  grpc::Status ResetNextStepDbId(
+      grpc::ServerContext *context,
+      const crane::grpc::ResetNextStepDbIdRequest *request,
+      crane::grpc::ResetNextStepDbIdReply *response) override;
+
+  grpc::Status PurgeTaskHistory(
+      grpc::ServerContext *context,
+      const crane::grpc::PurgeTaskHistoryRequest *request,
+      crane::grpc::PurgeTaskHistoryReply *response) override;
+
   grpc::Status ModifyNode(
       grpc::ServerContext *context,
       const crane::grpc::ModifyCranedStateRequest *request,
@@ -287,6 +302,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::ModifyPartitionAclRequest *request,
       crane::grpc::ModifyPartitionAclReply *response) override;
+
+  grpc::Status ResetPartitionAcl(
+      grpc::ServerContext *context,
+      const crane::grpc::ResetPartitionAclRequest *request,
+      crane::grpc::ResetPartitionAclReply *response) override;
 
   grpc::Status AddAccount(grpc::ServerContext *context,
                           const crane::grpc::AddAccountRequest *request,

@@ -30,7 +30,7 @@ A brief overview of the main frontend components you will install and run:
 - `cplugind` (plugin daemon):
   
     - Loads and manages plugins (mail, monitor, energy, event, etc.) and exposes plugin services to CraneSched components.
-    - Must run on nodes that need plugin functionality. Plugin `.so` files and configuration are registered in `/etc/crane/config.yaml`.
+    - Must run on nodes that need plugin functionality. Plugin `.so` files and configuration are registered in `/etc/crane/plugin.yaml`.
 
 ## Deployment Strategy
 

@@ -2432,6 +2432,23 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           job_steps.add_steps(step->StepId());
         }
       } else {
+        if (task->Status() == crane::grpc::TaskStatus::Configuring) {
+          // Daemon step is still being configured on Craned nodes.
+          // Record the cancel intent; DaemonStepInCtld::StepStatusChange will
+          // act on it once all nodes have reported their configuring status,
+          // and the existing Configuring-failed path will handle frontend
+          // notification for interactive jobs at that point.
+          task->SetCancelRequested(true);
+
+          auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+          cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
+
+          CRANE_INFO(
+              "[Job #{}] Cancel requested during Configuring state. "
+              "Deferring until all nodes finish configuring.",
+              task_id);
+          return;
+        }
         // User cancel jobs with node/name... filter
         auto daemon_step = task->DaemonStep();
         if (!daemon_step) {
@@ -3092,6 +3109,36 @@ std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
       CRANE_ERROR("Failed to commit transaction for reservation {}.", resv_id);
   }
   return {};
+}
+
+crane::grpc::DeleteReservationReply TaskScheduler::PurgeAllReservations() {
+  crane::grpc::DeleteReservationReply reply;
+
+  // Collect all reservation names first
+  std::vector<ResvId> resv_names;
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapConstPtr();
+    for (const auto& [name, _] : *resv_meta_map) {
+      resv_names.push_back(name);
+    }
+  }
+
+  std::vector<std::string> failed_reasons;
+  for (const auto& name : resv_names) {
+    auto res = DeleteResvMeta_(name);
+    if (!res) {
+      failed_reasons.push_back(res.error());
+    }
+  }
+
+  if (failed_reasons.empty()) {
+    reply.set_ok(true);
+  } else {
+    reply.set_ok(false);
+    reply.set_reason(fmt::format("{}", fmt::join(failed_reasons, "; ")));
+  }
+
+  return reply;
 }
 
 void TaskScheduler::CleanTaskTimerCb_() {

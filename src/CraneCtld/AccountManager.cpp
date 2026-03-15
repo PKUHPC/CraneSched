@@ -296,6 +296,93 @@ CraneExpectedRich<void> AccountManager::DeleteQos(uint32_t uid,
   return DeleteQos_(actor_name, name);
 }
 
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllAccounts(
+    uint32_t uid) {
+  std::vector<crane::grpc::RichError> errors;
+  std::string actor_name;
+
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return errors;
+    actor_name = user_result.value()->name;
+  }
+
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
+  // Find top-level accounts and delete each subtree (post-order).
+  // Skip the default ROOT account (and its root user) — it's the
+  // bootstrap account for uid=0 and must remain for authentication.
+  std::vector<std::string> top_accounts;
+  for (const auto& [name, acct_ptr] : m_account_map_) {
+    if (!acct_ptr->deleted && acct_ptr->parent_account.empty() &&
+        name != "ROOT") {
+      top_accounts.push_back(name);
+    }
+  }
+
+  for (const auto& acct : top_accounts) {
+    DeleteAccountSubtreeNoLock_(actor_name, acct, errors);
+  }
+
+  return errors;
+}
+
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllQos(uint32_t uid) {
+  std::vector<crane::grpc::RichError> errors;
+  std::string actor_name;
+
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return errors;
+    actor_name = user_result.value()->name;
+  }
+
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
+  // Skip the default UNLIMITED QoS — it's the bootstrap QoS for the
+  // ROOT account and is referenced by kUnlimitedQosName.
+  std::vector<std::string> qos_names;
+  for (const auto& [name, qos_ptr] : m_qos_map_) {
+    if (!qos_ptr->deleted && name != kUnlimitedQosName)
+      qos_names.emplace_back(name);
+  }
+  for (const auto& name : qos_names) {
+    auto res = DeleteQos_(actor_name, name);
+    if (!res) {
+      errors.push_back(res.error());
+    }
+  }
+
+  return errors;
+}
+
+std::vector<crane::grpc::RichError> AccountManager::PurgeAllWckeys(
+    uint32_t uid) {
+  std::vector<crane::grpc::RichError> errors;
+
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
+
+  // Collect non-deleted wckeys, skip root user's wckeys
+  std::vector<std::pair<std::string, std::string>> wckey_pairs;
+  for (const auto& [key, wckey_ptr] : m_wckey_map_) {
+    if (!wckey_ptr->deleted && key.user_name != "root") {
+      wckey_pairs.emplace_back(key.name, key.user_name);
+    }
+  }
+
+  for (const auto& [name, user_name] : wckey_pairs) {
+    auto res = DeleteWckey_(name, user_name, true);
+    if (!res) errors.push_back(res.error());
+  }
+
+  return errors;
+}
+
 CraneExpectedRich<void> AccountManager::DeleteWckey(
     uint32_t uid, const std::string& name, const std::string& user_name,
     bool force) {
@@ -2684,6 +2771,53 @@ CraneExpectedRich<void> AccountManager::DeleteAccount_(
   g_account_meta_container->DeleteAccountMeta(name);
 
   return {};
+}
+
+/**
+ * @note need write lock(m_rw_user_mutex_ && m_rw_account_mutex_ &&
+ * m_rw_qos_mutex_)
+ */
+void AccountManager::DeleteAccountSubtreeNoLock_(
+    const std::string& actor_name, const std::string& account_name,
+    std::vector<crane::grpc::RichError>& errors) {
+  const Account* account = GetExistedAccountInfoNoLock_(account_name);
+  if (!account) return;
+
+  // Post-order: recurse into children first.
+  // Copy the child list since DeleteAccount_ modifies the parent's list.
+  std::list<std::string> children(account->child_accounts);
+  for (const auto& child : children) {
+    DeleteAccountSubtreeNoLock_(actor_name, child, errors);
+  }
+
+  // Delete all users under this account.
+  // Copy the user list since DeleteUser_ modifies the account's list.
+  std::list<std::string> users(account->users);
+  for (const auto& user_name : users) {
+    const User* user = GetExistedUserInfoNoLock_(user_name);
+    if (user) DeleteUser_(actor_name, *user, account_name);
+  }
+
+  // Clean up external coordinators: users from other accounts who are
+  // coordinators of this account.  DeleteUser_ above only handles users
+  // that belong to this account — coordinators from other accounts are
+  // not covered.  Remove stale coordinator_accounts references on them.
+  account = GetExistedAccountInfoNoLock_(account_name);
+  if (account) {
+    for (const auto& coord_name : account->coordinators) {
+      auto it = m_user_map_.find(coord_name);
+      if (it != m_user_map_.end() && !it->second->deleted) {
+        it->second->coordinator_accounts.remove(account_name);
+      }
+    }
+  }
+
+  // Now this account is a leaf — delete it.
+  account = GetExistedAccountInfoNoLock_(account_name);
+  if (account) {
+    auto res = DeleteAccount_(actor_name, *account);
+    if (!res) errors.push_back(res.error());
+  }
 }
 
 CraneExpectedRich<void> AccountManager::DeleteQos_(

@@ -924,6 +924,8 @@ class TaskScheduler {
   crane::grpc::DeleteReservationReply DeleteResv(
       const crane::grpc::DeleteReservationRequest& request);
 
+  crane::grpc::DeleteReservationReply PurgeAllReservations();
+
   // For failed dependency, timestamp should be absl::InfiniteFuture()
   void AddDependencyEvent(task_id_t dependent, task_id_t dependee,
                           absl::Time timestamp) {

@@ -587,6 +587,17 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
     if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus()) {
         job_finished = true;
+      } else if (job->CancelRequested()) {
+        // User cancelled the job while daemon step was being configured.
+        // Treat it as a user-initiated cancellation rather than transitioning
+        // to Running and creating the primary step.
+        CRANE_INFO(
+            "[Step #{}.{}] Cancel was requested during Configuring. "
+            "Finishing as Cancelled.",
+            job_id, this->StepId());
+        this->SetErrorStatus(crane::grpc::TaskStatus::Cancelled);
+        this->SetErrorExitCode(ExitCode::EC_TERMINATED);
+        job_finished = true;
       } else {
         CRANE_TRACE("[Step #{}.{}] CONFIGURING->RUNNING", job_id,
                     this->StepId());
@@ -1432,6 +1443,8 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   exclusive = val.exclusive();
 
+  submit_hostname = val.submit_hostname();
+
   SetHeld(val.hold());
 
   SetDependency(val.dependencies());
@@ -1507,6 +1520,8 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->set_extra_attr(extra_attr);
   task_info->set_reservation(reservation);
+
+  task_info->set_submit_hostname(submit_hostname);
 
   // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
