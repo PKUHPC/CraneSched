@@ -1703,11 +1703,6 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       executing_nodes = task->executing_craned_ids;
     }
 
-    if (!persist_status(crane::grpc::Suspended, "suspend precheck")) {
-      results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
-      continue;
-    }
-
     if (executing_nodes.empty()) {
       CRANE_WARN("Task #{} has no executing craned when suspending", task_id);
       results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
@@ -1745,7 +1740,6 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       // Ensure suspension only proceeds when every craned involved is online.
       CRANE_WARN("Task #{} suspend skipped because craned(s) {} are offline.",
                  task_id, absl::StrJoin(offline_nodes, ","));
-      persist_status(crane::grpc::Running, "suspend rollback");
       handle_failure(CraneErrCode::ERR_RPC_FAILURE, "suspend");
       continue;
     }
@@ -1794,8 +1788,12 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
           "Task #{} suspend partially failed on node(s); abandoning task to "
           "avoid inconsistent state.",
           task_id);
-      persist_status(crane::grpc::Running, "suspend rollback");
       handle_failure(failure_code, "suspend");
+      continue;
+    }
+
+    if (!persist_status(crane::grpc::Suspended, "suspend success")) {
+      results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
 
