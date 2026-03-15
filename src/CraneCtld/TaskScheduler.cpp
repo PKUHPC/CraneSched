@@ -2140,6 +2140,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
               task_id);
           return;
         }
+        auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+        cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
         // User cancel jobs with node/name... filter or cancel a job.
         auto primary_step = task->PrimaryStep();
         if (!primary_step) {
@@ -2147,10 +2149,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
               "[Job #{}] Primary step not found when cancelling running job, "
               "maybe completing.",
               task_id);
+          return;
         }
         TerminateRunningStepNoLock_(primary_step);
-        auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
-        cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
       }
     }
   };
