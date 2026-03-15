@@ -20,6 +20,7 @@
 #include <sched.h>
 
 #include <expected>
+#include <string_view>
 
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
@@ -223,6 +224,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Suspend() = 0;
+  virtual CraneErrCode Resume() = 0;
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
@@ -254,6 +257,8 @@ class PodInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
@@ -313,6 +318,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
@@ -423,6 +430,8 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   void InitEnvMap() override;
@@ -574,6 +583,10 @@ class TaskManager {
 
   void SetActivelyShutdown() { m_active_shutdown_ = true; }
 
+  std::future<CraneErrCode> SuspendJobAsync();
+
+  std::future<CraneErrCode> ResumeJobAsync();
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -595,6 +608,16 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  struct TaskSignalQueueElem {
+    enum class Action {
+      Suspend,
+      Resume,
+    };
+
+    Action action{Action::Suspend};
+    std::promise<CraneErrCode> prom;
+  };
+
   void EvShutdownSupervisorCb_();
 
   // Process exited
@@ -612,9 +635,13 @@ class TaskManager {
   void EvTaskTimerCb_();
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanTaskSignalQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+
+  CraneErrCode SuspendRunningTasks_();
+  CraneErrCode ResumeSuspendedTasks_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
@@ -644,6 +671,9 @@ class TaskManager {
   std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_task_signal_async_handle_;
+  ConcurrentQueue<TaskSignalQueueElem> m_task_signal_queue_;
+
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
 
@@ -658,6 +688,7 @@ class TaskManager {
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
   std::atomic_bool m_active_shutdown_{false};
+  bool m_tasks_suspended_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;

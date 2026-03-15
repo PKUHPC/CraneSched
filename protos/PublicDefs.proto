@@ -117,6 +117,7 @@ enum TaskStatus {
   Configuring = 7;
   Configured = 8;
   Completing = 9;
+  Suspended = 10;
 
   Invalid = 15;
 }

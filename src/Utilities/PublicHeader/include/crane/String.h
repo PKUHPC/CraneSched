@@ -222,7 +222,7 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         "Configured",
         "Completing",
         // 10 - 14
-        "Invalid",
+        "Suspended",
         "Invalid",
         "Invalid",
         "Invalid",
