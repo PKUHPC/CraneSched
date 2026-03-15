@@ -1652,6 +1652,32 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
   for (task_id_t task_id : task_ids) {
     std::vector<CranedId> executing_nodes;
 
+    auto persist_status = [&](crane::grpc::TaskStatus status,
+                              const char* failure_reason) {
+      LockGuard running_guard(&m_running_task_map_mtx_);
+      auto iter = m_running_task_map_.find(task_id);
+      if (iter == m_running_task_map_.end()) {
+        CRANE_WARN("Task #{} disappeared while persisting status {} during {}",
+                   task_id, static_cast<int>(status), failure_reason);
+        return false;
+      }
+
+      TaskInCtld* task = iter->second.get();
+      auto prev_status = task->Status();
+      if (prev_status == status) return true;
+
+      task->SetStatus(status);
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
+              0, task->TaskDbId(), task->RuntimeAttr())) {
+        task->SetStatus(prev_status);
+        CRANE_ERROR("Failed to persist status {} for task #{} during {}",
+                    static_cast<int>(status), task_id, failure_reason);
+        return false;
+      }
+
+      return true;
+    };
+
     {
       LockGuard running_guard(&m_running_task_map_mtx_);
       auto iter = m_running_task_map_.find(task_id);
@@ -1675,6 +1701,11 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       }
 
       executing_nodes = task->executing_craned_ids;
+    }
+
+    if (!persist_status(crane::grpc::Suspended, "suspend precheck")) {
+      results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+      continue;
     }
 
     if (executing_nodes.empty()) {
@@ -1714,6 +1745,7 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       // Ensure suspension only proceeds when every craned involved is online.
       CRANE_WARN("Task #{} suspend skipped because craned(s) {} are offline.",
                  task_id, absl::StrJoin(offline_nodes, ","));
+      persist_status(crane::grpc::Running, "suspend rollback");
       handle_failure(CraneErrCode::ERR_RPC_FAILURE, "suspend");
       continue;
     }
@@ -1762,31 +1794,9 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
           "Task #{} suspend partially failed on node(s); abandoning task to "
           "avoid inconsistent state.",
           task_id);
+      persist_status(crane::grpc::Running, "suspend rollback");
       handle_failure(failure_code, "suspend");
       continue;
-    }
-
-    {
-      LockGuard running_guard(&m_running_task_map_mtx_);
-      auto iter = m_running_task_map_.find(task_id);
-      if (iter == m_running_task_map_.end()) {
-        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
-        continue;
-      }
-
-      TaskInCtld* task = iter->second.get();
-      if (task->Status() != crane::grpc::Suspended) {
-        auto prev_status = task->Status();
-        task->SetStatus(crane::grpc::Suspended);
-        if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
-                0, task->TaskDbId(), task->RuntimeAttr())) {
-          task->SetStatus(prev_status);
-          CRANE_ERROR("Failed to persist suspended status for task #{}",
-                      task_id);
-          results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
-          continue;
-        }
-      }
     }
 
     results.emplace_back(CraneErrCode::SUCCESS);
@@ -1913,7 +1923,15 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
       LockGuard running_guard(&m_running_task_map_mtx_);
       auto iter = m_running_task_map_.find(task_id);
       if (iter == m_running_task_map_.end()) {
-        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        // Resume RPCs have succeeded on all nodes. If the task disappears here,
+        // it is very likely finishing concurrently; avoid reporting a hard
+        // failure and keep current behavior simple. If future states (e.g.
+        // frozen tasks) require explicit rollback, handle it here.
+        CRANE_WARN(
+            "Task #{} disappeared after successful resume RPC; likely finished "
+            "concurrently.",
+            task_id);
+        results.emplace_back(CraneErrCode::SUCCESS);
         continue;
       }
 
