@@ -46,67 +46,6 @@ class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
   }
 };
 
-struct PdJobInScheduler {
-  task_id_t job_id;
-  absl::Duration time_limit;
-
-  PartitionId partition_id;
-  std::string reservation;
-
-  ResourceView requested_node_res_view;
-  uint32_t node_num;
-  uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
-  bool exclusive;
-
-  std::unordered_set<std::string> included_nodes;
-  std::unordered_set<std::string> excluded_nodes;
-
-  absl::Time submit_time;
-  uint32_t partition_priority;
-  std::string qos;
-  uint32_t qos_priority;
-  std::string username;
-  std::string account;
-  std::list<std::string> account_chain;
-
-  double priority;
-
-  absl::Time start_time;
-  ResourceV2 allocated_res;
-  std::vector<CranedId> craned_ids;
-
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-      req_licenses;
-  bool is_license_or;
-  std::unordered_map<LicenseId, uint32_t> actual_licenses;
-
-  std::string reason;
-
-  PdJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
-        time_limit(job->time_limit),
-        partition_id(job->partition_id),
-        reservation(job->reservation),
-        requested_node_res_view(job->requested_node_res_view),
-        node_num(job->node_num),
-        ntasks_per_node(job->ntasks_per_node),
-        cpus_per_task(job->cpus_per_task),
-        exclusive(job->exclusive),
-        included_nodes(job->included_nodes),
-        excluded_nodes(job->excluded_nodes),
-        submit_time(job->SubmitTime()),
-        partition_priority(job->partition_priority),
-        qos_priority(job->qos_priority),
-        account(job->account),
-        priority(job->mandated_priority),
-        req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()),
-        qos(job->qos),
-        username(job->Username()),
-        account_chain(job->account_chain) {}
-};
-
 struct RnJobInScheduler {
   task_id_t job_id;
   absl::Duration time_limit;
@@ -138,6 +77,76 @@ struct RnJobInScheduler {
         end_time(job->EndTime()),
         allocated_res(job->AllocatedRes()),
         allocated_res_view(job->allocated_res_view) {}
+};
+
+struct PdJobInScheduler {
+  task_id_t job_id;
+  absl::Duration time_limit;
+
+  PartitionId partition_id;
+  std::string reservation;
+
+  ResourceView req_node_res_view;
+  ResourceView req_task_res_view;
+  ResourceView req_total_res_view;
+
+  uint32_t node_num;
+  uint32_t ntasks_per_node_min;
+  uint32_t ntasks_per_node_max;
+  uint32_t ntasks;
+  bool exclusive;
+
+  std::unordered_set<std::string> included_nodes;
+  std::unordered_set<std::string> excluded_nodes;
+
+  absl::Time submit_time;
+  uint32_t partition_priority;
+  uint32_t qos_priority;
+  std::string account;
+
+  double priority;
+
+  std::unordered_map<CranedId, uint32_t> craned_id_to_task_num;
+
+  absl::Time start_time;
+  ResourceV2 allocated_res;
+  std::vector<CranedId> craned_ids;
+
+  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld::License>
+      req_licenses;
+  bool is_license_or;
+  std::unordered_map<LicenseId, uint32_t> actual_licenses;
+
+  std::string reason;
+  std::string qos;
+  std::string username;
+  std::list<std::string> account_chain;
+
+  PdJobInScheduler(TaskInCtld* job)
+      : job_id(job->TaskId()),
+        time_limit(job->time_limit),
+        partition_id(job->partition_id),
+        reservation(job->reservation),
+        req_node_res_view(job->req_node_res_view),
+        req_task_res_view(job->req_task_res_view),
+        req_total_res_view(job->req_total_res_view),
+        node_num(job->node_num),
+        ntasks_per_node_min(job->ntasks_per_node_min),
+        ntasks_per_node_max(job->ntasks_per_node_max),
+        ntasks(job->ntasks),
+        exclusive(job->exclusive),
+        included_nodes(job->included_nodes),
+        excluded_nodes(job->excluded_nodes),
+        submit_time(job->SubmitTime()),
+        partition_priority(job->partition_priority),
+        qos_priority(job->qos_priority),
+        account(job->account),
+        priority(job->mandated_priority),
+        req_licenses(job->TaskToCtld().licenses_count()),
+        is_license_or(job->TaskToCtld().is_licenses_or()),
+        qos(job->qos),
+        username(job->Username()),
+        account_chain(job->account_chain) {}
 };
 
 class IPrioritySorter {
@@ -931,14 +940,6 @@ class TaskScheduler {
   }
 
  private:
-  template <class... Ts>
-  struct VariantVisitor : Ts... {
-    using Ts::operator()...;
-  };
-
-  template <class... Ts>
-  VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
-
   void RequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);
 
@@ -957,7 +958,7 @@ class TaskScheduler {
   static void PersistAndTransferTasksToMongodb_(
       std::unordered_set<TaskInCtld*> const& tasks);
 
-  CraneErrCode TerminateRunningStepNoLock_(StepInCtld* step);
+  CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 

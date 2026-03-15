@@ -749,9 +749,10 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_account(view["account"].get_string().value.data());
         job_info.set_username(view["username"].get_string().value.data());
 
-        auto* mutable_req_res_view = job_info.mutable_req_res_view();
+        auto* mutable_req_total_res_view =
+            job_info.mutable_req_total_res_view();
         auto* mutable_req_alloc_res =
-            mutable_req_res_view->mutable_allocatable_res();
+            mutable_req_total_res_view->mutable_allocatable_res();
         mutable_req_alloc_res->set_cpu_core_limit(
             view["cpus_req"].get_double().value);
         mutable_req_alloc_res->set_memory_limit_bytes(
@@ -4149,6 +4150,22 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
 
+  double cpus_req = 0.0;
+  int64_t mem_req = 0;
+
+  if (task_to_ctld.has_cpus_per_task()) {
+    cpus_req = task_to_ctld.cpus_per_task() * task_to_ctld.ntasks();
+  }
+
+  if (task_to_ctld.has_mem_per_node()) {
+    mem_req += task_to_ctld.mem_per_node() * task_to_ctld.node_num();
+  }
+  if (task_to_ctld.has_cpus_per_task() && task_to_ctld.has_mem_per_cpu()) {
+    mem_req += static_cast<int64_t>(task_to_ctld.cpus_per_task() *
+                                    task_to_ctld.mem_per_cpu() *
+                                    task_to_ctld.ntasks());
+  }
+
   bool using_default_wckey = false;
   if (g_config.WckeyValid && task_to_ctld.wckey().empty()) {
     using_default_wckey = true;
@@ -4218,11 +4235,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
              task_to_ctld.account(),
              // 5-9
-             task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-             static_cast<int64_t>(task_to_ctld.req_resources()
-                                      .allocatable_res()
-                                      .memory_limit_bytes()),
-             task_to_ctld.name(), env_str,
+             cpus_req, mem_req, task_to_ctld.name(), env_str,
              static_cast<int32_t>(task_to_ctld.uid()),
              // 10-14
              static_cast<int32_t>(task_to_ctld.gid()),
@@ -4345,8 +4358,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
-             task->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+             task->req_total_res_view.CpuCount(),
+             static_cast<int64_t>(task->req_total_res_view.MemoryBytes()),
              task->name, env_str, static_cast<int32_t>(task->uid),
              // 10-14
              static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
@@ -4434,8 +4447,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       values{                                                     // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             step->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(step->requested_node_res_view.MemoryBytes()),
+             step->req_total_res_view.CpuCount(),
+             static_cast<int64_t>(step->req_total_res_view.MemoryBytes()),
              // 5-9
              step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
              util::HostNameListToStr(step->CranedIds()),
@@ -4474,6 +4487,21 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       container_meta =
           static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
     }
+  }
+
+  double cpus_req = 0.0;
+  int64_t mem_req = 0;
+
+  if (step_to_ctld.has_cpus_per_task()) {
+    cpus_req = step_to_ctld.cpus_per_task() * step_to_ctld.ntasks();
+  }
+
+  if (step_to_ctld.has_mem_per_node()) {
+    mem_req += step_to_ctld.mem_per_node() * step_to_ctld.node_num();
+  }
+  if (step_to_ctld.has_cpus_per_task() && step_to_ctld.has_mem_per_cpu()) {
+    mem_req += static_cast<int64_t>(step_to_ctld.cpus_per_task()) *
+               step_to_ctld.mem_per_cpu() * step_to_ctld.ntasks();
   }
 
   document env_doc;
@@ -4520,14 +4548,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
-          absl::ToUnixSeconds(absl::Now()), false,
-          step_to_ctld.req_resources_per_task()
-                  .allocatable_res()
-                  .cpu_core_limit() *
-              step_to_ctld.ntasks_per_node(),
-          static_cast<int64_t>(step_to_ctld.req_resources_per_task()
-                                   .allocatable_res()
-                                   .memory_limit_bytes()),
+          absl::ToUnixSeconds(absl::Now()), false, cpus_req, mem_req,
           // 5-9
           step_to_ctld.name(), env_str, step_to_ctld.uid(),
           std::vector<gid_t>(step_to_ctld.gid().begin(),
@@ -4560,8 +4581,9 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   // 25 extra_attr      res_alloc     step_type     meta_container
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
-  auto* mutable_req_res_view = step_info->mutable_req_res_view();
-  auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+  auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
+  auto* mutable_req_alloc_res =
+      mutable_req_total_res_view->mutable_allocatable_res();
   mutable_req_alloc_res->set_cpu_core_limit(
       view["cpus_req"].get_double().value);
   mutable_req_alloc_res->set_memory_limit_bytes(
