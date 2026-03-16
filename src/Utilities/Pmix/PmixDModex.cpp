@@ -43,7 +43,7 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   request.set_craned_id(dmo_modex_cb_data->craned_id);
 
   if (!g_pmix_server->GetPmixClient()) {
-    CRANE_ERROR("Cannot send direct modex response to {}",
+    CRANE_ERROR("PmicClient is null, cannot send direct modex response to {}",
                 dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
@@ -203,9 +203,10 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
 
   auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(craned_id);
   if (!stub) {
-    CRANE_ERROR("Cannot send direct modex error response to {}", craned_id);
+    CRANE_ERROR("Stub is null, cannot send direct modex error response to {}", craned_id);
     return;
   }
+
   stub->PmixDModexResponseNoBlock(request, [craned_id](bool ok) {
     if (!ok) {
       CRANE_ERROR("Cannot send direct modex error response to {}", craned_id);

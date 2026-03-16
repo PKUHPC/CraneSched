@@ -100,8 +100,9 @@ extern "C" {
    }
 
    if (data == nullptr && ndata > 0) {
-      cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
-      return PMIX_ERROR;
+    CRANE_ERROR("Fence called with non-zero ndata but null data pointer");
+    cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+    return PMIX_ERROR;
    }
 
     CollType type = StrToCollType(g_pmix_server->GetFenceType());
@@ -115,11 +116,13 @@ extern "C" {
   auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs);
 
   if (coll == nullptr) {
-      cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
-      return PMIX_ERROR;
+    CRANE_ERROR("Failed to get collective object for fence");
+    cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+    return PMIX_ERROR;
   }
 
   if (!coll->PmixCollContribLocal(std::string(data, ndata), cbfunc, cbdata)) {
+    CRANE_ERROR("Failed to contribute data to collective for fence");
     cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
     return PMIX_ERROR;
   }
@@ -134,7 +137,11 @@ extern "C" {
     CRANE_DEBUG("dmodex func called");
     auto rc = g_pmix_server->GetDmodexReqManager()->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 
-    if (!rc) return PMIX_ERROR;
+    if (!rc) {
+      CRANE_ERROR("Failed to get dmodex data for proc [{}:{}]", proc->nspace, proc->rank);
+      cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+      return PMIX_ERROR;
+    }
 
     return PMIX_SUCCESS;
   }
@@ -290,7 +297,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
       }
   );
 
-  m_cleanup_timer_handle_->start(std::chrono::seconds(5), std::chrono::seconds(5));
+  m_cleanup_timer_handle_->start(std::chrono::seconds(m_timeout_), std::chrono::seconds(m_timeout_));
 
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PmixLoopThread_");
