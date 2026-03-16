@@ -40,7 +40,10 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
-#include "crane/TracePluginExporter.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -737,6 +740,12 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Tracing"]) {
+        const auto& tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
@@ -904,7 +913,7 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-#ifdef CRANE_ENABLE_TEST
+#ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
   g_task_scheduler.reset();
@@ -943,15 +952,15 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-#ifdef CRANE_ENABLE_TEST
-  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
-      []() { return g_plugin_client.get(); },
-      []() { return g_config.Plugin.Enabled; });
-
-  if (crane::TracerManager::GetInstance().Initialize(
-          "CraneCtld", std::move(plugin_exporter))) {
-    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+#ifdef CRANE_ENABLE_TRACING
+  {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        "CraneCtld", std::move(exporter));
   }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
 #endif
 
   g_thread_pool = std::make_unique<BS::thread_pool>(

@@ -25,6 +25,7 @@
 
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
+#include "crane/Tracing.h"
 #include "DeviceManager.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
@@ -260,14 +261,7 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   for (auto& job : jobs) {
     task_id_t job_id = job.job_id;
 
-#ifdef CRANE_ENABLE_TEST
-    if (g_tracer) {
-      auto span = g_tracer->StartSpan("Alloc Job");
-      span->SetAttribute("service", "craned");
-      span->SetAttribute("job_id", job_id);
-      span->End();
-    }
-#endif
+    CRANE_TRACE_POINT_ATTR("Alloc Job", "job_id", job_id);
 
     uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
@@ -286,14 +280,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   std::vector<StepInstance*> steps_to_free;
 
   for (job_id_t job_id : job_ids) {
-#ifdef CRANE_ENABLE_TEST
-    if (g_tracer) {
-      auto span = g_tracer->StartSpan("Free Job");
-      span->SetAttribute("service", "craned");
-      span->SetAttribute("job_id", job_id);
-      span->End();
-    }
-#endif
+    CRANE_TRACE_POINT_ATTR("Free Job", "job_id", job_id);
     auto job = FreeJobInfo_(job_id);
     if (!job.has_value()) {
       CRANE_INFO("Try to free non-existent job #{}.", job_id);
@@ -453,16 +440,9 @@ bool JobManager::EvCheckSupervisorRunning_() {
                       ","));
     FreeStepAllocation_(std::move(steps_to_clean));
     if (!jobs_to_clean.empty()) {
-#ifdef CRANE_ENABLE_TEST
-      if (g_tracer) {
-        for (const auto& job : jobs_to_clean) {
-          auto span = g_tracer->StartSpan("Finish Release");
-          span->SetAttribute("service", "craned");
-          span->SetAttribute("job_id", job.job_id);
-          span->End();
-        }
+      for (const auto& job : jobs_to_clean) {
+        CRANE_TRACE_POINT_ATTR("Finish Release", "job_id", job.job_id);
       }
-#endif
       FreeJobAllocation_(std::move(jobs_to_clean));
     }
   }
@@ -695,6 +675,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       auto* plugin_conf = init_req.mutable_plugin_config();
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
+
+    init_req.set_tracing_enabled(g_config.Tracing.Enabled);
 
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob ||
         !g_config.JobLifecycleHook.TaskPrologs.empty() ||

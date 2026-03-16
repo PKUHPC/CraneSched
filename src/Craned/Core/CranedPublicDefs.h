@@ -144,6 +144,11 @@ struct Config {
   };
   PluginConfig Plugin;
 
+  struct TracingConfig {
+    bool Enabled{false};
+  };
+  TracingConfig Tracing;
+
   struct SupervisorConfig {
     std::filesystem::path Path;
     std::string DebugLevel;
@@ -225,6 +230,3 @@ enum HealthCheckNodeStateEnum : std::uint8_t {
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
 
-#ifdef CRANE_ENABLE_TEST
-inline opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> g_tracer;
-#endif

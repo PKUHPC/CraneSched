@@ -29,7 +29,10 @@
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
-#include "crane/TracePluginExporter.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 using Craned::Supervisor::g_config;
 
@@ -166,6 +169,9 @@ int InitFromStdin(int argc, char** argv) {
   g_config.Plugin.Enabled = msg.has_plugin_config();
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
+
+  // Tracing config
+  g_config.Tracing.Enabled = msg.tracing_enabled();
 
   g_config.SupervisorLogFile =
       std::filesystem::path(msg.log_dir()) /
@@ -326,15 +332,15 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   PasswordEntry::InitializeEntrySize();
 
-#ifdef CRANE_ENABLE_TEST
-  auto plugin_exporter = std::make_unique<crane::TracePluginExporter>(
-      []() { return g_plugin_client.get(); },
-      []() { return g_config.Plugin.Enabled; });
-
-  if (crane::TracerManager::GetInstance().Initialize(
-          "Supervisor", std::move(plugin_exporter))) {
-    g_tracer = crane::TracerManager::GetInstance().GetTracer();
+#ifdef CRANE_ENABLE_TRACING
+  {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        "Supervisor", std::move(exporter));
   }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
 #endif
 
   Craned::Common::CgroupManager::Init(
@@ -447,7 +453,7 @@ void StartServer(int grpc_output_fd) {
   g_task_mgr.reset();
 
   g_craned_client.reset();
-#ifdef CRANE_ENABLE_TEST
+#ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
   g_plugin_client.reset();

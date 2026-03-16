@@ -219,6 +219,10 @@ Supervisor:
   # max files of supervisor log file
   MaxLogFileNum: 3
 
+Tracing:
+  # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)
+  Enabled: false
+
 Container:
   # Toggle the container support in CraneSched
   Enabled: false
