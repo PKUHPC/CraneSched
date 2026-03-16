@@ -584,6 +584,8 @@ void ProcInstance::ResetChildProcSigHandler_() {
   signal(SIGUSR2, SIG_DFL);
   signal(SIGALRM, SIG_DFL);
   signal(SIGHUP, SIG_DFL);
+  // Prevent any suprocess like x11 trigger uvw signal handler
+  signal(SIGCHLD, SIG_DFL);
 }
 
 CraneErrCode ProcInstance::SetChildProcProperty_() {
