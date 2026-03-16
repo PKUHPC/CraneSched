@@ -484,8 +484,8 @@ CraneErrCode CranedStub::ReceivePmixPort(job_id_t job_id, step_id_t step_id, con
   }
 
   if (!reply.ok()) {
-    CRANE_ERROR("[Step#{}.{}] Craned {} failed to receive PMIX port: {}",
-                job_id, step_id, m_craned_id_, reply.error_message());
+    CRANE_ERROR("[Step#{}.{}] Craned {} failed to receive PMIX port",
+                job_id, step_id, m_craned_id_);
     return CraneErrCode::ERR_GENERIC_FAILURE;
   }
     
