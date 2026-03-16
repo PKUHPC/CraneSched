@@ -224,7 +224,11 @@ CraneErrCode SupervisorStub::ReceivePmixPort(const std::vector<std::pair<CranedI
   }
 
   auto ok = m_stub_->ReceivePmixPort(&context, request, &reply);
-  if (!ok.ok() || !reply.ok()) return CraneErrCode::ERR_RPC_FAILURE;
+  if (!ok.ok() || !reply.ok()) {
+    CRANE_ERROR("ReceivePmixPort failed: reply {},{}, request size {}, ok {}",
+                reply.ok(), ok.error_message(), request.pmix_ports().size(), ok.ok());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
   
   return CraneErrCode::SUCCESS;
 }

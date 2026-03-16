@@ -509,10 +509,6 @@ class CtldServer {
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;
 
-  // TODO: test
-  Mutex m_pmix_mtx_;
-  HashMap<CranedId, std::string> m_pmix_ports_ ABSL_GUARDED_BY(m_pmix_mtx_);
-
   friend class CtldForInternalServiceImpl;
 
   // external
