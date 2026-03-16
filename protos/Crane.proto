@@ -1334,7 +1334,7 @@ message BroadcastPmixPortRequest {
   repeated string craned_ids = 2; // nodes
   uint32 job_id = 3;
   uint32 step_id = 4;
-  string port = 5; // grpc port or ucx addr
+  bytes port = 5; // grpc port or ucx addr (must bytes)
 }
 
 message BroadcastPmixPortReply {
@@ -1347,7 +1347,7 @@ message ReceivePmixPortRequest {
 
   message PmixPorts{
     string craned_id = 1;
-    string port = 2; // grpc port or ucx addr
+    bytes port = 2; // grpc port or ucx addr (must bytes)
   }
   repeated PmixPorts pmix_ports = 3;
 }
