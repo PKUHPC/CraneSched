@@ -567,6 +567,10 @@ void ParseConfig(int argc, char** argv) {
               if (gres_node["EnvInjector"]) {
                 env_injector = gres_node["EnvInjector"].as<std::string>();
               }
+              std::optional<std::string> cni_pipeline;
+              if (gres_node["DeviceCniPipeline"]) {
+                cni_pipeline = gres_node["DeviceCniPipeline"].as<std::string>();
+              }
               // Parse CDI names (optional, mutually exclusive)
               std::vector<std::string> cdi_names;
               bool has_cdi_regex =
@@ -625,7 +629,8 @@ void ParseConfig(int argc, char** argv) {
                        .EnvInjectorStr = !env_injector.empty()
                                              ? std::optional(env_injector)
                                              : std::nullopt,
-                       .CdiName = std::nullopt});
+                       .CdiName = std::nullopt,
+                       .CniPipeline = cni_pipeline});
                 }
               }
               if (gres_node["DeviceFileList"] &&
@@ -654,7 +659,8 @@ void ParseConfig(int argc, char** argv) {
                                      !env_injector.empty()
                                          ? std::optional(env_injector)
                                          : std::nullopt,
-                                     std::nullopt});
+                                     std::nullopt,
+                                     cni_pipeline});
                 }
               }
 
@@ -1043,7 +1049,7 @@ void ParseConfig(int argc, char** argv) {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
-      auto& [name, type, path_vec, env_injector, cdi_name] = dev_arg;
+      auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] = dev_arg;
       auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
@@ -1052,7 +1058,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       std::unique_ptr dev = DeviceManager::ConstructDevice(
-          name, type, path_vec, env_injector_enum, cdi_name);
+          name, type, path_vec, env_injector_enum, cdi_name, cni_pipeline);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
@@ -1091,6 +1097,30 @@ void ParseConfig(int argc, char** argv) {
             "When CDI is configured for a GRES name/type, ALL devices of "
             "that name/type must have CDI names.",
             name_type.first, name_type.second, has_cnt, miss_cnt, example);
+        std::exit(1);
+      }
+    }
+
+    // Validate DeviceCniPipeline requires CDI: if a device has cni_pipeline
+    // set, it must also have a valid CDI name (to extract the device
+    // identifier). Check at startup to fail fast.
+    for (const auto& [slot_id, dev] : g_this_node_device) {
+      if (!dev->cni_pipeline.has_value()) continue;
+      if (!dev->cdi_name.has_value()) {
+        CRANE_ERROR(
+            "GRES {}:{} (slot '{}') has DeviceCniPipeline '{}' set but no "
+            "CDI name configured. DeviceCniPipeline requires CDI to extract "
+            "device identifier.",
+            dev->name, dev->type, slot_id, dev->cni_pipeline.value());
+        std::exit(1);
+      }
+      auto extracted = DeviceManager::ExtractCdiDeviceName(
+          dev->cdi_name.value());
+      if (!extracted.has_value()) {
+        CRANE_ERROR(
+            "GRES {}:{} (slot '{}') has malformed CDI name '{}': "
+            "expected '<kind>=<device-name>'.",
+            dev->name, dev->type, slot_id, dev->cdi_name.value());
         std::exit(1);
       }
     }

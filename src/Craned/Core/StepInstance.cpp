@@ -23,6 +23,7 @@
 
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "crane/CriClient.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
@@ -304,6 +305,51 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
               CRANE_TRACE("[Step #{}.{}] CDI device: {} (slot: {})", job_id,
                           step_id, dev_it->second->cdi_name.value(), slot_id);
             }
+          }
+        }
+      }
+    }
+
+    // CNI is pod-level, so GRES annotations only apply to daemon container
+    // steps that carry pod metadata.
+    if (this->IsContainer() && this->IsDaemonStep() &&
+        init_req.mutable_step_spec()->has_pod_meta()) {
+      auto* annotations =
+          init_req.mutable_step_spec()->mutable_pod_meta()->mutable_annotations();
+      const auto& dedicated_res = this->step_to_d.res().dedicated_res_in_node();
+      std::unordered_map<std::string, int> pipeline_counters;
+
+      for (const auto& [dev_name, type_slots_map] :
+           dedicated_res.name_type_map()) {
+        for (const auto& [dev_type, slots] : type_slots_map.type_slots_map()) {
+          for (const auto& slot_id : slots.slots()) {
+            auto dev_it = Common::g_this_node_device.find(slot_id);
+            if (dev_it == Common::g_this_node_device.end()) continue;
+
+            const auto& dev = dev_it->second;
+            if (!dev->cni_pipeline.has_value()) continue;
+
+            auto device_name =
+                Common::DeviceManager::ExtractCdiDeviceName(
+                    dev->cdi_name.value());
+            if (!device_name.has_value()) {
+              CRANE_ERROR("[Step #{}.{}] Invalid CDI name '{}' for slot '{}'.",
+                          job_id, step_id, dev->cdi_name.value(), slot_id);
+              crane_cgroup->KillAllProcesses(SIGKILL);
+              close(craned_supervisor_fd);
+              close(supervisor_craned_fd);
+              return CraneErrCode::ERR_INVALID_PARAM;
+            }
+
+            const auto& pipeline = dev->cni_pipeline.value();
+            int idx = pipeline_counters[pipeline]++;
+            std::string anno_key = fmt::format(
+                "{}meta-cni/gres/{}/{}", cri::kCriAnnotationPrefix, pipeline,
+                idx);
+            (*annotations)[anno_key] = device_name.value();
+            CRANE_TRACE("[Step #{}.{}] CNI GRES annotation: {}={} (slot: {})",
+                        job_id, step_id, anno_key, device_name.value(),
+                        slot_id);
           }
         }
       }

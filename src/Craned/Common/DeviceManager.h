@@ -59,6 +59,7 @@ struct DeviceMetaInConfig {
   std::vector<std::string> path;
   std::optional<std::string> EnvInjectorStr;
   std::optional<std::string> CdiName;  // CDI fully-qualified name for this slot
+  std::optional<std::string> CniPipeline;  // MetaCNI pipeline name for network devices
 };
 
 struct DeviceFileMeta {
@@ -83,10 +84,15 @@ struct BasicDevice {
   // configured.
   std::optional<std::string> cdi_name;
 
+  // MetaCNI pipeline name. When set, this device's CDI device name will be
+  // injected as a pod annotation for MetaCNI template pipeline expansion.
+  std::optional<std::string> cni_pipeline;
+
   BasicDevice(const std::string& device_name, const std::string& device_type,
               const std::vector<std::string>& device_path,
               DeviceEnvInjectorEnum env_injector,
-              std::optional<std::string> cdi_name = std::nullopt);
+              std::optional<std::string> cdi_name = std::nullopt,
+              std::optional<std::string> cni_pipeline = std::nullopt);
 
   BasicDevice(const BasicDevice& another) = default;
 
@@ -104,13 +110,20 @@ class DeviceManager {
       const std::string& device_name, const std::string& device_type,
       const std::vector<std::string>& device_path,
       DeviceEnvInjectorEnum env_injector,
-      std::optional<std::string> cdi_name = std::nullopt);
+      std::optional<std::string> cdi_name = std::nullopt,
+      std::optional<std::string> cni_pipeline = std::nullopt);
 
   static CraneErrCode GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);
 
   static Common::EnvMap GetDevEnvMapByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);
+
+  // Extract the device name from a CDI fully-qualified name.
+  // CDI FQN format: "<vendor>/<class>=<device-name>"
+  // Returns the part after the last '=', or std::nullopt if malformed.
+  static std::optional<std::string> ExtractCdiDeviceName(
+      const std::string& cdi_fqn);
 };
 
 // read only after init
