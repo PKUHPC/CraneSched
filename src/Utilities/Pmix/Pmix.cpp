@@ -419,34 +419,48 @@ void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
     std::fill_n(m_pmix_job_info_.task_map.begin() + node * m_pmix_job_info_.ntasks_per_node, m_pmix_job_info_.ntasks_per_node, node);
   }
 
-  auto timeout_str = config.CranePmixTimeout;
-  if (timeout_str != "") {
-    try {
-      m_timeout_ = std::stoul(timeout_str);
-    } catch (const std::exception& e) {
-      CRANE_WARN("Failed to parse {} with error {}, use default timeout {}s",
-                 timeout_str, e.what(), m_timeout_);
+  if (step.env().contains("CRANE_PMIX_TIMEOUT")) {
+    auto timeout_str = step.env().at("CRANE_PMIX_TIMEOUT");
+    if (timeout_str != "") {
+      try {
+        m_timeout_ = std::stoul(timeout_str);
+      } catch (const std::exception& e) {
+        CRANE_WARN("Failed to parse {} with error {}, use default timeout {}s",
+                  timeout_str, e.what(), m_timeout_);
+      }
     }
   }
 
+
   m_pmix_job_info_.server_tmpdir = fmt::format("{}pmix.crane.{}/pmix.{}.{}", config.CraneBaseDir, m_pmix_job_info_.hostname, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
 
-  if (!config.PmixpPmixlibTmpDir.empty()) {
-    m_pmix_job_info_.cli_tmpdir_base = fmt::format("{}pmix.crane.cli", config.PmixpPmixlibTmpDir);
-    m_pmix_job_info_.cli_tmpdir = fmt::format("{}/spmix_appdir_{}.{}.{}", m_pmix_job_info_.cli_tmpdir_base, m_pmix_job_info_.uid, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
+  if (step.env().contains("PMIXP_PMIXLIB_TMPDIR")) {
+    // pmixlib_tmpdir is left for the user to configure, as the directory must be accessible to the user. 
+    // By default, it is unset and the PMIx default directory will be used.
+    std::string pmixlib_tmpdir = step.env().at("PMIXP_PMIXLIB_TMPDIR");
+    if (!pmixlib_tmpdir.empty()) {
+      m_pmix_job_info_.cli_tmpdir_base = fmt::format("{}pmix.crane.cli", pmixlib_tmpdir);
+      m_pmix_job_info_.cli_tmpdir = fmt::format("{}/spmix_appdir_{}.{}.{}", m_pmix_job_info_.cli_tmpdir_base, m_pmix_job_info_.uid, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
+    }
   }
 
-  m_pmix_job_info_.fence_type = config.CranePmixFence;
+  if (step.env().contains("CRANE_PMIX_FENCE")) 
+    m_pmix_job_info_.fence_type = step.env().at("CRANE_PMIX_FENCE");
+
+  if (step.env().contains("CRANE_PMIX_DIRECT_CONN_UCX"))
+    m_pmix_job_info_.pmix_direct_conn_ucx = step.env().at("CRANE_PMIX_DIRECT_CONN_UCX");
+  
 }
 
 bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_ = std::make_unique<CranedClient>(m_pmix_job_info_);
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
-  if (config.CranePmixDirectConnUcx == "true") {
+  if (m_pmix_job_info_.pmix_direct_conn_ucx == "true") {
   #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_job_info_.node_num);
     m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
+    CRANE_TRACE("Using UCX for PMIx communication as CranePmixDirectConnUcx is set to true.");
   #else
     CRANE_ERROR("UCX support is not enabled in this build, cannot use UCX for PMIx communication.");
     return false;
@@ -454,6 +468,7 @@ bool PmixServer::ConnInit_(const Config& config) {
   } else {
     m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num);
     m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
+    CRANE_TRACE("Using gRPC for PMIx communication as CranePmixDirectConnUcx is not set to true.");
   }
 
   if (!m_pmix_async_server_->Init(config))
