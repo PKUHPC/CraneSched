@@ -38,11 +38,6 @@ struct Config {
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
-  
-  std::string CranePmixFence;
-  std::string CranePmixTimeout;
-  std::string CranePmixDirectConnUcx;
-  std::string PmixpPmixlibTmpDir;
 };
 
 struct PmixJobInfo {
@@ -69,6 +64,7 @@ struct PmixJobInfo {
   std::string cli_tmpdir_base;
   std::string cli_tmpdir;
   std::string fence_type;
+  std::string pmix_direct_conn_ucx;
 };
 
 static constexpr uint64_t kTagTypeShift   = 48;
