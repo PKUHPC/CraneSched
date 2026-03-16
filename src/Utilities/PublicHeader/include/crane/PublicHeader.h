@@ -347,14 +347,16 @@ class FlagSet {
     return bits[std::to_underlying(flag)];
   }
 
-  void FromInt64(int64_t value) { 
-    static_assert(BitSize <= 64, "FlagSet: enum _Count > 64, cannot convert to int64");
-    bits = value; 
+  void FromInt64(int64_t value) {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    bits = value;
   }
 
-  int64_t ToInt64() const { 
-    static_assert(BitSize <= 64, "FlagSet: enum _Count > 64, cannot convert to int64");
-    return static_cast<int64_t>(bits.to_ullong()); 
+  int64_t ToInt64() const {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    return static_cast<int64_t>(bits.to_ullong());
   }
 
   std::string ToString() const { return bits.to_string(); }
