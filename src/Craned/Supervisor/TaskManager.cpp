@@ -728,16 +728,26 @@ void ProcInstance::SetupChildProcCrunX11_() {
   }
 
   auto buf = std::array<char, 4096>();
-  std::string xauth_stdout_str;
-  std::string xauth_stderr_str;
+  auto read_pipe = [&buf](std::FILE* stream, const char* stream_name) {
+    std::string output;
+    if (stream == nullptr) {
+      fmt::print(stderr,
+                 "[Craned Subprocess] xauth {} stream unavailable.\n",
+                 stream_name);
+      return output;
+    }
 
-  std::FILE* cmd_fd = subprocess_stdout(&subprocess);
-  while (std::fgets(buf.data(), 4096, cmd_fd) != nullptr)
-    xauth_stdout_str.append(buf.data());
+    while (std::fgets(buf.data(), buf.size(), stream) != nullptr)
+      output.append(buf.data());
 
-  cmd_fd = subprocess_stderr(&subprocess);
-  while (std::fgets(buf.data(), 4096, cmd_fd) != nullptr)
-    xauth_stderr_str.append(buf.data());
+    if (std::ferror(stream))
+      fmt::print(stderr, "[Craned Subprocess] xauth {} read failed.\n",
+                 stream_name);
+    return output;
+  };
+
+  std::string xauth_stdout_str = read_pipe(subprocess_stdout(&subprocess), "stdout");
+  std::string xauth_stderr_str = read_pipe(subprocess_stderr(&subprocess), "stderr");
 
   if (0 != subprocess_join(&subprocess, &result))
     fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
