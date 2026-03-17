@@ -231,11 +231,11 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
-    auto total_task_num =
-        m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
-    env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(total_task_num));
     env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
     // TODO: Add this after we have real tasks.
+    // auto total_task_num =
+    //     m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
+    // env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(total_task_num));
     // std::vector<int> gtids(total_task_num);
     // std::iota(gtids.begin(), gtids.end(), 0);
     // env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
@@ -448,20 +448,20 @@ void ITaskInstance::InitEnvMap() {
     m_env_.emplace(name, value);
   }
   if (g_config.EnableSlurmCompatibleEnv) {
-    auto proc_id_to_str = [nodelist = m_parent_step_inst_->GetStep().nodelist(),
-                           ntasks_per_node =
-                               m_parent_step_inst_->GetStep().ntasks_per_node(),
-                           task_id = task_id]() -> std::string {
-      auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
-      if (it == nodelist.end()) {
-        return "-1";
-      }
-      auto proc_id =
-          static_cast<uint32_t>(it - nodelist.begin()) * ntasks_per_node +
-          task_id;
-      return std::to_string(proc_id);
-    };
-    m_env_.emplace("SLURM_PROCID", proc_id_to_str());
+    // auto proc_id_to_str = [nodelist = m_parent_step_inst_->GetStep().nodelist(),
+    //                        ntasks_per_node =
+    //                            m_parent_step_inst_->GetStep().ntasks_per_node(),
+    //                        task_id = task_id]() -> std::string {
+    //   auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
+    //   if (it == nodelist.end()) {
+    //     return "-1";
+    //   }
+    //   auto proc_id =
+    //       static_cast<uint32_t>(it - nodelist.begin()) * ntasks_per_node +
+    //       task_id;
+    //   return std::to_string(proc_id);
+    // };
+    // m_env_.emplace("SLURM_PROCID", proc_id_to_str());
     m_env_.emplace("SLURM_LOCALID", std::to_string(task_id));
   }
 }
