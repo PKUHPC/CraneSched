@@ -2807,6 +2807,18 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       m_step_.AddTaskInstance(task_id, std::move(instance));
     }
 
+    m_step_.pwd.Init(m_step_.uid);
+    if (!m_step_.pwd.Valid()) {
+      CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
+      for (auto task_id : m_step_.task_ids)
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                    ExitCode::EC_PERMISSION_DENIED,
+                    fmt::format("Failed to look up password entry for uid {}",
+                                m_step_.uid));
+      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
+
     {
       auto err = m_step_.Prepare();
       if (err != CraneErrCode::SUCCESS) {
@@ -2848,21 +2860,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                    signal.signal_time(), signal.signal_number());
       }
     }
-
-    m_step_.pwd.Init(m_step_.uid);
-    if (!m_step_.pwd.Valid()) {
-      CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      for (auto task_id : m_step_.task_ids)
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                    ExitCode::EC_PERMISSION_DENIED,
-                    fmt::format("Failed to look up password entry for uid {}",
-                                m_step_.uid));
-      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
-      continue;
-    }
-
     // TODO: We dont need to exec task for a calloc job
-
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
