@@ -1130,10 +1130,8 @@ void ParseConfig(int argc, char** argv) {
       auto extracted =
           DeviceManager::ExtractCdiDeviceName(dev->cdi_name.value());
       if (!extracted.has_value()) {
-        CRANE_ERROR(
-            "GRES {}:{} (slot '{}') has malformed CDI name '{}': "
-            "expected '<kind>=<device-name>'.",
-            dev->name, dev->type, slot_id, dev->cdi_name.value());
+        CRANE_ERROR("GRES {}:{} (slot '{}'): {}", dev->name, dev->type, slot_id,
+                    extracted.error());
         std::exit(1);
       }
     }

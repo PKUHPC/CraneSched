@@ -59,7 +59,8 @@ struct DeviceMetaInConfig {
   std::vector<std::string> path;
   std::optional<std::string> EnvInjectorStr;
   std::optional<std::string> CdiName;  // CDI fully-qualified name for this slot
-  std::optional<std::string> CniPipeline;  // MetaCNI pipeline name for network devices
+  std::optional<std::string>
+      CniPipeline;  // MetaCNI pipeline name for network devices
 };
 
 struct DeviceFileMeta {
@@ -121,9 +122,19 @@ class DeviceManager {
 
   // Extract the device name from a CDI fully-qualified name.
   // CDI FQN format: "<vendor>/<class>=<device-name>"
-  // Returns the part after the last '=', or std::nullopt if malformed.
-  static std::optional<std::string> ExtractCdiDeviceName(
+  // Returns the part after the last '=', or an error string if malformed.
+  static std::expected<std::string, std::string> ExtractCdiDeviceName(
       const std::string& cdi_fqn);
+
+  // Generate CNI GRES annotations for MetaCNI template pipeline expansion.
+  // Scans allocated devices for those with cni_pipeline set, extracts the CDI
+  // device name, and produces annotation entries.
+  // Keys use the format "meta-cni/gres/<pipeline>/<index>" (no prefix).
+  // The caller is responsible for prepending the annotation prefix.
+  static std::expected<std::unordered_map<std::string, std::string>,
+                       std::string>
+  GetCniGresAnnotations(
+      const crane::grpc::DedicatedResourceInNode& res_in_node);
 };
 
 // read only after init
