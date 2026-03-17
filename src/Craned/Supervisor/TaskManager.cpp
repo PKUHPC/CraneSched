@@ -448,7 +448,8 @@ void ITaskInstance::InitEnvMap() {
     m_env_.emplace(name, value);
   }
   if (g_config.EnableSlurmCompatibleEnv) {
-    // auto proc_id_to_str = [nodelist = m_parent_step_inst_->GetStep().nodelist(),
+    // auto proc_id_to_str = [nodelist =
+    // m_parent_step_inst_->GetStep().nodelist(),
     //                        ntasks_per_node =
     //                            m_parent_step_inst_->GetStep().ntasks_per_node(),
     //                        task_id = task_id]() -> std::string {
