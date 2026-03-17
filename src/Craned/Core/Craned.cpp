@@ -557,11 +557,24 @@ void ParseConfig(int argc, char** argv) {
 
           std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
+            std::set<std::pair<std::string, std::string>> seen_gres_types;
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
               const auto& gres_node = gres_it->as<YAML::Node>();
               const auto& device_name = gres_node["name"].as<std::string>();
               const auto& device_type = gres_node["type"].as<std::string>();
+
+              auto [_, inserted] =
+                  seen_gres_types.emplace(device_name, device_type);
+              if (!inserted) {
+                CRANE_ERROR(
+                    "Duplicate GRES definition: {}:{} appears more than once "
+                    "in the same node group. Each (name, type) pair must be "
+                    "unique.",
+                    device_name, device_type);
+                std::exit(1);
+              }
+
               bool device_file_configured = false;
               std::string env_injector;
               if (gres_node["EnvInjector"]) {
@@ -659,8 +672,7 @@ void ParseConfig(int argc, char** argv) {
                                      !env_injector.empty()
                                          ? std::optional(env_injector)
                                          : std::nullopt,
-                                     std::nullopt,
-                                     cni_pipeline});
+                                     std::nullopt, cni_pipeline});
                 }
               }
 
@@ -1049,7 +1061,8 @@ void ParseConfig(int argc, char** argv) {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
-      auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] = dev_arg;
+      auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
+          dev_arg;
       auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
@@ -1114,8 +1127,8 @@ void ParseConfig(int argc, char** argv) {
             dev->name, dev->type, slot_id, dev->cni_pipeline.value());
         std::exit(1);
       }
-      auto extracted = DeviceManager::ExtractCdiDeviceName(
-          dev->cdi_name.value());
+      auto extracted =
+          DeviceManager::ExtractCdiDeviceName(dev->cdi_name.value());
       if (!extracted.has_value()) {
         CRANE_ERROR(
             "GRES {}:{} (slot '{}') has malformed CDI name '{}': "
