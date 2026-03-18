@@ -116,7 +116,17 @@ ccontrol show job 12345
 
 ```text
 [root@CraneProject CraneSched-FrontEnd]# ccontrol show job
-No job is running.
+JobId=12345 JobName=Test_Job
+        User=root(0) GroupId=root(0) Account=ROOT
+        JobState=Running RunTime=00:00:05 TimeLimit=00:03:01 SubmitTime=2026-03-18 20:16:12
+        StartTime=2026-03-18 20:16:14 EndTime=2026-03-18 20:19:15 Partition=CPU NodeList=crane01 ExecutionHost=crane01
+        CmdLine="cbatch cbatch_test.sh" Workdir=/root
+        Priority=0 Qos=UNLIMITED CpusPerTask=1 MemPerNode=20M
+        ReqRes:node=1 cpu=1.00 mem=20M gres=None
+        AllocRes:node=1 cpu=1.00 mem=20M gres=None
+        ReqNodeList=None ExecludeNodeList=None
+        Exclusive=false Comment= Wckey=
+        SubmitNode=crane01
 ```
 
 #### 显示步骤
