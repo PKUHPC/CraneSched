@@ -17,6 +17,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         fpm
         yaml-cpp
         bs_thread_pool
+        uvw
 )
 
 # This trimmed version is used for PAM module
