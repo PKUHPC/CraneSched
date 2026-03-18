@@ -63,6 +63,7 @@ CPU*      up    infinite   3     idle  crane[01-03]
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**: Query version number
+- **-R**: Display node failure reasons
 
 ### Format Specifiers (-o/--format)
 
@@ -272,6 +273,16 @@ Build Time: Wed, 09 Oct 2024 17:11:48 +0800
 **JSON output:**
 ```bash
 cinfo --json
+```
+
+- **-R**: Display node failure reasons
+```bash
+cinfo -R
+```
+```text
+PARTITION AVAIL NODES STATE                   NODELIST REASON       
+GPU       up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+CPU*      up    1     idle(drain)[power_idle] crane01  Mem mismatch 
 ```
 
 ## Node State Filtering

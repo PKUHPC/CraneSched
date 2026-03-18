@@ -63,6 +63,7 @@ CPU*      up    infinite   3     idle  crane[01-03]
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**：查询版本号
+- **-R**：查询节点故障原因
 
 ### 格式说明符 (-o/--format)
 
@@ -268,6 +269,16 @@ Build Time: Wed, 09 Oct 2024 17:11:48 +0800
 **JSON输出：**
 ```bash
 cinfo --json
+```
+
+**显示节点故障原因：**
+```bash
+cinfo -R
+```
+```text
+PARTITION AVAIL NODES STATE                   NODELIST REASON       
+GPU       up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+CPU*      up    1     idle(drain)[power_idle] crane01  Mem mismatch 
 ```
 
 ## 节点状态过滤
