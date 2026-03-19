@@ -3350,7 +3350,7 @@ void TaskScheduler::StartCraneCtldPrologThread(TaskInCtld* job) {
           } else {
             CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
             this->StepStatusChangeAsync(job_id, kPrimaryStepId, "",
-                                        crane::grpc::TaskStatus::Configured, 0,
+                                        crane::grpc::TaskStatus::Starting, 0,
                                         "", now);
           }
         });
