@@ -1492,9 +1492,19 @@ void TaskScheduler::StepScheduleThread_() {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
             CRANE_ERROR("Failed to update steps to embedded database.");
-            StepStatusChangeAsync(step->job_id, step->StepId(), "",
-                                  crane::grpc::TaskStatus::Failed, 0,
-                                  "DbUpdateError", now);
+            const auto& configuring_nodes =
+                step->RuntimeAttr().configuring_nodes();
+            if (configuring_nodes.empty()) {
+              StepStatusChangeAsync(step->job_id, step->StepId(), "",
+                                    crane::grpc::TaskStatus::Failed, 0,
+                                    "DbUpdateError", now);
+            } else {
+              for (const auto& craned_id : configuring_nodes) {
+                StepStatusChangeAsync(step->job_id, step->StepId(), craned_id,
+                                      crane::grpc::TaskStatus::Failed, 0,
+                                      "DbUpdateError", now);
+              }
+            }
           }
         }
 
