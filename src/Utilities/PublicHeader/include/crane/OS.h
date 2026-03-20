@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <future>
 
 #include "crane/Logger.h"
 
@@ -51,11 +52,35 @@ struct RunPrologEpilogArgs {
   gid_t run_gid;
   uint64_t output_size;
   std::function<bool(pid_t)> at_child_setup_cb;
+  using ForkAndWatchFn = std::function<
+      std::optional<std::pair<pid_t, std::future<int>>>(
+          std::function<pid_t()> do_fork)>;
+  ForkAndWatchFn fork_and_watch_fn;
 };
 
 struct RunPrologEpilogStatus {
   int exit_code;
   int signal_num;
+};
+
+class ChildExitWatcher {
+ public:
+  std::future<int> Watch(pid_t pid) {
+    auto& p = waiters_[pid];
+    return p.get_future();
+  }
+
+  bool TryDeliver(pid_t pid, int status) {
+    if (auto it = waiters_.find(pid); it != waiters_.end()) {
+      it->second.set_value(status);
+      waiters_.erase(it);
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  absl::flat_hash_map<pid_t, std::promise<int>> waiters_;
 };
 
 namespace util::os {

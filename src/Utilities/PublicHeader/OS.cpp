@@ -444,22 +444,49 @@ void KillPg(pid_t pid) {
   killpg(pid, SIGKILL);
 }
 
+/**
+ * @brief Execute a sequence of prolog or epilog scripts serially.
+ *
+ * Each script is forked as a child process whose stdout/stderr are captured
+ * via a pipe.  Scripts are run one-by-one: the next script starts only after
+ * the previous one exits successfully.  If any script fails or the aggregate
+ * wall-time budget is exhausted, execution stops and an error is returned.
+ *
+ * @param args  Configuration: script paths, timeout, uid/gid, environment
+ *              variables, optional fork-and-watch hook, etc.
+ * @return      The concatenated stdout/stderr of all scripts on success, or
+ *              a RunPrologEpilogStatus describing the first failure.
+ */
 std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     const RunPrologEpilogArgs& args) {
   using namespace std::chrono;
 
-  auto start_time = steady_clock::now();
-  auto timeout = duration_cast<milliseconds>(seconds(args.timeout_sec));
+  // Record the wall-clock start time so we can enforce an aggregate timeout
+  // across all scripts in the sequence.
+  const auto start_time = steady_clock::now();
+  const auto timeout    = duration_cast<milliseconds>(seconds(args.timeout_sec));
 
+  // Accumulated stdout/stderr from every successfully completed script.
   std::string output;
+
+  // Overall function result; initialised to a generic failure so that any
+  // early-return path without an explicit assignment still signals an error.
   std::expected<std::string, RunPrologEpilogStatus> result =
       std::unexpected(RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
 
+  // Index into args.scripts – advanced by one each time a script succeeds.
   size_t script_idx = 0;
 
+  // run_next_script is a recursive lambda: it runs scripts[script_idx], and
+  // on success increments script_idx and calls itself again.  Using
+  // std::function allows the lambda to capture a reference to itself.
   std::function<void()> run_next_script;
 
   run_next_script = [&]() {
+
+    // -------------------------------------------------------------------------
+    // Base case: all scripts have finished successfully.
+    // -------------------------------------------------------------------------
     if (script_idx >= args.scripts.size()) {
       result = output;
       return;
@@ -467,94 +494,261 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     const auto& script = args.scripts[script_idx];
 
+    // Reject relative paths to prevent accidental execution of unintended
+    // binaries when the working directory changes.
     if (!IsAbsolutePath(script)) {
-      CRANE_ERROR("Script path {} is not absolute.", script);
+      CRANE_ERROR("Script path '{}' is not absolute.", script);
       result = std::unexpected(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
       return;
     }
 
+    // -------------------------------------------------------------------------
+    // Create a pipe to capture the child's stdout and stderr.
+    //   stdout_pipe[0] – read  end (parent reads script output)
+    //   stdout_pipe[1] – write end (child writes its output here)
+    // -------------------------------------------------------------------------
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) {
-      CRANE_ERROR("Failed to create pipe for script {}: {}", script,
-                  strerror(errno));
+      CRANE_ERROR("Failed to create pipe for script '{}': {}",
+                  script, strerror(errno));
       result = std::unexpected(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
       return;
     }
 
-    pid_t pid = fork();
-    if (pid == -1) {
-      CRANE_ERROR("Failed to fork for script {}: {}", script, strerror(errno));
-      result = std::unexpected(
-          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
-      close(stdout_pipe[0]);
-      close(stdout_pipe[1]);
-      return;
+    // -------------------------------------------------------------------------
+    // Fork the child process.
+    //
+    // Two modes depending on whether a fork_and_watch_fn hook is provided:
+    //
+    //  1. With hook (fork_and_watch_fn set):
+    //     The hook acquires a mutex BEFORE calling fork(), then immediately
+    //     registers the child PID in a ChildExitWatcher.  This eliminates the
+    //     TOCTOU race where SIGCHLD could arrive between fork() and Watch().
+    //     The hook returns:
+    //       nullopt          – fork() failed (pid < 0)
+    //       {0,  empty fut}  – we are the child process
+    //       {pid, future}    – we are the parent; future delivers waitpid status
+    //
+    //  2. Without hook:
+    //     Plain fork(); the caller is responsible for reaping via waitpid().
+    // -------------------------------------------------------------------------
+    pid_t pid        = -1;
+    std::future<int> exit_future;   // valid only in parent when use_watcher==true
+    bool use_watcher = false;
+
+    if (args.fork_and_watch_fn) {
+      auto fork_result = args.fork_and_watch_fn([]() { return fork(); });
+
+      if (!fork_result) {
+        // fork() itself failed (errno is already logged inside the hook).
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        result = std::unexpected(
+            RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+        return;
+      }
+
+      pid = fork_result->first;
+
+      // Only the parent process registers the watcher future.
+      // The child (pid == 0) receives an empty future but will exec shortly
+      // and never use it.
+      if (pid > 0) {
+        exit_future = std::move(fork_result->second);
+        use_watcher = true;
+      }
+    } else {
+      pid = fork();
+      if (pid == -1) {
+        CRANE_ERROR("Failed to fork for script '{}': {}", script, strerror(errno));
+        result = std::unexpected(
+            RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        return;
+      }
     }
 
-    if (pid == 0) {  // child
+    // =========================================================================
+    // Child process
+    // =========================================================================
+    if (pid == 0) {
+      // The child only writes to the pipe; close the read end immediately.
       close(stdout_pipe[0]);
+
+      // Redirect both stdout and stderr to the write end of the pipe so the
+      // parent can capture all script output through a single fd.
       if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 ||
           dup2(stdout_pipe[1], STDERR_FILENO) == -1) {
         close(stdout_pipe[1]);
-        fmt::print(stderr, "[Subprocess] Error: dup2 failed: {} ({})\n",
+        fmt::print(stderr, "[Subprocess] dup2 failed: {} ({})\n",
                    strerror(errno), errno);
         _exit(EXIT_FAILURE);
       }
-      close(stdout_pipe[1]);
+      close(stdout_pipe[1]);  // original fd no longer needed after dup2
 
-      CloseFdFrom(3);  // close all other fds
-      setpgid(0, 0);   // set process group id to its own pid
+      // Close every fd >= 3 to avoid leaking parent file descriptors into
+      // the script (e.g. sockets, log files, gRPC channels).
+      CloseFdFrom(3);
 
+      // Place the child in its own process group so KillPg() can send
+      // signals to the entire group (child + any grandchildren it spawns).
+      setpgid(0, 0);
+
+      // Optional caller-supplied callback executed in the child context
+      // (e.g., to move the child into a cgroup before exec).
       if (args.at_child_setup_cb) {
-        bool setup_ok = args.at_child_setup_cb(getpid());
-        if (!setup_ok) {
-          fmt::print(stderr,
-                     "[Subprocess] Error: subprocess callback failed\n");
+        if (!args.at_child_setup_cb(getpid())) {
+          fmt::print(stderr, "[Subprocess] child setup callback failed\n");
           _exit(EXIT_FAILURE);
         }
       }
 
+      // Drop to the requested group and user credentials before executing
+      // the script.  Group must be dropped first (setgid fails after setuid
+      // on most Linux configurations).
       if (setgid(args.run_gid) != 0) {
-        fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {} ({})\n",
+        fmt::print(stderr, "[Subprocess] setgid(%u) failed: {} ({})\n",
                    args.run_gid, strerror(errno), errno);
         _exit(EXIT_FAILURE);
       }
-
       if (setuid(args.run_uid) != 0) {
-        fmt::print(stderr, "[Subprocess] Error: setuid({}) failed: {} ({})\n",
+        fmt::print(stderr, "[Subprocess] setuid(%u) failed: {} ({})\n",
                    args.run_uid, strerror(errno), errno);
         _exit(EXIT_FAILURE);
       }
 
+      // Populate the environment for the script.
       for (const auto& [name, value] : args.envs) {
         if (setenv(name.c_str(), value.c_str(), 1) != 0) {
-          fmt::print(stderr,
-                     "[Subprocess] Error: setenv({}, {}) failed: {} ({})\n",
+          fmt::print(stderr, "[Subprocess] setenv({}={}) failed: {} ({})\n",
                      name, value, strerror(errno), errno);
           _exit(EXIT_FAILURE);
         }
       }
 
+      // Replace the child image with the script.  execvp searches PATH, but
+      // since the script path is absolute, PATH is irrelevant here.
       std::vector<const char*> argv = {script.c_str(), nullptr};
       execvp(argv[0], const_cast<char* const*>(argv.data()));
-      fmt::print(stderr, "[Subprocess] execvp() failed: {}\n", strerror(errno));
+
+      // If execvp() returns, it has failed.
+      fmt::print(stderr, "[Subprocess] execvp('{}') failed: {}\n",
+                 script, strerror(errno));
       _exit(EXIT_FAILURE);
 
-    } else {  // parent
+    } else {
+      // =======================================================================
+      // Parent process
+      // =======================================================================
+
+      // The parent only reads from the pipe; close the write end so that
+      // EOF (end_event) is triggered when the child closes its write end.
       close(stdout_pipe[1]);
 
-      auto loop = uvw::loop::create();
-      auto pipe_handle = loop->uninitialized_resource<uvw::pipe_handle>(false);
-      auto timer_handle = loop->resource<uvw::timer_handle>();
-      auto idle_handle = loop->resource<uvw::idle_handle>();
+      // Create a dedicated libuv event loop for this script.
+      // Using a fresh loop per script keeps state isolated and avoids
+      // cross-contamination between sequential script executions.
+      auto loop          = uvw::loop::create();
+      auto pipe_handle   = loop->uninitialized_resource<uvw::pipe_handle>(false);
+      auto timeout_timer = loop->resource<uvw::timer_handle>();
+
+      // poll_timer replaces the previous idle_handle + sleep_for(50ms) design.
+      // A repeating 50ms timer is far less invasive than sleeping inside an
+      // idle callback, which would block the entire event loop and delay both
+      // pipe reads and the timeout timer.
+      // CPU overhead: ~20 lightweight syscalls per second (waitpid/wait_for),
+      // which is negligible even on the busiest node.
+      auto poll_timer = loop->resource<uvw::timer_handle>();
 
       std::string script_output;
-      int err = 0;
-      err = pipe_handle->init();
+
+      // -----------------------------------------------------------------------
+      // Completion state
+      //
+      // We need TWO independent events before it is safe to inspect results:
+      //
+      //   child_exited  – poll_timer detected the child has terminated and
+      //                   stored the raw waitpid() status in exit_status.
+      //
+      //   pipe_ended    – end_event fired, meaning the kernel has flushed all
+      //                   buffered pipe data to us via data_event callbacks.
+      //
+      // Checking child_exited alone would risk processing a truncated
+      // script_output if pipe data was still in flight.  Checking pipe_ended
+      // alone would miss the exit status.  try_finish() gates on both.
+      // -----------------------------------------------------------------------
+      bool child_exited  = false;
+      bool pipe_ended    = false;
+      bool has_error     = false;    // fatal error; suppress normal completion
+      int  exit_status   = 0;       // raw waitpid() status (not just exit code)
+      bool loop_stopping = false;   // guard against double-closing handles
+
+      // --- stop_loop -----------------------------------------------------------
+      // Close all active handles.  Once every handle is closed, libuv exits
+      // loop->run() automatically.  Idempotent via loop_stopping guard.
+      // -------------------------------------------------------------------------
+      auto stop_loop = [&]() {
+        if (loop_stopping) return;
+        loop_stopping = true;
+        pipe_handle->close();
+        timeout_timer->close();
+        poll_timer->close();
+      };
+
+      // --- try_finish ----------------------------------------------------------
+      // Called from both poll_timer and end_event callbacks.  Proceeds only
+      // when both events have fired so that script_output is complete and
+      // exit_status is valid.
+      //
+      // On success, appends output and tail-calls run_next_script(), which
+      // creates a NEW event loop internally.  This is safe because stop_loop()
+      // has already closed all handles on the current loop before we call
+      // run_next_script(); the outer loop->run() therefore returns as soon as
+      // the current callback completes.  Stack depth grows by one frame per
+      // script, which is acceptable for the small number of prolog/epilog
+      // scripts typically configured (< 10).
+      // -------------------------------------------------------------------------
+      auto try_finish = [&]() {
+        if (!child_exited || !pipe_ended) return;
+
+        // Shut down the current event loop before (possibly) entering a new one.
+        stop_loop();
+        if (has_error) return;
+
+        // Decode the raw waitpid() status using standard POSIX macros.
+        int exit_code  = 0;
+        int signal_num = 0;
+        if (WIFEXITED(exit_status)) {
+          exit_code = WEXITSTATUS(exit_status);
+        } else if (WIFSIGNALED(exit_status)) {
+          signal_num = WTERMSIG(exit_status);
+        } else {
+          // Unexpected status (e.g., stopped process); treat as error.
+          exit_code = exit_status;
+        }
+
+        if (exit_code != 0 || signal_num != 0) {
+          CRANE_TRACE("Script '{}' failed (exit_code={}, signal={}), output: {}.",
+                      script, exit_code, signal_num, script_output);
+          result = std::unexpected(RunPrologEpilogStatus{
+              .exit_code = exit_code, .signal_num = signal_num});
+        } else {
+          // Script succeeded; queue the next one.
+          output += script_output;
+          script_idx++;
+          run_next_script();
+        }
+      };
+
+      // -----------------------------------------------------------------------
+      // Initialise the pipe handle and associate it with the OS pipe fd.
+      // -----------------------------------------------------------------------
+      int err = pipe_handle->init();
       if (err) {
-        CRANE_ERROR("Failed to initialize pipe_handle for script {}: {}",
+        CRANE_ERROR("Failed to init pipe_handle for '{}': {}",
                     script, uv_strerror(err));
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
@@ -564,107 +758,166 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
       err = pipe_handle->open(stdout_pipe[0]);
       if (err) {
-        CRANE_ERROR("Failed to open pipe_handle for script {}: {}", script,
-                    uv_strerror(err));
+        CRANE_ERROR("Failed to open pipe_handle for '{}': {}",
+                    script, uv_strerror(err));
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
         return;
       }
 
+      // -----------------------------------------------------------------------
+      // Pipe: data event
+      // Append incoming bytes to script_output, honouring the caller-supplied
+      // size cap.  Excess bytes are silently discarded to bound memory use.
+      // -----------------------------------------------------------------------
       pipe_handle->on<uvw::data_event>(
           [&](const uvw::data_event& event, uvw::pipe_handle&) {
             if (event.length > 0) {
-              size_t remain = args.output_size > script_output.size()
-                                  ? args.output_size - script_output.size()
-                                  : 0;
+              const size_t remain =
+                  args.output_size > script_output.size()
+                      ? args.output_size - script_output.size()
+                      : 0;
               if (remain > 0)
                 script_output.append(event.data.get(),
                                      std::min<size_t>(event.length, remain));
             }
           });
 
+      // -----------------------------------------------------------------------
+      // Pipe: end event (EOF)
+      // The kernel delivers this only after the child has closed its write end
+      // (i.e., after it has exited or explicitly closed stdout/stderr).
+      // All data_event callbacks for this pipe have already been delivered by
+      // the time end_event fires, so script_output is complete here.
+      // -----------------------------------------------------------------------
       pipe_handle->on<uvw::end_event>(
-          [&](const uvw::end_event&, uvw::pipe_handle& h) { h.close(); });
+          [&](const uvw::end_event&, uvw::pipe_handle& h) {
+            h.close();           // release the handle
+            pipe_ended = true;
+            try_finish();        // proceed if child has also exited
+          });
 
+      // -----------------------------------------------------------------------
+      // Pipe: error event
+      // Any I/O error on the read end is treated as a fatal failure.
+      // All handles are closed so the event loop terminates promptly.
+      // -----------------------------------------------------------------------
       pipe_handle->on<uvw::error_event>(
-          [&](uvw::error_event& e, uvw::pipe_handle& h) {
-            CRANE_WARN("{} output pipe error: {}. Closing.", script, e.what());
-            h.close();
+          [&](uvw::error_event& e, uvw::pipe_handle&) {
+            CRANE_WARN("Pipe error for script '{}': {}.", script, e.what());
+            has_error = true;
+            result    = std::unexpected(
+                RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+            stop_loop();   // also closes timeout_timer and poll_timer
           });
 
       pipe_handle->read();
 
-      timer_handle->on<uvw::timer_event>(
-          [&](const uvw::timer_event&, uvw::timer_handle&) {
-            CRANE_TRACE("{} Timeout.", script);
+      // -----------------------------------------------------------------------
+      // Timeout timer (one-shot)
+      // Fires once after the remaining time budget has elapsed.
+      // Sends SIGKILL to the child's entire process group, then closes
+      // itself.  The poll_timer is intentionally left running so we can
+      // still detect the child's eventual exit and drain the pipe cleanly.
+      // -----------------------------------------------------------------------
+      timeout_timer->on<uvw::timer_event>(
+          [&](const uvw::timer_event&, uvw::timer_handle& h) {
+            CRANE_TRACE("Script '{}' timed out; killing process group {}.",
+                        script, pid);
             KillPg(pid);
+            h.close();  // close only the timeout timer; poll_timer keeps running
           });
 
-      int status = 0;
-      idle_handle->on<uvw::idle_event>(
-          [&](const uvw::idle_event&, uvw::idle_handle& h) {
-            int rc = waitpid(pid, &status, WNOHANG);
-            if (rc == pid) {
-              timer_handle->close();
-              pipe_handle->close();
-              h.parent().walk([](auto&& h) { h.close(); });
-              h.parent().stop();
+      // -----------------------------------------------------------------------
+      // Poll timer (repeating, 50 ms interval)
+      // Periodically checks whether the child process has exited.
+      //
+      // Why a timer instead of idle + sleep?
+      //   idle + sleep_for(50ms) blocks the entire event loop thread, which
+      //   prevents libuv from processing pipe data or firing the timeout timer
+      //   during the sleep window.  A repeating timer is non-blocking: libuv
+      //   sleeps efficiently in epoll_wait() between timer ticks, and other
+      //   I/O events (pipe reads, timeout) are handled in between.
+      //
+      // CPU overhead estimation:
+      //   20 ticks/s × 1 waitpid (or wait_for) syscall × ~1 µs each ≈ 0.002%
+      //   of a single CPU core.  Negligible even under heavy load.
+      // -----------------------------------------------------------------------
+      poll_timer->on<uvw::timer_event>(
+          [&](const uvw::timer_event&, uvw::timer_handle& h) {
+            bool exited = false;
 
-              int exit_code = 0, signal_num = 0;
-              if (WIFEXITED(status)) {
-                exit_code = WEXITSTATUS(status);
-                signal_num = 0;
-              } else if (WIFSIGNALED(status)) {
-                exit_code = 0;
-                signal_num = WTERMSIG(status);
-              } else {
-                exit_code = status;
-                signal_num = 0;
+            if (use_watcher) {
+              // Non-blocking check of the shared future.
+              // TryDeliver() MUST call promise::set_value() with the raw
+              // waitpid() status (not a processed exit code), so that the
+              // WIFEXITED / WEXITSTATUS macros in try_finish() work correctly.
+              if (exit_future.wait_for(milliseconds(0)) ==
+                  std::future_status::ready) {
+                exit_status = exit_future.get();
+                exited      = true;
               }
-              if (exit_code != 0 || signal_num != 0) {
-                CRANE_TRACE("{} Failed (exit status {}:{}), output: {}.",
-                            script, exit_code, signal_num, script_output);
-                result = std::unexpected(
-                    RunPrologEpilogStatus{.exit_code = exit_code,
-                                          .signal_num = signal_num});
+            } else {
+              // WNOHANG: return immediately if no child has changed state.
+              //   rc == pid  → child exited; exit_status is valid
+              //   rc == 0    → child still running; try again next tick
+              //   rc == -1   → error (e.g., child already reaped elsewhere)
+              int rc = waitpid(pid, &exit_status, WNOHANG);
+              if (rc == pid) {
+                exited = true;
+              } else if (rc == -1) {
+                CRANE_ERROR("waitpid failed for script '{}' pid={}: {}",
+                            script, pid, strerror(errno));
+                has_error = true;
+                result    = std::unexpected(
+                    RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+                stop_loop();
                 return;
               }
-              output += script_output;
-              script_idx++;
-              run_next_script();
-            } else if (rc == -1) {
-              timer_handle->close();
-              pipe_handle->close();
-              h.parent().walk([](auto&& h) { h.close(); });
-              h.parent().stop();
-              CRANE_ERROR("waitpid failed for script {}, pid:{} : {}", script,
-                          pid, strerror(errno));
-              result = std::unexpected(
-                  RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
-              return;
+              // rc == 0: child still running; do nothing and wait for next tick
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+            if (exited) {
+              // Stop polling; child will not exit again.
+              h.close();
+              child_exited = true;
+              // Attempt completion; deferred if the pipe has not yet signalled EOF.
+              try_finish();
+            }
           });
 
-      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start_time);
+      // -----------------------------------------------------------------------
+      // Pre-flight timeout check
+      // If previous scripts consumed all of the time budget, skip even
+      // starting the event loop and kill the child we just forked.
+      // -----------------------------------------------------------------------
+      const auto elapsed = duration_cast<milliseconds>(
+          steady_clock::now() - start_time);
       if (elapsed >= timeout) {
-        idle_handle->stop();
+        CRANE_TRACE("Script '{}' timed out before its event loop started.",
+                    script);
+        KillPg(pid);
         pipe_handle->close();
-        CRANE_TRACE("{} Timeout.", script);
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         return;
       }
 
-      timer_handle->start(timeout - elapsed, std::chrono::seconds(0));
-      idle_handle->start();
+      // Start the one-shot timeout timer for the remaining time budget.
+      timeout_timer->start(timeout - elapsed, milliseconds(0));
 
+      // Start the repeating poll timer.  First tick after 50 ms; repeats
+      // every 50 ms thereafter.
+      poll_timer->start(milliseconds(50), milliseconds(50));
+
+      // Block until all handles have been closed (i.e., stop_loop() was called
+      // or every handle reached its natural end state).
       loop->run();
     }
   };
 
+  // Kick off the recursive script execution chain.
   run_next_script();
 
   return result;
