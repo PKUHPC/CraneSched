@@ -325,6 +325,8 @@ inline std::string_view CraneErrStr(CraneErrCode err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
+inline const CranedId kCtldPrologInternalNodeIndex{
+    "__CRANE_INTERNAL_PROLOG_CTLD_NODE_INDEX"};
 using ResvId = std::string;
 using cpu_t = fpm::fixed_24_8;
 using LicenseId = std::string;
