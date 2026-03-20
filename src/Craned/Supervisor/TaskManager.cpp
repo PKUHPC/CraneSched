@@ -2904,6 +2904,16 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+      run_epilog_args.fork_and_watch_fn =
+        [this](std::function<pid_t()> do_fork)
+          -> std::optional<std::pair<pid_t, std::future<int>>> {
+        absl::MutexLock lock(&m_fork_reap_mu_);
+        pid_t pid = do_fork();
+        if (pid < 0) return std::nullopt;
+        if (pid == 0) return std::make_pair(pid, std::future<int>{});
+        return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+      };
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
@@ -2927,6 +2937,16 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+      run_epilog_args.fork_and_watch_fn =
+        [this](std::function<pid_t()> do_fork)
+          -> std::optional<std::pair<pid_t, std::future<int>>> {
+        absl::MutexLock lock(&m_fork_reap_mu_);
+        pid_t pid = do_fork();
+        if (pid < 0) return std::nullopt;
+        if (pid == 0) return std::make_pair(pid, std::future<int>{});
+        return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+      };
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
