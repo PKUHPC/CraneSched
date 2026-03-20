@@ -617,7 +617,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
-    if (craned_id != kCtldPrologInternalNodeIndex) {
+    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
       this->NodeConfigured(craned_id);
     } else {
       // CraneCtld Prolog completion event
@@ -1162,7 +1162,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
 
-  if (this->Status() == crane::grpc::TaskStatus::Configuring) {
+  switch (this->Status()) {
+  case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Starting / Failed / Cancelled,
     if (!craned_id.empty()) this->NodeConfigured(craned_id);
     if (new_status != crane::grpc::TaskStatus::Starting) {
@@ -1197,8 +1198,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         context->rn_step_raw_ptrs.insert(this);
       }
     }
-  } else if (this->Status() == crane::grpc::TaskStatus::Running ||
-             this->Status() == crane::grpc::TaskStatus::Completing) {
+    break;
+  case crane::grpc::TaskStatus::Running:
+  case crane::grpc::TaskStatus::Completing:
     // Running/Completing -> Completed / Failed / Cancelled,
     // Primary: the job is completed.
 
@@ -1213,13 +1215,13 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           "[Step #{}.{}] got a finish status, waiting for {} status change.",
           job_id, step_id, this->RunningNodes().size());
     }
-
-  } else {
+    break;
+  default:
+    std::unreachable();
     CRANE_ASSERT_MSG(
         false, fmt::format("Invalid step status, current: {}, new status: {}",
                            StepStatusToString(Status()),
                            StepStatusToString(new_status)));
-    std::unreachable();
   }
 
   // Step finish: configure failed or execution status change
