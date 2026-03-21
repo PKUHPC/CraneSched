@@ -222,7 +222,8 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "gid", &TaskInCtld::gid, "account", &TaskInCtld::account,
     "name", &TaskInCtld::name, "qos", &TaskInCtld::qos,
     "node_num", &TaskInCtld::node_num,
-    "ntasks_per_node", &TaskInCtld::ntasks_per_node,
+    // TODO: expose ntasks_per_node_min to Lua
+    "ntasks_per_node", &TaskInCtld::ntasks_per_node_max,
     "cpus_per_task", &TaskInCtld::cpus_per_task,
     "included_nodes", sol::property(
           [](const TaskInCtld& t) {
@@ -330,8 +331,8 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "qos", sol::property([](const TaskInfo& t) {
       return t.qos();
     }),
-    "req_res_view", sol::property([](const TaskInfo& t) {
-      return static_cast<ResourceView>(t.req_res_view());
+    "req_total_res_view", sol::property([](const TaskInfo& t) {
+      return static_cast<ResourceView>(t.req_total_res_view());
     }),
     "licenses_count", sol::property([&](const TaskInfo& t) {
       sol::table tbl = lua_env.GetLuaState().create_table();
@@ -434,6 +435,12 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     }),
     "max_mem_per_cpu", sol::property([](const PartitionInfo& p) {
       return p.max_mem_per_cpu();
+    }),
+    "default_mem_per_node", sol::property([](const PartitionInfo& p) {
+      return p.default_mem_per_node();
+    }),
+    "max_mem_per_node", sol::property([](const PartitionInfo& p) {
+      return p.max_mem_per_node();
     })
   );
 

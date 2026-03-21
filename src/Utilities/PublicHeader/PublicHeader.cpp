@@ -512,6 +512,17 @@ ResourceInNode& ResourceInNode::operator-=(const ResourceInNode& rhs) {
   return *this;
 }
 
+void ResourceInNode::ckmin(const ResourceInNode& rhs) {
+  allocatable_res.cpu_count =
+      std::min(allocatable_res.cpu_count, rhs.allocatable_res.cpu_count);
+  allocatable_res.memory_bytes =
+      std::min(allocatable_res.memory_bytes, rhs.allocatable_res.memory_bytes);
+  allocatable_res.memory_sw_bytes = std::min(
+      allocatable_res.memory_sw_bytes, rhs.allocatable_res.memory_sw_bytes);
+
+  dedicated_res = Intersection(dedicated_res, rhs.dedicated_res);
+}
+
 bool ResourceInNode::IsZero() const {
   return allocatable_res.IsZero() && dedicated_res.IsZero();
 }
@@ -737,8 +748,8 @@ uint64_t ResourceView::MemoryBytes() const {
   return allocatable_res.memory_bytes;
 }
 
-bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
-                                             ResourceInNode* feasible_res) {
+bool ResourceView::GetFeasibleResourceInNode(
+    const ResourceInNode& avail_res, ResourceInNode* feasible_res) const {
   if (!(this->allocatable_res <= avail_res.allocatable_res)) return false;
 
   feasible_res->allocatable_res = this->allocatable_res;
@@ -799,6 +810,21 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs) {
   ResourceView result(lhs);
   result.allocatable_res *= rhs;
   result.device_map *= rhs;
+
+  return result;
+}
+
+ResourceView operator+(const ResourceView& lhs, const ResourceView& rhs) {
+  ResourceView result(lhs);
+  result.GetAllocatableRes() += rhs.GetAllocatableRes();
+
+  for (const auto& [name, type_pair] : rhs.GetDeviceMap()) {
+    auto& dest_pair = result.GetDeviceMap()[name];
+    dest_pair.first += type_pair.first;  // untyped count
+    for (const auto& [type, count] : type_pair.second) {
+      dest_pair.second[type] += count;  // typed count
+    }
+  }
 
   return result;
 }

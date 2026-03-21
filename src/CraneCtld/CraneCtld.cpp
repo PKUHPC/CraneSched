@@ -647,12 +647,31 @@ void ParseConfig(int argc, char** argv) {
           }
           constexpr uint32_t B2MB = 1024 * 1024;
 
-          if (partition["DefaultMemPerCpu"] &&
-              !partition["DefaultMemPerCpu"].IsNull()) {
+          bool has_default_mem_per_cpu =
+              partition["DefaultMemPerCpu"] &&
+              !partition["DefaultMemPerCpu"].IsNull();
+          bool has_default_mem_per_node =
+              partition["DefaultMemPerNode"] &&
+              !partition["DefaultMemPerNode"].IsNull();
+
+          if (has_default_mem_per_cpu && has_default_mem_per_node) {
+            CRANE_ERROR(
+                "Partition {}: DefaultMemPerCpu and DefaultMemPerNode "
+                "are mutually exclusive.",
+                name);
+            std::exit(1);
+          }
+
+          if (has_default_mem_per_cpu) {
             part.default_mem_per_cpu =
                 partition["DefaultMemPerCpu"].as<uint64_t>() * B2MB;
           }
-          if (part.default_mem_per_cpu == 0) {
+          if (has_default_mem_per_node) {
+            part.default_mem_per_node =
+                partition["DefaultMemPerNode"].as<uint64_t>() * B2MB;
+          }
+
+          if (part.default_mem_per_cpu == 0 && part.default_mem_per_node == 0) {
             uint64_t part_mem = 0;
             uint32_t part_cpu = 0;
             for (const auto& node : part.nodes) {
@@ -666,8 +685,17 @@ void ParseConfig(int argc, char** argv) {
               !partition["MaxMemPerCpu"].IsNull()) {
             part.max_mem_per_cpu =
                 partition["MaxMemPerCpu"].as<uint64_t>() * B2MB;
-          } else
+          } else {
             part.max_mem_per_cpu = 0;
+          }
+
+          if (partition["MaxMemPerNode"] &&
+              !partition["MaxMemPerNode"].IsNull()) {
+            part.max_mem_per_node =
+                partition["MaxMemPerNode"].as<uint64_t>() * B2MB;
+          } else {
+            part.max_mem_per_node = 0;
+          }
 
           if (part.default_mem_per_cpu != 0 && part.max_mem_per_cpu != 0 &&
               part.max_mem_per_cpu < part.default_mem_per_cpu) {
@@ -678,15 +706,22 @@ void ParseConfig(int argc, char** argv) {
                 part.default_mem_per_cpu / B2MB);
             std::exit(1);
           }
-          if (part.max_mem_per_cpu == 0) {
-            CRANE_TRACE(
-                "Partition {} MaxMemPerCpu not set, DefaultMemPerCpu {}MB.",
-                name, part.default_mem_per_cpu / B2MB);
-          } else {
-            CRANE_TRACE(
-                "Partition {} MaxMemPerCpu {}MB, DefaultMemPerCpu {}MB.", name,
-                part.max_mem_per_cpu / B2MB, part.default_mem_per_cpu / B2MB);
+          if (part.default_mem_per_node != 0 && part.max_mem_per_node != 0 &&
+              part.max_mem_per_node < part.default_mem_per_node) {
+            CRANE_ERROR(
+                "The partition {} MaxMemPerNode {}MB should not be "
+                "less than DefaultMemPerNode {}MB.",
+                name, part.max_mem_per_node / B2MB,
+                part.default_mem_per_node / B2MB);
+            std::exit(1);
           }
+
+          CRANE_TRACE(
+              "Partition {} DefaultMemPerCpu {}MB, DefaultMemPerNode "
+              "{}MB, MaxMemPerCpu {}MB, MaxMemPerNode {}MB.",
+              name, part.default_mem_per_cpu / B2MB,
+              part.default_mem_per_node / B2MB, part.max_mem_per_cpu / B2MB,
+              part.max_mem_per_node / B2MB);
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
@@ -1075,6 +1110,7 @@ int StartServer() {
   CreateFolders();
 
   InitializeCtldGlobalVariables();
+  CRANE_INFO("CraneCtld service ready.");
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
     if (!util::os::CreateFile(g_config.KeepalivedConfig.CraneCtldAliveFile)) {
