@@ -721,9 +721,6 @@ class TaskManager {
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
-
-  absl::Mutex m_fork_reap_mu_;
-  ChildExitWatcher m_exit_watcher_;
 };
 
 }  // namespace Craned::Supervisor
