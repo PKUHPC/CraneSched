@@ -801,6 +801,11 @@ void CtldClient::BroadcastPmixPort(
 
   grpc::Status status =
       m_stub_->BroadcastPmixPort(&context, request, response);
+  if (!status.ok()) {
+    CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
+                static_cast<int>(status.error_code()),
+                status.error_message());
+  }
 }
 
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
