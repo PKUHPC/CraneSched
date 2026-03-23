@@ -588,7 +588,12 @@ grpc::Status CranedServiceImpl::BroadcastPmixPort(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  g_ctld_client->BroadcastPmixPort(*request, response);
+
+  auto result = g_ctld_client->BroadcastPmixPort(*request, response);
+  if (result != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step{}.{}] Failed to broadcast pmix ports: {}", 
+      request->job_id(), request->step_id(), CraneErrStr(result));
+  }
 
   return Status::OK;
 }
@@ -610,17 +615,8 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
   }
 
   CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor", request->job_id(), request->step_id(), pmix_ports.size());
-  auto stub = g_supervisor_keeper->GetStub(request->job_id(), request->step_id());
-  if (!stub) {
-    CRANE_ERROR("[Step{}.{}] Failed to get stub", request->job_id(), request->step_id());
-    response->set_ok(false);
-    return Status::OK;
-  }
-
-  auto result = stub->ReceivePmixPort(pmix_ports);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step{}.{}] Failed to deliver pmix ports: {}", 
-      request->job_id(), request->step_id(), CraneErrStr(result));
+  bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(), request->step_id());
+  if (!ok) {
     response->set_ok(false);
   } else {
     response->set_ok(true);

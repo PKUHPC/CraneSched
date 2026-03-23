@@ -2827,10 +2827,10 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
 
   if (!InitPmixPreFork()) { 
     CRANE_ERROR("Failed to initialize PMIx server.");
-    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeFileNotFound,
-                              fmt::format("pmix failed"));
-    return ;
+    TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::EC_MPI_ERR,
+                fmt::format("pmix failed"));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   CRANE_INFO("[Task #{}] Spawning in task", task->task_id);
