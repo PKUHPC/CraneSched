@@ -589,11 +589,7 @@ grpc::Status CranedServiceImpl::BroadcastPmixPort(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  auto result = g_ctld_client->BroadcastPmixPort(*request, response);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step{}.{}] Failed to broadcast pmix ports: {}", 
-      request->job_id(), request->step_id(), CraneErrStr(result));
-  }
+  g_ctld_client->BroadcastPmixPort(*request, response);
 
   return Status::OK;
 }
