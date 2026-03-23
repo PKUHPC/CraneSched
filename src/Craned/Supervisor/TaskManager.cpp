@@ -2364,7 +2364,7 @@ CraneErrCode ProcInstance::Spawn() {
     std::unordered_map<std::string, std::string> pmix_env;
     if (m_parent_step_inst_->IsCrun() &&
         m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
-      auto result = g_pmix_server->SetupFork(0);
+      auto result = g_pmix_server->SetupFork(task_id);
       if (!result) {
         fmt::print(stderr,
                    "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
