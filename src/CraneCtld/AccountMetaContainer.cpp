@@ -87,8 +87,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
-  if (static_cast<double>(task.cpus_per_task) * task.node_num >
-      qos->max_cpus_per_user)
+  if (resource_use.CpuCount() * task.node_num > qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
@@ -334,8 +333,7 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
               result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
               return;
             }
-            ResourceView resource_use{task.requested_node_res_view *
-                                      task.node_num};
+            ResourceView resource_use{task.req_total_res_view};
             resource_use += val.resource;
             if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
@@ -370,8 +368,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
               return;
             }
           }
-          ResourceView resource_use{task.requested_node_res_view *
-                                    task.node_num};
+          ResourceView resource_use{task.req_total_res_view};
           resource_use += val.resource;
           if (!CheckTres_(resource_use, qos.max_tres)) {
             result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
