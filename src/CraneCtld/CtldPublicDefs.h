@@ -734,6 +734,12 @@ struct DaemonStepInCtld : StepInCtld {
 
   ~DaemonStepInCtld() override = default;
 
+  void SetCtldPrologPending(bool pending) { m_ctld_prolog_pending_ = pending; }
+  bool PrologComplete() const {
+    if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
+    return !m_ctld_prolog_pending_;
+  }
+
   void InitFromJob(const TaskInCtld& job);
   [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 
@@ -751,6 +757,9 @@ struct DaemonStepInCtld : StepInCtld {
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
       crane::grpc::StepInfo* step_info) const noexcept override;
+
+ private:
+  bool m_ctld_prolog_pending_{false};
 };
 
 struct CommonStepInCtld : StepInCtld {
@@ -841,8 +850,6 @@ struct TaskInCtld {
   std::list<std::string> account_chain;
 
   std::string submit_hostname;
-
-  bool is_prolog_running{false};
 
  private:
   /* ------------- [2] -------------
@@ -944,8 +951,6 @@ struct TaskInCtld {
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
-
-  bool PrologComplete() const;
 
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }

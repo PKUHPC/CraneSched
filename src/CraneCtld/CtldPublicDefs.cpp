@@ -617,7 +617,12 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
-    this->NodeConfigured(craned_id);
+    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+      this->NodeConfigured(craned_id);
+    } else {
+      // CraneCtld Prolog completion event
+      this->SetCtldPrologPending(false);
+    }
 
     switch (new_status) {
     case crane::grpc::TaskStatus::Running:
@@ -634,7 +639,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                   util::StepStatusToString(new_status));
     }
 
-    if (this->AllNodesConfigured()) {
+    if (this->AllNodesConfigured() && this->PrologComplete()) {
       if (this->PrevErrorStatus()) {
         job_finished = true;
       } else if (job->CancelRequested()) {
@@ -687,7 +692,6 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           context->craned_step_alloc_map[node_id].emplace_back(
               job->PrimaryStep()->GetStepToD(node_id));
         }
-        g_task_scheduler->StartCraneCtldPrologThread(job);
       }
     }
 
@@ -1158,14 +1162,15 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
 
-  if (this->Status() == crane::grpc::TaskStatus::Configuring) {
+  switch (this->Status()) {
+  case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Starting / Failed / Cancelled,
     if (!craned_id.empty()) this->NodeConfigured(craned_id);
     if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
-    if (this->AllNodesConfigured() && job->PrologComplete()) {
+    if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus().has_value()) {
         // Configuring -> Failed
         step_configure_failed = true;
@@ -1193,8 +1198,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         context->rn_step_raw_ptrs.insert(this);
       }
     }
-  } else if (this->Status() == crane::grpc::TaskStatus::Running ||
-             this->Status() == crane::grpc::TaskStatus::Completing) {
+    break;
+  case crane::grpc::TaskStatus::Running:
+  case crane::grpc::TaskStatus::Completing:
     // Running/Completing -> Completed / Failed / Cancelled,
     // Primary: the job is completed.
 
@@ -1209,13 +1215,13 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           "[Step #{}.{}] got a finish status, waiting for {} status change.",
           job_id, step_id, this->RunningNodes().size());
     }
-
-  } else {
+    break;
+  default:
+    std::unreachable();
     CRANE_ASSERT_MSG(
         false, fmt::format("Invalid step status, current: {}, new status: {}",
                            StepStatusToString(Status()),
                            StepStatusToString(new_status)));
-    std::unreachable();
   }
 
   // Step finish: configure failed or execution status change
@@ -1418,12 +1424,6 @@ bool TaskInCtld::ShouldLaunchOnAllNodes() const {
   } else {
     std::unreachable();
   }
-}
-
-bool TaskInCtld::PrologComplete() const {
-  if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
-
-  return !is_prolog_running;
 }
 
 void TaskInCtld::SetTaskId(task_id_t id) {
