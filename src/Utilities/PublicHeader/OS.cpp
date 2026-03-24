@@ -464,7 +464,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
   // Record the wall-clock start time so we can enforce an aggregate timeout
   // across all scripts in the sequence.
   const auto start_time = steady_clock::now();
-  const auto timeout    = duration_cast<milliseconds>(seconds(args.timeout_sec));
+  const auto timeout = duration_cast<milliseconds>(seconds(args.timeout_sec));
 
   // Accumulated stdout/stderr from every successfully completed script.
   std::string output;
@@ -483,7 +483,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
   std::function<void()> run_next_script;
 
   run_next_script = [&]() {
-
     // -------------------------------------------------------------------------
     // Base case: all scripts have finished successfully.
     // -------------------------------------------------------------------------
@@ -510,8 +509,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     // -------------------------------------------------------------------------
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) {
-      CRANE_ERROR("Failed to create pipe for script '{}': {}",
-                  script, strerror(errno));
+      CRANE_ERROR("Failed to create pipe for script '{}': {}", script,
+                  strerror(errno));
       result = std::unexpected(
           RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
       return;
@@ -529,13 +528,15 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     //     The hook returns:
     //       nullopt          – fork() failed (pid < 0)
     //       {0,  empty fut}  – we are the child process
-    //       {pid, future}    – we are the parent; future delivers waitpid status
+    //       {pid, future}    – we are the parent; future delivers waitpid
+    //       status
     //
     //  2. Without hook:
     //     Plain fork(); the caller is responsible for reaping via waitpid().
     // -------------------------------------------------------------------------
-    pid_t pid        = -1;
-    std::future<int> exit_future;   // valid only in parent when use_watcher==true
+    pid_t pid = -1;
+    std::future<int>
+        exit_future;  // valid only in parent when use_watcher==true
     bool use_watcher = false;
 
     if (args.fork_and_watch_fn) {
@@ -562,7 +563,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     } else {
       pid = fork();
       if (pid == -1) {
-        CRANE_ERROR("Failed to fork for script '{}': {}", script, strerror(errno));
+        CRANE_ERROR("Failed to fork for script '{}': {}", script,
+                    strerror(errno));
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
@@ -635,8 +637,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       execvp(argv[0], const_cast<char* const*>(argv.data()));
 
       // If execvp() returns, it has failed.
-      fmt::print(stderr, "[Subprocess] execvp('{}') failed: {}\n",
-                 script, strerror(errno));
+      fmt::print(stderr, "[Subprocess] execvp('{}') failed: {}\n", script,
+                 strerror(errno));
       _exit(EXIT_FAILURE);
 
     } else {
@@ -651,8 +653,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // Create a dedicated libuv event loop for this script.
       // Using a fresh loop per script keeps state isolated and avoids
       // cross-contamination between sequential script executions.
-      auto loop          = uvw::loop::create();
-      auto pipe_handle   = loop->uninitialized_resource<uvw::pipe_handle>(false);
+      auto loop = uvw::loop::create();
+      auto pipe_handle = loop->uninitialized_resource<uvw::pipe_handle>(false);
       auto timeout_timer = loop->resource<uvw::timer_handle>();
 
       // poll_timer replaces the previous idle_handle + sleep_for(50ms) design.
@@ -680,15 +682,16 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // script_output if pipe data was still in flight.  Checking pipe_ended
       // alone would miss the exit status.  try_finish() gates on both.
       // -----------------------------------------------------------------------
-      bool child_exited  = false;
-      bool pipe_ended    = false;
-      bool has_error     = false;    // fatal error; suppress normal completion
-      int  exit_status   = 0;       // raw waitpid() status (not just exit code)
-      bool loop_stopping = false;   // guard against double-closing handles
+      bool child_exited = false;
+      bool pipe_ended = false;
+      bool has_error = false;      // fatal error; suppress normal completion
+      int exit_status = 0;         // raw waitpid() status (not just exit code)
+      bool loop_stopping = false;  // guard against double-closing handles
 
-      // --- stop_loop -----------------------------------------------------------
-      // Close all active handles.  Once every handle is closed, libuv exits
-      // loop->run() automatically.  Idempotent via loop_stopping guard.
+      // --- stop_loop
+      // ----------------------------------------------------------- Close all
+      // active handles.  Once every handle is closed, libuv exits loop->run()
+      // automatically.  Idempotent via loop_stopping guard.
       // -------------------------------------------------------------------------
       auto stop_loop = [&]() {
         if (loop_stopping) return;
@@ -698,10 +701,11 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         poll_timer->close();
       };
 
-      // --- try_finish ----------------------------------------------------------
-      // Called from both poll_timer and end_event callbacks.  Proceeds only
-      // when both events have fired so that script_output is complete and
-      // exit_status is valid.
+      // --- try_finish
+      // ---------------------------------------------------------- Called from
+      // both poll_timer and end_event callbacks.  Proceeds only when both
+      // events have fired so that script_output is complete and exit_status is
+      // valid.
       //
       // On success, appends output and tail-calls run_next_script(), which
       // creates a NEW event loop internally.  This is safe because stop_loop()
@@ -714,12 +718,13 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       auto try_finish = [&]() {
         if (!child_exited || !pipe_ended) return;
 
-        // Shut down the current event loop before (possibly) entering a new one.
+        // Shut down the current event loop before (possibly) entering a new
+        // one.
         stop_loop();
         if (has_error) return;
 
         // Decode the raw waitpid() status using standard POSIX macros.
-        int exit_code  = 0;
+        int exit_code = 0;
         int signal_num = 0;
         if (WIFEXITED(exit_status)) {
           exit_code = WEXITSTATUS(exit_status);
@@ -731,10 +736,12 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         }
 
         if (exit_code != 0 || signal_num != 0) {
-          CRANE_TRACE("Script '{}' failed (exit_code={}, signal={}), output: {}.",
-                      script, exit_code, signal_num, script_output);
-          result = std::unexpected(RunPrologEpilogStatus{
-              .exit_code = exit_code, .signal_num = signal_num});
+          CRANE_TRACE(
+              "Script '{}' failed (exit_code={}, signal={}), output: {}.",
+              script, exit_code, signal_num, script_output);
+          result =
+              std::unexpected(RunPrologEpilogStatus{.exit_code = exit_code,
+                                                    .signal_num = signal_num});
         } else {
           // Script succeeded; queue the next one.
           output += script_output;
@@ -748,8 +755,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // -----------------------------------------------------------------------
       int err = pipe_handle->init();
       if (err) {
-        CRANE_ERROR("Failed to init pipe_handle for '{}': {}",
-                    script, uv_strerror(err));
+        CRANE_ERROR("Failed to init pipe_handle for '{}': {}", script,
+                    uv_strerror(err));
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
@@ -758,8 +765,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
       err = pipe_handle->open(stdout_pipe[0]);
       if (err) {
-        CRANE_ERROR("Failed to open pipe_handle for '{}': {}",
-                    script, uv_strerror(err));
+        CRANE_ERROR("Failed to open pipe_handle for '{}': {}", script,
+                    uv_strerror(err));
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
@@ -771,18 +778,17 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // Append incoming bytes to script_output, honouring the caller-supplied
       // size cap.  Excess bytes are silently discarded to bound memory use.
       // -----------------------------------------------------------------------
-      pipe_handle->on<uvw::data_event>(
-          [&](const uvw::data_event& event, uvw::pipe_handle&) {
-            if (event.length > 0) {
-              const size_t remain =
-                  args.output_size > script_output.size()
-                      ? args.output_size - script_output.size()
-                      : 0;
-              if (remain > 0)
-                script_output.append(event.data.get(),
-                                     std::min<size_t>(event.length, remain));
-            }
-          });
+      pipe_handle->on<uvw::data_event>([&](const uvw::data_event& event,
+                                           uvw::pipe_handle&) {
+        if (event.length > 0) {
+          const size_t remain = args.output_size > script_output.size()
+                                    ? args.output_size - script_output.size()
+                                    : 0;
+          if (remain > 0)
+            script_output.append(event.data.get(),
+                                 std::min<size_t>(event.length, remain));
+        }
+      });
 
       // -----------------------------------------------------------------------
       // Pipe: end event (EOF)
@@ -793,9 +799,9 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // -----------------------------------------------------------------------
       pipe_handle->on<uvw::end_event>(
           [&](const uvw::end_event&, uvw::pipe_handle& h) {
-            h.close();           // release the handle
+            h.close();  // release the handle
             pipe_ended = true;
-            try_finish();        // proceed if child has also exited
+            try_finish();  // proceed if child has also exited
           });
 
       // -----------------------------------------------------------------------
@@ -807,9 +813,9 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           [&](uvw::error_event& e, uvw::pipe_handle&) {
             CRANE_WARN("Pipe error for script '{}': {}.", script, e.what());
             has_error = true;
-            result    = std::unexpected(
+            result = std::unexpected(
                 RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
-            stop_loop();   // also closes timeout_timer and poll_timer
+            stop_loop();  // also closes timeout_timer and poll_timer
           });
 
       pipe_handle->read();
@@ -821,13 +827,13 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // itself.  The poll_timer is intentionally left running so we can
       // still detect the child's eventual exit and drain the pipe cleanly.
       // -----------------------------------------------------------------------
-      timeout_timer->on<uvw::timer_event>(
-          [&](const uvw::timer_event&, uvw::timer_handle& h) {
-            CRANE_TRACE("Script '{}' timed out; killing process group {}.",
-                        script, pid);
-            KillPg(pid);
-            h.close();  // close only the timeout timer; poll_timer keeps running
-          });
+      timeout_timer->on<uvw::timer_event>([&](const uvw::timer_event&,
+                                              uvw::timer_handle& h) {
+        CRANE_TRACE("Script '{}' timed out; killing process group {}.", script,
+                    pid);
+        KillPg(pid);
+        h.close();  // close only the timeout timer; poll_timer keeps running
+      });
 
       // -----------------------------------------------------------------------
       // Poll timer (repeating, 50 ms interval)
@@ -856,7 +862,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
               if (exit_future.wait_for(milliseconds(0)) ==
                   std::future_status::ready) {
                 exit_status = exit_future.get();
-                exited      = true;
+                exited = true;
               }
             } else {
               // WNOHANG: return immediately if no child has changed state.
@@ -867,10 +873,10 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
               if (rc == pid) {
                 exited = true;
               } else if (rc == -1) {
-                CRANE_ERROR("waitpid failed for script '{}' pid={}: {}",
-                            script, pid, strerror(errno));
+                CRANE_ERROR("waitpid failed for script '{}' pid={}: {}", script,
+                            pid, strerror(errno));
                 has_error = true;
-                result    = std::unexpected(
+                result = std::unexpected(
                     RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
                 stop_loop();
                 return;
@@ -882,7 +888,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
               // Stop polling; child will not exit again.
               h.close();
               child_exited = true;
-              // Attempt completion; deferred if the pipe has not yet signalled EOF.
+              // Attempt completion; deferred if the pipe has not yet signalled
+              // EOF.
               try_finish();
             }
           });
@@ -892,8 +899,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // If previous scripts consumed all of the time budget, skip even
       // starting the event loop and kill the child we just forked.
       // -----------------------------------------------------------------------
-      const auto elapsed = duration_cast<milliseconds>(
-          steady_clock::now() - start_time);
+      const auto elapsed =
+          duration_cast<milliseconds>(steady_clock::now() - start_time);
       if (elapsed >= timeout) {
         CRANE_TRACE("Script '{}' timed out before its event loop started.",
                     script);

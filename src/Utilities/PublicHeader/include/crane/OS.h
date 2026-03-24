@@ -25,9 +25,9 @@
 
 #include <expected>
 #include <filesystem>
+#include <future>
 #include <set>
 #include <string>
-#include <future>
 
 #include "crane/Logger.h"
 
@@ -52,8 +52,8 @@ struct RunPrologEpilogArgs {
   gid_t run_gid;
   uint64_t output_size;
   std::function<bool(pid_t)> at_child_setup_cb;
-  using ForkAndWatchFn = std::function<
-      std::optional<std::pair<pid_t, std::future<int>>>(
+  using ForkAndWatchFn =
+      std::function<std::optional<std::pair<pid_t, std::future<int>>>(
           std::function<pid_t()> do_fork)>;
   ForkAndWatchFn fork_and_watch_fn;
 };

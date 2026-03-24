@@ -1250,8 +1250,9 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             .run_gid = 0,
             .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
-        run_epilog_args.fork_and_watch_fn = [this](std::function<pid_t()> do_fork)
-        -> std::optional<std::pair<pid_t, std::future<int>>> {
+        run_epilog_args.fork_and_watch_fn =
+            [this](std::function<pid_t()> do_fork)
+            -> std::optional<std::pair<pid_t, std::future<int>>> {
           absl::MutexLock lock(&m_fork_reap_mu_);
           pid_t pid = do_fork();
           if (pid < 0) return std::nullopt;
