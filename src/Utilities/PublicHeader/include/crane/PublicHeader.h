@@ -131,6 +131,8 @@ enum PrologFlagEnum : std::uint8_t {
 
 constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
 
+constexpr uint64_t kMaxJobMemoryBytes = 10737418240000;  // 10000GB
+
 namespace ExitCode {
 
 constexpr size_t KCrunExitCodeStatusNum = 128;
@@ -300,7 +302,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
-        "ERR_USER_HAS_TASK"
+        "Cannot delete user with active tasks.",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+
+        "Not a valide resource string",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)"
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_TASK_BEYOND)"
     };
 // clang-format on
 }  // namespace Internal
@@ -320,6 +328,39 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
 inline std::string_view CraneErrStr(CraneErrCode err) {
   return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
+
+template <typename EnumType>
+class FlagSet {
+  static_assert(std::is_enum<EnumType>::value,
+                "FlagSet can only be used with enum types");
+  static constexpr size_t BitSize = std::to_underlying(EnumType::_Count);
+  std::bitset<BitSize> bits;
+
+ public:
+  constexpr FlagSet() = default;
+
+  decltype(auto) operator[](EnumType flag) {
+    return bits[std::to_underlying(flag)];
+  }
+
+  bool operator[](EnumType flag) const {
+    return bits[std::to_underlying(flag)];
+  }
+
+  void FromInt64(int64_t value) {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    bits = value;
+  }
+
+  int64_t ToInt64() const {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    return static_cast<int64_t>(bits.to_ullong());
+  }
+
+  std::string ToString() const { return bits.to_string(); }
+};
 
 /* ----------- Public definitions for all components */
 
@@ -448,6 +489,9 @@ using DeviceMap =
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
 DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs);
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
@@ -549,6 +593,10 @@ class ResourceView {
 
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
+
+  // Account level resource operations
+  ResourceView& operator+=(const ResourceView& rhs);
+  ResourceView& operator-=(const ResourceView& rhs);
 
   bool IsZero() const;
   void SetToZero();

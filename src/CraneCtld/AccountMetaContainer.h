@@ -21,18 +21,35 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "AccountManager.h"
-
 namespace Ctld {
 
 struct PdJobInScheduler;
 
-constexpr int kNumStripes = 128;
+struct MetaResource {
+  ResourceView resource{};
+  uint32_t jobs_count{0};
+  uint32_t submit_jobs_count{0};
+  absl::Duration wall_time{absl::ZeroDuration()};
+
+  bool operator<=(const MetaResource& rhs) const;
+
+  MetaResource& operator+=(const MetaResource& rhs);
+  MetaResource& operator-=(const MetaResource& rhs);
+
+  bool IsZero() const {
+    return resource.IsZero() && jobs_count == 0 && submit_jobs_count == 0 &&
+           wall_time == absl::ZeroDuration();
+  }
+
+  void SetToZero();
+
+  std::string DebugString() const;
+};
 
 class AccountMetaContainer final {
  public:
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
-                                              QosResource>;
+                                              MetaResource>;
 
   using ResourceMetaMap = phmap::parallel_flat_hash_map<
       std::string, QosToResourceMap,
@@ -45,6 +62,12 @@ class AccountMetaContainer final {
       std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
       std::shared_mutex>;
 
   AccountMetaContainer() = default;
@@ -68,6 +91,8 @@ class AccountMetaContainer final {
 
   void DeleteAccountMeta(const std::string& account);
 
+  void DeleteQosMeta(const std::string& qos);
+
   void UserAddTask(const std::string& username);
 
   void UserReduceTask(const std::string& username);
@@ -75,59 +100,55 @@ class AccountMetaContainer final {
   bool UserHasTask(const std::string& username);
 
  private:
+  const static int kNumStripes = 128;
+
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
-                                              const Qos& qos);
+  CraneErrCode CheckUserQosSubmitResourceUsage_(const TaskInCtld& task,
+                                                const Qos& qos);
 
-  CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
-                                                 const Qos& qos);
+  CraneErrCode CheckAccountQosSubmitResourceUsage_(const TaskInCtld& task,
+                                                   const Qos& qos);
 
-  bool CheckQosResource_(const Qos& qos, const PdJobInScheduler& job,
-                         const ResourceView& resource_view);
+  CraneErrCode CheckQosSubmitResourceUsage_(const TaskInCtld& task,
+                                            const Qos& qos);
 
-  template <typename T>
-  static void CheckAndSubResource_(T& current, T need,
-                                   const std::string& resource_name,
-                                   const std::string& username,
-                                   const std::string& qos, task_id_t task_id) {
-    if (current < need) {
-      if constexpr (std::is_same_v<T, AllocatableResource>) {
-        CRANE_ERROR(
-            "Insufficient {} when freeing for user/account '{}', qos '{}', "
-            "task {}.",
-            resource_name, username, qos, task_id);
-        current.SetToZero();
-      } else if constexpr (std::is_same_v<T, uint32_t>) {
-        CRANE_ERROR(
-            "Insufficient {} when freeing for user/account '{}', qos '{}', "
-            "task {}. cur={}, need={}",
-            resource_name, username, qos, task_id, current, need);
-        current = 0;
-      } else {
-        CRANE_ERROR("Unknown type");
-      }
-      return;
-    }
+  std::expected<void, std::string> CheckQosResource_(
+      const Qos& qos, const PdJobInScheduler& job);
 
-    current -= need;
-  }
+  static std::expected<void, std::string> CheckTres_(
+      const ResourceView& resource_req, const ResourceView& resource_total);
+
+  static bool CheckGres_(const DeviceMap& device_req,
+                         const DeviceMap& device_total);
+
+  void DoMallocResource_(job_id_t job_id, const std::string& username,
+                         const std::list<std::string>& account_chain,
+                         const std::string& qos,
+                         const MetaResource& meta_resource);
+  void DoFreeResource_(job_id_t job_id, const std::string& username,
+                       const std::list<std::string>& account_chain,
+                       const std::string& qos,
+                       const MetaResource& meta_resource);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:
-  // 1. Lock user(s) first.
+  // 1. Lock user first.
   // 2. Then lock account(s).
+  // 3. lock qos last.
   // For both users and accounts, acquire locks in ascending order by their IDs
   // (from smallest to largest).
   std::array<std::mutex, kNumStripes> m_user_stripes_;
   std::array<std::mutex, kNumStripes> m_account_stripes_;
+  std::array<std::mutex, kNumStripes> m_qos_stripes_;
   std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(
       const std::list<std::string>& account_chain);
 
   ResourceMetaMap m_user_meta_map_;
   ResourceMetaMap m_account_meta_map_;
+  QosResourceMap m_qos_meta_map_;
   UserToTaskNumMap m_user_to_task_map_;
 };
 

@@ -1289,6 +1289,15 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
   qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
 
+  qos.max_jobs = qos_info->max_jobs();
+  qos.max_submit_jobs = qos_info->max_submit_jobs();
+  qos.max_tres = static_cast<ResourceView>(qos_info->max_tres());
+  qos.max_tres_per_user =
+      static_cast<ResourceView>(qos_info->max_tres_per_user());
+  qos.max_tres_per_account =
+      static_cast<ResourceView>(qos_info->max_tres_per_account());
+  qos.flags.FromInt64(qos_info->flags());
+
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
@@ -1296,6 +1305,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
+
+  qos.max_wall = absl::Seconds(qos_info->max_wall());
 
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
@@ -1684,6 +1695,45 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->set_max_jobs(qos.max_jobs);
+    qos_info->set_max_submit_jobs(qos.max_submit_jobs);
+    qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
+    qos_info->mutable_max_tres()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    // When type_count.second is 0, you need to insert it manually; otherwise,
+    // it will not be recorded.
+    for (auto& [name, type_count] : qos.max_tres.GetDeviceMap()) {
+      auto* type_count_map = (*qos_info->mutable_max_tres()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
+      for (auto& [type, value] : type_count.second) {
+        (*type_count_map)[type] = value;
+      }
+    }
+    qos_info->mutable_max_tres_per_user()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    for (auto& [name, type_count] : qos.max_tres_per_user.GetDeviceMap()) {
+      auto* type_count_map = (*qos_info->mutable_max_tres_per_user()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
+      for (auto& [type, value] : type_count.second) {
+        (*type_count_map)[type] = value;
+      }
+    }
+    qos_info->mutable_max_tres_per_account()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    for (auto& [name, type_count] : qos.max_tres_per_account.GetDeviceMap()) {
+      auto* type_count_map = (*qos_info->mutable_max_tres_per_account()
+                                   ->mutable_device_map()
+                                   ->mutable_name_type_map())[name]
+                                 .mutable_type_count_map();
+      for (auto& [type, value] : type_count.second) {
+        (*type_count_map)[type] = value;
+      }
+    }
+    qos_info->set_flags(qos.flags.ToInt64());
   }
 
   return grpc::Status::OK;
