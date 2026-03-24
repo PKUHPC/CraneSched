@@ -91,7 +91,9 @@ Same as the return values of `crane_job_submit`.
 |---------------------------|---------|-----------------------------------------------|
 | time_limit                | number  | Time limit                                    |
 | partition_id              | string  | Partition to which the job belongs            |
-| requested_node_res_view   | ResourceView | Requested resource information           |
+| req_node_res_view         | ResourceView | Requested resource per node              |
+| req_task_res_view         | ResourceView | Requested resource per task              |
+| req_total_res_view        | ResourceView | Total requested resource information     |
 | type                      | number  | Job type                                      |
 | uid                       | number  | UID of the job owner                          |
 | gid                       | number  | GID of the job owner                          |
@@ -99,8 +101,8 @@ Same as the return values of `crane_job_submit`.
 | name                      | string  | Job name                                      |
 | qos                       | string  | QoS associated with the job                   |
 | node_num                  | number  | Number of nodes                               |
-| ntasks_per_node           | number  | Number of tasks per node                      |
-| cpus_per_task             | number  | Number of CPUs per task                       |
+| ntasks_per_node_min       | number  | Minimum number of tasks per node              |
+| ntasks_per_node_max       | number  | Maximum number of tasks per node              |
 | included_nodes            | table(string list) | Nodes explicitly included            |
 | excluded_nodes            | table(string list) | Nodes explicitly excluded            |
 | requeue_if_failed         | boolean | Whether the job can be requeued on failure    |
@@ -248,8 +250,8 @@ function crane_job_submit(job_desc, part_list, uid)
         crane.log_info("  %s %s", name, tostring(value))
     end
 
-    crane.log_info("job_desc.requested_node_res_view:")
-    local rv = job_desc.requested_node_res_view
+    crane.log_info("job_desc.req_node_res_view:")
+    local rv = job_desc.req_node_res_view
     crane.log_info("  cpu_count: %d", rv.cpu_count)
     crane.log_info("  memory_bytes: %d", rv.memory_bytes)
     crane.log_info("  device_map:")
@@ -260,6 +262,16 @@ function crane_job_submit(job_desc, part_list, uid)
             crane.log_info("        %s: %d", tname, tcount)
         end
     end
+
+    crane.log_info("job_desc.req_task_res_view:")
+    local rtv = job_desc.req_task_res_view
+    crane.log_info("  cpu_count: %d", rtv.cpu_count)
+    crane.log_info("  memory_bytes: %d", rtv.memory_bytes)
+
+    crane.log_info("job_desc.req_total_res_view:")
+    local ttv = job_desc.req_total_res_view
+    crane.log_info("  cpu_count: %d", ttv.cpu_count)
+    crane.log_info("  memory_bytes: %d", ttv.memory_bytes)
 
     crane.log_info("part_list:")
     for i, part in ipairs(part_list) do
