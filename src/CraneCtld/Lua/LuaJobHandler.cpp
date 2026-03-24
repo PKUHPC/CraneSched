@@ -217,14 +217,16 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
       t.time_limit = absl::Seconds(time_limit);
     }),
     "partition_id", &TaskInCtld::partition_id,
-    "requested_node_res_view", &TaskInCtld::requested_node_res_view,
+    "req_node_res_view", &TaskInCtld::req_node_res_view,
+    "req_task_res_view", &TaskInCtld::req_task_res_view,
+    "req_total_res_view", &TaskInCtld::req_total_res_view,
     "type", &TaskInCtld::type, "uid", &TaskInCtld::uid,
     "gid", &TaskInCtld::gid, "account", &TaskInCtld::account,
     "name", &TaskInCtld::name, "qos", &TaskInCtld::qos,
     "node_num", &TaskInCtld::node_num,
     // TODO: expose ntasks_per_node_min to Lua
-    "ntasks_per_node", &TaskInCtld::ntasks_per_node_max,
-    "cpus_per_task", &TaskInCtld::cpus_per_task,
+    "ntasks_per_node_min", &TaskInCtld::ntasks_per_node_min,
+    "ntasks_per_node_max", &TaskInCtld::ntasks_per_node_max,
     "included_nodes", sol::property(
           [](const TaskInCtld& t) {
             return t.included_nodes | std::ranges::to<std::vector>();
