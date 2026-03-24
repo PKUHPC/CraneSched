@@ -47,11 +47,13 @@ BasicDevice::BasicDevice(const std::string& device_name,
                          const std::string& device_type,
                          const std::vector<std::string>& device_path,
                          DeviceEnvInjectorEnum env_injector,
-                         std::optional<std::string> cdi_name)
+                         std::optional<std::string> cdi_name,
+                         std::optional<std::string> cni_pipeline)
     : name(device_name),
       type(device_type),
       env_injector(env_injector),
-      cdi_name(std::move(cdi_name)) {
+      cdi_name(std::move(cdi_name)),
+      cni_pipeline(std::move(cni_pipeline)) {
   device_file_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
     device_file_metas.emplace_back(
@@ -101,9 +103,54 @@ CraneErrCode DeviceManager::GetDeviceFileMajorMinorOpType(
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
     const std::vector<std::string>& device_path,
-    DeviceEnvInjectorEnum env_injector, std::optional<std::string> cdi_name) {
+    DeviceEnvInjectorEnum env_injector, std::optional<std::string> cdi_name,
+    std::optional<std::string> cni_pipeline) {
   return std::make_unique<BasicDevice>(device_name, device_type, device_path,
-                                       env_injector, std::move(cdi_name));
+                                       env_injector, std::move(cdi_name),
+                                       std::move(cni_pipeline));
+}
+
+std::expected<std::string, std::string> DeviceManager::ExtractCdiDeviceName(
+    const std::string& cdi_fqn) {
+  auto eq_pos = cdi_fqn.rfind('=');
+  if (eq_pos == std::string::npos || eq_pos + 1 >= cdi_fqn.size()) {
+    return std::unexpected(fmt::format(
+        "Malformed CDI FQN '{}': expected '<kind>=<device-name>'", cdi_fqn));
+  }
+  return cdi_fqn.substr(eq_pos + 1);
+}
+
+std::expected<std::unordered_map<std::string, std::string>, std::string>
+DeviceManager::GetCniGresAnnotations(
+    const crane::grpc::DedicatedResourceInNode& res_in_node) {
+  std::unordered_map<std::string, std::string> annotations;
+  std::unordered_map<std::string, int> pipeline_counters;
+
+  for (const auto& [dev_name, type_slots_map] : res_in_node.name_type_map()) {
+    for (const auto& [dev_type, slots] : type_slots_map.type_slots_map()) {
+      for (const auto& slot_id : slots.slots()) {
+        auto dev_it = g_this_node_device.find(slot_id);
+        if (dev_it == g_this_node_device.end()) continue;
+        const auto& dev = dev_it->second;
+        if (!dev->cni_pipeline.has_value()) continue;
+
+        auto device_name = ExtractCdiDeviceName(dev->cdi_name.value());
+        if (!device_name.has_value()) {
+          return std::unexpected(fmt::format("Device {} (slot: {}): {}",
+                                             dev->name, slot_id,
+                                             device_name.error()));
+        }
+
+        const auto& pipeline = dev->cni_pipeline.value();
+        int idx = pipeline_counters[pipeline]++;
+        std::string anno_key =
+            fmt::format("meta-cni/gres/{}/{}", pipeline, idx);
+        annotations[anno_key] = device_name.value();
+      }
+    }
+  }
+
+  return annotations;
 }
 
 std::unordered_map<std::string, std::string>

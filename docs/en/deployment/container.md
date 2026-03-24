@@ -255,6 +255,68 @@ The following is a Meta CNI + Calico + dns-register + Port Mapping + Bandwidth c
 
     Some fields in this configuration file depend on your actual cluster deployment. Adjust them as needed.
 
+#### Example: RDMA VF Network
+
+For resources such as RDMA VFs that require both device injection and network
+interface configuration, **CDI** and **Meta CNI** should be used together:
+
+- CDI injects device nodes such as `uverbs` and `rdma_cm` into the container.
+- Meta CNI moves the allocated VF NICs into the container network namespace and
+  creates interfaces such as `rdma0` and `rdma1`.
+
+In other words, start with the CDI-related steps in
+[`Configure GRES to Use CDI`](./container.md#configure-gres-to-use-cdi) and
+configure `DeviceCDIRegex` or `DeviceCDIList`. Then add the
+`DeviceCniPipeline` field in `/etc/crane/config.yaml` and provide the
+corresponding Meta CNI configuration.
+
+??? "GRES Configuration Example (/etc/crane/config.yaml)"
+    The example below extends the `Configure GRES to Use CDI` configuration by
+    adding `DeviceCniPipeline: rdma`:
+
+    ```yaml
+    Nodes:
+      - name: "node01"
+        gres:
+          - name: rdma
+            type: cx5vf
+            DeviceCniPipeline: rdma
+            DeviceFileList:
+              - /dev/infiniband/uverbs3,/dev/infiniband/umad3,/dev/infiniband/rdma_cm
+              - /dev/infiniband/uverbs4,/dev/infiniband/umad4,/dev/infiniband/rdma_cm
+            DeviceCDIList:
+              - rdma/pci-0000-17-00-2=0000:17:00.2
+              - rdma/pci-0000-17-00-3=0000:17:00.3
+    ```
+
+    The fields have the following roles:
+
+    - `DeviceFileList`: Declares the RDMA device files to inject into the container.
+    - `DeviceCDIList`: Provides CDI fully qualified names for those device files.
+    - `DeviceCniPipeline`: Declares that these GRES devices also need network configuration through Meta CNI.
+
+    The value of `DeviceCniPipeline` must match the `name` of the corresponding
+    network pipeline in the Meta CNI configuration.
+
+??? "Meta CNI Configuration Example"
+    For an RDMA VF network example, refer to:
+    [tool/meta-cni/config/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico-sriov.conf).
+
+    This example contains two classes of network interfaces:
+
+    - `ethernet`: The container's primary network interface, typically used for regular IP communication.
+    - `rdma`: A dedicated RDMA VF network interface, created dynamically according to the number of GRES devices allocated to the job.
+
+    The RDMA-related key points are:
+
+    - `name: rdma`: Must match `DeviceCniPipeline: rdma`.
+    - `ifNamePrefix: rdma`: Generates container interface names such as `rdma0` and `rdma1`.
+    - `confFromArgs: {"deviceID": "$gres.device"}`: Passes the CDI device identifier for the GRES allocation to the `sriov` plugin.
+
+If you only need to inject RDMA device files into the container and do not need
+independent RDMA network interfaces inside the container, you do not need to
+configure `DeviceCniPipeline`.
+
 ### Advanced Features
 
 CraneSched container features include some advanced capabilities that require additional configuration:

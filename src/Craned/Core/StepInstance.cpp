@@ -23,6 +23,7 @@
 
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "crane/CriClient.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
@@ -305,6 +306,34 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
                           step_id, dev_it->second->cdi_name.value(), slot_id);
             }
           }
+        }
+      }
+    }
+
+    // CNI is pod-level, so GRES annotations only apply to daemon container
+    // steps that carry pod metadata.
+    if (this->IsContainer() && this->IsDaemonStep() &&
+        init_req.mutable_step_spec()->has_pod_meta()) {
+      const auto& dedicated_res = this->step_to_d.res().dedicated_res_in_node();
+      auto cni_annos =
+          Common::DeviceManager::GetCniGresAnnotations(dedicated_res);
+      if (!cni_annos.has_value()) {
+        CRANE_ERROR("[Step #{}.{}] {}", job_id, step_id, cni_annos.error());
+        crane_cgroup->KillAllProcesses(SIGKILL);
+        close(craned_supervisor_fd);
+        close(supervisor_craned_fd);
+        return CraneErrCode::ERR_INVALID_PARAM;
+      }
+      if (!cni_annos->empty()) {
+        auto* annotations = init_req.mutable_step_spec()
+                                ->mutable_pod_meta()
+                                ->mutable_annotations();
+        for (auto& [key, value] : cni_annos.value()) {
+          std::string prefixed_key =
+              fmt::format("{}{}", cri::kCriAnnotationPrefix, key);
+          CRANE_TRACE("[Step #{}.{}] CNI GRES annotation: {}={}", job_id,
+                      step_id, prefixed_key, value);
+          (*annotations)[std::move(prefixed_key)] = std::move(value);
         }
       }
     }
