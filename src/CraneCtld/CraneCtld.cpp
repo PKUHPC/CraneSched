@@ -991,8 +991,8 @@ void InitializeCtldGlobalVariables() {
   {
     auto exporter =
         std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
-    crane::TracerManager::GetInstance().Initialize(
-        "CraneCtld", std::move(exporter));
+    crane::TracerManager::GetInstance().Initialize("CraneCtld",
+                                                   std::move(exporter));
   }
   crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
                                  std::memory_order_release);

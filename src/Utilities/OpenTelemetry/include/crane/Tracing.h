@@ -35,7 +35,8 @@
  * 1) CRANE_TRACE_SCOPE(name)
  *    Create an RAII span covering the current scope. The span automatically
  *    ends when the scope exits. Uses a fixed variable name `_crane_scope_span_`
- *    so only ONE per C++ scope. Use with CRANE_TRACE_SET_ATTR/CRANE_TRACE_EVENT.
+ *    so only ONE per C++ scope. Use with
+ * CRANE_TRACE_SET_ATTR/CRANE_TRACE_EVENT.
  *
  *      void ProcessJob(int job_id) {
  *        CRANE_TRACE_SCOPE("ProcessJob");
@@ -159,10 +160,10 @@
 #include <utility>
 
 #ifdef CRANE_ENABLE_TRACING
+#  include "crane/TracerManager.h"
 #  include "opentelemetry/trace/provider.h"
 #  include "opentelemetry/trace/span.h"
 #  include "opentelemetry/trace/tracer.h"
-#  include "crane/TracerManager.h"
 #endif
 
 namespace crane {
@@ -185,9 +186,9 @@ inline std::atomic<bool> g_tracing_enabled{false};
 class ScopedSpan {
  public:
   /// Construct a root span (no parent).
-  ScopedSpan(std::string_view name,
-             opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-                 tracer)
+  ScopedSpan(
+      std::string_view name,
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer)
       : tracer_(std::move(tracer)), ended_(false) {
     if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
       span_ = tracer_->StartSpan(std::string(name));
@@ -197,10 +198,10 @@ class ScopedSpan {
   }
 
   /// Construct a child span linked to a parent context.
-  ScopedSpan(std::string_view name,
-             opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
-                 tracer,
-             const opentelemetry::trace::SpanContext& parent_ctx)
+  ScopedSpan(
+      std::string_view name,
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer,
+      const opentelemetry::trace::SpanContext& parent_ctx)
       : tracer_(std::move(tracer)), ended_(false) {
     if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
       opentelemetry::trace::StartSpanOptions opts;
@@ -294,44 +295,43 @@ class ScopedSpan {
 /// Create an RAII span for the current scope.
 /// Only ONE per C++ scope (uses fixed variable name `_crane_scope_span_`).
 /// Pair with CRANE_TRACE_SET_ATTR / CRANE_TRACE_EVENT.
-#define CRANE_TRACE_SCOPE(name)                                    \
-  ::crane::ScopedSpan _crane_scope_span_(                          \
-      name, ::crane::TracerManager::GetInstance().GetTracerSafe())
+#  define CRANE_TRACE_SCOPE(name)                                    \
+    ::crane::ScopedSpan _crane_scope_span_(                          \
+        name, ::crane::TracerManager::GetInstance().GetTracerSafe())
 
 /// Create a named RAII span for explicit reference.
 /// Use when you need .SetAttribute(), .CreateChild(), or .End() on it.
-#define CRANE_TRACE_SCOPE_NAMED(var, name)                         \
-  ::crane::ScopedSpan var(                                         \
-      name, ::crane::TracerManager::GetInstance().GetTracerSafe())
+#  define CRANE_TRACE_SCOPE_NAMED(var, name)                         \
+    ::crane::ScopedSpan var(                                         \
+        name, ::crane::TracerManager::GetInstance().GetTracerSafe())
 
 /// Create an instant span (starts and ends immediately).
 /// Use for event markers with no duration.
-#define CRANE_TRACE_POINT(name)                                    \
-  do {                                                             \
-    ::crane::ScopedSpan _crane_tp_(                                \
-        name, ::crane::TracerManager::GetInstance().GetTracerSafe()); \
-  } while (0)
+#  define CRANE_TRACE_POINT(name)                                       \
+    do {                                                                \
+      ::crane::ScopedSpan _crane_tp_(                                   \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe()); \
+    } while (0)
 
 /// Create an instant span with one attribute.
-#define CRANE_TRACE_POINT_ATTR(name, key, value)                   \
-  do {                                                             \
-    ::crane::ScopedSpan _crane_tp_(                                \
-        name, ::crane::TracerManager::GetInstance().GetTracerSafe()); \
-    _crane_tp_.SetAttribute(key, value);                           \
-  } while (0)
+#  define CRANE_TRACE_POINT_ATTR(name, key, value)                      \
+    do {                                                                \
+      ::crane::ScopedSpan _crane_tp_(                                   \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe()); \
+      _crane_tp_.SetAttribute(key, value);                              \
+    } while (0)
 
 /// Create a child span under an existing parent ScopedSpan.
 /// Supports arbitrary nesting depth.
-#define CRANE_TRACE_CHILD_NAMED(var, parent, name) \
-  auto var = (parent).CreateChild(name)
+#  define CRANE_TRACE_CHILD_NAMED(var, parent, name) \
+    auto var = (parent).CreateChild(name)
 
 /// Set an attribute on the CRANE_TRACE_SCOPE span in the current scope.
-#define CRANE_TRACE_SET_ATTR(key, value) \
-  _crane_scope_span_.SetAttribute(key, value)
+#  define CRANE_TRACE_SET_ATTR(key, value)      \
+    _crane_scope_span_.SetAttribute(key, value)
 
 /// Add an event to the CRANE_TRACE_SCOPE span in the current scope.
-#define CRANE_TRACE_EVENT(event_name) \
-  _crane_scope_span_.AddEvent(event_name)
+#  define CRANE_TRACE_EVENT(event_name) _crane_scope_span_.AddEvent(event_name)
 
 #else  // CRANE_ENABLE_TRACING not defined
 
@@ -350,13 +350,13 @@ class ScopedSpan {
   void AddEvent(std::string_view) {}
 };
 
-#define CRANE_TRACE_SCOPE(name) (void)0
-#define CRANE_TRACE_SCOPE_NAMED(var, name) ::crane::ScopedSpan var
-#define CRANE_TRACE_POINT(name) (void)0
-#define CRANE_TRACE_POINT_ATTR(name, key, value) (void)0
-#define CRANE_TRACE_CHILD_NAMED(var, parent, name) ::crane::ScopedSpan var
-#define CRANE_TRACE_SET_ATTR(key, value) (void)0
-#define CRANE_TRACE_EVENT(event_name) (void)0
+#  define CRANE_TRACE_SCOPE(name) (void)0
+#  define CRANE_TRACE_SCOPE_NAMED(var, name) ::crane::ScopedSpan var
+#  define CRANE_TRACE_POINT(name) (void)0
+#  define CRANE_TRACE_POINT_ATTR(name, key, value) (void)0
+#  define CRANE_TRACE_CHILD_NAMED(var, parent, name) ::crane::ScopedSpan var
+#  define CRANE_TRACE_SET_ATTR(key, value) (void)0
+#  define CRANE_TRACE_EVENT(event_name) (void)0
 
 #endif  // CRANE_ENABLE_TRACING
 

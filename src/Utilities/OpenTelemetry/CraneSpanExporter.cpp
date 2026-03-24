@@ -10,9 +10,9 @@
 
 #ifdef CRANE_ENABLE_TRACING
 
-#include "crane/CraneSpanExporter.h"
+#  include "crane/CraneSpanExporter.h"
 
-#include "crane/Logger.h"
+#  include "crane/Logger.h"
 
 namespace crane {
 
@@ -77,10 +77,9 @@ std::string CraneSpanExporter::AttributeToString(
 void CraneSpanExporter::SetTimestamp(
     google::protobuf::Timestamp* ts,
     opentelemetry::common::SystemTimestamp time) {
-  auto ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          time.time_since_epoch())
-          .count();
+  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                time.time_since_epoch())
+                .count();
   ts->set_seconds(ns / 1000000000);
   ts->set_nanos(static_cast<int32_t>(ns % 1000000000));
 }

@@ -136,4 +136,3 @@ inline Config g_config;
 }  // namespace Craned::Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
-

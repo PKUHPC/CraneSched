@@ -25,9 +25,9 @@
 
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
-#include "crane/Tracing.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 #include "protos/Supervisor.pb.h"
 

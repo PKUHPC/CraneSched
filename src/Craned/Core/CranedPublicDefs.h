@@ -229,4 +229,3 @@ enum HealthCheckNodeStateEnum : std::uint8_t {
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
-
