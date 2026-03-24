@@ -218,8 +218,6 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
-
-
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};

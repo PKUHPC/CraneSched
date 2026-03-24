@@ -4389,14 +4389,13 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
   std::optional<PodMetaInTask> pod_meta{std::nullopt};
 
- if (task->type == crane::grpc::Container) {
+  if (task->type == crane::grpc::Container) {
     // All container job has pod_meta
     pod_meta = task->pod_meta;
 
     // Jobs from ccon has container_meta
     if (std::holds_alternative<ContainerMetaInTask>(task->meta))
       container_meta = std::get<ContainerMetaInTask>(task->meta);
-
   }
 
   // TODO: Interactive meta?

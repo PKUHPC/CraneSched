@@ -66,8 +66,8 @@ CraneErrCode StepInstance::Prepare() {
     script_path = sh_path;
   }
 
-    // Init CriClient before preparation
-    if (IsPod() || IsContainer()) InitCriClient();
+  // Init CriClient before preparation
+  if (IsPod() || IsContainer()) InitCriClient();
 
   // Init cfored
   if (IsCrun()) {
@@ -2109,13 +2109,13 @@ CraneErrCode ProcInstance::Spawn() {
   }
 
   pid_t child_pid = -1;
-  if (m_parent_step_inst_->IsCrun()){
+  if (m_parent_step_inst_->IsCrun()) {
     auto pid_expt = ForkCrunAndInitIOfd_();
     if (!pid_expt) return pid_expt.error();
 
     child_pid = pid_expt.value();
 
-    } else {
+  } else {
     child_pid = fork();
   }
 

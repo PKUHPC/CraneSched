@@ -308,7 +308,6 @@ message StepToCtld {
   string task_prolog = 27;
   string task_epilog = 28;
 
-
   string extra_attr = 30;
 
   string cmd_line = 31;
