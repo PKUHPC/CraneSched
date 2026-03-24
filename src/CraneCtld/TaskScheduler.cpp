@@ -1161,8 +1161,6 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      begin = std::chrono::steady_clock::now();
-
       // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
       // ids to node maps immediately before CreateCgroupForTasks to ensure
       // that if a CraneD crash, the callback of CranedKeeper can call
@@ -1182,55 +1180,6 @@ void TaskScheduler::ScheduleThread_() {
 
       Mutex thread_pool_mtx;
       HashSet<task_id_t> failed_job_id_set;
-
-      if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
-        // TODO: cbatch job must be requeue
-        begin = std::chrono::steady_clock::now();
-        absl::BlockingCounter prolog_bl(jobs_to_run.size());
-        for (auto& job : jobs_to_run) {
-          const task_id_t job_id = job->TaskId();
-          g_thread_pool->detach_task([&, job_id, env = job->env]() {
-            // run prolog ctld script
-            RunPrologEpilogArgs run_prolog_args{
-                .scripts = g_config.JobLifecycleHook.CranectldPrologs,
-                .envs = env,
-                .run_uid = 0,
-                .run_gid = 0,
-                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-            if (g_config.JobLifecycleHook.PrologTimeout) {
-              run_prolog_args.timeout_sec =
-                  g_config.JobLifecycleHook.PrologTimeout;
-            } else {
-              run_prolog_args.timeout_sec =
-                  g_config.JobLifecycleHook.PrologEpilogTimeout;
-            }
-            CRANE_TRACE(
-                "#{}: Running CraneCtldProlog as UID {} with timeout {}s",
-                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
-            auto run_prolog_result =
-                util::os::RunPrologOrEpiLog(run_prolog_args);
-            if (!run_prolog_result) {
-              auto status = run_prolog_result.error();
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
-                          job_id, status.exit_code, status.signal_num);
-              thread_pool_mtx.Lock();
-              failed_job_id_set.emplace(job_id);
-              thread_pool_mtx.Unlock();
-            } else {
-              CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
-            }
-            prolog_bl.DecrementCount();
-          });
-        }
-        prolog_bl.Wait();
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "CraneCtldProlog running costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-      }
-
-      begin = std::chrono::steady_clock::now();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
@@ -1254,7 +1203,6 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
-        if (failed_job_id_set.contains(job->TaskId())) continue;
         // IMPORTANT: job must be put into running_task_map before any
         // time-consuming operation, otherwise TaskStatusChange RPC will come
         // earlier before job is put into running_task_map.
@@ -1269,7 +1217,6 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
-        if (failed_job_id_set.contains(job->TaskId())) continue;
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*job);
@@ -1277,6 +1224,7 @@ void TaskScheduler::ScheduleThread_() {
         job->SetDaemonStep(std::move(daemon_step));
       }
 
+      begin = std::chrono::steady_clock::now();
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
         jobs_failed.insert(jobs_failed.end(),
                            std::make_move_iterator(jobs_to_run.begin()),
@@ -1284,7 +1232,6 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
-          if (failed_job_id_set.contains(job->TaskId())) continue;
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
             craned_alloc_job_map[craned_id].push_back(
@@ -1295,7 +1242,13 @@ void TaskScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Append steps to embedded DB costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
       std::latch alloc_job_latch(craned_alloc_job_map.size());
@@ -1303,7 +1256,7 @@ void TaskScheduler::ScheduleThread_() {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
 
-        m_rpc_worker_pool_->detach_task([&]() {
+        m_rpc_worker_pool_->detach_task([&] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send AllocJobs for {} tasks to {}", jobs.size(),
                       craned_id);
@@ -1353,7 +1306,13 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc job costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1400,6 +1359,11 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc daemon steps costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
       for (auto& job : jobs_to_run) {
@@ -1409,12 +1373,6 @@ void TaskScheduler::ScheduleThread_() {
           jobs_created.emplace_back(std::move(job));
         }
       }
-
-      end = std::chrono::steady_clock::now();
-      CRANE_TRACE(
-          "CreateCgroupForJobs costed {} ms",
-          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-              .count());
 
       begin = std::chrono::steady_clock::now();
 
@@ -1924,18 +1882,8 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
-  if (step->StepType() == crane::grpc::StepType::DAEMON) {
-    for (CranedId const& craned_id : step->ExecutionNodes()) {
-      m_cancel_task_queue_.enqueue(
-          CancelRunningTaskQueueElem{.job_id = step->job_id,
-                                     .step_id = step->StepId(),
-                                     .craned_id = craned_id});
-      m_cancel_task_async_handle_->send();
-    }
-    return CraneErrCode::SUCCESS;
-  }
-
+CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -2143,17 +2091,18 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
               task_id);
           return;
         }
-        // User cancel jobs with node/name... filter
-        auto daemon_step = task->DaemonStep();
-        if (!daemon_step) {
-          CRANE_ERROR(
-              "[Job #{}] Daemon step not found when cancelling running job",
+        auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+        cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
+        // User cancel jobs with node/name... filter or cancel a job.
+        auto primary_step = task->PrimaryStep();
+        if (!primary_step) {
+          CRANE_DEBUG(
+              "[Job #{}] Primary step not found when cancelling running job, "
+              "maybe completing.",
               task_id);
           return;
         }
-        TerminateRunningStepNoLock_(daemon_step);
-        auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
-        cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
+        TerminateRunningStepNoLock_(primary_step);
       }
     }
   };
@@ -2244,7 +2193,7 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");
@@ -2386,7 +2335,7 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");
@@ -3352,6 +3301,65 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
   }
 }
 
+void TaskScheduler::StartCraneCtldPrologThread(TaskInCtld* job) {
+  // CraneCtldProlog must be executed prior to task execution,
+  // specifically during the configure phase, and it requires the running map
+  // for the task to be present. At present, the framework can only launch the
+  // CraneCtldProlog thread after the step has started and before the task is
+  // executed.
+  if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
+    // TODO: cbatch job must be requeue
+    job->is_prolog_running = true;
+    g_thread_pool->detach_task(
+        [this, job_id = job->TaskId(), env = job->env]() {
+          // run prolog ctld script
+          RunPrologEpilogArgs run_prolog_args{
+              .scripts = g_config.JobLifecycleHook.CranectldPrologs,
+              .envs = env,
+              .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
+              .run_uid = 0,
+              .run_gid = 0,
+              .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+          run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+          if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
+            run_prolog_args.timeout_sec =
+                g_config.JobLifecycleHook.PrologEpilogTimeout;
+          }
+          CRANE_TRACE(
+              "[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
+              job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
+          auto run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
+
+          absl::MutexLock running_lk(&m_running_task_map_mtx_);
+          auto iter = m_running_task_map_.find(job_id);
+          if (iter == m_running_task_map_.end()) {
+            CRANE_DEBUG(
+                "[Job #{}]: Job not found in m_running_task_map_ when running "
+                "CraneCtldProlog,"
+                " may be canceled.",
+                job_id);
+            return;
+          }
+          auto& job = iter->second;
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          job->is_prolog_running = false;
+          if (!run_prolog_result) {
+            auto status = run_prolog_result.error();
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
+                        job_id, status.exit_code, status.signal_num);
+            this->StepStatusChangeAsync(
+                job_id, kPrimaryStepId, "", crane::grpc::TaskStatus::Cancelled,
+                ExitCode::EC_PROLOG_ERR, "CraneCtldPrologError", now);
+          } else {
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
+            this->StepStatusChangeAsync(job_id, kPrimaryStepId, "",
+                                        crane::grpc::TaskStatus::Starting, 0,
+                                        "", now);
+          }
+        });
+  }
+}
+
 void TaskScheduler::StepStatusChangeAsync(
     job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
     crane::grpc::TaskStatus new_status, uint32_t exit_code, std::string reason,
@@ -3432,11 +3440,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
       CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
                   task_id, step_id, new_status);
-      step->StepStatusChange(new_status, exit_code, reason, craned_index,
-                             timestamp, &context);
+      job_finished_status = step->StepStatusChange(
+          new_status, exit_code, reason, craned_index, timestamp, &context);
     }
 
     if (job_finished_status.has_value()) {
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  job_finished_status.value());
       CRANE_TRACE_POINT_ATTR("Receive Task End", "job_id", task->TaskId());
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
@@ -3496,13 +3506,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
               RunPrologEpilogArgs run_epilog_ctld_args{
                   .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
                   .envs = env_copy,
+                  .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
                   .run_uid = 0,
                   .run_gid = 0,
                   .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-              if (g_config.JobLifecycleHook.EpilogTimeout) {
-                run_epilog_ctld_args.timeout_sec =
-                    g_config.JobLifecycleHook.EpilogTimeout;
-              } else {
+              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
                 run_epilog_ctld_args.timeout_sec =
                     g_config.JobLifecycleHook.PrologEpilogTimeout;
               }
@@ -3527,9 +3535,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // Pending / Running -> Completed / Failed / Cancelled.
       // It means all task status changes will put the task into mongodb,
       // so we don't have any branch code here and just put it into mongodb.
-
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
       m_running_task_map_.erase(iter);
     }
   }
@@ -4148,16 +4153,44 @@ void TaskScheduler::TerminateOrphanedSteps(
 
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     const absl::Time& now, PdJobInScheduler* job) {
-  uint32_t node_num_limit;
-  if constexpr (kAlgoRedundantNode) {
-    node_num_limit = std::min(job->node_num + 10, job->node_num * 2);
-  } else {
-    node_num_limit = job->node_num;
-  }
-
   std::vector<NodeState*> nodes_to_sched;
 
   absl::Time earliest_end_time = now + job->time_limit;
+
+  const ResourceView min_res_view =
+      job->req_node_res_view +
+      job->req_task_res_view * job->ntasks_per_node_min;
+  ResourceV2 job_alloc_res;
+  struct node_info {
+    int ntasks_on_node;
+    ResourceInNode res;
+    NodeState* node_state;
+    bool operator<(const node_info& other) const {
+      return ntasks_on_node > other.ntasks_on_node;
+    }
+  };
+  std::priority_queue<node_info> topk_nodes_total;
+  int topk_ntasks_sum_total = 0;
+
+  std::priority_queue<node_info> topk_nodes_avail;
+  int topk_ntasks_sum_avail = 0;
+
+  auto get_max_tasks = [&](const ResourceInNode& res_on_node) {
+    ResourceInNode feasible_res;
+    if (!min_res_view.GetFeasibleResourceInNode(res_on_node, &feasible_res)) {
+      return 0;
+    }
+    ResourceInNode res_avail = res_on_node;
+    res_avail -= feasible_res;
+    int ntasks_on_node = job->ntasks_per_node_min;
+    while (ntasks_on_node < static_cast<int>(job->ntasks_per_node_max) &&
+           job->req_task_res_view.GetFeasibleResourceInNode(res_avail,
+                                                            &feasible_res)) {
+      ++ntasks_on_node;
+      res_avail -= feasible_res;
+    }
+    return ntasks_on_node;
+  };
 
   for (const auto& node_state :
        m_node_selector_->GetOrderedNodesSet() | std::views::values) {
@@ -4193,8 +4226,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       continue;
     }
 
-    if (!(job->requested_node_res_view <=
-          m_node_selector_->GetNodeState(craned_id)->res_total)) {
+    int ntasks_on_node_total = get_max_tasks(node_state->res_total);
+    if (ntasks_on_node_total == 0) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Job #{} needs more resource than that of craned {}. "
@@ -4204,73 +4237,140 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       continue;
     }
 
-    if (job->exclusive) {
-      job->requested_node_res_view.SetToZero();
-      job->requested_node_res_view += node_state->res_total;
+    if (topk_nodes_total.size() < job->node_num ||
+        topk_ntasks_sum_total < job->ntasks) {
+      topk_ntasks_sum_total += ntasks_on_node_total;
+      topk_nodes_total.push(
+          node_info{ntasks_on_node_total, node_state->res_total, node_state});
+      if (topk_nodes_total.size() > job->node_num) {
+        topk_ntasks_sum_total -= topk_nodes_total.top().ntasks_on_node;
+        topk_nodes_total.pop();
+      }
     }
 
-    if constexpr (kAlgoRedundantNode) {
-      nodes_to_sched.emplace_back(node_state);
-      if (nodes_to_sched.size() >= node_num_limit) break;
-    } else {
-      // Given N as the required number of nodes,
-      // all the nodes that is able to run the task at some time-point will be
-      // iterated and the first N nodes will be in the craned_ids_.
-      if (nodes_to_sched.size() < node_num_limit)
-        nodes_to_sched.emplace_back(node_state);
+    // Given N as the required number of nodes,
+    // all the nodes that is able to run the task at some time-point will be
+    // iterated and the first N nodes will be in the craned_ids_.
 
-      // Find all possible nodes that can run the task now.
-      ResourceInNode feasible_res;
-      bool ok = job->requested_node_res_view.GetFeasibleResourceInNode(
-          node_state->res_avail, &feasible_res);
-      if (ok) {
-        bool is_node_satisfied_now = true;
-        for (const auto& [time, res] : time_avail_res_map) {
-          if (time >= earliest_end_time) break;
-          if (!(feasible_res <= res)) is_node_satisfied_now = false;
+    // Find all possible nodes that can run the task now.
+    if (job->exclusive) {
+      bool satisfied = true;
+      for (const auto& [time, res] : time_avail_res_map) {
+        if (time >= earliest_end_time) break;
+        if (!(node_state->res_total <= res)) {
+          satisfied = false;
+          break;
         }
+      }
+      if (!satisfied) {
+        continue;
+      }
+      topk_ntasks_sum_avail += ntasks_on_node_total;
+      topk_nodes_avail.push(
+          node_info{ntasks_on_node_total, node_state->res_total, node_state});
+      if (topk_nodes_avail.size() > job->node_num) {
+        topk_ntasks_sum_avail -= topk_nodes_avail.top().ntasks_on_node;
+        topk_nodes_avail.pop();
+      }
+      if (topk_nodes_avail.size() == job->node_num &&
+          topk_ntasks_sum_avail >= job->ntasks) {
+        break;
+      }
+    } else {
+      ResourceInNode feasible_res;
+      if (!min_res_view.GetFeasibleResourceInNode(node_state->res_avail,
+                                                  &feasible_res)) {
+        continue;
+      }
+      ResourceInNode min_res_on_node = node_state->res_avail;
 
-        if (is_node_satisfied_now) {
-          job->craned_ids.emplace_back(craned_id);
-          job->allocated_res.AddResourceInNode(craned_id, feasible_res);
-          if (job->craned_ids.size() >= job->node_num) {
-            job->start_time = now;
-            return true;
-          }
+      for (const auto& [time, res] : time_avail_res_map) {
+        if (time >= earliest_end_time) break;
+        min_res_on_node.ckmin(res);
+      }
+
+      int ntasks_on_node_avail = get_max_tasks(min_res_on_node);
+      if (ntasks_on_node_avail) {
+        topk_ntasks_sum_avail += ntasks_on_node_avail;
+        topk_nodes_avail.push(
+            node_info{ntasks_on_node_avail, min_res_on_node, node_state});
+        if (topk_nodes_avail.size() > job->node_num) {
+          topk_ntasks_sum_avail -= topk_nodes_avail.top().ntasks_on_node;
+          topk_nodes_avail.pop();
+        }
+        if (topk_nodes_avail.size() == job->node_num &&
+            topk_ntasks_sum_avail >= job->ntasks) {
+          break;
         }
       }
     }
   }
 
-  if (nodes_to_sched.size() < job->node_num) {
-    CRANE_TRACE(
-        "Only {} nodes are available for job #{} but {} nodes are required.",
-        nodes_to_sched.size(), job->job_id, job->node_num);
-    return false;
+  if (topk_nodes_avail.size() == job->node_num &&
+      topk_ntasks_sum_avail >= job->ntasks) {
+    int rest_ntasks = job->ntasks - job->node_num;
+    while (!topk_nodes_avail.empty()) {
+      const auto& info = topk_nodes_avail.top();
+      const auto& res = info.res;
+      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      if (job->exclusive) {
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+      } else {
+        ResourceInNode feasible_res;
+        bool ok =
+            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+                .GetFeasibleResourceInNode(res, &feasible_res);
+        CRANE_ASSERT_MSG(
+            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
+                    info.node_state->craned_id, job->job_id));
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                             feasible_res);
+      }
+      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
+      rest_ntasks -= ntasks_on_node - 1;
+      topk_nodes_avail.pop();
+    }
+    job->start_time = now;
+    job->craned_ids.clear();
+    job->craned_ids.reserve(job->craned_id_to_task_num.size());
+    for (const auto& [craned_id, _] : job->craned_id_to_task_num) {
+      job->craned_ids.emplace_back(craned_id);
+    }
+    return true;
   }
 
-  job->allocated_res.SetToZero();
-
-  for (const auto& node_state : nodes_to_sched) {
-    ResourceInNode feasible_res;
-
-    // TODO: get feasible resource randomly (may cause start time change
-    //       rapidly)
-    bool ok = job->requested_node_res_view.GetFeasibleResourceInNode(
-        node_state->res_avail, &feasible_res);
-    if (!ok) {
-      ok = job->requested_node_res_view.GetFeasibleResourceInNode(
-          node_state->res_total, &feasible_res);
+  if (topk_nodes_total.size() < job->node_num ||
+      topk_ntasks_sum_total < job->ntasks) {
+    CRANE_TRACE(
+        "Only {} nodes with {} tasks are available for job #{} but {} nodes "
+        "with {} tasks are required.",
+        topk_nodes_total.size(), topk_ntasks_sum_total, job->job_id,
+        job->node_num, job->ntasks);
+    return false;
+  } else {
+    int rest_ntasks = job->ntasks - job->node_num;
+    while (!topk_nodes_total.empty()) {
+      const auto& info = topk_nodes_total.top();
+      const auto& res = info.res;
+      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      if (job->exclusive) {
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+      } else {
+        ResourceInNode feasible_res;
+        bool ok =
+            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+                .GetFeasibleResourceInNode(res, &feasible_res);
+        CRANE_ASSERT_MSG(
+            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
+                    info.node_state->craned_id, job->job_id));
+        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                             feasible_res);
+      }
+      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
+      nodes_to_sched.push_back(info.node_state);
+      rest_ntasks -= ntasks_on_node - 1;
+      topk_nodes_total.pop();
     }
-    if (!ok) {
-      CRANE_ERROR(
-          "Job #{} needs more resource than that of craned {}. "
-          "Craned resource might have been changed.",
-          job->job_id, node_state->craned_id);
-      return false;
-    }
-
-    job->allocated_res.AddResourceInNode(node_state->craned_id, feasible_res);
   }
 
   EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
@@ -4294,7 +4394,8 @@ void SchedulerAlgo::NodeSelect(
     pd_job_ptr_vec.emplace_back(job.get());
   }
 
-  // For nodes in partition, reservations and running jobs on node are collected
+  // For nodes in partition, reservations and running jobs on node are
+  // collected
   absl::flat_hash_map<CranedId, NodeState> node_state_map;
 
   absl::flat_hash_map<PartitionId, std::vector<CranedId>> part_node_ids_map;
@@ -4429,7 +4530,8 @@ void SchedulerAlgo::NodeSelect(
         auto it = resv_node_state_map.find(job->reservation);
         if (it == resv_node_state_map.end()) {
           CRANE_ERROR(
-              "Reservation {} of running job #{} not found in resv_node_state_"
+              "Reservation {} of running job #{} not found in "
+              "resv_node_state_"
               "map",
               job->reservation, job->job_id);
           continue;
@@ -4661,41 +4763,142 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   task->partition_priority = part_it->second.priority;
 
   Config::Partition const& part_meta = part_it->second;
+  CRANE_TRACE(
+      "Task {} node res:{}, task res:{}, part default_mem_per_cpu:{}, "
+      "default_mem_per_node:{}, max_mem_per_cpu:{}, max_mem_per_node:{}",
+      task->TaskId(), util::ReadableResourceView(task->req_node_res_view),
+      util::ReadableResourceView(task->req_task_res_view),
+      part_meta.default_mem_per_cpu, part_meta.default_mem_per_node,
+      part_meta.max_mem_per_cpu, part_meta.max_mem_per_node);
 
-  // Calculate task memory value based on MEM_PER_CPU and user-set memory.
-  AllocatableResource& task_alloc_res =
-      task->requested_node_res_view.GetAllocatableRes();
-  double core_double = static_cast<double>(task_alloc_res.cpu_count);
-  if (task_alloc_res.CpuCount() == 0) {
-    CRANE_DEBUG("Job has zero cpu request, rejected.");
+  bool user_set_mem_per_cpu = task->TaskToCtld().has_mem_per_cpu();
+  bool user_set_mem_per_node = task->TaskToCtld().has_mem_per_node();
+
+  if (user_set_mem_per_cpu && user_set_mem_per_node) {
+    CRANE_ERROR(
+        "Task {} has both mem_per_cpu and mem_per_node set by user, which is "
+        "not allowed.",
+        task->TaskId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+  }
+
+  CRANE_ASSERT(task->req_node_res_view.CpuCount() == 0);
+
+  if (!user_set_mem_per_cpu && !user_set_mem_per_node) {
+    if (part_meta.default_mem_per_node != 0) {
+      task->req_node_res_view.GetAllocatableRes().memory_bytes =
+          part_meta.default_mem_per_node;
+      task->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
+          part_meta.default_mem_per_node;
+      user_set_mem_per_node = true;
+      CRANE_TRACE("default_mem_per_node for job #{} is set to {}",
+                  task->TaskId(), part_meta.default_mem_per_node);
+    } else if (part_meta.default_mem_per_cpu != 0) {
+      auto task_mem_per_cpu = part_meta.default_mem_per_cpu;
+      task->req_task_res_view.GetAllocatableRes().memory_bytes =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
+          task_mem_per_cpu;
+      task->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
+          task_mem_per_cpu;
+      user_set_mem_per_cpu = true;
+      CRANE_TRACE("default_mem_per_cpu for job #{} is set to {}",
+                  task->TaskId(), task_mem_per_cpu);
+    } else {
+      CRANE_ERROR(
+          "Neither mem_per_cpu nor mem_per_node is set for task #{} and "
+          "partition {}, and no default is provided by partition meta.",
+          task->TaskId(), task->partition_id);
+      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+    }
+  }
+
+  if (part_meta.max_mem_per_cpu != 0) {
+    if (user_set_mem_per_cpu) {
+      auto max_task_mem =
+          static_cast<double>(task->req_task_res_view.CpuCount()) *
+          part_meta.max_mem_per_cpu;
+      if (task->req_task_res_view.MemoryBytes() > max_task_mem) {
+        task->req_task_res_view.GetAllocatableRes().memory_bytes = max_task_mem;
+        task->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+            max_task_mem;
+      }
+    } else {
+      // mem_per_node / (ntasks_per_node * cpus_per_task) <= max_mem_per_cpu
+      // ntasks_per_node >= ceil(mem_per_node / (max_mem_per_cpu *
+      // cpus_per_task))
+      double cpus_per_task = task->req_task_res_view.CpuCount();
+      if (cpus_per_task > 0) {
+        auto required_min = static_cast<uint32_t>(std::ceil(
+            static_cast<double>(task->req_node_res_view.MemoryBytes()) /
+            (part_meta.max_mem_per_cpu * cpus_per_task)));
+        task->ntasks_per_node_min =
+            std::max(task->ntasks_per_node_min, required_min);
+      }
+    }
+  }
+
+  if (part_meta.max_mem_per_node != 0) {
+    if (user_set_mem_per_node) {
+      if (task->req_node_res_view.MemoryBytes() > part_meta.max_mem_per_node) {
+        task->req_node_res_view.GetAllocatableRes().memory_bytes =
+            part_meta.max_mem_per_node;
+        task->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
+            part_meta.max_mem_per_node;
+      }
+    } else {
+      // ntasks_per_node * task_memory <= max_mem_per_node
+      // ntasks_per_node_max <= floor(max_mem_per_node / task_memory)
+      auto task_mem = task->req_task_res_view.MemoryBytes();
+      if (task_mem > 0) {
+        auto required_max = static_cast<uint32_t>(
+            static_cast<double>(part_meta.max_mem_per_node) / task_mem);
+        if (task->ntasks_per_node_max == 0 ||
+            task->ntasks_per_node_max > required_max) {
+          task->ntasks_per_node_max = required_max;
+        }
+      }
+    }
+  }
+
+  // Finalize ntasks_per_node bounds from task distribution constraint.
+  // One pass suffices: the second iteration is provably idempotent
+  // because N >= K*m holds for any valid job (ntasks >= node_num).
+  {
+    uint32_t dist_max = task->ntasks - task->node_num + 1;
+    if (task->ntasks_per_node_max == 0)
+      task->ntasks_per_node_max = dist_max;
+    else
+      task->ntasks_per_node_max = std::min(task->ntasks_per_node_max, dist_max);
+
+    task->ntasks_per_node_min = std::max(
+        task->ntasks_per_node_min,
+        task->ntasks - (task->node_num - 1) * task->ntasks_per_node_max);
+
+    task->ntasks_per_node_max = std::min(
+        task->ntasks_per_node_max,
+        task->ntasks - (task->node_num - 1) * task->ntasks_per_node_min);
+  }
+
+  if (task->ntasks_per_node_min > task->ntasks_per_node_max) {
+    CRANE_ERROR(
+        "Job #{}: ntasks_per_node_min ({}) > ntasks_per_node_max ({}), "
+        "infeasible constraints.",
+        task->TaskId(), task->ntasks_per_node_min, task->ntasks_per_node_max);
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
-  double task_mem_per_cpu = 0.0;
-  if (task->TaskToCtld().has_mem_per_cpu()) {
-    task_mem_per_cpu = task->TaskToCtld().mem_per_cpu();
-  } else if (task_alloc_res.memory_bytes > 0) {
-    // Otherwise, calculate from memory_bytes and number of cores.
-    task_mem_per_cpu =
-        static_cast<double>(task_alloc_res.memory_bytes) / core_double;
-  } else {
-    // User specified memory bytes is zero, will use the partition's default
-  }
 
-  // If still zero, use the partition's default value.
-  if (task_mem_per_cpu == 0.0) {
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
-  }
+  CRANE_TRACE(
+      "Job #{} after mem adjust: node res:{}, task res:{}, "
+      "ntasks_per_node_min:{}, ntasks_per_node_max:{}",
+      task->TaskId(), util::ReadableResourceView(task->req_node_res_view),
+      util::ReadableResourceView(task->req_task_res_view),
+      task->ntasks_per_node_min, task->ntasks_per_node_max);
 
-  // Enforce the partition's maximum if set.
-  if (part_meta.max_mem_per_cpu > 0) {
-    task_mem_per_cpu = std::min(task_mem_per_cpu,
-                                static_cast<double>(part_meta.max_mem_per_cpu));
-  }
-
-  uint64_t mem_bytes = core_double * task_mem_per_cpu;
-
-  task_alloc_res.memory_bytes = mem_bytes;
-  task_alloc_res.memory_sw_bytes = mem_bytes;
+  task->req_total_res_view = task->req_node_res_view * task->node_num +
+                             task->req_task_res_view * task->ntasks;
+  CRANE_TRACE("Job #{} total res:{}", task->TaskId(),
+              util::ReadableResourceView(task->req_total_res_view));
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);
@@ -4766,13 +4969,13 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
   // Check res req valid
-  {
-    const auto& res = task->requested_node_res_view;
-
-    if (res.MemoryBytes() == 0) {
-      CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-    }
+  if (task->req_total_res_view.MemoryBytes() == 0) {
+    CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+  if (task->req_task_res_view.CpuCount() == 0) {
+    CRANE_DEBUG("Job #{} has zero cpu request.", task->TaskId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
 
   // Check whether the selected partition is able to run this task.
@@ -4784,7 +4987,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     // Since we do not access the elements in partition_metas_m
 
     // Check whether the selected partition is able to run this task.
-    if (!(task->requested_node_res_view * task->node_num <=
+    if (!(task->req_total_res_view <=
           metas_ptr->partition_global_meta.res_total_inc_dead)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
@@ -4864,7 +5067,8 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (task->requested_node_res_view <= craned_meta->res_total &&
+      if (task->req_node_res_view + task->req_task_res_view <=
+              craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||
@@ -4903,59 +5107,122 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
     for (auto&& node : nodes) step->excluded_nodes.emplace(std::move(node));
   }
 
-  // Fill unset task resource request from job's resource request per task.
-  {
-    auto step_to_ctld = step->MutableStepToCtld();
-    auto* res_step_to_ctld = step_to_ctld->mutable_req_resources_per_task();
-    auto& req_res_view = step->requested_task_res_view;
-    AllocatableResource& allocatable_resource =
-        req_res_view.GetAllocatableRes();
-    if (allocatable_resource.CpuCount() == 0.0f) {
-      allocatable_resource.cpu_count =
-          step->job->requested_node_res_view.GetAllocatableRes().cpu_count;
-      res_step_to_ctld->mutable_allocatable_res()->set_cpu_core_limit(
-          allocatable_resource.CpuCount());
-    }
-    if (step_to_ctld->has_mem_per_cpu()) {
-      uint64_t mem_per_cpu = step_to_ctld->mem_per_cpu();  // in bytes
-      uint64_t mem_bytes =
-          static_cast<uint64_t>(mem_per_cpu * allocatable_resource.cpu_count);
-      allocatable_resource.memory_bytes = mem_bytes;
-      allocatable_resource.memory_sw_bytes = mem_bytes;
-      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
-          allocatable_resource.memory_bytes);
-      res_step_to_ctld->mutable_allocatable_res()->set_memory_sw_limit_bytes(
-          allocatable_resource.memory_sw_bytes);
-    }
-    if (allocatable_resource.memory_bytes == 0ull) {
-      allocatable_resource.memory_bytes =
-          step->job->requested_node_res_view.GetAllocatableRes().memory_bytes;
-      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
-          allocatable_resource.memory_bytes);
-    }
-    if (allocatable_resource.memory_sw_bytes == 0ull) {
-      allocatable_resource.memory_sw_bytes =
-          step->job->requested_node_res_view.GetAllocatableRes()
-              .memory_sw_bytes;
-      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
-          allocatable_resource.memory_sw_bytes);
+  auto part_it = g_config.Partitions.find(step->job->partition_id);
+  if (part_it != g_config.Partitions.end()) {
+    Config::Partition const& part_meta = part_it->second;
+
+    bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
+    bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
+
+    if (user_set_mem_per_cpu && user_set_mem_per_node) {
+      CRANE_ERROR(
+          "Step #{}.{} has both mem_per_cpu and mem_per_node set, "
+          "which is not allowed.",
+          step->job_id, step->StepId());
+      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
     }
 
-    auto& gres = req_res_view.GetDeviceMap();
-    if (gres.empty()) {
-      gres = step->job->requested_node_res_view.GetDeviceMap();
-      *res_step_to_ctld->mutable_device_map() = ToGrpcDeviceMap(gres);
+    bool no_memory_set = (step->req_node_res_view.MemoryBytes() == 0 &&
+                          step->req_task_res_view.MemoryBytes() == 0);
+
+    if (no_memory_set) {
+      if (part_meta.default_mem_per_node != 0) {
+        step->req_node_res_view.GetAllocatableRes().memory_bytes =
+            part_meta.default_mem_per_node;
+        step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
+            part_meta.default_mem_per_node;
+        user_set_mem_per_node = true;
+      } else if (part_meta.default_mem_per_cpu != 0) {
+        auto mem_per_cpu = part_meta.default_mem_per_cpu;
+        step->req_task_res_view.GetAllocatableRes().memory_bytes =
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            mem_per_cpu;
+        step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            mem_per_cpu;
+        user_set_mem_per_cpu = true;
+      } else {
+        CRANE_ERROR(
+            "Step #{}.{}: neither mem_per_cpu nor mem_per_node is "
+            "set, and partition {} has no default.",
+            step->job_id, step->StepId(), step->job->partition_id);
+        return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+      }
     }
 
-    if (step->node_num == 0) {
-      step->node_num = step->job->node_num;
-      step_to_ctld->set_node_num(step->node_num);
+    if (part_meta.max_mem_per_cpu != 0) {
+      if (user_set_mem_per_cpu) {
+        auto max_task_mem =
+            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            part_meta.max_mem_per_cpu;
+        if (step->req_task_res_view.MemoryBytes() > max_task_mem) {
+          step->req_task_res_view.GetAllocatableRes().memory_bytes =
+              max_task_mem;
+          step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
+              max_task_mem;
+        }
+      } else if (user_set_mem_per_node) {
+        double cpus_per_task = step->req_task_res_view.CpuCount();
+        if (cpus_per_task > 0) {
+          auto required_min = static_cast<uint32_t>(std::ceil(
+              static_cast<double>(step->req_node_res_view.MemoryBytes()) /
+              (part_meta.max_mem_per_cpu * cpus_per_task)));
+          step->ntasks_per_node_min =
+              std::max(step->ntasks_per_node_min, required_min);
+        }
+      }
     }
-    if (step->ntasks_per_node == 0) {
-      step->ntasks_per_node = step->job->ntasks_per_node;
-      step_to_ctld->set_ntasks_per_node(step->ntasks_per_node);
+
+    if (part_meta.max_mem_per_node != 0) {
+      if (user_set_mem_per_node) {
+        if (step->req_node_res_view.MemoryBytes() >
+            part_meta.max_mem_per_node) {
+          step->req_node_res_view.GetAllocatableRes().memory_bytes =
+              part_meta.max_mem_per_node;
+          step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
+              part_meta.max_mem_per_node;
+        }
+      } else if (user_set_mem_per_cpu) {
+        auto task_mem = step->req_task_res_view.MemoryBytes();
+        if (task_mem > 0) {
+          auto required_max = static_cast<uint32_t>(
+              static_cast<double>(part_meta.max_mem_per_node) / task_mem);
+          if (step->ntasks_per_node_max == 0 ||
+              step->ntasks_per_node_max > required_max) {
+            step->ntasks_per_node_max = required_max;
+          }
+        }
+      }
     }
   }
+
+  {
+    uint32_t dist_max = step->ntasks - step->node_num + 1;
+    if (step->ntasks_per_node_max == 0)
+      step->ntasks_per_node_max = dist_max;
+    else
+      step->ntasks_per_node_max = std::min(step->ntasks_per_node_max, dist_max);
+
+    step->ntasks_per_node_min = std::max(
+        step->ntasks_per_node_min,
+        step->ntasks - (step->node_num - 1) * step->ntasks_per_node_max);
+
+    step->ntasks_per_node_max = std::min(
+        step->ntasks_per_node_max,
+        step->ntasks - (step->node_num - 1) * step->ntasks_per_node_min);
+  }
+
+  if (step->ntasks_per_node_min > step->ntasks_per_node_max) {
+    CRANE_ERROR(
+        "Step #{}.{}: ntasks_per_node_min ({}) > "
+        "ntasks_per_node_max ({}), infeasible constraints.",
+        step->job_id, step->StepId(), step->ntasks_per_node_min,
+        step->ntasks_per_node_max);
+    return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+  }
+
+  step->req_total_res_view = step->req_node_res_view * step->node_num +
+                             step->req_task_res_view * step->ntasks;
 
   return {};
 }
@@ -4964,6 +5231,17 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   auto* job = step->job;
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+
+  if (step->req_total_res_view.MemoryBytes() == 0) {
+    CRANE_DEBUG("Step #{}.{} has zero memory request.", step->job_id,
+                step->StepId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+  if (step->req_task_res_view.CpuCount() == 0) {
+    CRANE_DEBUG("Step #{}.{} has zero cpu request.", step->job_id,
+                step->StepId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
 
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
@@ -4980,7 +5258,8 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   std::unordered_set<std::string> avail_nodes;
   for (const auto& craned_id : job->CranedIds()) {
     const auto& job_res = job->AllocatedRes();
-    if (step->requested_task_res_view <= job_res.at(craned_id) &&
+    if (step->req_node_res_view + step->req_task_res_view <=
+            job_res.at(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
         (step->excluded_nodes.empty() ||
@@ -4998,20 +5277,9 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
     return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
-  // TODO: Check ntasks with job ntasks
-  // All step res request must be less than or equal to job res request
-
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
-
-  // mem/gres for whole step,only CPU is allocated per task, currently multiply
-  // cpu by ntasks_per_node
-  auto node_res_view = step->requested_task_res_view;
-  node_res_view.GetAllocatableRes().cpu_count *= step->ntasks_per_node;
-  step->requested_node_res_view = node_res_view;
-  if (!(step->requested_node_res_view <= job->requested_node_res_view))
-    return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
 
   return {};
 }
@@ -5111,12 +5379,12 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_req, bound.node_num_min);
     bound.node_num_max = std::max(nodes_req, bound.node_num_max);
 
-    uint64_t job_mem_req = job->requested_node_res_view.MemoryBytes();
+    uint64_t job_mem_req = job->req_total_res_view.MemoryBytes();
     bound.mem_alloc_min = std::min(job_mem_req, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(job_mem_req, bound.mem_alloc_max);
 
     double job_cpus_req =
-        static_cast<double>(job->requested_node_res_view.CpuCount());
+        static_cast<double>(job->req_total_res_view.CpuCount());
     bound.cpus_alloc_min = std::min(job_cpus_req, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(job_cpus_req, bound.cpus_alloc_max);
 
@@ -5199,9 +5467,9 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
   uint32_t job_qos_priority = job->qos_priority;
   uint32_t job_part_priority = job->partition_priority;
   uint32_t job_nodes_alloc = job->node_num;
-  uint64_t job_mem_alloc = job->requested_node_res_view.MemoryBytes();
+  uint64_t job_mem_alloc = job->req_total_res_view.MemoryBytes();
   double job_cpus_alloc =
-      static_cast<double>(job->requested_node_res_view.CpuCount());
+      static_cast<double>(job->req_total_res_view.CpuCount());
   double job_service_val = bound.acc_service_val_map.at(job->account);
 
   double qos_factor{0};

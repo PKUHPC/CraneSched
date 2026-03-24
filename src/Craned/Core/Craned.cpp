@@ -39,7 +39,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -51,27 +51,28 @@
 using namespace Craned::Common;
 using Craned::g_config;
 using Craned::JobInD;
+using Craned::StepInstance;
 
-/* Trace Handle */
-
-CraneErrCode RecoverCgForJobs(
-    std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
+CraneErrCode RecoverCgForJobSteps(
+    std::unordered_map<job_id_t, JobInD>& rn_jobs_from_ctld,
+    absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                        std::unique_ptr<StepInstance>>& rn_step_from_ctld) {
   using namespace Craned;
   using namespace Common::CgConstant;
 
-  std::set<job_id_t> rn_job_ids_with_cg;
+  std::set<CgroupStrParsedIds> rn_job_ids_with_cg;
   if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1) {
     // FIXME: What about the case of inconsistency?
 
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
 
   } else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
-    rn_job_ids_with_cg = CgroupManager::GetJobIdsFromCgroupV2_(
+    rn_job_ids_with_cg = CgroupManager::GetIdsFromCgroupV2_(
         kSystemCgPathPrefix / kRootCgNamePrefix);
 
 #ifdef CRANE_ENABLE_BPF
@@ -82,10 +83,21 @@ CraneErrCode RecoverCgForJobs(
       return CraneErrCode::ERR_EBPF;
     }
 
-    for (const auto& [job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (rn_jobs_from_ctld.contains(job_id)) continue;
-
-      CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
+    for (const auto& [ids, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
+      auto job_id = std::get<kParsedJobIdIdx>(ids).value();
+      auto step_id = std::get<kParsedStepIdIdx>(ids);
+      if (step_id.has_value()) {
+        if (rn_step_from_ctld.contains({job_id, step_id.value()})) {
+          continue;
+        } else {
+          CRANE_DEBUG("Erase bpf map entry for rn step {} {} not in Ctld.",
+                      job_id, step_id.value());
+        }
+      }
+      if (rn_jobs_from_ctld.contains(job_id))
+        continue;
+      else
+        CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
       for (const auto& key : bpf_key_vec) {
         if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
                                  &key, sizeof(BpfKey), BPF_ANY) < 0) {
@@ -101,7 +113,76 @@ CraneErrCode RecoverCgForJobs(
     return CraneErrCode::ERR_CGROUP;
   }
 
-  for (job_id_t job_id : rn_job_ids_with_cg) {
+  auto clean_invalid_cg = [](CgroupStrParsedIds ids) {
+    std::unique_ptr<CgroupInterface> cg_ptr;
+
+    // Open cgroup and destroy it.
+    auto cg_str = CgroupManager::CgroupStrByParsedIds(ids);
+
+    // NOLINTBEGIN(readability-suspicious-call-argument)
+    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
+                                            NO_CONTROLLER_FLAG, true);
+    else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
+                                            NO_CONTROLLER_FLAG, true);
+    else
+      std::unreachable();
+
+    if (!cg_ptr) {
+      // FIXME: Clean incomplete cgroups!
+      CRANE_ERROR("Failed to reopen cgroup of job #{}.",
+                  std::get<kParsedJobIdIdx>(ids).value());
+      return;
+    }
+
+    cg_ptr->KillAllProcesses(SIGKILL);
+    cg_ptr->Destroy();
+  };
+
+  for (auto ids : rn_job_ids_with_cg) {
+    auto [job_id_opt, step_id_opt, system_flag, task_id_opt] = ids;
+    job_id_t job_id = job_id_opt.value();
+    // For craned, we don't care task cgroup
+    if (task_id_opt.has_value()) continue;
+    if (step_id_opt.has_value()) {
+      step_id_t step_id = step_id_opt.value();
+      // Step cgroup recovery
+      if (rn_step_from_ctld.contains({job_id, step_id})) {
+        // Step is found in both ctld and cgroup
+        auto& step_instance = rn_step_from_ctld.at({job_id, step_id});
+
+        // For common step cgroup, craned only cares about system cgroup
+        // For daemon step cgroup, craned cares about both system and user
+        // cgroup
+        if (!step_instance->IsDaemonStep() && !system_flag) {
+          continue;
+        }
+        CRANE_DEBUG("Recover existing cgroup for step {} of job #{}", step_id,
+                    job_id);
+        auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+            CgroupManager::CgroupStrByStepId(job_id, step_id, system_flag),
+            step_instance->step_to_d.res(), true);
+        if (cg_expt.has_value()) {
+          if (system_flag)
+            step_instance->crane_cgroup = std::move(cg_expt.value());
+          continue;
+        } else {
+          // If the cgroup is found but is unrecoverable, just logging out.
+          CRANE_ERROR(
+              "Cgroup for step {} of job #{} is found but not "
+              "recoverable.",
+              step_id, job_id);
+        }
+      } else {
+        // Job is found in cgroup but not in ctld. Cleaning up.
+        CRANE_DEBUG("Removing cgroup for step #{}.{} not in Ctld.", job_id,
+                    step_id);
+        clean_invalid_cg(ids);
+      }
+    }
+
+    // Job cgroup recovery
     if (rn_jobs_from_ctld.contains(job_id)) {
       // Job is found in both ctld and cgroup
       JobInD& job = rn_jobs_from_ctld.at(job_id);
@@ -116,35 +197,11 @@ CraneErrCode RecoverCgForJobs(
         // If the cgroup is found but is unrecoverable, just logging out.
         CRANE_ERROR("Cgroup for job #{} is found but not recoverable.", job_id);
       }
-
       continue;
     }
-
+    clean_invalid_cg(ids);
     // Job is found in cgroup but not in ctld. Cleaning up.
     CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
-    std::unique_ptr<CgroupInterface> cg_ptr;
-
-    // Open cgroup and destroy it.
-    auto cg_str = CgroupManager::CgroupStrByJobId(job_id);
-
-    // NOLINTBEGIN(readability-suspicious-call-argument)
-    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else
-      std::unreachable();
-
-    if (!cg_ptr) {
-      // FIXME: Clean incomplete cgroups!
-      CRANE_ERROR("Failed to reopen cgroup of job #{}.", job_id);
-      continue;
-    }
-
-    cg_ptr->KillAllProcesses();
-    cg_ptr->Destroy();
   }
 
   return CraneErrCode::SUCCESS;
@@ -504,15 +561,32 @@ void ParseConfig(int argc, char** argv) {
 
           std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
+            std::set<std::pair<std::string, std::string>> seen_gres_types;
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
               const auto& gres_node = gres_it->as<YAML::Node>();
               const auto& device_name = gres_node["name"].as<std::string>();
               const auto& device_type = gres_node["type"].as<std::string>();
+
+              auto [_, inserted] =
+                  seen_gres_types.emplace(device_name, device_type);
+              if (!inserted) {
+                CRANE_ERROR(
+                    "Duplicate GRES definition: {}:{} appears more than once "
+                    "in the same node group. Each (name, type) pair must be "
+                    "unique.",
+                    device_name, device_type);
+                std::exit(1);
+              }
+
               bool device_file_configured = false;
               std::string env_injector;
               if (gres_node["EnvInjector"]) {
                 env_injector = gres_node["EnvInjector"].as<std::string>();
+              }
+              std::optional<std::string> cni_pipeline;
+              if (gres_node["DeviceCniPipeline"]) {
+                cni_pipeline = gres_node["DeviceCniPipeline"].as<std::string>();
               }
               // Parse CDI names (optional, mutually exclusive)
               std::vector<std::string> cdi_names;
@@ -572,7 +646,8 @@ void ParseConfig(int argc, char** argv) {
                        .EnvInjectorStr = !env_injector.empty()
                                              ? std::optional(env_injector)
                                              : std::nullopt,
-                       .CdiName = std::nullopt});
+                       .CdiName = std::nullopt,
+                       .CniPipeline = cni_pipeline});
                 }
               }
               if (gres_node["DeviceFileList"] &&
@@ -601,7 +676,7 @@ void ParseConfig(int argc, char** argv) {
                                      !env_injector.empty()
                                          ? std::optional(env_injector)
                                          : std::nullopt,
-                                     std::nullopt});
+                                     std::nullopt, cni_pipeline});
                 }
               }
 
@@ -869,9 +944,9 @@ void ParseConfig(int argc, char** argv) {
             &g_config.JobLifecycleHook.TaskEpilogs);
 
         g_config.JobLifecycleHook.PrologTimeout =
-            YamlValueOr<uint32_t>(job_log_hook_config["PrologTimeout"], 0);
+            YamlValueOr<uint32_t>(job_log_hook_config["PrologTimeout"], 60);
         g_config.JobLifecycleHook.EpilogTimeout =
-            YamlValueOr<uint32_t>(job_log_hook_config["EpilogTimeout"], 0);
+            YamlValueOr<uint32_t>(job_log_hook_config["EpilogTimeout"], 60);
         g_config.JobLifecycleHook.PrologEpilogTimeout = YamlValueOr<uint32_t>(
             job_log_hook_config["PrologEpilogTimeout"], 0);
         g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
@@ -996,7 +1071,8 @@ void ParseConfig(int argc, char** argv) {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
-      auto& [name, type, path_vec, env_injector, cdi_name] = dev_arg;
+      auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
+          dev_arg;
       auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
@@ -1005,7 +1081,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       std::unique_ptr dev = DeviceManager::ConstructDevice(
-          name, type, path_vec, env_injector_enum, cdi_name);
+          name, type, path_vec, env_injector_enum, cdi_name, cni_pipeline);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
@@ -1044,6 +1120,28 @@ void ParseConfig(int argc, char** argv) {
             "When CDI is configured for a GRES name/type, ALL devices of "
             "that name/type must have CDI names.",
             name_type.first, name_type.second, has_cnt, miss_cnt, example);
+        std::exit(1);
+      }
+    }
+
+    // Validate DeviceCniPipeline requires CDI: if a device has cni_pipeline
+    // set, it must also have a valid CDI name (to extract the device
+    // identifier). Check at startup to fail fast.
+    for (const auto& [slot_id, dev] : g_this_node_device) {
+      if (!dev->cni_pipeline.has_value()) continue;
+      if (!dev->cdi_name.has_value()) {
+        CRANE_ERROR(
+            "GRES {}:{} (slot '{}') has DeviceCniPipeline '{}' set but no "
+            "CDI name configured. DeviceCniPipeline requires CDI to extract "
+            "device identifier.",
+            dev->name, dev->type, slot_id, dev->cni_pipeline.value());
+        std::exit(1);
+      }
+      auto extracted =
+          DeviceManager::ExtractCdiDeviceName(dev->cdi_name.value());
+      if (!extracted.has_value()) {
+        CRANE_ERROR("GRES {}:{} (slot '{}'): {}", dev->name, dev->type, slot_id,
+                    extracted.error());
         std::exit(1);
       }
     }
@@ -1090,8 +1188,7 @@ void CreateRequiredDirectories() {
 void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
-
-  using Craned::JobInD, Craned::StepInstance;
+  using Craned::SupervisorStub;
   std::map<job_id_t, std::set<step_id_t>> ctld_step_ids;
 
   for (const auto& [job_id, job_steps] : config_from_ctld.job_steps()) {
@@ -1103,12 +1200,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
               util::JobStepsToString(ctld_step_ids));
 
   CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    std::pair<pid_t, Craned::StepStatus>>>
-      steps = g_supervisor_keeper->InitAndGetRecoveredMap();
+                                    SupervisorStub::SupervisorRecoverInfo>>
+      steps = SupervisorStub::InitAndGetRecoveredMap();
 
-  // JobId,supervisor pid
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      std::pair<pid_t, Craned::StepStatus>>
+                      SupervisorStub::SupervisorRecoverInfo>
       step_supv_map;
   if (steps.has_value()) step_supv_map = steps.value();
 
@@ -1171,9 +1267,10 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   for (const auto& [job_id, job_steps] : valid_steps) {
     const auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
     for (const auto& step_id : job_steps) {
-      auto [pid, status] = step_supv_map.at(std::make_pair(job_id, step_id));
+      auto& [pid, status, stub] =
+          step_supv_map.at(std::make_pair(job_id, step_id));
       auto step_inst = std::make_unique<StepInstance>(
-          proto_job_steps.steps().at(step_id), pid, status);
+          proto_job_steps.steps().at(step_id), pid, status, stub);
       step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
   }
@@ -1186,13 +1283,9 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
 
   /******************* Recover job cgroup info *******************/
-  RecoverCgForJobs(job_map);
+  RecoverCgForJobSteps(job_map, step_map);
 
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
-
-  for (const auto& [job_id, step_ids] : invalid_steps)
-    for (auto step_id : step_ids)
-      g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
 
   if (!invalid_steps.empty()) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
@@ -1225,8 +1318,6 @@ void GlobalVariableInit() {
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
       [] { util::SetCurrentThreadName("BsThreadPool"); });
-
-  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
   using CgConstant::Controller;
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
@@ -1291,7 +1382,7 @@ void GlobalVariableInit() {
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 
   // Make sure all grpc server is ready to receive requests.
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  std::this_thread::sleep_for(1000ms);
 }
 
 void WaitForStopAndDoGvarFini() {
@@ -1332,12 +1423,6 @@ void WaitForStopAndDoGvarFini() {
   g_ctld_client.reset();
   // After ctld client destroyed, it is ok to destroy ctld client state machine
   g_ctld_client_sm.reset();
-
-  /*
-   * Called from G_SERVER, JobMgr
-   * CtldClient: ActionConfigureCb
-   */
-  g_supervisor_keeper.reset();
 
   g_thread_pool.reset();
 

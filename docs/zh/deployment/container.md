@@ -186,6 +186,63 @@ RuntimeApiVersion:  v1
 
     该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
 
+#### 示例：RDMA VF 网络
+
+对于 RDMA VF 这类既需要设备注入，又需要网络接口配置的资源，需要将
+**CDI** 与 **Meta CNI** 配合使用：
+
+- CDI 负责把 `uverbs`、`rdma_cm` 等设备节点注入容器
+- Meta CNI 负责把分配到的 VF 网卡移动到容器网络命名空间，并创建 `rdma0`、`rdma1` 等接口
+
+请参考下文 CDI 相关内容，配置好
+`DeviceCDIRegex` 或 `DeviceCDIList`。然后在 `/etc/crane/config.yaml` 中补充
+`DeviceCniPipeline` 字段，并提供对应的 Meta CNI 配置。
+
+??? "GRES 配置示例（/etc/crane/config.yaml）"
+    下面的示例是在“配置 GRES 使用 CDI”基础上增加了 `DeviceCniPipeline: rdma`
+    字段后的写法：
+
+    ```yaml
+    Nodes:
+      - name: "node01"
+        gres:
+          - name: rdma
+            type: cx5vf
+            DeviceCniPipeline: rdma
+            DeviceFileList:
+              - /dev/infiniband/uverbs3,/dev/infiniband/umad3,/dev/infiniband/rdma_cm
+              - /dev/infiniband/uverbs4,/dev/infiniband/umad4,/dev/infiniband/rdma_cm
+            DeviceCDIList:
+              - rdma/pci-0000-17-00-2=0000:17:00.2
+              - rdma/pci-0000-17-00-3=0000:17:00.3
+    ```
+
+    这里各字段的作用分别是：
+
+    - `DeviceFileList`：声明需要注入容器的 RDMA 设备文件
+    - `DeviceCDIList`：为这些设备文件提供 CDI 完全限定名称
+    - `DeviceCniPipeline`：声明这些 GRES 设备还需要交给 Meta CNI 进行网络配置
+
+    `DeviceCniPipeline` 的值必须与 Meta CNI 配置中对应网络管线的 `name` 保持一致。
+
+??? "Meta CNI 配置示例"
+    RDMA VF 网络示例配置可参考：
+    [tool/meta-cni/config/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico-sriov.conf)。
+
+    该示例中包含两类网络：
+
+    - `ethernet`：容器的基础网络接口，一般用于普通 IP 通信
+    - `rdma`：RDMA VF 专用网络接口，按作业实际分配的 GRES 数量动态创建
+
+    其中与 RDMA VF 相关的关键点如下：
+
+    - `name: rdma`：必须与 `DeviceCniPipeline: rdma` 一致
+    - `ifNamePrefix: rdma`：生成的容器内接口名形如 `rdma0`、`rdma1`
+    - `confFromArgs: {"deviceID": "$gres.device"}`：把 GRES 对应的 CDI 设备标识传给 `sriov` 插件
+
+如果您只需要将 RDMA 设备文件注入容器，而不需要在容器内创建独立 RDMA 网络接口，
+则无需配置 `DeviceCniPipeline`。
+
 ### 容器设备接口
 
 除了上述厂商提供的运行时 Hook 方式，鹤思还支持通过 **容器设备接口（Container Device Interface, CDI）** 标准将设备注入容器。CDI 是一种与厂商无关的设备注入规范，使用 JSON 规范文件（CDI Spec）描述设备及其注入所需的设备节点、挂载和环境变量。特别适用于以下场景：

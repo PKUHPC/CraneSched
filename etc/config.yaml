@@ -153,10 +153,15 @@ Partitions:
   - name: GPU
     nodes: "cn[17-18]"
     priority: 3
+    # DefaultMemPerCpu and DefaultMemPerNode are mutually exclusive.
+    # If neither is set, DefaultMemPerCpu is auto-computed from partition resources.
     # Optional default memory per cpu in MB, 0 lets scheduler decide
     DefaultMemPerCpu: 0
-    # Optional maximum memory per cpu in MB, 0 indicates no limit
+    # Optional default memory per node in MB, 0 lets scheduler decide
+    # DefaultMemPerNode: 0
+    # MaxMemPerCpu and MaxMemPerNode can both be set. 0 indicates no limit.
     MaxMemPerCpu: 0
+    MaxMemPerNode: 0
     # AllowedAccounts and DeniedAccounts are mutually exclusive, only one should be configured.
     # If AllowedAccounts is set, any DeniedAccounts configuration will be ignored.
     # AllowedAccounts: ac1, ac2
