@@ -3417,8 +3417,8 @@ void MongodbClient::DocumentAppendItem_(
   }));
 }
 
-void MongodbClient::DocumentAppendItem_(
-    document& doc, const std::string& key, const ResourceView& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const ResourceView& value) {
   doc.append(kvp(key, [&](sub_document valueDocument) {
     valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
       allocDoc.append(kvp("cpu_count", static_cast<double>(value.CpuCount())));
@@ -3430,8 +3430,8 @@ void MongodbClient::DocumentAppendItem_(
 }
 
 void MongodbClient::SubDocumentAppendItem_(sub_document& doc,
-                                                      const std::string& key,
-                                                      const DeviceMap& value) {
+                                           const std::string& key,
+                                           const DeviceMap& value) {
   doc.append(kvp(key, [&value](sub_document mapValueDocument) {
     for (const auto& [dev_name, pair_val] : value) {
       uint64_t untyped_req_count = pair_val.first;
@@ -4305,8 +4305,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-  std::string,std::list<CranedId>, std::list<CranedId>,              /*45-46*/
-  std::vector<CranedId>>                                           /*45-49*/
+             std::string, std::list<CranedId>, std::list<CranedId>, /*45-46*/
+             std::vector<CranedId>>                                 /*45-49*/
       values{                                                       // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -4345,9 +4345,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              bsoncxx::array::value{nodename_list_array.view()},
              task_to_ctld.wckey(), using_default_wckey,
              g_config.CraneClusterName,
-        // 45-48
-        task_to_ctld.submit_hostname(),
-             req_node_list,exclude_node_list, execution_nodes};
+             // 45-48
+             task_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
+             execution_nodes};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4460,7 +4460,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::optional<ContainerMetaInTask>, bool,              /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-             std::string,std::unordered_set<CranedId>,                          /*45-49*/
+             std::string, std::unordered_set<CranedId>,             /*45-49*/
              std::unordered_set<CranedId>, std::vector<CranedId>>   /*45-49*/
       values{                                                       // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
@@ -4494,7 +4494,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
              task->using_default_wckey, g_config.CraneClusterName,
              // 45-49
-             task->submit_hostname,task->included_nodes, task->excluded_nodes,
+             task->submit_hostname, task->included_nodes, task->excluded_nodes,
              task->executing_craned_ids};
 
   return DocumentConstructor_(fields, values);
@@ -4677,7 +4677,10 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
-          absl::ToUnixSeconds(absl::Now()), false, cpus_req, mem_req,
+          absl::ToUnixSeconds(absl::Now()),
+          false,
+          cpus_req,
+          mem_req,
           // 5-9
           step_to_ctld.name(),
           env_str,

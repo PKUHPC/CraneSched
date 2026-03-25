@@ -522,13 +522,11 @@ class MongodbClient {
       document& doc, const std::string& key,
       const std::unordered_map<std::string, uint32_t>& value);
 
-  void DocumentAppendItem_(
-      document& doc, const std::string& key, const ResourceView& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceView& value);
 
-  void SubDocumentAppendItem_(sub_document& doc,
-                                                      const std::string& key,
-                                                      const DeviceMap& value);
-
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const DeviceMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
