@@ -69,7 +69,7 @@ class PmixServer {
 
  private:
  #ifdef HAVE_PMIX
-  void InfoSet_(const Config& config, const crane::grpc::StepToD& step);
+  bool InfoSet_(const Config& config, const crane::grpc::StepToD& step);
 
   bool ConnInit_(const Config& config);
 

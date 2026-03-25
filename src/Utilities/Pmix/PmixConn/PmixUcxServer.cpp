@@ -179,14 +179,14 @@ bool PmixUcxServer::Init(const Config& config) {
 
   addr_str = std::string(reinterpret_cast<const char*>(m_ucx_addr_), m_ucx_alen_);
 
+  ucx_client = dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
+  ucx_client->InitUcxWorker(m_mutex_, m_ucp_worker_);
+
   result = m_craned_client_->BroadcastPmixPort(addr_str);
   if (!result) {
     CRANE_ERROR("Failed to broadcast UCX address");
     goto err_efd;
   }
-
-  ucx_client = dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
-  ucx_client->InitUcxWorker(m_mutex_, m_ucp_worker_);
 
   m_poll_ = g_pmix_server->GetUvwLoop()->resource<uvw::poll_handle>(m_server_fd_);
   m_poll_->on<uvw::poll_event>([this](const uvw::poll_event&, uvw::poll_handle&) {

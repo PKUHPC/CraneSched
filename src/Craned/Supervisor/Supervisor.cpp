@@ -450,14 +450,13 @@ void StartServer(int grpc_output_fd) {
     // Daemon step is RUNNING after supervisor and related resources are ready.
     status = ready ? StepStatus::Running : StepStatus::Failed;
   } else {
-    // Common step is Starting after supervisor is ready.
     bool ready = true;
 
     if (!g_task_mgr->InitPmixPreFork()) {
       CRANE_ERROR("Failed to init pmix server for step.");
       ready = false;
     }
-    // Common step is CONFIGURED after supervisor is ready.
+    // Common step is Starting after supervisor is ready.
     status = ready ? StepStatus::Starting : StepStatus::Failed;
   }
 

@@ -1120,7 +1120,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_get_user_env(this->get_user_env);
 
-  for (const auto& hostname : this->m_craned_ids_)
+  for (const auto& hostname : this->m_craned_ids_) 
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
 
   // Build task_node_list: task_node_list[task_id] = node_idx in nodelist.
