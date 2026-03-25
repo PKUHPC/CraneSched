@@ -134,6 +134,7 @@ class StepInstance {
   */
 
   // Perspective 1: Interactivity
+  [[nodiscard]] bool IsBatch() const noexcept;
   [[nodiscard]] bool IsInteractive() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
@@ -642,8 +643,6 @@ class TaskManager {
     absl::Duration time_limit;
     std::promise<CraneErrCode> ok_prom;
   };
-
-  void EvSupervisorFinishInitCb_();
   void EvShutdownSupervisorCb_();
 
   // Process exited

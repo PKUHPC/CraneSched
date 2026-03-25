@@ -788,7 +788,7 @@ struct CommonStepInCtld : StepInCtld {
   std::string allocated_craneds_regex;
   // TODO: Schedule thread should fill in following task map
   std::unordered_map<task_id_t, ResourceInNode> task_res_map;
-  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
+  std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
@@ -950,11 +950,6 @@ struct TaskInCtld {
   // =================== Get Attr ==================
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
-  bool IsCrun() const {
-    return type == crane::grpc::TaskType::Interactive &&
-           task_to_ctld.interactive_meta().interactive_type() ==
-               crane::grpc::InteractiveTaskType::Crun;
-  }
   bool IsCalloc() const {
     return type == crane::grpc::TaskType::Interactive &&
            task_to_ctld.interactive_meta().interactive_type() ==

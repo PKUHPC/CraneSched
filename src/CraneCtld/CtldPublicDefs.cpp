@@ -574,7 +574,6 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   // No need to set batch/ia/io meta and script
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
   step_to_d.set_get_user_env(this->get_user_env);
-  step_to_d.set_ntasks_total(this->job->task_res_map);
   step_to_d.set_extra_attr(extra_attr);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -1109,7 +1108,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_cwd(this->cwd);
   step_to_d.set_get_user_env(this->get_user_env);
-  step_to_d.set_ntasks_total(this->task_res_map.size());
   step_to_d.set_extra_attr(extra_attr);
 
   step_to_d.set_get_user_env(this->get_user_env);
@@ -1905,24 +1903,27 @@ int TaskInCtld::SchedulePendingSteps(
       rest_ntasks -= ntasks_on_node - 1;
       candidates.pop();
     }
-    std::unordered_set<CranedId> step_craned_ids =
-        step_alloc_res.EachNodeResMap() | std::views::keys |
-        std::ranges::to<std::unordered_set>();
+    std::vector<CranedId> step_craned_ids = step_alloc_res.EachNodeResMap() |
+                                            std::views::keys |
+                                            std::ranges::to<std::vector>();
     step->SetAllocatedRes(step_alloc_res);
     step->SetCranedIds(step_craned_ids);
     step->allocated_craneds_regex = util::HostNameListToStr(step->CranedIds());
-    step->SetConfiguringNodes(step_craned_ids);
-    step->SetExecutionNodes(step_craned_ids);
+    step->SetConfiguringNodes({step_craned_ids.begin(), step_craned_ids.end()});
+    step->SetExecutionNodes({step_craned_ids.begin(), step_craned_ids.end()});
     step->SetStartTime(now);
     step->SetStatus(crane::grpc::TaskStatus::Configuring);
-    const auto& meta = step->ia_meta.value();
     if (step->ia_meta.has_value()) {
       const auto& meta = step->ia_meta.value();
       meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
           .job_id = step->job_id,
           .step_id = step->StepId(),
-          .allocated_nodes{std::make_pair(
-              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+          .res_allocate_expt{
+              StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                  .allocated_craned_regex = step->allocated_craneds_regex,
+                  .allocated_craned_ids = step->CranedIds(),
+                  .craned_task_map = step->craned_task_map,
+                  .ntasks_total = step->ntasks}}});
     }
     pending_step_ids_.pop();
     ++popped_count;

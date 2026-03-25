@@ -154,6 +154,10 @@ void StepInstance::CleanUp() {
   StopCriClient();
 }
 
+bool StepInstance::IsBatch() const noexcept {
+  return this->m_step_to_supv_.type() == crane::grpc::Batch;
+}
+
 bool StepInstance::IsInteractive() const noexcept {
   return interactive_type.has_value();
 }
@@ -2385,12 +2389,6 @@ TaskManager::TaskManager()
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec) {
   m_uvw_loop_ = uvw::loop::create();
 
-  m_supervisor_finish_init_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_supervisor_finish_init_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvSupervisorFinishInitCb_();
-      });
-
   m_shutdown_supervisor_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_shutdown_supervisor_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
@@ -2538,10 +2536,6 @@ TaskManager::~TaskManager() {
 void TaskManager::SupervisorFinishInit(StepStatus status) {
   m_step_.GotNewStatus(status);
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
-}
-
-void TaskManager::SupervisorFinishInit() {
-  m_supervisor_finish_init_handle_->send();
 }
 
 void TaskManager::Wait() {
@@ -2705,16 +2699,6 @@ std::future<CraneErrCode> TaskManager::MigrateSshProcToCgroupAsync(pid_t pid) {
   m_grpc_migrate_ssh_proc_to_cgroup_queue_.enqueue(std::move(elem));
   m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->send();
   return ok_future;
-}
-
-void TaskManager::EvSupervisorFinishInitCb_() {
-  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
-    m_step_.GotNewStatus(StepStatus::Running);
-  } else {
-    m_step_.GotNewStatus(StepStatus::Starting);
-  }
-
-  g_craned_client->StepStatusChangeAsync(m_step_.GetStatus(), 0, std::nullopt);
 }
 
 void TaskManager::EvShutdownSupervisorCb_() {
@@ -3017,7 +3001,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
-    if (m_step_.IsDaemonStep()) {
+    if (m_step_.IsDaemon()) {
       if (elem.mark_as_orphaned)
         g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       else {
