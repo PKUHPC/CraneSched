@@ -278,7 +278,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
   CRANE_TRACE("[Step#{}.{}] Initializing PmixServer...", step.job_id(), step.step_id());
   m_uvw_loop_ = uvw::loop::create();
 
-  InfoSet_(config, step);
+  if (!InfoSet_(config, step)) return false;
 
   if (!PmixInit_()) return false;
 
@@ -337,9 +337,12 @@ PmixServer::SetupFork(uint32_t rank) {
 #ifdef HAVE_PMIX
   char** client_env = nullptr;
 
+  // Compute the correct global rank of this local rank (0-based offset within
+  // this node's task block) by scanning task_map for the start rank of this
+  // node, then adding the local rank offset.
   pmix_proc_t proc;
   PMIX_LOAD_NSPACE(proc.nspace, m_pmix_job_info_.nspace.c_str());
-  proc.rank = m_pmix_job_info_.ntasks_per_node * m_pmix_job_info_.node_id + rank;
+  proc.rank = rank;
   pmix_status_t rc = PMIx_server_setup_fork(&proc, &client_env);
   if (PMIX_SUCCESS != rc) {
     CRANE_ERROR("Server fork setup failed with error {}", rc);
@@ -382,17 +385,18 @@ PmixServer::SetupFork(uint32_t rank) {
 }
 
 #ifdef HAVE_PMIX
-void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step) {
-
+bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step) {
   m_pmix_job_info_.uid = step.uid();
   m_pmix_job_info_.gid = step.gid()[0];
   m_pmix_job_info_.job_id = step.job_id();
   m_pmix_job_info_.step_id = step.step_id();
   m_pmix_job_info_.nspace = fmt::format("crane.pmix.{}.{}", m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
 
-  m_pmix_job_info_.ntasks_per_node = step.ntasks_per_node();
   m_pmix_job_info_.node_num = step.node_num();
-  m_pmix_job_info_.task_num = m_pmix_job_info_.ntasks_per_node * m_pmix_job_info_.node_num;
+  // Use the actual total task count, NOT ntasks_per_node * node_num,
+  // because tasks may not be evenly distributed across nodes.
+  m_pmix_job_info_.task_num = step.task_node_list().size();
+  CRANE_TRACE("task_num: {}", m_pmix_job_info_.task_num);
   std::string hostname;
   hostname.resize(256);  // Resize to ensure enough space for the hostname
   if (gethostname(hostname.data(), hostname.size()) == 0) {
@@ -400,23 +404,39 @@ void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
         strlen(hostname.c_str()));  // Resize to actual length of hostname
   } else {
     CRANE_ERROR("Failed to get hostname");
-    hostname = "unknown";  // Set a default value if gethostname fails
+    return false;
   }
   m_pmix_job_info_.hostname = hostname;
   m_pmix_job_info_.node_list = std::vector<std::string>(step.nodelist().begin(), step.nodelist().end());
   m_pmix_job_info_.node_list_str = absl::StrJoin(m_pmix_job_info_.node_list, ",");
 
   auto it = std::ranges::find(m_pmix_job_info_.node_list, m_pmix_job_info_.hostname);
-  if (it != m_pmix_job_info_.node_list.end())
-    m_pmix_job_info_.node_id = std::ranges::distance(m_pmix_job_info_.node_list.begin(), it);
+  if (it == m_pmix_job_info_.node_list.end()) {
+    CRANE_ERROR(
+        "[Step#{}.{}] Current hostname '{}' is not in the node list [{}] "
+        "assigned to this step.",
+        m_pmix_job_info_.job_id, m_pmix_job_info_.step_id,
+        m_pmix_job_info_.hostname, m_pmix_job_info_.node_list_str);
+    return false;
+  }
+
+  m_pmix_job_info_.node_id = std::ranges::distance(m_pmix_job_info_.node_list.begin(), it);
 
   m_pmix_job_info_.peer_node_list = std::vector(m_pmix_job_info_.node_list);
   std::erase(m_pmix_job_info_.peer_node_list, m_pmix_job_info_.hostname);
 
-  m_pmix_job_info_.task_map = std::vector<uint32_t>(m_pmix_job_info_.task_num);
+  // Build task_map: task_map[rank] = node_id (block order).
+  // tasks_per_node_list[i] is the number of tasks on nodelist[i].
+  m_pmix_job_info_.task_map.assign(step.task_node_list().begin(), step.task_node_list().end());
 
-  for (size_t node = 0; node < m_pmix_job_info_.node_num; ++node) {
-    std::fill_n(m_pmix_job_info_.task_map.begin() + node * m_pmix_job_info_.ntasks_per_node, m_pmix_job_info_.ntasks_per_node, node);
+  // ntasks_per_node: the actual number of tasks on THIS specific node.
+  for (const auto& node_id : step.task_node_list()) {
+    if (node_id == m_pmix_job_info_.node_id)
+      m_pmix_job_info_.ntasks_per_node++;
+  }
+
+  for (uint32_t index = 0; index < step.task_node_list_size(); index++) {
+    CRANE_TRACE("task_id: {}, node_id: {}", index, step.task_node_list(index));
   }
 
   if (step.env().contains("CRANE_PMIX_TIMEOUT")) {
@@ -449,7 +469,8 @@ void PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
 
   if (step.env().contains("CRANE_PMIX_DIRECT_CONN_UCX"))
     m_pmix_job_info_.pmix_direct_conn_ucx = step.env().at("CRANE_PMIX_DIRECT_CONN_UCX");
-  
+
+  return true;
 }
 
 bool PmixServer::ConnInit_(const Config& config) {
@@ -470,6 +491,15 @@ bool PmixServer::ConnInit_(const Config& config) {
     m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
     CRANE_TRACE("Using gRPC for PMIx communication as CranePmixDirectConnUcx is not set to true.");
   }
+
+  // #ifdef HAVE_UCX
+  //   m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_job_info_.node_num);
+  //   m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
+  //   CRANE_TRACE("Using UCX for PMIx communication as CranePmixDirectConnUcx is set to true.");
+  // #else
+  //   CRANE_ERROR("UCX support is not enabled in this build, cannot use UCX for PMIx communication.");
+  //   return false;
+  // #endif
 
   if (!m_pmix_async_server_->Init(config))
     return false;
@@ -544,6 +574,18 @@ bool PmixServer::JobSet_() {
 
   info_list.emplace_back(InfoLoad_(PMIX_JOBID, fmt::format("{}", m_pmix_job_info_.job_id), PMIX_STRING));
   info_list.emplace_back(InfoLoad_(PMIX_NODEID, m_pmix_job_info_.node_id, PMIX_UINT32));
+
+  // Precompute the start global rank of THIS node so we can compute local_rank.
+  // task_map is in block order, so the first index where task_map[r] == node_id
+  // is the start rank of this node.
+  uint32_t my_node_start_rank = 0;
+  for (uint32_t r = 0; r < m_pmix_job_info_.task_num; ++r) {
+    if (m_pmix_job_info_.task_map[r] == m_pmix_job_info_.node_id) {
+      my_node_start_rank = r;
+      break;
+    }
+  }
+
   std::list<uint32_t> local_ranks;
   for (uint32_t rank = 0; rank < m_pmix_job_info_.task_num; rank++) {
     pmix_data_array_t* proc_data;
@@ -558,9 +600,15 @@ bool PmixServer::JobSet_() {
     PMIX_INFO_LOAD(&proc_data_arr[3], PMIX_GLOBAL_RANK, &rank, PMIX_UINT32);
     PMIX_INFO_LOAD(&proc_data_arr[4], PMIX_APP_RANK, &rank, PMIX_UINT32);
 
-    /* this rank is local, store local info ab't it! */
-    if (rank / m_pmix_job_info_.ntasks_per_node == m_pmix_job_info_.node_id) {
-      uint32_t local_rank = rank % m_pmix_job_info_.ntasks_per_node;
+    // Use task_map to determine which node owns this rank, and set the
+    // correct hostname/node_id for that rank.
+    uint32_t rank_node_id = m_pmix_job_info_.task_map[rank];
+    const std::string& rank_hostname = m_pmix_job_info_.node_list[rank_node_id];
+
+    /* this rank is local, store local info about it */
+    if (rank_node_id == m_pmix_job_info_.node_id) {
+      // local_rank = offset within this node's task block
+      uint32_t local_rank = rank - my_node_start_rank;
       PMIX_INFO_LOAD(&proc_data_arr[5], PMIX_NODE_RANK, &local_rank,
                      PMIX_UINT16);
       PMIX_INFO_LOAD(&proc_data_arr[6], PMIX_LOCAL_RANK, &local_rank,
@@ -602,16 +650,21 @@ bool PmixServer::JobSet_() {
   }
   info_list.emplace_back(InfoLoad_(PMIX_NODE_MAP, regex, PMIX_STRING));
 
-  // proc_map "0,1;2,3;4,5"
+  // proc_map "0,1,2;3,4" (per-node rank lists, separated by ';')
+  // Use task_map (block-ordered) to build the correct per-node rank lists,
+  // handling uneven distribution where nodes may have different task counts.
   std::ostringstream ppn_oss;
-  for (uint32_t i = 0; i < m_pmix_job_info_.node_num; i++) {
-    for (uint32_t j = 0; j < m_pmix_job_info_.ntasks_per_node; j++) {
-      if (j > 0) ppn_oss << ",";
-      ppn_oss << ((i * m_pmix_job_info_.ntasks_per_node) + j);
+  uint32_t rank = 0;
+  for (uint32_t node = 0; node < m_pmix_job_info_.node_num; ++node) {
+    bool first = true;
+    while (rank < m_pmix_job_info_.task_num &&
+             m_pmix_job_info_.task_map[rank] == node) {
+        if (!first) ppn_oss << ",";
+        ppn_oss << rank;
+        first = false;
+        ++rank;
     }
-    if (i < m_pmix_job_info_.node_num - 1) {
-      ppn_oss << ";";
-    }
+    if (node < m_pmix_job_info_.node_num - 1) ppn_oss << ";";
   }
   std::string ppn_str = ppn_oss.str();
 
@@ -623,7 +676,6 @@ bool PmixServer::JobSet_() {
     CRANE_ERROR("Error: PMIx_generate_ppn. {}", PMIx_Error_string(rc));
     return false;
   }
-
   info_list.emplace_back(InfoLoad_(PMIX_PROC_MAP, ppn, PMIX_STRING));
   // info_list.emplace_back(InfoLoad_(PMIX_ANL_MAP, ppn, PMIX_STRING));
 
@@ -663,17 +715,23 @@ bool PmixServer::JobSet_() {
     bc.Wait();
   }
 
+  // Register only the local clients (ranks whose task_map entry == this node).
+  // Use task_map as the authoritative source for which global ranks belong here.
   pmix_proc_t proc;
   PMIX_LOAD_NSPACE(proc.nspace, m_pmix_job_info_.nspace.c_str());
-  for (uint32_t rank = 0; rank < m_pmix_job_info_.ntasks_per_node; rank++) {
-    uint32_t gloabl_rank = (m_pmix_job_info_.ntasks_per_node * m_pmix_job_info_.node_id) + rank;
-    proc.rank = gloabl_rank;
+  for (uint32_t global_rank = 0; global_rank < m_pmix_job_info_.task_num;
+       ++global_rank) {
+    if (m_pmix_job_info_.task_map[global_rank] != m_pmix_job_info_.node_id)
+      continue;
+    proc.rank = global_rank;
     {
       absl::BlockingCounter bc(1);
-      if (PMIX_SUCCESS != PMIx_server_register_client(&proc, m_pmix_job_info_.uid, m_pmix_job_info_.gid,
-                                                      nullptr, OpCb, &bc)) {
-        CRANE_ERROR("Pmix Server fork setup failed with error {}",
-                    PMIx_Error_string(rc));
+      if (PMIX_SUCCESS !=
+          PMIx_server_register_client(&proc, m_pmix_job_info_.uid,
+                                      m_pmix_job_info_.gid, nullptr, OpCb,
+                                      &bc)) {
+        CRANE_ERROR("Pmix register_client failed for global rank {} with error {}",
+                    global_rank, PMIx_Error_string(rc));
         return false;
       }
       bc.Wait();

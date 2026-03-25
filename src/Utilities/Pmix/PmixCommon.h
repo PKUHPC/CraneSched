@@ -73,7 +73,7 @@ static constexpr uint64_t kTagLowMask     = 0x0000FFFFFFFFFFFFULL;
 // 每个类型同时挂接的接收个数（可根据负载调大）
 static constexpr int      kInflightPerType = 256;
 // 每条消息最大长度（可配置/调优；若需要超大消息建议用 AM 或 pipeline）
-static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
+static constexpr size_t   kRecvMaxBytes    = 1024; // 1KB
 
 static constexpr uint64_t kRpcTimeoutSeconds = 5;
 
