@@ -87,7 +87,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
-  if (resource_use.CpuCount() * task.node_num > qos->max_cpus_per_user)
+  if (resource_use.CpuCount() > qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
