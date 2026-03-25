@@ -83,6 +83,7 @@ fabric.properties
 # Agents
 .claude/
 .worktrees/
+docs/plans
 CLAUDE.md
 AGENTS.md
 

@@ -917,6 +917,8 @@ void ParseConfig(int argc, char** argv) {
                   YamlValueOr<uint64_t>(subid_config["RangeSize"], 65536);
               g_config.Container.SubId.BaseOffset =
                   YamlValueOr<uint64_t>(subid_config["BaseOffset"], 100000);
+              g_config.Container.SubId.UidShift =
+                  YamlValueOr<uint64_t>(subid_config["UidShift"], 0);
             }
             if (g_config.Container.SubId.RangeSize == 0) {
               CRANE_ERROR("Container.SubId.RangeSize must be > 0");

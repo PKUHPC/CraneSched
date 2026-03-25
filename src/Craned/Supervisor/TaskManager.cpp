@@ -1152,18 +1152,30 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
 
   const auto& subid_conf = g_config.Container.SubId;
   const uint64_t size = subid_conf.RangeSize;
+  const uint64_t uid_shift = subid_conf.UidShift;
+
+  if (uid < uid_shift || gid < uid_shift) {
+    CRANE_ERROR(
+        "Failed to calculate SubId range for user {}: uid/gid [{}, {}] must "
+        "be >= UidShift {}.",
+        pwd.Username(), uid, gid, uid_shift);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  const uint64_t effective_uid = uid - uid_shift;
+  const uint64_t effective_gid = gid - uid_shift;
 
   uint64_t uid_start{};
   uint64_t gid_start{};
 
-  if (util::MulOverflow(uid, size, uid_start) ||
+  if (util::MulOverflow(effective_uid, size, uid_start) ||
       util::AddOverflow(subid_conf.BaseOffset, uid_start, uid_start)) {
     CRANE_ERROR("Failed to calculate uid_start for user {}: uid overflowed.",
                 pwd.Username());
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (util::MulOverflow(gid, size, gid_start) ||
+  if (util::MulOverflow(effective_gid, size, gid_start) ||
       util::AddOverflow(subid_conf.BaseOffset, gid_start, gid_start)) {
     CRANE_ERROR("Failed to calculate gid_start for user {}: gid overflowed.",
                 pwd.Username());
@@ -1180,6 +1192,16 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
                     uint64_t count) -> bool {
     return ranges.Valid() && ranges.Count() == 1 && ranges[0].start == start &&
            ranges[0].count == count;
+  };
+  auto fits_runtime_mapping = [](uint64_t start, uint64_t count) -> bool {
+    if (count == 0) return false;
+
+    constexpr uint64_t kMaxRuntimeId = std::numeric_limits<uint32_t>::max();
+    if (start > kMaxRuntimeId || count > kMaxRuntimeId) return false;
+
+    uint64_t end{};
+    if (util::AddOverflow(start, count - 1, end)) return false;
+    return end <= kMaxRuntimeId;
   };
 
   if (!subid_conf.Managed) {
@@ -1230,6 +1252,17 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     }
+  }
+
+  if (!fits_runtime_mapping(subuid[0].start, subuid[0].count) ||
+      !fits_runtime_mapping(subgid[0].start, subgid[0].count)) {
+    CRANE_ERROR(
+        "SubId range exceeds runtime 32-bit id mapping limits for user {}: "
+        "uid range [{}, {}], gid range [{}, {}]. Consider reducing "
+        "BaseOffset, increasing UidShift, or using smaller uid/gid values.",
+        pwd.Username(), subuid[0].start, subuid[0].count, subgid[0].start,
+        subgid[0].count);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // NOTE: Using 0 as the start of the range no matter run_as_user is 0 or not.

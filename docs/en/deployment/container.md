@@ -328,7 +328,7 @@ CraneSched container features include some advanced capabilities that require ad
 !!! note
     CraneSched supports automatic management of SubUID/SubGID ranges ("Managed" mode; see the "Container Configuration" section). If you want to manage SubID yourself, follow the instructions below.
 
-In "Managed" mode, CraneSched calculates each user's SubUID/SubGID range start with `BaseOffset + ID * RangeSize` and maintains system files such as `/etc/subuid`. If this mode does not meet your requirements, you can manage SubID directly or using external services.
+In "Managed" mode, CraneSched calculates each user's SubUID/SubGID range start with `BaseOffset + (ID - UidShift) * RangeSize` and maintains system files such as `/etc/subuid`. Here `ID` refers to the user's UID or primary GID, and `UidShift` defaults to `0`. If this mode does not meet your requirements, you can manage SubID directly or using external services.
 
 In "Unmanaged" mode, CraneSched only reads SubID information from the system via the `shadow-utils` APIs. Therefore, administrators must ensure that users on all cluster nodes have consistent, non-overlapping SubID ranges. You can manually edit `/etc/subuid` and `/etc/subgid`, or use LDAP for centralized management.
 
@@ -438,6 +438,8 @@ Container:
     RangeSize: 65536
     # Base offset for SubUID/SubGID ranges
     BaseOffset: 100000
+    # Offset subtracted from UID/primary GID in Managed mode
+    UidShift: 0
 
   # BindFs configuration (optional, for user namespace mapping)
   BindFs:
@@ -471,11 +473,15 @@ Container DNS is used to provide domain name resolution services for containers 
 
 SubID (subordinate user/group IDs) configuration is used for secure container user namespace isolation.
 
+!!! warning
+    Some LDAP/SSSD deployments assign users and groups from a high UID/GID starting point such as `65536`. If Managed mode uses those raw IDs directly, it can skip a large portion of the available SubID space and may even exceed the container runtime's 32-bit ID mapping limit. In that case, set `UidShift` to the directory service's starting offset, for example `65536`, so that Managed mode allocates SubIDs from a smaller contiguous index. `UidShift` applies to both the UID and the primary GID, so only enable it when your cluster's UID/GID allocation shares the same starting offset.
+
 | Field | Type | Default | Description |
 |:-----|:-----|:-------|:-----|
 | `Managed` | bool | `true` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically adds and validates SubID ranges<br>- `false`: managed by the administrator |
 | `RangeSize` | int | `65536` | Size of SubUID/SubGID range per user. Must be greater than 0; recommended value is 65536 |
-| `BaseOffset` | int | `100000` | Base offset for SubID ranges. Used to calculate each user's range: `start = BaseOffset + uid * RangeSize` |
+| `BaseOffset` | int | `100000` | Base offset for SubID ranges. In Managed mode the formula is `start = BaseOffset + (id - UidShift) * RangeSize` |
+| `UidShift` | int | `0` | Managed mode only. Subtracted from the user's UID and primary GID before calculating the SubID range. Useful for LDAP/SSSD environments that allocate IDs from a high starting offset such as `65536` |
 
 ### BindFs Configuration
 

@@ -246,6 +246,7 @@ Container:
     Managed: true
     RangeSize: 65536
     BaseOffset: 100000
+    UidShift: 0
   # BindFS configuration
   BindFs:
     Enabled: false

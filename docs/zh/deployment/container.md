@@ -326,7 +326,7 @@ ls /etc/cdi/
 !!! note
     鹤思系统支持自动管理 SubUID/SubGID 范围（“Managed” 模式）。如需自行管理 SubID，请按以下说明操作。
 
-“Managed” 模式下，鹤思通过 `BaseOffset + ID × RangeSize` 计算每个用户的 SubUID/SubGID 范围起始值，并维护 `/etc/subuid` 等系统文件。若该模式无法满足需求，可手动管理或使用外部服务。
+“Managed” 模式下，鹤思通过 `BaseOffset + (ID - UidShift) × RangeSize` 计算每个用户的 SubUID/SubGID 范围起始值，并维护 `/etc/subuid` 等系统文件。其中 `ID` 对应用户的 UID 或主 GID，`UidShift` 默认为 `0`。若该模式无法满足需求，可手动管理或使用外部服务。
 
 “Unmanaged” 模式下，鹤思仅通过 `shadow-utils` 的 API 获取系统中的 SubID 信息。因此，管理员必须确保集群内所有节点上的用户具有一致的、不冲突的 SubID 范围。管理员可以手动填写 `/etc/subuid` 和 `/etc/subgid` 文件，或通过 LDAP 服务器集中管理。
 
@@ -436,6 +436,8 @@ Container:
     RangeSize: 65536
     # SubUID/SubGID 范围的基础偏移量
     BaseOffset: 100000
+    # Managed 模式下，从 UID/主 GID 中减去的偏移量
+    UidShift: 0
   
   # BindFs 配置（可选，用于用户命名空间映射）
   BindFs:
@@ -469,11 +471,15 @@ Container:
 
 SubID（从属用户/组 ID）配置用于容器用户命名空间的安全隔离。
 
+!!! warning
+    某些 LDAP/SSSD 环境会从较大的 UID/GID 起点开始分配用户和组，例如 `65536`。若直接使用真实 UID/GID 参与 Managed 模式计算，会快速跳过前部 SubID 空间，甚至超出容器运行时的 32 位 ID 映射范围。此时可将 `UidShift` 设置为目录服务的起始偏移量，例如 `65536`，使 Managed 模式按较小的连续编号分配 SubID。`UidShift` 会同时作用于 UID 和主 GID，因此仅应在集群 UID/GID 共享同一起始偏移时启用。
+
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
 | `Managed` | bool | `true` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：自动添加和验证 SubID 范围<br>- `false`：管理员自行配置 |
 | `RangeSize` | int | `65536` | 每个用户的 SubUID/SubGID 范围大小。必须大于 0，建议值为 65536 |
-| `BaseOffset` | int | `100000` | SubID 范围的基础偏移量。用于计算每个用户的范围：`start = BaseOffset + uid × RangeSize` |
+| `BaseOffset` | int | `100000` | SubID 范围的基础偏移量。Managed 模式的计算公式为 `start = BaseOffset + (id - UidShift) × RangeSize` |
+| `UidShift` | int | `0` | 仅在 Managed 模式下生效。计算前会从用户 UID 和主 GID 中减去该偏移量，适用于 LDAP/SSSD 等从较大 ID 起点分配用户/组的环境，例如 `65536` |
 
 ### BindFs 配置
 

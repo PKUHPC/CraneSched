@@ -158,6 +158,7 @@ int InitFromStdin(int argc, char** argv) {
       g_config.Container.SubId.Managed = subid_conf.managed();
       g_config.Container.SubId.RangeSize = subid_conf.range_size();
       g_config.Container.SubId.BaseOffset = subid_conf.base_offset();
+      g_config.Container.SubId.UidShift = subid_conf.uid_shift();
     }
   }
 

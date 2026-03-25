@@ -244,6 +244,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       subid_conf->set_managed(g_config.Container.SubId.Managed);
       subid_conf->set_range_size(g_config.Container.SubId.RangeSize);
       subid_conf->set_base_offset(g_config.Container.SubId.BaseOffset);
+      subid_conf->set_uid_shift(g_config.Container.SubId.UidShift);
     }
 
     if (g_config.Plugin.Enabled) {

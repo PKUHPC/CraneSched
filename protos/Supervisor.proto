@@ -58,6 +58,7 @@ message InitSupervisorRequest {
       bool managed = 1;
       uint64 range_size = 2;
       uint64 base_offset = 3;
+      uint64 uid_shift = 4;
     }
     SubIdConfig subid = 5;
 
