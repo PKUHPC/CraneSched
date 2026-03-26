@@ -435,8 +435,8 @@ bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
       m_pmix_job_info_.ntasks_per_node++;
   }
 
-  for (uint32_t index = 0; index < step.task_node_list_size(); index++) {
-    CRANE_TRACE("task_id: {}, node_id: {}", index, step.task_node_list(index));
+  for (uint32_t index = 0; index < m_pmix_job_info_.task_map.size(); index++) {
+    CRANE_TRACE("task_id: {}, node_id: {}", index, m_pmix_job_info_.task_map[index]);
   }
 
   if (step.env().contains("CRANE_PMIX_TIMEOUT")) {
@@ -450,7 +450,6 @@ bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
       }
     }
   }
-
 
   m_pmix_job_info_.server_tmpdir = fmt::format("{}pmix.crane.{}/pmix.{}.{}", config.CraneBaseDir, m_pmix_job_info_.hostname, m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
 
@@ -616,9 +615,9 @@ bool PmixServer::JobSet_() {
       local_ranks.emplace_back(local_rank);
     }
 
-    PMIX_INFO_LOAD(&proc_data_arr[7], PMIX_HOSTNAME, m_pmix_job_info_.hostname.c_str(),
+    PMIX_INFO_LOAD(&proc_data_arr[7], PMIX_HOSTNAME, rank_hostname.c_str(),
                    PMIX_STRING);
-    PMIX_INFO_LOAD(&proc_data_arr[8], PMIX_NODEID, &m_pmix_job_info_.node_id, PMIX_UINT32);
+    PMIX_INFO_LOAD(&proc_data_arr[8], PMIX_NODEID, &rank_node_id, PMIX_UINT32);
 
     pmix_info_t info;
     PMIX_INFO_LOAD(&info, PMIX_PROC_DATA, proc_data, PMIX_DATA_ARRAY);
@@ -667,6 +666,8 @@ bool PmixServer::JobSet_() {
     if (node < m_pmix_job_info_.node_num - 1) ppn_oss << ";";
   }
   std::string ppn_str = ppn_oss.str();
+  // FIXME: ppn有问题
+  CRANE_TRACE("{}", ppn_str);
 
   std::unique_ptr<char, decltype(&free)> ppn(nullptr, &free);
   char* raw_ppn;
@@ -677,7 +678,7 @@ bool PmixServer::JobSet_() {
     return false;
   }
   info_list.emplace_back(InfoLoad_(PMIX_PROC_MAP, ppn, PMIX_STRING));
-  // info_list.emplace_back(InfoLoad_(PMIX_ANL_MAP, ppn, PMIX_STRING));
+  info_list.emplace_back(InfoLoad_(PMIX_ANL_MAP, ppn, PMIX_STRING));
 
   std::string ranks_str = absl::StrJoin(local_ranks, ",");
   // Identifies the set of processes of the same task on the same physical node.
