@@ -63,6 +63,7 @@ CPU*      up    infinite   3     idle  crane[01-03]
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**: Query version number
+- **-R**: Display node failure reasons
 
 ### Format Specifiers (-o/--format)
 
@@ -159,6 +160,7 @@ Flags:
   -h, --help                help for cinfo
   -i, --iterate uint        Display at specified intervals (seconds)
       --json                Output in JSON format
+  -R, --list-reasons        Display reasons if nodes are down or drained
   -n, --nodes strings       Display the specified nodes only
   -N, --noheader            Do not print header line in the output
   -p, --partition strings   Display nodes in the specified partition only
@@ -274,6 +276,16 @@ Build Time: Wed, 09 Oct 2024 17:11:48 +0800
 cinfo --json
 ```
 
+- **-R**: Display node failure reasons
+```bash
+cinfo -R
+```
+```text
+PARTITION AVAIL NODES STATE                   NODELIST REASON       
+GPU       up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+CPU*      up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+```
+
 ## Node State Filtering
 
 The `-t/--states` option allows filtering nodes by their states. Multiple states can be specified as a comma-separated list:
@@ -289,7 +301,7 @@ cinfo -t alloc
 cinfo -t down
 ```
 
-**Note:** The `-t/--states`, `-r/--responding`, and `-d/--dead` options are mutually exclusive. Only one can be specified at a time.
+**Note:** The `-t/--states`, `-r/--responding`, and `-d/--dead`, `-R/--list-reasons`options are mutually exclusive. Only one can be specified at a time.
 
 ## Related Commands
 

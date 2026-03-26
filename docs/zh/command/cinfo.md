@@ -63,6 +63,7 @@ CPU*      up    infinite   3     idle  crane[01-03]
   - `-t idle,mix`
   - `-t=alloc`
 - **-v/--version**：查询版本号
+- **-R**：查询节点故障原因
 
 ### 格式说明符 (-o/--format)
 
@@ -156,6 +157,7 @@ Flags:
   -h, --help                help for cinfo
   -i, --iterate uint        Display at specified intervals (seconds)
       --json                Output in JSON format
+  -R, --list-reasons        Display reasons if nodes are down or drained
   -n, --nodes strings       Display the specified nodes only
   -N, --noheader            Do not print header line in the output
   -p, --partition strings   Display nodes in the specified partition only
@@ -270,6 +272,16 @@ Build Time: Wed, 09 Oct 2024 17:11:48 +0800
 cinfo --json
 ```
 
+**显示节点故障原因：**
+```bash
+cinfo -R
+```
+```text
+PARTITION AVAIL NODES STATE                   NODELIST REASON       
+GPU       up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+CPU*      up    1     idle(drain)[power_idle] crane01  Mem mismatch 
+```
+
 ## 节点状态过滤
 
 `-t/--states` 选项允许按节点状态过滤。可以将多个状态指定为逗号分隔的列表：
@@ -285,7 +297,7 @@ cinfo -t alloc
 cinfo -t down
 ```
 
-**注意：** `-t/--states`、`-r/--responding` 和 `-d/--dead` 选项是互斥的。一次只能指定一个。
+**注意：** `-t/--states`、`-r/--responding` 和 `-d/--dead`、`-R/--list-reasons`选项是互斥的。一次只能指定一个。
 
 ## 相关命令
 
