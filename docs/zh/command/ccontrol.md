@@ -124,7 +124,7 @@ JobId=12345 JobName=Test_Job
         Priority=0 Qos=UNLIMITED CpusPerTask=1 MemPerNode=20M
         ReqRes:node=1 cpu=1.00 mem=20M gres=None
         AllocRes:node=1 cpu=1.00 mem=20M gres=None
-        ReqNodeList=None ExecludeNodeList=None
+        ReqNodeList=None ExcludeNodeLists=None
         Exclusive=false Comment= Wckey=
         SubmitNode=crane01
 ```

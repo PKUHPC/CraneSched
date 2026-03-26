@@ -157,6 +157,7 @@ Flags:
   -h, --help                help for cinfo
   -i, --iterate uint        Display at specified intervals (seconds)
       --json                Output in JSON format
+  -R, --list-reasons        Display reasons if nodes are down or drained
   -n, --nodes strings       Display the specified nodes only
   -N, --noheader            Do not print header line in the output
   -p, --partition strings   Display nodes in the specified partition only
@@ -296,7 +297,7 @@ cinfo -t alloc
 cinfo -t down
 ```
 
-**注意：** `-t/--states`、`-r/--responding` 和 `-d/--dead` 选项是互斥的。一次只能指定一个。
+**注意：** `-t/--states`、`-r/--responding` 和 `-d/--dead`、`-R/--list-reasons`选项是互斥的。一次只能指定一个。
 
 ## 相关命令
 
