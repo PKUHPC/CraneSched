@@ -396,7 +396,6 @@ bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
   // Use the actual total task count, NOT ntasks_per_node * node_num,
   // because tasks may not be evenly distributed across nodes.
   m_pmix_job_info_.task_num = step.task_node_list().size();
-  CRANE_TRACE("task_num: {}", m_pmix_job_info_.task_num);
   std::string hostname;
   hostname.resize(256);  // Resize to ensure enough space for the hostname
   if (gethostname(hostname.data(), hostname.size()) == 0) {
@@ -433,10 +432,6 @@ bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
   for (const auto& node_id : step.task_node_list()) {
     if (node_id == m_pmix_job_info_.node_id)
       m_pmix_job_info_.ntasks_per_node++;
-  }
-
-  for (uint32_t index = 0; index < m_pmix_job_info_.task_map.size(); index++) {
-    CRANE_TRACE("task_id: {}, node_id: {}", index, m_pmix_job_info_.task_map[index]);
   }
 
   if (step.env().contains("CRANE_PMIX_TIMEOUT")) {
@@ -652,22 +647,14 @@ bool PmixServer::JobSet_() {
   // proc_map "0,1,2;3,4" (per-node rank lists, separated by ';')
   // Use task_map (block-ordered) to build the correct per-node rank lists,
   // handling uneven distribution where nodes may have different task counts.
-  std::ostringstream ppn_oss;
-  uint32_t rank = 0;
-  for (uint32_t node = 0; node < m_pmix_job_info_.node_num; ++node) {
-    bool first = true;
-    while (rank < m_pmix_job_info_.task_num &&
-             m_pmix_job_info_.task_map[rank] == node) {
-        if (!first) ppn_oss << ",";
-        ppn_oss << rank;
-        first = false;
-        ++rank;
-    }
-    if (node < m_pmix_job_info_.node_num - 1) ppn_oss << ";";
-  }
-  std::string ppn_str = ppn_oss.str();
-  // FIXME: ppn有问题
-  CRANE_TRACE("{}", ppn_str);
+  std::vector<std::vector<uint32_t>> node_tasks(m_pmix_job_info_.node_num);
+  for (uint32_t task = 0; task < m_pmix_job_info_.task_num; ++task)
+    node_tasks[m_pmix_job_info_.task_map[task]].push_back(task);
+
+  std::string ppn_str = fmt::format("{}", fmt::join(
+    node_tasks | std::views::transform([](const auto& tasks) {
+        return fmt::format("{}", fmt::join(tasks, ","));
+    }), ";"));
 
   std::unique_ptr<char, decltype(&free)> ppn(nullptr, &free);
   char* raw_ppn;
