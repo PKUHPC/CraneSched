@@ -1,100 +1,100 @@
-# 存·算·用融合超智算解决方案
+# Storage·Compute·Usage Convergence Solution for HPC+AI
 
-鹤思提供 HTC+HPC+AI 超智一体化融合方案，实现存储、算力、使用的彻底融合，一套集群满足所有计算业务场景。
-
----
-
-## 背景与痛点
-
-当前算力调度市场存在以下关键问题：
-
-### 算力调度系统被美国软件垄断
-
-- 公开可查的 12 个国家超算中，使用美国 Slurm 系统 11 个、LSF 系统 1 个
-- 排名靠前的 22 所高校中，使用美国 Slurm 系统 15 个、LSF 系统 5 个、PBS 系统 2 个
-- 智算领域，美国 Kubernetes（K8s）处于事实垄断地位
-
-### 超算智算融合难
-
-超算与智算独立建设导致资源割裂，算力、存储、数据难以共享，形成资源孤岛，造成浪费。
-
-### 国产生态兼容差
-
-国产芯片生态适配成本高，国产平台软件支持不完善。
-
-### 算力系统性能低
-
-高吞吐下响应时延高，系统作业吞吐效率低。
+CraneSched provides an HTC+HPC+AI unified convergence solution, achieving full integration of storage, compute, and usage — one cluster for all computing workloads.
 
 ---
 
-## 传统方案 vs 鹤思融合方案
+## Background and Pain Points
 
-| 对比维度 | 传统方案 | 鹤思融合方案 |
-|---------|--------|-----------|
-| **调度系统** | 超算用 Slurm/LSF，智算用 K8s，两套系统 | 鹤思统一调度超算 + 智算算力资源 |
-| **存储** | 超算存储与智算存储分离 | 超智统一存储，数据资源池化 |
-| **算力门户** | HPC 门户和 AI 门户分离 | 统一门户（SCOW）对接超算和智算 |
-| **资源共享** | 算力、存储、数据难以共享，形成孤岛 | 算力、存储、数据资源池化，高效共享 |
-| **任务调度** | 多平台协同难度大，数据流转效率低 | 统一调度系统全局协同，高效顺畅 |
-| **运维管理** | 管理系统分散，运维复杂度高 | 一体化平台简化运维，降低管理成本 |
-| **用户体验** | 用户认证使用复杂 | 统一用户认证与资源管理 |
+The current compute scheduling market faces the following key challenges:
 
----
+### Scheduling Systems Dominated by US Vendors
 
-## 存·算·用三层融合
+- Among 12 publicly known national supercomputing centers, 11 use US-made Slurm and 1 uses LSF
+- Among the top 22 universities, 15 use Slurm, 5 use LSF, and 2 use PBS
+- In the AI computing domain, Kubernetes (K8s) holds a de facto monopoly
 
-### 算力融合（"算"）
+### Difficulty Converging HPC and AI Computing
 
-鹤思同时支持超算和智算两大计算场景：
+Independent deployment of HPC and AI clusters leads to fragmented resources — compute, storage, and data cannot be shared, creating resource silos and waste.
 
-**超算场景**
+### Poor Compatibility with Domestic Ecosystems
 
-鹤思是自研原生超算调度系统，通过 Slurm & LSF Wrapper 兼容所有超算应用：
+High adaptation costs for domestic chip ecosystems; incomplete software support on domestic platforms.
 
-| 应用领域 | 典型软件 |
-|---------|---------|
-| 大气海洋环境 | WRF、OpenFOAM、CMAQ |
-| 天文地球物理 | CESM、iCESM、Fds、Salome |
-| 工业设计制造 | ABAQUS、Ansys Fluent |
-| 新能源新材料 | MPB、CP2K、GROMACS |
+### Low Performance of Existing Scheduling Systems
 
-**智算场景**
-
-鹤思自研 `ccon` 命令，原生支持容器化 AI 任务：
-
-- 支持 DeepSeek、Qwen、Llama、CPMBee、ChatGLM 等大模型训练与推理
-- 支持 Docker、Podman、containerd 等 OCI 标准容器及 Singularity
-- 支持跨节点容器任务，并实现容器内部组网通信
-- 支持容器镜像自动拉取
-- 支持容器启动、停止、进入容器、查看日志等完整生命周期管理
-
-**HTC 场景**
-
-支持芯片设计等对调度系统吞吐量要求极高的高通量计算（High Throughput Computing）应用场景。
-
-### 存储融合（"存"）
-
-传统方案中超算存储和智算存储各自独立，数据无法共享。鹤思融合方案实现超智统一存储：
-
-- 一套存储系统同时服务超算和智算任务
-- 容器任务可直接访问共享文件系统（支持 Fake Root 特性）
-- 数据资源池化，消除数据搬运开销
-
-### 使用融合（"用"）
-
-通过鹤思 + SCOW 统一平台实现使用层面的融合：
-
-- 统一用户认证：一套账号体系访问所有资源
-- 统一资源管理：一个平台管理超算和智算资源
-- 统一任务提交：用户无需关心底层是超算还是智算
-- 统一监控计费：全生命周期闭环管理
+High response latency under heavy throughput; low job scheduling efficiency.
 
 ---
 
-## 鹤思容器编排
+## Traditional Approach vs. CraneSched Convergence
 
-鹤思的容器编排采用**命令式编排**（仿 Slurm 风格），用户可以混合宿主机和容器内的操作，灵活性高：
+| Dimension | Traditional Approach | CraneSched Convergence |
+|-----------|---------------------|----------------------|
+| **Scheduling** | Slurm/LSF for HPC, K8s for AI — two separate systems | CraneSched unified scheduling for HPC + AI |
+| **Storage** | Separate storage for HPC and AI | Unified storage with pooled data resources |
+| **Portal** | Separate HPC and AI portals | Unified portal (SCOW) for both HPC and AI |
+| **Resource Sharing** | Compute, storage, data siloed and hard to share | Compute, storage, data pooled and efficiently shared |
+| **Job Scheduling** | Difficult multi-platform coordination, low data flow efficiency | Unified scheduler with global coordination |
+| **Operations** | Fragmented management systems, high complexity | Integrated platform simplifies operations |
+| **User Experience** | Complex authentication and usage | Unified user authentication and resource management |
+
+---
+
+## Three-Layer Convergence: Storage · Compute · Usage
+
+### Compute Convergence ("Compute")
+
+CraneSched natively supports both HPC and AI computing workloads:
+
+**HPC Workloads**
+
+CraneSched is a purpose-built HPC scheduler, compatible with all HPC applications via its Slurm & LSF Wrapper:
+
+| Domain | Typical Software |
+|--------|-----------------|
+| Atmosphere, Ocean & Environment | WRF, OpenFOAM, CMAQ |
+| Astronomy & Geophysics | CESM, iCESM, Fds, Salome |
+| Industrial Design & Manufacturing | ABAQUS, Ansys Fluent |
+| New Energy & Materials | MPB, CP2K, GROMACS |
+
+**AI Workloads**
+
+CraneSched provides the `ccon` command for native containerized AI jobs:
+
+- Supports training and inference of large models: DeepSeek, Qwen, Llama, CPMBee, ChatGLM, etc.
+- Supports OCI-standard containers (Docker, Podman, containerd) and Singularity
+- Supports multi-node container jobs with intra-container networking
+- Supports automatic container image pulling
+- Full container lifecycle management: start, stop, exec, logs, etc.
+
+**HTC Workloads**
+
+Supports high-throughput computing (HTC) scenarios such as chip design that demand extremely high scheduler throughput.
+
+### Storage Convergence ("Storage")
+
+Traditional approaches use separate storage for HPC and AI, making data sharing impossible. CraneSched's convergence solution provides unified storage for both:
+
+- A single storage system serves both HPC and AI jobs simultaneously
+- Container jobs can directly access shared file systems (with Fake Root support)
+- Pooled data resources eliminate data movement overhead
+
+### Usage Convergence ("Usage")
+
+A unified CraneSched + SCOW platform achieves convergence at the user layer:
+
+- **Unified authentication**: one account system for all resources
+- **Unified resource management**: one platform manages both HPC and AI resources
+- **Unified job submission**: users need not care whether the underlying resource is HPC or AI
+- **Unified monitoring and billing**: closed-loop lifecycle management
+
+---
+
+## CraneSched Container Orchestration
+
+CraneSched uses **imperative orchestration** (Slurm-style), allowing users to mix host and container operations for maximum flexibility:
 
 ```bash
 #!/bin/bash
@@ -105,99 +105,99 @@
 
 echo "Job started on $(hostname)"
 
-# 运行第一个容器任务
+# Run first container task
 ccon run python:3.11 python -c "print('Step 1: Data preprocessing')"
 
-# 运行第二个容器任务
+# Run second container task
 ccon run python:3.11 python -c "print('Step 2: Model training')"
 
 echo "Job completed"
 ```
 
-### 与 K8s 的对比
+### Comparison with K8s
 
-| 对比维度 | 鹤思 | K8s |
-|---------|------|-----|
-| 编排方式 | 命令式（仿 Slurm） | 声明式（YAML） |
-| 灵活性 | 可混合宿主机和容器操作 | 需开发 Controller |
-| 概念映射 | Pod → Job，Container → Step | 原生 Pod/Container |
-| 适用场景 | HPC + AI 融合场景 | 云原生微服务场景 |
-
----
-
-## 自研调度算法 { #自研调度算法 }
-
-鹤思自研多项创新算法，全方位优化调度效率与能效。
-
-### ORA 作业时间预测算法
-
-**发表于 CCF 推荐 B 类会议 ICS（2025）**
-
-- 首次使用大语言模型（LLM）帮助集群作业预测用时
-- 使用在线更新的历史作业向量数据库，缓解作业分布持续变化导致预测准确率低的问题
-- 使用基于 diff 的上下文学习，高亮历史作业与当前作业存在区别的部分，缓解检索到的历史样本重复内容过高限制预测准确性的问题
-- **作业用时预测准确率提升 41%**
-
-### TSMF 公平共享调度算法
-
-**发表于 CCF 推荐中文 B 类期刊《计算机科学》（封面论文）**
-
-- 在北京大学高性能计算校级公共平台 3 个真实集群测试
-- 基于 GBDT（Gradient Boosting Decision Tree）的作业时间预测
-- **作业平均排队时间减少 13.6 分钟**
-- **在集群 90% 高负载情况下，CPU 利用率可提升至 97.3%**
-- 用户排队体验指标（越小越好）平均下降 50.53%
-
-### EcoSched 节能调度算法
-
-自动化电源控制调度算法：
-
-- **总集群能耗降低**：经模拟实验，在未采用优化电源控制算法的情况下，集群能耗为 22,220.29 kWh；EcoSched 将总集群能耗降低至 4,746.64 kWh，**总能耗节省 78.64%**
-- **电力成本节省**：经模拟实验，实现约 10,484 RMB 的电力成本节省，大幅降低了运行开销
-- **资源利用率提升**：通过优化调度策略，显著提升了集群的资源利用率，减少了资源闲置时间
+| Dimension | CraneSched | K8s |
+|-----------|-----------|-----|
+| Orchestration style | Imperative (Slurm-style) | Declarative (YAML) |
+| Flexibility | Mix host and container operations | Requires custom Controllers |
+| Concept mapping | Pod → Job, Container → Step | Native Pod/Container |
+| Use case | HPC + AI converged workloads | Cloud-native microservices |
 
 ---
 
-## 异构资源融合
+## In-House Scheduling Algorithms { #scheduling-algorithms }
 
-鹤思全面适配国内外主流硬件，实现真正的异构资源统一纳管：
+CraneSched develops multiple innovative algorithms to comprehensively optimize scheduling efficiency and energy efficiency.
 
-| 维度 | 支持范围 |
-|------|---------|
-| **架构** | X86、ARM、RISC-V |
-| **CPU（国外）** | Intel、AMD |
-| **CPU（国内）** | 飞腾、曙光、华为鲲鹏 |
-| **加速卡（国外）** | Nvidia GPU、AMD GPU |
-| **加速卡（国内）** | 华为昇腾、海光、寒武纪 MLU、天数智芯、昆仑芯、沐曦、摩尔线程 |
-| **操作系统（国外）** | CentOS、Ubuntu、Rocky Linux |
-| **操作系统（国内）** | OpenEuler、银河麒麟 |
+### ORA Job Runtime Prediction Algorithm
 
----
+**Published at CCF-B conference ICS (2025)**
 
-## 应用场景
+- First use of a large language model (LLM) to predict HPC job runtimes
+- Uses an online-updated historical job vector database to address prediction accuracy degradation caused by shifting job distributions
+- Uses diff-based in-context learning to highlight differences between historical and current jobs, mitigating the impact of high-redundancy retrieved samples on prediction accuracy
+- **Job runtime prediction accuracy improved by 41%**
 
-鹤思存·算·用融合方案适用于多种行业和场景：
+### TSMF Fair-Share Scheduling Algorithm
 
-| 行业领域 | 典型应用 |
-|---------|---------|
-| 航空航天 | 空气动力学仿真、飞行器设计 |
-| 智能制造 | 工业仿真、数字孪生 |
-| 生物医药 | 分子动力学模拟、药物设计 |
-| 地球物理 | 大气模拟、气候预测 |
-| 新能源材料 | 电池材料研究、催化剂设计 |
-| 智能驾驶 | 自动驾驶模型训练 |
-| 智慧城市 | 城市大脑、交通优化 |
-| 智慧医疗 | 医学大模型、影像分析 |
-| 智慧金融 | 金融 AI 助手、风控模型 |
-| 智慧教育 | 教育大模型、个性化学习 |
-| 芯片设计 | EDA 工具链、芯片验证 |
+**Published as a cover paper in CCF-B Chinese journal *Computer Science***
+
+- Validated on 3 real clusters at Peking University's university-level HPC platform
+- Uses GBDT (Gradient Boosting Decision Tree) for job time prediction
+- **Average job queue time reduced by 13.6 minutes**
+- **CPU utilization improved to 97.3% under 90% cluster load**
+- User queue experience metric (lower is better) reduced by an average of 50.53%
+
+### EcoSched Power-Saving Scheduling Algorithm
+
+Automated power control scheduling algorithm:
+
+- **Total cluster energy savings**: In simulation, cluster energy consumption without optimization was 22,220.29 kWh; EcoSched reduced it to 4,746.64 kWh — **a 78.64% reduction in total energy consumption**
+- **Electricity cost savings**: Approximately 10,484 RMB in simulated electricity cost savings, significantly reducing operating overhead
+- **Improved resource utilization**: Optimized scheduling strategies significantly increase cluster resource utilization and reduce idle time
 
 ---
 
-## 相关成果
+## Heterogeneous Resource Integration
 
-- 入选 2024 年工信部"典型应用案例"及"重点推荐应用案例"双项名单
-- 入选教育部信创应用案例集
-- 已获得多项发明专利和软件著作权
-- 参与制定 IEEE 国际标准和多项国家标准
-- 已在全国 8 个省市、10+ 个算力中心部署使用
+CraneSched fully supports mainstream domestic and international hardware for true unified heterogeneous resource management:
+
+| Dimension | Supported |
+|-----------|----------|
+| **Architecture** | X86, ARM, RISC-V |
+| **CPU (International)** | Intel, AMD |
+| **CPU (Domestic)** | Phytium, Hygon, Huawei Kunpeng |
+| **Accelerator (International)** | Nvidia GPU, AMD GPU |
+| **Accelerator (Domestic)** | Huawei Ascend, Hygon DCU, Cambricon MLU, Iluvatar CoreX, Kunlunxin, Metax, Moore Threads |
+| **OS (International)** | CentOS, Ubuntu, Rocky Linux |
+| **OS (Domestic)** | OpenEuler, KylinOS |
+
+---
+
+## Use Cases
+
+CraneSched's Storage·Compute·Usage convergence solution applies to a wide range of industries:
+
+| Industry | Typical Applications |
+|----------|---------------------|
+| Aerospace | Aerodynamics simulation, aircraft design |
+| Smart Manufacturing | Industrial simulation, digital twins |
+| Biopharmaceuticals | Molecular dynamics simulation, drug design |
+| Geophysics | Atmospheric simulation, climate prediction |
+| New Energy & Materials | Battery material research, catalyst design |
+| Autonomous Driving | Self-driving model training |
+| Smart Cities | City brain, traffic optimization |
+| Smart Healthcare | Medical large models, image analysis |
+| Smart Finance | Financial AI assistants, risk control models |
+| Smart Education | Education large models, personalized learning |
+| Chip Design | EDA toolchains, chip verification |
+
+---
+
+## Recognitions
+
+- Selected for the Ministry of Industry and Information Technology (MIIT) "Typical Application Cases" and "Key Recommended Application Cases" lists in 2024
+- Selected for the Ministry of Education's domestic technology application case collection
+- Multiple invention patents and software copyrights granted
+- Participated in drafting IEEE international standards and multiple national standards
+- Deployed in 10+ computing centers across 8 provinces and cities nationwide

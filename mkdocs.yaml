@@ -54,12 +54,7 @@ nav:
     - Convergence Solution: features/convergence-solution.md
     - CraneSched + SCOW Integration: features/scow-integration.md
     - CraneSched vs Slurm: features/slurm-comparison.md
-    - Container Support:
-        - Overview: reference/container/index.md
-        - Concepts: reference/container/concepts.md
-        - Quick Start: reference/container/quickstart.md
-        - Examples: reference/container/examples.md
-        - Troubleshooting: reference/container/troubleshooting.md
+    - Container Support: reference/container/index.md
   - Deployment:
     - Overview: deployment/index.md
     - Frontend:
@@ -109,6 +104,12 @@ nav:
     - Job Steps: reference/job_steps.md
     - Job Dependency: reference/job_dependency.md
     - Pending Reason: reference/pending_reason.md
+    - Container Support:
+        - Overview: reference/container/index.md
+        - Concepts: reference/container/concepts.md
+        - Quick Start: reference/container/quickstart.md
+        - Examples: reference/container/examples.md
+        - Troubleshooting: reference/container/troubleshooting.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md

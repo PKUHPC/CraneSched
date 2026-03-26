@@ -116,7 +116,7 @@ hide:
 | 作业依赖（Job Dependencies） | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | 作业间依赖关系控制 |
 | 作业数组（Job Array） | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | 批量提交参数化作业 |
 | QOS 服务质量管理 | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | 差异化服务等级控制 |
-| 容器原生编排（CRI/CNI） | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | 基于 K8s CRI/CNI 标准的原生容器编排 |
+| 容器原生编排（CRI/CNI） | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | 基于 CRI/CNI 标准的原生容器编排 |
 | 多租户容器网络隔离 | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | 支持 CNI 多租户网络隔离（Calico Underlay） |
 | 容器 RDMA 网络支持 | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | 支持 SR-IOV 共享 RNIC 和直接透传 |
 | 国产化信创全面适配 | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | 全面适配国产 CPU、GPU/NPU、操作系统 |

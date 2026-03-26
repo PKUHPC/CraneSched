@@ -1,151 +1,151 @@
-# 鹤思 + SCOW 算力一体化方案
+# CraneSched + SCOW Integrated Computing Solution
 
-鹤思与自研算力平台系统 SCOW（Super Computing On Web）深度集成，形成从底层资源调度到上层运营管理的完整算力中心解决方案，为政府、高校、企业、运营商提供算力平台一站式服务。
-
----
-
-## SCOW 简介
-
-SCOW 是面向算力中心的"超·智·量·云"一体化算力平台系统，解决算力中心在建设和运营中广泛存在的**运营管理难、用户使用难、资源融合难**等问题。
-
-SCOW 可同时纳管基于不同硬件厂商、不同软件栈建设的包括 HPC 算力和 AI 算力在内的各类异构算力资源，向用户和管理员提供便捷完整的算力资源管理和使用功能。
-
-- **开源仓库**：<https://github.com/PKUHPC/OPENSCOW>
-- **推广部署**：已覆盖全国 23 个省市、70+ 个算力中心，开源下载量 53000+
+CraneSched is deeply integrated with SCOW (Super Computing On Web), forming a complete computing center solution spanning from underlying resource scheduling to upper-level operations management — providing one-stop computing platform services for governments, universities, enterprises, and operators.
 
 ---
 
-## 一体化架构
+## About SCOW
 
-鹤思 + SCOW 的一体化方案架构分为四层：
+SCOW is an integrated "HPC·AI·Quantum·Cloud" computing platform designed for computing centers, addressing the widespread challenges of **difficult operations management, difficult user access, and difficult resource convergence**.
 
-### 应用层
+SCOW can simultaneously manage heterogeneous computing resources from different hardware vendors and software stacks, including both HPC and AI computing, providing users and administrators with convenient and comprehensive resource management and usage capabilities.
 
-| 模块 | 功能 |
-|------|------|
-| 小蒜 大模型智能体平台 | RAG 知识库应用、Agent 智能体应用 |
-| MaaS 大模型服务平台 | 融合本地算力与云服务，提供一体化大模型能力 |
-| ShadowDesk 远程桌面 | 高性能远程桌面，支持 EDA、CAE 仿真、数据可视化等 |
-| 交互式应用 | VSCode、Jupyter、模型训练等可视化交互应用 |
-
-### 平台层 — SCOW 算力平台系统
-
-SCOW 提供统一用户界面，涵盖三大管理域：
-
-**运营管理**
-
-| 功能 | 说明 |
-|------|------|
-| 计费收费 | 灵活的计费策略和收费管理 |
-| 作业管理 | 全平台作业监控和管理 |
-| 用户管理 | 多级用户体系管理 |
-| 账户管理 | 账户创建、充值、消费记录 |
-| 身份认证 | 对接 LDAP 等认证系统 |
-| 权限管理 | 基于角色的精细化权限控制 |
-
-**资源使用**
-
-| 功能 | 说明 |
-|------|------|
-| 在线作业提交 | Web 界面提交和管理作业 |
-| 在线资源申请 | 自助式资源申请流程 |
-| 在线 Shell 平台 | 浏览器内终端访问 |
-| 跨集群文件传输 | 多集群间数据传输 |
-| 可视化桌面 | 远程图形化桌面 |
-| 可视化应用 | 图形化科研应用 |
-
-**资源管理**
-
-| 功能 | 说明 |
-|------|------|
-| 资源虚拟化 | 支持基于 HPC 环境的虚拟化功能 |
-| 资源授权 | 精细化资源授权管理 |
-| 资源配置 | 灵活的资源配置策略 |
-
-### 调度层 — 鹤思算力调度系统
-
-鹤思作为调度内核，提供：
-
-- **高并发调度**：每秒调度超 1 万个任务
-- **层级权限管控**：树状层级用户/账户管理
-- **异构资源融合**：统一纳管国内外各类 CPU 和加速卡
-- **兼容性**：兼容 Slurm、LSF
-
-### 硬件层
-
-支持接入多种算力资源：
-
-- **超算资源**：基于 Slurm、鹤思等调度器管理
-- **智算资源**：基于鹤思、K8s 管理
-- **量子资源**：通过量子接入系统
-- **云资源**：公有云、私有云算力
+- **Open-source repository**: <https://github.com/PKUHPC/OPENSCOW>
+- **Deployment reach**: Covers 23 provinces and cities nationwide, 70+ computing centers, 53,000+ open-source downloads
 
 ---
 
-## 功能亮点
+## Integrated Architecture
 
-### 图形化界面，使用方便
+The CraneSched + SCOW integrated solution is organized into four layers:
 
-在算力资源使用方面，SCOW 提供基于 Web 页面的多个功能，降低了用户使用门槛，让 Linux 小白用户也能顺利使用算力资源。
+### Application Layer
 
-### 功能丰富，管理便捷
+| Module | Function |
+|--------|----------|
+| Xiaosu LLM Agent Platform | RAG knowledge base applications, intelligent agent applications |
+| MaaS Large Model Service Platform | Combines local compute and cloud services for unified LLM capabilities |
+| ShadowDesk Remote Desktop | High-performance remote desktop supporting EDA, CAE simulation, data visualization, etc. |
+| Interactive Applications | Visualization-based interactive apps: VSCode, Jupyter, model training, etc. |
 
-在算力中心管理运营方面，SCOW 提供覆盖算力资源全生命周期的全流程管理能力，帮助算力中心快速建立管理和运营制度。
+### Platform Layer — SCOW Computing Platform
 
-### 标准化平台，支持算力融合
+SCOW provides a unified user interface covering three management domains:
 
-支持接入 Slurm、CraneSched、K8s 等多种资源调度器，可纳管各类算力资源。同时面向算力网络提供标准化管控接口，支撑算力融合。
+**Operations Management**
 
-### 开放中立，支持开源
+| Feature | Description |
+|---------|-------------|
+| Billing & Charging | Flexible billing strategies and charge management |
+| Job Management | Platform-wide job monitoring and management |
+| User Management | Multi-level user hierarchy management |
+| Account Management | Account creation, top-up, and consumption records |
+| Identity Authentication | Integration with LDAP and other authentication systems |
+| Permission Management | Fine-grained role-based access control |
 
-SCOW 独立于各家厂商，帮助算力中心打破供应商锁定。发起并维护基于木兰宽松协议开源的社区项目 OPENSCOW。
+**Resource Usage**
 
-### 超·智·量·云四算融合
+| Feature | Description |
+|---------|-------------|
+| Online Job Submission | Submit and manage jobs via web interface |
+| Online Resource Requests | Self-service resource request workflow |
+| Online Shell Platform | Browser-based terminal access |
+| Cross-Cluster File Transfer | Data transfer between multiple clusters |
+| Visual Desktop | Remote graphical desktop |
+| Visual Applications | Graphical scientific computing applications |
 
-在同一平台接入和管理超算、智算、量子计算和云计算资源，支持各种计算场景，在国内率先实现超智量云四算融合。
+**Resource Management**
 
-### 快速部署，开箱即用
+| Feature | Description |
+|---------|-------------|
+| Resource Virtualization | Virtualization support for HPC environments |
+| Resource Authorization | Fine-grained resource authorization management |
+| Resource Configuration | Flexible resource configuration policies |
 
-能够快速在新建集群部署上线或接入现有集群，部署几乎无侵入，可与其他管理平台共存。
+### Scheduling Layer — CraneSched
+
+CraneSched serves as the scheduling kernel, providing:
+
+- **High-concurrency scheduling**: schedules over 10,000 jobs per second
+- **Hierarchical access control**: tree-structured user/account management
+- **Heterogeneous resource integration**: unified management of domestic and international CPUs and accelerators
+- **Compatibility**: compatible with Slurm and LSF
+
+### Hardware Layer
+
+Supports connection to various computing resources:
+
+- **HPC resources**: managed by Slurm, CraneSched, etc.
+- **AI computing resources**: managed by CraneSched, K8s
+- **Quantum resources**: via quantum access systems
+- **Cloud resources**: public cloud and private cloud compute
 
 ---
 
-## 算力网络融合 — XSCOW
+## Feature Highlights
 
-在 SCOW 基础上，XSCOW 算力网络融合平台进一步实现跨域算力融合：
+### Graphical Interface for Easy Use
 
-- **资源管理**：跨算力中心的统一资源管理
-- **权限管理**：统一认证和权限体系
-- **任务调度**：跨域任务调度和分发
-- **计费管理**：统一计费和支付管理
-- **全流程监控**：端到端监控和审计
+SCOW provides multiple web-based features for computing resource usage, lowering the barrier to entry so that users unfamiliar with Linux can successfully utilize computing resources.
 
-**应用案例**：教育部高校智算融合共享平台，由教育部教育管理信息中心牵头成立，旨在推进整合各地高校超算中心。尖山塔图作为技术支撑方，已有 10 所高校资源和 16 所高校用户接入平台。
+### Rich Features, Convenient Management
 
----
+For computing center operations, SCOW provides full-lifecycle management capabilities covering the entire process, helping computing centers quickly establish management and operational workflows.
 
-## 典型部署案例
+### Standardized Platform with Resource Convergence Support
 
-### 北京大学未名卓越一号集群
+Supports connection to multiple schedulers including Slurm, CraneSched, and K8s, enabling management of diverse computing resources. Provides standardized management interfaces for computing networks to support resource convergence.
 
-全国产华为设备，价值超 3000 万。采用完整的鹤思 + SCOW 一体化方案：
+### Open, Neutral, and Open-Source
 
-- **应用层**：小蒜智能问答助手 + ShadowDesk 远程桌面 + 交互式应用（VSCode、Jupyter 等）
-- **平台层**：SCOW 算力平台系统（用户体系、作业管理、文件管理、计费管理、应用管理、镜像与模型管理、日志管理、Shell 终端）
-- **调度层**：鹤思算力调度系统（高并发调度、层级权限管控、异构资源融合、兼容 Slurm/LSF/K8s/OpenPBS）
-- **硬件层**：OpenEuler 国产开源操作系统 + RoCE 高速网络 + 昇腾训练 NPU（910B）+ 昇腾推理 NPU（310P）+ 鲲鹏 CPU（ARM）
+SCOW is independent of all vendors, helping computing centers break vendor lock-in. Initiates and maintains the community project OPENSCOW, open-sourced under the Mulan Permissive Software License.
 
-### 某芯片设计公司
+### HPC·AI·Quantum·Cloud Four-Way Convergence
 
-自 2024 年起，某芯片设计公司（约 200 人规模）引入了"鹤思 + SCOW"一体化解决方案管理其新建集群。该方案成功解决了旧有商业软件因资源管控机制不合理而导致计算节点经常超载的问题，并通过深度适配主流 EDA 工具，为各类芯片设计任务提供了精准、高效的支持。
+Connect and manage HPC, AI, quantum, and cloud computing resources on a single platform — the first in China to achieve four-way compute convergence.
+
+### Fast Deployment, Ready Out of the Box
+
+Quickly deployable on new clusters or connectable to existing ones with minimal invasiveness, able to coexist with other management platforms.
 
 ---
 
-## 相关链接
+## Computing Network Convergence — XSCOW
 
-| 项目 | 链接 |
-|------|------|
-| SCOW 开源仓库 | <https://github.com/PKUHPC/OPENSCOW> |
-| 鹤思后端仓库 | <https://github.com/PKUHPC/CraneSched> |
-| 鹤思前端仓库 | <https://github.com/PKUHPC/CraneSched-FrontEnd> |
-| 塔图官网 | <https://csjstt.com> |
+Building on SCOW, the XSCOW computing network convergence platform further enables cross-domain resource integration:
+
+- **Resource management**: unified resource management across computing centers
+- **Permission management**: unified authentication and permission systems
+- **Job scheduling**: cross-domain job scheduling and dispatch
+- **Billing management**: unified billing and payment management
+- **End-to-end monitoring**: comprehensive monitoring and auditing
+
+**Application case**: The Ministry of Education's University AI Computing Convergence and Sharing Platform, led by the Ministry of Education's Educational Management Information Center, aims to integrate supercomputing centers across universities nationwide. Jianshan Tatu serves as the technical support provider, with resources from 10 universities and users from 16 universities already connected to the platform.
+
+---
+
+## Typical Deployment Cases
+
+### Peking University Weiming Excellence No.1 Cluster
+
+Fully domestic Huawei equipment, valued at over 30 million RMB. Adopts the complete CraneSched + SCOW integrated solution:
+
+- **Application layer**: Xiaosu intelligent Q&A assistant + ShadowDesk remote desktop + interactive applications (VSCode, Jupyter, etc.)
+- **Platform layer**: SCOW computing platform (user management, job management, file management, billing management, application management, image and model management, log management, Shell terminal)
+- **Scheduling layer**: CraneSched (high-concurrency scheduling, hierarchical access control, heterogeneous resource integration, compatible with Slurm/LSF/K8s/OpenPBS)
+- **Hardware layer**: OpenEuler domestic open-source OS + RoCE high-speed network + Ascend training NPU (910B) + Ascend inference NPU (310P) + Kunpeng CPU (ARM)
+
+### A Chip Design Company
+
+Since 2024, a chip design company (approximately 200 employees) has adopted the CraneSched + SCOW integrated solution to manage its new cluster. The solution resolved the frequent compute node overload caused by unreasonable resource control mechanisms in the previous commercial software, and through deep adaptation of mainstream EDA tools, provides precise and efficient support for various chip design tasks.
+
+---
+
+## Related Links
+
+| Project | Link |
+|---------|------|
+| SCOW Open-source Repository | <https://github.com/PKUHPC/OPENSCOW> |
+| CraneSched Backend Repository | <https://github.com/PKUHPC/CraneSched> |
+| CraneSched Frontend Repository | <https://github.com/PKUHPC/CraneSched-FrontEnd> |
+| Jianshan Tatu Official Website | <https://csjstt.com> |
