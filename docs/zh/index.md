@@ -231,44 +231,6 @@ hide:
 
 ---
 
-## 快速开始
-
-<div class="grid cards" markdown>
-
-- :material-rocket-launch: **部署后端**（Rocky Linux 9）
-
-    ---
-
-    生产环境推荐。
-
-    [打开指南 →](deployment/backend/Rocky9.md)
-
-- :material-cog: **配置集群**
-
-    ---
-
-    配置数据库、分区、节点和策略。
-
-    [数据库](deployment/configuration/database.md) | [配置](deployment/configuration/config.md)
-
-- :material-code-tags: **部署前端**
-
-    ---
-
-    用户工具和服务（CLI、cfored、cplugind）。
-
-    [打开指南 →](deployment/frontend/frontend.md)
-
-- :material-console-line: **运行您的第一个作业**
-
-    ---
-
-    批处理：[cbatch](command/cbatch.md) | 交互式：[crun](command/crun.md)、[calloc](command/calloc.md)
-
-</div>
-
----
-
 ## 命令行参考
 
 - 用户命令：[cbatch](command/cbatch.md)、[cqueue](command/cqueue.md)、[crun](command/crun.md)、[calloc](command/calloc.md)、[cinfo](command/cinfo.md)

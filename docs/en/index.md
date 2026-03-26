@@ -55,44 +55,6 @@ hide:
 
 ---
 
-## Quick Start
-
-<div class="grid cards" markdown>
-
-- :material-rocket-launch: **Deploy Backend** (Rocky Linux 9)
-
-    ---
-
-    Recommended for production.
-
-    [Open guide →](deployment/backend/Rocky9.md)
-
-- :material-cog: **Configure Cluster**
-
-    ---
-
-    Database, partitions, nodes, and policies.
-
-    [Database](deployment/configuration/database.md) • [Config](deployment/configuration/config.md)
-
-- :material-code-tags: **Deploy Frontend**
-
-    ---
-
-    User tools and services (CLI, cfored, cplugind).
-
-    [Open guide →](deployment/frontend/frontend.md)
-
-- :material-console-line: **Run Your First Job**
-
-    ---
-
-    Batch: [cbatch](command/cbatch.md) • Interactive: [crun](command/crun.md), [calloc](command/calloc.md)
-
-</div>
-
----
-
 ## Architecture
 
 ![CraneSched architecture](images/Architecture.png)
