@@ -92,7 +92,6 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
 
-
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     env_map.emplace("SLURM_JOBID", std::to_string(job_id));

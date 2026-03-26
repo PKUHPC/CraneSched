@@ -232,7 +232,8 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
-    env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(m_step_to_supv_.task_node_list().size()));
+    env_map.emplace("SLURM_STEP_NUM_TASKS",
+                    std::to_string(m_step_to_supv_.task_node_list().size()));
     // The set of task IDs running on the current node
     const auto& task_res_map = m_step_to_supv_.task_res_map();
     std::vector<task_id_t> gtids;
@@ -450,14 +451,15 @@ void ITaskInstance::InitEnvMap() {
     m_env_.emplace(name, value);
   }
   if (g_config.EnableSlurmCompatibleEnv) {
-
     // Global task id
     m_env_.emplace("SLURM_PROCID", std::to_string(task_id));
     // Local task id task_node_list()
     task_id_t local_task_id = 0;
-    const auto& task_node_list = m_parent_step_inst_->GetStep().task_node_list();
+    const auto& task_node_list =
+        m_parent_step_inst_->GetStep().task_node_list();
     for (uint32_t index = 0; index < task_node_list.size(); index++) {
-      const std::string& hostname = m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
+      const std::string& hostname =
+          m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
       if (hostname == g_config.CranedIdOfThisNode) {
         local_task_id = task_id - index;
         break;
