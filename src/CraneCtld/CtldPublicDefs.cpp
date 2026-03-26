@@ -1105,6 +1105,23 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   for (const auto& hostname : this->m_craned_ids_)
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
 
+  // Build task_node_list: task_node_list[task_id] = node_idx in nodelist.
+  // This provides the authoritative task_id -> node mapping for PMIx.
+  uint32_t total_task_num = 0;
+  for (const auto& [node_name, task_ids] : craned_task_map) {
+    total_task_num += task_ids.size();
+  }
+  step_to_d.mutable_task_node_list()->Resize(total_task_num, 0);
+  uint32_t node_index = 0;
+  for (const auto& node_name : m_craned_ids_) {
+    auto it = this->craned_task_map.find(node_name);
+    if (it == this->craned_task_map.end()) continue;
+    for (const auto& task_id : it->second) {
+      step_to_d.mutable_task_node_list()->Set(task_id, node_index);
+    }
+    node_index++;
+  }
+
   step_to_d.mutable_start_time()->set_seconds(
       ToUnixSeconds(this->m_start_time_));
   step_to_d.mutable_submit_time()->set_seconds(

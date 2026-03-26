@@ -232,13 +232,15 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
-    // TODO: Add this after we have real tasks.
-    // auto total_task_num =
-    //     m_step_to_supv_.node_num() * m_step_to_supv_.ntasks_per_node();
-    // env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(total_task_num));
-    // std::vector<int> gtids(total_task_num);
-    // std::iota(gtids.begin(), gtids.end(), 0);
-    // env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
+    env_map.emplace("SLURM_STEP_NUM_TASKS", std::to_string(m_step_to_supv_.task_node_list().size()));
+    // The set of task IDs running on the current node
+    const auto& task_res_map = m_step_to_supv_.task_res_map();
+    std::vector<task_id_t> gtids;
+    gtids.reserve(task_res_map.size());
+    for (const auto& [task_id, resource] : task_res_map) {
+      gtids.emplace_back(task_id);
+    }
+    env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
   }
 
   return env_map;
@@ -448,22 +450,20 @@ void ITaskInstance::InitEnvMap() {
     m_env_.emplace(name, value);
   }
   if (g_config.EnableSlurmCompatibleEnv) {
-    // auto proc_id_to_str = [nodelist =
-    // m_parent_step_inst_->GetStep().nodelist(),
-    //                        ntasks_per_node =
-    //                            m_parent_step_inst_->GetStep().ntasks_per_node(),
-    //                        task_id = task_id]() -> std::string {
-    //   auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
-    //   if (it == nodelist.end()) {
-    //     return "-1";
-    //   }
-    //   auto proc_id =
-    //       static_cast<uint32_t>(it - nodelist.begin()) * ntasks_per_node +
-    //       task_id;
-    //   return std::to_string(proc_id);
-    // };
-    // m_env_.emplace("SLURM_PROCID", proc_id_to_str());
-    m_env_.emplace("SLURM_LOCALID", std::to_string(task_id));
+
+    // Global task id
+    m_env_.emplace("SLURM_PROCID", std::to_string(task_id));
+    // Local task id task_node_list()
+    task_id_t local_task_id = 0;
+    const auto& task_node_list = m_parent_step_inst_->GetStep().task_node_list();
+    for (uint32_t index = 0; index < task_node_list.size(); index++) {
+      const std::string& hostname = m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
+      if (hostname == g_config.CranedIdOfThisNode) {
+        local_task_id = task_id - index;
+        break;
+      }
+    }
+    m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
   }
 }
 
