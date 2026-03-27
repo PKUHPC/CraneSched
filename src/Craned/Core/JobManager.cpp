@@ -451,6 +451,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
+  absl::MutexLock lock(&m_fork_reap_mu_);
   int status;
   pid_t pid;
   while (true) {
