@@ -223,15 +223,20 @@ static void OpCb(pmix_status_t status, void* cbdata) {
               PMIx_Error_string(status));
 }
 
+// Stores the PMIx errhandler ref so we can deregister it on shutdown.
+static size_t g_pmix_errhandler_ref = 0;
+
 static void ErrHandlerRegCb(pmix_status_t status, size_t errhandler_ref,
                                   void *cbdata) {
+  if (status == PMIX_SUCCESS)
+    g_pmix_errhandler_ref = errhandler_ref;
   CRANE_DEBUG(
       "Errhandler registration callback is called with status={}, "
       "ref={}",
       status, static_cast<int>(errhandler_ref));
 }
 
-void ErrHandler_(size_t evhdlr_registration_id,
+static void ErrHandler_(size_t evhdlr_registration_id,
                         pmix_status_t status,
                         const pmix_proc_t *source,
                         pmix_info_t info[], size_t ninfo,
@@ -256,8 +261,10 @@ PmixServer::~PmixServer() {
 
   util::os::DeleteFolders(m_pmix_job_info_.server_tmpdir);
 
-  /* deregister the errhandler */
-//  PMIx_Deregister_event_handler(0, OpCb, NULL);
+  /* deregister the errhandler using the stored ref from registration */
+  if (g_pmix_errhandler_ref != 0) {
+    PMIx_Deregister_event_handler(g_pmix_errhandler_ref, OpCb, nullptr);
+  }
 
   int rc = PMIx_server_finalize();
   if (rc != PMIX_SUCCESS)

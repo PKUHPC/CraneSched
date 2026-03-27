@@ -31,17 +31,22 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   util::write_lock_guard lock_guard(m_mutex_);
 
   for (const auto& coll : m_coll_list_) {
-    if (coll->GetProcNum() != procs.size()) continue;
     if (coll->GetType() != type) continue;
+    if (coll->GetProcNum() != procs.size()) continue;
+    // Zero-proc collectives are matched by type alone
     if (!coll->GetProcNum()) return coll;
 
+    bool all_match = true;
     for (size_t i = 0; i < procs.size(); i++) {
-      if (i > coll->GetProcNum()) break;
-      const auto proc = coll->GetProcs(i);
-      if (proc && std::strcmp(proc->nspace, procs[i].nspace) == 0 &&
-          proc->rank == procs[i].rank)
-        return coll;
+      if (i >= coll->GetProcNum()) { all_match = false; break; }
+      const auto* proc = coll->GetProcs(i);
+      if (!proc || std::strcmp(proc->nspace, procs[i].nspace) != 0 ||
+          proc->rank != procs[i].rank) {
+        all_match = false;
+        break;
+      }
     }
+    if (all_match) return coll;
   }
 
   std::shared_ptr<Coll> coll = nullptr;

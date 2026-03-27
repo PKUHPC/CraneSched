@@ -165,11 +165,13 @@ bool PmixGrpcServer::Init(const Config& config) {
 
   std::string listen_addr = "0.0.0.0";
   int selected_port = 0;
-  if (config.UseTls)
-    // TODO:
+  if (config.UseTls) {
+    // TODO: implement TLS-secured listener; currently falling back to insecure
+    CRANE_WARN("PMIx gRPC: TLS requested but not yet implemented — falling back to insecure listener");
     ServerBuilderAddTcpInsecureListeningRandomPort(&builder, listen_addr, &selected_port);
-  else
+  } else {
     ServerBuilderAddTcpInsecureListeningRandomPort(&builder, listen_addr, &selected_port);
+  }
 
   builder.RegisterService(m_service_impl_.get());
 
