@@ -471,21 +471,7 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_ = std::make_unique<CranedClient>(m_pmix_job_info_);
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
-  // if (m_pmix_job_info_.pmix_direct_conn_ucx == "true") {
-  // #ifdef HAVE_UCX
-  //   m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_job_info_.node_num);
-  //   m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
-  //   CRANE_TRACE("Using UCX for PMIx communication as CranePmixDirectConnUcx is set to true.");
-  // #else
-  //   CRANE_ERROR("UCX support is not enabled in this build, cannot use UCX for PMIx communication.");
-  //   return false;
-  // #endif
-  // } else {
-  //   m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num);
-  //   m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
-  //   CRANE_TRACE("Using gRPC for PMIx communication as CranePmixDirectConnUcx is not set to true.");
-  // }
-
+  if (m_pmix_job_info_.pmix_direct_conn_ucx == "true") {
   #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_job_info_.node_num);
     m_pmix_async_server_ = std::make_unique<PmixUcxServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
@@ -494,6 +480,11 @@ bool PmixServer::ConnInit_(const Config& config) {
     CRANE_ERROR("UCX support is not enabled in this build, cannot use UCX for PMIx communication.");
     return false;
   #endif
+  } else {
+    m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num);
+    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>(m_dmodex_mgr_.get(), m_pmix_state_.get(), m_craned_client_.get());
+    CRANE_TRACE("Using gRPC for PMIx communication as default.");
+  }
 
   if (!m_pmix_async_server_->Init(config))
     return false;
