@@ -2,48 +2,50 @@
 
 本指南介绍如何为鹤思安装和配置所有数据库相关组件，包括 MongoDB、嵌入式数据库和 Vault 集成。
 
-鹤思使用两类数据库：
+鹤思涉及以下三类数据存储/证书组件：
 
 - **MongoDB**：外部数据库，用于持久化存储作业历史、账户信息等。仅在**控制节点**上需要。
 - **嵌入式数据库（EmbeddedDb）**：内嵌在 CraneCtld 进程中，用于快速存取运行时状态（待执行队列、运行队列等），支持崩溃恢复。
+- **Vault（可选）**：用于 PKI/TLS 证书管理。仅在启用 TLS 加密通信时需要。
 
 ## 完整配置参考
 
 `/etc/crane/database.yaml` 完整配置示例：
 
-```yaml
-# ============ 嵌入式数据库配置 ============
-# 嵌入式数据库后端类型：Unqlite（默认）或 BerkeleyDB
-CraneEmbeddedDbBackend: Unqlite
+??? example "展开查看 /etc/crane/database.yaml 完整配置示例"
+    ```yaml
+    # ============ 嵌入式数据库配置 ============
+    # 嵌入式数据库后端类型（默认 Unqlite）
+    CraneEmbeddedDbBackend: Unqlite
 
-# CraneCtld 嵌入式数据库文件路径
-# 相对于 CraneBaseDir（如果配置了 Keepalived，则相对于 CraneSharedBaseDir）
-CraneCtldDbPath: cranectld/embedded.db
+    # CraneCtld 嵌入式数据库文件路径
+    # 相对于 CraneBaseDir（如果配置了 Keepalived，则相对于 CraneSharedBaseDir）
+    CraneCtldDbPath: cranectld/embedded.db
 
-# ============ MongoDB 配置 ============
-DbUser: admin
-DbPassword: "123456"
-DbHost: localhost
-DbPort: 27017
-DbReplSetName: crane_rs
-DbName: crane_db
+    # ============ MongoDB 配置 ============
+    DbUser: admin
+    DbPassword: "123456"
+    DbHost: localhost
+    DbPort: 27017
+    DbReplSetName: crane_rs
+    DbName: crane_db
 
-# 作业聚合超时时间（毫秒），用于 MongoDB 聚合操作
-JobAggregationTimeoutMs: 600000
+    # 作业聚合超时时间（毫秒），用于 MongoDB 聚合操作
+    JobAggregationTimeoutMs: 600000
 
-# 作业聚合批次大小，用于 MongoDB 批量操作
-JobAggregationBatchSize: 100
+    # 作业聚合批次大小，用于 MongoDB 批量操作
+    JobAggregationBatchSize: 100
 
-# ============ Vault 配置（可选，用于 PKI/TLS） ============
-Vault:
-  Enabled: false
-  Addr: 127.0.0.1
-  Port: 8200
-  Username: admin
-  Password: "123456"
-  Tls: false
-  ExpirationMinutes: 30
-```
+    # ============ Vault 配置（可选，用于 PKI/TLS） ============
+    Vault:
+      Enabled: false
+      Addr: 127.0.0.1
+      Port: 8200
+      Username: admin
+      Password: "123456"
+      Tls: false
+      ExpirationMinutes: 30
+    ```
 
 ---
 
@@ -55,12 +57,10 @@ Vault:
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `CraneEmbeddedDbBackend` | 字符串 | `Unqlite` | 嵌入式数据库引擎，可选 `Unqlite` 或 `BerkeleyDB` |
+| `CraneEmbeddedDbBackend` | 字符串 | `Unqlite` | 嵌入式数据库引擎，默认使用 `Unqlite` |
 | `CraneCtldDbPath` | 路径 | `cranectld/embedded.db` | 数据库文件存储路径 |
 
-### 后端选择
-
-#### Unqlite（默认推荐）
+### 默认后端：Unqlite
 
 [Unqlite](https://unqlite.org/) 是一个嵌入式的 NoSQL 数据库引擎，零配置、无需外部依赖。
 
@@ -68,25 +68,8 @@ Vault:
 CraneEmbeddedDbBackend: Unqlite
 ```
 
-- **优势**：零配置，开箱即用，轻量级
-- **适用场景**：大多数部署环境
-
 !!! note
     Unqlite 对单次事务中的记录数有约 900,000 条的上限限制，这会影响待执行队列的最大容量。
-
-#### BerkeleyDB
-
-[BerkeleyDB](https://www.oracle.com/database/technologies/related/berkeleydb.html) 是 Oracle 提供的高性能嵌入式数据库。
-
-```yaml
-CraneEmbeddedDbBackend: BerkeleyDB
-```
-
-- **优势**：更成熟的事务支持，适合大规模部署
-- **前置条件**：编译时需启用 BerkeleyDB 支持，并安装 BerkeleyDB 开发库
-
-!!! warning
-    使用 BerkeleyDB 需要在编译鹤思时包含 BerkeleyDB 支持（CMake 会自动检测）。如果编译时未检测到 BerkeleyDB，运行时选择此后端将导致启动失败。
 
 ### 数据库路径
 
@@ -290,33 +273,9 @@ JobAggregationBatchSize: 100
 
 ## 4. Vault 集成（可选）
 
-Vault 集成用于 PKI/TLS 证书管理，为鹤思集群提供加密通信。这是一个**可选**配置，仅在启用 TLS 加密时需要。
+Vault 用于 PKI/TLS 证书管理，为鹤思集群提供证书签发与轮换能力。这是一个**可选**配置，仅在启用 TLS 加密通信时需要。
 
-```yaml
-Vault:
-  Enabled: false
-  Addr: 127.0.0.1
-  Port: 8200
-  Username: admin
-  Password: "123456"
-  Tls: false
-  ExpirationMinutes: 30
-```
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `Enabled` | 布尔值 | `false` | 是否启用 Vault 集成 |
-| `Addr` | 字符串 | `127.0.0.1` | Vault 服务地址 |
-| `Port` | 字符串 | `8200` | Vault 服务端口 |
-| `Username` | 字符串 | — | Vault 认证用户名，**启用时必须配置** |
-| `Password` | 字符串 | — | Vault 认证密码，**启用时必须配置** |
-| `Tls` | 布尔值 | `false` | Vault 服务本身是否启用 TLS。生产环境建议启用 |
-| `ExpirationMinutes` | 整数 | `30` | 签发证书的有效期（分钟） |
-
-!!! note
-    启用 TLS 时必须同时启用 Vault。如果在 `config.yaml` 中开启了 TLS 但未启用 Vault，CraneCtld 将拒绝启动。
-
-有关 Vault 的完整安装和配置指南，请参阅 [PKI 安全配置](pki.md)。
+Vault 的安装、初始化、策略与 `database.yaml` 相关字段说明，请参阅 [PKI 安全配置](pki.md)。
 
 ---
 
@@ -363,8 +322,7 @@ chown crane:crane /etc/crane/database.yaml
 
 **启动时报数据库后端错误**：
 
-- 检查 `CraneEmbeddedDbBackend` 拼写是否正确（区分大小写：`Unqlite` 或 `BerkeleyDB`）
-- 如果选择 `BerkeleyDB`，确认编译时已包含 BerkeleyDB 支持
+- 检查 `CraneEmbeddedDbBackend` 拼写是否正确（区分大小写：`Unqlite`）
 
 **数据库文件权限问题**：
 
