@@ -74,13 +74,20 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
                                          int rank, pmix_modex_cbfunc_t cbfunc,
                                          void *cbdata) {
   // Find the node host corresponding to the nspace-rank.
+  // Guard: negative rank would wrap when compared to size_t, check explicitly.
+  if (rank < 0) {
+    CRANE_ERROR("Invalid negative rank {}", rank);
+    return false;
+  }
+
   if (m_pmix_job_info_.nspace != pmix_namespace) {
     CRANE_ERROR("Cannot find pmix namespace {}", pmix_namespace);
     return false;
   }
 
-  if (rank >= m_pmix_job_info_.task_map.size()) {
-    CRANE_ERROR("The rank is out of the range of the task_map.");
+  if (static_cast<size_t>(rank) >= m_pmix_job_info_.task_map.size()) {
+    CRANE_ERROR("The rank {} is out of the range of the task_map (size={}).",
+                rank, m_pmix_job_info_.task_map.size());
     return false;
   }
 

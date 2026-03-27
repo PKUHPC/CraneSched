@@ -39,7 +39,7 @@ bool PmixCollRing::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
         hostname_set.emplace(hostname);
       }
     } else {
-      if (proc.rank > m_pmix_job_info_.task_map.size()) {
+      if (proc.rank >= m_pmix_job_info_.task_map.size()) {
         CRANE_ERROR("The rank is out of the task number range.");
         return false;
       }
@@ -314,8 +314,9 @@ bool PmixCollRing::ProcessRingRequest(
 
   CRANE_DEBUG("collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}", hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(), hdr.msgsize());
 
-  if (m_seq_-1 == hdr.seq()) {
-    CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
+  // Guard against uint32_t underflow when m_seq_ == 0
+  if (m_seq_ > 0 && m_seq_ - 1 == hdr.seq()) {
+    CRANE_DEBUG("{:p}: stale contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
     return false;
   }
 
@@ -366,10 +367,17 @@ bool PmixCollRing::PmixCollRingNeighbor_(
                   coll_ring_ctx->seq, ToString(coll_ring_ctx->state), hdr.craned_id(),
                   hdr.contrib_id(), hdr.hop_seq(), hdr.msgsize());
 
-  /* compute the actual hops of ring: (src - dst + size) % size */
-  uint32_t hop_seq = ((m_peerid_ + m_peers_cnt_ - hdr.contrib_id()) % m_peers_cnt_) - 1;
+  /* compute the actual hops of ring: (src - dst + size) % size
+   * dist = (peerid - contrib_id + peers_cnt) % peers_cnt, then hop_seq = dist - 1.
+   * Guard against underflow: dist == 0 means self-loop which must not happen. */
+  uint32_t dist = (m_peerid_ + m_peers_cnt_ - hdr.contrib_id()) % m_peers_cnt_;
+  if (dist == 0) {
+    CRANE_ERROR("{:p}: received own contribution from {}, ignoring", static_cast<void*>(this), hdr.craned_id());
+    return false;
+  }
+  uint32_t hop_seq = dist - 1;
   if (hop_seq != hdr.hop_seq()) {
-    CRANE_DEBUG("{:p}: unexpected ring seq number={}, expect={}, coll seq={}", static_cast<void*>(this), hdr.hop_seq(), hop_seq, hdr.seq(), m_seq_);
+    CRANE_DEBUG("{:p}: unexpected ring hop_seq={}, expect={}, coll seq={}", static_cast<void*>(this), hdr.hop_seq(), hop_seq, hdr.seq());
     return false;
   }
 
