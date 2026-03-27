@@ -1,3 +1,21 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "PmixUcxClient.h"
 #include "crane/Logger.h"
 
@@ -79,7 +97,6 @@ void PmixUcxStub::SendHandle_(void* request, ucs_status_t status,
           {std::move(ctx->callback), status == UCS_OK});
       if (ctx->client->m_notify_fn_) ctx->client->m_notify_fn_();
     } else {
-      // 兜底: client 为空时直接调用 (不应发生)
       ctx->callback(status == UCS_OK);
     }
     delete ctx;
