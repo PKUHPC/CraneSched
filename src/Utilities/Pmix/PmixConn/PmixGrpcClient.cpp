@@ -106,8 +106,8 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   int cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}, node num: {}", craned_id,
-              ip_addr, port, cur_count, m_node_num_);
+  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}/{}", craned_id,
+              ip_addr, port, cur_count, m_node_num_-1);
 
   craned->m_channel_ =
       CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
@@ -131,16 +131,11 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 std::shared_ptr<PmixStub> PmixGrpcClient::GetPmixStub(const CranedId& craned_id) {
 
   std::shared_ptr<PmixGrpcStub> pmix_stub = nullptr;
-  for (int i = 0; i < 5; ++i) {
     m_craned_id_stub_map_.if_contains(
-        craned_id, [&](std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>& pair) {
-            pmix_stub = pair.second;
-        });
-    if (pmix_stub)
-      return pmix_stub;
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  }
-  return nullptr;
+      craned_id, [&](std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>& pair) {
+          pmix_stub = pair.second;
+    });
+  return pmix_stub;
 }
 
 } // namespace pmix
