@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,112 +18,154 @@
 
 #pragma once
 
-#include <ucp/api/ucp_compat.h>
-#include <ucp/api/ucp_def.h>
-
 #include "PmixClient.h"
-#include "crane/Lock.h"
+#include "PmixCommon.h"
 #include "protos/Pmix.grpc.pb.h"
 
+#include "concurrentqueue/concurrentqueue.h"
 #include <parallel_hashmap/phmap.h>
+
+#ifdef HAVE_UCX
+#include <ucp/api/ucp.h>
+#endif
+
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
 
 namespace pmix {
 
 class PmixUcxClient;
 
-class PmixUcxStub : public PmixStub {
-public:
-  explicit PmixUcxStub(PmixUcxClient *pmix_client);
 #ifdef HAVE_UCX
-  ~PmixUcxStub() override {
-    ucp_ep_destroy(m_ep_);
-  }
+
+struct PmixSendCtx {
+  AsyncCallback  callback;
+  std::string    buffer;              // owned — valid until SendHandle_ fires
+  PmixUcxClient* client{nullptr};
+};
+#endif
+
+class PmixUcxStub : public PmixStub {
+ public:
+  explicit PmixUcxStub(PmixUcxClient* client);
+
+#ifdef HAVE_UCX
+  ~PmixUcxStub() override;
 
   void SendPmixRingMsgNoBlock(
-      const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::SendPmixRingMsgReq& request,
+      AsyncCallback callback) override;
 
   void PmixTreeUpwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq& request,
+      AsyncCallback callback) override;
 
   void PmixTreeDownwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq& request,
+      AsyncCallback callback) override;
 
   void PmixDModexRequestNoBlock(
-      const crane::grpc::pmix::PmixDModexRequestReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixDModexRequestReq& request,
+      AsyncCallback callback) override;
 
   void PmixDModexResponseNoBlock(
-      const crane::grpc::pmix::PmixDModexResponseReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixDModexResponseReq& request,
+      AsyncCallback callback) override;
 
-private:
+ private:
+  // 序列化 payload → 打 tag → 投递异步 send
+  void SendMessage_(PmixUcxMsgType type,
+                    std::string    data,
+                    AsyncCallback  callback);
 
-  static void SendHandle_(void *request, ucs_status_t status, void *user_data);
+  static void SendHandle_(void* request, ucs_status_t status, void* user_data);
 
-  PmixUcxClient *m_pmix_client_;
-
-  ucp_ep_h m_ep_;
-
-  CranedId m_craned_id_;
+  PmixUcxClient* m_client_;      // non-owning
+  ucp_ep_h       m_ep_{nullptr};
+  CranedId       m_craned_id_;
 
   friend class PmixUcxClient;
-#endif
+#endif  // HAVE_UCX
 };
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// PmixUcxClient  —  Manages all UCX connections to remote nodes
+//
+// Lifecycle:
+//   1. Construct (node_num)
+//   2. InitUcxWorker()        Called by PmixUcxServer::Init() to inject worker
+//   3. SetNotifyFn()          Called by PmixUcxServer::Init() to inject notify function
+//   4. EmplacePmixStub() × N  Concurrency-safe, idempotent on duplicate key
+//   5. WaitAllStubReady()     Block until node_num-1 connections are ready
+//   6. GetPmixStub()          Can be called at any time, returns nullptr on timeout
+//   7. DrainSendCallbacks()   Called periodically on PMIx Loop thread to consume deferred callbacks
+// ─────────────────────────────────────────────────────────────────────────────
 class PmixUcxClient : public PmixClient {
-public:
-  PmixUcxClient(int node_num) : m_node_num_(node_num) {}
-
+ public:
+  explicit PmixUcxClient(int node_num) : m_node_num_(node_num) {}
   ~PmixUcxClient() override = default;
+
 #ifdef HAVE_UCX
-  void InitUcxWorker(util::mutex& worker_lock, ucp_worker_h ucp_worker_) {
-    m_ucp_worker_ = ucp_worker_;
-    m_worker_lock_ = &worker_lock;
+  void InitUcxWorker(ucp_worker_h worker) {
+    m_ucp_worker_ = worker;
   }
 
-  void EmplacePmixStub(const CranedId &craned_id, const std::string& port) override;
-
-  std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) override;
-
-  uint64_t GetChannelCount() const override { return m_channel_count_.load(); }
-
-  bool WaitAllStubReady() override {
-    if (m_node_num_ == 1) return true;
-
-    std::unique_lock<std::mutex> lock(m_mutex_);
-    if (GetChannelCount()+1 >= m_node_num_) return true;
-
-    bool ready = m_cv_.wait_for(lock, std::chrono::seconds(5), [this](){
-        return GetChannelCount()+1 >= m_node_num_; 
-    });
-    
-    return ready;
+  void SetNotifyFn(std::function<void()> fn) {
+    m_notify_fn_ = std::move(fn);
   }
-private:
-  template <typename K, typename V,
-          typename Hash = absl::container_internal::hash_default_hash<K>>
-using NodeHashMap = absl::node_hash_map<K, V, Hash>;
 
-  using CranedIdToStubMap = phmap::parallel_flat_hash_map<
-      CranedId,
-      std::shared_ptr<PmixUcxStub>, phmap::priv::hash_default_hash<CranedId>,
+  void DrainSendCallbacks() {
+    std::pair<AsyncCallback, bool> item;
+    while (m_send_cb_queue_.try_dequeue(item)) {
+      item.first(item.second);
+    }
+  }
+
+  void EmplacePmixStub(const CranedId&    craned_id,
+                       const std::string& addr_bytes) override;
+
+  std::shared_ptr<PmixStub> GetPmixStub(const CranedId& craned_id) override;
+
+  uint64_t GetChannelCount() const override {
+    return m_channel_count_.load(std::memory_order_acquire);
+  }
+
+  bool WaitAllStubReady() override;
+
+ private:
+  bool AllStubsReady_() const {
+    return static_cast<int>(
+               m_channel_count_.load(std::memory_order_acquire)) >=
+           m_node_num_ - 1;
+  }
+
+  using StubMap = phmap::parallel_flat_hash_map<
+      CranedId, std::shared_ptr<PmixUcxStub>,
+      phmap::priv::hash_default_hash<CranedId>,
       phmap::priv::hash_default_eq<CranedId>,
-      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixUcxStub>>>, 4,
-      std::shared_mutex>;
+      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixUcxStub>>>,
+      4, std::shared_mutex>;
 
-  CranedIdToStubMap m_craned_id_stub_map_;
-
-  std::mutex m_mutex_;
+  StubMap                 m_stub_map_;
+  mutable std::mutex      m_cv_mu_;
   std::condition_variable m_cv_;
 
-  util::mutex* m_worker_lock_;
-  ucp_worker_h m_ucp_worker_;
-#endif
+  ucp_worker_h  m_ucp_worker_{nullptr}; 
 
-  int m_node_num_;
+  moodycamel::ConcurrentQueue<std::pair<AsyncCallback, bool>> m_send_cb_queue_;
 
-  std::atomic_uint64_t m_channel_count_{0};
+  std::function<void()> m_notify_fn_;
+
+  friend class PmixUcxStub;
+#endif  // HAVE_UCX
+
+  int                   m_node_num_;
+  std::atomic<uint64_t> m_channel_count_{0};
 };
 
-
-
-}// namespace pmix
+}  // namespace pmix

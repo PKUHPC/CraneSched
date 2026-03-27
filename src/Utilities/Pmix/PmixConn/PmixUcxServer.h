@@ -1,131 +1,110 @@
-/**
-* Copyright (c) 2024 Peking University and Peking University
- * Changsha Institute for Computing and Digital Economy
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
-
 #pragma once
 
+#include "CranedClient.h"
 #include "PmixASyncServer.h"
-
 #include "PmixCommon.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
-#include "CranedClient.h"
 
 #include "concurrentqueue/concurrentqueue.h"
 #include "uvw/async.h"
+#include "uvw/loop.h"
+#include "uvw/poll.h"
 
 #ifdef HAVE_UCX
 #include <ucp/api/ucp.h>
 #endif
 
+#include <atomic>
+#include <thread>
+
 namespace pmix {
+
 class PmixUcxServer;
 
 #ifdef HAVE_UCX
 struct PmixUcxReq {
-  PmixUcxMsgType type;
-  std::string data;
-  PmixUcxServer* self{};
+  PmixUcxMsgType type{};
+  std::string    data;
+  PmixUcxServer* self{nullptr};
 };
 #endif
 
 class PmixUcxServiceImpl {
-public:
-  explicit PmixUcxServiceImpl(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state) :
-      m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {};
+ public:
+  explicit PmixUcxServiceImpl(PmixDModexReqManager* dmodex_mgr,
+                              PmixState*            pmix_state)
+      : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {}
+
 #ifdef HAVE_UCX
-  void SendPmixRingMsg(const std::string& req_data);
-
-  void PmixTreeUpwardForward(const std::string& req_data);
-
-  void PmixTreeDownwardForward(const std::string& req_data);
-
-  void PmixDModexRequest(const std::string& req_data);
-
-  void PmixDModexResponse(const std::string& req_data);
+  void SendPmixRingMsg(const std::string& data);
+  void PmixTreeUpwardForward(const std::string& data);
+  void PmixTreeDownwardForward(const std::string& data);
+  void PmixDModexRequest(const std::string& data);
+  void PmixDModexResponse(const std::string& data);
 #endif
 
-private:
+ private:
   PmixDModexReqManager* m_dmodex_mgr_;
-  PmixState* m_pmix_state_;
+  PmixState*            m_pmix_state_;
 };
 
-class PmixUcxServer: public PmixASyncServer {
-public:
+class PmixUcxServer : public PmixASyncServer {
+ public:
 #ifdef HAVE_UCX
-  explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state, CranedClient* craned_client)
-      : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state), m_craned_client_(craned_client) {};
-      
-  ~PmixUcxServer() override {
-    if (m_ucp_worker_) ucp_worker_destroy(m_ucp_worker_);
-    if (m_ucp_context_) ucp_cleanup(m_ucp_context_);
-  }
+  explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr,
+                         PmixState*            pmix_state,
+                         CranedClient*         craned_client)
+      : m_dmodex_mgr_(dmodex_mgr),
+        m_pmix_state_(pmix_state),
+        m_craned_client_(craned_client) {}
+
+  ~PmixUcxServer() override { Shutdown(); }
 
   bool Init(const Config& config) override;
+  void Shutdown() override;
+  void Wait() override {}
 
-  void Shutdown() override {  }
-
-  void Wait() override { }
-private:
-
+ private:
   void OnUcxReadable_();
 
   void RegisterReceivesAllTypes_();
-  void RegisterReceivesForType_(PmixUcxMsgType type, int cnt);
+  void RegisterReceivesForType_(PmixUcxMsgType type, int count);
 
-  static void RecvHandle_(void* request,
-                                ucs_status_t status,
-                                const ucp_tag_recv_info_t* info,
-                                void* user_data);
+  static void RecvHandle_(void*                      request,
+                          ucs_status_t               status,
+                          const ucp_tag_recv_info_t* info,
+                          void*                      user_data);
 
-  static uint64_t MakeTag_(PmixUcxMsgType type, uint64_t low48) {
-    return (static_cast<uint64_t>(type) << kTagTypeShift) | (low48 & kTagLowMask);
-  }
-  static PmixUcxMsgType TagToType_(uint64_t tag) {
-    return static_cast<PmixUcxMsgType>((tag & kTagTypeMask) >> kTagTypeShift);
-  }
-  static uint64_t TagLow_(uint64_t tag) { return (tag & kTagLowMask); }
+  void EvCleanUcxProcessReqQueueCb_();
 
-  template <class T>
-using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+  static PmixUcxMsgType TagToType_(uint64_t tag);
 
-  ucp_context_h m_ucp_context_{};
-  ucp_worker_h m_ucp_worker_{};
-  ucp_address_t *m_ucx_addr_{};
-  size_t m_ucx_alen_{};
-  int m_server_fd_{};
-
-  util::mutex m_mutex_;
-  std::list<std::shared_ptr<PmixUcxReq>> m_pending_reqs_;
+  ucp_context_h  m_ucp_context_{nullptr};
+  ucp_worker_h   m_ucp_worker_{nullptr};
+  ucp_address_t* m_ucx_addr_{nullptr};
+  size_t         m_ucx_alen_{0};
+  int            m_server_fd_{-1};
 
   std::unique_ptr<PmixUcxServiceImpl> m_service_impl_;
 
   PmixDModexReqManager* m_dmodex_mgr_;
-  PmixState* m_pmix_state_;
-  CranedClient* m_craned_client_;
+  PmixState*            m_pmix_state_;
+  CranedClient*         m_craned_client_;
 
-  std::shared_ptr<uvw::poll_handle> m_poll_;
-  std::shared_ptr<uvw::async_handle> m_ucx_process_req_async_handle_;
-  ConcurrentQueue<PmixUcxReq*> m_ucx_process_req_queue_;
-  void EvCleanUcxProcessReqQueueCb_();
+  std::shared_ptr<uvw::loop>         m_ucx_loop_;
+  std::thread                        m_ucx_thread_;
+  std::shared_ptr<uvw::poll_handle>  m_ucx_poll_; 
+  std::shared_ptr<uvw::async_handle> m_ucx_stop_;   
+
+  std::shared_ptr<uvw::async_handle> m_pmix_async_;
+
+  moodycamel::ConcurrentQueue<PmixUcxReq*> m_req_queue_;
+
+  std::atomic<bool> m_shutdown_{false};
 
   friend class PmixUcxServiceImpl;
 #endif
 };
 
-} // namespace pmix
+}  // namespace pmix
