@@ -913,7 +913,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         response->add_not_modified_reasons(
             fmt::format("Job #{} was not found in pending queue.", job_id));
       } else {
-        response->add_not_modified_jobs(false);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
       }

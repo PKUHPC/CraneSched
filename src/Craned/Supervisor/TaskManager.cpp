@@ -2584,12 +2584,12 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                   ExitCode::EC_SPAWN_FAILED, std::nullopt);
-      return;
+      continue;
 
     case CraneErrCode::ERR_CGROUP:
       TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                   ExitCode::EC_CGROUP_ERR, std::nullopt);
-      return;
+      continue;
 
     default:
       break;
