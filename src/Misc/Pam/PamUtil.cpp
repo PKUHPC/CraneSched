@@ -440,8 +440,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
       return false;
     }
 
-    pam_syslog(pamh, LOG_ERR,
-               "[Crane] QueryJobEnvVariablesForward succeeded.");
+    pam_syslog(pamh, LOG_ERR, "[Crane] QueryJobEnvVariablesForward succeeded.");
     for (const auto &[name, value] : reply.env_map()) {
       int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
       if (ret != PAM_SUCCESS) {

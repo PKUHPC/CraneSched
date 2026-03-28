@@ -240,11 +240,9 @@ class EmbeddedDbClient {
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
-  bool AppendJobsToPendingAndAdvanceJobIds(
-      const std::vector<JobInCtld*>& jobs);
+  bool AppendJobsToPendingAndAdvanceJobIds(const std::vector<JobInCtld*>& jobs);
 
-  bool PurgeEndedJobs(
-      const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
+  bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 
   bool UpdateRuntimeAttrOfJob(
       txn_id_t txn_id, db_id_t db_id,
@@ -255,7 +253,7 @@ class EmbeddedDbClient {
   }
 
   bool UpdateJobToCtld(txn_id_t txn_id, db_id_t db_id,
-                        crane::grpc::JobToCtld const& job_to_ctld_ref) {
+                       crane::grpc::JobToCtld const& job_to_ctld_ref) {
     return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                             GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
         .has_value();
@@ -271,14 +269,15 @@ class EmbeddedDbClient {
   }
 
   bool UpdateJobToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                                crane::grpc::JobToCtld const& job_to_ctld_ref) {
+                               crane::grpc::JobToCtld const& job_to_ctld_ref) {
     return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
-                                    GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
+                                    GetFixedDbEntryName_(db_id),
+                                    &job_to_ctld_ref)
         .has_value();
   }
 
   bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
-                         JobInEmbeddedDb* job_in_db) {  // Only used in test
+                        JobInEmbeddedDb* job_in_db) {  // Only used in test
     return FetchJobDataInDbAtomic_(txn_id, db_id, job_in_db).has_value();
   }
 

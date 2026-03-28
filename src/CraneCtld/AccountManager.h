@@ -153,8 +153,8 @@ class AccountManager {
                                                     const std::string& account);
 
   CraneExpected<void> CheckQosLimitOnJob(const std::string& user,
-                                          const std::string& account,
-                                          JobInCtld* job);
+                                         const std::string& account,
+                                         JobInCtld* job);
 
   CraneExpected<std::string> CheckUidIsAdmin(uint32_t uid);
 

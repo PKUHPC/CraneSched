@@ -161,10 +161,8 @@ void LuaEnvironment::RegisterFunctions_() {
   m_crane_table_["ERROR"] = static_cast<int>(CraneErrCode::ERR_LUA_FAILED);
   m_crane_table_["SUCCESS"] = static_cast<int>(CraneErrCode::SUCCESS);
 
-  m_crane_table_["Pending"] =
-      static_cast<int>(crane::grpc::JobStatus::Pending);
-  m_crane_table_["Running"] =
-      static_cast<int>(crane::grpc::JobStatus::Running);
+  m_crane_table_["Pending"] = static_cast<int>(crane::grpc::JobStatus::Pending);
+  m_crane_table_["Running"] = static_cast<int>(crane::grpc::JobStatus::Running);
   m_crane_table_["Completed"] =
       static_cast<int>(crane::grpc::JobStatus::Completed);
   m_crane_table_["Failed"] = static_cast<int>(crane::grpc::JobStatus::Failed);

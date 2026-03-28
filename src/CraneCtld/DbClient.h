@@ -150,8 +150,8 @@ class MongodbClient {
   bool CheckJobDbIdExisted(int64_t job_db_id);
 
   // Fetch job status (state, exit_code, time_end, time_start)
-  std::unordered_map<job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t,
-                                           int64_t, int64_t>>
+  std::unordered_map<
+      job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
   FetchJobStatus(const std::unordered_set<job_id_t>& job_ids);
 
   /* ----- Method of operating the step table ----------- */
@@ -175,7 +175,7 @@ class MongodbClient {
 
   // Mark job as aggregated in job_table
   void MarkJobAsAggregated(job_id_t job_id,
-                            mongocxx::client_session* session = nullptr);
+                           mongocxx::client_session* session = nullptr);
 
   // Recovery functions for startup
   void RecoverMissingAggregations_();

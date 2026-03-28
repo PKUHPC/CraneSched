@@ -26,10 +26,10 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "JobScheduler.h"
 #include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
-#include "JobScheduler.h"
 #include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -144,7 +144,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   if (!orphaned_steps.empty()) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
     g_job_scheduler->TerminateOrphanedSteps(orphaned_steps,
-                                             request->craned_id());
+                                            request->craned_id());
     for (const auto& [job_id, steps] : orphaned_steps) {
       // Reverse order: we should process larger step_id first to avoid warnings
       // abort daemon/primary steps
@@ -451,7 +451,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (g_job_scheduler->TerminatePendingOrRunningIaStep(
                   payload.job_id(), payload.step_id()) != CraneErrCode::SUCCESS)
             stream_writer->WriteJobCompletionAckReply(payload.job_id(),
-                                                       payload.step_id());
+                                                      payload.step_id());
           else {
             CRANE_TRACE(
                 "[Step #{}.{}] Termination succeeded. "
@@ -482,9 +482,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       stream_writer->Invalidate();
       m_ctld_server_->m_mtx_.Lock();
 
-      auto running_steps =
-          m_ctld_server_->m_cfored_running_jobs_[cfored_name] |
-          std::ranges::to<std::unordered_map>();
+      auto running_steps = m_ctld_server_->m_cfored_running_jobs_[cfored_name] |
+                           std::ranges::to<std::unordered_map>();
       m_ctld_server_->m_cfored_running_jobs_.erase(cfored_name);
       m_ctld_server_->m_mtx_.Unlock();
 
@@ -863,8 +862,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
   CraneErrCode err;
   if (request->attribute() == ModifyJobRequest::TimeLimit) {
     for (auto job_id : job_ids) {
-      err = g_job_scheduler->ChangeJobTimeLimit(
-          job_id, request->time_limit_seconds());
+      err = g_job_scheduler->ChangeJobTimeLimit(job_id,
+                                                request->time_limit_seconds());
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -884,7 +883,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
   } else if (request->attribute() == ModifyJobRequest::Priority) {
     for (auto job_id : job_ids) {
       err = g_job_scheduler->ChangeJobPriority(job_id,
-                                                 request->mandated_priority());
+                                               request->mandated_priority());
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -902,8 +901,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     std::vector<std::pair<job_id_t, std::future<CraneErrCode>>> results;
     results.reserve(job_ids.size());
     for (auto job_id : job_ids) {
-      results.emplace_back(
-          job_id, g_job_scheduler->HoldReleaseJobAsync(job_id, secs));
+      results.emplace_back(job_id,
+                           g_job_scheduler->HoldReleaseJobAsync(job_id, secs));
     }
     for (auto& [job_id, res] : results) {
       err = res.get();
@@ -1150,12 +1149,12 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
       it = job_info_map.erase(it);
     }
 
-    std::sort(
-        job_info_list->begin(), job_info_list->end(),
-        [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-          return (a.status() == b.status()) ? (a.priority() > b.priority())
-                                            : (a.status() < b.status());
-        });
+    std::sort(job_info_list->begin(), job_info_list->end(),
+              [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
+                return (a.status() == b.status())
+                           ? (a.priority() > b.priority())
+                           : (a.status() < b.status());
+              });
 
     if (job_info_list->size() > limit)
       job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);

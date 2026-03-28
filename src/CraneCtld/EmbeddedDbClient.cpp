@@ -586,7 +586,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 }
 
 bool EmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
-                                       db_id_t next_job_db_id) {
+                                      db_id_t next_job_db_id) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -819,39 +819,39 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
     return false;
   }
 
-  result = m_fixed_db_->IterateAllKv(
-      [&](std::string&& key, std::vector<uint8_t>&& value) {
-        job_db_id_t id = ExtractDbIdFromEntry_(key);
+  result = m_fixed_db_->IterateAllKv([&](std::string&& key,
+                                         std::vector<uint8_t>&& value) {
+    job_db_id_t id = ExtractDbIdFromEntry_(key);
 
-        // Delete incomplete job fixed data,
-        // where fixed data are stored but variable data are missing.
-        auto runtime_attr_it = db_id_runtime_attr_map.find(id);
-        if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
+    // Delete incomplete job fixed data,
+    // where fixed data are stored but variable data are missing.
+    auto runtime_attr_it = db_id_runtime_attr_map.find(id);
+    if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
 
-        JobStatus status = runtime_attr_it->second.status();
+    JobStatus status = runtime_attr_it->second.status();
 
-        // Assemble JobInEmbeddedDb here.
-        JobInEmbeddedDb job_data;
-        *job_data.mutable_runtime_attr() = std::move(runtime_attr_it->second);
-        job_data.mutable_job_to_ctld()->ParseFromArray(value.data(), value.size());
+    // Assemble JobInEmbeddedDb here.
+    JobInEmbeddedDb job_data;
+    *job_data.mutable_runtime_attr() = std::move(runtime_attr_it->second);
+    job_data.mutable_job_to_ctld()->ParseFromArray(value.data(), value.size());
 
-        // Dispatch to different queues by status.
-        switch (status) {
-        case crane::grpc::Pending:
-          snapshot->pending_queue.emplace(id, std::move(job_data));
-          break;
-        case crane::grpc::Running:
-        case crane::grpc::Starting:
-        case crane::grpc::Configuring:
-        case crane::grpc::Completing:
-          snapshot->running_queue.emplace(id, std::move(job_data));
-          break;
-        default:
-          snapshot->final_queue.emplace(id, std::move(job_data));
-          break;
-        }
-        return true;
-      });
+    // Dispatch to different queues by status.
+    switch (status) {
+    case crane::grpc::Pending:
+      snapshot->pending_queue.emplace(id, std::move(job_data));
+      break;
+    case crane::grpc::Running:
+    case crane::grpc::Starting:
+    case crane::grpc::Configuring:
+    case crane::grpc::Completing:
+      snapshot->running_queue.emplace(id, std::move(job_data));
+      break;
+    default:
+      snapshot->final_queue.emplace(id, std::move(job_data));
+      break;
+    }
+    return true;
+  });
 
   if (!result) {
     CRANE_ERROR("Failed to restore fixed data into queues!");
@@ -1013,8 +1013,8 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     return false;
   }
 
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            s_next_job_db_id_str_, &job_db_id);
+  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_db_id_str_,
+                            &job_db_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_db_id.");
     return false;

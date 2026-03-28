@@ -32,12 +32,12 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "JobScheduler.h"
 #include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
-#include "JobScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 

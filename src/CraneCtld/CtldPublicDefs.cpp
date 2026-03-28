@@ -957,8 +957,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     }
     if (job.JobToCtld().has_container_meta()) {
       // ccon has container_meta.
-      step.mutable_container_meta()->CopyFrom(
-          job.JobToCtld().container_meta());
+      step.mutable_container_meta()->CopyFrom(job.JobToCtld().container_meta());
     }
   }
 
@@ -1549,7 +1548,7 @@ void JobInCtld::UpdateDependency(job_id_t dep_job_id, absl::Time event_time) {
 }
 
 void JobInCtld::AddDependent(crane::grpc::DependencyType dep_type,
-                              job_id_t dep_job_id) {
+                             job_id_t dep_job_id) {
   if (dep_type == crane::grpc::DependencyType::AFTER &&
       status != crane::grpc::JobStatus::Pending) {
     // already satisfied

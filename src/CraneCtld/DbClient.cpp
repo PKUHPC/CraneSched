@@ -420,9 +420,8 @@ bool MongodbClient::InsertRecoveredJob(
 
   // Create filter by job_id
   document filter;
-  filter.append(
-      kvp("job_id",
-          static_cast<int32_t>(job_in_embedded_db.runtime_attr().job_id())));
+  filter.append(kvp("job_id", static_cast<int32_t>(
+                                  job_in_embedded_db.runtime_attr().job_id())));
 
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
@@ -737,7 +736,7 @@ bool MongodbClient::FetchJobRecords(
 
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                                option);
+                                                               option);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1020,7 +1019,7 @@ bool MongodbClient::FetchJobStepRecords(
 
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                                option);
+                                                               option);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1090,8 +1089,8 @@ bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
 std::unordered_map<
     job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
 MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
-  std::unordered_map<job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t,
-                                           int64_t, int64_t>>
+  std::unordered_map<
+      job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
       result;
 
   if (job_ids.empty()) {
@@ -1119,7 +1118,7 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
 
     mongocxx::cursor cursor =
         (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                                  options);
+                                                                 options);
 
     for (auto view : cursor) {
       job_id_t fetched_job_id = view["job_id"].get_int32().value;
@@ -1254,8 +1253,7 @@ bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
 
 // Real-time aggregation: Append job to acc_usage tables (hour/day/month)
 void MongodbClient::AppendToAccUsageTable(
-    const bsoncxx::document::view& job_doc,
-    mongocxx::client_session* session) {
+    const bsoncxx::document::view& job_doc, mongocxx::client_session* session) {
   using namespace std::chrono;
 
   try {
@@ -1325,8 +1323,8 @@ void MongodbClient::AppendToAccUsageTable(const JobInCtld* job,
     AppendToMonthTable_(info, session);
 
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to append job {} to acc_usage tables: {}",
-                job->JobId(), e.what());
+    CRANE_ERROR("Failed to append job {} to acc_usage tables: {}", job->JobId(),
+                e.what());
     throw;
   }
 }
@@ -1537,7 +1535,7 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
 
 // Mark job as aggregated in job_table
 void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
-                                         mongocxx::client_session* session) {
+                                        mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
@@ -1554,7 +1552,7 @@ void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
         *session, filter.view(), update.view());
   } else {
     (*client)[m_db_name_][m_job_collection_name_].update_one(filter.view(),
-                                                              update.view());
+                                                             update.view());
   }
 }
 
@@ -1786,8 +1784,7 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
                   static_cast<int64_t>(crane::grpc::JobStatus::Cancelled),
                   static_cast<int64_t>(crane::grpc::JobStatus::Completed),
                   static_cast<int64_t>(crane::grpc::JobStatus::OutOfMemory),
-                  static_cast<int64_t>(
-                      crane::grpc::JobStatus::ExceedTimeLimit),
+                  static_cast<int64_t>(crane::grpc::JobStatus::ExceedTimeLimit),
                   static_cast<int64_t>(crane::grpc::JobStatus::Failed))))));
 
   auto cursor =
@@ -1971,8 +1968,7 @@ bool MongodbClient::QueryJobSizeSummary(
   int64_t result_count = 0;
   try {
     auto cursor =
-        (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(
-            pipeline);
+        (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
     for (auto doc : cursor) {
       auto id = doc["_id"].get_document().view();
       crane::grpc::JobSizeSummaryItem item;
@@ -4214,9 +4210,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     mem_req += job_to_ctld.mem_per_node() * job_to_ctld.node_num();
   }
   if (job_to_ctld.has_cpus_per_task() && job_to_ctld.has_mem_per_cpu()) {
-    mem_req += static_cast<int64_t>(job_to_ctld.cpus_per_task() *
-                                    job_to_ctld.mem_per_cpu() *
-                                    job_to_ctld.ntasks());
+    mem_req +=
+        static_cast<int64_t>(job_to_ctld.cpus_per_task() *
+                             job_to_ctld.mem_per_cpu() * job_to_ctld.ntasks());
   }
 
   bool using_default_wckey = false;
@@ -4246,8 +4242,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     execution_nodes.push_back(runtime_attr.craned_ids(0));
   } else if (job_to_ctld.type() == crane::grpc::JobType::Interactive) {
     const auto& ia_meta = job_to_ctld.interactive_meta();
-    if (ia_meta.interactive_type() ==
-        crane::grpc::InteractiveJobType::Calloc) {
+    if (ia_meta.interactive_type() == crane::grpc::InteractiveJobType::Calloc) {
       execution_nodes.push_back(runtime_attr.craned_ids(0));
     } else if (ia_meta.pty())
       execution_nodes.push_back(runtime_attr.craned_ids(0));
@@ -4298,60 +4293,59 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   };
   // clang-format on
 
-  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,     /*0-4*/
+  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
              double, int64_t, std::string, std::string, int32_t,    /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
              int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInJob>,      /*35-37*/
-             std::optional<ContainerMetaInJob>, bool,              /*38-39*/
+             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-46*/
              std::vector<CranedId>>                                 /*45-49*/
-      values{                                                       // 0-4
-             static_cast<int32_t>(runtime_attr.job_id()),
-             runtime_attr.job_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-             job_to_ctld.account(),
-             // 5-9
-             cpus_req, mem_req, job_to_ctld.name(), env_str,
-             static_cast<int32_t>(job_to_ctld.uid()),
-             // 10-14
-             static_cast<int32_t>(job_to_ctld.gid()),
-             util::HostNameListToStr(runtime_attr.craned_ids()),
-             runtime_attr.craned_ids().size(), 0, job_to_ctld.partition_name(),
-             // 15-19
-             runtime_attr.cached_priority(), 0,
-             runtime_attr.start_time().seconds(),
-             runtime_attr.end_time().seconds(), 0,
-             // 20-24
-             job_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-             job_to_ctld.time_limit().seconds(),
-             runtime_attr.submit_time().seconds(), job_to_ctld.cwd(),
-             // 25-29
-             job_to_ctld.cmd_line(), runtime_attr.exit_code(),
-             runtime_attr.username(), job_to_ctld.qos(),
-             job_to_ctld.get_user_env(),
-             // 30-34
-             job_to_ctld.type(), job_to_ctld.extra_attr(),
-             job_to_ctld.reservation(), job_to_ctld.exclusive(),
-             allocated_res_view.CpuCount(),
-             // 35-39
-             static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
-             true /* Mark the document having complete job info */,
-             // 40-44
-             std::unordered_map<std::string, uint32_t>{
-                 runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()},
-             bsoncxx::array::value{nodename_list_array.view()},
-             job_to_ctld.wckey(), using_default_wckey,
-             g_config.CraneClusterName,
-             // 45-48
-             job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
-             execution_nodes};
+      values{
+          // 0-4
+          static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
+          absl::ToUnixSeconds(absl::Now()), false, job_to_ctld.account(),
+          // 5-9
+          cpus_req, mem_req, job_to_ctld.name(), env_str,
+          static_cast<int32_t>(job_to_ctld.uid()),
+          // 10-14
+          static_cast<int32_t>(job_to_ctld.gid()),
+          util::HostNameListToStr(runtime_attr.craned_ids()),
+          runtime_attr.craned_ids().size(), 0, job_to_ctld.partition_name(),
+          // 15-19
+          runtime_attr.cached_priority(), 0,
+          runtime_attr.start_time().seconds(),
+          runtime_attr.end_time().seconds(), 0,
+          // 20-24
+          job_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+          job_to_ctld.time_limit().seconds(),
+          runtime_attr.submit_time().seconds(), job_to_ctld.cwd(),
+          // 25-29
+          job_to_ctld.cmd_line(), runtime_attr.exit_code(),
+          runtime_attr.username(), job_to_ctld.qos(),
+          job_to_ctld.get_user_env(),
+          // 30-34
+          job_to_ctld.type(), job_to_ctld.extra_attr(),
+          job_to_ctld.reservation(), job_to_ctld.exclusive(),
+          allocated_res_view.CpuCount(),
+          // 35-39
+          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
+          allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+          true /* Mark the document having complete job info */,
+          // 40-44
+          std::unordered_map<std::string, uint32_t>{
+              runtime_attr.actual_licenses().begin(),
+              runtime_attr.actual_licenses().end()},
+          bsoncxx::array::value{nodename_list_array.view()},
+          job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
+          // 45-48
+          job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
+          execution_nodes};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4453,15 +4447,15 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   };
   // clang-format on
 
-  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,     /*0-4*/
+  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
              double, int64_t, std::string, std::string, int32_t,    /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
              int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInJob>,      /*35-37*/
-             std::optional<ContainerMetaInJob>, bool,              /*38-39*/
+             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
              std::string, std::unordered_set<CranedId>,             /*45-49*/
@@ -4487,8 +4481,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->get_user_env,
              // 30-34
              job->type, job->extra_attr, job->reservation,
-             job->JobToCtld().exclusive(),
-             job->allocated_res_view.CpuCount(),
+             job->JobToCtld().exclusive(), job->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(job->allocated_res_view.MemoryBytes()),
              job->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,

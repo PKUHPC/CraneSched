@@ -62,8 +62,7 @@ std::string MetaResource::DebugString() const {
       util::ReadableResourceView(resource));
 }
 
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
-    JobInCtld& job) {
+CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   CRANE_TRACE(
@@ -133,8 +132,8 @@ void AccountMetaContainer::MallocQosSubmitResource(const JobInCtld& job) {
                              .jobs_count = 0,
                              .submit_jobs_count = 1,
                              .wall_time = absl::ZeroDuration()};
-  DoMallocResource_(job.JobId(), job.Username(), job.account_chain,
-                    job.qos, meta_resource);
+  DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                    meta_resource);
 }
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningJob(
@@ -157,8 +156,8 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningJob(
                              .submit_jobs_count = 1,
                              .wall_time = job.time_limit};
 
-  DoMallocResource_(job.JobId(), job.Username(), job.account_chain,
-                    job.qos, meta_resource);
+  DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                    meta_resource);
 }
 
 std::expected<void, std::string>

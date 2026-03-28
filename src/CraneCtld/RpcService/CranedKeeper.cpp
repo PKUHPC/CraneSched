@@ -269,8 +269,7 @@ CraneErrCode CranedStub::FreeSteps(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t job_id,
-                                            uint64_t seconds) {
+CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds) {
   using crane::grpc::ChangeJobTimeLimitReply;
   using crane::grpc::ChangeJobTimeLimitRequest;
 

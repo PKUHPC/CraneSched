@@ -262,7 +262,7 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
     auto* job_it = job_list->Add();
     job_it->CopyFrom(job);
     job_it->mutable_elapsed_time()->set_seconds(now -
-                                                 job.start_time().seconds());
+                                                job.start_time().seconds());
   }
 
   HookEvent e{HookType::END,

@@ -492,8 +492,7 @@ struct ContainerMetaInJob {
 };
 
 struct DependenciesInJob {
-  std::unordered_map<job_id_t,
-                     std::pair<crane::grpc::DependencyType, uint64_t>>
+  std::unordered_map<job_id_t, std::pair<crane::grpc::DependencyType, uint64_t>>
       deps;
   bool is_or{false};
   absl::Time ready_time{absl::InfinitePast()};
@@ -1159,9 +1158,8 @@ struct Qos {
         "max_jobs: {}, max_submit_jobs: {}, max_wall: {}, flags: {}, max_tres: "
         "{}, max_tres_per_user: {}, max_tres_per_account: {}",
         name, description, reference_count, priority, max_jobs_per_user,
-        max_running_jobs_per_user,
-        absl::FormatDuration(max_time_limit_per_job), max_cpus_per_user,
-        max_jobs_per_account, max_submit_jobs_per_user,
+        max_running_jobs_per_user, absl::FormatDuration(max_time_limit_per_job),
+        max_cpus_per_user, max_jobs_per_account, max_submit_jobs_per_user,
         max_submit_jobs_per_account, max_jobs, max_submit_jobs,
         absl::FormatDuration(max_wall), flags.ToString(),
         util::ReadableResourceView(max_tres),

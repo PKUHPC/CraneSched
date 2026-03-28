@@ -75,8 +75,7 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
   PushPartitionList_(job->Username(), job->account, &part_list);
   auto& lua_state = lua_env->GetLuaState();
   sol::function submit = lua_state["crane_job_submit"];
-  sol::protected_function_result lua_result =
-      submit(job, part_list, job->uid);
+  sol::protected_function_result lua_result = submit(job, part_list, job->uid);
 
   if (!lua_result.valid()) {
     sol::error err = lua_result;

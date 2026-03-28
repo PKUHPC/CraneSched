@@ -318,7 +318,7 @@ class SchedulerAlgo {
       auto job_duration_begin_it = time_avail_res_map.upper_bound(start_time);
       if (job_duration_begin_it == time_avail_res_map.end()) {
         --job_duration_begin_it;  // job_duration_begin_it->first <=
-                                   // start_time < end_time
+                                  // start_time < end_time
         // Case #1
         //                     job duration
         //                   |<-------------->|
@@ -344,8 +344,8 @@ class SchedulerAlgo {
         //                      subtract resource here
 
         TimeAvailResMap::iterator inserted_it;
-        std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-            end_time, job_duration_begin_it->second);
+        std::tie(inserted_it, ok) =
+            time_avail_res_map.emplace(end_time, job_duration_begin_it->second);
         CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
         if (job_duration_begin_it->first == start_time) {
@@ -363,7 +363,7 @@ class SchedulerAlgo {
         }
       } else {
         --job_duration_begin_it;  // job_duration_begin_it->first <=
-                                   // start_time < end_time
+                                  // start_time < end_time
         // Case #3
         //                    job duration
         //                |<-------------->|
@@ -406,8 +406,8 @@ class SchedulerAlgo {
 
         if (job_duration_end_it->first != end_time) {
           TimeAvailResMap::iterator inserted_it;
-          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              end_time, job_duration_end_it->second);
+          std::tie(inserted_it, ok) =
+              time_avail_res_map.emplace(end_time, job_duration_end_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           CRANE_ASSERT(res <= job_duration_end_it->second);
@@ -783,18 +783,16 @@ class JobScheduler {
   std::future<CraneExpected<step_id_t>> SubmitStepAsync(
       std::unique_ptr<CommonStepInCtld> step);
 
-  std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id,
-                                                 int64_t secs);
+  std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs);
 
   CraneErrCode ChangeJobTimeLimit(job_id_t job_id, int64_t secs);
 
   CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
 
   CraneErrCode ChangeJobExtraAttrs(job_id_t job_id,
-                                    const std::string& new_extra_attr);
+                                   const std::string& new_extra_attr);
 
-  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(
-      JobInCtld* job);
+  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(JobInCtld* job);
 
   void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
                          crane::grpc::ModifyJobReply* response,
@@ -942,8 +940,7 @@ class JobScheduler {
   }
 
  private:
-  void RequeueRecoveredJobIntoPendingQueueLock_(
-      std::unique_ptr<JobInCtld> job);
+  void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
   void HandleFailToRecoverRngJob_(job_id_t job_id);

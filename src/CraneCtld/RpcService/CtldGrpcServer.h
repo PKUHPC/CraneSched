@@ -88,7 +88,7 @@ class CforedStreamWriter {
           allocated_craned_expt.value().first);
       auto &craned_list = allocated_craned_expt.value().second;
       job_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
-                                                         craned_list.end());
+                                                        craned_list.end());
     } else {
       job_res_alloc_reply->set_ok(false);
       job_res_alloc_reply->set_failure_reason(
@@ -101,8 +101,7 @@ class CforedStreamWriter {
   bool WriteJobCompletionAckReply(job_id_t job_id, step_id_t step_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending JobCompletionAckReply to cfored of job id {}",
-                job_id);
+    CRANE_TRACE("Sending JobCompletionAckReply to cfored of job id {}", job_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::JOB_COMPLETION_ACK_REPLY);
 
@@ -241,8 +240,8 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::SubmitBatchJobsReply *response) override;
 
   grpc::Status CancelJob(grpc::ServerContext *context,
-                          const crane::grpc::CancelJobRequest *request,
-                          crane::grpc::CancelJobReply *response) override;
+                         const crane::grpc::CancelJobRequest *request,
+                         crane::grpc::CancelJobReply *response) override;
 
   grpc::Status QueryJobsInfo(
       grpc::ServerContext *context,
@@ -270,8 +269,8 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::QueryLicensesInfoReply *response) override;
 
   grpc::Status ModifyJob(grpc::ServerContext *context,
-                          const crane::grpc::ModifyJobRequest *request,
-                          crane::grpc::ModifyJobReply *response) override;
+                         const crane::grpc::ModifyJobRequest *request,
+                         crane::grpc::ModifyJobReply *response) override;
 
   grpc::Status ModifyJobsExtraAttrs(
       grpc::ServerContext *context,
