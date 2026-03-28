@@ -1154,7 +1154,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
-  step_to_d.mutable_io_meta()->CopyFrom(StepToCtld().io_meta());
 
   return step_to_d;
 }

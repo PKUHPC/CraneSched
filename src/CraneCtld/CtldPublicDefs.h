@@ -614,6 +614,7 @@ struct StepInCtld {
   std::int32_t m_requeue_count_{0};
   ResourceV2 m_allocated_res_;
 
+  // craned_id must be ordered;
   std::vector<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
 
