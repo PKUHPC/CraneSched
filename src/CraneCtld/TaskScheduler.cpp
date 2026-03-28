@@ -98,6 +98,7 @@ bool TaskScheduler::Init() {
       auto result = AcquireTaskAttributes(task.get());
       if (!result || task->type == crane::grpc::Interactive) {
         task->SetStatus(crane::grpc::Failed);
+        task->SetEndTime(absl::Now());
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
         if (!ok) {

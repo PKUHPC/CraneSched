@@ -1183,6 +1183,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
+    this->NodeConfigured(craned_id);
     // Configuring -> Starting / Failed / Cancelled,
     if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
