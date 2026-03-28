@@ -962,7 +962,7 @@ struct JobInCtld {
   job_id_t JobId() const { return job_id; }
 
   void SetJobDbId(job_db_id_t id);
-  job_id_t JobDbId() const { return job_db_id; }
+  job_db_id_t JobDbId() const { return job_db_id; }
 
   void SetUsername(std::string const& val);
   std::string const& Username() const { return username; }
