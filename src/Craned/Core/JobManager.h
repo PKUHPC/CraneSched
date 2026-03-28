@@ -54,7 +54,7 @@ struct JobInD {
 
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
-  crane::grpc::TaskStatus status{crane::grpc::TaskStatus::Configuring};
+  crane::grpc::JobStatus status{crane::grpc::JobStatus::Configuring};
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
 
@@ -77,7 +77,7 @@ class JobManager {
   JobManager();
 
   CraneErrCode Recover(
-      std::unordered_map<task_id_t, JobInD>&& job_map,
+      std::unordered_map<job_id_t, JobInD>&& job_map,
       absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
                           std::unique_ptr<StepInstance>>&& step_map);
 
@@ -90,7 +90,7 @@ class JobManager {
    * @param job_ids jobs to free
    * @return true if all job exists
    */
-  bool FreeJobs(std::set<task_id_t>&& job_ids);
+  bool FreeJobs(std::set<job_id_t>&& job_ids);
 
   void AllocSteps(std::vector<StepToD>&& steps);
 
@@ -102,9 +102,9 @@ class JobManager {
 
   CraneExpected<void> ChangeStepTimelimit(job_id_t job_id, step_id_t step_id,
                                           int64_t new_timelimit_sec);
-  std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
+  std::optional<JobInfoOfUid> QueryJobInfoOfUid(uid_t uid);
 
-  bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
+  bool MigrateProcToCgroupOfJob(pid_t pid, job_id_t job_id);
 
   CraneExpected<EnvMap> QuerySshStepEnvVariables(job_id_t job_id,
                                                  step_id_t step_id);
@@ -138,7 +138,7 @@ class JobManager {
                                std::vector<StepInstance*>&& steps);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                             crane::grpc::TaskStatus new_status,
+                             crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
                              const google::protobuf::Timestamp& timestamp);
@@ -179,16 +179,16 @@ class JobManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
-  struct EvQueueQueryTaskIdFromPid {
-    std::promise<CraneExpected<task_id_t>> task_id_prom;
+  struct EvQueueQueryJobIdFromPid {
+    std::promise<CraneExpected<job_id_t>> job_id_prom;
     pid_t pid;
   };
 
   struct StepTerminateQueueElem {
     job_id_t job_id;
     step_id_t step_id;
-    bool terminated_by_user{false};  // If the task is canceled by user,
-                                     // task->status=Cancelled
+    bool terminated_by_user{false};  // If the job is canceled by user,
+                                     // job->status=Cancelled
     bool mark_as_orphaned{false};
     std::promise<void> terminate_prom;
   };
@@ -208,21 +208,20 @@ class JobManager {
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
   /**
-   * Inform CraneCtld of the status change of a task.
-   * This method is called when the status of a task is changed:
-   * 1. A task is completed successfully. It means that this task returns
+   * Inform CraneCtld of the status change of a job.
+   * This method is called when the status of a job is changed:
+   * 1. A job is completed successfully. It means that this job returns
    *  normally with 0 or a non-zero code. (EvSigchldCb_)
-   * 2. A task is killed by a signal. In this case, the task is considered
+   * 2. A job is killed by a signal. In this case, the job is considered
    *  failed. (EvSigchldCb_)
-   * 3. A task cannot be created because of various reasons.
-   *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
+   * 3. A job cannot be created because of various reasons.
    */
-  void ActivateTaskStatusChangeAsync_(
-      job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+  void ActivateStepStatusChangeAsync_(
+      job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
       uint32_t exit_code, std::optional<std::string> reason,
       const google::protobuf::Timestamp& timestamp);
 
-  // Contains all the task that is running on this Craned node.
+  // Contains all the jobs that are running on this Craned node.
   JobMap m_job_map_;
 
   UidMap m_uid_to_job_ids_map_;
@@ -238,16 +237,16 @@ class JobManager {
 
   void EvCleanGrpcExecuteStepQueueCb_();
 
-  void EvCleanTaskStatusChangeQueueCb_();
+  void EvCleanStepStatusChangeQueueCb_();
 
-  void EvCleanTerminateTaskQueueCb_();
+  void EvCleanTerminateStepQueueCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
   // When this event is triggered, the JobManager will not accept
-  // any more new tasks and quit as soon as all existing task end.
+  // any more new jobs and quit as soon as all existing jobs end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
@@ -264,11 +263,11 @@ class JobManager {
   ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
-  // A custom event that handles the ExecuteTask RPC.
+  // A custom event that handles the ExecuteStep RPC.
   ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
-  ConcurrentQueue<StepStatusChangeQueueElem> m_task_status_change_queue_;
+  std::shared_ptr<uvw::async_handle> m_step_status_change_async_handle_;
+  ConcurrentQueue<StepStatusChangeQueueElem> m_step_status_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
@@ -278,8 +277,8 @@ class JobManager {
   std::function<void()> m_sigint_cb_;
 
   // When SIGINT is triggered or Shutdown() gets called, this variable is set to
-  // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
-  // ev_sigchld_cb_ will stop the event loop when there is no task running.
+  // true. Then, AddJobAsyncMethod will not accept any more new jobs and
+  // ev_sigchld_cb_ will stop the event loop when there is no job running.
   std::atomic_bool m_is_ending_now_{false};
 
   util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial

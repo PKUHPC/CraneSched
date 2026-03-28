@@ -600,7 +600,7 @@ std::string StepToDIdString(const crane::grpc::StepToD &step_to_d) {
   return StepIdsToString(step_to_d.job_id(), step_to_d.step_id());
 }
 
-std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
+std::string StepStatusToString(const crane::grpc::JobStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 

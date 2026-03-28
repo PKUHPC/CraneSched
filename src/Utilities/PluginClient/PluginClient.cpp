@@ -240,12 +240,12 @@ grpc::Status PluginClient::SendUpdateLicensesHook_(
   return m_stub_->UpdateLicensesHook(context, *request, &reply);
 }
 
-void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+void PluginClient::StartHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
   auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
-  auto* task_list = request->mutable_task_info_list();
-  for (auto& task : tasks) {
-    auto* task_it = task_list->Add();
-    task_it->CopyFrom(task);
+  auto* job_list = request->mutable_job_info_list();
+  for (auto& job : jobs) {
+    auto* job_it = job_list->Add();
+    job_it->CopyFrom(job);
   }
 
   HookEvent e{HookType::START,
@@ -253,16 +253,16 @@ void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+void PluginClient::EndHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
   auto request = std::make_unique<crane::grpc::plugin::EndHookRequest>();
-  auto* task_list = request->mutable_task_info_list();
+  auto* job_list = request->mutable_job_info_list();
 
   auto now = absl::ToUnixSeconds(absl::Now());
-  for (auto& task : tasks) {
-    auto* task_it = task_list->Add();
-    task_it->CopyFrom(task);
-    task_it->mutable_elapsed_time()->set_seconds(now -
-                                                 task.start_time().seconds());
+  for (auto& job : jobs) {
+    auto* job_it = job_list->Add();
+    job_it->CopyFrom(job);
+    job_it->mutable_elapsed_time()->set_seconds(now -
+                                                 job.start_time().seconds());
   }
 
   HookEvent e{HookType::END,
@@ -271,11 +271,11 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 }
 
 void PluginClient::CreateCgroupHookAsync(
-    task_id_t task_id, const std::string& cgroup,
+    job_id_t job_id, const std::string& cgroup,
     const crane::grpc::ResourceInNode& resource) {
   auto request =
       std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
-  request->set_task_id(task_id);
+  request->set_job_id(job_id);
   request->set_cgroup(cgroup);
   request->mutable_resource()->CopyFrom(resource);
 
@@ -284,11 +284,11 @@ void PluginClient::CreateCgroupHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::DestroyCgroupHookAsync(task_id_t task_id,
+void PluginClient::DestroyCgroupHookAsync(job_id_t job_id,
                                           const std::string& cgroup) {
   auto request =
       std::make_unique<crane::grpc::plugin::DestroyCgroupHookRequest>();
-  request->set_task_id(task_id);
+  request->set_job_id(job_id);
   request->set_cgroup(cgroup);
 
   HookEvent e{HookType::DESTROY_CGROUP,

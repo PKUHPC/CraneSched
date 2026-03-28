@@ -584,8 +584,8 @@ void CforedClient::AsyncSendRecvThread_() {
         m_stop_task_io_queue_.enqueue(task_id);
         m_clean_stop_task_io_queue_async_handle_->send();
       }
-      CRANE_ERROR("Terminating all task due to cfored connection failure.");
-      g_task_mgr->TerminateTaskAsync(
+      CRANE_ERROR("Terminating step due to cfored connection failure.");
+      g_task_mgr->TerminateStepAsync(
           false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
       state = State::End;
     }

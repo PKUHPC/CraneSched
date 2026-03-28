@@ -56,7 +56,7 @@ class LicensesManager {
 
   std::expected<void, std::string> CheckLicensesLegal(
       const google::protobuf::RepeatedPtrField<
-          crane::grpc::TaskToCtld::License>& lic_id_to_count,
+          crane::grpc::JobToCtld::License>& lic_id_to_count,
       bool is_license_or);
 
   void CheckLicenseCountSufficient(std::vector<PdJobInScheduler*>* job_ptr_vec);

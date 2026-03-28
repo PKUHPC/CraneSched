@@ -47,7 +47,7 @@ class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
 };
 
 struct RnJobInScheduler {
-  task_id_t job_id;
+  job_id_t job_id;
   absl::Duration time_limit;
 
   PartitionId partition_id;
@@ -64,8 +64,8 @@ struct RnJobInScheduler {
   ResourceV2 allocated_res;
   ResourceView allocated_res_view;
 
-  RnJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
+  RnJobInScheduler(JobInCtld* job)
+      : job_id(job->JobId()),
         time_limit(job->time_limit),
         partition_id(job->partition_id),
         reservation(job->reservation),
@@ -80,7 +80,7 @@ struct RnJobInScheduler {
 };
 
 struct PdJobInScheduler {
-  task_id_t job_id;
+  job_id_t job_id;
   absl::Duration time_limit;
 
   PartitionId partition_id;
@@ -112,7 +112,7 @@ struct PdJobInScheduler {
   ResourceV2 allocated_res;
   std::vector<CranedId> craned_ids;
 
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld::License>
+  google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
       req_licenses;
   bool is_license_or;
   std::unordered_map<LicenseId, uint32_t> actual_licenses;
@@ -122,8 +122,8 @@ struct PdJobInScheduler {
   std::string username;
   std::list<std::string> account_chain;
 
-  PdJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
+  PdJobInScheduler(JobInCtld* job)
+      : job_id(job->JobId()),
         time_limit(job->time_limit),
         partition_id(job->partition_id),
         reservation(job->reservation),
@@ -142,8 +142,8 @@ struct PdJobInScheduler {
         qos_priority(job->qos_priority),
         account(job->account),
         priority(job->mandated_priority),
-        req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()),
+        req_licenses(job->JobToCtld().licenses_count()),
+        is_license_or(job->JobToCtld().is_licenses_or()),
         qos(job->qos),
         username(job->Username()),
         account_chain(job->account_chain) {}
@@ -246,7 +246,7 @@ class SchedulerAlgo {
   static constexpr bool kAlgoTraceOutput = false;
   // TODO: move to config
   static constexpr bool kAlgoRedundantNode = false;
-  static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
+  static constexpr uint32_t kAlgoMaxJobNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
   struct NodeState {
@@ -315,16 +315,16 @@ class SchedulerAlgo {
                                 const absl::Time& end_time,
                                 const ResourceInNode& res) {
       bool ok;
-      auto task_duration_begin_it = time_avail_res_map.upper_bound(start_time);
-      if (task_duration_begin_it == time_avail_res_map.end()) {
-        --task_duration_begin_it;  // task_duration_begin_it->first <=
+      auto job_duration_begin_it = time_avail_res_map.upper_bound(start_time);
+      if (job_duration_begin_it == time_avail_res_map.end()) {
+        --job_duration_begin_it;  // job_duration_begin_it->first <=
                                    // start_time < end_time
         // Case #1
-        //                     task duration
+        //                     job duration
         //                   |<-------------->|
         // *-----------------*----------------------> inf
         //                   ^
-        //        task_duration_begin_it
+        //        job_duration_begin_it
         //
         // *-----------------*----------------|-----> inf
         //                           ^        ^
@@ -332,11 +332,11 @@ class SchedulerAlgo {
         //                      subtract resource here
         //
         // OR Case #2
-        //                        task duration
+        //                        job duration
         //                      |<-------------->|
         // *-----------------*----------------------> inf
         //                   ^
-        //        task_duration_begin_it
+        //        job_duration_begin_it
         //
         // *-----------------*--|----------------|--> inf
         //                      ^      ^         ^
@@ -345,73 +345,73 @@ class SchedulerAlgo {
 
         TimeAvailResMap::iterator inserted_it;
         std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-            end_time, task_duration_begin_it->second);
+            end_time, job_duration_begin_it->second);
         CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-        if (task_duration_begin_it->first == start_time) {
+        if (job_duration_begin_it->first == start_time) {
           // Case #1, subtract resource at start_time
-          CRANE_ASSERT(res <= task_duration_begin_it->second);
-          task_duration_begin_it->second -= res;
+          CRANE_ASSERT(res <= job_duration_begin_it->second);
+          job_duration_begin_it->second -= res;
         } else {
           // Case #2, insert subtracted resource at start_time
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              start_time, task_duration_begin_it->second);
+              start_time, job_duration_begin_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           CRANE_ASSERT(res <= inserted_it->second);
           inserted_it->second -= res;
         }
       } else {
-        --task_duration_begin_it;  // task_duration_begin_it->first <=
+        --job_duration_begin_it;  // job_duration_begin_it->first <=
                                    // start_time < end_time
         // Case #3
-        //                    task duration
+        //                    job duration
         //                |<-------------->|
         // *-------*----------*---------*------------
         //         ^                    ^
-        //  task_duration_begin_it     task_duration_end_it
+        //  job_duration_begin_it     job_duration_end_it
         // *-------*------|---*---------*--|---------
         //                ^  ^     ^     ^ ^
         //       insert here |     |     | insert here
         //                 subtract at these points
         //
         // Or Case #4
-        //               task duration
+        //               job duration
         //         |<----------------->|
         // *-------*----------*--------*------------
         //         ^                   ^
-        //  task_duration_begin_it   task_duration_end_it
+        //  job_duration_begin_it   job_duration_end_it
 
         // std::prev can be used without any check here.
         // There will always be one time point (now) before end_time.
 
-        if (task_duration_begin_it->first != start_time) {
+        if (job_duration_begin_it->first != start_time) {
           // Case #3, copy resource before start_time to start_time
           TimeAvailResMap::iterator inserted_it;
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              start_time, task_duration_begin_it->second);
+              start_time, job_duration_begin_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-          task_duration_begin_it = inserted_it;
+          job_duration_begin_it = inserted_it;
         }
-        auto task_duration_end_it = std::prev(time_avail_res_map.upper_bound(
-            end_time));  // task_duration_end_it->first <= end_time
+        auto job_duration_end_it = std::prev(time_avail_res_map.upper_bound(
+            end_time));  // job_duration_end_it->first <= end_time
 
         // Subtract the required resources within the interval.
-        for (auto in_duration_it = task_duration_begin_it;
-             in_duration_it != task_duration_end_it; in_duration_it++) {
+        for (auto in_duration_it = job_duration_begin_it;
+             in_duration_it != job_duration_end_it; in_duration_it++) {
           CRANE_ASSERT(res <= in_duration_it->second);
           in_duration_it->second -= res;
         }
 
-        if (task_duration_end_it->first != end_time) {
+        if (job_duration_end_it->first != end_time) {
           TimeAvailResMap::iterator inserted_it;
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              end_time, task_duration_end_it->second);
+              end_time, job_duration_end_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-          CRANE_ASSERT(res <= task_duration_end_it->second);
-          task_duration_end_it->second -= res;
+          CRANE_ASSERT(res <= job_duration_end_it->second);
+          job_duration_end_it->second -= res;
         }
       }
     }
@@ -625,11 +625,11 @@ class SchedulerAlgo {
                         const TimeAvailResMap::const_iterator& it,
                         const TimeAvailResMap::const_iterator& end,
                         ResMapIterList* tracker_list,
-                        const ResourceInNode* task_res)
+                        const ResourceInNode* job_res)
         : m_craned_id_(craned_id),
           m_it_(it),
           m_end_(end),
-          task_res(task_res),
+          job_res(job_res),
           m_tracker_list_it_(tracker_list->m_tracker_list_.end()) {
       m_satisfied_flag_ = Satisfied();
     }
@@ -650,7 +650,7 @@ class SchedulerAlgo {
    private:
     friend ResMapIterList;
 
-    bool Satisfied() const { return *task_res <= m_it_->second; }
+    bool Satisfied() const { return *job_res <= m_it_->second; }
 
     void MoveToNext() {
       m_satisfied_flag_ = !m_satisfied_flag_;  // target state
@@ -663,7 +663,7 @@ class SchedulerAlgo {
     void MoveToNextUnsatisfied() { while (++m_it_ != m_end_ && Satisfied()); }
     void MoveToNextSatisfied() { while (++m_it_ != m_end_ && !Satisfied()); }
 
-    const ResourceInNode* task_res;
+    const ResourceInNode* job_res;
 
     ResMapIterList::ListContainer::iterator m_tracker_list_it_;
 
@@ -752,8 +752,8 @@ class SchedulerAlgo {
   IPrioritySorter* m_priority_sorter_;
 };
 
-class TaskScheduler {
-  using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+class JobScheduler {
+  using JobInEmbeddedDb = crane::grpc::JobInEmbeddedDb;
 
   using Mutex = absl::Mutex;
   using LockGuard = absl::MutexLock;
@@ -769,64 +769,64 @@ class TaskScheduler {
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  TaskScheduler();
+  JobScheduler();
 
-  ~TaskScheduler();
+  ~JobScheduler();
 
   bool Init();
 
-  /// \return The future is set to an error code if task submission failed.
-  /// Otherwise, it is set to newly allocated task id.
-  std::future<CraneExpected<task_id_t>> SubmitTaskAsync(
-      std::unique_ptr<TaskInCtld> task);
+  /// \return The future is set to an error code if job submission failed.
+  /// Otherwise, it is set to newly allocated job id.
+  std::future<CraneExpected<job_id_t>> SubmitJobAsync(
+      std::unique_ptr<JobInCtld> job);
 
   std::future<CraneExpected<step_id_t>> SubmitStepAsync(
       std::unique_ptr<CommonStepInCtld> step);
 
-  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
+  std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id,
                                                  int64_t secs);
 
-  CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
+  CraneErrCode ChangeJobTimeLimit(job_id_t job_id, int64_t secs);
 
-  CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
+  CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
 
-  CraneErrCode ChangeTaskExtraAttrs(task_id_t task_id,
+  CraneErrCode ChangeJobExtraAttrs(job_id_t job_id,
                                     const std::string& new_extra_attr);
 
   std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(
-      TaskInCtld* task);
+      JobInCtld* job);
 
-  void JobModifyLuaCheck(const crane::grpc::ModifyTaskRequest& request,
-                         crane::grpc::ModifyTaskReply* response,
-                         std::list<task_id_t>* task_ids);
+  void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
+                         crane::grpc::ModifyJobReply* response,
+                         std::list<job_id_t>* job_ids);
 
-  CraneExpected<std::future<CraneExpected<task_id_t>>> SubmitTaskToScheduler(
-      std::unique_ptr<TaskInCtld> task);
+  CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
+      std::unique_ptr<JobInCtld> job);
 
-  void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
+  void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
-                                       crane::grpc::TaskStatus new_status,
+                                       crane::grpc::JobStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string>&& reason,
                                        google::protobuf::Timestamp timestamp) {
     // TODO: Add reason implementation here!
-    StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
+    StepStatusChangeAsync(job_id, step_id, craned_index, new_status, exit_code,
                           reason.value_or(""), std::move(timestamp));
   }
 
-  void StartCraneCtldPrologThread(TaskInCtld* job);
+  void StartCraneCtldPrologThread(JobInCtld* job);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              const CranedId& craned_index,
-                             crane::grpc::TaskStatus new_status,
+                             crane::grpc::JobStatus new_status,
                              uint32_t exit_code, std::string reason,
                              google::protobuf::Timestamp timestamp);
 
-  void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
+  void TerminateJobsOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
-  void QueryTasksInRam(
-      const crane::grpc::QueryTasksInfoRequest* request,
-      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map);
+  void QueryJobsInRam(
+      const crane::grpc::QueryJobsInfoRequest* request,
+      std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
@@ -835,8 +835,8 @@ class TaskScheduler {
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
 
-  crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
-      const crane::grpc::CancelTaskRequest& request);
+  crane::grpc::CancelJobReply CancelPendingOrRunningJob(
+      const crane::grpc::CancelJobRequest& request);
 
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest& request);
@@ -846,40 +846,40 @@ class TaskScheduler {
 
   CraneErrCode TerminatePendingOrRunningIaStep(job_id_t job_id,
                                                step_id_t step_id) {
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
-    LockGuard running_guard(&m_running_task_map_mtx_);
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    LockGuard running_guard(&m_running_job_map_mtx_);
 
-    auto pd_it = m_pending_task_map_.find(job_id);
-    if (pd_it != m_pending_task_map_.end()) {
-      auto& task = pd_it->second;
-      if (task->type != crane::grpc::Interactive) {
+    auto pd_it = m_pending_job_map_.find(job_id);
+    if (pd_it != m_pending_job_map_.end()) {
+      auto& job = pd_it->second;
+      if (job->type != crane::grpc::Interactive) {
         return CraneErrCode::ERR_INVALID_PARAM;
       }
-      auto& meta = std::get<InteractiveMeta>(task->meta);
+      auto& meta = std::get<InteractiveMeta>(job->meta);
       meta.has_been_cancelled_on_front_end = true;
 
-      m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{.task = std::move(task)});
-      m_cancel_task_async_handle_->send();
-      m_pending_task_map_.erase(pd_it);
+      m_cancel_job_queue_.enqueue(
+          CancelPendingJobQueueElem{.job = std::move(job)});
+      m_cancel_job_async_handle_->send();
+      m_pending_job_map_.erase(pd_it);
       return CraneErrCode::SUCCESS;
     }
 
-    auto rn_it = m_running_task_map_.find(job_id);
-    if (rn_it == m_running_task_map_.end())
+    auto rn_it = m_running_job_map_.find(job_id);
+    if (rn_it == m_running_job_map_.end())
       return CraneErrCode::ERR_NON_EXISTENT;
 
     CommonStepInCtld* step;
-    auto& task = rn_it->second;
-    step = task->GetStep(step_id);
+    auto& job = rn_it->second;
+    step = job->GetStep(step_id);
     if (step) {
       if (step->type == crane::grpc::Interactive) {
         auto& meta = step->ia_meta.value();
         meta.has_been_cancelled_on_front_end = true;
-        if (step->Status() == crane::grpc::TaskStatus::Pending) {
-          m_cancel_task_queue_.enqueue(
-              CancelPendingStepQueueElem{.step = task->EraseStep(step_id)});
-          m_cancel_task_async_handle_->send();
+        if (step->Status() == crane::grpc::JobStatus::Pending) {
+          m_cancel_job_queue_.enqueue(
+              CancelPendingStepQueueElem{.step = job->EraseStep(step_id)});
+          m_cancel_job_async_handle_->send();
           return CraneErrCode::SUCCESS;
         }
       } else {
@@ -894,12 +894,12 @@ class TaskScheduler {
 
   CraneErrCode TerminateRunningStep(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps) {
-    LockGuard running_guard(&m_running_task_map_mtx_);
+    LockGuard running_guard(&m_running_job_map_mtx_);
 
     std::vector<CommonStepInCtld*> steps;
     for (auto& [job_id, step_ids] : job_steps) {
-      auto iter = m_running_task_map_.find(job_id);
-      if (iter == m_running_task_map_.end())
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end())
         return CraneErrCode::ERR_NON_EXISTENT;
       auto* job = iter->second.get();
       for (auto step_id : step_ids) {
@@ -916,9 +916,9 @@ class TaskScheduler {
     return CraneErrCode::SUCCESS;
   }
 
-  static CraneExpected<void> HandleUnsetOptionalInTaskToCtld(TaskInCtld* task);
-  static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
-  static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
+  static CraneExpected<void> HandleUnsetOptionalInJobToCtld(JobInCtld* job);
+  static CraneExpected<void> AcquireJobAttributes(JobInCtld* job);
+  static CraneExpected<void> CheckJobValidity(JobInCtld* job);
 
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
@@ -933,7 +933,7 @@ class TaskScheduler {
   crane::grpc::DeleteReservationReply PurgeAllReservations();
 
   // For failed dependency, timestamp should be absl::InfiniteFuture()
-  void AddDependencyEvent(task_id_t dependent, task_id_t dependee,
+  void AddDependencyEvent(job_id_t dependent, job_id_t dependee,
                           absl::Time timestamp) {
     m_dependency_event_queue_.enqueue(
         DependencyEvent{.dependent_job_id = dependent,
@@ -942,27 +942,27 @@ class TaskScheduler {
   }
 
  private:
-  void RequeueRecoveredTaskIntoPendingQueueLock_(
-      std::unique_ptr<TaskInCtld> task);
+  void RequeueRecoveredJobIntoPendingQueueLock_(
+      std::unique_ptr<JobInCtld> job);
 
-  void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
-  void HandleFailToRecoverRngJob_(task_id_t task_id);
+  void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
+  void HandleFailToRecoverRngJob_(job_id_t job_id);
 
   static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
   static void PersistAndTransferStepsToMongodb_(
       std::unordered_set<StepInCtld*> const& steps);
 
-  static void ProcessFinalTasks_(const std::unordered_set<TaskInCtld*>& tasks);
+  static void ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
 
-  static void CallPluginHookForFinalTasks_(
-      std::unordered_set<TaskInCtld*> const& tasks);
+  static void CallPluginHookForFinalJobs_(
+      std::unordered_set<JobInCtld*> const& jobs);
 
-  static void PersistAndTransferTasksToMongodb_(
-      std::unordered_set<TaskInCtld*> const& tasks);
+  static void PersistAndTransferJobsToMongodb_(
+      std::unordered_set<JobInCtld*> const& jobs);
 
   CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
 
-  CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
+  CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
@@ -971,46 +971,46 @@ class TaskScheduler {
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
-  // Ordered by task id. Those who comes earlier are in the head,
-  // Because they have smaller task id.
-  TreeMap<task_id_t, std::unique_ptr<TaskInCtld>> m_pending_task_map_
-      ABSL_GUARDED_BY(m_pending_task_map_mtx_);
-  Mutex m_pending_task_map_mtx_;
+  // Ordered by job id. Those who comes earlier are in the head,
+  // Because they have smaller job id.
+  TreeMap<job_id_t, std::unique_ptr<JobInCtld>> m_pending_job_map_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
+  Mutex m_pending_job_map_mtx_;
 
   std::atomic_uint32_t m_pending_map_cached_size_;
 
-  HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
-      ABSL_GUARDED_BY(m_running_task_map_mtx_);
-  Mutex m_running_task_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_task_map_mtx_);
+  HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
+      ABSL_GUARDED_BY(m_running_job_map_mtx_);
+  Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
 
-  // Task Indexes
-  HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
-      ABSL_GUARDED_BY(m_task_indexes_mtx_);
-  Mutex m_task_indexes_mtx_ ABSL_ACQUIRED_AFTER(m_running_task_map_mtx_);
+  // Job Indexes
+  HashMap<CranedId, HashSet<uint32_t /* Job ID*/>> m_node_to_jobs_map_
+      ABSL_GUARDED_BY(m_job_indexes_mtx_);
+  Mutex m_job_indexes_mtx_ ABSL_ACQUIRED_AFTER(m_running_job_map_mtx_);
 
   HashMap<job_id_t, std::uint32_t> m_job_pending_step_num_map_
       ABSL_GUARDED_BY(m_step_num_mutex_);
-  Mutex m_step_num_mutex_ ABSL_ACQUIRED_BEFORE(m_task_indexes_mtx_);
+  Mutex m_step_num_mutex_ ABSL_ACQUIRED_BEFORE(m_job_indexes_mtx_);
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
 
   // If this variable is set to true, all threads must stop in a certain time.
   std::atomic_bool m_thread_stop_{};
 
-  // RPC worker pool for RPC calls with mutex `m_pending_task_map_mtx_` or
-  // `m_running_task_map_mtx_` or `m_task_indexes_mtx_` held. Put there RPCs in
+  // RPC worker pool for RPC calls with mutex `m_pending_job_map_mtx_` or
+  // `m_running_job_map_mtx_` or `m_job_indexes_mtx_` held. Put there RPCs in
   // global thread pool can be dangerous is some cases, e.g., deadlock may
   // happen. So we create a separate thread pool for those RPCs. Consider a
   // scenario:
-  // There is task `A` (Like CraneStub::ConfigureCraned) in thread pool: Try to
+  // There is job `A` (Like CraneStub::ConfigureCraned) in thread pool: Try to
   // acquire `mutex` and send something via RPC.
   //
   // And another thread (like StepStatusChangeThread): Acquired `mutex` and
-  // create task `B` to send something to craned, and a latch is used to wait
+  // create job `B` to send something to craned, and a latch is used to wait
   // for RPCs completion in the thread.
   //
-  // If too many tasks like `A` are in the thread pool, all threads
-  // may be occupied, then task `B` can never be scheduled, and therefore
+  // If too many jobs like `A` are in the thread pool, all threads
+  // may be occupied, then job `B` can never be scheduled, and therefore
   // the latch will cause a deadlock.
   std::unique_ptr<BS::thread_pool> m_rpc_worker_pool_;
 
@@ -1020,78 +1020,78 @@ class TaskScheduler {
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();
 
-  std::thread m_task_release_thread_;
-  void ReleaseTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::thread m_job_release_thread_;
+  void ReleaseJobThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::thread m_task_cancel_thread_;
-  void CancelTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::thread m_job_cancel_thread_;
+  void CancelJobThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::thread m_task_submit_thread_;
-  void SubmitTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::thread m_job_submit_thread_;
+  void SubmitJobThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::thread m_step_submit_thread_;
   void StepSubmitThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::thread m_task_status_change_thread_;
-  void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::thread m_job_status_change_thread_;
+  void JobStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
-  std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
-  void CleanTaskTimerCb_();
+  std::shared_ptr<uvw::timer_handle> m_job_timer_handle_;
+  void CleanJobTimerCb_();
 
-  std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
-      m_task_timer_handles_;
+  std::unordered_map<job_id_t, std::shared_ptr<uvw::timer_handle>>
+      m_job_timer_handles_;
 
-  std::shared_ptr<uvw::async_handle> m_task_timeout_async_handle_;
+  std::shared_ptr<uvw::async_handle> m_job_timeout_async_handle_;
 
-  using TaskTimerQueueElem =
-      std::pair<std::pair<task_id_t, int64_t>, std::promise<CraneErrCode>>;
-  ConcurrentQueue<TaskTimerQueueElem> m_task_timer_queue_;
+  using JobTimerQueueElem =
+      std::pair<std::pair<job_id_t, int64_t>, std::promise<CraneErrCode>>;
+  ConcurrentQueue<JobTimerQueueElem> m_job_timer_queue_;
 
-  void TaskTimerAsyncCb_();
+  void JobTimerAsyncCb_();
 
-  std::shared_ptr<uvw::async_handle> m_clean_task_timer_queue_handle_;
-  void CleanTaskTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::shared_ptr<uvw::async_handle> m_clean_job_timer_queue_handle_;
+  void CleanJobTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
-  void CancelTaskTimerCb_();
+  std::shared_ptr<uvw::timer_handle> m_cancel_job_timer_handle_;
+  void CancelJobTimerCb_();
 
-  struct CancelPendingTaskQueueElem {
-    std::unique_ptr<TaskInCtld> task;
+  struct CancelPendingJobQueueElem {
+    std::unique_ptr<JobInCtld> job;
   };
 
   struct CancelPendingStepQueueElem {
     std::unique_ptr<CommonStepInCtld> step;
   };
 
-  struct CancelRunningTaskQueueElem {
+  struct CancelRunningJobQueueElem {
     job_id_t job_id;
     step_id_t step_id;
     CranedId craned_id;
   };
 
-  using CancelTaskQueueElem =
-      std::variant<CancelPendingTaskQueueElem, CancelPendingStepQueueElem,
-                   CancelRunningTaskQueueElem>;
+  using CancelJobQueueElem =
+      std::variant<CancelPendingJobQueueElem, CancelPendingStepQueueElem,
+                   CancelRunningJobQueueElem>;
 
-  std::shared_ptr<uvw::async_handle> m_cancel_task_async_handle_;
-  ConcurrentQueue<CancelTaskQueueElem> m_cancel_task_queue_;
-  void CancelTaskAsyncCb_();
+  std::shared_ptr<uvw::async_handle> m_cancel_job_async_handle_;
+  ConcurrentQueue<CancelJobQueueElem> m_cancel_job_queue_;
+  void CancelJobAsyncCb_();
 
-  std::shared_ptr<uvw::async_handle> m_clean_cancel_queue_handle_;
-  void CleanCancelQueueCb_();
+  std::shared_ptr<uvw::async_handle> m_clean_cancel_job_queue_handle_;
+  void CleanCancelJobQueueCb_();
 
-  std::shared_ptr<uvw::timer_handle> m_submit_task_timer_handle_;
-  void SubmitTaskTimerCb_();
+  std::shared_ptr<uvw::timer_handle> m_submit_job_timer_handle_;
+  void SubmitJobTimerCb_();
 
-  std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
-  ConcurrentQueue<std::pair<std::unique_ptr<TaskInCtld>,
-                            std::promise<CraneExpected<task_id_t>>>>
-      m_submit_task_queue_;
-  void SubmitTaskAsyncCb_();
+  std::shared_ptr<uvw::async_handle> m_submit_job_async_handle_;
+  ConcurrentQueue<std::pair<std::unique_ptr<JobInCtld>,
+                            std::promise<CraneExpected<job_id_t>>>>
+      m_submit_job_queue_;
+  void SubmitJobAsyncCb_();
 
-  std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
-  void CleanSubmitQueueCb_();
+  std::shared_ptr<uvw::async_handle> m_clean_submit_job_queue_handle_;
+  void CleanSubmitJobQueueCb_();
 
   std::shared_ptr<uvw::timer_handle> m_submit_step_timer_handle_;
   void SubmitStepTimerCb_();
@@ -1105,26 +1105,26 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_clean_step_submit_queue_handle_;
   void CleanStepSubmitQueueCb_();
 
-  std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle_;
-  void TaskStatusChangeTimerCb_();
+  std::shared_ptr<uvw::timer_handle> m_job_status_change_timer_handle_;
+  void JobStatusChangeTimerCb_();
 
-  std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
+  std::shared_ptr<uvw::async_handle> m_job_status_change_async_handle_;
 
-  struct TaskStatusChangeArg {
+  struct JobStatusChangeArg {
     job_id_t job_id;
     step_id_t step_id;
     uint32_t exit_code;
-    crane::grpc::TaskStatus new_status;
+    crane::grpc::JobStatus new_status;
     CranedId craned_index;
     std::string reason;
     google::protobuf::Timestamp timestamp;
   };
 
-  ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
-  void TaskStatusChangeAsyncCb_();
+  ConcurrentQueue<JobStatusChangeArg> m_job_status_change_queue_;
+  void JobStatusChangeAsyncCb_();
 
-  std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
-  void CleanTaskStatusChangeQueueCb_();
+  std::shared_ptr<uvw::async_handle> m_clean_job_status_change_handle_;
+  void CleanJobStatusChangeQueueCb_();
 
   // TODO: Move to Reservation Mini-Scheduler.
   std::thread m_resv_clean_thread_;
@@ -1140,8 +1140,8 @@ class TaskScheduler {
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   struct DependencyEvent {
-    task_id_t dependent_job_id;
-    task_id_t dependee_job_id;
+    job_id_t dependent_job_id;
+    job_id_t dependee_job_id;
     absl::Time event_time;
   };
 
@@ -1150,4 +1150,4 @@ class TaskScheduler {
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
+inline std::unique_ptr<Ctld::JobScheduler> g_job_scheduler;

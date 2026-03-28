@@ -59,7 +59,7 @@ class StepInstance {
   std::vector<gid_t> gids;
 
   // TODO: Move these into ProcInstance
-  std::optional<crane::grpc::InteractiveTaskType> interactive_type;
+  std::optional<crane::grpc::InteractiveJobType> interactive_type;
   bool x11{};
   bool x11_fwd{};
   bool pty{};
@@ -98,7 +98,7 @@ class StepInstance {
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
-        step.type() == crane::grpc::TaskType::Interactive
+        step.type() == crane::grpc::JobType::Interactive
             ? std::optional(step.interactive_meta().interactive_type())
             : std::nullopt;
     pty = interactive_type.has_value() && step.interactive_meta().pty();
@@ -309,15 +309,15 @@ class PodInstance : public ITaskInstance {
   static CraneErrCode ResolveUserNsMapping_(
       const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
 
-  void SetPodLabels_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
+  void SetPodLabels_(const crane::grpc::PodJobAdditionalMeta& pod_meta,
                      uid_t uid, job_id_t job_id, const std::string& job_name);
-  void SetPodAnnotations_(const crane::grpc::PodTaskAdditionalMeta& pod_meta,
+  void SetPodAnnotations_(const crane::grpc::PodJobAdditionalMeta& pod_meta,
                           uid_t uid, job_id_t job_id,
                           const std::string& job_name,
                           const std::string& hostname);
 
   CraneErrCode SetPodSandboxConfig_(
-      const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+      const crane::grpc::PodJobAdditionalMeta& pod_meta);
   CraneErrCode PersistPodSandboxInfo_();
 
   cri::api::PodSandboxConfig m_pod_config_;
@@ -380,10 +380,10 @@ class ContainerInstance : public ITaskInstance {
                            const std::string& step_name);
 
   CraneErrCode LoadPodSandboxInfo_(
-      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
+      const crane::grpc::PodJobAdditionalMeta* pod_meta);
   CraneErrCode SetContainerConfig_(
-      const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
-      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
+      const crane::grpc::ContainerJobAdditionalMeta& ca_meta,
+      const crane::grpc::PodJobAdditionalMeta* pod_meta);
 
   std::string m_image_id_;
   std::string m_pod_id_;
@@ -518,7 +518,7 @@ class TaskManager {
   // Shutdown supervisor asynchronously with given status, exit code and reason.
   // Status change will be sent only if daemon step.
   void ShutdownSupervisorAsync(
-      crane::grpc::TaskStatus new_status = StepStatus::Completed,
+      crane::grpc::JobStatus new_status = StepStatus::Completed,
       uint32_t exit_code = 0, std::string reason = "");
 
   // NOLINTBEGIN(readability-identifier-naming)
@@ -527,7 +527,7 @@ class TaskManager {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
-          EvTaskTimerCb_();
+          EvStepTimerCb_();
         });
     termination_handle->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -539,7 +539,7 @@ class TaskManager {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
-          EvTaskTimerCb_();
+          EvStepTimerCb_();
         });
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -578,7 +578,7 @@ class TaskManager {
   }
 
   // Should called in uvw thread, otherwise data race may happen.
-  void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
+  void TaskFinish_(task_id_t task_id, crane::grpc::JobStatus new_status,
                    uint32_t exit_code, std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
@@ -595,13 +595,13 @@ class TaskManager {
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
 
-  std::future<CraneErrCode> ExecuteTaskAsync();
+  std::future<CraneErrCode> ExecuteStepAsync();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
-  std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
+  std::future<CraneErrCode> ChangeStepTimeLimitAsync(absl::Duration time_limit);
 
-  void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
+  void TerminateStepAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
   void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
 
@@ -615,16 +615,16 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct ExecuteTaskElem {
+  struct ExecuteStepElem {
     std::promise<CraneErrCode> ok_prom;
   };
 
-  struct TaskTerminateQueueElem {
+  struct StepTerminateQueueElem {
     TerminatedBy termination_reason{TerminatedBy::NONE};
     bool mark_as_orphaned{false};
   };
 
-  struct ChangeTaskTimeLimitQueueElem {
+  struct ChangeStepTimeLimitQueueElem {
     absl::Duration time_limit;
     std::promise<CraneErrCode> ok_prom;
   };
@@ -642,19 +642,19 @@ class TaskManager {
   // Handle stopped tasks
   void EvCleanTaskStopQueueCb_();
 
-  // Handle task termination requests
-  void EvTaskTimerCb_();
-  void EvCleanTerminateTaskQueueCb_();
-  void EvCleanChangeTaskTimeLimitQueueCb_();
+  // Handle step termination requests
+  void EvStepTimerCb_();
+  void EvCleanTerminateStepQueueCb_();
+  void EvCleanChangeStepTimeLimitQueueCb_();
 
-  void EvGrpcExecuteTaskCb_();
+  void EvGrpcExecuteStepCb_();
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
-  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
+  ConcurrentQueue<std::tuple<crane::grpc::JobStatus, uint32_t, std::string>>
       m_shutdown_status_queue_;
   std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
@@ -672,17 +672,17 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
   ConcurrentQueue<task_id_t> m_task_stopped_queue_;
 
-  // Task is requested to be terminated
-  std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_terminate_task_timer_handle_;
-  ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
+  // Step is requested to be terminated
+  std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
+  ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+  std::shared_ptr<uvw::async_handle> m_change_step_time_limit_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_change_step_time_limit_timer_handle_;
+  ConcurrentQueue<ChangeStepTimeLimitQueueElem> m_step_time_limit_change_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
-  ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
+  std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
+  ConcurrentQueue<ExecuteStepElem> m_grpc_execute_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_query_step_env_async_handle_;
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>

@@ -30,14 +30,14 @@ class CranedClient {
   ~CranedClient();
   void Shutdown();
   void InitChannelAndStub(const std::string& endpoint);
-  void StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
+  void StepStatusChangeAsync(crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason);
 
  private:
   void AsyncSendThread_();
   struct StepStatusChangeQueueElem {
-    crane::grpc::TaskStatus new_status{};
+    crane::grpc::JobStatus new_status{};
     uint32_t exit_code{};
     std::optional<std::string> reason;
     google::protobuf::Timestamp timestamp{};

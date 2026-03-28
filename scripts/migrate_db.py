@@ -34,7 +34,7 @@ logger = logging.getLogger()
 # Suppress overly verbose logs from pymongo
 logging.getLogger("pymongo").setLevel(logging.INFO)
 
-TASK_COLLECTION = "task_table"
+JOB_COLLECTION = "job_table"
 
 
 # ======================== Migration Registry ========================
@@ -93,7 +93,7 @@ def migrate_has_job_info(db: pymongo.database.Database, dry_run: bool = False):
     'account' field, which is always present in records created by InsertJob
     or InsertRecoveredJob.
     """
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
 
     query = {
         "has_job_info": {"$exists": False},
@@ -131,7 +131,7 @@ def migrate_has_job_info(db: pymongo.database.Database, dry_run: bool = False):
 )
 def migrate_exclusive(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'exclusive: false' to task records missing this field."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {"exclusive": {"$exists": False}}
     count = collection.count_documents(query)
     logger.info(f"[add_exclusive] Found {count} record(s) missing 'exclusive' field.")
@@ -156,7 +156,7 @@ def migrate_cpus_mem_alloc(db: pymongo.database.Database, dry_run: bool = False)
     Add 'cpus_alloc' and 'mem_alloc' to task records missing these fields.
     Values are copied from cpus_req and mem_req respectively.
     """
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {
         "$or": [
             {"cpus_alloc": {"$exists": False}},
@@ -192,7 +192,7 @@ def migrate_cpus_mem_alloc(db: pymongo.database.Database, dry_run: bool = False)
 )
 def migrate_device_map(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'device_map: {}' to task records missing this field."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {"device_map": {"$exists": False}}
     count = collection.count_documents(query)
     logger.info(f"[add_device_map] Found {count} record(s) missing 'device_map'.")
@@ -214,7 +214,7 @@ def migrate_device_map(db: pymongo.database.Database, dry_run: bool = False):
 )
 def migrate_wckey_fields(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'wckey: ""' and 'using_default_wckey: false' to records missing them."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {
         "$or": [
             {"wckey": {"$exists": False}},
@@ -249,7 +249,7 @@ def migrate_wckey_fields(db: pymongo.database.Database, dry_run: bool = False):
 )
 def migrate_licenses_alloc(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'licenses_alloc: {}' to task records missing this field."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {"licenses_alloc": {"$exists": False}}
     count = collection.count_documents(query)
     logger.info(f"[add_licenses_alloc] Found {count} record(s) missing 'licenses_alloc'.")
@@ -271,7 +271,7 @@ def migrate_licenses_alloc(db: pymongo.database.Database, dry_run: bool = False)
 )
 def migrate_nodename_list(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'nodename_list: []' to task records missing this field."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {"nodename_list": {"$exists": False}}
     count = collection.count_documents(query)
     logger.info(f"[add_nodename_list] Found {count} record(s) missing 'nodename_list'.")
@@ -293,7 +293,7 @@ def migrate_nodename_list(db: pymongo.database.Database, dry_run: bool = False):
 )
 def migrate_cluster(db: pymongo.database.Database, dry_run: bool = False):
     """Add 'cluster: ""' to task records missing this field."""
-    collection = db[TASK_COLLECTION]
+    collection = db[JOB_COLLECTION]
     query = {"cluster": {"$exists": False}}
     count = collection.count_documents(query)
     logger.info(f"[add_cluster] Found {count} record(s) missing 'cluster' field.")

@@ -29,7 +29,7 @@
 #include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 #include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -44,7 +44,7 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  g_task_scheduler->StepStatusChangeAsync(
+  g_job_scheduler->StepStatusChangeAsync(
       request->job_id(), request->step_id(), request->craned_id(),
       request->new_status(), request->exit_code(), request->reason(),
       request->timestamp());
@@ -143,15 +143,15 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
              util::JobStepsToString(orphaned_steps));
   if (!orphaned_steps.empty()) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-    g_task_scheduler->TerminateOrphanedSteps(orphaned_steps,
+    g_job_scheduler->TerminateOrphanedSteps(orphaned_steps,
                                              request->craned_id());
     for (const auto& [job_id, steps] : orphaned_steps) {
       // Reverse order: we should process larger step_id first to avoid warnings
       // abort daemon/primary steps
       for (const auto step_id : steps | std::views::reverse)
-        g_task_scheduler->StepStatusChangeWithReasonAsync(
+        g_job_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
-            crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
+            crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);
     }
   }
@@ -221,7 +221,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  using crane::grpc::InteractiveTaskType;
+  using crane::grpc::InteractiveJobType;
   using crane::grpc::StreamCforedRequest;
   using crane::grpc::StreamCtldReply;
   using grpc::Status;
@@ -242,15 +242,15 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   auto cb_step_res_allocated =
       [writer_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
         if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteTaskResAllocReply(arg);
+          writer->WriteJobResAllocReply(arg);
       };
   auto cb_step_cancel =
       [writer_weak_ptr](StepInteractiveMeta::StepCancelArgs const& args) {
         auto& [job_id, step_id] = args;
-        CRANE_TRACE("[Step #{}.{}] Sending TaskCancelRequest in task_cancel",
+        CRANE_TRACE("[Step #{}.{}] Sending JobCancelRequest in job_cancel",
                     job_id, step_id);
         if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteTaskCancelRequest(job_id, step_id);
+          writer->WriteJobCancelRequest(job_id, step_id);
       };
   auto cb_step_completed =
       [this,
@@ -260,23 +260,23 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                     job_id, step_id);
         if (auto writer = writer_weak_ptr.lock(); writer) {
           if (send_completion_ack)
-            writer->WriteTaskCompletionAckReply(job_id, step_id);
+            writer->WriteJobCompletionAckReply(job_id, step_id);
         } else {
           CRANE_ERROR(
               "[Step #{}.{}] Stream writer of has been destroyed. "
-              "TaskCompletionAckReply will not be sent.",
+              "JobCompletionAckReply will not be sent.",
               job_id, step_id);
         }
 
         m_ctld_server_->m_mtx_.Lock();
 
         // If cfored disconnected, the cfored_name should have be
-        // removed from the map and the task completion callback is
-        // generated from cleaning the remaining tasks by calling
-        // g_task_scheduler->TerminateTask(), we should ignore this
-        // callback since the task id has already been cleaned.
-        auto iter = m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
-        if (iter != m_ctld_server_->m_cfored_running_tasks_.end()) {
+        // removed from the map and the job completion callback is
+        // generated from cleaning the remaining jobs by calling
+        // g_job_scheduler->TerminateJob(), we should ignore this
+        // callback since the job id has already been cleaned.
+        auto iter = m_ctld_server_->m_cfored_running_jobs_.find(cfored_name);
+        if (iter != m_ctld_server_->m_cfored_running_jobs_.end()) {
           auto& cfored_job_map = iter->second;
           auto job_iter = cfored_job_map.find(job_id);
           if (job_iter != cfored_job_map.end()) {
@@ -285,14 +285,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             if (step_set.empty()) cfored_job_map.erase(job_iter);
             if (!present) {
               CRANE_ERROR(
-                  "[Step #{}.{}] not found in cfored {} running task map "
-                  "when handling task completion callback.",
+                  "[Step #{}.{}] not found in cfored {} running job map "
+                  "when handling job completion callback.",
                   job_id, step_id, cfored_name);
             }
           } else {
             CRANE_ERROR(
-                "Job #{} not found in cfored {} running task map when "
-                "handling task completion callback.",
+                "Job #{} not found in cfored {} running job map when "
+                "handling job completion callback.",
                 job_id, cfored_name);
           }
         }
@@ -337,20 +337,20 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       ok = stream->Read(&cfored_request);
       if (ok) {
         switch (cfored_request.type()) {
-        case StreamCforedRequest::TASK_REQUEST: {
-          auto const& payload = cfored_request.payload_task_req();
-          auto task = std::make_unique<TaskInCtld>();
-          task->SetFieldsByTaskToCtld(payload.task());
+        case StreamCforedRequest::JOB_REQUEST: {
+          auto const& payload = cfored_request.payload_job_req();
+          auto job = std::make_unique<JobInCtld>();
+          job->SetFieldsByJobToCtld(payload.job());
 
           InteractiveMeta meta;
           meta.cfored_name = cfored_name;
           meta.cb_step_res_allocated = cb_step_res_allocated;
           meta.cb_step_cancel = cb_step_cancel;
           meta.cb_step_completed = cb_step_completed;
-          task->meta = std::move(meta);
+          job->meta = std::move(meta);
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
+          auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
           if (lua_result) {
             auto rich_err = lua_result.value().get();
             if (rich_err.code() != CraneErrCode::SUCCESS) {
@@ -364,9 +364,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           if (result) {
             auto submit_result =
-                g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+                g_job_scheduler->SubmitJobToScheduler(std::move(job));
             if (submit_result.has_value()) {
-              CraneExpected<task_id_t> job_result = submit_result.value().get();
+              CraneExpected<job_id_t> job_result = submit_result.value().get();
               if (job_result.has_value()) {
                 result =
                     std::expected<std::pair<job_id_t, step_id_t>, std::string>{
@@ -379,7 +379,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             }
           }
 
-          ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
+          ok = stream_writer->WriteJobIdReply(payload.pid(), result);
 
           if (!ok) {
             CRANE_ERROR(
@@ -391,7 +391,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             if (result.has_value()) {
               auto [job_id, step_id] = result.value();
               m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
+              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
                   .insert(step_id);
               m_ctld_server_->m_mtx_.Unlock();
             }
@@ -411,7 +411,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           step->ia_meta = std::move(meta);
 
           auto submit_result =
-              g_task_scheduler->SubmitStepAsync(std::move(step));
+              g_job_scheduler->SubmitStepAsync(std::move(step));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
           auto submit_expt = submit_result.get();
           if (submit_expt.has_value()) {
@@ -422,7 +422,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             result = std::unexpected(CraneErrStr(submit_expt.error()));
           }
 
-          ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
+          ok = stream_writer->WriteJobIdReply(payload.pid(), result);
 
           if (!ok) {
             CRANE_ERROR(
@@ -434,28 +434,28 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             if (result.has_value()) {
               auto [job_id, step_id] = result.value();
               m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
+              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
                   .insert(step_id);
               m_ctld_server_->m_mtx_.Unlock();
             }
           }
         } break;
 
-        case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
-          auto const& payload = cfored_request.payload_task_complete_req();
+        case StreamCforedRequest::JOB_COMPLETION_REQUEST: {
+          auto const& payload = cfored_request.payload_job_complete_req();
           CRANE_TRACE("[Step #{}.{}] Recv StepCompletionReq.", payload.job_id(),
                       payload.step_id());
           // Just send ack if step not found (finished step triggered a cancel
           // req to cfored and a completion req from frontend) to kick cfored
           // statemachine. If found, will send ack when process status change.
-          if (g_task_scheduler->TerminatePendingOrRunningIaStep(
+          if (g_job_scheduler->TerminatePendingOrRunningIaStep(
                   payload.job_id(), payload.step_id()) != CraneErrCode::SUCCESS)
-            stream_writer->WriteTaskCompletionAckReply(payload.job_id(),
+            stream_writer->WriteJobCompletionAckReply(payload.job_id(),
                                                        payload.step_id());
           else {
             CRANE_TRACE(
                 "[Step #{}.{}] Termination succeeded. "
-                "Leave TaskCompletionAck to TaskStatusChange.",
+                "Leave JobCompletionAck to JobStatusChange.",
                 payload.job_id(), payload.step_id());
           }
         } break;
@@ -483,12 +483,12 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       m_ctld_server_->m_mtx_.Lock();
 
       auto running_steps =
-          m_ctld_server_->m_cfored_running_tasks_[cfored_name] |
+          m_ctld_server_->m_cfored_running_jobs_[cfored_name] |
           std::ranges::to<std::unordered_map>();
-      m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
+      m_ctld_server_->m_cfored_running_jobs_.erase(cfored_name);
       m_ctld_server_->m_mtx_.Unlock();
 
-      g_task_scheduler->TerminateRunningStep(running_steps);
+      g_job_scheduler->TerminateRunningStep(running_steps);
 
       return Status::OK;
     }
@@ -496,27 +496,27 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   }
 }
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
+grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
     grpc::ServerContext* context,
-    const crane::grpc::SubmitBatchTaskRequest* request,
-    crane::grpc::SubmitBatchTaskReply* response) {
+    const crane::grpc::SubmitBatchJobRequest* request,
+    crane::grpc::SubmitBatchJobReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   // Check job type
-  if (request->task().type() == crane::grpc::TaskType::Container &&
+  if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
     response->set_ok(false);
     response->set_code(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
   }
 
-  auto task = std::make_unique<TaskInCtld>();
-  task->SetFieldsByTaskToCtld(request->task());
-  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
+  auto job = std::make_unique<JobInCtld>();
+  job->SetFieldsByJobToCtld(request->job());
+  auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
   if (lua_result) {
     auto rich_err = lua_result.value().get();
     if (rich_err.code() != CraneErrCode::SUCCESS) {
@@ -527,15 +527,15 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     }
   }
 
-  auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+  auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
   if (result.has_value()) {
-    CraneExpected<task_id_t> task_result = result.value().get();
-    if (task_result.has_value()) {
+    CraneExpected<job_id_t> job_result = result.value().get();
+    if (job_result.has_value()) {
       response->set_ok(true);
-      response->set_task_id(task_result.value());
+      response->set_job_id(job_result.value());
     } else {
       response->set_ok(false);
-      response->set_code(task_result.error());
+      response->set_code(job_result.error());
     }
   } else {
     response->set_ok(false);
@@ -559,7 +559,7 @@ grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
   response->set_job_id(request->step().job_id());
 
   // Only container steps are accepted here.
-  if (request->step().type() != crane::grpc::TaskType::Container) {
+  if (request->step().type() != crane::grpc::JobType::Container) {
     response->set_ok(false);
     response->set_code(CraneErrCode::ERR_INVALID_PARAM);
     return grpc::Status::OK;
@@ -581,7 +581,7 @@ grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
   auto step = std::make_unique<CommonStepInCtld>();
   step->SetFieldsByStepToCtld(request->step());
 
-  auto submit_future = g_task_scheduler->SubmitStepAsync(std::move(step));
+  auto submit_future = g_job_scheduler->SubmitStepAsync(std::move(step));
   auto submit_result = submit_future.get();
 
   if (submit_result.has_value()) {
@@ -595,49 +595,49 @@ grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
+grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     grpc::ServerContext* context,
-    const crane::grpc::SubmitBatchTasksRequest* request,
-    crane::grpc::SubmitBatchTasksReply* response) {
+    const crane::grpc::SubmitBatchJobsRequest* request,
+    crane::grpc::SubmitBatchJobsReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  // Check task type
-  if (request->task().type() == crane::grpc::TaskType::Container &&
+  // Check job type
+  if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
-    response->add_task_id_list(0);
+    response->add_job_id_list(0);
     response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
   }
 
-  std::vector<CraneExpected<std::future<CraneExpected<task_id_t>>>> results;
+  std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
 
-  uint32_t task_count = request->count();
-  const auto& task_to_ctld = request->task();
-  results.reserve(task_count);
+  uint32_t job_count = request->count();
+  const auto& job_to_ctld = request->job();
+  results.reserve(job_count);
 
-  for (int i = 0; i < task_count; i++) {
-    auto task = std::make_unique<TaskInCtld>();
-    task->SetFieldsByTaskToCtld(task_to_ctld);
+  for (int i = 0; i < job_count; i++) {
+    auto job = std::make_unique<JobInCtld>();
+    job->SetFieldsByJobToCtld(job_to_ctld);
 
-    auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
     results.emplace_back(std::move(result));
   }
 
   for (auto& res : results) {
     if (res.has_value()) {
-      CraneExpected<task_id_t> task_result = res.value().get();
-      if (task_result.has_value()) {
-        response->mutable_task_id_list()->Add(task_result.value());
+      CraneExpected<job_id_t> job_result = res.value().get();
+      if (job_result.has_value()) {
+        response->mutable_job_id_list()->Add(job_result.value());
       } else {
-        response->mutable_task_id_list()->Add(0);
-        response->mutable_code_list()->Add(task_result.error());
+        response->mutable_job_id_list()->Add(0);
+        response->mutable_code_list()->Add(job_result.error());
       }
     } else {
-      response->mutable_task_id_list()->Add(0);
+      response->mutable_job_id_list()->Add(0);
       response->mutable_code_list()->Add(res.error());
     }
   }
@@ -645,23 +645,23 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CancelTask(
-    grpc::ServerContext* context, const crane::grpc::CancelTaskRequest* request,
-    crane::grpc::CancelTaskReply* response) {
+grpc::Status CraneCtldServiceImpl::CancelJob(
+    grpc::ServerContext* context, const crane::grpc::CancelJobRequest* request,
+    crane::grpc::CancelJobReply* response) {
   if (auto msg = CheckCertAndUIDAllowed_(context, request->operator_uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
+  *response = g_job_scheduler->CancelPendingOrRunningJob(*request);
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ResetNextTaskId(
+grpc::Status CraneCtldServiceImpl::ResetNextJobId(
     grpc::ServerContext* context,
-    const crane::grpc::ResetNextTaskIdRequest* request,
-    crane::grpc::ResetNextTaskIdReply* response) {
+    const crane::grpc::ResetNextJobIdRequest* request,
+    crane::grpc::ResetNextJobIdReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -678,22 +678,22 @@ grpc::Status CraneCtldServiceImpl::ResetNextTaskId(
   }
 
   // Field value 0 means "don't change"; >0 means "reset to this value"
-  task_id_t next_task_id = request->next_task_id();
-  int64_t next_task_db_id = request->next_task_db_id();
+  job_id_t next_job_id = request->next_job_id();
+  int64_t next_job_db_id = request->next_job_db_id();
 
-  if (next_task_id == 0 && next_task_db_id == 0) {
+  if (next_job_id == 0 && next_job_db_id == 0) {
     response->set_ok(false);
     response->set_reason(
-        "At least one of next_task_id or next_task_db_id must be specified "
+        "At least one of next_job_id or next_job_db_id must be specified "
         "(>0)");
     return grpc::Status::OK;
   }
 
-  if (g_embedded_db_client->ResetNextTaskId(next_task_id, next_task_db_id)) {
+  if (g_embedded_db_client->ResetNextJobId(next_job_id, next_job_db_id)) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to reset task ID counters in embedded DB");
+    response->set_reason("Failed to reset job ID counters in embedded DB");
   }
 
   return grpc::Status::OK;
@@ -728,10 +728,10 @@ grpc::Status CraneCtldServiceImpl::ResetNextStepDbId(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::PurgeTaskHistory(
+grpc::Status CraneCtldServiceImpl::PurgeJobHistory(
     grpc::ServerContext* context,
-    const crane::grpc::PurgeTaskHistoryRequest* request,
-    crane::grpc::PurgeTaskHistoryReply* response) {
+    const crane::grpc::PurgeJobHistoryRequest* request,
+    crane::grpc::PurgeJobHistoryReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -745,11 +745,11 @@ grpc::Status CraneCtldServiceImpl::PurgeTaskHistory(
     return grpc::Status::OK;
   }
 
-  if (g_embedded_db_client->PurgeAllTaskHistory()) {
+  if (g_embedded_db_client->PurgeAllJobHistory()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to purge task history from embedded DB");
+    response->set_reason("Failed to purge job history from embedded DB");
   }
 
   return grpc::Status::OK;
@@ -828,21 +828,21 @@ grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyTask(
-    grpc::ServerContext* context, const crane::grpc::ModifyTaskRequest* request,
-    crane::grpc::ModifyTaskReply* response) {
+grpc::Status CraneCtldServiceImpl::ModifyJob(
+    grpc::ServerContext* context, const crane::grpc::ModifyJobRequest* request,
+    crane::grpc::ModifyJobReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
+  using ModifyJobRequest = crane::grpc::ModifyJobRequest;
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
-    for (auto task_id : request->task_ids()) {
-      response->add_not_modified_tasks(task_id);
+    for (auto job_id : request->job_ids()) {
+      response->add_not_modified_jobs(job_id);
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
         response->add_not_modified_reasons("User is not a user of Crane");
       } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
@@ -852,76 +852,76 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     return grpc::Status::OK;
   }
 
-  std::list<task_id_t> task_ids;
+  std::list<job_id_t> job_ids;
 
   if (g_config.JobSubmitLuaScript.empty()) {
-    task_ids.assign(request->task_ids().begin(), request->task_ids().end());
+    job_ids.assign(request->job_ids().begin(), request->job_ids().end());
   } else {
-    g_task_scheduler->JobModifyLuaCheck(*request, response, &task_ids);
+    g_job_scheduler->JobModifyLuaCheck(*request, response, &job_ids);
   }
 
   CraneErrCode err;
-  if (request->attribute() == ModifyTaskRequest::TimeLimit) {
-    for (auto task_id : task_ids) {
-      err = g_task_scheduler->ChangeTaskTimeLimit(
-          task_id, request->time_limit_seconds());
+  if (request->attribute() == ModifyJobRequest::TimeLimit) {
+    for (auto job_id : job_ids) {
+      err = g_job_scheduler->ChangeJobTimeLimit(
+          job_id, request->time_limit_seconds());
       if (err == CraneErrCode::SUCCESS) {
-        response->add_modified_tasks(task_id);
+        response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
-            "Task #{} was not found in running or pending queue.", task_id));
+            "Job #{} was not found in running or pending queue.", job_id));
       } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons("Invalid time limit value.");
       } else {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
-            fmt::format("Failed to change the time limit of Task#{}: {}.",
-                        task_id, CraneErrStr(err)));
+            fmt::format("Failed to change the time limit of Job#{}: {}.",
+                        job_id, CraneErrStr(err)));
       }
     }
-  } else if (request->attribute() == ModifyTaskRequest::Priority) {
-    for (auto task_id : task_ids) {
-      err = g_task_scheduler->ChangeTaskPriority(task_id,
+  } else if (request->attribute() == ModifyJobRequest::Priority) {
+    for (auto job_id : job_ids) {
+      err = g_job_scheduler->ChangeJobPriority(job_id,
                                                  request->mandated_priority());
       if (err == CraneErrCode::SUCCESS) {
-        response->add_modified_tasks(task_id);
+        response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
-            fmt::format("Task #{} was not found in pending queue.", task_id));
+            fmt::format("Job #{} was not found in pending queue.", job_id));
       } else {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
             fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
       }
     }
-  } else if (request->attribute() == ModifyTaskRequest::Hold) {
+  } else if (request->attribute() == ModifyJobRequest::Hold) {
     int64_t secs = request->hold_seconds();
-    std::vector<std::pair<task_id_t, std::future<CraneErrCode>>> results;
-    results.reserve(task_ids.size());
-    for (auto task_id : task_ids) {
+    std::vector<std::pair<job_id_t, std::future<CraneErrCode>>> results;
+    results.reserve(job_ids.size());
+    for (auto job_id : job_ids) {
       results.emplace_back(
-          task_id, g_task_scheduler->HoldReleaseTaskAsync(task_id, secs));
+          job_id, g_job_scheduler->HoldReleaseJobAsync(job_id, secs));
     }
-    for (auto& [task_id, res] : results) {
+    for (auto& [job_id, res] : results) {
       err = res.get();
       if (err == CraneErrCode::SUCCESS) {
-        response->add_modified_tasks(task_id);
+        response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
-        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
-            fmt::format("Task #{} was not found in pending queue.", task_id));
+            fmt::format("Job #{} was not found in pending queue.", job_id));
       } else {
-        response->add_not_modified_tasks(false);
+        response->add_not_modified_jobs(false);
         response->add_not_modified_reasons(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
       }
     }
   } else {
-    for (auto task_id : task_ids) {
-      response->add_not_modified_tasks(task_id);
+    for (auto job_id : job_ids) {
+      response->add_not_modified_jobs(job_id);
       response->add_not_modified_reasons("Invalid function.");
     }
   }
@@ -929,10 +929,10 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyTasksExtraAttrs(
+grpc::Status CraneCtldServiceImpl::ModifyJobsExtraAttrs(
     grpc::ServerContext* context,
-    const crane::grpc::ModifyTasksExtraAttrsRequest* request,
-    crane::grpc::ModifyTasksExtraAttrsReply* response) {
+    const crane::grpc::ModifyJobsExtraAttrsRequest* request,
+    crane::grpc::ModifyJobsExtraAttrsReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -941,8 +941,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTasksExtraAttrs(
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
-    for (const auto [task_id, _] : request->extra_attrs_list()) {
-      response->add_not_modified_tasks(task_id);
+    for (const auto [job_id, _] : request->extra_attrs_list()) {
+      response->add_not_modified_jobs(job_id);
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
         response->add_not_modified_reasons("User is not a user of Crane");
       } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
@@ -953,16 +953,16 @@ grpc::Status CraneCtldServiceImpl::ModifyTasksExtraAttrs(
   }
 
   CraneErrCode err;
-  for (const auto [task_id, extra_attrs] : request->extra_attrs_list()) {
-    err = g_task_scheduler->ChangeTaskExtraAttrs(task_id, extra_attrs);
+  for (const auto [job_id, extra_attrs] : request->extra_attrs_list()) {
+    err = g_job_scheduler->ChangeJobExtraAttrs(job_id, extra_attrs);
     if (err == CraneErrCode::SUCCESS) {
-      response->add_modified_tasks(task_id);
+      response->add_modified_jobs(job_id);
     } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
-      response->add_not_modified_tasks(task_id);
+      response->add_not_modified_jobs(job_id);
       response->add_not_modified_reasons(
-          fmt::format("Task #{} was not found in pd/r queue.", task_id));
+          fmt::format("Job #{} was not found in pd/r queue.", job_id));
     } else {
-      response->add_not_modified_tasks(task_id);
+      response->add_not_modified_jobs(job_id);
       response->add_not_modified_reasons(
           fmt::format("Failed to change extra_attrs: {}.", CraneErrStr(err)));
     }
@@ -1126,33 +1126,33 @@ grpc::Status CraneCtldServiceImpl::ResetPartitionAcl(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
+grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     grpc::ServerContext* context,
-    const crane::grpc::QueryTasksInfoRequest* request,
-    crane::grpc::QueryTasksInfoReply* response) {
+    const crane::grpc::QueryJobsInfoRequest* request,
+    crane::grpc::QueryJobsInfoReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  std::unordered_map<job_id_t, crane::grpc::TaskInfo> job_info_map;
-  // Query tasks in RAM
-  g_task_scheduler->QueryTasksInRam(request, &job_info_map);
+  std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
+  // Query jobs in RAM
+  g_job_scheduler->QueryJobsInRam(request, &job_info_map);
 
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
+  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                : request->num_limit();
 
   auto sort_truncate_and_move_to_proto = [&job_info_map,
                                           response](size_t limit) -> void {
-    auto* job_info_list = response->mutable_task_info_list();
+    auto* job_info_list = response->mutable_job_info_list();
     job_info_list->Reserve(job_info_map.size());
     for (auto it = job_info_map.begin(); it != job_info_map.end();) {
-      auto* new_task_info = job_info_list->Add();
-      *new_task_info = std::move(it->second);
+      auto* new_job_info = job_info_list->Add();
+      *new_job_info = std::move(it->second);
       it = job_info_map.erase(it);
     }
 
     std::sort(
         job_info_list->begin(), job_info_list->end(),
-        [](const crane::grpc::TaskInfo& a, const crane::grpc::TaskInfo& b) {
+        [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
           return (a.status() == b.status()) ? (a.priority() > b.priority())
                                             : (a.status() < b.status());
         });
@@ -1162,8 +1162,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   if (job_info_map.size() >= num_limit ||
-      !request->option_include_completed_tasks()) {
-    if (request->option_include_completed_tasks()) {
+      !request->option_include_completed_jobs()) {
+    if (request->option_include_completed_jobs()) {
       // Fetch job finished steps in Mongodb
       if (!g_db_client->FetchJobStepRecords(request, &job_info_map)) {
         CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
@@ -1175,8 +1175,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  // Query completed tasks in Mongodb
-  // (only for cacct, which sets `option_include_completed_tasks` to true)
+  // Query completed jobs in Mongodb
+  // (only for cacct, which sets `option_include_completed_jobs` to true)
   if (!g_db_client->FetchJobRecords(request, &job_info_map,
                                     num_limit - job_info_map.size())) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
@@ -1298,13 +1298,13 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       static_cast<ResourceView>(qos_info->max_tres_per_account());
   qos.flags.FromInt64(qos_info->flags());
 
-  int64_t sec = qos_info->max_time_limit_per_task();
+  int64_t sec = qos_info->max_time_limit_per_job();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
     response->set_code(CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
-  qos.max_time_limit_per_task = absl::Seconds(sec);
+  qos.max_time_limit_per_job = absl::Seconds(sec);
 
   qos.max_wall = absl::Seconds(qos_info->max_wall());
 
@@ -1693,8 +1693,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
     qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
     qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
-    qos_info->set_max_time_limit_per_task(
-        absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->set_max_time_limit_per_job(
+        absl::ToInt64Seconds(qos.max_time_limit_per_job));
     qos_info->set_max_jobs(qos.max_jobs);
     qos_info->set_max_submit_jobs(qos.max_submit_jobs);
     qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
@@ -2220,7 +2220,7 @@ grpc::Status CraneCtldServiceImpl::CreateReservation(
     return grpc::Status::OK;
   }
 
-  *response = g_task_scheduler->CreateResv(*request);
+  *response = g_job_scheduler->CreateResv(*request);
   return grpc::Status::OK;
 }
 
@@ -2243,7 +2243,7 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
 
   if (absl::AsciiStrToUpper(request->reservation_name()) == "ALL" &&
       request->force()) {
-    *response = g_task_scheduler->PurgeAllReservations();
+    *response = g_job_scheduler->PurgeAllReservations();
     return grpc::Status::OK;
   }
 
@@ -2254,7 +2254,7 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
     return grpc::Status::OK;
   }
 
-  *response = g_task_scheduler->DeleteResv(*request);
+  *response = g_job_scheduler->DeleteResv(*request);
   return grpc::Status::OK;
 }
 
@@ -2477,7 +2477,7 @@ grpc::Status CraneCtldServiceImpl::AttachContainerStep(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->AttachContainerStep(*request);
+  *response = g_job_scheduler->AttachContainerStep(*request);
 
   return grpc::Status::OK;
 }
@@ -2527,7 +2527,7 @@ grpc::Status CraneCtldServiceImpl::ExecInContainerStep(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->ExecInContainerStep(*request);
+  *response = g_job_scheduler->ExecInContainerStep(*request);
 
   return grpc::Status::OK;
 }

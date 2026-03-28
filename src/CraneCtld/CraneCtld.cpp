@@ -37,7 +37,7 @@
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
@@ -438,9 +438,9 @@ void ParseConfig(int argc, char** argv) {
       g_config.AllLicenseResourcesAbsolute =
           YamlValueOr<bool>(config["AllLicenseResourcesAbsolute"], false);
 
-      g_config.RejectTasksBeyondCapacity =
+      g_config.RejectJobsBeyondCapacity =
           YamlValueOr<bool>(config["RejectJobsBeyondCapacity"],
-                            Ctld::kDefaultRejectTasksBeyondCapacity);
+                            Ctld::kDefaultRejectJobsBeyondCapacity);
 
       if (config["JobFileAppend"]) {
         g_config.JobFileOpenModeAppend = config["JobFileAppend"].as<bool>();
@@ -940,7 +940,7 @@ void DestroyCtldGlobalVariables() {
 
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
-  g_task_scheduler.reset();
+  g_job_scheduler.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
@@ -997,8 +997,8 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  // Account manager must be initialized before Task Scheduler
-  // since the recovery stage of the task scheduler will acquire
+  // Account manager must be initialized before Job Scheduler
+  // since the recovery stage of the job scheduler will acquire
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
@@ -1046,7 +1046,7 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
-    // No need to worry disconnect before task scheduler init
+    // No need to worry disconnect before job scheduler init
     g_meta_container->CranedDown(craned_id);
   });
 
@@ -1059,11 +1059,11 @@ void InitializeCtldGlobalVariables() {
 
   using namespace std::chrono_literals;
 
-  g_task_scheduler = std::make_unique<TaskScheduler>();
+  g_job_scheduler = std::make_unique<JobScheduler>();
 
-  ok = g_task_scheduler->Init();
+  ok = g_job_scheduler->Init();
   if (!ok) {
-    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
+    CRANE_ERROR("The initialization of JobScheduler failed. Exiting...");
     DestroyCtldGlobalVariables();
     std::exit(1);
   }

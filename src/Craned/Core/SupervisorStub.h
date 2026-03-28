@@ -35,9 +35,9 @@ class SupervisorStub {
     std::shared_ptr<SupervisorStub> supervisor_stub;
   };
   /**
-   * @brief Query all existing supervisor for task they hold.
+   * @brief Query all existing supervisor for steps they hold.
    * @return job_id and pid from supervisors. Error when socket file
-   * scanning fails, supervisors are unreachable, or task status queries fail
+   * scanning fails, supervisors are unreachable, or step status queries fail
    * with specific error codes.
    */
   [[nodiscard]] static CraneExpected<absl::flat_hash_map<
@@ -48,8 +48,8 @@ class SupervisorStub {
   CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
   CheckStatus();
 
-  CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
-  CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
+  CraneErrCode TerminateStep(bool mark_as_orphaned, bool terminated_by_user);
+  CraneErrCode ChangeStepTimeLimit(absl::Duration time_limit);
   CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
 

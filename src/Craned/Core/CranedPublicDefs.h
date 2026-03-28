@@ -36,7 +36,7 @@ using ::Craned::Common::CgroupInterface;
 using ::Craned::Common::CgroupManager;
 using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
-using StepStatus = crane::grpc::TaskStatus;
+using StepStatus = crane::grpc::JobStatus;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
 
@@ -55,15 +55,15 @@ inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
 struct StepStatusChangeQueueElem {
   job_id_t job_id;
   step_id_t step_id;
-  crane::grpc::TaskStatus new_status{};
+  crane::grpc::JobStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
   google::protobuf::Timestamp timestamp;
 };
 
-struct TaskInfoOfUid {
+struct JobInfoOfUid {
   uint32_t job_cnt;
-  uint32_t first_task_id;
+  uint32_t first_job_id;
   bool cgroup_exists;
   std::string cgroup_path;
 };

@@ -199,14 +199,14 @@ struct formatter<std::filesystem::path> {
 };
 
 template <>
-struct formatter<crane::grpc::TaskStatus> {
+struct formatter<crane::grpc::JobStatus> {
   template <typename ParseContext>
   constexpr auto parse(ParseContext& ctx) {
     return ctx.begin();
   };
 
   template <typename FormatContext>
-  auto format(const crane::grpc::TaskStatus& v, FormatContext& ctx) const {
+  auto format(const crane::grpc::JobStatus& v, FormatContext& ctx) const {
     return fmt::format_to(
         ctx.out(), "{}",
         util::Internal::CraneStepStatusStrArr[static_cast<int>(v)]);
