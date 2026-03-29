@@ -24,8 +24,8 @@
 #include "crane/String.h"
 namespace Craned::Supervisor {
 
-using crane::grpc::StreamTaskIOReply;
-using crane::grpc::StreamTaskIORequest;
+using crane::grpc::StreamStepIOReply;
+using crane::grpc::StreamStepIORequest;
 
 CforedClient::CforedClient() {
   m_loop_ = uvw::loop::create();
@@ -160,7 +160,7 @@ uint16_t CforedClient::SetupX11forwarding_() {
     CRANE_TRACE("Accepting connection on x11 proxy.");
 
     x11_local_id_t x11_local_id = next_x11_id_++;
-    this->TaskX11ConnectForward(x11_local_id);
+    this->StepX11ConnectForward(x11_local_id);
     auto x11_fd_info = std::make_shared<X11FdInfo>();
     auto sock = h.parent().resource<uvw::tcp_handle>();
 
@@ -168,7 +168,7 @@ uint16_t CforedClient::SetupX11forwarding_() {
         [x11_local_id, this](uvw::data_event& e, uvw::tcp_handle& s) {
           CRANE_TRACE("[X11 #{}] Read x11 output len [{}]. Forwarding...",
                       x11_local_id, e.length);
-          TaskX11OutPutForward(x11_local_id, std::move(e.data), e.length);
+          StepX11OutPutForward(x11_local_id, std::move(e.data), e.length);
         });
     sock->on<uvw::write_event>(
         [x11_local_id, this](const uvw::write_event&, uvw::tcp_handle&) {
@@ -191,7 +191,7 @@ uint16_t CforedClient::SetupX11forwarding_() {
     sock->on<uvw::close_event>(
         [x11_local_id, this](uvw::close_event&, uvw::tcp_handle& s) {
           CRANE_INFO("[X11 #{}] proxy connection was closed.", x11_local_id);
-          this->TaskX11OutputFinish(x11_local_id);
+          this->StepX11OutputFinish(x11_local_id);
         });
 
     h.accept(*sock);
@@ -431,7 +431,7 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
 }
 
 void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
-    grpc::ClientAsyncReaderWriter<StreamTaskIORequest, StreamTaskIOReply>*
+    grpc::ClientAsyncReaderWriter<StreamStepIORequest, StreamStepIOReply>*
         stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
@@ -448,7 +448,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
 
     if (ok) {
-      StreamTaskIORequest request;
+      StreamStepIORequest request;
       request.set_type(fwd_req.type);
       std::visit(
           VariantVisitor{
@@ -457,12 +457,12 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
                 payload->set_msg(req.data.get(), req.len);
               },
               [&request](X11FwdConnectReq& req) {
-                auto* payload = request.mutable_payload_task_x11_fwd_conn_req();
+                auto* payload = request.mutable_payload_step_x11_fwd_conn_req();
                 payload->set_local_id(req.x11_id);
                 payload->set_craned_id(g_config.CranedIdOfThisNode);
               },
               [&request](X11FwdReq& req) {
-                auto* payload = request.mutable_payload_task_x11_output_req();
+                auto* payload = request.mutable_payload_step_x11_output_req();
                 payload->set_local_id(req.x11_id);
                 payload->set_craned_id(g_config.CranedIdOfThisNode);
                 payload->set_msg(req.data.get(), req.len);
@@ -474,7 +474,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
                 payload->set_signaled(status.signaled);
               },
               [&request](X11FwdEofReq& req) {
-                auto* payload = request.mutable_payload_task_x11_eof_req();
+                auto* payload = request.mutable_payload_step_x11_eof_req();
                 payload->set_local_id(req.x11_id);
                 payload->set_craned_id(g_config.CranedIdOfThisNode);
               }},
@@ -512,14 +512,14 @@ void CforedClient::AsyncSendRecvThread_() {
   bool ok;
   Tag tag;
   grpc::ClientContext context;
-  StreamTaskIORequest request;
-  StreamTaskIOReply reply;
+  StreamStepIORequest request;
+  StreamStepIOReply reply;
   grpc::CompletionQueue::NextStatus next_status;
 
   auto stream =
-      m_stub_->AsyncTaskIOStream(&context, &m_cq_, (void*)Tag::Prepare);
+      m_stub_->AsyncStepIOStream(&context, &m_cq_, (void*)Tag::Prepare);
 
-  CRANE_TRACE("Preparing TaskIOStream...");
+  CRANE_TRACE("Preparing StepIOStream...");
 
   State state = State::Registering;
   while (true) {
@@ -556,7 +556,7 @@ void CforedClient::AsyncSendRecvThread_() {
         CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
 
         request.Clear();
-        request.set_type(StreamTaskIORequest::SUPERVISOR_UNREGISTER);
+        request.set_type(StreamStepIORequest::SUPERVISOR_UNREGISTER);
 
         stream->WriteLast(request, grpc::WriteOptions(), (void*)Tag::Write);
 
@@ -597,7 +597,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
       CRANE_ASSERT_MSG_VA(tag == Tag::Prepare, "Tag: {}", int(tag));
 
-      request.set_type(StreamTaskIORequest::SUPERVISOR_REGISTER);
+      request.set_type(StreamStepIORequest::SUPERVISOR_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
       request.mutable_payload_register_req()->set_job_id(g_config.JobId);
@@ -644,25 +644,25 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_ASSERT(tag == Tag::Read);
       const std::string* msg;
 
-      if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
-        msg = &reply.payload_task_x11_input_req().msg();
-        CRANE_TRACE("TASK_X11_INPUT len:{} EOF: {}.", msg->length(),
-                    reply.payload_task_x11_input_req().eof());
-      } else if (reply.type() == StreamTaskIOReply::TASK_INPUT) {
+      if (reply.type() == StreamStepIOReply::STEP_X11_INPUT) {
+        msg = &reply.payload_step_x11_input_req().msg();
+        CRANE_TRACE("STEP_X11_INPUT len:{} EOF: {}.", msg->length(),
+                    reply.payload_step_x11_input_req().eof());
+      } else if (reply.type() == StreamStepIOReply::TASK_INPUT) {
         msg = &reply.payload_task_input_req().msg();
         CRANE_TRACE("TASK_INPUT len:{} EOF:{}.", msg->length(),
                     reply.payload_task_input_req().eof());
       } else [[unlikely]] {
-        CRANE_ERROR("Expect TASK_INPUT or TASK_X11_INPUT, but got {}",
+        CRANE_ERROR("Expect TASK_INPUT or STEP_X11_INPUT, but got {}",
                     (int)reply.type());
         break;
       }
 
       m_mtx_.Lock();
 
-      if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
-        x11_local_id_t x11_id = reply.payload_task_x11_input_req().local_id();
-        bool eof = reply.payload_task_x11_input_req().eof();
+      if (reply.type() == StreamStepIOReply::STEP_X11_INPUT) {
+        x11_local_id_t x11_id = reply.payload_step_x11_input_req().local_id();
+        bool eof = reply.payload_step_x11_input_req().eof();
         auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
         if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
           if (!x11_fd_info_it->second->sock_stopped) {
@@ -723,7 +723,7 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_ASSERT(tag == Tag::Read);
       CRANE_TRACE("UNREGISTER_REPLY msg received.");
 
-      if (reply.type() != StreamTaskIOReply::SUPERVISOR_UNREGISTER_REPLY) {
+      if (reply.type() != StreamStepIOReply::SUPERVISOR_UNREGISTER_REPLY) {
         CRANE_TRACE("Expect UNREGISTER_REPLY, but got {}. Ignoring it.",
                     (int)reply.type());
         reply.Clear();
@@ -757,7 +757,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
   CRANE_DEBUG("[Task #{}] Process stopped with exit_code: {}, signaled: {}.",
               task_id, exit_code, signaled);
   m_task_fwd_req_queue_.enqueue(FwdRequest{
-      .type = StreamTaskIORequest::TASK_EXIT_STATUS,
+      .type = StreamStepIORequest::TASK_EXIT_STATUS,
       .data = TaskFinishStatus{.task_id = task_id,
                                .exit_code = exit_code,
                                .signaled = signaled},
@@ -780,34 +780,34 @@ void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
                                      size_t len) {
   CRANE_TRACE("Receive TaskOutputForward len: {}.", len);
   m_task_fwd_req_queue_.enqueue(FwdRequest{
-      .type = StreamTaskIORequest::TASK_OUTPUT,
+      .type = StreamStepIORequest::TASK_OUTPUT,
       .data = IOFwdRequest{.data = std::move(data), .len = len},
   });
 }
-void CforedClient::TaskX11ConnectForward(x11_local_id_t x11_local_id) {
-  CRANE_INFO("Receive TaskX11ConnectForward id:{} .", x11_local_id);
+void CforedClient::StepX11ConnectForward(x11_local_id_t x11_local_id) {
+  CRANE_INFO("Receive StepX11ConnectForward id:{} .", x11_local_id);
   m_task_fwd_req_queue_.enqueue(
-      FwdRequest{.type = StreamTaskIORequest::TASK_X11_CONN,
+      FwdRequest{.type = StreamStepIORequest::STEP_X11_CONN,
                  .data = X11FwdConnectReq{.x11_id = x11_local_id}});
 }
 
-void CforedClient::TaskX11OutPutForward(x11_local_id_t x11_local_id,
+void CforedClient::StepX11OutPutForward(x11_local_id_t x11_local_id,
                                         std::unique_ptr<char[]>&& data,
                                         size_t len) {
-  CRANE_TRACE("Receive TaskX11OutPutForward len: {}.", len);
+  CRANE_TRACE("Receive StepX11OutPutForward len: {}.", len);
   m_task_fwd_req_queue_.enqueue(FwdRequest{
-      .type = StreamTaskIORequest::TASK_X11_OUTPUT,
+      .type = StreamStepIORequest::STEP_X11_OUTPUT,
       .data = X11FwdReq{.x11_id = x11_local_id,
                         .data = std::move(data),
                         .len = len},
   });
 }
 
-void CforedClient::TaskX11OutputFinish(x11_local_id_t x11_local_id) {
+void CforedClient::StepX11OutputFinish(x11_local_id_t x11_local_id) {
   absl::MutexLock lock(&m_mtx_);
-  CRANE_INFO("Receive TaskX11OutputFinish id:{} .", x11_local_id);
+  CRANE_INFO("Receive StepX11OutputFinish id:{} .", x11_local_id);
   m_task_fwd_req_queue_.enqueue(
-      FwdRequest{.type = StreamTaskIORequest::TASK_X11_EOF,
+      FwdRequest{.type = StreamStepIORequest::STEP_X11_EOF,
                  .data = X11FwdEofReq{.x11_id = x11_local_id}});
   m_x11_fd_info_map_.erase(x11_local_id);
 }

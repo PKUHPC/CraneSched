@@ -865,7 +865,7 @@ message StreamCrunRequest {
     STEP_REQUEST = 4;
     JOB_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
-    TASK_X11_FORWARD = 3;
+    STEP_X11_FORWARD = 3;
   }
 
   message JobReq {
@@ -887,7 +887,7 @@ message StreamCrunRequest {
     bool eof = 2;
   }
 
-  message TaskX11ForwardReq {
+  message StepX11ForwardReq {
     bytes msg = 1;
     bool eof = 2;
     uint32 local_id = 3;
@@ -901,7 +901,7 @@ message StreamCrunRequest {
     StepReq payload_step_req = 6;
     JobCompleteReq payload_job_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
-    TaskX11ForwardReq payload_task_x11_forward_req = 5;
+    StepX11ForwardReq payload_step_x11_forward_req = 5;
   }
 }
 
@@ -913,10 +913,10 @@ message StreamCrunReply {
     JOB_COMPLETION_ACK_REPLY = 3;
     TASK_IO_FORWARD = 4;
     TASK_IO_FORWARD_READY = 5;
-    TASK_X11_FORWARD = 6;
+    STEP_X11_FORWARD = 6;
     TASK_EXIT_STATUS = 7;
-    TASK_X11_CONN = 8;
-    TASK_X11_EOF = 9;
+    STEP_X11_CONN = 8;
+    STEP_X11_EOF = 9;
   }
 
   message JobIdReply {
@@ -946,18 +946,18 @@ message StreamCrunReply {
     bytes msg = 1;
   }
 
-  message TaskX11ConnReply {
+  message StepX11ConnReply {
     string craned_id = 1;
     uint32 local_id = 2;
   }
 
-  message TaskX11ForwardReply {
+  message StepX11ForwardReply {
     bytes msg = 1;
     string craned_id = 2;
     uint32 local_id = 3;
   }
 
-  message TaskX11EofReply {
+  message StepX11EofReply {
     string craned_id = 1;
     uint32 local_id = 2;
   }
@@ -977,22 +977,22 @@ message StreamCrunReply {
     JobCompletionAckReply payload_job_completion_ack_reply = 5;
     TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
     TaskIOForwardReply payload_task_io_forward_reply = 7;
-    TaskX11ForwardReply payload_task_x11_forward_reply = 8;
+    StepX11ForwardReply payload_step_x11_forward_reply = 8;
     TaskExitStatusReply payload_task_exit_status_reply = 9;
-    TaskX11ConnReply payload_task_x11_conn_reply = 10;
-    TaskX11EofReply payload_task_x11_eof_reply = 11;
+    StepX11ConnReply payload_step_x11_conn_reply = 10;
+    StepX11EofReply payload_step_x11_eof_reply = 11;
   }
 }
 
-message StreamTaskIORequest {
+message StreamStepIORequest {
   enum SupervisorRequestType {
     SUPERVISOR_REGISTER = 0;
     TASK_OUTPUT = 1;
     SUPERVISOR_UNREGISTER = 2;
-    TASK_X11_OUTPUT = 3;
+    STEP_X11_OUTPUT = 3;
     TASK_EXIT_STATUS = 4;
-    TASK_X11_CONN = 5;
-    TASK_X11_EOF = 6;
+    STEP_X11_CONN = 5;
+    STEP_X11_EOF = 6;
   }
 
   message SupervisorRegisterReq {
@@ -1007,18 +1007,18 @@ message StreamTaskIORequest {
 
   message SupervisorUnRegisterReq {}
 
-  message TaskX11FwdConnReq {
+  message StepX11FwdConnReq {
     uint32 local_id = 1;
     string craned_id = 2;
   }
 
-  message TaskX11OutputReq {
+  message StepX11OutputReq {
     bytes msg = 1;
     uint32 local_id = 2;
     string craned_id = 3;
   }
 
-  message TaskX11OutputEofReq {
+  message StepX11OutputEofReq {
     uint32 local_id = 1;
     string craned_id = 2;
   }
@@ -1035,19 +1035,19 @@ message StreamTaskIORequest {
     SupervisorRegisterReq payload_register_req = 2;
     TaskOutputReq payload_task_output_req = 3;
     SupervisorUnRegisterReq payload_unregister_req = 4;
-    TaskX11OutputReq payload_task_x11_output_req = 5;
+    StepX11OutputReq payload_step_x11_output_req = 5;
     TaskExitStatus payload_task_exit_status_req = 6;
-    TaskX11FwdConnReq payload_task_x11_fwd_conn_req = 7;
-    TaskX11OutputEofReq payload_task_x11_eof_req = 8;
+    StepX11FwdConnReq payload_step_x11_fwd_conn_req = 7;
+    StepX11OutputEofReq payload_step_x11_eof_req = 8;
   }
 }
 
-message StreamTaskIOReply {
+message StreamStepIOReply {
   enum SupervisorReplyType {
     SUPERVISOR_REGISTER_REPLY = 0;
     TASK_INPUT = 1;
     SUPERVISOR_UNREGISTER_REPLY = 2;
-    TASK_X11_INPUT = 3;
+    STEP_X11_INPUT = 3;
   }
 
   message SupervisorRegisterReply {
@@ -1063,7 +1063,7 @@ message StreamTaskIOReply {
     bool ok = 1;
   }
 
-  message TaskX11InputReq {
+  message StepX11InputReq {
     bytes msg = 1;
     bool eof = 2;
     uint32 local_id = 3;
@@ -1075,7 +1075,7 @@ message StreamTaskIOReply {
     SupervisorRegisterReply payload_supervisor_register_reply = 2;
     TaskInputReq payload_task_input_req = 3;
     SupervisorUnregisterReply payload_supervisor_unregister_reply = 4;
-    TaskX11InputReq payload_task_x11_input_req = 5;
+    StepX11InputReq payload_step_x11_input_req = 5;
   }
 }
 
@@ -1421,6 +1421,6 @@ service CranedForPam {
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
-  rpc TaskIOStream(stream StreamTaskIORequest) returns (stream StreamTaskIOReply);
+  rpc StepIOStream(stream StreamStepIORequest) returns (stream StreamStepIOReply);
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }
