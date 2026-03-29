@@ -379,6 +379,16 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             }
           }
 
+          // Track in map before Write so kCleanData can always find
+          // and terminate the task even if the Write fails.
+          if (result.has_value()) {
+            auto [job_id, step_id] = result.value();
+            m_ctld_server_->m_mtx_.Lock();
+            m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
+                .insert(step_id);
+            m_ctld_server_->m_mtx_.Unlock();
+          }
+
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -387,14 +397,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kCleanData;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
         case StreamCforedRequest::STEP_REQUEST: {
@@ -422,6 +424,16 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             result = std::unexpected(CraneErrStr(submit_expt.error()));
           }
 
+          // Track in map before Write so kCleanData can always find
+          // and terminate the step even if the Write fails.
+          if (result.has_value()) {
+            auto [job_id, step_id] = result.value();
+            m_ctld_server_->m_mtx_.Lock();
+            m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
+                .insert(step_id);
+            m_ctld_server_->m_mtx_.Unlock();
+          }
+
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -430,14 +442,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kCleanData;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
 

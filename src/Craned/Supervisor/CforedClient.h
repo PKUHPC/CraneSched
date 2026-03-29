@@ -55,6 +55,11 @@ class CforedClient {
     bool err_stopped{false};
 
     bool proc_stopped{false};
+
+    // Deferred exit status: filled by TaskProcessStop(), sent after output
+    // drain to guarantee all TASK_OUTPUT precedes TASK_EXIT_STATUS.
+    uint32_t exit_code{0};
+    bool signaled{false};
   };
 
   using x11_local_id_t = uint32_t;
