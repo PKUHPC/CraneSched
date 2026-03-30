@@ -66,8 +66,8 @@ mode from jobs to steps.
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `job`, `step`  
-Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When used with `--step`, filters steps
-belonging to the specified jobs.
+Specify job IDs to query (comma-separated list). Supports `jobid` and `jobid_arraytaskid` (for example, `-j=229,229_0`).
+When used with `--step`, filters steps belonging to the specified jobs (or array tasks).
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -136,10 +136,13 @@ When querying jobs (default mode), the following fields are displayed:
 - **NodeList**: Names of nodes where the job is running
 - **Deadline**： Deadline of the job
 
+For array jobs, `JobId` is shown as `jobid_arraytaskid`; in the default table output an additional array summary row
+(`anchorJobId_[start-end]`) is displayed.
+
 When querying steps (using `--step`), the following fields are displayed:
 
-- **StepId**: Step identification in format jobid.stepid
-- **JobId**: Parent job identification number
+- **StepId**: Step identification; array jobs use `jobid_arraytaskid.stepid`, regular jobs use `jobid.stepid`
+- **JobId**: Parent job identification number (array jobs use `jobid_arraytaskid`)
 - **Name**: Step name
 - **Partition**: Partition (inherited from parent job)
 - **User**: Username (inherited from parent job)
@@ -159,7 +162,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 | %deadline  | Deadline        | Deadline time of the job                                    |
 | %e         | ElapsedTime     | Elapsed time since job started                              |
 | %h         | Held            | Hold state of the job                                       |
-| %j         | JobID           | Job ID                                                      |
+| %j         | JobID           | Job ID (array jobs use `jobid_arraytaskid`)                |
 | %k         | Comment         | Comment of the job                                          |
 | %l         | TimeLimit       | Time limit for the job                                      |
 | %L         | NodeList        | List of nodes the job is running on (or reason for pending) |
@@ -189,8 +192,8 @@ When querying steps (using `--step`), the following format identifiers are suppo
 
 | Identifier | Full Name   | Description                                    |
 |------------|-------------|------------------------------------------------|
-| %i         | StepId      | Step ID in format jobid.stepid                 |
-| %j         | JobId       | Parent job ID                                  |
+| %i         | StepId      | Step ID; array jobs use `jobid_arraytaskid.stepid`         |
+| %j         | JobId       | Parent job ID (array jobs use `jobid_arraytaskid`)         |
 | %n         | Name        | Step name                                      |
 | %P         | Partition   | Partition (inherited from parent job)          |
 | %u         | User        | Username (inherited from parent job)           |

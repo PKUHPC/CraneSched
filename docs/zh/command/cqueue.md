@@ -63,7 +63,7 @@ cqueue
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **适用于：** `作业`, `作业步`  
-指定查询的作业ID（逗号分隔列表）。例如，`-j=2,3,4`。与`--step`一起使用时，过滤属于指定作业的作业步。
+指定查询的作业ID（逗号分隔列表）。支持 `jobid` 或 `jobid_arraytaskid`（例如 `-j=229,229_0`）。与`--step`一起使用时，过滤属于指定作业（或数组子任务）的作业步。
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -127,10 +127,12 @@ cqueue
 - **Nodes**：分配的节点数
 - **NodeList**：作业运行的节点名称
 
+对于数组作业，`JobId` 会显示为 `jobid_arraytaskid`；默认表格还会额外显示一行数组聚合行（形如 `anchorJobId_[start-end]`）。
+
 查询作业步时（使用`--step`），显示以下字段：
 
-- **StepId**：作业步标识，格式为jobid.stepid
-- **JobId**：父作业标识号
+- **StepId**：作业步标识，数组作业格式为 `jobid_arraytaskid.stepid`，普通作业为 `jobid.stepid`
+- **JobId**：父作业标识号（数组作业显示为 `jobid_arraytaskid`）
 - **Name**：作业步名称
 - **Partition**：分区（从父作业继承）
 - **User**：用户名（从父作业继承）
@@ -149,7 +151,7 @@ cqueue
 | %C  | ReqCpus         | 作业请求的总CPU数            |
 | %e  | ElapsedTime     | 作业启动以来的经过时间           |
 | %h  | Held            | 作业的保持状态               |
-| %j  | JobID           | 作业ID                  |
+| %j  | JobID           | 作业ID（数组作业显示为 `jobid_arraytaskid`） |
 | %k  | Comment         | 作业的备注                 |
 | %l  | TimeLimit       | 作业的时间限制               |
 | %L  | NodeList        | 作业运行的节点列表（或pending原因） |
@@ -179,8 +181,8 @@ cqueue
 
 | 标识符 | 全名          | 描述                    |
 |-----|-------------|-----------------------|
-| %i  | StepId      | 作业步ID，格式为jobid.stepid |
-| %j  | JobId       | 父作业ID                 |
+| %i  | StepId      | 作业步ID，数组作业格式为 `jobid_arraytaskid.stepid` |
+| %j  | JobId       | 父作业ID（数组作业显示为 `jobid_arraytaskid`） |
 | %n  | Name        | 作业步名称                 |
 | %P  | Partition   | 分区（从父作业继承）            |
 | %u  | User        | 用户名（从父作业继承）           |

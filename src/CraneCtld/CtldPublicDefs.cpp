@@ -1802,6 +1802,16 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
 
   job_info->set_submit_hostname(submit_hostname);
 
+  if (job_to_ctld.has_array_index_start()) {
+    job_info->set_array_index_start(job_to_ctld.array_index_start());
+  }
+  if (job_to_ctld.has_array_index_end()) {
+    job_info->set_array_index_end(job_to_ctld.array_index_end());
+  }
+  if (job_to_ctld.has_array_task_id()) {
+    job_info->set_array_task_id(job_to_ctld.array_task_id());
+  }
+
   // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
   if (IsContainer()) {

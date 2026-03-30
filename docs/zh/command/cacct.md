@@ -28,8 +28,8 @@ cacct
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **适用于：** `作业`, `作业步`  
-指定查询的作业ID（逗号分隔列表）。例如，`-j=2,3,4`。查询作业时，会按作业ID过滤。输出将包含匹配的作业及其相关的作业步。支持使用作业步ID格式
-`jobid.stepid`查询特定作业步。
+指定查询的作业ID（逗号分隔列表）。支持 `jobid`、`jobid_arraytaskid`、`jobid.stepid`、`jobid_arraytaskid.stepid`。例如，`-j=2,2_0,2.1,2_0.1`。
+查询时会按作业或作业步ID过滤，输出包含匹配记录及其关联信息。
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -119,13 +119,15 @@ cacct
 
 显示默认格式时，会显示以下字段：
 
-- **JobId**：作业或作业步标识（格式：作业为jobid，作业步为jobid.stepid）
+- **JobId**：作业或作业步标识（普通作业为 `jobid`/`jobid.stepid`，数组作业为 `jobid_arraytaskid`/`jobid_arraytaskid.stepid`）
 - **JobName**：作业或作业步名称
 - **Partition**：作业/作业步运行的分区
 - **Account**：作业/作业步计费的账户
 - **AllocCPUs**：分配的CPU数量
 - **State**：作业/作业步状态（如COMPLETED、FAILED、CANCELLED）
 - **ExitCode**：退出码（格式：exitcode:signal，见[退出码参考](../reference/exit_code.md)）
+
+对于数组作业，默认表格会额外显示一行数组聚合行（形如 `anchorJobId_[start-end]`）。
 
 ## 格式说明符
 
@@ -140,7 +142,7 @@ cacct
 | %E / %EndTime         | 作业/作业步的结束时间                  |
 | %e / %ExitCode        | 退出码（格式：exitcode:signal）      |
 | %h / %Held            | 作业的保持状态                      |
-| %j / %JobID           | 作业ID（或作业步ID，格式为jobid.stepid） |
+| %j / %JobID           | 作业ID（支持 `jobid`、`jobid_arraytaskid`、`jobid.stepid`、`jobid_arraytaskid.stepid`） |
 | %K / %Wckey           | 工作负载特征键                      |
 | %k / %Comment         | 作业的备注                        |
 | %L / %NodeList        | 作业/作业步运行的节点列表                |
