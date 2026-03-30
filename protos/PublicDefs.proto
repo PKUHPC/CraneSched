@@ -420,6 +420,10 @@ message StepToD {
   string task_prolog = 30;
   string task_epilog = 31;
   repeated Signal signals = 32;
+
+  // task_node_list[task_id] = index of the node in nodelist that owns this task.
+  // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
+  repeated uint32 task_node_list = 34;
 }
 
 message JobStepsToD {
