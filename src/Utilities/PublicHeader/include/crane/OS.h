@@ -115,6 +115,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,
-    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd);
+    std::unordered_map<std::string, std::string>* env_map, int job_stdout_fd);
 
 }  // namespace util::os

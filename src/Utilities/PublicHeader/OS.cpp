@@ -662,7 +662,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,
-    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
+    std::unordered_map<std::string, std::string>* env_map, int job_stdout_fd) {
   static const LazyRE2 export_re = {
       R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
   static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
@@ -675,8 +675,8 @@ void ApplyPrologOutputToEnvAndStdout(
     } else if (RE2::FullMatch(line, *unset_re, &name)) {
       env_map->erase(name);
     } else if (RE2::FullMatch(line, *print_re, &to_print)) {
-      write(task_stdout_fd, to_print.data(), to_print.size());
-      write(task_stdout_fd, "\n", 1);
+      write(job_stdout_fd, to_print.data(), to_print.size());
+      write(job_stdout_fd, "\n", 1);
     }
   }
 }

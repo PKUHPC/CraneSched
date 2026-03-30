@@ -196,11 +196,11 @@ class CtldClient {
 
   void StartHealthCheck();
 
-  void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
+  void StepStatusChangeAsync(StepStatusChangeQueueElem&& step_status_change);
 
   // Convenience method for reporting status changes
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                             crane::grpc::TaskStatus new_status,
+                             crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason = std::nullopt);
 

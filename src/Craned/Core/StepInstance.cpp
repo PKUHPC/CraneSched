@@ -293,7 +293,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
           g_config.JobLifecycleHook.MaxOutputSize);
     }
 
-    // Populate CDI devices into container_meta for container tasks.
+    // Populate CDI devices into container_meta for container jobs.
     // CDI consistency (all-or-none per name/type) is validated at config
     // parse time in Craned.cpp, so here we only need to fill the list.
     if (this->IsContainer() &&
@@ -343,6 +343,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
         }
       }
     }
+
+    init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
     if (!this->traceparent.empty())
@@ -539,18 +541,18 @@ void StepInstance::ExecuteStepAsync() {
                               stub = supervisor_stub] {
     auto code = stub->ExecuteStep();
     if (code != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
+      CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute step, code:{}.",
                   job_id, step_id, static_cast<int>(code));
       g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
           .job_id = job_id,
           .step_id = step_id,
           .new_status = StepStatus::Failed,
           .exit_code = ExitCode::EC_RPC_ERR,
-          .reason = "Supervisor not responding when execute task",
+          .reason = "Supervisor not responding when execute step",
           .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       // Ctld will send ShutdownSupervisor after status change from
       // daemon supervisor, for common step, will shut down itself when all
-      // task in local step finished.
+      // steps finished locally.
     }
   });
 }

@@ -304,7 +304,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
                              const std::string &remote_address,
-                             uint16_t port_to_query, uint32_t *task_id) {
+                             uint16_t port_to_query, uint32_t *job_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -347,27 +347,27 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
 
   status = stub->QueryStepFromPortForward(&context, request, &reply);
   if (!status.ok()) {
-    pam_syslog(pamh, LOG_ERR, "QueryTaskIdFromPort gRPC call failed: %s | %s",
+    pam_syslog(pamh, LOG_ERR, "QueryJobIdFromPort gRPC call failed: %s | %s",
                status.error_message().c_str(), status.error_details().c_str());
     return false;
   }
 
   if (reply.ok()) {
     pam_syslog(pamh, LOG_ERR,
-               "ssh client with remote port %u belongs to task #%u",
+               "ssh client with remote port %u belongs to job #%u",
                port_to_query, reply.job_id());
-    *task_id = reply.job_id();
+    *job_id = reply.job_id();
     return true;
   } else {
     pam_syslog(pamh, LOG_ERR,
-               "ssh client with remote port %u doesn't belong to any task",
+               "ssh client with remote port %u doesn't belong to any job",
                port_to_query);
     return false;
   }
 }
 
 bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
-                                         task_id_t task_id) {
+                                         job_id_t job_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -398,7 +398,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     ClientContext context;
 
     request.set_pid(pid);
-    request.set_task_id(task_id);
+    request.set_job_id(job_id);
 
     status = stub->MigrateSshProcToCgroup(&context, request, &reply);
     if (!status.ok()) {
@@ -424,24 +424,23 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     crane::grpc::QuerySshStepEnvVariablesForwardReply reply;
     ClientContext context;
 
-    request.set_task_id(task_id);
+    request.set_job_id(job_id);
 
     status = stub->QuerySshStepEnvVariablesForward(&context, request, &reply);
     if (!status.ok()) {
       pam_syslog(
           pamh, LOG_ERR,
-          "[Crane] QueryTaskEnvVariablesForward gRPC call failed: %s | %s",
+          "[Crane] QueryJobEnvVariablesForward gRPC call failed: %s | %s",
           status.error_message().c_str(), status.error_details().c_str());
       return false;
     }
 
     if (!reply.ok()) {
-      pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariablesForward failed.");
+      pam_syslog(pamh, LOG_ERR, "[Crane] QueryJobEnvVariablesForward failed.");
       return false;
     }
 
-    pam_syslog(pamh, LOG_ERR,
-               "[Crane] QueryTaskEnvVariablesForward succeeded.");
+    pam_syslog(pamh, LOG_ERR, "[Crane] QueryJobEnvVariablesForward succeeded.");
     for (const auto &[name, value] : reply.env_map()) {
       int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
       if (ret != PAM_SUCCESS) {

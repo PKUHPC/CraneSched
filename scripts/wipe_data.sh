@@ -2,7 +2,7 @@
 
 echo "Usage: $0 \
 mode(1:acct_table | 2:qos_table | \
-3:task_table | 4:user_table+wckey_table | \
+3:job_table | 4:user_table+wckey_table | \
 5:all | 6:acct_table+qos_table+user_table+wckey_table | \
 7:license_resource_table | \
 8:hour_table+day_table+month_table |9: summary_time_table)"
@@ -43,7 +43,7 @@ if [ "$mode" -eq 2 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection qos_table
 fi
 if [ "$mode" -eq 3 ] || [ "$mode" -eq 5 ]; then
-  wipe_collection task_table
+  wipe_collection job_table
 
   # Get the directory and filename of the embedded database
   db_dir=$(dirname "$embedded_db_path")

@@ -24,6 +24,10 @@
 
 namespace Ctld {
 
+// NOTE: MongoDB field names "job_id", "job_db_id", "job_name" were renamed
+// to "job_id", "job_db_id", "job_name" in this version. Existing databases from
+// older versions require field name migration before upgrading.
+
 using bsoncxx::builder::basic::kvp;
 using namespace std::chrono_literals;
 
@@ -337,13 +341,11 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.priority = 0;
     qos.max_jobs_per_user =
         std::numeric_limits<decltype(qos.max_jobs_per_user)>::max();
-    qos.max_running_tasks_per_user =
-        std::numeric_limits<decltype(qos.max_running_tasks_per_user)>::max();
-    qos.max_time_limit_per_task = absl::Seconds(kTaskMaxTimeLimitSec);
+    qos.max_running_jobs_per_user =
+        std::numeric_limits<decltype(qos.max_running_jobs_per_user)>::max();
+    qos.max_time_limit_per_job = absl::Seconds(kJobMaxTimeLimitSec);
     qos.max_cpus_per_user =
         std::numeric_limits<decltype(qos.max_cpus_per_user)>::max();
-    qos.max_cpus_per_account =
-        std::numeric_limits<decltype(qos.max_cpus_per_account)>::max();
     qos.reference_count = 1;
     qos.max_submit_jobs_per_user =
         std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
@@ -351,6 +353,24 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
     qos.max_jobs_per_account =
         std::numeric_limits<decltype(qos.max_jobs_per_account)>::max();
+    qos.max_submit_jobs =
+        std::numeric_limits<decltype(qos.max_submit_jobs)>::max();
+    qos.max_submit_jobs_per_user =
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
+    qos.max_submit_jobs_per_account =
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
+    qos.max_jobs = std::numeric_limits<decltype(qos.max_jobs)>::max();
+    qos.max_wall = absl::ZeroDuration();
+    qos.max_tres.GetAllocatableRes().cpu_count =
+        static_cast<cpu_t>(INT32_MAX / 256);
+    qos.max_tres.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+    qos.max_tres_per_user.GetAllocatableRes().cpu_count =
+        static_cast<cpu_t>(INT32_MAX / 256);
+    qos.max_tres_per_user.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+    qos.max_tres_per_account.GetAllocatableRes().cpu_count =
+        static_cast<cpu_t>(INT32_MAX / 256);
+    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
+        kMaxJobMemoryBytes;
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -395,14 +415,13 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
 }
 
 bool MongodbClient::InsertRecoveredJob(
-    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
-  document job_doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
+    const crane::grpc::JobInEmbeddedDb& job_in_embedded_db) {
+  document job_doc = JobInEmbeddedDbToDocument_(job_in_embedded_db);
 
-  // Create filter by task_id
+  // Create filter by job_id
   document filter;
-  filter.append(
-      kvp("task_id",
-          static_cast<int32_t>(task_in_embedded_db.runtime_attr().task_id())));
+  filter.append(kvp("job_id", static_cast<int32_t>(
+                                  job_in_embedded_db.runtime_attr().job_id())));
 
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
@@ -413,7 +432,7 @@ bool MongodbClient::InsertRecoveredJob(
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> ret =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
             *GetSession_(), filter.view(), update_doc.view(),
             mongocxx::options::update{}.upsert(true));
 
@@ -426,29 +445,29 @@ bool MongodbClient::InsertRecoveredJob(
             AppendToAccUsageTable(job_doc.view(), session);
 
             // 2. Mark as aggregated
-            MarkTaskAsAggregated(
-                ViewGetArithmeticValue_<int32_t>(job_doc.view()["task_id"]),
+            MarkJobAsAggregated(
+                ViewGetArithmeticValue_<int32_t>(job_doc.view()["job_id"]),
                 session);
           });
       if (txn_success) return true;
       CRANE_WARN(
           "Transaction failed for job {} aggregation. "
           "Will be recovered on startup.",
-          task_in_embedded_db.runtime_attr().task_id());
+          job_in_embedded_db.runtime_attr().job_id());
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
   return false;
 }
 
-bool MongodbClient::InsertJob(TaskInCtld* task) {
-  document job_doc = TaskInCtldToDocument_(task);
+bool MongodbClient::InsertJob(JobInCtld* job) {
+  document job_doc = JobInCtldToDocument_(job);
 
-  // Create filter by task_id
+  // Create filter by job_id
   document filter;
-  filter.append(kvp("task_id", static_cast<int32_t>(task->TaskId())));
+  filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
@@ -458,7 +477,7 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> ret =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
             *GetSession_(), filter.view(), update_doc.view(),
             mongocxx::options::update{}.upsert(true));
 
@@ -468,31 +487,31 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
       // Uses transaction to ensure atomicity of aggregation and marking
       try {
         using bsoncxx::builder::basic::make_document;
-        auto task_doc_copy = bsoncxx::document::value(job_doc.view());
+        auto job_doc_copy = bsoncxx::document::value(job_doc.view());
         auto filter_copy = bsoncxx::document::value(filter.view());
 
         bool txn_success = CommitTransaction(
-            [this, &task_doc_copy, task](mongocxx::client_session* session) {
+            [this, &job_doc_copy, job](mongocxx::client_session* session) {
               // 1. Append to acc_usage tables (hour/day/month)
-              AppendToAccUsageTable(task_doc_copy.view(), session);
+              AppendToAccUsageTable(job_doc_copy.view(), session);
 
               // 2. Mark as aggregated
-              MarkTaskAsAggregated(task->TaskId(), session);
+              MarkJobAsAggregated(job->JobId(), session);
             });
 
         if (!txn_success) {
           CRANE_WARN(
-              "Transaction failed for task {} aggregation. "
+              "Transaction failed for job {} aggregation. "
               "Will be recovered on startup.",
-              task->TaskId());
+              job->JobId());
         }
       } catch (const std::exception& e) {
-        // Best effort: failure doesn't affect task insertion
-        // Startup recovery will handle unaggregated tasks
+        // Best effort: failure does not affect job insertion
+        // Startup recovery will handle unaggregated jobs
         CRANE_WARN(
-            "Failed to append task {} to acc_usage tables: {}. "
+            "Failed to append job {} to acc_usage tables: {}. "
             "Will be recovered on startup.",
-            task->TaskId(), e.what());
+            job->JobId(), e.what());
       }
 
       return true;
@@ -501,24 +520,24 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
   return false;
 }
 
-bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
-  if (tasks.empty()) return false;
+bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
+  if (jobs.empty()) return false;
   try {
     mongocxx::options::bulk_write bulk_options;
     auto bulk =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].create_bulk_write(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].create_bulk_write(
             *GetSession_(), bulk_options);
 
-    for (const auto& task : tasks) {
-      document job_doc = TaskInCtldToDocument_(task);
+    for (const auto& job : jobs) {
+      document job_doc = JobInCtldToDocument_(job);
 
-      // Create filter by task_id
+      // Create filter by job_id
       document filter;
-      filter.append(kvp("task_id", static_cast<int32_t>(task->TaskId())));
+      filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
 
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
@@ -537,21 +556,21 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
 
     auto result = bulk.execute();
     if (result) {
-      // Real-time aggregation for each task (best effort)
+      // Real-time aggregation for each job (best effort)
       // Failures will be recovered on startup via RecoverMissingAggregations
-      for (const TaskInCtld* task : tasks) {
+      for (const JobInCtld* job : jobs) {
         using bsoncxx::builder::basic::make_document;
         bool txn_success =
-            CommitTransaction([this, task](mongocxx::client_session* session) {
-              AppendToAccUsageTable(task, session);
+            CommitTransaction([this, job](mongocxx::client_session* session) {
+              AppendToAccUsageTable(job, session);
               // 2. Mark as aggregated
-              MarkTaskAsAggregated(task->TaskId(), session);
+              MarkJobAsAggregated(job->JobId(), session);
             });
         if (!txn_success)
           CRANE_WARN(
-              "Failed to append task {} to acc_usage tables. "
+              "Failed to append job {} to acc_usage tables. "
               "Will be recovered on startup.",
-              task->TaskId());
+              job->JobId());
       }
       return true;
     }
@@ -559,13 +578,13 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
   return false;
 }
 
 bool MongodbClient::FetchJobRecords(
-    const crane::grpc::QueryTasksInfoRequest* request,
-    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map,
+    const crane::grpc::QueryJobsInfoRequest* request,
+    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
     size_t limit) {
   document filter;
 
@@ -630,14 +649,14 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_task_names_constraint = !request->filter_task_names().empty();
-  if (has_task_names_constraint) {
-    filter.append(kvp("task_name", [&request](sub_document task_name_doc) {
-      array task_name_array;
-      for (const auto& task_name : request->filter_task_names()) {
-        task_name_array.append(task_name);
+  bool has_job_names_constraint = !request->filter_job_names().empty();
+  if (has_job_names_constraint) {
+    filter.append(kvp("job_name", [&request](sub_document job_name_doc) {
+      array job_name_array;
+      for (const auto& job_name : request->filter_job_names()) {
+        job_name_array.append(job_name);
       }
-      task_name_doc.append(kvp("$in", task_name_array));
+      job_name_doc.append(kvp("$in", job_name_array));
     }));
   }
 
@@ -663,19 +682,19 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_task_ids_constraint = !request->filter_ids().empty();
-  if (has_task_ids_constraint) {
-    filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
-      array task_id_array;
-      for (const auto& task_id : request->filter_ids() | std::views::keys) {
-        task_id_array.append(static_cast<std::int32_t>(task_id));
+  bool has_job_ids_constraint = !request->filter_ids().empty();
+  if (has_job_ids_constraint) {
+    filter.append(kvp("job_id", [&request](sub_document job_id_doc) {
+      array job_id_array;
+      for (const auto& job_id : request->filter_ids() | std::views::keys) {
+        job_id_array.append(static_cast<std::int32_t>(job_id));
       }
-      task_id_doc.append(kvp("$in", task_id_array));
+      job_id_doc.append(kvp("$in", job_id_array));
     }));
   }
 
-  bool has_task_status_constraint = !request->filter_states().empty();
-  if (has_task_status_constraint) {
+  bool has_job_status_constraint = !request->filter_states().empty();
+  if (has_job_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
       array state_array;
       for (const auto& state : request->filter_states()) {
@@ -697,11 +716,11 @@ bool MongodbClient::FetchJobRecords(
         }));
   }
 
-  bool has_task_types_constraint = !request->filter_task_types().empty();
-  if (has_task_types_constraint) {
+  bool has_job_types_constraint = !request->filter_job_types().empty();
+  if (has_job_types_constraint) {
     filter.append(kvp("type", [&request](sub_document type_doc) {
       array type_array;
-      for (const auto& type : request->filter_task_types()) {
+      for (const auto& type : request->filter_job_types()) {
         type_array.append(static_cast<std::int32_t>(type));
       }
       type_doc.append(kvp("$in", type_array));
@@ -712,15 +731,15 @@ bool MongodbClient::FetchJobRecords(
   option = option.limit(limit);
 
   document sort_doc;
-  sort_doc.append(kvp("task_db_id", -1));
+  sort_doc.append(kvp("job_db_id", -1));
   option = option.sort(sort_doc.view());
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
-                                                                option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
+                                                               option);
 
-  // 0  task_id       task_db_id     mod_time       deleted       account
-  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 0  job_id        job_db_id      mod_time       deleted       account
+  // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
   // 15 priority      time_eligible  time_start     time_end      time_suspended
   // 20 script        state          timelimit      time_submit   work_dir
@@ -730,8 +749,8 @@ bool MongodbClient::FetchJobRecords(
   // 40 nodename_list wckey          submit_hostname
   try {
     for (auto view : cursor) {
-      job_id_t job_id = view["task_id"].get_int32().value;
-      crane::grpc::TaskInfo* job_info_ptr = nullptr;
+      job_id_t job_id = view["job_id"].get_int32().value;
+      crane::grpc::JobInfo* job_info_ptr = nullptr;
       auto in_mem_job_it = job_info_map->find(job_id);
       bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
       bool has_db_job_info = ViewValueOr_(view["has_job_info"], false);
@@ -739,10 +758,10 @@ bool MongodbClient::FetchJobRecords(
         // Only got step info in db, no such jobinfo in db or memory, this is an
         // incomplete record, skip.
         if (!has_db_job_info) continue;
-        crane::grpc::TaskInfo job_info;
+        crane::grpc::JobInfo job_info;
         job_info.set_type(
-            static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
-        job_info.set_task_id(job_id);
+            static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
+        job_info.set_job_id(job_id);
 
         job_info.set_node_num(view["nodes_alloc"].get_int32().value);
 
@@ -772,7 +791,7 @@ bool MongodbClient::FetchJobRecords(
             view["mem_alloc"].get_int64().value);
         auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
         *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
-        job_info.set_name(std::string(view["task_name"].get_string().value));
+        job_info.set_name(std::string(view["job_name"].get_string().value));
         job_info.set_qos(std::string(view["qos"].get_string().value));
         job_info.set_uid(view["id_user"].get_int32().value);
         job_info.set_gid(view["id_group"].get_int32().value);
@@ -785,7 +804,7 @@ bool MongodbClient::FetchJobRecords(
         job_info.mutable_end_time()->set_seconds(
             view["time_end"].get_int64().value);
 
-        job_info.set_status(static_cast<crane::grpc::TaskStatus>(
+        job_info.set_status(static_cast<crane::grpc::JobStatus>(
             view["state"].get_int32().value));
         job_info.mutable_time_limit()->set_seconds(
             view["timelimit"].get_int64().value);
@@ -810,11 +829,24 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_submit_hostname(
             view["submit_hostname"].get_string().value);
 
+        if (view["req_node"])
+          for (auto& craned_id : view["req_node"].get_array().value) {
+            job_info.add_req_nodes(craned_id.get_string().value.data());
+          }
+        if (view["exclude_nodes"])
+          for (auto& craned_id : view["exclude_nodes"].get_array().value) {
+            job_info.add_exclude_nodes(craned_id.get_string().value.data());
+          }
+        if (view["execution_nodes"])
+          for (auto& craned_id : view["execution_nodes"].get_array().value) {
+            job_info.add_execution_node(craned_id.get_string().value.data());
+          }
+
         if (job_info.type() == crane::grpc::Container) {
           if (auto pod_elem = view["meta_pod"];
               pod_elem && pod_elem.type() == bsoncxx::type::k_document) {
             job_info.mutable_pod_meta()->CopyFrom(
-                static_cast<crane::grpc::PodTaskAdditionalMeta>(
+                static_cast<crane::grpc::PodJobAdditionalMeta>(
                     BsonToPodMeta(view)));
           } else {
             CRANE_ERROR("Container job {} missing pod meta in db record!",
@@ -850,8 +882,8 @@ bool MongodbClient::FetchJobRecords(
 }
 
 bool MongodbClient::FetchJobStepRecords(
-    const crane::grpc::QueryTasksInfoRequest* request,
-    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
+    const crane::grpc::QueryJobsInfoRequest* request,
+    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
   if (job_info_map->empty()) return true;
   document filter;
 
@@ -916,14 +948,14 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  bool has_task_names_constraint = !request->filter_task_names().empty();
-  if (has_task_names_constraint) {
-    filter.append(kvp("task_name", [&request](sub_document task_name_doc) {
-      array task_name_array;
-      for (const auto& task_name : request->filter_task_names()) {
-        task_name_array.append(task_name);
+  bool has_job_names_constraint = !request->filter_job_names().empty();
+  if (has_job_names_constraint) {
+    filter.append(kvp("job_name", [&request](sub_document job_name_doc) {
+      array job_name_array;
+      for (const auto& job_name : request->filter_job_names()) {
+        job_name_array.append(job_name);
       }
-      task_name_doc.append(kvp("$in", task_name_array));
+      job_name_doc.append(kvp("$in", job_name_array));
     }));
   }
 
@@ -949,16 +981,16 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  filter.append(kvp("task_id", [&job_info_map](sub_document task_id_doc) {
-    array task_id_array;
+  filter.append(kvp("job_id", [&job_info_map](sub_document job_id_doc) {
+    array job_id_array;
     for (const auto job_id : *job_info_map | std::views::keys) {
-      task_id_array.append(static_cast<std::int32_t>(job_id));
+      job_id_array.append(static_cast<std::int32_t>(job_id));
     }
-    task_id_doc.append(kvp("$in", task_id_array));
+    job_id_doc.append(kvp("$in", job_id_array));
   }));
 
-  bool has_task_status_constraint = !request->filter_states().empty();
-  if (has_task_status_constraint) {
+  bool has_job_status_constraint = !request->filter_states().empty();
+  if (has_job_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
       array state_array;
       for (const auto& state : request->filter_states()) {
@@ -968,11 +1000,11 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  bool has_task_types_constraint = !request->filter_task_types().empty();
-  if (has_task_types_constraint) {
+  bool has_job_types_constraint = !request->filter_job_types().empty();
+  if (has_job_types_constraint) {
     filter.append(kvp("type", [&request](sub_document type_doc) {
       array type_array;
-      for (const auto& type : request->filter_task_types()) {
+      for (const auto& type : request->filter_job_types()) {
         type_array.append(static_cast<std::int32_t>(type));
       }
       type_doc.append(kvp("$in", type_array));
@@ -982,15 +1014,15 @@ bool MongodbClient::FetchJobStepRecords(
   mongocxx::options::find option;
 
   document sort_doc;
-  sort_doc.append(kvp("task_db_id", -1));
+  sort_doc.append(kvp("job_db_id", -1));
   option = option.sort(sort_doc.view());
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
-                                                                option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
+                                                               option);
 
-  // 0  task_id       task_db_id     mod_time       deleted       account
-  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 0  job_id        job_db_id      mod_time       deleted       account
+  // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
   // 15 priority      time_eligible  time_start     time_end      time_suspended
   // 20 script        state          timelimit      time_submit   work_dir
@@ -1000,7 +1032,7 @@ bool MongodbClient::FetchJobStepRecords(
 
   try {
     for (auto view : cursor) {
-      job_id_t job_id = view["task_id"].get_int32().value;
+      job_id_t job_id = view["job_id"].get_int32().value;
       auto in_mem_job_it = job_info_map->find(job_id);
       bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
       if (!has_in_mem_job_info) {
@@ -1036,13 +1068,13 @@ bool MongodbClient::FetchJobStepRecords(
   return true;
 }
 
-bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
+bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
   document doc;
-  doc.append(kvp("job_db_inx", task_db_id));
+  doc.append(kvp("job_db_inx", job_db_id));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].find_one(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].find_one(
             doc.view());
     if (result) {
       return true;
@@ -1055,10 +1087,10 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
 }
 
 std::unordered_map<
-    task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t, int64_t, int64_t>>
-MongodbClient::FetchJobStatus(const std::unordered_set<task_id_t>& job_ids) {
-  std::unordered_map<task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t,
-                                           int64_t, int64_t>>
+    job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
+MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
+  std::unordered_map<
+      job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
       result;
 
   if (job_ids.empty()) {
@@ -1067,17 +1099,17 @@ MongodbClient::FetchJobStatus(const std::unordered_set<task_id_t>& job_ids) {
 
   try {
     document filter;
-    filter.append(kvp("task_id", [&job_ids](sub_document task_id_doc) {
-      array task_id_array;
+    filter.append(kvp("job_id", [&job_ids](sub_document job_id_doc) {
+      array job_id_array;
       for (const auto& job_id : job_ids) {
-        task_id_array.append(static_cast<std::int32_t>(job_id));
+        job_id_array.append(static_cast<std::int32_t>(job_id));
       }
-      task_id_doc.append(kvp("$in", task_id_array));
+      job_id_doc.append(kvp("$in", job_id_array));
     }));
 
     mongocxx::options::find options;
     document projection;
-    projection.append(kvp("task_id", 1));
+    projection.append(kvp("job_id", 1));
     projection.append(kvp("state", 1));
     projection.append(kvp("exit_code", 1));
     projection.append(kvp("time_end", 1));
@@ -1085,18 +1117,18 @@ MongodbClient::FetchJobStatus(const std::unordered_set<task_id_t>& job_ids) {
     options.projection(projection.view());
 
     mongocxx::cursor cursor =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
-                                                                  options);
+        (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
+                                                                 options);
 
     for (auto view : cursor) {
-      task_id_t task_id = view["task_id"].get_int32().value;
-      crane::grpc::TaskStatus status =
-          static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value);
+      job_id_t fetched_job_id = view["job_id"].get_int32().value;
+      crane::grpc::JobStatus status =
+          static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value);
       uint32_t exit_code = view["exit_code"].get_int32().value;
       int64_t time_end = view["time_end"].get_int64().value;
       int64_t time_start = view["time_start"].get_int64().value;
 
-      result.emplace(task_id,
+      result.emplace(fetched_job_id,
                      std::make_tuple(status, exit_code, time_end, time_start));
     }
   } catch (const std::exception& e) {
@@ -1111,9 +1143,9 @@ bool MongodbClient::InsertRecoveredStep(
   document step_doc = StepInEmbeddedDbToDocument_(step_in_embedded_db);
   job_id_t job_id = step_in_embedded_db.step_to_ctld().job_id();
 
-  // Filter by task_id (job_id)
+  // Filter by job_id
   document filter;
-  filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
+  filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
 
   // Use $push to append step, and $setOnInsert to create minimal document if
   // needed
@@ -1122,12 +1154,12 @@ bool MongodbClient::InsertRecoveredStep(
     push_doc.append(kvp("steps", step_doc));
   }));
   update_doc.append(kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-    set_on_insert.append(kvp("task_id", static_cast<int32_t>(job_id)));
+    set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
   }));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> ret =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
             *GetSession_(), filter.view(), update_doc.view(),
             mongocxx::options::update{}.upsert(true));
 
@@ -1151,7 +1183,7 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
 
   try {
     auto bulk =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].create_bulk_write(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].create_bulk_write(
             *GetSession_(), bulk_options);
 
     for (const auto& [job_id, job_steps] : steps_by_job) {
@@ -1162,9 +1194,9 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         steps_array.append(step_doc);
       }
 
-      // Filter by task_id (job_id)
+      // Filter by job_id
       document filter;
-      filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
+      filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document
@@ -1177,7 +1209,7 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       }));
       update_doc.append(
           kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-            set_on_insert.append(kvp("task_id", static_cast<int32_t>(job_id)));
+            set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
           }));
 
       mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
@@ -1199,15 +1231,15 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
 }
 
 bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
-  // Query for a job with the given task_id that contains a step with the given
+  // Query for a job with the given job_id that contains a step with the given
   // step_id
   document filter;
-  filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
+  filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
   filter.append(kvp("steps.step_id", static_cast<int32_t>(step_id)));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].find_one(
+        (*GetClient_())[m_db_name_][m_job_collection_name_].find_one(
             filter.view());
     if (result) {
       return true;
@@ -1219,28 +1251,27 @@ bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
   return false;
 }
 
-// Real-time aggregation: Append task to acc_usage tables (hour/day/month)
+// Real-time aggregation: Append job to acc_usage tables (hour/day/month)
 void MongodbClient::AppendToAccUsageTable(
-    const bsoncxx::document::view& task_doc,
-    mongocxx::client_session* session) {
+    const bsoncxx::document::view& job_doc, mongocxx::client_session* session) {
   using namespace std::chrono;
 
   try {
-    // Extract task information from BSON document
-    std::string account = std::string(task_doc["account"].get_string().value);
-    std::string username = std::string(task_doc["username"].get_string().value);
-    std::string qos = std::string(task_doc["qos"].get_string().value);
-    std::string wckey = task_doc["wckey"]
-                            ? std::string(task_doc["wckey"].get_string().value)
+    // Extract job information from BSON document
+    std::string account = std::string(job_doc["account"].get_string().value);
+    std::string username = std::string(job_doc["username"].get_string().value);
+    std::string qos = std::string(job_doc["qos"].get_string().value);
+    std::string wckey = job_doc["wckey"]
+                            ? std::string(job_doc["wckey"].get_string().value)
                             : "";
-    // Get task start/end time and resources
-    auto time_start = ViewGetArithmeticValue_<int64_t>(task_doc["time_start"]);
+    // Get job start/end time and resources
+    auto time_start = ViewGetArithmeticValue_<int64_t>(job_doc["time_start"]);
     if (time_start == 0) {
       return;
     }
-    auto time_end = ViewGetArithmeticValue_<int64_t>(task_doc["time_end"]);
-    auto cpus_alloc = ViewGetArithmeticValue_<double>(task_doc["cpus_alloc"]);
-    auto nodes_alloc = ViewGetArithmeticValue_<double>(task_doc["nodes_alloc"]);
+    auto time_end = ViewGetArithmeticValue_<int64_t>(job_doc["time_end"]);
+    auto cpus_alloc = ViewGetArithmeticValue_<double>(job_doc["cpus_alloc"]);
+    auto nodes_alloc = ViewGetArithmeticValue_<double>(job_doc["nodes_alloc"]);
 
     auto start_time = sys_seconds(seconds(time_start));
     auto end_time = sys_seconds(seconds(time_end));
@@ -1261,30 +1292,30 @@ void MongodbClient::AppendToAccUsageTable(
     AppendToMonthTable_(info, session);
 
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to append task to acc_usage tables: {}", e.what());
+    CRANE_ERROR("Failed to append job to acc_usage tables: {}", e.what());
     throw;
   }
 }
 
-// Overload: append task from TaskInCtld pointer (builds JobAggregationInfo)
-void MongodbClient::AppendToAccUsageTable(const TaskInCtld* task,
+// Overload: append job from JobInCtld pointer (builds JobAggregationInfo)
+void MongodbClient::AppendToAccUsageTable(const JobInCtld* job,
                                           mongocxx::client_session* session) {
   using namespace std::chrono;
 
   try {
-    if (task->StartTimeInUnixSecond() == 0) {
+    if (job->StartTimeInUnixSecond() == 0) {
       return;
     }
-    // Build JobAggregationInfo from TaskInCtld
+    // Build JobAggregationInfo from JobInCtld
     JobAggregationInfo info{
-        .account = task->account,
-        .username = task->Username(),
-        .qos = task->qos,
-        .wckey = task->wckey,
-        .start_time = sys_seconds(seconds(task->StartTimeInUnixSecond())),
-        .end_time = sys_seconds(seconds(task->EndTimeInUnixSecond())),
-        .total_cpus = task->allocated_res_view.CpuCount() *
-                      static_cast<double>(task->nodes_alloc)};
+        .account = job->account,
+        .username = job->Username(),
+        .qos = job->qos,
+        .wckey = job->wckey,
+        .start_time = sys_seconds(seconds(job->StartTimeInUnixSecond())),
+        .end_time = sys_seconds(seconds(job->EndTimeInUnixSecond())),
+        .total_cpus = job->allocated_res_view.CpuCount() *
+                      static_cast<double>(job->nodes_alloc)};
 
     // Append to all three granularity tables
     AppendToHourTable_(info, session);
@@ -1292,13 +1323,13 @@ void MongodbClient::AppendToAccUsageTable(const TaskInCtld* task,
     AppendToMonthTable_(info, session);
 
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to append task {} to acc_usage tables: {}",
-                task->TaskId(), e.what());
+    CRANE_ERROR("Failed to append job {} to acc_usage tables: {}", job->JobId(),
+                e.what());
     throw;
   }
 }
 
-// Append task to hour table - handles cross-hour allocation internally
+// Append job to hour table - handles cross-hour allocation internally
 void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
                                        mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
@@ -1309,7 +1340,7 @@ void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
   auto current_hour = floor<hours>(info.start_time);
   auto end_hour = floor<hours>(info.end_time);
 
-  // Loop through each hour the task spans
+  // Loop through each hour the job spans
   while (current_hour <= end_hour) {
     auto next_hour = current_hour + hours(1);
 
@@ -1317,11 +1348,11 @@ void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
     // Convert hour-precision time_point to sys_seconds for comparison
     auto current_hour_sec = time_point_cast<seconds>(current_hour);
     auto next_hour_sec = time_point_cast<seconds>(next_hour);
-    auto hour_start_in_task = std::max(current_hour_sec, info.start_time);
-    auto hour_end_in_task = std::min(next_hour_sec, info.end_time);
+    auto hour_start_in_job = std::max(current_hour_sec, info.start_time);
+    auto hour_end_in_job = std::min(next_hour_sec, info.end_time);
 
     int64_t duration_this_hour =
-        duration_cast<seconds>(hour_end_in_task - hour_start_in_task).count();
+        duration_cast<seconds>(hour_end_in_job - hour_start_in_job).count();
 
     if (duration_this_hour > 0) {
       double cpu_time_this_hour = info.total_cpus * duration_this_hour;
@@ -1363,7 +1394,7 @@ void MongodbClient::AppendToHourTable_(const JobAggregationInfo& info,
   }
 }
 
-// Append task to day table - handles cross-day allocation internally
+// Append job to day table - handles cross-day allocation internally
 void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
                                       mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
@@ -1374,7 +1405,7 @@ void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
   auto current_day = floor<days>(info.start_time);
   auto end_day = floor<days>(info.end_time);
 
-  // Loop through each day the task spans
+  // Loop through each day the job spans
   while (current_day <= end_day) {
     auto next_day = current_day + days(1);
 
@@ -1382,11 +1413,11 @@ void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
     // Convert sys_days to sys_seconds for comparison
     auto current_day_sec = time_point_cast<seconds>(current_day);
     auto next_day_sec = time_point_cast<seconds>(next_day);
-    auto day_start_in_task = std::max(current_day_sec, info.start_time);
-    auto day_end_in_task = std::min(next_day_sec, info.end_time);
+    auto day_start_in_job = std::max(current_day_sec, info.start_time);
+    auto day_end_in_job = std::min(next_day_sec, info.end_time);
 
     int64_t duration_this_day =
-        duration_cast<seconds>(day_end_in_task - day_start_in_task).count();
+        duration_cast<seconds>(day_end_in_job - day_start_in_job).count();
 
     if (duration_this_day > 0) {
       double cpu_time_this_day = info.total_cpus * duration_this_day;
@@ -1428,7 +1459,7 @@ void MongodbClient::AppendToDayTable_(const JobAggregationInfo& info,
   }
 }
 
-// Append task to month table - handles cross-month allocation internally
+// Append job to month table - handles cross-month allocation internally
 void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
                                         mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
@@ -1445,7 +1476,7 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
   auto current_month = year_month{start_ymd.year(), start_ymd.month()};
   auto end_month = year_month{end_ymd.year(), end_ymd.month()};
 
-  // Loop through each month the task spans
+  // Loop through each month the job spans
   while (current_month <= end_month) {
     auto month_start = sys_days{current_month / 1};
     auto next_month = current_month + months(1);
@@ -1455,11 +1486,11 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
     // Convert sys_days to sys_seconds for comparison
     auto month_start_sec = time_point_cast<seconds>(month_start);
     auto month_end_sec = time_point_cast<seconds>(month_end);
-    auto month_start_in_task = std::max(month_start_sec, info.start_time);
-    auto month_end_in_task = std::min(month_end_sec, info.end_time);
+    auto month_start_in_job = std::max(month_start_sec, info.start_time);
+    auto month_end_in_job = std::min(month_end_sec, info.end_time);
 
     int64_t duration_this_month =
-        duration_cast<seconds>(month_end_in_task - month_start_in_task).count();
+        duration_cast<seconds>(month_end_in_job - month_start_in_job).count();
 
     if (duration_this_month > 0) {
       double cpu_time_this_month = info.total_cpus * duration_this_month;
@@ -1502,26 +1533,26 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
   }
 }
 
-// Mark task as aggregated in task_table
-void MongodbClient::MarkTaskAsAggregated(job_id_t job_id,
-                                         mongocxx::client_session* session) {
+// Mark job as aggregated in job_table
+void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
+                                        mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
   auto client = GetClient_();
-  auto filter = make_document(kvp("task_id", static_cast<int32_t>(job_id)));
+  auto filter = make_document(kvp("job_id", static_cast<int32_t>(job_id)));
   auto update = make_document(kvp(
       "$set", make_document(kvp("aggregated", true),
                             kvp("aggregated_at",
                                 bsoncxx::types::b_date{system_clock::now()}))));
 
   if (session) {
-    (*client)[m_db_name_][m_task_collection_name_].update_one(
+    (*client)[m_db_name_][m_job_collection_name_].update_one(
         *session, filter.view(), update.view());
   } else {
-    (*client)[m_db_name_][m_task_collection_name_].update_one(filter.view(),
-                                                              update.view());
+    (*client)[m_db_name_][m_job_collection_name_].update_one(filter.view(),
+                                                             update.view());
   }
 }
 
@@ -1553,7 +1584,7 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
   //    Mark in batches of 10000 to avoid connection timeout
   if (!hour_done) {
     CRANE_INFO("Marking all jobs as aggregated before batch aggregation...");
-    auto task_coll = (*client)[m_db_name_][m_task_collection_name_];
+    auto job_coll = (*client)[m_db_name_][m_job_collection_name_];
 
     constexpr int64_t kBatchSize = 10000;
     int64_t total_marked = 0;
@@ -1570,7 +1601,7 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
       find_opts.projection(make_document(kvp("_id", 1)));
 
       std::vector<bsoncxx::types::bson_value::value> ids;
-      auto cursor = task_coll.find(filter.view(), find_opts);
+      auto cursor = job_coll.find(filter.view(), find_opts);
       for (const auto& doc : cursor) {
         ids.push_back(doc["_id"].get_owning_value());
       }
@@ -1594,7 +1625,7 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
                             kvp("aggregated_at",
                                 bsoncxx::types::b_date{system_clock::now()}))));
 
-      auto result = task_coll.update_many(batch_filter.view(), update.view());
+      auto result = job_coll.update_many(batch_filter.view(), update.view());
       if (result) {
         total_marked += result->modified_count();
       }
@@ -1619,7 +1650,7 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
     CRANE_INFO("Hour aggregation: from {} to {}", hour_start, now);
 
     bool success =
-        AggregateJobSummaryByHour_(hour_start, now, m_task_collection_name_);
+        AggregateJobSummaryByHour_(hour_start, now, m_job_collection_name_);
 
     if (success) {
       UpdateJobSummaryLastSuccessTime_(JobSummary::Type::HOUR, now);
@@ -1733,7 +1764,7 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
   CRANE_INFO("New cluster aggregation recovery completed");
 }
 
-// Recovery for existing cluster: iterate unaggregated tasks and append
+// Recovery for existing cluster: iterate unaggregated jobs and append
 void MongodbClient::RecoverExistingClusterAggregations_() {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_array;
@@ -1750,23 +1781,22 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
           make_document(kvp(
               "$in",
               make_array(
-                  static_cast<int64_t>(crane::grpc::TaskStatus::Cancelled),
-                  static_cast<int64_t>(crane::grpc::TaskStatus::Completed),
-                  static_cast<int64_t>(crane::grpc::TaskStatus::OutOfMemory),
-                  static_cast<int64_t>(
-                      crane::grpc::TaskStatus::ExceedTimeLimit),
-                  static_cast<int64_t>(crane::grpc::TaskStatus::Failed))))));
+                  static_cast<int64_t>(crane::grpc::JobStatus::Cancelled),
+                  static_cast<int64_t>(crane::grpc::JobStatus::Completed),
+                  static_cast<int64_t>(crane::grpc::JobStatus::OutOfMemory),
+                  static_cast<int64_t>(crane::grpc::JobStatus::ExceedTimeLimit),
+                  static_cast<int64_t>(crane::grpc::JobStatus::Failed))))));
 
   auto cursor =
-      (*client)[m_db_name_][m_task_collection_name_].find(filter.view());
+      (*client)[m_db_name_][m_job_collection_name_].find(filter.view());
 
   int count = 0;
-  for (auto&& task_doc : cursor) {
+  for (auto&& job_doc : cursor) {
     bool success =
-        CommitTransaction([this, &task_doc](mongocxx::client_session* session) {
-          AppendToAccUsageTable(task_doc, session);
-          MarkTaskAsAggregated(
-              ViewGetArithmeticValue_<int32_t>(task_doc["task_id"]), session);
+        CommitTransaction([this, &job_doc](mongocxx::client_session* session) {
+          AppendToAccUsageTable(job_doc, session);
+          MarkJobAsAggregated(
+              ViewGetArithmeticValue_<int32_t>(job_doc["job_id"]), session);
         });
     if (!success) {
       CRANE_ERROR("Failed to append job to acc usage table.");
@@ -1774,12 +1804,12 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
     count++;
 
     if (count % 1000 == 0) {
-      CRANE_INFO("Recovered {} unaggregated tasks...", count);
+      CRANE_INFO("Recovered {} unaggregated jobs...", count);
     }
   }
 
   CRANE_INFO(
-      "Existing cluster aggregation recovery completed, {} tasks recovered",
+      "Existing cluster aggregation recovery completed, {} jobs recovered",
       count);
 }
 
@@ -1791,7 +1821,7 @@ void MongodbClient::RecoverMissingAggregations_() {
   bool month_done = GetInitialAggregationCompleted_(JobSummary::Type::MONTH);
 
   if (hour_done && day_done && month_done) {
-    // Initial aggregation completed, use append for new unaggregated tasks
+    // Initial aggregation completed, use append for new unaggregated jobs
     RecoverExistingClusterAggregations_();
   } else {
     // New cluster or interrupted: use batch aggregation
@@ -1938,8 +1968,7 @@ bool MongodbClient::QueryJobSizeSummary(
   int64_t result_count = 0;
   try {
     auto cursor =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].aggregate(
-            pipeline);
+        (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
     for (auto doc : cursor) {
       auto id = doc["_id"].get_document().view();
       crane::grpc::JobSizeSummaryItem item;
@@ -2389,7 +2418,7 @@ void MongodbClient::SetInitialAggregationCompleted_(JobSummary::Type type,
 
 std::chrono::sys_seconds MongodbClient::GetJobMinStartTime_() {
   try {
-    auto task_coll = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    auto job_coll = (*GetClient_())[m_db_name_][m_job_collection_name_];
 
     using bsoncxx::builder::basic::make_document;
     auto sort_doc = make_document(kvp("time_start", 1));
@@ -2399,7 +2428,7 @@ std::chrono::sys_seconds MongodbClient::GetJobMinStartTime_() {
     auto filter =
         make_document(kvp("time_start", make_document(kvp("$ne", 0))));
 
-    auto doc_opt = task_coll.find_one(filter.view(), options);
+    auto doc_opt = job_coll.find_one(filter.view(), options);
     if (!doc_opt) {
       CRANE_INFO("No jobs found when getting min start time.");
       return std::chrono::sys_seconds{std::chrono::seconds{0}};
@@ -2417,7 +2446,7 @@ std::chrono::sys_seconds MongodbClient::GetJobMinStartTime_() {
 // Worker function to aggregate a single hour (executed in thread pool)
 std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
     std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
-    const std::string& task_collection_name, int64_t cached_min_start) {
+    const std::string& job_collection_name, int64_t cached_min_start) {
   using namespace std::chrono;
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_array;
@@ -2428,7 +2457,7 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
 
   try {
     mongocxx::client* client = GetClient_();
-    auto jobs = (*client)[m_db_name_][task_collection_name];
+    auto jobs = (*client)[m_db_name_][job_collection_name];
 
     auto cur_start =
         duration_cast<seconds>(hour_start.time_since_epoch()).count();
@@ -2448,15 +2477,15 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
                                         kvp("$lt", cur_end), kvp("$ne", 0)))),
         find_opts);
 
-    bool has_task = false;
+    bool has_job = false;
     for (auto&& doc : probe_cursor) {
       discovered_min_start =
           ViewGetArithmeticValue_<int64_t>(doc["time_start"]);
-      has_task = true;
+      has_job = true;
     }
 
-    if (!has_task) {
-      CRANE_LOGGER_TRACE(m_logger_, "Hour [{}, {}) skipped: no active tasks",
+    if (!has_job) {
+      CRANE_LOGGER_TRACE(m_logger_, "Hour [{}, {}) skipped: no active jobs",
                          hour_start, hour_end);
       return discovered_min_start;
     }
@@ -2549,7 +2578,7 @@ std::optional<int64_t> MongodbClient::AggregateJobSummaryForSingleHour_(
 
 bool MongodbClient::AggregateJobSummaryByHour_(
     std::chrono::sys_seconds start_sec, std::chrono::sys_seconds end_sec,
-    const std::string& task_collection_name) {
+    const std::string& job_collection_name) {
   CRANE_LOGGER_INFO(m_logger_, "AggregateJobSummaryByHour from {} to {}",
                     start_sec, end_sec);
   using namespace std::chrono;
@@ -2582,7 +2611,7 @@ bool MongodbClient::AggregateJobSummaryByHour_(
       for (const auto& hour_start : batch_hours) {
         futures.push_back(std::async(std::launch::async, [&, hour_start]() {
           return AggregateJobSummaryForSingleHour_(
-              hour_start, hour_start + hours{1}, task_collection_name,
+              hour_start, hour_start + hours{1}, job_collection_name,
               cached_min_start);
         }));
       }
@@ -3157,27 +3186,8 @@ bool MongodbClient::CommitTransaction(
   return true;
 }
 
-template <typename V>
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
-                                        const V& value) {
-  doc.append(kvp(key, value));
-}
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document& doc, const std::string& key,
-    const std::list<std::string>& value) {
-  doc.append(kvp(key, [&value](sub_array array) {
-    for (const auto& v : value) {
-      array.append(v);
-    }
-  }));
-}
-
-template <>
-void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
-    document& doc, const std::string& key,
-    const User::AccountToAttrsMap& value) {
+                                        const User::AccountToAttrsMap& value) {
   doc.append(kvp(key, [&value, this](sub_document map_value_doc) {
     for (const auto& map_item : value) {
       map_value_doc.append(
@@ -3190,20 +3200,7 @@ void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, std::string>>(
-    document& doc, const std::string& key,
-    const std::unordered_map<std::string, std::string>& value) {
-  doc.append(kvp(key, [&value](sub_document subdoc) {
-    for (const auto& [k, v] : value) {
-      subdoc.append(kvp(k, v));
-    }
-  }));
-}
-
-template <>
-void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
+void MongodbClient::SubDocumentAppendItem_(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value) {
   doc.append(kvp(key, [&value](sub_document map_value_document) {
@@ -3223,10 +3220,8 @@ void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
-                                                   const std::string& key,
-                                                   const DeviceMap& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const DeviceMap& value) {
   doc.append(kvp(key, [&value](sub_document map_value_document) {
     for (const auto& map_item : value) {
       const auto& device_name = map_item.first;
@@ -3249,9 +3244,8 @@ void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<std::vector<gid_t>>(
-    document& doc, const std::string& key, const std::vector<gid_t>& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const std::vector<gid_t>& value) {
   using bsoncxx::builder::basic::array;
   array arr_builder;
 
@@ -3261,10 +3255,8 @@ void MongodbClient::DocumentAppendItem_<std::vector<gid_t>>(
   doc.append(kvp(key, arr_builder));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<DedicatedResourceInNode>(
-    document& doc, const std::string& key,
-    const DedicatedResourceInNode& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const DedicatedResourceInNode& value) {
   doc.append(kvp(key, [&value](sub_document subDoc) {
     for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
       subDoc.append(kvp(name, [&type_slots_map](sub_document typeDoc) {
@@ -3278,9 +3270,8 @@ void MongodbClient::DocumentAppendItem_<DedicatedResourceInNode>(
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<ResourceInNode>(
-    document& doc, const std::string& key, const ResourceInNode& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const ResourceInNode& value) {
   document sub_doc{};
   sub_doc.append(
       kvp("cpu", static_cast<double>(value.allocatable_res.cpu_count)));
@@ -3291,10 +3282,8 @@ void MongodbClient::DocumentAppendItem_<ResourceInNode>(
   doc.append(kvp(key, sub_doc));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
-                                                    const std::string& key,
-                                                    const ResourceV2& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const ResourceV2& value) {
   document node_res_doc{};
   for (const auto& [node, res] : value.EachNodeResMap()) {
     DocumentAppendItem_(node_res_doc, node, res);
@@ -3302,10 +3291,9 @@ void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
   doc.append(kvp(key, node_res_doc));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
+void MongodbClient::DocumentAppendItem_(
     document& doc, const std::string& key,
-    const std::optional<ContainerMetaInTask>& value) {
+    const std::optional<ContainerMetaInJob>& value) {
   if (!value.has_value()) {
     doc.append(kvp(key, bsoncxx::types::b_null{}));
     return;
@@ -3370,10 +3358,9 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
+void MongodbClient::DocumentAppendItem_(
     document& doc, const std::string& key,
-    const std::optional<PodMetaInTask>& value) {
+    const std::optional<PodMetaInJob>& value) {
   if (!value.has_value()) {
     doc.append(kvp(key, bsoncxx::types::b_null{}));
     return;
@@ -3430,9 +3417,39 @@ void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
   }));
 }
 
-template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, uint32_t>>(
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const ResourceView& value) {
+  doc.append(kvp(key, [&](sub_document valueDocument) {
+    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
+      allocDoc.append(kvp("cpu_count", static_cast<double>(value.CpuCount())));
+      allocDoc.append(kvp("mem", static_cast<int64_t>(value.MemoryBytes())));
+      allocDoc.append(kvp("mem_sw", static_cast<int64_t>(value.MemoryBytes())));
+    }));
+    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+  }));
+}
+
+void MongodbClient::SubDocumentAppendItem_(sub_document& doc,
+                                           const std::string& key,
+                                           const DeviceMap& value) {
+  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
+    for (const auto& [dev_name, pair_val] : value) {
+      uint64_t untyped_req_count = pair_val.first;
+      const auto& type_map = pair_val.second;
+      mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
+        devDoc.append(
+            kvp("untyped_req_count", std::to_string(untyped_req_count)));
+        devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
+          for (const auto& [type, total] : type_map) {
+            typeDoc.append(kvp(type, std::to_string(total)));
+          }
+        }));
+      }));
+    }
+  }));
+}
+
+void MongodbClient::DocumentAppendItem_(
     document& doc, const std::string& key,
     const std::unordered_map<std::string, uint32_t>& value) {
   doc.append(kvp(key, [&value](sub_document sub_doc) {
@@ -3667,8 +3684,25 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()],
         int64_t(std::numeric_limits<
                 decltype(qos->max_submit_jobs_per_account)>::max()));
-    qos->max_time_limit_per_task = absl::Seconds(
-        qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
+    qos->max_time_limit_per_job = absl::Seconds(
+        qos_view[Qos::FieldStringOfMaxTimeLimitPerJob()].get_int64().value);
+    qos->max_jobs = ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxJobs()],
+        int64_t(std::numeric_limits<decltype(qos->max_jobs)>::max()));
+    qos->max_submit_jobs = ViewValueOr_(
+        qos_view[Qos::FieldStringOfMaxSubmitJobs()],
+        int64_t(std::numeric_limits<decltype(qos->max_submit_jobs)>::max()));
+    qos->max_wall = absl::Seconds(
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxWall()], int64_t(0)));
+    qos->flags.FromInt64(
+        ViewValueOr_(qos_view[Qos::FieldStringOfFlags()], int64_t(0)));
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(),
+                           &qos->max_tres);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(),
+                           &qos->max_tres_per_user);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(),
+                           &qos->max_tres_per_account);
+
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -3676,7 +3710,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 11> fields{
+  std::array<std::string, 18> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -3684,12 +3718,20 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfPriority(),
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
-      Qos::FieldStringOfMaxTimeLimitPerTask(),
+      Qos::FieldStringOfMaxTimeLimitPerJob(),
       Qos::FieldStringOfMaxJobsPerAccount(),
       Qos::FieldStringOfMaxSubmitJobsPerUser(),
-      Qos::FieldStringOfMaxSubmitJobsPerAccount()};
+      Qos::FieldStringOfMaxSubmitJobsPerAccount(),
+      Qos::FieldStringOfMaxJobs(),
+      Qos::FieldStringOfMaxSubmitJobs(),
+      Qos::FieldStringOfMaxWall(),
+      Qos::FieldStringOfMaxTres(),
+      Qos::FieldStringOfMaxTresPerUser(),
+      Qos::FieldStringOfMaxTresPerAccount(),
+      Qos::FieldStringOfFlags()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t, int64_t, int64_t, int64_t>
+             int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+             ResourceView, ResourceView, ResourceView, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -3697,10 +3739,17 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             absl::ToInt64Seconds(qos.max_time_limit_per_job),
              qos.max_jobs_per_account,
              qos.max_submit_jobs_per_user,
-             qos.max_submit_jobs_per_account};
+             qos.max_submit_jobs_per_account,
+             qos.max_jobs,
+             qos.max_submit_jobs,
+             absl::ToInt64Seconds(qos.max_wall),
+             qos.max_tres,
+             qos.max_tres_per_user,
+             qos.max_tres_per_account,
+             qos.flags.ToInt64()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -3902,16 +3951,16 @@ ResourceV2 MongodbClient::BsonToResourceV2(const bsoncxx::document::view& doc) {
   return res;
 }
 
-ContainerMetaInTask MongodbClient::BsonToContainerMeta(
+ContainerMetaInJob MongodbClient::BsonToContainerMeta(
     const bsoncxx::document::view& doc) {
-  ContainerMetaInTask result;
+  ContainerMetaInJob result;
 
   try {
     auto container_elem = doc["meta_container"];
     if (!container_elem || container_elem.type() != bsoncxx::type::k_document) {
       CRANE_LOGGER_ERROR(m_logger_,
                          "Error in reading container metadata for a container "
-                         "task: Unexpected document type.");
+                         "job: Unexpected document type.");
       return result;
     }
 
@@ -4008,8 +4057,8 @@ ContainerMetaInTask MongodbClient::BsonToContainerMeta(
   return result;
 }
 
-PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
-  PodMetaInTask result;
+PodMetaInJob MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
+  PodMetaInJob result;
   try {
     auto pod_elem = doc["meta_pod"];
     if (!pod_elem || pod_elem.type() != bsoncxx::type::k_document) {
@@ -4042,17 +4091,17 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
       auto ns_doc = ns_elem.get_document().view();
       if (auto network_elem = ns_doc["network"]) {
         result.namespace_option.network =
-            static_cast<crane::grpc::PodTaskAdditionalMeta::NamespaceMode>(
+            static_cast<crane::grpc::PodJobAdditionalMeta::NamespaceMode>(
                 network_elem.get_int32().value);
       }
       if (auto pid_elem = ns_doc["pid"]) {
         result.namespace_option.pid =
-            static_cast<crane::grpc::PodTaskAdditionalMeta::NamespaceMode>(
+            static_cast<crane::grpc::PodJobAdditionalMeta::NamespaceMode>(
                 pid_elem.get_int32().value);
       }
       if (auto ipc_elem = ns_doc["ipc"]) {
         result.namespace_option.ipc =
-            static_cast<crane::grpc::PodTaskAdditionalMeta::NamespaceMode>(
+            static_cast<crane::grpc::PodJobAdditionalMeta::NamespaceMode>(
                 ipc_elem.get_int32().value);
       }
       if (auto target_id_elem = ns_doc["target_id"]) {
@@ -4077,10 +4126,10 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
       for (const auto& port_val : ports_elem.get_array().value) {
         if (port_val.type() != bsoncxx::type::k_document) continue;
         auto ports_doc = port_val.get_document().view();
-        PodMetaInTask::PortMapping mapping{};
+        PodMetaInJob::PortMapping mapping{};
         if (auto proto_elem = ports_doc["protocol"]) {
           mapping.protocol = static_cast<
-              crane::grpc::PodTaskAdditionalMeta::PortMapping::Protocol>(
+              crane::grpc::PodJobAdditionalMeta::PortMapping::Protocol>(
               proto_elem.get_int32().value);
         }
         if (auto container_port_elem = ports_doc["container_port"]) {
@@ -4096,11 +4145,11 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
       }
     } else if (ports_elem && ports_elem.type() == bsoncxx::type::k_document) {
       // Backward compatibility with single-port schema.
-      PodMetaInTask::PortMapping mapping{};
+      PodMetaInJob::PortMapping mapping{};
       auto ports_doc = ports_elem.get_document().view();
       if (auto proto_elem = ports_doc["protocol"]) {
         mapping.protocol = static_cast<
-            crane::grpc::PodTaskAdditionalMeta::PortMapping::Protocol>(
+            crane::grpc::PodJobAdditionalMeta::PortMapping::Protocol>(
             proto_elem.get_int32().value);
       }
       if (auto container_port_elem = ports_doc["container_port"]) {
@@ -4132,17 +4181,17 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
   return result;
 }
 
-MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-    const crane::grpc::TaskInEmbeddedDb& task) {
-  auto const& task_to_ctld = task.task_to_ctld();
-  auto const& runtime_attr = task.runtime_attr();
+MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
+    const crane::grpc::JobInEmbeddedDb& job_in_db) {
+  auto const& job_to_ctld = job_in_db.job_to_ctld();
+  auto const& runtime_attr = job_in_db.runtime_attr();
 
-  std::optional<PodMetaInTask> pod_meta{std::nullopt};
-  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
-  if (task_to_ctld.type() == crane::grpc::TaskType::Container) {
-    pod_meta = static_cast<PodMetaInTask>(task_to_ctld.pod_meta());
+  std::optional<PodMetaInJob> pod_meta{std::nullopt};
+  std::optional<ContainerMetaInJob> container_meta{std::nullopt};
+  if (job_to_ctld.type() == crane::grpc::JobType::Container) {
+    pod_meta = static_cast<PodMetaInJob>(job_to_ctld.pod_meta());
     container_meta =
-        static_cast<ContainerMetaInTask>(task_to_ctld.container_meta());
+        static_cast<ContainerMetaInJob>(job_to_ctld.container_meta());
   }
 
   auto resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
@@ -4153,26 +4202,26 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   double cpus_req = 0.0;
   int64_t mem_req = 0;
 
-  if (task_to_ctld.has_cpus_per_task()) {
-    cpus_req = task_to_ctld.cpus_per_task() * task_to_ctld.ntasks();
+  if (job_to_ctld.has_cpus_per_task()) {
+    cpus_req = job_to_ctld.cpus_per_task() * job_to_ctld.ntasks();
   }
 
-  if (task_to_ctld.has_mem_per_node()) {
-    mem_req += task_to_ctld.mem_per_node() * task_to_ctld.node_num();
+  if (job_to_ctld.has_mem_per_node()) {
+    mem_req += job_to_ctld.mem_per_node() * job_to_ctld.node_num();
   }
-  if (task_to_ctld.has_cpus_per_task() && task_to_ctld.has_mem_per_cpu()) {
-    mem_req += static_cast<int64_t>(task_to_ctld.cpus_per_task() *
-                                    task_to_ctld.mem_per_cpu() *
-                                    task_to_ctld.ntasks());
+  if (job_to_ctld.has_cpus_per_task() && job_to_ctld.has_mem_per_cpu()) {
+    mem_req +=
+        static_cast<int64_t>(job_to_ctld.cpus_per_task() *
+                             job_to_ctld.mem_per_cpu() * job_to_ctld.ntasks());
   }
 
   bool using_default_wckey = false;
-  if (g_config.WckeyValid && task_to_ctld.wckey().empty()) {
+  if (g_config.WckeyValid && job_to_ctld.wckey().empty()) {
     using_default_wckey = true;
   }
 
   document env_doc;
-  for (const auto& entry : task_to_ctld.env()) {
+  for (const auto& entry : job_to_ctld.env()) {
     env_doc.append(kvp(entry.first, entry.second));
   }
 
@@ -4183,8 +4232,34 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     nodename_list_array.append(nodename);
   }
 
-  // 0  task_id       task_db_id     mod_time       deleted       account
-  // 5  cpus_req      mem_req        task_name      env           id_user
+  std::list<std::string> req_node_list;
+  util::ParseHostList(job_to_ctld.nodelist(), &req_node_list);
+  std::list<std::string> exclude_node_list;
+  util::ParseHostList(job_to_ctld.excludes(), &exclude_node_list);
+
+  std::vector<CranedId> execution_nodes;
+  if (job_to_ctld.type() == crane::grpc::JobType::Batch) {
+    execution_nodes.push_back(runtime_attr.craned_ids(0));
+  } else if (job_to_ctld.type() == crane::grpc::JobType::Interactive) {
+    const auto& ia_meta = job_to_ctld.interactive_meta();
+    if (ia_meta.interactive_type() == crane::grpc::InteractiveJobType::Calloc) {
+      execution_nodes.push_back(runtime_attr.craned_ids(0));
+    } else if (ia_meta.pty())
+      execution_nodes.push_back(runtime_attr.craned_ids(0));
+    else
+      execution_nodes = std::vector(runtime_attr.craned_ids().begin(),
+                                    runtime_attr.craned_ids().end());
+  } else if (job_to_ctld.type() == crane::grpc::JobType::Container) {
+    if (job_to_ctld.has_container_meta()) {
+      execution_nodes = std::vector(runtime_attr.craned_ids().begin(),
+                                    runtime_attr.craned_ids().end());
+    } else {
+      execution_nodes.push_back(runtime_attr.craned_ids(0));
+    }
+  }
+
+  // 0  job_id        job_db_id      mod_time       deleted       account
+  // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
@@ -4192,13 +4267,13 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-  // 45 submit_hostname
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes
   // clang-format off
-  std::array<std::string, 46> fields{
+  std::array<std::string, 49> fields{
     // 0 - 4
-    "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
+    "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
-    "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+    "cpus_req", "mem_req",    "job_name",   "env",      "id_user",
     // 10 - 14
     "id_group", "nodelist",   "nodes_alloc", "node_inx", "partition_name",
     // 15 - 19
@@ -4214,100 +4289,130 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 49
-    "submit_hostname"
+    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes"
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,     /*0-4*/
+  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
              double, int64_t, std::string, std::string, int32_t,    /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
              int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
-             std::optional<ContainerMetaInTask>, bool,              /*38-39*/
+             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-             std::string>                                           /*45-49*/
-      values{                                                       // 0-4
-             static_cast<int32_t>(runtime_attr.task_id()),
-             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-             task_to_ctld.account(),
-             // 5-9
-             cpus_req, mem_req, task_to_ctld.name(), env_str,
-             static_cast<int32_t>(task_to_ctld.uid()),
-             // 10-14
-             static_cast<int32_t>(task_to_ctld.gid()),
-             util::HostNameListToStr(runtime_attr.craned_ids()),
-             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
-             // 15-19
-             runtime_attr.cached_priority(), 0,
-             runtime_attr.start_time().seconds(),
-             runtime_attr.end_time().seconds(), 0,
-             // 20-24
-             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-             task_to_ctld.time_limit().seconds(),
-             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
-             // 25-29
-             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
-             runtime_attr.username(), task_to_ctld.qos(),
-             task_to_ctld.get_user_env(),
-             // 30-34
-             task_to_ctld.type(), task_to_ctld.extra_attr(),
-             task_to_ctld.reservation(), task_to_ctld.exclusive(),
-             allocated_res_view.CpuCount(),
-             // 35-40
-             static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
-             true /* Mark the document having complete job info */,
-             // 40-44
-             std::unordered_map<std::string, uint32_t>{
-                 runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()},
-             bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey(), using_default_wckey,
-             g_config.CraneClusterName, task_to_ctld.submit_hostname()};
+             std::string, std::list<CranedId>, std::list<CranedId>, /*45-46*/
+             std::vector<CranedId>>                                 /*45-49*/
+      values{
+          // 0-4
+          static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
+          absl::ToUnixSeconds(absl::Now()), false, job_to_ctld.account(),
+          // 5-9
+          cpus_req, mem_req, job_to_ctld.name(), env_str,
+          static_cast<int32_t>(job_to_ctld.uid()),
+          // 10-14
+          static_cast<int32_t>(job_to_ctld.gid()),
+          util::HostNameListToStr(runtime_attr.craned_ids()),
+          runtime_attr.craned_ids().size(), 0, job_to_ctld.partition_name(),
+          // 15-19
+          runtime_attr.cached_priority(), 0,
+          runtime_attr.start_time().seconds(),
+          runtime_attr.end_time().seconds(), 0,
+          // 20-24
+          job_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+          job_to_ctld.time_limit().seconds(),
+          runtime_attr.submit_time().seconds(), job_to_ctld.cwd(),
+          // 25-29
+          job_to_ctld.cmd_line(), runtime_attr.exit_code(),
+          runtime_attr.username(), job_to_ctld.qos(),
+          job_to_ctld.get_user_env(),
+          // 30-34
+          job_to_ctld.type(), job_to_ctld.extra_attr(),
+          job_to_ctld.reservation(), job_to_ctld.exclusive(),
+          allocated_res_view.CpuCount(),
+          // 35-39
+          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
+          allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+          true /* Mark the document having complete job info */,
+          // 40-44
+          std::unordered_map<std::string, uint32_t>{
+              runtime_attr.actual_licenses().begin(),
+              runtime_attr.actual_licenses().end()},
+          bsoncxx::array::value{nodename_list_array.view()},
+          job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
+          // 45-48
+          job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
+          execution_nodes};
 
   return DocumentConstructor_(fields, values);
 }
 
-MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
-  std::string script;
-  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
-  std::optional<PodMetaInTask> pod_meta{std::nullopt};
+void MongodbClient::QosResourceViewFromDb_(
+    const bsoncxx::document::view& qos_view, const std::string& field,
+    ResourceView* resource) {
+  auto max_tres = ViewValueOr_(qos_view[field], bsoncxx::document::view{});
+  auto allocatable_res =
+      ViewValueOr_(max_tres["allocatable_res"], bsoncxx::document::view{});
 
-  if (task->type == crane::grpc::Batch)
-    script = task->TaskToCtld().batch_meta().sh_script();
-  else if (task->type == crane::grpc::Container) {
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(ViewValueOr_(
+      allocatable_res["cpu_count"], static_cast<double>(INT32_MAX / 256)));
+  resource->GetAllocatableRes().memory_bytes = ViewValueOr_(
+      allocatable_res["mem"], static_cast<int64_t>(kMaxJobMemoryBytes));
+  resource->GetAllocatableRes().memory_sw_bytes = ViewValueOr_(
+      allocatable_res["mem_sw"], static_cast<int64_t>(kMaxJobMemoryBytes));
+
+  auto device_map_view =
+      ViewValueOr_(max_tres["device_map"], bsoncxx::document::view{});
+  for (auto&& device_item : device_map_view) {
+    auto device_doc = device_item.get_document().value;
+    uint64_t untyped_req_count = std::stoull(
+        std::string(device_doc["untyped_req_count"].get_string().value));
+    std::unordered_map<std::string, uint64_t> type_total;
+    auto type_total_ele = device_doc["type_total"];
+    for (auto&& sub_item : type_total_ele.get_document().value) {
+      uint64_t total = std::stoull(std::string(sub_item.get_string().value));
+      type_total.emplace(std::string(sub_item.key()), total);
+    }
+    resource->GetDeviceMap().emplace(
+        std::string(device_item.key()),
+        std::make_pair(untyped_req_count, std::move(type_total)));
+  }
+}
+
+MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
+  std::string script;
+  std::optional<ContainerMetaInJob> container_meta{std::nullopt};
+  std::optional<PodMetaInJob> pod_meta{std::nullopt};
+
+  if (job->type == crane::grpc::Batch)
+    script = job->JobToCtld().batch_meta().sh_script();
+  else if (job->type == crane::grpc::Container) {
     // All container job has pod_meta
-    pod_meta = task->pod_meta;
+    pod_meta = job->pod_meta;
 
     // Jobs from ccon has container_meta
-    if (std::holds_alternative<ContainerMetaInTask>(task->meta))
-      container_meta = std::get<ContainerMetaInTask>(task->meta);
+    if (std::holds_alternative<ContainerMetaInJob>(job->meta))
+      container_meta = std::get<ContainerMetaInJob>(job->meta);
 
     // Jobs from cbatch has batch_meta
-    if (task->TaskToCtld().has_batch_meta())
-      script = task->TaskToCtld().batch_meta().sh_script();
+    if (job->JobToCtld().has_batch_meta())
+      script = job->JobToCtld().batch_meta().sh_script();
   }
 
   // TODO: Interactive meta?
 
   document env_doc;
-  for (const auto& entry : task->env) {
+  for (const auto& entry : job->env) {
     env_doc.append(kvp(entry.first, entry.second));
   }
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  bsoncxx::builder::basic::array nodename_list_array;
-  for (const auto& nodename : task->CranedIds()) {
-    nodename_list_array.append(nodename);
-  }
-
-  // 0  task_id       task_db_id     mod_time       deleted       account
-  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 0  job_id        job_db_id      mod_time       deleted       account
+  // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
@@ -4315,14 +4420,14 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
-  // 45 submit_hostname
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes
 
   // clang-format off
-  std::array<std::string, 46> fields{
+  std::array<std::string, 49> fields{
       // 0 - 4
-      "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
+      "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
-      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+      "cpus_req", "mem_req",    "job_name",   "env",      "id_user",
       // 10 - 14
       "id_group", "nodelist",   "nodes_alloc", "node_inx", "partition_name",
       // 15 - 19
@@ -4338,54 +4443,55 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 40 - 44
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 49
-      "submit_hostname"
+      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes"
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,     /*0-4*/
+  std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
              double, int64_t, std::string, std::string, int32_t,    /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,   /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,   /*20-24*/
              std::string, int32_t, std::string, std::string, bool,  /*25-29*/
              int32_t, std::string, std::string, bool, double,       /*30-34*/
-             int64_t, DeviceMap, std::optional<PodMetaInTask>,      /*35-37*/
-             std::optional<ContainerMetaInTask>, bool,              /*38-39*/
+             int64_t, DeviceMap, std::optional<PodMetaInJob>,       /*35-37*/
+             std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
-             bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-             std::string>                                           /*45-49*/
+             std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
+             std::string, std::unordered_set<CranedId>,             /*45-49*/
+             std::unordered_set<CranedId>, std::vector<CranedId>>   /*45-49*/
       values{                                                       // 0-4
-             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->account,
+             static_cast<int32_t>(job->JobId()), job->JobDbId(),
+             absl::ToUnixSeconds(absl::Now()), false, job->account,
              // 5-9
-             task->req_total_res_view.CpuCount(),
-             static_cast<int64_t>(task->req_total_res_view.MemoryBytes()),
-             task->name, env_str, static_cast<int32_t>(task->uid),
+             job->req_total_res_view.CpuCount(),
+             static_cast<int64_t>(job->req_total_res_view.MemoryBytes()),
+             job->name, env_str, static_cast<int32_t>(job->uid),
              // 10-14
-             static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+             static_cast<int32_t>(job->gid), job->allocated_craneds_regex,
+             static_cast<int32_t>(job->nodes_alloc), 0, job->partition_id,
              // 15-19
-             static_cast<int64_t>(task->CachedPriority()), 0,
-             task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+             static_cast<int64_t>(job->CachedPriority()), 0,
+             job->StartTimeInUnixSecond(), job->EndTimeInUnixSecond(), 0,
              // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-             task->SubmitTimeInUnixSecond(), task->cwd,
+             script, job->Status(), absl::ToInt64Seconds(job->time_limit),
+             job->SubmitTimeInUnixSecond(), job->cwd,
              // 25-29
-             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env,
+             job->cmd_line, job->ExitCode(), job->Username(), job->qos,
+             job->get_user_env,
              // 30-34
-             task->type, task->extra_attr, task->reservation,
-             task->TaskToCtld().exclusive(),
-             task->allocated_res_view.CpuCount(),
+             job->type, job->extra_attr, job->reservation,
+             job->JobToCtld().exclusive(), job->allocated_res_view.CpuCount(),
              // 35-39
-             static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             task->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+             static_cast<int64_t>(job->allocated_res_view.MemoryBytes()),
+             job->allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
              true /* Mark the document having complete job info */,
              // 40-44
-             task->licenses_count,
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey,
-             task->using_default_wckey, g_config.CraneClusterName,
-             task->submit_hostname};
+             job->licenses_count, job->CranedIds(), job->wckey,
+             job->using_default_wckey, g_config.CraneClusterName,
+             // 45-49
+             job->submit_hostname, job->included_nodes, job->excluded_nodes,
+             job->executing_craned_ids};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4399,8 +4505,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
     // Container job primary step submitted via cbatch --pod
     script = step->StepToCtld().batch_meta().sh_script();
 
-  std::optional<PodMetaInTask> pod_meta{std::nullopt};
-  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
+  std::optional<PodMetaInJob> pod_meta{std::nullopt};
+  std::optional<ContainerMetaInJob> container_meta{std::nullopt};
   if (step->pod_meta.has_value()) pod_meta = step->pod_meta;
   if (step->container_meta.has_value()) container_meta = step->container_meta;
 
@@ -4416,10 +4522,11 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
   // 10 nodes_alloc     node_inx      time_eligible   time_start    time_end
   // 15 time_suspended  script        state           timelimit     time_submit
   // 20 work_dir        submit_line   exit_code       get_user_env  type
-  // 25 extra_attr      res_alloc     step_type       meta_pod meta_container
+  // 25 extra_attr      res_alloc     step_type       meta_pod  meta_container
+  // 30 req_nodes       exclude_nodes execution_nodes
 
   // clang-format off
-  std::array<std::string, 30> fields{
+  std::array<std::string, 33> fields{
       // 0 - 4
       "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
@@ -4432,19 +4539,24 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
         "work_dir","submit_line", "exit_code","get_user_env","type",
       // 25 - 29
          "extra_attr", "res_alloc", "step_type", "meta_pod", "meta_container",
+    //30-32
+      "req_nodes", "exclude_nodes", "execution_nodes"
   };
 
   // clang-format on
-  std::tuple<int32_t, int64_t, bool,                             /*0-4*/
-             double, int64_t, std::string, std::string, int32_t, /*5-9*/
-             std::vector<gid_t>, std::string, int32_t, int32_t,
-             int64_t,                                             /*10-14*/
-             int64_t, int64_t, int64_t, std::string, int32_t,     /*15-19*/
-             int64_t, int64_t, std::string, std::string, int32_t, /*20-24*/
-             bool, int32_t, std::string, ResourceV2, int32_t,     /*25-29*/
-             std::optional<PodMetaInTask>,                        /*30-30*/
-             std::optional<ContainerMetaInTask>>                  /*31-31*/
-      values{                                                     // 0-4
+  std::tuple<int32_t, int64_t, bool, double, int64_t,          /*0-4*/
+             std::string, std::string, int32_t,                /*5-7*/
+             std::vector<gid_t>, std::string,                  /*8-9*/
+             int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/
+             int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
+             std::string, std::string, int32_t, bool, int32_t, /*20-24*/
+             std::string, ResourceV2, int32_t,                 /*25-27*/
+             std::optional<PodMetaInJob>,                      /*28*/
+             std::optional<ContainerMetaInJob>,                /*29*/
+             std::unordered_set<std::string>,                  /*30*/
+             std::unordered_set<std::string>,                  /*31*/
+             std::unordered_set<std::string>>                  /*32*/
+      values{                                                  // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
              step->req_total_res_view.CpuCount(),
@@ -4461,9 +4573,12 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              // 20-24
              step->StepToCtld().cwd(), step->StepToCtld().cmd_line(),
              step->ExitCode(), step->get_user_env, step->type,
-             // 25-28
+             // 25-29
              step->StepToCtld().extra_attr(), step->AllocatedRes(),
-             step->StepType(), pod_meta, container_meta};
+             step->StepType(), pod_meta, container_meta,
+             // 30 -32
+             step->included_nodes, step->excluded_nodes,
+             step->ExecutionNodes()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4480,12 +4595,12 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
            step_to_ctld.has_batch_meta())
     script = step_to_ctld.batch_meta().sh_script();
 
-  std::optional<PodMetaInTask> pod_meta{std::nullopt};
-  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
+  std::optional<PodMetaInJob> pod_meta{std::nullopt};
+  std::optional<ContainerMetaInJob> container_meta{std::nullopt};
   if (step_to_ctld.type() == crane::grpc::Container) {
     if (step_to_ctld.has_container_meta()) {
       container_meta =
-          static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
+          static_cast<ContainerMetaInJob>(step_to_ctld.container_meta());
     }
   }
 
@@ -4511,15 +4626,21 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  std::list<std::string> req_node_list;
+  util::ParseHostList(step_to_ctld.nodelist(), &req_node_list);
+  std::list<std::string> exclude_node_list;
+  util::ParseHostList(step_to_ctld.excludes(), &exclude_node_list);
+
   // 0  step_id         mod_time      deleted       cpus_req      mem_req
   // 5  step_name       env           id_user       id_group      nodelist
   // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
   // 15 time_suspended  script        state         timelimit     time_submit
   // 20 work_dir        submit_line   exit_code     get_user_env  type
   // 25 extra_attr      res_alloc     step_type     meta_pod     meta_container
+  // 30 req_nodes       exclude_nodes   execution_nodes
 
   // clang-format off
-  std::array<std::string, 30> fields{
+  std::array<std::string, 33> fields{
       // 0 - 4
       "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
@@ -4532,6 +4653,8 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
        "work_dir","submit_line", "exit_code","get_user_env","type",
       // 25 - 29
          "extra_attr", "res_alloc", "step_type", "meta_pod", "meta_container",
+    //30-32
+    "req_nodes","exclude_nodes","execution_nodes"
   };
 
   // clang-format on
@@ -4542,31 +4665,54 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
              int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
              std::string, std::string, int32_t, bool, int32_t, /*20-24*/
              std::string, ResourceV2, int32_t,
-             std::optional<PodMetaInTask>,       /*25-28*/
-             std::optional<ContainerMetaInTask>> /*29-29*/
+             std::optional<PodMetaInJob>,                    /*25-28*/
+             std::optional<ContainerMetaInJob>,              /*29-29*/
+             std::list<std::string>, std::list<std::string>, /*30-31*/
+             decltype(runtime_attr.execution_nodes())>       /*32*/
 
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
-          absl::ToUnixSeconds(absl::Now()), false, cpus_req, mem_req,
+          absl::ToUnixSeconds(absl::Now()),
+          false,
+          cpus_req,
+          mem_req,
           // 5-9
-          step_to_ctld.name(), env_str, step_to_ctld.uid(),
+          step_to_ctld.name(),
+          env_str,
+          step_to_ctld.uid(),
           std::vector<gid_t>(step_to_ctld.gid().begin(),
                              step_to_ctld.gid().end()),
           util::HostNameListToStr(runtime_attr.craned_ids()),
           // 10-14
-          runtime_attr.craned_ids_size(), 0, 0,
+          runtime_attr.craned_ids_size(),
+          0,
+          0,
           runtime_attr.start_time().seconds(),
           runtime_attr.end_time().seconds(),
           // 15-19
-          0, script, runtime_attr.status(), step_to_ctld.time_limit().seconds(),
+          0,
+          script,
+          runtime_attr.status(),
+          step_to_ctld.time_limit().seconds(),
           runtime_attr.submit_time().seconds(),
           // 20-24
-          step_to_ctld.cwd(), step_to_ctld.cmd_line(), runtime_attr.exit_code(),
-          step_to_ctld.get_user_env(), step_to_ctld.type(),
-          // 25-28
-          step_to_ctld.extra_attr(), ResourceV2(runtime_attr.allocated_res()),
-          runtime_attr.step_type(), pod_meta, container_meta};
+          step_to_ctld.cwd(),
+          step_to_ctld.cmd_line(),
+          runtime_attr.exit_code(),
+          step_to_ctld.get_user_env(),
+          step_to_ctld.type(),
+          // 25-29
+          step_to_ctld.extra_attr(),
+          ResourceV2(runtime_attr.allocated_res()),
+          runtime_attr.step_type(),
+          pod_meta,
+          container_meta,
+          // 30-32
+          req_node_list,
+          exclude_node_list,
+          runtime_attr.execution_nodes(),
+      };
 
   return DocumentConstructor_(fields, values);
 }
@@ -4578,7 +4724,8 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
   // 15 time_suspended  script        state         timelimit     time_submit
   // 20 work_dir        submit_line   exit_code     get_user_env  type
-  // 25 extra_attr      res_alloc     step_type     meta_container
+  // 25 extra_attr      res_alloc     step_type     meta_pod     meta_container
+  // 30 req_nodes       exclude_nodes   execution_nodes
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
@@ -4614,7 +4761,7 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
       view["time_end"].get_int64().value);
 
   step_info->set_status(
-      static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value));
+      static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value));
   step_info->mutable_time_limit()->set_seconds(
       view["timelimit"].get_int64().value);
   step_info->mutable_submit_time()->set_seconds(
@@ -4626,7 +4773,7 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_info->set_exit_code(view["exit_code"].get_int32().value);
 
   step_info->set_type(
-      static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
+      static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
 
   step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
   *step_info->mutable_allocated_res_view() =
@@ -4641,8 +4788,20 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
     auto* meta_info = step_info->mutable_container_meta();
     auto container_meta = BsonToContainerMeta(view);
     *meta_info = std::move(
-        static_cast<crane::grpc::ContainerTaskAdditionalMeta>(container_meta));
+        static_cast<crane::grpc::ContainerJobAdditionalMeta>(container_meta));
   }
+  if (view["req_nodes"])
+    for (auto&& req_node : view["req_nodes"].get_array().value) {
+      step_info->add_req_nodes(req_node.get_string().value.data());
+    }
+  if (view["exclude_nodes"])
+    for (auto&& exclude_node : view["exclude_nodes"].get_array().value) {
+      step_info->add_exclude_nodes(exclude_node.get_string().value.data());
+    }
+  if (view["execution_nodes"])
+    for (auto&& exec_node : view["execution_nodes"].get_array().value) {
+      step_info->add_execution_node(exec_node.get_string().value.data());
+    }
 }
 
 void MongodbClient::CreateCollectionIndex(
@@ -4668,19 +4827,19 @@ bool MongodbClient::InitTableIndexes() {
   try {
     CRANE_LOGGER_DEBUG(m_logger_, "Initializing database indexes...");
 
-    // Create indexes for the raw task table
-    CRANE_LOGGER_DEBUG(m_logger_, "Creating indexes for task_table...");
+    // Create indexes for the raw job table
+    CRANE_LOGGER_DEBUG(m_logger_, "Creating indexes for job_table...");
     auto client = m_connect_pool_->acquire();
-    auto raw_table = client[m_db_name_][m_task_collection_name_];
+    auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
-    // Indexes for jobsize queries (direct task_table scan)
+    // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
         raw_table, {"time_start", "time_end", "account", "username"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end", "cpus_alloc"},
                           false);
-    // task_table: add index for aggregated field (recovery optimization)
+    // job_table: add index for aggregated field (recovery optimization)
     CRANE_LOGGER_DEBUG(m_logger_,
-                       "Creating aggregation recovery index on task_table...");
+                       "Creating aggregation recovery index on job_table...");
     CreateCollectionIndex(raw_table, {"aggregated", "status"}, false);
 
     auto acc_hour_coll = client[m_db_name_][m_acc_usage_hour_collection_name_];

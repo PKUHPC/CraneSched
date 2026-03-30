@@ -77,7 +77,9 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 |-------------------------|---------|--------------|
 | time_limit              | number  | 时间限制         | 
 | partition_id            | string  | 作业所属分区       | 
-| requested_node_res_view | ResourceView | 需求资源信息   | 
+| req_node_res_view       | ResourceView | 单节点需求资源信息  | 
+| req_task_res_view       | ResourceView | 单task需求资源信息 |
+| req_total_res_view      | ResourceView | 总需求资源信息     |
 | type                    | number  | 作业类型         |
 | uid                     | number  | 作业所属uid      |
 | gid                     | number  | 作业所属gid      |
@@ -85,8 +87,8 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | name                    | string  | 作业名          |
 | qos                     | string  | 作业所属qos      |
 | node_num                | number  | 节点数目         |
-| ntasks_per_node         | number  | 每个节点的task数目  |
-| cpus_per_task           | number  | 每个task的cpu数目 |
+| ntasks_per_node_min     | number  | 每个节点最少task数目 |
+| ntasks_per_node_max     | number  | 每个节点最多task数目 |
 | included_nodes          | table(string list) | 包含的节点 |
 | excluded_nodes          | table(string list) | 排除的节点 |
 | requeue_if_failed       | boolean | 是否允许失败重试     |
@@ -227,8 +229,8 @@ function crane_job_submit(job_desc, part_list, uid)
         crane.log_info("  %s %s", name, tostring(value))
     end
 
-    crane.log_info("job_desc.requested_node_res_view:")
-    local rv = job_desc.requested_node_res_view
+    crane.log_info("job_desc.req_node_res_view:")
+    local rv = job_desc.req_node_res_view
     crane.log_info("  cpu_count: %d", rv.cpu_count)
     crane.log_info("  memory_bytes: %d", rv.memory_bytes)
     crane.log_info("  device_map:")
@@ -239,6 +241,16 @@ function crane_job_submit(job_desc, part_list, uid)
             crane.log_info("        %s: %d", tname, tcount)
         end
     end
+
+    crane.log_info("job_desc.req_task_res_view:")
+    local rtv = job_desc.req_task_res_view
+    crane.log_info("  cpu_count: %d", rtv.cpu_count)
+    crane.log_info("  memory_bytes: %d", rtv.memory_bytes)
+
+    crane.log_info("job_desc.req_total_res_view:")
+    local ttv = job_desc.req_total_res_view
+    crane.log_info("  cpu_count: %d", ttv.cpu_count)
+    crane.log_info("  memory_bytes: %d", ttv.memory_bytes)
 
     crane.log_info("part_list:")
     for i, part in ipairs(part_list) do

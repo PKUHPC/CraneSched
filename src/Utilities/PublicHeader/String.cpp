@@ -79,6 +79,49 @@ CraneExpected<uint64_t> ParseMemory(const std::string &mem) {
   return memory_bytes;
 }
 
+std::optional<uint64_t> ParseMemStringAsByte(const std::string &mem) {
+  static const LazyRE2 mem_regex = {R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)"};
+  std::string num_str, unit;
+  if (!RE2::FullMatch(mem, *mem_regex, &num_str, &unit)) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  double sz = 0.0;
+  try {
+    sz = std::stod(num_str);
+  } catch (const std::exception &e) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  if (unit.empty()) return sz * 1024 * 1024;
+
+  uint64_t bytes = 0;
+  switch (unit[0]) {
+  case 'K':
+  case 'k':
+    bytes = sz * 1024;
+    break;
+  case 'M':
+  case 'm':
+    bytes = sz * 1024 * 1024;
+    break;
+  case 'G':
+  case 'g':
+    bytes = sz * 1024 * 1024 * 1024;
+    break;
+  case 'B':
+  case 'b':
+    bytes = sz;
+    break;
+  default:
+    bytes = sz * 1024 * 1024;
+  }
+
+  return bytes;
+}
+
 bool ParseNodeList(const std::string &node_str,
                    std::list<std::string> *nodelist) {
   static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
@@ -557,7 +600,7 @@ std::string StepToDIdString(const crane::grpc::StepToD &step_to_d) {
   return StepIdsToString(step_to_d.job_id(), step_to_d.step_id());
 }
 
-std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
+std::string StepStatusToString(const crane::grpc::JobStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
@@ -640,6 +683,141 @@ void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
     }
   }
   std::ranges::sort(*result, std::greater());
+}
+
+bool ConvertStringToDeviceMap(const std::string &s, DeviceMap *device_map) {
+  std::vector<std::string> items = absl::StrSplit(s, ":");
+  std::string key = items[0];
+  if (items.size() == 2) {
+    if (items[1] == "unlimited") {
+      auto iter = device_map->find(key);
+      if (iter != device_map->end()) {
+        if (iter->second.second.empty()) {
+          device_map->erase(key);
+        } else {
+          iter->second.first = UINT32_MAX;
+        }
+      }
+      return true;
+    }
+    uint64_t value;
+    try {
+      value = std::stoull(items[1]);
+    } catch (const std::exception &e) {
+      return false;
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
+      iter->second.first = value;
+    } else {
+      device_map->insert_or_assign(
+          key,
+          std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
+    }
+  } else if (items.size() == 3) {
+    std::string type = items[1];
+    if (items[2] == "unlimited") {
+      auto iter = device_map->find(key);
+      if (iter != device_map->end()) {
+        if (iter->second.second.contains(type)) {
+          iter->second.second.erase(type);
+        }
+        if (iter->second.second.empty()) {
+          device_map->erase(key);
+        }
+      }
+      return true;
+    }
+    uint64_t value;
+    try {
+      value = std::stoull(items[2]);
+    } catch (const std::exception &e) {
+      CRANE_ERROR("Failed to parse device map string: {}", s);
+      return false;
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
+      iter->second.second.insert_or_assign(type, value);
+    } else {
+      device_map->insert_or_assign(
+          key, std::make_pair(
+                   UINT32_MAX,
+                   std::unordered_map<std::string, uint64_t>{{type, value}}));
+    }
+  } else {
+    CRANE_ERROR("Failed to parse device map string: {}", s);
+    return false;
+  }
+
+  return true;
+}
+
+bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
+  if (s.empty()) {
+    res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX / 256);
+    res->GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+    res->GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
+    res->GetDeviceMap().clear();
+    return true;
+  }
+
+  ResourceView tmp = *res;
+  std::vector<std::string> items = absl::StrSplit(s, ",");
+  for (const auto &item : items) {
+    if (item.starts_with("gres/") && item.size() > 5) {
+      if (!ConvertStringToDeviceMap(item.substr(5), &tmp.GetDeviceMap()))
+        return false;
+    } else {
+      std::vector<std::string> kv = absl::StrSplit(item, ":");
+      if (kv.size() == 2) {
+        if (kv[0] == "cpu") {
+          if (kv[1] == "unlimited") {
+            tmp.GetAllocatableRes().cpu_count =
+                static_cast<cpu_t>(INT32_MAX / 256);
+            continue;
+          }
+          double cpu_count;
+          try {
+            cpu_count = std::stod(kv[1]);
+          } catch (const std::exception &e) {
+            return false;
+          }
+          if (cpu_count > static_cast<double>(INT32_MAX / 256)) return false;
+
+          tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
+        } else if (kv[0] == "mem") {
+          if (kv[1] == "unlimited") {
+            tmp.GetAllocatableRes().memory_bytes = kMaxJobMemoryBytes;
+            tmp.GetAllocatableRes().memory_sw_bytes = kMaxJobMemoryBytes;
+            continue;
+          }
+
+          auto result = ParseMemStringAsByte(kv[1]);
+          if (!result) return false;
+
+          uint64_t value = result.value();
+
+          if (value > kMaxJobMemoryBytes) {
+            CRANE_ERROR(
+                "Memory value {} exceeds the maximum allowed memory bytes {}",
+                value, kMaxJobMemoryBytes);
+            return false;
+          }
+
+          tmp.GetAllocatableRes().memory_bytes = value;
+          tmp.GetAllocatableRes().memory_sw_bytes = value;
+        } else {
+          CRANE_ERROR("Unknown resource type: {}", kv[0]);
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+  }
+
+  *res = std::move(tmp);
+  return true;
 }
 
 }  // namespace util

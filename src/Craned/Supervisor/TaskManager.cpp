@@ -229,6 +229,22 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   std::string time_limit =
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_map.emplace("CRANE_TIMELIMIT", time_limit);
+
+  // SLURM
+  if (g_config.EnableSlurmCompatibleEnv) {
+    env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
+    env_map.emplace("SLURM_STEP_NUM_TASKS",
+                    std::to_string(m_step_to_supv_.task_node_list().size()));
+    // The set of task IDs running on the current node
+    const auto& task_res_map = m_step_to_supv_.task_res_map();
+    std::vector<task_id_t> gtids;
+    gtids.reserve(task_res_map.size());
+    for (const auto& [task_id, resource] : task_res_map) {
+      gtids.emplace_back(task_id);
+    }
+    env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
+  }
+
   return env_map;
 }
 
@@ -434,6 +450,23 @@ void ITaskInstance::InitEnvMap() {
   }
   for (const auto& [name, value] : m_parent_step_inst_->GetStepProcessEnv()) {
     m_env_.emplace(name, value);
+  }
+  if (g_config.EnableSlurmCompatibleEnv) {
+    // Global task id
+    m_env_.emplace("SLURM_PROCID", std::to_string(task_id));
+    // Local task id task_node_list()
+    task_id_t local_task_id = 0;
+    const auto& task_node_list =
+        m_parent_step_inst_->GetStep().task_node_list();
+    for (uint32_t index = 0; index < task_node_list.size(); index++) {
+      const std::string& hostname =
+          m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
+      if (hostname == g_config.CranedIdOfThisNode) {
+        local_task_id = task_id - index;
+        break;
+      }
+    }
+    m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
   }
 }
 
@@ -914,7 +947,7 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
 }
 
 void PodInstance::SetPodLabels_(
-    const crane::grpc::PodTaskAdditionalMeta& pod_meta, uid_t uid,
+    const crane::grpc::PodJobAdditionalMeta& pod_meta, uid_t uid,
     job_id_t job_id, const std::string& job_name) {
   m_pod_config_.mutable_labels()->insert(
       {{std::string(cri::kCriUidKey), std::to_string(uid)},
@@ -925,7 +958,7 @@ void PodInstance::SetPodLabels_(
 }
 
 void PodInstance::SetPodAnnotations_(
-    const crane::grpc::PodTaskAdditionalMeta& pod_meta, uid_t uid,
+    const crane::grpc::PodJobAdditionalMeta& pod_meta, uid_t uid,
     job_id_t job_id, const std::string& job_name, const std::string& hostname) {
   auto prefix = [](std::string_view key) -> std::string {
     return std::string(cri::kCriAnnotationPrefix) + std::string(key);
@@ -945,7 +978,7 @@ void PodInstance::SetPodAnnotations_(
 }
 
 CraneErrCode PodInstance::SetPodSandboxConfig_(
-    const crane::grpc::PodTaskAdditionalMeta& pod_meta) {
+    const crane::grpc::PodJobAdditionalMeta& pod_meta) {
   // All steps in a job share the same pod.
   job_id_t job_id = g_config.JobId;
 
@@ -1394,7 +1427,7 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
 }
 
 CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
-    const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
+    const crane::grpc::PodJobAdditionalMeta* pod_meta) {
   using cri::kCriDefaultLabel;
   using cri::kCriJobIdKey;
   using cri::kCriJobNameKey;
@@ -1498,8 +1531,8 @@ void ContainerInstance::SetContainerLabels_(uid_t uid, job_id_t job_id,
 }
 
 CraneErrCode ContainerInstance::SetContainerConfig_(
-    const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
-    const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
+    const crane::grpc::ContainerJobAdditionalMeta& ca_meta,
+    const crane::grpc::PodJobAdditionalMeta* pod_meta) {
   // There is only one container in a step. So we use step_id and job_id here.
   job_id_t job_id = g_config.JobId;
   step_id_t step_id = g_config.StepId;
@@ -2103,41 +2136,41 @@ TaskManager::TaskManager()
         EvCleanCriEventQueueCb_();
       });
 
-  m_terminate_task_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_terminate_task_async_handle_->on<uvw::async_event>(
+  m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_terminate_step_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanTerminateTaskQueueCb_();
+        EvCleanTerminateStepQueueCb_();
       });
-  m_terminate_task_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
-  m_terminate_task_timer_handle_->on<uvw::timer_event>(
+  m_terminate_step_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_terminate_step_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        m_terminate_task_async_handle_->send();
+        m_terminate_step_async_handle_->send();
       });
-  m_terminate_task_timer_handle_->start(
+  m_terminate_step_timer_handle_->start(
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
-  m_change_task_time_limit_async_handle_ =
+  m_change_step_time_limit_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_change_task_time_limit_async_handle_->on<uvw::async_event>(
+  m_change_step_time_limit_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanChangeTaskTimeLimitQueueCb_();
+        EvCleanChangeStepTimeLimitQueueCb_();
       });
-  m_change_task_time_limit_timer_handle_ =
+  m_change_step_time_limit_timer_handle_ =
       m_uvw_loop_->resource<uvw::timer_handle>();
-  m_change_task_time_limit_timer_handle_->on<uvw::timer_event>(
+  m_change_step_time_limit_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        m_change_task_time_limit_async_handle_->send();
+        m_change_step_time_limit_async_handle_->send();
       });
-  m_change_task_time_limit_timer_handle_->start(
+  m_change_step_time_limit_timer_handle_->start(
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
-  m_grpc_execute_task_async_handle_ =
+  m_grpc_execute_step_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_grpc_execute_task_async_handle_->on<uvw::async_event>(
+  m_grpc_execute_step_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcExecuteTaskCb_();
+        EvGrpcExecuteStepCb_();
       });
 
   m_grpc_query_step_env_async_handle_ =
@@ -2217,7 +2250,7 @@ void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::ShutdownSupervisorAsync(crane::grpc::TaskStatus new_status,
+void TaskManager::ShutdownSupervisorAsync(crane::grpc::JobStatus new_status,
                                           uint32_t exit_code,
                                           std::string reason) {
   CRANE_INFO("All tasks finished, exiting...");
@@ -2232,7 +2265,7 @@ void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
 }
 
 void TaskManager::TaskFinish_(task_id_t task_id,
-                              crane::grpc::TaskStatus new_status,
+                              crane::grpc::JobStatus new_status,
                               uint32_t exit_code,
                               std::optional<std::string> reason) {
   CRANE_TRACE(
@@ -2284,16 +2317,16 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   }
 }
 
-std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
-  CRANE_INFO("[Job #{}.{}] Executing task.", m_step_.job_id, m_step_.step_id);
+std::future<CraneErrCode> TaskManager::ExecuteStepAsync() {
+  CRANE_INFO("[Job #{}.{}] Executing step.", m_step_.job_id, m_step_.step_id);
 
   std::promise<CraneErrCode> ok_promise;
   std::future ok_future = ok_promise.get_future();
 
-  auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
+  auto elem = ExecuteStepElem{.ok_prom = std::move(ok_promise)};
 
-  m_grpc_execute_task_queue_.enqueue(std::move(elem));
-  m_grpc_execute_task_async_handle_->send();
+  m_grpc_execute_step_queue_.enqueue(std::move(elem));
+  m_grpc_execute_step_async_handle_->send();
   return ok_future;
 }
 
@@ -2306,7 +2339,7 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     TaskFinish_(
-        task->task_id, crane::grpc::TaskStatus::Failed,
+        task->task_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_FILE_NOT_FOUND,
         fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
     return err;
@@ -2315,7 +2348,7 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   CRANE_INFO("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
-    TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+    TaskFinish_(task->task_id, crane::grpc::JobStatus::Failed,
                 ExitCode::EC_SPAWN_FAILED,
                 fmt::format("Cannot spawn child process in task, code: {}",
                             static_cast<int>(err)));
@@ -2333,27 +2366,27 @@ std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
   return env_future;
 }
 
-std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
+std::future<CraneErrCode> TaskManager::ChangeStepTimeLimitAsync(
     absl::Duration time_limit) {
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
 
-  ChangeTaskTimeLimitQueueElem elem;
+  ChangeStepTimeLimitQueueElem elem;
   elem.time_limit = time_limit;
   elem.ok_prom = std::move(ok_promise);
 
-  m_task_time_limit_change_queue_.enqueue(std::move(elem));
-  m_change_task_time_limit_async_handle_->send();
+  m_step_time_limit_change_queue_.enqueue(std::move(elem));
+  m_change_step_time_limit_async_handle_->send();
   return ok_future;
 }
 
-void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
+void TaskManager::TerminateStepAsync(bool mark_as_orphaned,
                                      TerminatedBy terminated_by) {
-  m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+  m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
       .termination_reason = terminated_by,
       .mark_as_orphaned = mark_as_orphaned,
   });
-  m_terminate_task_async_handle_->send();
+  m_terminate_step_async_handle_->send();
 }
 
 void TaskManager::CheckStatusAsync(
@@ -2382,7 +2415,7 @@ std::future<CraneErrCode> TaskManager::MigrateSshProcToCgroupAsync(pid_t pid) {
 }
 
 void TaskManager::EvShutdownSupervisorCb_() {
-  std::tuple<crane::grpc::TaskStatus, uint32_t, std::string> final_status;
+  std::tuple<crane::grpc::JobStatus, uint32_t, std::string> final_status;
   bool got_final_status = false;
   do {
     got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
@@ -2515,28 +2548,28 @@ void TaskManager::EvCleanCriEventQueueCb_() {
   }
 }
 
-void TaskManager::EvTaskTimerCb_() {
-  CRANE_TRACE("task #{} exceeded its time limit. Terminating it...",
-              g_config.JobId);
+void TaskManager::EvStepTimerCb_() {
+  CRANE_TRACE("Step #{}.{} exceeded its time limit. Terminating it...",
+              g_config.JobId, g_config.StepId);
 
   DelTerminationTimer_();
   DelSignalTimers_();
 
   if (m_step_.IsCalloc()) {
     // Now calloc and cbatch steps only have one task with id 0.
-    TaskFinish_(0, crane::grpc::TaskStatus::ExceedTimeLimit,
+    TaskFinish_(0, crane::grpc::JobStatus::ExceedTimeLimit,
                 ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   } else {
-    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+    m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
-    m_terminate_task_async_handle_->send();
+    m_terminate_step_async_handle_->send();
   }
 }
 
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stopped_queue_.try_dequeue(task_id)) {
-    CRANE_INFO("[Task #{}] Stopped and is doing TaskStatusChange...", task_id);
+    CRANE_INFO("[Task #{}] Stopped and is doing StepStatusChange...", task_id);
     auto* task = m_step_.GetTaskInstance(task_id);
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
@@ -2589,14 +2622,14 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
-      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+      TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                   ExitCode::EC_SPAWN_FAILED, std::nullopt);
-      return;
+      continue;
 
     case CraneErrCode::ERR_CGROUP:
-      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+      TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                   ExitCode::EC_CGROUP_ERR, std::nullopt);
-      return;
+      continue;
 
     default:
       break;
@@ -2615,31 +2648,31 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         uint32_t exit_code = exit_info.value + ExitCode::kTerminationSignalBase;
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::Cancelled, exit_code,
+          TaskFinish_(task_id, crane::grpc::JobStatus::Cancelled, exit_code,
                       std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+          TaskFinish_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
                       ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory, exit_code,
+          TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory, exit_code,
                       "Detected by oom_kill counter delta");
           break;
         default:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_code,
+          TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_code,
                       std::nullopt);
         }
       } else if (exit_info.value == 0) {
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed, 0,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Completed, 0,
                     std::nullopt);
       } else {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
-          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
+          TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory,
                       exit_info.value,
                       "Detected by oom_kill counter delta (no signal)");
         } else {
-          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
+          TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_info.value,
                       std::nullopt);
         }
       }
@@ -2647,29 +2680,29 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
       if (exit_info.is_terminated_by_signal)
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Completed,
                     exit_info.value + ExitCode::kTerminationSignalBase,
                     std::nullopt);
       else if (exit_info.value == 0)
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed, 0,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Completed, 0,
                     std::nullopt);
       else
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_info.value,
                     std::nullopt);
     }
   }
 }
 
-void TaskManager::EvCleanTerminateTaskQueueCb_() {
-  TaskTerminateQueueElem elem;
-  std::vector<TaskTerminateQueueElem> not_ready_elems;
-  while (m_task_terminate_queue_.try_dequeue(elem)) {
-    CRANE_TRACE("Receive TerminateRunningTask Request for #{}.{}.",
+void TaskManager::EvCleanTerminateStepQueueCb_() {
+  StepTerminateQueueElem elem;
+  std::vector<StepTerminateQueueElem> not_ready_elems;
+  while (m_step_terminate_queue_.try_dequeue(elem)) {
+    CRANE_TRACE("Receive TerminateRunningStep Request for #{}.{}.",
                 g_config.JobId, g_config.StepId);
 
     if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
       CRANE_TRACE(
-          "TerminateRunningTask request ignored for daemon step unless active "
+          "TerminateRunningStep request ignored for daemon step unless active "
           "shutdown is in progress.",
           g_config.JobId, g_config.StepId);
       continue;
@@ -2678,7 +2711,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
-      CRANE_DEBUG("Task is not ready to terminate, will check next time.");
+      CRANE_DEBUG("Step is not ready to terminate, will check next time.");
       continue;
     }
 
@@ -2722,7 +2755,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       } else if (m_step_.IsInteractive()) {
         // For an Interactive task with no process running, it ends
         // immediately.
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Completed,
                     ExitCode::EC_TERMINATED, std::nullopt);
       } else {
         CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
@@ -2731,24 +2764,24 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
   }
 
   for (auto& not_ready_elem : not_ready_elems) {
-    m_task_terminate_queue_.enqueue(not_ready_elem);
+    m_step_terminate_queue_.enqueue(not_ready_elem);
   }
 }
 
-void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
+void TaskManager::EvCleanChangeStepTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
-  ChangeTaskTimeLimitQueueElem elem;
-  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
-  while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
+  ChangeStepTimeLimitQueueElem elem;
+  std::vector<ChangeStepTimeLimitQueueElem> not_ready_elems;
+  while (m_step_time_limit_change_queue_.try_dequeue(elem)) {
     if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
-          "Task is not ready to change time limit, will check next time.");
+          "Step is not ready to change time limit, will check next time.");
       continue;
     }
     if (m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Change timelimit for a completing task, ignored.");
+      CRANE_DEBUG("Change timelimit for a completing step, ignored.");
       continue;
     }
     // Delete the old timer.
@@ -2760,13 +2793,13 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     absl::Duration const& new_time_limit = elem.time_limit;
 
     if (now - start_time >= new_time_limit) {
-      // If the task times out, terminate it.
-      TaskTerminateQueueElem ev_task_terminate{
+      // If the step times out, terminate it.
+      StepTerminateQueueElem ev_step_terminate{
           .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
-      m_task_terminate_queue_.enqueue(ev_task_terminate);
-      m_terminate_task_async_handle_->send();
+      m_step_terminate_queue_.enqueue(ev_step_terminate);
+      m_terminate_step_async_handle_->send();
     } else {
-      // If the task haven't timed out, set up a new timer.
+      // If the step hasn't timed out, set up a new timer.
       int64_t new_sec =
           ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
       AddTerminationTimer_(new_sec);
@@ -2791,13 +2824,13 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
   for (auto& not_ready_elem : not_ready_elems) {
-    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
+    m_step_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 
-void TaskManager::EvGrpcExecuteTaskCb_() {
-  ExecuteTaskElem elem;
-  while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
+void TaskManager::EvGrpcExecuteStepCb_() {
+  ExecuteStepElem elem;
+  while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     m_step_.GotNewStatus(StepStatus::Running);
 
     CRANE_TRACE_SCOPE_FROM_REMOTE(exec_span, "step/execute",
@@ -2826,7 +2859,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
       for (auto task_id : m_step_.task_ids)
-        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+        TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                     ExitCode::EC_PERMISSION_DENIED,
                     fmt::format("Failed to look up password entry for uid {}",
                                 m_step_.uid));
@@ -2842,7 +2875,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                     m_step_.step_id, static_cast<int>(err));
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->TaskFinish_(
-              task_id, crane::grpc::TaskStatus::Failed,
+              task_id, crane::grpc::JobStatus::Failed,
               ExitCode::EC_FILE_NOT_FOUND,
               fmt::format("Failed to prepare step, code: {}",
                           static_cast<int>(err)));
@@ -2893,7 +2926,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
                   m_step_.step_id);
       for (auto task_id : m_step_.task_ids) {
-        g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+        g_task_mgr->TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                                 ExitCode::EC_CGROUP_ERR,
                                 "Failed to allocate cgroup");
       }

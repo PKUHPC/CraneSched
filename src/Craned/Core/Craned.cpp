@@ -425,6 +425,9 @@ void ParseConfig(int argc, char** argv) {
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
 
+      g_config.EnableSlurmCompatibleEnv =
+          YamlValueOr<bool>(config["EnableSlurmCompatibleEnv"], false);
+
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
 
@@ -1298,7 +1301,7 @@ void GlobalVariableInit() {
   CreateRequiredDirectories();
 
   // Mask SIGPIPE to prevent Craned from crushing due to
-  // SIGPIPE while communicating with spawned task processes.
+  // SIGPIPE while communicating with spawned job processes.
   signal(SIGPIPE, SIG_IGN);
 
   PasswordEntry::InitializeEntrySize();

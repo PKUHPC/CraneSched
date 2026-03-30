@@ -92,6 +92,17 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+
+  // SLURM
+  if (g_config.EnableSlurmCompatibleEnv) {
+    env_map.emplace("SLURM_JOBID", std::to_string(job_id));
+    env_map.emplace("SLURM_NODEID", node_id_to_str());
+    env_map.emplace("SLURMD_NODENAME", g_config.Hostname);
+    env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
+    env_map.emplace("SLURM_NODELIST",
+                    util::HostNameListToStr(daemon_step_to_d.nodelist()));
+  }
+
   return env_map;
 }
 
@@ -145,18 +156,18 @@ JobManager::JobManager() {
         EvCleanGrpcExecuteStepQueueCb_();
       });
 
-  // Task Status Change Event
-  m_task_status_change_async_handle_ =
+  // Step Status Change Event
+  m_step_status_change_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_task_status_change_async_handle_->on<uvw::async_event>(
+  m_step_status_change_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanTaskStatusChangeQueueCb_();
+        EvCleanStepStatusChangeQueueCb_();
       });
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanTerminateTaskQueueCb_();
+        EvCleanTerminateStepQueueCb_();
       });
   m_terminate_step_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_terminate_step_timer_handle_->on<uvw::timer_event>(
@@ -186,7 +197,7 @@ JobManager::JobManager() {
 }
 
 CraneErrCode JobManager::Recover(
-    std::unordered_map<task_id_t, JobInD>&& job_map,
+    std::unordered_map<job_id_t, JobInD>&& job_map,
     absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
                         std::unique_ptr<StepInstance>>&& step_map) {
   CRANE_INFO("Job allocation [{}] recovered.",
@@ -201,7 +212,7 @@ CraneErrCode JobManager::Recover(
     if (uid_map->contains(uid)) {
       uid_map->at(uid).RawPtr()->emplace(job_id);
     } else {
-      uid_map->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+      uid_map->emplace(uid, absl::flat_hash_set<job_id_t>({job_id}));
     }
   }
 
@@ -240,7 +251,7 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
 
   for (auto& job : jobs) {
-    task_id_t job_id = job.job_id;
+    job_id_t job_id = job.job_id;
 
     {
       CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/alloc",
@@ -253,14 +264,14 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
     } else {
-      uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+      uid_map_ptr->emplace(uid, absl::flat_hash_set<job_id_t>({job_id}));
     }
   }
 
   return true;
 }
 
-bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
+bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
   std::vector<JobInD> jobs_to_free;
   std::vector<StepInstance*> steps_to_free;
 
@@ -329,9 +340,9 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       CRANE_WARN("Try to allocate step for nonexistent job#{}, ignoring it.",
                  step.job_id());
     } else {
-      // Simply wrap the Task structure within an Execution structure and
-      // pass it to the event loop. The cgroup field of this task is initialized
-      // in the corresponding handler (EvGrpcExecuteTaskCb_).
+      // Simply wrap the job structure within an Execution structure and
+      // pass it to the event loop. The cgroup field of this job is initialized
+      // in the corresponding handler.
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
       step_inst->traceparent = job_ptr->job_to_d.traceparent();
@@ -579,7 +590,7 @@ CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
                           google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
-  auto err = stub->ChangeTaskTimeLimit(absl::Seconds(new_timelimit_sec));
+  auto err = stub->ChangeStepTimeLimit(absl::Seconds(new_timelimit_sec));
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR(
         "[Step #{}.{}] Failed to change step timelimit to {} seconds via "
@@ -621,7 +632,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
   EvQueueExecuteStepElem elem;
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
-    // Once ExecuteTask RPC is processed, the Execution goes into m_job_map_.
+    // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
     auto& [job_id, step_id, ok_prom] = elem;
     auto job = m_job_map_.GetValueExclusivePtr(job_id);
 
@@ -678,7 +689,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
                               return job.job_id;
                             }) | std::views::common,
                             ","));
-  std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
+  std::unordered_map<job_id_t, CgroupInterface*> job_cg_map;
   std::vector<uid_t> uid_vec;
 
   for (auto& job : jobs) {
@@ -762,8 +773,8 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
       CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
                   job_id, step_id, status.exit_code, status.signal_num);
       g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-      ActivateTaskStatusChangeAsync_(
-          job_id, step_id, crane::grpc::TaskStatus::Failed,
+      ActivateStepStatusChangeAsync_(
+          job_id, step_id, crane::grpc::JobStatus::Failed,
           ExitCode::EC_PROLOG_ERR,
           fmt::format("Failed to run prolog for job#{} ", job_id),
           google::protobuf::util::TimeUtil::GetCurrentTime());
@@ -784,8 +795,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
     CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
-    ActivateTaskStatusChangeAsync_(
-        job_id, step_id, crane::grpc::TaskStatus::Failed,
+    ActivateStepStatusChangeAsync_(
+        job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_CGROUP_ERR,
         fmt::format("Failed to get the allocation for job#{} ", job_id),
         google::protobuf::util::TimeUtil::GetCurrentTime());
@@ -799,8 +810,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (step->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
-    ActivateTaskStatusChangeAsync_(
-        job_id, step_id, crane::grpc::TaskStatus::Failed,
+    ActivateStepStatusChangeAsync_(
+        job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_SPAWN_FAILED, "Container is not enabled in this craned.",
         google::protobuf::util::TimeUtil::GetCurrentTime());
     return;
@@ -816,8 +827,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       job->cgroup = std::move(cg_expt.value());
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
-      ActivateTaskStatusChangeAsync_(
-          job_id, step_id, crane::grpc::TaskStatus::Failed,
+      ActivateStepStatusChangeAsync_(
+          job_id, step_id, crane::grpc::JobStatus::Failed,
           ExitCode::EC_CGROUP_ERR,
           fmt::format("Failed to get cgroup for job#{} ", job_id),
           google::protobuf::util::TimeUtil::GetCurrentTime());
@@ -833,14 +844,14 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
+  // In this case, SIGCHLD will NOT be received for this job, and
+  // we should send StepStatusChange manually.
   CraneErrCode err = step_ptr->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
-    ActivateTaskStatusChangeAsync_(
-        job_id, step_id, crane::grpc::TaskStatus::Failed,
+    ActivateStepStatusChangeAsync_(
+        job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_CGROUP_ERR,
         fmt::format("Cannot create cgroup for the instance of step {}.{}",
                     job_id, step_id),
@@ -850,8 +861,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());
   if (err != CraneErrCode::SUCCESS) {
     step_ptr->err_before_supv_start = true;
-    ActivateTaskStatusChangeAsync_(
-        job_id, step_id, crane::grpc::TaskStatus::Failed,
+    ActivateStepStatusChangeAsync_(
+        job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_SPAWN_FAILED,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
                     job_id),
@@ -864,9 +875,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 }
 
-void JobManager::EvCleanTaskStatusChangeQueueCb_() {
+void JobManager::EvCleanStepStatusChangeQueueCb_() {
   StepStatusChangeQueueElem status_change;
-  while (m_task_status_change_queue_.try_dequeue(status_change)) {
+  while (m_step_status_change_queue_.try_dequeue(status_change)) {
     {
       auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
       if (job_ptr) {
@@ -887,8 +898,8 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   }
 }
 
-void JobManager::ActivateTaskStatusChangeAsync_(
-    job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+void JobManager::ActivateStepStatusChangeAsync_(
+    job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
     uint32_t exit_code, std::optional<std::string> reason,
     const google::protobuf::Timestamp& timestamp) {
   StepStatusChangeQueueElem status_change{.job_id = job_id,
@@ -898,8 +909,8 @@ void JobManager::ActivateTaskStatusChangeAsync_(
                                           .timestamp = std::move(timestamp)};
   if (reason.has_value()) status_change.reason = std::move(reason);
 
-  m_task_status_change_queue_.enqueue(std::move(status_change));
-  m_task_status_change_async_handle_->send();
+  m_step_status_change_queue_.enqueue(std::move(status_change));
+  m_step_status_change_async_handle_->send();
 }
 
 /**
@@ -909,7 +920,7 @@ void JobManager::ActivateTaskStatusChangeAsync_(
  * @param job_id
  * @return True if job and cgroup exists
  */
-bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
+bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, job_id_t job_id) {
   auto job = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job) {
     CRANE_DEBUG("Job #{} does not exist when querying its cgroup.", job_id);
@@ -998,25 +1009,25 @@ google::protobuf::Timestamp JobManager::GetStepEndTime(job_id_t job_id,
   return step_it->second->end_time;
 }
 
-std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
-  CRANE_DEBUG("Query task info for uid {}", uid);
+std::optional<JobInfoOfUid> JobManager::QueryJobInfoOfUid(uid_t uid) {
+  CRANE_DEBUG("Query job info for uid {}", uid);
 
-  TaskInfoOfUid info;
+  JobInfoOfUid info;
   info.job_cnt = 0;
   info.cgroup_exists = false;
 
-  if (auto task_ids = this->m_uid_to_job_ids_map_[uid]; task_ids) {
+  if (auto job_ids = this->m_uid_to_job_ids_map_[uid]; job_ids) {
     info.cgroup_exists = true;
-    info.job_cnt = task_ids->size();
-    info.first_task_id = *task_ids->begin();
+    info.job_cnt = job_ids->size();
+    info.first_job_id = *job_ids->begin();
   } else {
-    CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
+    CRANE_WARN("Uid {} not found in uid_to_job_ids_map", uid);
     return std::nullopt;
   }
   return info;
 }
 
-void JobManager::EvCleanTerminateTaskQueueCb_() {
+void JobManager::EvCleanTerminateStepQueueCb_() {
   StepTerminateQueueElem elem;
   std::vector<StepTerminateQueueElem> not_ready_elems;
 
@@ -1024,7 +1035,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 
   while (m_step_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
-        "Receive TerminateRunningTask Request from internal queue. "
+        "Receive TerminateRunningJob Request from internal queue. "
         "Step: {}.{}",
         elem.job_id, elem.step_id);
 
@@ -1045,7 +1056,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         g_ctld_client->StepStatusChangeAsync(
             {.job_id = elem.job_id,
              .step_id = elem.step_id,
-             .new_status = crane::grpc::TaskStatus::Cancelled,
+             .new_status = crane::grpc::JobStatus::Cancelled,
              .exit_code = ExitCode::EC_TERMINATED,
              .reason = "Terminated non-existent job.",
              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
@@ -1063,7 +1074,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         g_ctld_client->StepStatusChangeAsync(
             {.job_id = elem.job_id,
              .step_id = elem.step_id,
-             .new_status = crane::grpc::TaskStatus::Cancelled,
+             .new_status = crane::grpc::JobStatus::Cancelled,
              .exit_code = ExitCode::EC_TERMINATED,
              .reason = "Terminated non-existent step.",
              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
@@ -1100,7 +1111,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
           continue;
         }
         auto err =
-            stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
+            stub->TerminateStep(elem.mark_as_orphaned, elem.terminated_by_user);
         if (err != CraneErrCode::SUCCESS) {
           // Supervisor dead for some reason.
           CRANE_ERROR("[Step #{}.{}] Failed to terminate.", elem.job_id,
@@ -1109,7 +1120,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
             g_ctld_client->StepStatusChangeAsync(
                 {.job_id = elem.job_id,
                  .step_id = step_id,
-                 .new_status = crane::grpc::TaskStatus::Cancelled,
+                 .new_status = crane::grpc::JobStatus::Cancelled,
                  .exit_code = ExitCode::EC_TERMINATED,
                  .reason = "Terminated failed."});
         }
@@ -1173,7 +1184,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
   std::latch shutdown_step_latch(steps.size());
   for (auto* step : steps) {
     // Only daemon step needs manual shutdown, others will shut down itself when
-    // all task finished.
+    // all jobs finished.
     if (!step->IsDaemonStep() || step->err_before_supv_start) {
       shutdown_step_latch.count_down();
       continue;
@@ -1274,12 +1285,12 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 }
 
 void JobManager::StepStatusChangeAsync(
-    job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+    job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
     uint32_t exit_code, std::optional<std::string> reason,
     const google::protobuf::Timestamp& timestamp) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
-  ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,
+  ActivateStepStatusChangeAsync_(job_id, step_id, new_status, exit_code,
                                  std::move(reason), timestamp);
 }
 

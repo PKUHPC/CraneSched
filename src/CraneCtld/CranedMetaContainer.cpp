@@ -165,7 +165,7 @@ CranedMetaContainer::GetResvMetaMapExclusivePtr() {
 }
 
 void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
-                                                 task_id_t task_id,
+                                                 job_id_t job_id,
                                                  const ResourceV2& resources) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
@@ -184,27 +184,27 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
 
-  const ResourceInNode& task_node_res = resources.at(node_id);
+  const ResourceInNode& job_node_res = resources.at(node_id);
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
 
-  node_meta->rn_task_res_map.emplace(task_id, task_node_res);
+  node_meta->rn_job_res_map.emplace(job_id, job_node_res);
 
-  node_meta->res_avail -= task_node_res;
-  node_meta->res_in_use += task_node_res;
+  node_meta->res_avail -= job_node_res;
+  node_meta->res_in_use += job_node_res;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail -= task_node_res;
-    part_global_meta.res_in_use += task_node_res;
+    part_global_meta.res_avail -= job_node_res;
+    part_global_meta.res_in_use += job_node_res;
   }
 }
 
 void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
-                                               uint32_t task_id) {
+                                               uint32_t job_id) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
     return;
@@ -225,10 +225,10 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
 
-  auto resource_iter = node_meta->rn_task_res_map.find(task_id);
-  if (resource_iter == node_meta->rn_task_res_map.end()) {
-    CRANE_ERROR("Try to free resource from an unknown task {} on craned {}",
-                task_id, node_id);
+  auto resource_iter = node_meta->rn_job_res_map.find(job_id);
+  if (resource_iter == node_meta->rn_job_res_map.end()) {
+    CRANE_ERROR("Try to free resource from an unknown job {} on craned {}",
+                job_id, node_id);
     return;
   }
 
@@ -244,11 +244,11 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
     part_global_meta.res_in_use -= resources;
   }
 
-  node_meta->rn_task_res_map.erase(resource_iter);
+  node_meta->rn_job_res_map.erase(resource_iter);
 }
 
 void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
-                                                 task_id_t job_id,
+                                                 job_id_t job_id,
                                                  const ResourceV2& res) {
   auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
   if (!resv_meta) {
@@ -263,7 +263,7 @@ void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
 }
 
 void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
-                                               task_id_t job_id) {
+                                               job_id_t job_id) {
   auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
   if (!resv_meta) {
     CRANE_ERROR("Try to free resource from an unknown reservation {}", resv_id);
@@ -961,7 +961,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
 
   if (part_meta_iter == part_metas_map->end()) {
     CRANE_DEBUG(
-        "the partition {} does not exist, submission of the task is "
+        "the partition {} does not exist, submission of the job is "
         "prohibited.",
         partition_name);
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
@@ -978,7 +978,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     if (!allowed_accounts.contains(account_name)) {
       CRANE_DEBUG(
           "The account {} is not in the AllowedAccounts of the partition {}"
-          "specified for the task, submission of the task is prohibited.",
+          "specified for the job, submission of the job is prohibited.",
           account_name, partition_name);
       return std::unexpected(CraneErrCode::ERR_NOT_IN_ALLOWED_LIST);
     }
@@ -986,7 +986,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     if (denied_accounts.contains(account_name)) {
       CRANE_DEBUG(
           "The account {} is in the DeniedAccounts of the partition {}"
-          "specified for the task, submission of the task is prohibited.",
+          "specified for the job, submission of the job is prohibited.",
           account_name, partition_name);
       return std::unexpected(CraneErrCode::ERR_IN_DENIED_LIST);
     }
@@ -1061,7 +1061,7 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
                   craned_meta.remote_meta.sys_rel_info.version);
   craned_info->set_system_desc(system_desc);
 
-  craned_info->set_running_task_num(craned_meta.rn_task_res_map.size());
+  craned_info->set_running_job_num(craned_meta.rn_job_res_map.size());
 
   if (craned_meta.drain) {
     craned_info->set_control_state(

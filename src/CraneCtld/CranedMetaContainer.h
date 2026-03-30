@@ -122,10 +122,10 @@ class CranedMetaContainer final {
     return craned_meta_map_.Contains(hostname);
   };
 
-  void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
+  void MallocResourceFromNode(CranedId node_id, job_id_t job_id,
                               const ResourceV2& resources);
 
-  void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
+  void FreeResourceFromNode(CranedId craned_id, uint32_t job_id);
 
   // TODO: Move to Reservation Mini-Scheduler. Craned only use LogicalPartition.
   using ResvMetaAtomicMap = util::AtomicHashMap<HashMap, std::string, ResvMeta>;
@@ -153,10 +153,10 @@ class CranedMetaContainer final {
 
   ResvMetaMapExclusivePtr GetResvMetaMapExclusivePtr();
 
-  void MallocResourceFromResv(ResvId resv_id, task_id_t task_id,
+  void MallocResourceFromResv(ResvId resv_id, job_id_t job_id,
                               const ResourceV2& res);
 
-  void FreeResourceFromResv(ResvId resv_id, task_id_t task_id);
+  void FreeResourceFromResv(ResvId resv_id, job_id_t job_id);
 
   // Store Resource reduction events happened during scheduling here.
   // Cases:

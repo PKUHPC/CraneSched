@@ -52,6 +52,14 @@ struct BsonFieldTrait<bool> {
 };
 
 template <>
+struct BsonFieldTrait<double> {
+  static double get(const bsoncxx::document::element& ele) {
+    return ele.get_double().value;
+  }
+  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_double;
+};
+
+template <>
 struct BsonFieldTrait<std::string> {
   static std::string get(const bsoncxx::document::element& ele) {
     return std::string(ele.get_string().value);
@@ -85,7 +93,7 @@ class MongodbClient {
     enum class Type : std::uint8_t { HOUR, DAY, MONTH };
   };
 
-  // Task aggregation information for acc_usage tables
+  // Job aggregation information for acc_usage tables
   struct JobAggregationInfo {
     std::string account;
     std::string username;
@@ -126,25 +134,25 @@ class MongodbClient {
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
-      crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
-  bool InsertJob(TaskInCtld* task);
-  bool InsertJobs(const std::unordered_set<TaskInCtld*>& tasks);
+      crane::grpc::JobInEmbeddedDb const& job_in_embedded_db);
+  bool InsertJob(JobInCtld* job);
+  bool InsertJobs(const std::unordered_set<JobInCtld*>& jobs);
 
   bool FetchJobRecords(
-      const crane::grpc::QueryTasksInfoRequest* request,
-      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map,
+      const crane::grpc::QueryJobsInfoRequest* request,
+      std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
       size_t limit);
 
   bool FetchJobStepRecords(
-      const crane::grpc::QueryTasksInfoRequest* request,
-      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map);
+      const crane::grpc::QueryJobsInfoRequest* request,
+      std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
-  bool CheckTaskDbIdExisted(int64_t task_db_id);
+  bool CheckJobDbIdExisted(int64_t job_db_id);
 
   // Fetch job status (state, exit_code, time_end, time_start)
-  std::unordered_map<task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t,
-                                           int64_t, int64_t>>
-  FetchJobStatus(const std::unordered_set<task_id_t>& job_ids);
+  std::unordered_map<
+      job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
+  FetchJobStatus(const std::unordered_set<job_id_t>& job_ids);
 
   /* ----- Method of operating the step table ----------- */
   bool InsertRecoveredStep(
@@ -159,15 +167,15 @@ class MongodbClient {
       const crane::grpc::QueryJobSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
 
-  // Real-time aggregation: append task to acc_usage tables
-  void AppendToAccUsageTable(const bsoncxx::document::view& task_doc,
+  // Real-time aggregation: append job to acc_usage tables
+  void AppendToAccUsageTable(const bsoncxx::document::view& job_doc,
                              mongocxx::client_session* session = nullptr);
-  void AppendToAccUsageTable(const TaskInCtld* task,
+  void AppendToAccUsageTable(const JobInCtld* job,
                              mongocxx::client_session* session = nullptr);
 
-  // Mark task as aggregated in task_table
-  void MarkTaskAsAggregated(job_id_t job_id,
-                            mongocxx::client_session* session = nullptr);
+  // Mark job as aggregated in job_table
+  void MarkJobAsAggregated(job_id_t job_id,
+                           mongocxx::client_session* session = nullptr);
 
   // Recovery functions for startup
   void RecoverMissingAggregations_();
@@ -195,12 +203,12 @@ class MongodbClient {
   // Returns: discovered min_start on success, std::nullopt on failure
   std::optional<int64_t> AggregateJobSummaryForSingleHour_(
       std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
-      const std::string& task_collection_name, int64_t cached_min_start);
+      const std::string& job_collection_name, int64_t cached_min_start);
 
   // (For new cluster initialization only)
   bool AggregateJobSummaryByHour_(std::chrono::sys_seconds start_sec,
                                   std::chrono::sys_seconds end_sec,
-                                  const std::string& task_collection_name);
+                                  const std::string& job_collection_name);
 
   // (For new cluster initialization only)
   bool AggregateJobSummaryByDayOrMonth_(
@@ -287,6 +295,8 @@ class MongodbClient {
       for (const std::string& v : value) array.append(v);
     }));
   }
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const User::PartToAllowedQosMap& value);
 
   template <typename T>
   bool UpdateEntityOne(EntityType type, const std::string& opt,
@@ -443,8 +453,80 @@ class MongodbClient {
   bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>
+    requires requires(bsoncxx::builder::core core, std::remove_cvref_t<V> t) {
+      core.append(t);
+    }
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const V& value);
+                           const V& value) {
+    using bsoncxx::builder::basic::kvp;
+    doc.append(kvp(key, value));
+  };
+
+  template <typename V>
+    requires std::ranges::input_range<std::remove_cvref_t<V>> &&
+             (!std::convertible_to<std::remove_cvref_t<V>, std::string> &&
+              !std::convertible_to<std::remove_cvref_t<V>, std::string_view> &&
+              !std::is_convertible_v<std::remove_cvref_t<V>, const char*>)
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const V& value) {
+    using bsoncxx::builder::basic::kvp;
+    using T = std::remove_cvref_t<V>;
+    constexpr bool not_string = !std::convertible_to<T, std::string> &&
+                                !std::convertible_to<T, std::string_view> &&
+                                !std::is_convertible_v<T, const char*>;
+    constexpr bool is_map = requires {
+      typename T::key_type;
+      typename T::mapped_type;
+    };
+    if constexpr (is_map) {
+      doc.append(kvp(key, [&](sub_document sub_doc) {
+        for (const auto& [k, v] : value) {
+          SubDocumentAppendItem_(sub_doc, k, v);
+        }
+      }));
+    } else if constexpr (not_string) {
+      doc.append(kvp(key, [&](sub_array array) {
+        for (const auto& v : value) {
+          array.append(v);
+        }
+      }));
+
+    } else {
+      static_assert(
+          false,
+          "DocumentAppendItem_ not implemented for this range-like type");
+    }
+  };
+
+  void DocumentAppendItem_(
+      document& doc, const std::string& key,
+      const std::unordered_map<std::string, User::AttrsInAccount>& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const DeviceMap& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::vector<gid_t>& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const DedicatedResourceInNode& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceInNode& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceV2& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::optional<ContainerMetaInJob>& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::optional<PodMetaInJob>& value);
+
+  void DocumentAppendItem_(
+      document& doc, const std::string& key,
+      const std::unordered_map<std::string, uint32_t>& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const ResourceView& value);
+
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const DeviceMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -544,9 +626,9 @@ class MongodbClient {
                               LicenseResourceInDb* resource);
   document LicenseResourceToDocument_(const LicenseResourceInDb& resource);
 
-  document TaskInCtldToDocument_(TaskInCtld* task);
-  document TaskInEmbeddedDbToDocument_(
-      crane::grpc::TaskInEmbeddedDb const& task);
+  document JobInCtldToDocument_(JobInCtld* job);
+  document JobInEmbeddedDbToDocument_(
+      crane::grpc::JobInEmbeddedDb const& job_in_db);
 
   document StepInCtldToDocument_(StepInCtld* step);
   document StepInEmbeddedDbToDocument_(
@@ -559,11 +641,18 @@ class MongodbClient {
       const bsoncxx::document::view& doc);
   ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
   ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
-  PodMetaInTask BsonToPodMeta(const bsoncxx::document::view& doc);
-  ContainerMetaInTask BsonToContainerMeta(const bsoncxx::document::view& doc);
+  PodMetaInJob BsonToPodMeta(const bsoncxx::document::view& doc);
+  ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
+
+  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view,
+                              const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
-  const std::string m_task_collection_name_{"task_table"};
+  // TODO: Renaming from "task_table" to "job_table" requires a database
+  // migration for existing deployments. A migration script should rename the
+  // MongoDB collection (db.task_table.renameCollection("job_table")) and be
+  // integrated into the upgrade procedure before this change is released.
+  const std::string m_job_collection_name_{"job_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
@@ -591,41 +680,6 @@ class MongodbClient {
   mongocxx::read_preference m_rp_primary_{};
   std::atomic_bool m_thread_stop_{false};
 };
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document& doc, const std::string& key, const std::list<std::string>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
-    document& doc, const std::string& key,
-    const std::unordered_map<std::string, User::AttrsInAccount>& value);
-
-template <>
-void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
-    sub_document& doc, const std::string& key,
-    const User::PartToAllowedQosMap& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
-                                                   const std::string& key,
-                                                   const DeviceMap& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, uint32_t>>(
-    document& doc, const std::string& key,
-    const std::unordered_map<std::string, uint32_t>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
-    document& doc, const std::string& key,
-    const std::optional<ContainerMetaInTask>& value);
-
-template <>
-void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
-    document& doc, const std::string& key,
-    const std::optional<PodMetaInTask>& value);
 
 }  // namespace Ctld
 

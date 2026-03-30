@@ -20,7 +20,7 @@
 
 #include "AccountManager.h"
 #include "CranedMetaContainer.h"
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 
 namespace Ctld {
 
@@ -31,7 +31,7 @@ const std::vector<std::string> LuaJobHandler::kReqFxns = {"crane_job_submit",
 #endif
 
 CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
-                                        TaskInCtld* task) {
+                                        JobInCtld* job) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   auto lua_env = std::make_unique<crane::LuaEnvironment>();
@@ -48,9 +48,9 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
         sol::state_view lua(ts);
         sol::object next = lua["next"];
 
-        crane::grpc::QueryTasksInfoRequest req;
-        std::unordered_map<job_id_t, crane::grpc::TaskInfo> job_info_map;
-        g_task_scheduler->QueryTasksInRam(&req, &job_info_map);
+        crane::grpc::QueryJobsInfoRequest req;
+        std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
+        g_job_scheduler->QueryJobsInRam(&req, &job_info_map);
 
         sol::table all_jobs = lua.create_table();
         for (auto& [job_id, job_info] : job_info_map) {
@@ -72,11 +72,10 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
                          "Failed to load lua script");
 
   std::vector<crane::grpc::PartitionInfo> part_list;
-  PushPartitionList_(task->Username(), task->account, &part_list);
+  PushPartitionList_(job->Username(), job->account, &part_list);
   auto& lua_state = lua_env->GetLuaState();
   sol::function submit = lua_state["crane_job_submit"];
-  sol::protected_function_result lua_result =
-      submit(task, part_list, task->uid);
+  sol::protected_function_result lua_result = submit(job, part_list, job->uid);
 
   if (!lua_result.valid()) {
     sol::error err = lua_result;
@@ -94,7 +93,7 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
 }
 
 CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
-                                        TaskInCtld* task) {
+                                        JobInCtld* job) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   auto lua_env = std::make_unique<crane::LuaEnvironment>();
@@ -114,15 +113,15 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
     return FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
                          "Failed to load lua script");
 
-  crane::grpc::TaskInfo task_info;
-  task->SetFieldsOfTaskInfo(&task_info);
+  crane::grpc::JobInfo job_info;
+  job->SetFieldsOfJobInfo(&job_info);
   std::vector<crane::grpc::PartitionInfo> part_list;
-  PushPartitionList_(task->Username(), task->account, &part_list);
+  PushPartitionList_(job->Username(), job->account, &part_list);
 
   auto& lua_state = lua_env->GetLuaState();
   sol::function modify = lua_state["crane_job_modify"];
   sol::protected_function_result lua_result =
-      modify(task, task_info, part_list, task->uid);
+      modify(job, job_info, part_list, job->uid);
 
   if (!lua_result.valid()) {
     sol::error err = lua_result;
@@ -156,7 +155,7 @@ void LuaJobHandler::RegisterGlobalFunctions_(
 
   lua_env.GetCraneTable().set_function(
       "get_job_env_field",
-      [](TaskInCtld& job, const std::string& env_name) -> std::string {
+      [](JobInCtld& job, const std::string& env_name) -> std::string {
         auto iter = job.env.find(env_name);
         if (iter == job.env.end()) return std::string{""};
         return iter->second;
@@ -164,7 +163,7 @@ void LuaJobHandler::RegisterGlobalFunctions_(
 
   lua_env.GetCraneTable().set_function(
       "set_job_env_field",
-      [](const std::string& name, const std::string& value, TaskInCtld* job) {
+      [](const std::string& name, const std::string& value, JobInCtld* job) {
         job->env.insert_or_assign(name, value);
       });
 
@@ -210,75 +209,77 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
   );
 
   // job_desc
-  lua_env.GetLuaState().new_usertype<TaskInCtld>("TaskInCtld",
-    "time_limit", sol::property([](const TaskInCtld& t) {
+  lua_env.GetLuaState().new_usertype<JobInCtld>("JobInCtld",
+    "time_limit", sol::property([](const JobInCtld& t) {
       return  absl::ToInt64Seconds(t.time_limit);
-    }, [](TaskInCtld& t, int64_t time_limit) {
+    }, [](JobInCtld& t, int64_t time_limit) {
       t.time_limit = absl::Seconds(time_limit);
     }),
-    "partition_id", &TaskInCtld::partition_id,
-    "requested_node_res_view", &TaskInCtld::requested_node_res_view,
-    "type", &TaskInCtld::type, "uid", &TaskInCtld::uid,
-    "gid", &TaskInCtld::gid, "account", &TaskInCtld::account,
-    "name", &TaskInCtld::name, "qos", &TaskInCtld::qos,
-    "node_num", &TaskInCtld::node_num,
+    "partition_id", &JobInCtld::partition_id,
+    "req_node_res_view", &JobInCtld::req_node_res_view,
+    "req_task_res_view", &JobInCtld::req_task_res_view,
+    "req_total_res_view", &JobInCtld::req_total_res_view,
+    "type", &JobInCtld::type, "uid", &JobInCtld::uid,
+    "gid", &JobInCtld::gid, "account", &JobInCtld::account,
+    "name", &JobInCtld::name, "qos", &JobInCtld::qos,
+    "node_num", &JobInCtld::node_num,
     // TODO: expose ntasks_per_node_min to Lua
-    "ntasks_per_node", &TaskInCtld::ntasks_per_node_max,
-    "cpus_per_task", &TaskInCtld::cpus_per_task,
+    "ntasks_per_node_min", &JobInCtld::ntasks_per_node_min,
+    "ntasks_per_node_max", &JobInCtld::ntasks_per_node_max,
     "included_nodes", sol::property(
-          [](const TaskInCtld& t) {
+          [](const JobInCtld& t) {
             return t.included_nodes | std::ranges::to<std::vector>();
           },
-          [](TaskInCtld& t, const std::vector<std::string>& nodes) {
+          [](JobInCtld& t, const std::vector<std::string>& nodes) {
             t.included_nodes.clear();
             t.included_nodes.insert(nodes.begin(), nodes.end());
           }),
       "excluded_nodes", sol::property(
-          [](const TaskInCtld& t) {
+          [](const JobInCtld& t) {
             return t.excluded_nodes | std::ranges::to<std::vector>();
           },
-          [](TaskInCtld& t, const std::vector<std::string>& nodes) {
+          [](JobInCtld& t, const std::vector<std::string>& nodes) {
             t.excluded_nodes.clear();
             t.excluded_nodes.insert(nodes.begin(), nodes.end());
           }),
-      "requeue_if_failed", &TaskInCtld::requeue_if_failed,
-      "get_user_env", &TaskInCtld::get_user_env,
-      "cmd_line", &TaskInCtld::cmd_line,
+      "requeue_if_failed", &JobInCtld::requeue_if_failed,
+      "get_user_env", &JobInCtld::get_user_env,
+      "cmd_line", &JobInCtld::cmd_line,
       "env", sol::property(
-          [&](const TaskInCtld& t) {
+          [&](const JobInCtld& t) {
             sol::table tbl = lua_env.GetLuaState().create_table();
             for (const auto& [name, value] : t.env) tbl[name] = value;
             return tbl;
           },
-          [](TaskInCtld& t, const sol::table& tbl) {
+          [](JobInCtld& t, const sol::table& tbl) {
             t.env.clear();
             for (const auto& [name, value] : tbl) {
               t.env[name.as<std::string>()] = value.as<std::string>();
             }
           }),
-      "cwd", &TaskInCtld::cwd, "extra_attr", &TaskInCtld::extra_attr,
-      "reservation", &TaskInCtld::reservation,
+      "cwd", &JobInCtld::cwd, "extra_attr", &JobInCtld::extra_attr,
+      "reservation", &JobInCtld::reservation,
       "begin_time", sol::property(
-        [](const TaskInCtld& t) -> int64_t {
+        [](const JobInCtld& t) -> int64_t {
           if (t.begin_time == absl::InfinitePast()) return 0;
           return absl::ToUnixSeconds(t.begin_time);
         },
-      [](TaskInCtld& t, int64_t unix_seconds) {
+      [](JobInCtld& t, int64_t unix_seconds) {
           if (unix_seconds == 0)
             t.begin_time = absl::InfinitePast();
           else
             t.begin_time = absl::FromUnixSeconds(unix_seconds);
         }),
-      "exclusive", &TaskInCtld::exclusive,
+      "exclusive", &JobInCtld::exclusive,
       "licenses_count", sol::property(
-          [&](const TaskInCtld& t) {
+          [&](const JobInCtld& t) {
             sol::table tbl = lua_env.GetLuaState().create_table();
             for (const auto& [name, value] : t.licenses_count) {
               tbl[name] = value;
             }
             return tbl;
           },
-          [](TaskInCtld& t, const sol::table& tbl) {
+          [](JobInCtld& t, const sol::table& tbl) {
             t.licenses_count.clear();
             for (const auto& [name, value] : tbl) {
               t.licenses_count.insert_or_assign(name.as<std::string>(),
@@ -287,109 +288,109 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
         }));
 
   // crane.jobs
-  using TaskInfo = crane::grpc::TaskInfo;
-  lua_env.GetLuaState().new_usertype<TaskInfo>("TaskInfo",
-    "type", sol::property([](const TaskInfo& t) {
+  using JobInfo = crane::grpc::JobInfo;
+  lua_env.GetLuaState().new_usertype<JobInfo>("JobInfo",
+    "type", sol::property([](const JobInfo& t) {
       return static_cast<int>(t.type());
     }),
-    "task_id", sol::property([](const TaskInfo& t) {
-      return t.task_id();
+    "job_id", sol::property([](const JobInfo& t) {
+      return t.job_id();
     }),
-    "name", sol::property([](TaskInfo& t) {
+    "name", sol::property([](JobInfo& t) {
       return t.name();
     }),
-    "partition", sol::property([](const TaskInfo& t) {
+    "partition", sol::property([](const JobInfo& t) {
       return t.partition();
     }),
-    "uid", sol::property([](const TaskInfo& t) {
+    "uid", sol::property([](const JobInfo& t) {
       return t.uid();
     }),
-    "time_limit", sol::property([](const TaskInfo& t) {
+    "time_limit", sol::property([](const JobInfo& t) {
       return google::protobuf::util::TimeUtil::DurationToSeconds(t.time_limit());
     }),
-    "end_time", sol::property([](const TaskInfo& t) {
+    "end_time", sol::property([](const JobInfo& t) {
       return t.end_time().seconds();
     }),
-    "submit_time", sol::property([](const TaskInfo& t) {
+    "submit_time", sol::property([](const JobInfo& t) {
       return t.submit_time().seconds();
     }),
-    "account", sol::property([](const TaskInfo& t) {
+    "account", sol::property([](const JobInfo& t) {
       return t.account();
     }),
-    "node_num", sol::property([](const TaskInfo& t) {
+    "node_num", sol::property([](const JobInfo& t) {
       return t.node_num();
     }),
-    "cmd_line", sol::property([](const TaskInfo& t) {
+    "cmd_line", sol::property([](const JobInfo& t) {
       return t.cmd_line();
     }),
-    "cwd", sol::property([](const TaskInfo& t) {
+    "cwd", sol::property([](const JobInfo& t) {
       return t.cwd();
     }),
-    "username", sol::property([](const TaskInfo& t) {
+    "username", sol::property([](const JobInfo& t) {
       return t.username();
     }),
-    "qos", sol::property([](const TaskInfo& t) {
+    "qos", sol::property([](const JobInfo& t) {
       return t.qos();
     }),
-    "req_total_res_view", sol::property([](const TaskInfo& t) {
+    "req_total_res_view", sol::property([](const JobInfo& t) {
       return static_cast<ResourceView>(t.req_total_res_view());
     }),
-    "licenses_count", sol::property([&](const TaskInfo& t) {
+    "licenses_count", sol::property([&](const JobInfo& t) {
       sol::table tbl = lua_env.GetLuaState().create_table();
             for (const auto& [name, value] : t.licenses_count()) {
               tbl[name] = value;
             }
             return tbl;
     }),
-    "req_nodes", sol::property([](const TaskInfo& t) {
+    "req_nodes", sol::property([](const JobInfo& t) {
       return t.req_nodes() | std::ranges::to<std::vector>();
     }),
-    "exclude_nodes", sol::property([](const TaskInfo& t) {
+    "exclude_nodes", sol::property([](const JobInfo& t) {
       return t.exclude_nodes() | std::ranges::to<std::vector>();
     }),
-    "extra_attr", sol::property([](const TaskInfo& t) {
+    "extra_attr", sol::property([](const JobInfo& t) {
       return t.extra_attr();
     }),
-    "reservation", sol::property([](const TaskInfo& t) {
+    "reservation", sol::property([](const JobInfo& t) {
       return t.reservation();
     }),
-    "held", sol::property([](const TaskInfo& t) {
+    "held", sol::property([](const JobInfo& t) {
       return t.held();
     }),
-    "status", sol::property([](const TaskInfo& t) {
+    "status", sol::property([](const JobInfo& t) {
       return t.status();
     }),
-    "exit_code", sol::property([](const TaskInfo& t) {
+    "exit_code", sol::property([](const JobInfo& t) {
       return t.exit_code();
     }),
-    "priority", sol::property([](const TaskInfo& t) {
+    "priority", sol::property([](const JobInfo& t) {
       return t.priority();
     }),
-    "pending_reason", sol::property([](const TaskInfo& t) {
+    "pending_reason", sol::property([](const JobInfo& t) {
       if (t.has_pending_reason())
         return t.pending_reason();
 
       return std::string{""};
     }),
-    "craned_list", sol::property([](const TaskInfo& t) {
+    "craned_list", sol::property([](const JobInfo& t) {
       if (t.has_craned_list())
         return t.craned_list();
 
       return std::string{""};
     }),
-    "elapsed_time", sol::property([](const TaskInfo& t) {
+    "elapsed_time", sol::property([](const JobInfo& t) {
       return google::protobuf::util::TimeUtil::DurationToSeconds(t.elapsed_time());
     }),
-    "execution_node", sol::property([](const TaskInfo& t) {
+    "execution_node", sol::property([](const JobInfo& t) {
       return t.execution_node() | std::ranges::to<std::vector>();
     }),
-    "exclusive", sol::property([](const TaskInfo& t) {
+    "exclusive", sol::property([](const JobInfo& t) {
       return t.exclusive();
     }),
-    "allocated_res_view", sol::property([](const TaskInfo& t) {
+    "allocated_res_view", sol::property([](const JobInfo& t) {
       return static_cast<ResourceView>(t.allocated_res_view());
     }),
-    "env", sol::property([&](const TaskInfo& t) {
+    "env", sol::property([&](const JobInfo& t) {
       sol::table tbl = lua_env.GetLuaState().create_table();
       for (const auto& [name, value] : t.env()) tbl[name] = value;
         return tbl;

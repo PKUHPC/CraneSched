@@ -217,6 +217,8 @@ int InitFromStdin(int argc, char** argv) {
         msg.job_lifecycle_hook_config().max_output_size();
   }
 
+  g_config.EnableSlurmCompatibleEnv = msg.enable_slurm_compatible_env();
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,
@@ -402,7 +404,7 @@ void StartServer(int grpc_output_fd) {
         ready = false;
       } else {
         // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto ok_prom = g_task_mgr->ExecuteTaskAsync();
+        auto ok_prom = g_task_mgr->ExecuteStepAsync();
         if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to start daemon step, code: {}",
                       static_cast<int>(err));

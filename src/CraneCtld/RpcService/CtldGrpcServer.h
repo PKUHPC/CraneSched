@@ -46,83 +46,82 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(
+  bool WriteJobIdReply(
       pid_t calloc_pid,
       std::expected<std::pair<job_id_t, step_id_t>, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
-    reply.set_type(StreamCtldReply::TASK_ID_REPLY);
-    auto *task_id_reply = reply.mutable_payload_task_id_reply();
+    reply.set_type(StreamCtldReply::JOB_ID_REPLY);
+    auto *job_id_reply = reply.mutable_payload_job_id_reply();
     if (res.has_value()) {
-      task_id_reply->set_ok(true);
-      task_id_reply->set_pid(calloc_pid);
+      job_id_reply->set_ok(true);
+      job_id_reply->set_pid(calloc_pid);
       auto [job_id, step_id] = res.value();
-      task_id_reply->set_job_id(job_id);
-      task_id_reply->set_step_id(step_id);
+      job_id_reply->set_job_id(job_id);
+      job_id_reply->set_step_id(step_id);
     } else {
-      task_id_reply->set_ok(false);
-      task_id_reply->set_pid(calloc_pid);
-      task_id_reply->set_failure_reason(std::move(res.error()));
+      job_id_reply->set_ok(false);
+      job_id_reply->set_pid(calloc_pid);
+      job_id_reply->set_failure_reason(std::move(res.error()));
     }
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskResAllocReply(
+  bool WriteJobResAllocReply(
       const StepInteractiveMeta::StepResAllocArgs &args) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
-    reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
+    reply.set_type(StreamCtldReply::JOB_RES_ALLOC_REPLY);
     auto &[job_id, step_id, allocated_craned_expt] = args;
-    auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
-    task_res_alloc_reply->set_job_id(job_id);
-    task_res_alloc_reply->set_step_id(step_id);
+    auto *job_res_alloc_reply = reply.mutable_payload_job_res_alloc_reply();
+    job_res_alloc_reply->set_job_id(job_id);
+    job_res_alloc_reply->set_step_id(step_id);
 
     if (allocated_craned_expt.has_value()) {
-      task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(
+      job_res_alloc_reply->set_ok(true);
+      job_res_alloc_reply->set_allocated_craned_regex(
           allocated_craned_expt.value().first);
       auto &craned_list = allocated_craned_expt.value().second;
-      task_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
-                                                         craned_list.end());
+      job_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
+                                                        craned_list.end());
     } else {
-      task_res_alloc_reply->set_ok(false);
-      task_res_alloc_reply->set_failure_reason(
+      job_res_alloc_reply->set_ok(false);
+      job_res_alloc_reply->set_failure_reason(
           std::move(allocated_craned_expt.error()));
     }
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskCompletionAckReply(job_id_t job_id, step_id_t step_id) {
+  bool WriteJobCompletionAckReply(job_id_t job_id, step_id_t step_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",
-                job_id);
+    CRANE_TRACE("Sending JobCompletionAckReply to cfored of job id {}", job_id);
     StreamCtldReply reply;
-    reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
+    reply.set_type(StreamCtldReply::JOB_COMPLETION_ACK_REPLY);
 
-    auto *task_completion_ack = reply.mutable_payload_task_completion_ack();
-    task_completion_ack->set_job_id(job_id);
-    task_completion_ack->set_step_id(step_id);
+    auto *job_completion_ack = reply.mutable_payload_job_completion_ack();
+    job_completion_ack->set_job_id(job_id);
+    job_completion_ack->set_step_id(step_id);
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskCancelRequest(job_id_t job_id, step_id_t step_id) {
+  bool WriteJobCancelRequest(job_id_t job_id, step_id_t step_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
-    reply.set_type(StreamCtldReply::TASK_CANCEL_REQUEST);
+    reply.set_type(StreamCtldReply::JOB_CANCEL_REQUEST);
 
-    auto *task_cancel_req = reply.mutable_payload_task_cancel_request();
-    task_cancel_req->set_job_id(job_id);
-    task_cancel_req->set_step_id(step_id);
+    auto *job_cancel_req = reply.mutable_payload_job_cancel_request();
+    job_cancel_req->set_job_id(job_id);
+    job_cancel_req->set_step_id(step_id);
 
     return m_stream_->Write(reply);
   }
@@ -224,10 +223,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
-  grpc::Status SubmitBatchTask(
+  grpc::Status SubmitBatchJob(
       grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchTaskRequest *request,
-      crane::grpc::SubmitBatchTaskReply *response) override;
+      const crane::grpc::SubmitBatchJobRequest *request,
+      crane::grpc::SubmitBatchJobReply *response) override;
 
   grpc::Status SubmitContainerStep(
       grpc::ServerContext *context,
@@ -235,19 +234,19 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::SubmitContainerStepReply *response) override;
 
   // This gRPC is for testing purposes only
-  grpc::Status SubmitBatchTasks(
+  grpc::Status SubmitBatchJobs(
       grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchTasksRequest *request,
-      crane::grpc::SubmitBatchTasksReply *response) override;
+      const crane::grpc::SubmitBatchJobsRequest *request,
+      crane::grpc::SubmitBatchJobsReply *response) override;
 
-  grpc::Status CancelTask(grpc::ServerContext *context,
-                          const crane::grpc::CancelTaskRequest *request,
-                          crane::grpc::CancelTaskReply *response) override;
+  grpc::Status CancelJob(grpc::ServerContext *context,
+                         const crane::grpc::CancelJobRequest *request,
+                         crane::grpc::CancelJobReply *response) override;
 
-  grpc::Status QueryTasksInfo(
+  grpc::Status QueryJobsInfo(
       grpc::ServerContext *context,
-      const crane::grpc::QueryTasksInfoRequest *request,
-      crane::grpc::QueryTasksInfoReply *response) override;
+      const crane::grpc::QueryJobsInfoRequest *request,
+      crane::grpc::QueryJobsInfoReply *response) override;
 
   grpc::Status QueryCranedInfo(
       grpc::ServerContext *context,
@@ -269,29 +268,29 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryLicensesInfoRequest *request,
       crane::grpc::QueryLicensesInfoReply *response) override;
 
-  grpc::Status ModifyTask(grpc::ServerContext *context,
-                          const crane::grpc::ModifyTaskRequest *request,
-                          crane::grpc::ModifyTaskReply *response) override;
+  grpc::Status ModifyJob(grpc::ServerContext *context,
+                         const crane::grpc::ModifyJobRequest *request,
+                         crane::grpc::ModifyJobReply *response) override;
 
-  grpc::Status ModifyTasksExtraAttrs(
+  grpc::Status ModifyJobsExtraAttrs(
       grpc::ServerContext *context,
-      const crane::grpc::ModifyTasksExtraAttrsRequest *request,
-      crane::grpc::ModifyTasksExtraAttrsReply *response) override;
+      const crane::grpc::ModifyJobsExtraAttrsRequest *request,
+      crane::grpc::ModifyJobsExtraAttrsReply *response) override;
 
-  grpc::Status ResetNextTaskId(
+  grpc::Status ResetNextJobId(
       grpc::ServerContext *context,
-      const crane::grpc::ResetNextTaskIdRequest *request,
-      crane::grpc::ResetNextTaskIdReply *response) override;
+      const crane::grpc::ResetNextJobIdRequest *request,
+      crane::grpc::ResetNextJobIdReply *response) override;
 
   grpc::Status ResetNextStepDbId(
       grpc::ServerContext *context,
       const crane::grpc::ResetNextStepDbIdRequest *request,
       crane::grpc::ResetNextStepDbIdReply *response) override;
 
-  grpc::Status PurgeTaskHistory(
+  grpc::Status PurgeJobHistory(
       grpc::ServerContext *context,
-      const crane::grpc::PurgeTaskHistoryRequest *request,
-      crane::grpc::PurgeTaskHistoryReply *response) override;
+      const crane::grpc::PurgeJobHistoryRequest *request,
+      crane::grpc::PurgeJobHistoryReply *response) override;
 
   grpc::Status ModifyNode(
       grpc::ServerContext *context,
@@ -492,7 +491,7 @@ class CtldServer {
   Mutex m_mtx_;
   HashMap<std::string /* cfored_name */,
           HashMap<job_id_t, std::unordered_set<step_id_t>>>
-      m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
+      m_cfored_running_jobs_ ABSL_GUARDED_BY(m_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;

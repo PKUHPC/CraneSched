@@ -219,7 +219,7 @@ std::string JobStepsWithStatusToString(const Map& m) {
 
 namespace Internal {
 // clang-format off
-constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
+constexpr std::array<std::string_view, crane::grpc::JobStatus_ARRAYSIZE>
     CraneStepStatusStrArr = {
         // 0 - 4
         "Pending",
@@ -245,11 +245,15 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
 // clang-format on
 };  // namespace Internal
 
-std::string StepStatusToString(const crane::grpc::TaskStatus& status);
+std::string StepStatusToString(const crane::grpc::JobStatus& status);
 
 int TimeStr2Mins(std::string_view input);
 void ParsePrologEpilogHookPaths(const std::string& log_hook_config,
                                 const std::string& config_file_path,
                                 std::vector<std::string>* result);
+
+bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map);
+
+bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 
 }  // namespace util

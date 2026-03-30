@@ -229,8 +229,8 @@ CraneExpectedRich<void> AccountManager::DeleteUser(uint32_t uid,
         FormatRichErr(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
                       fmt::format("user: {}, account: {}", name, account))};
 
-  if (g_account_meta_container->UserHasTask(user->name))
-    return std::unexpected(FormatRichErr(CraneErrCode::ERR_USER_HAS_TASK,
+  if (g_account_meta_container->UserHasJob(user->name))
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_USER_HAS_JOB,
                                          fmt::format("user: {}", name)));
 
   return DeleteUser_(op_user->name, *user, account);
@@ -1234,6 +1234,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       return rich_error_list;
     }
   }
+
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) {
@@ -1247,17 +1248,28 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     auto value = operation.value_list()[0];
     auto item = Qos::GetModifyFieldStr(operation.modify_field());
     int64_t value_number;
-    if (item != Qos::FieldStringOfDescription()) {
+    if (item != Qos::FieldStringOfDescription() &&
+        item != Qos::FieldStringOfMaxTresPerUser() &&
+        item != Qos::FieldStringOfMaxTresPerAccount() &&
+        item != Qos::FieldStringOfMaxTres()) {
       bool ok = util::ConvertStringToInt64(value, &value_number);
       if (!ok) {
         rich_error_list.emplace_back(std::unexpected{
             FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)});
       }
 
-      if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
+      if (item == Qos::FieldStringOfMaxTimeLimitPerJob() &&
           !CheckIfTimeLimitSecIsValid(value_number)) {
         rich_error_list.emplace_back(std::unexpected{
             FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)});
+      }
+    } else if (item == Qos::FieldStringOfMaxTresPerUser() ||
+               item == Qos::FieldStringOfMaxTresPerAccount() ||
+               item == Qos::FieldStringOfMaxTres()) {
+      ResourceView resource_view;
+      if (!util::ConvertStringToResourceView(value, &resource_view)) {
+        rich_error_list.emplace_back(std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, value)});
       }
     }
   }
@@ -1319,11 +1331,58 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       log += fmt::format("max_submit_jobs_per_account: {}\n", value);
       break;
     }
-    case crane::grpc::ModifyField::MaxTimeLimitPerTask: {
+    case crane::grpc::ModifyField::MaxTresPerUser: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres_per_user);
+      log += fmt::format("max_tres_per_user: {}\n",
+                         util::ReadableResourceView(res_qos.max_tres_per_user));
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTresPerAccount: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres_per_account);
+      log +=
+          fmt::format("max_tres_per_account: {}\n",
+                      util::ReadableResourceView(res_qos.max_tres_per_account));
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTres: {
+      util::ConvertStringToResourceView(value, &res_qos.max_tres);
+      log += fmt::format("max_tres: {}\n",
+                         util::ReadableResourceView(res_qos.max_tres));
+      break;
+    }
+    case crane::grpc::ModifyField::MaxJobs: {
       int64_t value_number;
       util::ConvertStringToInt64(value, &value_number);
-      res_qos.max_time_limit_per_task = absl::Seconds(value_number);
-      log += fmt::format("max_time_limit_per_task: {}\n", value);
+      res_qos.max_jobs = value_number;
+      log += fmt::format("max_jobs: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxSubmitJobs: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_submit_jobs = value_number;
+      log += fmt::format("max_submit_jobs: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxWall: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_wall = absl::Seconds(value_number);
+      log += fmt::format("max_wall: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTimeLimitPerJob: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_time_limit_per_job = absl::Seconds(value_number);
+      log += fmt::format("max_time_limit_per_job: {}\n", value);
+      break;
+    }
+    case crane::grpc::ModifyField::Flags: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.flags.FromInt64(value_number);
+      log += fmt::format("flags: {}\n", res_qos.flags.ToString());
       break;
     }
     default:
@@ -1480,16 +1539,16 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckQosLimitOnTask(
-    const std::string& user, const std::string& account, TaskInCtld* task) {
+CraneExpected<void> AccountManager::CheckQosLimitOnJob(
+    const std::string& user, const std::string& account, JobInCtld* job) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   {
-    task->account_chain.clear();
+    job->account_chain.clear();
     const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-    std::string account_name = task->account;
+    std::string account_name = job->account;
     do {
-      task->account_chain.emplace_back(account_name);
+      job->account_chain.emplace_back(account_name);
       account_name = account_map_ptr->at(account_name)->parent_account;
     } while (!account_name.empty());
   }
@@ -1498,47 +1557,47 @@ CraneExpected<void> AccountManager::CheckQosLimitOnTask(
   if (!user_share_ptr) {
     CRANE_ERROR(
         "The current user {} is not in the user list when submitting the "
-        "task",
+        "job",
         user);
     return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
   }
 
-  if (task->uid != 0) {
+  if (job->uid != 0) {
     auto partition_it = user_share_ptr->account_to_attrs_map.at(account)
-                            .allowed_partition_qos_map.find(task->partition_id);
+                            .allowed_partition_qos_map.find(job->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end()) {
       CRANE_ERROR(
           "This user {} does not have partition {} permission when "
           "submitting "
-          "the task",
-          user, task->partition_id);
+          "the job",
+          user, job->partition_id);
       return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
     }
-    if (task->qos.empty()) {
+    if (job->qos.empty()) {
       // Default qos
-      task->qos = partition_it->second.first;
-      if (task->qos.empty()) {
+      job->qos = partition_it->second.first;
+      if (job->qos.empty()) {
         CRANE_ERROR(
             "The user '{}' has no QOS available for this partition '{}' to "
             "be "
             "used",
-            task->Username(), task->partition_id);
+            job->Username(), job->partition_id);
         return std::unexpected(CraneErrCode::ERR_HAS_NO_QOS_IN_PARTITION);
       }
     } else {
-      // Check whether task.qos in the qos list
-      if (!ranges::contains(partition_it->second.second, task->qos)) {
+      // Check whether job.qos in the qos list
+      if (!ranges::contains(partition_it->second.second, job->qos)) {
         CRANE_ERROR(
             "The set qos '{}' is not in partition's allowed qos list when "
-            "submitting the task",
-            task->qos);
+            "submitting the job",
+            job->qos);
         return std::unexpected(CraneErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION);
       }
     }
   } else {
-    if (task->qos.empty()) {
-      task->qos = kUnlimitedQosName;
+    if (job->qos.empty()) {
+      job->qos = kUnlimitedQosName;
     }
   }
   return {};
@@ -2834,6 +2893,8 @@ CraneExpectedRich<void> AccountManager::DeleteQos_(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   m_qos_map_[name]->deleted = true;
+
+  g_account_meta_container->DeleteQosMeta(name);
 
   return {};
 }

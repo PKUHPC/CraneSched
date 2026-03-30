@@ -45,8 +45,16 @@ theme:
   logo: images/logo.png
   favicon: images/logo.png
 
+extra_css:
+  - stylesheets/extra.css
+
 nav:
   - Home: index.md
+  - Highlights:
+    - Convergence Solution: features/convergence-solution.md
+    - CraneSched + SCOW Integration: features/scow-integration.md
+    - CraneSched vs Slurm: features/slurm-comparison.md
+    - Container Support: reference/container/index.md
   - Deployment:
     - Overview: deployment/index.md
     - Frontend:
@@ -106,8 +114,6 @@ nav:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
         - GPU-Accelerated Training: reference/use_case_gpu.md
-        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
-        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
 
 plugins:
   - search
@@ -124,6 +130,10 @@ plugins:
             language: zh
           nav_translations:
             Home: 首页
+            Highlights: 特色亮点
+            CraneSched vs Slurm: 鹤思 vs Slurm 功能对比
+            CraneSched + SCOW Integration: 鹤思 + SCOW 算力一体化方案
+            Convergence Solution: 存·算·用融合超智算方案
             Deployment: 部署指南
             Overview: 概览
             Frontend: 前端
@@ -154,8 +164,6 @@ plugins:
             Quick Start: 快速上手
             Examples: 使用示例
             Troubleshooting: 故障排除
-            # Parameter Sweep with Job Arrays: 参数扫描作业数组
-            # Chained Jobs with Dependencies: 带依赖的作业链
             Rocky Linux 9: Rocky Linux 9
             Debian/Ubuntu: Debian/Ubuntu
             CentOS 7: CentOS 7
@@ -221,4 +229,3 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
-

@@ -33,7 +33,7 @@
 #endif
 
 using job_id_t = uint32_t;
-using task_id_t = uint32_t;
+using task_id_t = uint32_t;  // Task ID within a step (Supervisor layer)
 using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
@@ -68,7 +68,7 @@ inline const char* const kDefaultPluginConfigPath = "/etc/crane/plugin.yaml";
 inline const char* const kUnlimitedQosName = "UNLIMITED";
 inline const char* const kHostFilePath = "/etc/hosts";
 
-inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
+inline constexpr size_t kDefaultQueryJobNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 inline constexpr double kMemoryToleranceGB = 0.01;
@@ -111,10 +111,10 @@ inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
 inline const char* const kResourceTypeGpu = "gpu";
 
-constexpr uint64_t kTaskMinTimeLimitSec = 11;
-constexpr int64_t kTaskMaxTimeLimitSec =
+constexpr uint64_t kJobMinTimeLimitSec = 11;
+constexpr int64_t kJobMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
-constexpr int64_t kTaskMaxTimeStampSec =
+constexpr int64_t kJobMaxTimeStampSec =
     google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
 
 constexpr uint64_t kCranedPingIntervalSec = 10;
@@ -130,6 +130,8 @@ enum PrologFlagEnum : std::uint8_t {
 };
 
 constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
+
+constexpr uint64_t kMaxJobMemoryBytes = 10737418240000;  // 10000GB
 
 namespace ExitCode {
 
@@ -221,21 +223,21 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 40 - 44
         "Generic failure",
-        "Not enough resources for the task",
+        "Not enough resources for the job",
         "Non-existent error",
-        "Not enough nodes in the partition for the task",
+        "Not enough nodes in the partition for the job",
         "Invalid node list",
 
         // 45 - 49
         "Invalid exclude node list",
         "Time limit reached the user's limit",
         "CPUs per task reached the user's limit",
-        "Not enough nodes for the task",
+        "Not enough nodes for the job",
         "System error",
 
         // 50 - 54
-        "Existing task",
-        "The number of pending tasks exceeded the maximum value",
+        "Existing job",
+        "The number of pending jobs exceeded the maximum value",
         "Invalid parameter",
         "Stop error",
         "Permission denied",
@@ -269,7 +271,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Revocation of the certificate failed, Please check the logs",
 
         // 75 - 79
-        "User information does not match, unable to submit the task.",
+        "User information does not match, unable to submit the job.",
         "You need to set --force for this operation.",
         "Invalid username",
         "Legal licenses",
@@ -278,7 +280,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 80 - 84
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
-        "Task is pending or container is not ready.",
+        "Job is pending or container is not ready.",
         "Requested CRI operation is not supported in multi-node steps.",
         "Invalid memory format",
 
@@ -300,7 +302,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
-        "ERR_USER_HAS_TASK"
+        "Cannot delete user with active jobs.",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+
+        "Not a valide resource string",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)"
     };
 // clang-format on
 }  // namespace Internal
@@ -321,10 +329,45 @@ inline std::string_view CraneErrStr(CraneErrCode err) {
   return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
 
+template <typename EnumType>
+class FlagSet {
+  static_assert(std::is_enum<EnumType>::value,
+                "FlagSet can only be used with enum types");
+  static constexpr size_t BitSize = std::to_underlying(EnumType::_Count);
+  std::bitset<BitSize> bits;
+
+ public:
+  constexpr FlagSet() = default;
+
+  decltype(auto) operator[](EnumType flag) {
+    return bits[std::to_underlying(flag)];
+  }
+
+  bool operator[](EnumType flag) const {
+    return bits[std::to_underlying(flag)];
+  }
+
+  void FromInt64(int64_t value) {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    bits = value;
+  }
+
+  int64_t ToInt64() const {
+    static_assert(BitSize <= 64,
+                  "FlagSet: enum _Count > 64, cannot convert to int64");
+    return static_cast<int64_t>(bits.to_ullong());
+  }
+
+  std::string ToString() const { return bits.to_string(); }
+};
+
 /* ----------- Public definitions for all components */
 
 using PartitionId = std::string;
 using CranedId = std::string;
+inline const CranedId kCtldPrologInternalNodeIndex{
+    "__CRANE_INTERNAL_PROLOG_CTLD_NODE_INDEX"};
 using ResvId = std::string;
 using cpu_t = fpm::fixed_24_8;
 using LicenseId = std::string;
@@ -448,6 +491,9 @@ using DeviceMap =
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
 DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs);
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
@@ -549,6 +595,10 @@ class ResourceView {
 
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
+
+  // Account level resource operations
+  ResourceView& operator+=(const ResourceView& rhs);
+  ResourceView& operator-=(const ResourceView& rhs);
 
   bool IsZero() const;
   void SetToZero();

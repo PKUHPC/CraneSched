@@ -29,33 +29,33 @@ namespace Ctld {
 using moodycamel::ConcurrentQueue;
 using RegToken = google::protobuf::Timestamp;
 
-using task_db_id_t = int64_t;
+using job_db_id_t = int64_t;
 using step_db_id_t = int64_t;
 
 // *****************************************************
-// TaskScheduler Constants
+// JobScheduler Constants
 
 constexpr step_id_t kPrimaryStepId = 1;
 
-constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+constexpr uint32_t kJobScheduleIntervalMs = 1000;
 constexpr uint32_t kNodePerRpcWorker = 100;
 constexpr std::size_t kMinRpcWorkerNum = 4;
 
-// Clean TaskHoldTimerQueue when timeout or exceeding batch num
-constexpr uint32_t kTaskHoldTimerTimeoutMs = 500;
-constexpr uint32_t kTaskHoldTimerBatchNum = 1000;
+// Clean JobHoldTimerQueue when timeout or exceeding batch num
+constexpr uint32_t kJobHoldTimerTimeoutMs = 500;
+constexpr uint32_t kJobHoldTimerBatchNum = 1000;
 
-// Clean CancelTaskQueue when timeout or exceeding batch num
-constexpr uint32_t kCancelTaskTimeoutMs = 500;
-constexpr uint32_t kCancelTaskBatchNum = 1000;
+// Clean CancelJobQueue when timeout or exceeding batch num
+constexpr uint32_t kCancelJobTimeoutMs = 500;
+constexpr uint32_t kCancelJobBatchNum = 1000;
 
-// Clean SubmitTaskQueue when timeout or exceeding batch num
-constexpr uint32_t kSubmitTaskTimeoutMs = 500;
-constexpr uint32_t kSubmitTaskBatchNum = 1000;
+// Clean SubmitJobQueue when timeout or exceeding batch num
+constexpr uint32_t kSubmitJobTimeoutMs = 500;
+constexpr uint32_t kSubmitJobBatchNum = 1000;
 
-// Clean TaskStatusChangeQueue when timeout or exceeding batch num
-constexpr uint32_t kTaskStatusChangeTimeoutMS = 100;
-constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
+// Clean JobStatusChangeQueue when timeout or exceeding batch num
+constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
+constexpr uint32_t kJobStatusChangeBatchNum = 1000;
 
 // Validate and adjust end_time to prevent it from exceeding time_limit
 // by too much. Allow 5 seconds of floating tolerance.
@@ -71,7 +71,7 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
 constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 
-// Since Unqlite has a limitation of about 900000 tasks per transaction,
+// Since Unqlite has a limitation of about 900000 jobs per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
@@ -79,7 +79,7 @@ constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
-constexpr bool kDefaultRejectTasksBeyondCapacity = false;
+constexpr bool kDefaultRejectJobsBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
 constexpr bool kDefaultTrackWCKey = false;
 
@@ -226,7 +226,7 @@ struct Config {
 
   std::unordered_map<LicenseId, uint32_t> lic_id_to_count_map;
 
-  bool RejectTasksBeyondCapacity{false};
+  bool RejectJobsBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
   bool WckeyValid{false};
@@ -303,7 +303,7 @@ struct CranedMeta {
   absl::Time last_busy_time;
   absl::Time craned_down_time;
 
-  absl::flat_hash_map<task_id_t, ResourceInNode> rn_task_res_map;
+  absl::flat_hash_map<job_id_t, ResourceInNode> rn_job_res_map;
 
   absl::flat_hash_map<ResvId, std::pair<absl::Time, absl::Time>>
       resv_in_node_map;
@@ -323,8 +323,8 @@ struct ResvMeta {
   absl::flat_hash_set<CranedId> craned_ids;
   ResourceV2 res_total;
   ResourceV2 res_avail;
-  absl::flat_hash_map<task_id_t, ResourceV2> rn_job_res_map;
-  absl::flat_hash_set<task_id_t> pd_job_ids;
+  absl::flat_hash_map<job_id_t, ResourceV2> rn_job_res_map;
+  absl::flat_hash_set<job_id_t> pd_job_ids;
 };
 
 struct PartitionGlobalMeta {
@@ -375,7 +375,7 @@ struct InteractiveMeta {
     has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
     cfored_name = other.cfored_name;
   }
-  crane::grpc::InteractiveTaskType interactive_type;
+  crane::grpc::InteractiveJobType interactive_type;
 
   struct StepResAllocArgs {
     job_id_t job_id;
@@ -401,44 +401,44 @@ struct InteractiveMeta {
   // This will ask front end like crun/calloc to exit
   std::function<void(StepCancelArgs)> cb_step_cancel;
 
-  // ccancel for an interactive CALLOC task should call the front end to kill
-  // the user's shell, let Cfored to inform CraneCtld of task completion rather
-  // than directly sending TerminateTask to its craned node.
+  // ccancel for an interactive CALLOC job should call the front end to kill
+  // the user's shell, let Cfored to inform CraneCtld of job completion rather
+  // than directly sending TerminateStep to its craned node.
   //
   // However, when TIMEOUT event on its craned node happens, Cranectld should
-  // also send TaskCancelRequest to the front end. So we need a flag
+  // also send JobCancelRequest to the front end. So we need a flag
   // ` has_been_cancelled_on_front_end` to record whether the front end for the
-  // task has been sent a TaskCancelRequest and a flag
-  // `has_been_terminated_on_craned` to record whether the task resource
+  // job has been sent a JobCancelRequest and a flag
+  // `has_been_terminated_on_craned` to record whether the job resource
   // (cgroup) has been destroyed on its craned node.
   //
-  // If `has_been_cancelled` is true, no more TaskCancelRequest should be sent
+  // If `has_been_cancelled` is true, no more JobCancelRequest should be sent
   // to the front end. It is set when the user runs ccancel command or the
   // timeout event has been triggered on the craned node.
   //
-  // If `has_been_terminated_on_craned` is true, no more TerminateTask RPC
+  // If `has_been_terminated_on_craned` is true, no more StepTerminate RPC
   // should be sent to its craned node. It is set when the timeout event is
-  // triggered on the craned node or a TaskTerminate RPC has been sent
+  // triggered on the craned node or a StepTerminate RPC has been sent
   // (triggered by either normal shell exit or ccancel).
   std::atomic<bool> has_been_cancelled_on_front_end{false};
   std::atomic<bool> has_been_terminated_on_craned{false};
   std::string cfored_name;
 };
 
-struct PodMetaInTask {
+struct PodMetaInJob {
   struct NamespaceOption {
-    crane::grpc::PodTaskAdditionalMeta::NamespaceMode network{
-        crane::grpc::PodTaskAdditionalMeta::POD};
-    crane::grpc::PodTaskAdditionalMeta::NamespaceMode pid{
-        crane::grpc::PodTaskAdditionalMeta::POD};
-    crane::grpc::PodTaskAdditionalMeta::NamespaceMode ipc{
-        crane::grpc::PodTaskAdditionalMeta::POD};
+    crane::grpc::PodJobAdditionalMeta::NamespaceMode network{
+        crane::grpc::PodJobAdditionalMeta::POD};
+    crane::grpc::PodJobAdditionalMeta::NamespaceMode pid{
+        crane::grpc::PodJobAdditionalMeta::POD};
+    crane::grpc::PodJobAdditionalMeta::NamespaceMode ipc{
+        crane::grpc::PodJobAdditionalMeta::POD};
     std::string target_id;
   };
 
   struct PortMapping {
-    crane::grpc::PodTaskAdditionalMeta::PortMapping::Protocol protocol{
-        crane::grpc::PodTaskAdditionalMeta::PortMapping::TCP};
+    crane::grpc::PodJobAdditionalMeta::PortMapping::Protocol protocol{
+        crane::grpc::PodJobAdditionalMeta::PortMapping::TCP};
     int32_t container_port{0};
     int32_t host_port{0};
     std::string host_ip;
@@ -456,12 +456,12 @@ struct PodMetaInTask {
   std::vector<PortMapping> port_mappings;
   std::vector<std::string> dns_servers;
 
-  PodMetaInTask() = default;
-  explicit PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs);
-  explicit operator crane::grpc::PodTaskAdditionalMeta() const;
+  PodMetaInJob() = default;
+  explicit PodMetaInJob(const crane::grpc::PodJobAdditionalMeta& rhs);
+  explicit operator crane::grpc::PodJobAdditionalMeta() const;
 };
 
-struct ContainerMetaInTask {
+struct ContainerMetaInJob {
   struct ImageInfo {
     std::string image;
     std::string username;
@@ -490,16 +490,15 @@ struct ContainerMetaInTask {
   // No need to define it here.
 
  public:
-  ContainerMetaInTask() = default;
+  ContainerMetaInJob() = default;
 
-  explicit ContainerMetaInTask(
-      const crane::grpc::ContainerTaskAdditionalMeta& rhs);
-  explicit operator crane::grpc::ContainerTaskAdditionalMeta() const;
+  explicit ContainerMetaInJob(
+      const crane::grpc::ContainerJobAdditionalMeta& rhs);
+  explicit operator crane::grpc::ContainerJobAdditionalMeta() const;
 };
 
 struct DependenciesInJob {
-  std::unordered_map<task_id_t,
-                     std::pair<crane::grpc::DependencyType, uint64_t>>
+  std::unordered_map<job_id_t, std::pair<crane::grpc::DependencyType, uint64_t>>
       deps;
   bool is_or{false};
   absl::Time ready_time{absl::InfinitePast()};
@@ -512,10 +511,10 @@ struct DependenciesInJob {
     return ready_time >= absl::InfiniteFuture() && (!is_or || deps.empty());
   }
 
-  void update(task_id_t job_id, absl::Time event_time);
+  void update(job_id_t job_id, absl::Time event_time);
 };
 
-struct TaskInCtld;
+struct JobInCtld;
 struct StepInCtld;
 
 using StepInteractiveMeta = InteractiveMeta;
@@ -554,11 +553,11 @@ struct StepStatusChangeContext {
 
   std::unordered_map<CranedId, std::vector<job_id_t>> craned_jobs_to_free;
   // Jobs will update in embedded db
-  std::unordered_set<TaskInCtld*> rn_job_raw_ptrs{};
-  // Carry the ownership of TaskInCtld for automatic destruction.
-  std::unordered_set<std::unique_ptr<TaskInCtld>> job_ptrs;
+  std::unordered_set<JobInCtld*> rn_job_raw_ptrs{};
+  // Carry the ownership of JobInCtld for automatic destruction.
+  std::unordered_set<std::unique_ptr<JobInCtld>> job_ptrs;
   // Ended jobs will transfer from embedded db to mongodb
-  std::unordered_set<TaskInCtld*> job_raw_ptrs;
+  std::unordered_set<JobInCtld*> job_raw_ptrs;
 
   // Trace context lookup for RPC worker threads (job_id -> traceparent)
   std::unordered_map<job_id_t, std::string> job_traceparents;
@@ -567,9 +566,9 @@ struct StepStatusChangeContext {
 // Abstract interface of all the steps in Ctld.
 struct StepInCtld {
  public:
-  crane::grpc::TaskType type;
+  crane::grpc::JobType type;
 
-  TaskInCtld* job;
+  JobInCtld* job;
   job_id_t job_id;
 
   uid_t uid;
@@ -600,15 +599,15 @@ struct StepInCtld {
 
   // In daemon step of container job, only use pod_meta.
   // In common step of container job, both are provided.
-  std::optional<PodMetaInTask> pod_meta;
-  std::optional<ContainerMetaInTask> container_meta;
+  std::optional<PodMetaInJob> pod_meta;
+  std::optional<ContainerMetaInJob> container_meta;
 
   std::string task_prolog;
   std::string task_epilog;
 
  protected:
   /* ------------- [2] -------------
-   * Fields that won't change after this task is accepted.
+   * Fields that won't change after this job is accepted.
    * Also, these fields are persisted on the disk.
    * ------------------------------- */
   step_db_id_t m_step_db_id_{0};
@@ -625,16 +624,16 @@ struct StepInCtld {
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
 
-  // If this task is PENDING, start_time is either not set (default constructed)
+  // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
-  // If this task is RUNNING, start_time is the actual starting time.
+  // If this job is RUNNING, start_time is the actual starting time.
   absl::Time m_submit_time_;
   absl::Time m_start_time_;
   absl::Time m_end_time_;
 
-  crane::grpc::TaskStatus m_error_status{crane::grpc::TaskStatus::Invalid};
+  crane::grpc::JobStatus m_error_status{crane::grpc::JobStatus::Invalid};
   uint32_t m_error_exit_code_{0u};
-  crane::grpc::TaskStatus m_status_{crane::grpc::TaskStatus::Invalid};
+  crane::grpc::JobStatus m_status_{crane::grpc::JobStatus::Invalid};
   uint32_t m_exit_code_{};
 
   bool m_held_{false};
@@ -700,17 +699,17 @@ struct StepInCtld {
   void SetEndTime(absl::Time end_time);
   absl::Time EndTime() const { return m_end_time_; }
 
-  void SetErrorStatus(crane::grpc::TaskStatus failed_status);
-  std::optional<crane::grpc::TaskStatus> PrevErrorStatus() {
-    if (m_error_status == crane::grpc::TaskStatus::Invalid) {
+  void SetErrorStatus(crane::grpc::JobStatus failed_status);
+  std::optional<crane::grpc::JobStatus> PrevErrorStatus() {
+    if (m_error_status == crane::grpc::JobStatus::Invalid) {
       return std::nullopt;
     }
     return m_error_status;
   }
   void SetErrorExitCode(uint32_t exit_code);
   uint32_t PrevErrorExitCode() { return m_error_exit_code_; }
-  void SetStatus(crane::grpc::TaskStatus new_status);
-  crane::grpc::TaskStatus Status() const { return m_status_; }
+  void SetStatus(crane::grpc::JobStatus new_status);
+  crane::grpc::JobStatus Status() const { return m_status_; }
 
   void SetExitCode(uint32_t exit_code);
   uint32_t ExitCode() const { return m_exit_code_; }
@@ -726,7 +725,7 @@ struct StepInCtld {
   [[nodiscard]] virtual crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const = 0;
 
-  virtual void RecoverFromDb(const TaskInCtld& job,
+  virtual void RecoverFromDb(const JobInCtld& job,
                              crane::grpc::StepInEmbeddedDb const& step_in_db);
 
   // Helper function to set the fields of StepInfo using info in
@@ -743,23 +742,32 @@ struct DaemonStepInCtld : StepInCtld {
 
   ~DaemonStepInCtld() override = default;
 
-  void InitFromJob(const TaskInCtld& job);
+  void SetCtldPrologPending(bool pending) { m_ctld_prolog_pending_ = pending; }
+  bool PrologComplete() const {
+    if (g_config.JobLifecycleHook.CranectldPrologs.empty()) return true;
+    return !m_ctld_prolog_pending_;
+  }
+
+  void InitFromJob(const JobInCtld& job);
   [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 
   // Interface methods
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t /*exit code*/>>
-  StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
+  std::optional<std::pair<crane::grpc::JobStatus, uint32_t /*exit code*/>>
+  StepStatusChange(crane::grpc::JobStatus new_status, uint32_t exit_code,
                    const std::string& reason, const CranedId& craned_id,
                    const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
 
-  void RecoverFromDb(const TaskInCtld& job,
+  void RecoverFromDb(const JobInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
       crane::grpc::StepInfo* step_info) const noexcept override;
+
+ private:
+  bool m_ctld_prolog_pending_{false};
 };
 
 struct CommonStepInCtld : StepInCtld {
@@ -773,30 +781,30 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
-  // TODO: Schedule thread should fill in following task map
+  // TODO: Schedule thread should fill in following job map
   std::unordered_map<task_id_t, ResourceInNode> task_res_map;
   std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
-  void InitPrimaryStepFromJob(TaskInCtld& job);
+  void InitPrimaryStepFromJob(JobInCtld& job);
   bool IsPrimaryStep() const noexcept;
   void SetFieldsByStepToCtld(const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
-      crane::grpc::TaskStatus new_status, uint32_t exit_code,
+  std::optional<std::pair<crane::grpc::JobStatus, uint32_t>> StepStatusChange(
+      crane::grpc::JobStatus new_status, uint32_t exit_code,
       const std::string& reason, const CranedId& craned_id,
       const google::protobuf::Timestamp& timestamp,
       StepStatusChangeContext* context);
-  void RecoverFromDb(const TaskInCtld& job,
+  void RecoverFromDb(const JobInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
       crane::grpc::StepInfo* step_info) const noexcept override;
 };
 
-struct TaskInCtld {
+struct JobInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
 
@@ -806,7 +814,7 @@ struct TaskInCtld {
   ResourceView req_task_res_view;
   ResourceView req_total_res_view;
 
-  crane::grpc::TaskType type;
+  crane::grpc::JobType type;
 
   uid_t uid;
   gid_t gid;
@@ -832,10 +840,10 @@ struct TaskInCtld {
   std::string extra_attr;
 
   // used to construct a primary step.
-  std::variant<std::monostate, InteractiveMeta, ContainerMetaInTask> meta;
+  std::variant<std::monostate, InteractiveMeta, ContainerMetaInJob> meta;
 
   // used to construct daemon step for container enabled job.
-  std::optional<PodMetaInTask> pod_meta;
+  std::optional<PodMetaInJob> pod_meta;
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
@@ -851,17 +859,15 @@ struct TaskInCtld {
 
   std::string submit_hostname;
 
-  bool is_prolog_running{false};
-
  private:
   /* ------------- [2] -------------
-   * Fields that won't change after this task is accepted.
+   * Fields that won't change after this job is accepted.
    * Also, these fields are persisted on the disk.
    * ------------------------------- */
-  task_id_t task_id{0};
-  task_db_id_t task_db_id{0};
+  job_id_t job_id{0};
+  job_db_id_t job_db_id{0};
   std::string username;
-  std::vector<task_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
+  std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
 
   /* ----------- [3] ----------------
    * Fields that may change at run time.
@@ -869,8 +875,8 @@ struct TaskInCtld {
    * -------------------------------- */
   int32_t requeue_count{0};
   std::vector<CranedId> craned_ids;
-  crane::grpc::TaskStatus primary_status{};
-  crane::grpc::TaskStatus status{};
+  crane::grpc::JobStatus primary_status{};
+  crane::grpc::JobStatus status{};
   uint32_t primary_exit_code{};
   uint32_t exit_code{};
   bool held{false};
@@ -886,14 +892,14 @@ struct TaskInCtld {
   std::queue<step_id_t> pending_step_ids_;
   ResourceV2 step_res_avail_;
 
-  // If this task is PENDING, start_time is either not set (default constructed)
+  // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
-  // If this task is RUNNING, start_time is the actual starting time.
+  // If this job is RUNNING, start_time is the actual starting time.
   absl::Time submit_time;
   absl::Time start_time;
   absl::Time end_time;
 
-  // persisted for querying priority of running tasks
+  // persisted for querying priority of running jobs
   double cached_priority{0.0};
 
   // Might change at each scheduling cycle.
@@ -905,10 +911,10 @@ struct TaskInCtld {
   std::string traceparent_;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
-  crane::grpc::TaskToCtld task_to_ctld;
+  crane::grpc::JobToCtld job_to_ctld;
 
   /* ------ duplicate of the fields [2][3] above just for convenience ----- */
-  crane::grpc::RuntimeAttrOfTask runtime_attr;
+  crane::grpc::RuntimeAttrOfJob runtime_attr;
 
  public:
   /* -----------
@@ -916,10 +922,10 @@ struct TaskInCtld {
    * However, these fields are NOT persisted on the disk.
    * These fields are cached for performance purpose.
    * ----------- */
-  // set in SetFieldsByTaskToCtld from uid
+  // set in SetFieldsByJobToCtld from uid
   std::unique_ptr<PasswordEntry> password_entry;
 
-  // Set in TaskScheduler->AcquireAttributes()
+  // Set in JobScheduler->AcquireAttributes()
   uint32_t partition_priority{0};
   uint32_t qos_priority{0};
 
@@ -945,34 +951,32 @@ struct TaskInCtld {
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
   bool IsCrun() const {
-    return type == crane::grpc::TaskType::Interactive &&
-           task_to_ctld.interactive_meta().interactive_type() ==
-               crane::grpc::InteractiveTaskType::Crun;
+    return type == crane::grpc::JobType::Interactive &&
+           job_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun;
   }
   bool IsCalloc() const {
-    return type == crane::grpc::TaskType::Interactive &&
-           task_to_ctld.interactive_meta().interactive_type() ==
-               crane::grpc::InteractiveTaskType::Calloc;
+    return type == crane::grpc::JobType::Interactive &&
+           job_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Calloc;
   }
   bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
 
-  bool PrologComplete() const;
+  crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
+  crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
-  crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
-  crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
-
-  crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
 
   // =================== Setter/Getter ===================
 
-  void SetTaskId(task_id_t id);
-  task_id_t TaskId() const { return task_id; }
+  void SetJobId(job_id_t id);
+  job_id_t JobId() const { return job_id; }
 
-  void SetTaskDbId(task_db_id_t id);
-  task_id_t TaskDbId() const { return task_db_id; }
+  void SetJobDbId(job_db_id_t id);
+  job_db_id_t JobDbId() const { return job_db_id; }
 
   void SetUsername(std::string const& val);
   std::string const& Username() const { return username; }
@@ -982,11 +986,11 @@ struct TaskInCtld {
   void CranedIdsClear();
   void CranedIdsAdd(CranedId const& i);
 
-  void SetPrimaryStepStatus(crane::grpc::TaskStatus val);
-  crane::grpc::TaskStatus PrimaryStepStatus() const { return primary_status; }
+  void SetPrimaryStepStatus(crane::grpc::JobStatus val);
+  crane::grpc::JobStatus PrimaryStepStatus() const { return primary_status; }
 
-  void SetStatus(crane::grpc::TaskStatus val);
-  crane::grpc::TaskStatus Status() const { return status; }
+  void SetStatus(crane::grpc::JobStatus val);
+  crane::grpc::JobStatus Status() const { return status; }
 
   void SetPrimaryStepExitCode(uint32_t val);
   uint32_t PrimaryStepExitCode() const { return primary_exit_code; }
@@ -1036,7 +1040,7 @@ struct TaskInCtld {
   }
 
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
-    CRANE_ASSERT(step->type != crane::grpc::TaskType::Batch);
+    CRANE_ASSERT(step->type != crane::grpc::JobType::Batch);
     step->job = this;
     pending_step_ids_.push(step->StepId());
     m_steps_.emplace(step->StepId(), std::move(step));
@@ -1080,22 +1084,24 @@ struct TaskInCtld {
   const std::string& Traceparent() const { return traceparent_; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
-  void UpdateDependency(task_id_t dep_job_id, absl::Time event_time);
+  void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
   DependenciesInJob const& Dependencies() const { return dependencies; }
-  void AddDependent(crane::grpc::DependencyType dep_type, task_id_t dep_job_id);
+  void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
   void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
                                absl::Time event_time);
 
-  void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val);
+  void SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val);
 
-  // Must be called after SetFieldsByTaskToCtld!
-  void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val);
+  // Must be called after SetFieldsByJobToCtld!
+  void SetFieldsByRuntimeAttrOfJob(crane::grpc::RuntimeAttrOfJob const& val);
 
-  // Helper function to set the fields of TaskInfo using info in
-  // TaskInCtld. Note that mutable_elapsed_time() is not set here for
+  // Helper function to set the fields of JobInfo using info in
+  // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info);
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
 };
+
+enum class QosFlags { DenyOnLimit, _Count };
 
 struct Qos {
   bool deleted = false;
@@ -1105,12 +1111,18 @@ struct Qos {
   uint32_t priority;
   uint32_t max_jobs_per_user;
   uint32_t max_jobs_per_account;
-  uint32_t max_running_tasks_per_user;
-  absl::Duration max_time_limit_per_task;
+  uint32_t max_running_jobs_per_user;
+  absl::Duration max_time_limit_per_job;
   uint32_t max_cpus_per_user;
-  uint32_t max_cpus_per_account;
   uint32_t max_submit_jobs_per_user;
   uint32_t max_submit_jobs_per_account;
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
+  absl::Duration max_wall;
+  ResourceView max_tres;
+  ResourceView max_tres_per_user;
+  ResourceView max_tres_per_account;
+  FlagSet<QosFlags> flags;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -1127,14 +1139,11 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxJobsPerAccount() {
     return "max_jobs_per_account";
   }
-  static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
-    return "max_time_limit_per_task";
+  static constexpr const char* FieldStringOfMaxTimeLimitPerJob() {
+    return "max_time_limit_per_job";
   }
   static constexpr const char* FieldStringOfMaxCpusPerUser() {
     return "max_cpus_per_user";
-  }
-  static constexpr const char* FieldStringOfMaxCpusPerAccount() {
-    return "max_cpus_per_account";
   }
   static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
     return "max_submit_jobs_per_user";
@@ -1142,19 +1151,37 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
     return "max_submit_jobs_per_account";
   }
+  static constexpr const char* FieldStringOfMaxTresPerUser() {
+    return "max_tres_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxTresPerAccount() {
+    return "max_tres_per_account";
+  }
+  static constexpr const char* FieldStringOfMaxTres() { return "max_tres"; }
+  static constexpr const char* FieldStringOfMaxJobs() { return "max_jobs"; }
+  static constexpr const char* FieldStringOfMaxSubmitJobs() {
+    return "max_submit_jobs";
+  }
+  static constexpr const char* FieldStringOfMaxWall() { return "max_wall"; }
+  static constexpr const char* FieldStringOfFlags() { return "flags"; }
 
   std::string QosToString() const {
     return fmt::format(
         "name: {}, description: {}, reference_count: {}, priority: {}, "
-        "max_jobs_per_user: {}, max_running_tasks_per_user: {}, "
-        "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
-        "max_cpus_per_account: {}, max_jobs_per_account: {}, "
-        "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}",
+        "max_jobs_per_user: {}, max_running_jobs_per_user: {}, "
+        "max_time_limit_per_job: {}, max_cpus_per_user: {}, "
+        "max_jobs_per_account: {}, "
+        "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}, "
+        "max_jobs: {}, max_submit_jobs: {}, max_wall: {}, flags: {}, max_tres: "
+        "{}, max_tres_per_user: {}, max_tres_per_account: {}",
         name, description, reference_count, priority, max_jobs_per_user,
-        max_running_tasks_per_user,
-        absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
-        max_cpus_per_account, max_jobs_per_account, max_submit_jobs_per_user,
-        max_submit_jobs_per_account);
+        max_running_jobs_per_user, absl::FormatDuration(max_time_limit_per_job),
+        max_cpus_per_user, max_jobs_per_account, max_submit_jobs_per_user,
+        max_submit_jobs_per_account, max_jobs, max_submit_jobs,
+        absl::FormatDuration(max_wall), flags.ToString(),
+        util::ReadableResourceView(max_tres),
+        util::ReadableResourceView(max_tres_per_user),
+        util::ReadableResourceView(max_tres_per_account));
   }
 
   static const std::string GetModifyFieldStr(
@@ -1168,14 +1195,28 @@ struct Qos {
       return "max_jobs_per_user";
     case crane::grpc::ModifyField::MaxCpusPerUser:
       return "max_cpus_per_user";
-    case crane::grpc::ModifyField::MaxTimeLimitPerTask:
-      return "max_time_limit_per_task";
+    case crane::grpc::ModifyField::MaxTimeLimitPerJob:
+      return "max_time_limit_per_job";
     case crane::grpc::ModifyField::MaxJobsPerAccount:
       return "max_jobs_per_account";
     case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
       return "max_submit_jobs_per_user";
     case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
       return "max_submit_jobs_per_account";
+    case crane::grpc::ModifyField::MaxJobs:
+      return "max_jobs";
+    case crane::grpc::ModifyField::MaxSubmitJobs:
+      return "max_submit_jobs";
+    case crane::grpc::ModifyField::MaxTres:
+      return "max_tres";
+    case crane::grpc::ModifyField::MaxTresPerAccount:
+      return "max_tres_per_account";
+    case crane::grpc::ModifyField::MaxTresPerUser:
+      return "max_tres_per_user";
+    case crane::grpc::ModifyField::MaxWall:
+      return "max_wall";
+    case crane::grpc::ModifyField::Flags:
+      return "flags";
     default:
       std::unreachable();
     }
@@ -1340,7 +1381,7 @@ struct License {
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
-  return sec >= kTaskMinTimeLimitSec && sec <= kTaskMaxTimeLimitSec;
+  return sec >= kJobMinTimeLimitSec && sec <= kJobMaxTimeLimitSec;
 }
 
 inline bool CheckIfTimeLimitIsValid(absl::Duration d) {

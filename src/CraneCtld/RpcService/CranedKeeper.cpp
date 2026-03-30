@@ -19,7 +19,7 @@
 #include "CranedKeeper.h"
 
 #include "CranedMetaContainer.h"
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -48,7 +48,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   request.set_ok(true);
   *request.mutable_token() = token;
 
-  g_task_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
+  g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
 
   ClientContext context;
   google::protobuf::Empty reply;
@@ -88,7 +88,7 @@ CraneErrCode CranedStub::TerminateSteps(
   status = m_stub_->TerminateSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
-        "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
+        "TerminateRunningJob RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -119,7 +119,7 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
   status = m_stub_->TerminateOrphanedStep(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
-        "TerminateOrphanedTasks RPC for Node {} returned status not ok: {}",
+        "TerminateOrphanedJobs RPC for Node {} returned status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -161,7 +161,7 @@ CraneErrCode CranedStub::AllocJobs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
+CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
   using crane::grpc::FreeJobsReply;
   using crane::grpc::FreeJobsRequest;
 
@@ -173,7 +173,7 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  request.mutable_job_id_list()->Assign(task.begin(), task.end());
+  request.mutable_job_id_list()->Assign(jobs.begin(), jobs.end());
 
   status = m_stub_->FreeJobs(&context, request, &reply);
   if (!status.ok()) {
@@ -269,8 +269,7 @@ CraneErrCode CranedStub::FreeSteps(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
-                                            uint64_t seconds) {
+CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds) {
   using crane::grpc::ChangeJobTimeLimitReply;
   using crane::grpc::ChangeJobTimeLimitRequest;
 
@@ -281,12 +280,12 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
 
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
-  request.set_task_id(task_id);
+  request.set_job_id(job_id);
   request.set_time_limit_seconds(seconds);
   status = m_stub_->ChangeJobTimeLimit(&context, request, &reply);
 
   if (!status.ok()) {
-    CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
+    CRANE_ERROR("ChangeJobTimeLimitAsync to Craned {} failed: {} ",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
