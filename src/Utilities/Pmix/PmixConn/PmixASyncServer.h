@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -23,7 +23,7 @@
 namespace pmix {
 
 class PmixASyncServer {
-public:
+ public:
   virtual ~PmixASyncServer() = default;
   virtual bool Init(const Config& config) = 0;
 
@@ -31,4 +31,4 @@ public:
 
   virtual void Wait() = 0;
 };
-} // namespace pmix
+}  // namespace pmix

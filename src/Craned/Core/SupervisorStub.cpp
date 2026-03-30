@@ -211,7 +211,8 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ReceivePmixPort(const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
+CraneErrCode SupervisorStub::ReceivePmixPort(
+    const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
   ClientContext context;
   crane::grpc::supervisor::ReceivePmixPortRequest request;
   crane::grpc::supervisor::ReceivePmixPortReply reply;
@@ -226,10 +227,11 @@ CraneErrCode SupervisorStub::ReceivePmixPort(const std::vector<std::pair<CranedI
   auto ok = m_stub_->ReceivePmixPort(&context, request, &reply);
   if (!ok.ok() || !reply.ok()) {
     CRANE_ERROR("ReceivePmixPort failed: reply {},{}, request size {}, ok {}",
-                reply.ok(), ok.error_message(), request.pmix_ports().size(), ok.ok());
+                reply.ok(), ok.error_message(), request.pmix_ports().size(),
+                ok.ok());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
-  
+
   return CraneErrCode::SUCCESS;
 }
 

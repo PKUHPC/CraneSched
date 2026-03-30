@@ -39,14 +39,14 @@ void CranedClient::TerminateTasks() {
 
   grpc::ClientContext client_context;
   client_context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(kRpcTimeoutSeconds));
+                              std::chrono::seconds(kRpcTimeoutSeconds));
   TerminateStepsRequest request;
   TerminateStepsReply reply;
 
-  auto &job_step_map = *request.mutable_job_step_ids_map();
+  auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  job_step_map[m_pmix_job_info_.job_id]
-      .mutable_steps()->Add(m_pmix_job_info_.step_id);
+  job_step_map[m_pmix_job_info_.job_id].mutable_steps()->Add(
+      m_pmix_job_info_.step_id);
 
   if (m_stub_ == nullptr) {
     CRANE_ERROR("Failed to terminate tasks, stub is null");
@@ -55,7 +55,8 @@ void CranedClient::TerminateTasks() {
 
   auto ok = m_stub_->TerminateSteps(&client_context, request, &reply);
   if (!ok.ok()) {
-    CRANE_ERROR("Failed to terminate tasks, grpc error: {}", ok.error_message());
+    CRANE_ERROR("Failed to terminate tasks, grpc error: {}",
+                ok.error_message());
     return;
   }
 
@@ -67,7 +68,6 @@ void CranedClient::TerminateTasks() {
 }
 
 bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
-
   if (m_pmix_job_info_.node_list.size() == 1) {
     CRANE_TRACE("Only one node in job, no need to broadcast pmix port.");
     return true;
@@ -78,7 +78,7 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
 
   grpc::ClientContext client_context;
   client_context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(kRpcTimeoutSeconds));
+                              std::chrono::seconds(kRpcTimeoutSeconds));
   BroadcastPmixPortRequest request;
   BroadcastPmixPortReply reply;
 

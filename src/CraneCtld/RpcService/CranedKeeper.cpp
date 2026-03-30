@@ -456,9 +456,11 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
   return reply;
 }
 
-CraneErrCode CranedStub::ReceivePmixPort(job_id_t job_id, step_id_t step_id, const std::unordered_map<CranedId, std::string>& pmix_ports) {
-  using crane::grpc::ReceivePmixPortRequest;
+CraneErrCode CranedStub::ReceivePmixPort(
+    job_id_t job_id, step_id_t step_id,
+    const std::unordered_map<CranedId, std::string> &pmix_ports) {
   using crane::grpc::ReceivePmixPortReply;
+  using crane::grpc::ReceivePmixPortRequest;
 
   ClientContext context;
   Status status;
@@ -468,7 +470,7 @@ CraneErrCode CranedStub::ReceivePmixPort(job_id_t job_id, step_id_t step_id, con
   request.set_job_id(job_id);
   request.set_step_id(step_id);
   auto pmix_port_list = request.mutable_pmix_ports();
-  for (const auto& [craned_id, port] : pmix_ports) {
+  for (const auto &[craned_id, port] : pmix_ports) {
     auto pmix_port_req = pmix_port_list->Add();
     pmix_port_req->set_craned_id(craned_id);
     pmix_port_req->set_port(port);
@@ -484,11 +486,11 @@ CraneErrCode CranedStub::ReceivePmixPort(job_id_t job_id, step_id_t step_id, con
   }
 
   if (!reply.ok()) {
-    CRANE_ERROR("[Step#{}.{}] Craned {} failed to receive PMIX port",
-                job_id, step_id, m_craned_id_);
+    CRANE_ERROR("[Step#{}.{}] Craned {} failed to receive PMIX port", job_id,
+                step_id, m_craned_id_);
     return CraneErrCode::ERR_GENERIC_FAILURE;
   }
-    
+
   return CraneErrCode::SUCCESS;
 }
 

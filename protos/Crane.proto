@@ -448,8 +448,8 @@ message DeleteWckeyReply {
 }
 
 message ModifyFieldOperation {
-  ModifyField modify_field = 1; // modify item field
-  repeated string value_list = 2; // new value
+  ModifyField modify_field = 1;    // modify item field
+  repeated string value_list = 2;  // new value
   OperationType type = 3;
 }
 
@@ -1330,11 +1330,11 @@ message QueryJobSizeSummaryReply {
 }
 
 message BroadcastPmixPortRequest {
-  string craned_id = 1; //  sender
-  repeated string craned_ids = 2; // nodes
+  string craned_id = 1;            //  sender
+  repeated string craned_ids = 2;  // nodes
   uint32 job_id = 3;
   uint32 step_id = 4;
-  bytes port = 5; // grpc port or ucx addr (must bytes)
+  bytes port = 5;  // grpc port or ucx addr (must bytes)
 }
 
 message BroadcastPmixPortReply {
@@ -1345,9 +1345,9 @@ message ReceivePmixPortRequest {
   uint32 job_id = 1;
   uint32 step_id = 2;
 
-  message PmixPorts{
+  message PmixPorts {
     string craned_id = 1;
-    bytes port = 2; // grpc port or ucx addr (must bytes)
+    bytes port = 2;  // grpc port or ucx addr (must bytes)
   }
   repeated PmixPorts pmix_ports = 3;
 }

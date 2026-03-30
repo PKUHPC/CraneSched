@@ -598,20 +598,23 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     grpc::ServerContext *context,
     const crane::grpc::ReceivePmixPortRequest *request,
     crane::grpc::ReceivePmixPortReply *response) {
-
   std::vector<std::pair<CranedId, std::string>> pmix_ports;
-  for (const auto& pmix_port : request->pmix_ports()) {
+  for (const auto &pmix_port : request->pmix_ports()) {
     if (pmix_port.craned_id() == g_config.CranedIdOfThisNode) {
-      CRANE_TRACE("[Step{}.{}] ReceivePmixPort: Ignore pmix port {} for self craned id {}", 
-        request->job_id(), request->step_id(),
-        pmix_port.port(), pmix_port.craned_id());
+      CRANE_TRACE(
+          "[Step{}.{}] ReceivePmixPort: Ignore pmix port {} for self craned id "
+          "{}",
+          request->job_id(), request->step_id(), pmix_port.port(),
+          pmix_port.craned_id());
       continue;
     }
     pmix_ports.emplace_back(pmix_port.craned_id(), pmix_port.port());
   }
 
-  CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor", request->job_id(), request->step_id(), pmix_ports.size());
-  bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(), request->step_id());
+  CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor",
+              request->job_id(), request->step_id(), pmix_ports.size());
+  bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(),
+                                       request->step_id());
   if (!ok) {
     response->set_ok(false);
   } else {

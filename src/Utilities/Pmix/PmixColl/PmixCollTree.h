@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2026 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 #pragma once
 
 #include "PmixColl.h"
@@ -29,7 +28,6 @@ namespace pmix {
 class PmixClient;
 class CranedClient;
 
-
 enum class CollTreeState : std::uint8_t {
   SYNC,
   COLLECT,
@@ -40,14 +38,21 @@ enum class CollTreeState : std::uint8_t {
 };
 
 inline std::string ToString(CollTreeState state) {
-  switch(state) {
-  case CollTreeState::SYNC:        return "SYNC";
-  case CollTreeState::COLLECT:     return "COLLECT";
-  case CollTreeState::UPFWD:       return "UPFWD";
-  case CollTreeState::UPFWD_WSC:   return "UPFWD_WSC";
-  case CollTreeState::UPFWD_WPC:   return "UPFWD_WPC";
-  case CollTreeState::DOWNFWD:     return "DOWNFWD";
-  default:                         return "UNKNOWN";
+  switch (state) {
+  case CollTreeState::SYNC:
+    return "SYNC";
+  case CollTreeState::COLLECT:
+    return "COLLECT";
+  case CollTreeState::UPFWD:
+    return "UPFWD";
+  case CollTreeState::UPFWD_WSC:
+    return "UPFWD_WSC";
+  case CollTreeState::UPFWD_WPC:
+    return "UPFWD_WPC";
+  case CollTreeState::DOWNFWD:
+    return "DOWNFWD";
+  default:
+    return "UNKNOWN";
   }
 };
 
@@ -59,17 +64,23 @@ enum class CollTreeSndState : std::uint8_t {
 };
 
 inline std::string ToString(CollTreeSndState state) {
-  switch(state) {
-  case CollTreeSndState::NONE:    return "NONE";
-  case CollTreeSndState::ACTIVE:  return "ACTIVE";
-  case CollTreeSndState::DONE:    return "DONE";
-  case CollTreeSndState::FAILED:  return "FAILED";
-  default:                        return "UNKNOWN";
+  switch (state) {
+  case CollTreeSndState::NONE:
+    return "NONE";
+  case CollTreeSndState::ACTIVE:
+    return "ACTIVE";
+  case CollTreeSndState::DONE:
+    return "DONE";
+  case CollTreeSndState::FAILED:
+    return "FAILED";
+  default:
+    return "UNKNOWN";
   }
 };
 
-class PmixCollTree : public Coll, public std::enable_shared_from_this<PmixCollTree> {
-public:
+class PmixCollTree : public Coll,
+                     public std::enable_shared_from_this<PmixCollTree> {
+ public:
 #ifdef HAVE_PMIX
   // pmix_client and craned_client are injected so this class never needs to
   // call PmixServer::GetInstance().
@@ -79,9 +90,11 @@ public:
         m_pmix_client_(pmix_client),
         m_craned_client_(craned_client) {}
 
-  bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) override;
+  bool PmixCollInit(CollType type,
+                    const std::vector<pmix_proc_t>& procs) override;
 
-  bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) override;
+  bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc,
+                            void* cbdata) override;
 
   bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
                          const std::string& data) override;
@@ -91,17 +104,17 @@ public:
 
   bool ProcessRingRequest(
       const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
-      const std::string& msg) override { 
-      CRANE_ERROR("Not implemented"); 
-      return false; 
+      const std::string& msg) override {
+    CRANE_ERROR("Not implemented");
+    return false;
   }
 
   void AbortOnTimeout() override;
 
   static void TreeReleaseFn(void* rel_data);
 
-private:
-   /* tree coll functions */
+ private:
+  /* tree coll functions */
   bool PmixCollTreeInit_(const std::set<std::string>& hostset);
   bool PmixCollTreeLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
                           void* cbdata);
@@ -124,9 +137,9 @@ private:
     uint32_t seq;
   };
 
-  PmixJobInfo   m_pmix_job_info_;
-  PmixClient*   m_pmix_client_{nullptr};   // injected, not owned
-  CranedClient* m_craned_client_{nullptr}; // injected, not owned
+  PmixJobInfo m_pmix_job_info_;
+  PmixClient* m_pmix_client_{nullptr};      // injected, not owned
+  CranedClient* m_craned_client_{nullptr};  // injected, not owned
 
   CollTreeState m_state_;
   bool m_contrib_local_;
@@ -149,4 +162,4 @@ private:
 #endif
 };
 
-} // namespace pmix
+}  // namespace pmix

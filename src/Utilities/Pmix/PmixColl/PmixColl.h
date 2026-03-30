@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2026 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,7 @@
 #pragma once
 
 #ifdef HAVE_PMIX
-#include <pmix.h>
+#  include <pmix.h>
 #endif
 
 #include <cassert>
@@ -33,8 +33,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "crane/PublicHeader.h"
 #include "crane/Logger.h"
+#include "crane/PublicHeader.h"
 #include "protos/Pmix.pb.h"
 
 namespace pmix {
@@ -48,26 +48,31 @@ enum class CollType : std::uint8_t {
 };
 
 inline std::string ToString(CollType type) {
-  switch(type) {
-  case CollType::FENCE_TREE:   return "FENCE_TREE";
-  case CollType::FENCE_RING:   return "FENCE_RING";
-  case CollType::FENCE_MAX:    return "FENCE_MAX";
-  case CollType::CONNECT:      return "CONNECT";
-  case CollType::DISCONNECT:   return "DISCONNECT";
-  default:                     return "UNKNOWN";
+  switch (type) {
+  case CollType::FENCE_TREE:
+    return "FENCE_TREE";
+  case CollType::FENCE_RING:
+    return "FENCE_RING";
+  case CollType::FENCE_MAX:
+    return "FENCE_MAX";
+  case CollType::CONNECT:
+    return "CONNECT";
+  case CollType::DISCONNECT:
+    return "DISCONNECT";
+  default:
+    return "UNKNOWN";
   }
 }
 
 inline CollType StrToCollType(const std::string& str) {
-  if (str == "FENCE_TREE")      return CollType::FENCE_TREE;
+  if (str == "FENCE_TREE") return CollType::FENCE_TREE;
   if (str == "FENCE_RING") return CollType::FENCE_RING;
-  if (str == "FENCE_MAX")  return CollType::FENCE_MAX;
-  if (str == "CONNECT")    return CollType::CONNECT;
+  if (str == "FENCE_MAX") return CollType::FENCE_MAX;
+  if (str == "CONNECT") return CollType::CONNECT;
   if (str == "DISCONNECT") return CollType::DISCONNECT;
-                            
+
   return CollType::FENCE_MAX;
 }
-
 
 class Coll {
  public:
@@ -76,24 +81,28 @@ class Coll {
   Coll& operator=(const Coll&) = delete;
 
 #ifdef HAVE_PMIX
-  virtual bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) = 0;
+  virtual bool PmixCollInit(CollType type,
+                            const std::vector<pmix_proc_t>& procs) = 0;
 
-  virtual bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) = 0;
+  virtual bool PmixCollContribLocal(const std::string& data,
+                                    pmix_modex_cbfunc_t cbfunc,
+                                    void* cbdata) = 0;
 
   virtual bool ProcessRingRequest(
       const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
       const std::string& msg) = 0;
 
   virtual bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
-                         const std::string& data) = 0;
+                                 const std::string& data) = 0;
   virtual bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
-                          const std::string& data) = 0;
+                                  const std::string& data) = 0;
 
   size_t GetProcNum() const { return m_procs_.size(); }
 
   const pmix_proc_t* GetProcs(size_t index) const {
     if (index >= m_procs_.size()) {
-      CRANE_ERROR("Index {} out of range in get_procs, proc num is {}", index, m_procs_.size());
+      CRANE_ERROR("Index {} out of range in get_procs, proc num is {}", index,
+                  m_procs_.size());
       return nullptr;
     }
 
@@ -118,8 +127,8 @@ class Coll {
  protected:
   std::mutex m_lock_;
   uint32_t m_seq_{};
-  CollType m_type_ {CollType::FENCE_MAX};
-  
+  CollType m_type_{CollType::FENCE_MAX};
+
   std::vector<pmix_proc_t> m_procs_;
   uint32_t m_peerid_{};
   uint32_t m_peers_cnt_{};
@@ -132,4 +141,4 @@ class Coll {
 #endif
 };
 
-} // namespace pmix
+}  // namespace pmix

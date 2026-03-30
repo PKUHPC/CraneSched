@@ -351,11 +351,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (job->IsCrun() && job->JobToCtld().interactive_meta().mpi() == "pmix") {
-            #ifndef HAVE_PMIX
-              result = std::unexpected(
-                  "MPI type pmix is not supported.");
-            #endif
+          if (job->IsCrun() &&
+              job->JobToCtld().interactive_meta().mpi() == "pmix") {
+#ifndef HAVE_PMIX
+            result = std::unexpected("MPI type pmix is not supported.");
+#endif
           }
 
           if (result) {
@@ -425,20 +425,20 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
           if (step->StepToCtld().interactive_meta().mpi() == "pmix") {
-            #ifndef HAVE_PMIX
-              result = std::unexpected(
-                  "MPI type pmix is not supported.");
-            #endif
+#ifndef HAVE_PMIX
+            result = std::unexpected("MPI type pmix is not supported.");
+#endif
           }
 
           if (result) {
             auto submit_result =
-              g_job_scheduler->SubmitStepAsync(std::move(step));
+                g_job_scheduler->SubmitStepAsync(std::move(step));
             auto submit_expt = submit_result.get();
             if (submit_expt.has_value()) {
               step_id_t step_id = submit_expt.value();
-              result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                  std::pair(job_id, step_id)};
+              result =
+                  std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                      std::pair(job_id, step_id)};
             } else {
               result = std::unexpected(CraneErrStr(submit_expt.error()));
             }
@@ -521,9 +521,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 }
 
 grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
-    grpc::ServerContext *context,
-    const crane::grpc::BroadcastPmixPortRequest *request,
-    crane::grpc::BroadcastPmixPortReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::BroadcastPmixPortRequest* request,
+    crane::grpc::BroadcastPmixPortReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -537,43 +537,57 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
   PmixPortsMetaMapKey map_key(request->job_id(), request->step_id());
 
-  pmix_ports_map.lazy_emplace_l(map_key, [&](std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>& pair){
+  pmix_ports_map.lazy_emplace_l(
+      map_key,
+      [&](std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>& pair) {
+        pair.second.emplace(request->craned_id(), request->port());
 
-    pair.second.emplace(request->craned_id(), request->port());
-
-    if (pair.second.size() == request->craned_ids().size()) {
-      CRANE_TRACE("[Step#{}.{}] All pmix ports have been collected, start broadcasting.", request->job_id(), request->step_id());
-      absl::BlockingCounter broadcast_bl(pair.second.size());
-      for (const auto& craned_id : request->craned_ids()) {
-        std::thread([&]() {
-          auto craned_stub  = g_craned_keeper->GetCranedStub(craned_id);
-          if (!craned_stub) {
-            CRANE_ERROR("[Step#{}.{}] Craned {} stub not found when broadcasting pmix port.", request->job_id(), request->step_id(), craned_id);
-            broadcast_bl.DecrementCount();
-            return;
+        if (pair.second.size() == request->craned_ids().size()) {
+          CRANE_TRACE(
+              "[Step#{}.{}] All pmix ports have been collected, start "
+              "broadcasting.",
+              request->job_id(), request->step_id());
+          absl::BlockingCounter broadcast_bl(pair.second.size());
+          for (const auto& craned_id : request->craned_ids()) {
+            std::thread([&]() {
+              auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+              if (!craned_stub) {
+                CRANE_ERROR(
+                    "[Step#{}.{}] Craned {} stub not found when broadcasting "
+                    "pmix port.",
+                    request->job_id(), request->step_id(), craned_id);
+                broadcast_bl.DecrementCount();
+                return;
+              }
+              auto result = craned_stub->ReceivePmixPort(
+                  request->job_id(), request->step_id(), pair.second);
+              if (result != CraneErrCode::SUCCESS) {
+                CRANE_ERROR(
+                    "[Step#{}.{}] Failed to broadcast pmix port to craned {} "
+                    "for job_id {}.",
+                    request->job_id(), request->step_id(), craned_id,
+                    request->job_id());
+              }
+              broadcast_bl.DecrementCount();
+            }).detach();
           }
-          auto result = craned_stub->ReceivePmixPort(request->job_id(), request->step_id(), pair.second);
-          if (result != CraneErrCode::SUCCESS) {
-            CRANE_ERROR("[Step#{}.{}] Failed to broadcast pmix port to craned {} for job_id {}.", request->job_id(), request->step_id(), craned_id, request->job_id());
-          }
-          broadcast_bl.DecrementCount();
-        }).detach();
-      }
-      broadcast_bl.Wait();
-      pmix_broadcast_completed = true;
-    }
+          broadcast_bl.Wait();
+          pmix_broadcast_completed = true;
+        }
+      },
+      [&](auto&& ctor) {
+        // First time insert
 
-  }, [&](auto&& ctor){
-    // First time insert
-    
-    PmixPortsMetaMapValue value;
-    value.emplace(request->craned_id(), request->port());
+        PmixPortsMetaMapValue value;
+        value.emplace(request->craned_id(), request->port());
 
-    ctor(map_key, std::move(value));
-  });
+        ctor(map_key, std::move(value));
+      });
 
   if (pmix_broadcast_completed) {
-    CRANE_TRACE("[Step#{}.{}] Pmix port broadcast completed, erase the record in Ctld.", request->job_id(), request->step_id());
+    CRANE_TRACE(
+        "[Step#{}.{}] Pmix port broadcast completed, erase the record in Ctld.",
+        request->job_id(), request->step_id());
     pmix_ports_map.erase(map_key);
   }
 

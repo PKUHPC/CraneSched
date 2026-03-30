@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2026 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -25,7 +25,8 @@ namespace pmix {
 
 #ifdef HAVE_PMIX
 
-bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) {
+bool PmixCollTree::PmixCollInit(CollType type,
+                                const std::vector<pmix_proc_t>& procs) {
   m_seq_ = 0;
   m_type_ = type;
   m_procs_.assign(procs.begin(), procs.end());
@@ -70,16 +71,16 @@ bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
 
   m_state_ = CollTreeState::SYNC;
 
-  width = 5; // TODO: config the width of the tree
-  ReverseTreeInfo(m_peerid_, m_peers_cnt_, width,
-                          &m_parent_peerid_, &m_childrn_cnt_, &depth,
-                          &max_depth);
+  width = 5;  // TODO: config the width of the tree
+  ReverseTreeInfo(m_peerid_, m_peers_cnt_, width, &m_parent_peerid_,
+                  &m_childrn_cnt_, &depth, &max_depth);
   /* We interested in amount of direct children */
   m_contrib_children_ = 0;
   m_contrib_local_ = false;
   m_chldrn_ids_.resize(width);
   m_contrib_child_.resize(width);
-  m_childrn_cnt_ = ReverseTreeDirectChildren(m_peerid_, m_peers_cnt_, width, depth, &m_chldrn_ids_);
+  m_childrn_cnt_ = ReverseTreeDirectChildren(m_peerid_, m_peers_cnt_, width,
+                                             depth, &m_chldrn_ids_);
 
   if (m_parent_peerid_ == -1) {
     /* if we are the root of the tree:
@@ -93,7 +94,8 @@ bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
       m_all_chldrn_hl_.emplace_back(host);
     }
     // host[1-3]
-    m_chldrn_str_ = util::HostNameListToStr<std::list<std::string>>(m_all_chldrn_hl_);
+    m_chldrn_str_ =
+        util::HostNameListToStr<std::list<std::string>>(m_all_chldrn_hl_);
   } else {
     /* for all other nodes in the tree we need to know:
      * - nodename of our parent;
@@ -127,25 +129,33 @@ bool PmixCollTree::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& p
     auto iter = std::next(hostname_set.begin(), m_chldrn_ids_[i]);
     m_childrn_hosts_[i] = *iter;
   }
-  CRANE_TRACE("coll {:p}: tree: parent_host={}, childrn_cnt={}, childrn_hosts={}",
-              static_cast<void*>(this), m_parent_host_, m_childrn_cnt_,
-              absl::StrJoin(m_childrn_hosts_, ","));
+  CRANE_TRACE(
+      "coll {:p}: tree: parent_host={}, childrn_cnt={}, childrn_hosts={}",
+      static_cast<void*>(this), m_parent_host_, m_childrn_cnt_,
+      absl::StrJoin(m_childrn_hosts_, ","));
 
   ResetCollTreeUpFwd_();
   ResetCollTreeDownFwd_();
   m_cbdata_ = nullptr;
   m_cbfunc_ = nullptr;
 
-  CRANE_TRACE("tree coll {:p}: peerid={}, peer_cnt = {}, parent_id={}, childrn_cnt={}, max_depth={}, width={}, chidrn_ids={}",
-              static_cast<void*>(this), m_peerid_, m_peers_cnt_, m_parent_peerid_, m_childrn_cnt_, max_depth, width, absl::StrJoin(m_chldrn_ids_, ","));
+  CRANE_TRACE(
+      "tree coll {:p}: peerid={}, peer_cnt = {}, parent_id={}, childrn_cnt={}, "
+      "max_depth={}, width={}, chidrn_ids={}",
+      static_cast<void*>(this), m_peerid_, m_peers_cnt_, m_parent_peerid_,
+      m_childrn_cnt_, max_depth, width, absl::StrJoin(m_chldrn_ids_, ","));
 
   return true;
 }
 
-bool PmixCollTree::PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) {
+bool PmixCollTree::PmixCollContribLocal(const std::string& data,
+                                        pmix_modex_cbfunc_t cbfunc,
+                                        void* cbdata) {
   std::lock_guard lock_guard(this->m_lock_);
 
-  CRANE_DEBUG("coll {:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(this), m_seq_, ToString(m_state_), data.size());
+  CRANE_DEBUG("coll {:p}: contrib/loc: seq_num={}, state={}, size={}",
+              static_cast<void*>(this), m_seq_, ToString(m_state_),
+              data.size());
 
   switch (m_state_) {
   case CollTreeState::SYNC:
@@ -165,10 +175,12 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data, pmix_modex_cbfu
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WPC:
   case CollTreeState::UPFWD_WSC:
-    CRANE_DEBUG("coll {:p}: contrib/loc: before prev coll is finished!", static_cast<void*>(this));
+    CRANE_DEBUG("coll {:p}: contrib/loc: before prev coll is finished!",
+                static_cast<void*>(this));
     return false;
   default:
-    CRANE_ERROR("{:p}: local contrib while active collective, state = {}", static_cast<void*>(this), ToString(m_state_));
+    CRANE_ERROR("{:p}: local contrib while active collective, state = {}",
+                static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
     m_craned_client_->TerminateTasks();
     return false;
@@ -190,7 +202,8 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data, pmix_modex_cbfu
 
   ProgressCollectTree_();
 
-  CRANE_DEBUG("{:p}: finish, state={}", static_cast<void*>(this), ToString(m_state_));
+  CRANE_DEBUG("{:p}: finish, state={}", static_cast<void*>(this),
+              ToString(m_state_));
 
   return true;
 }
@@ -225,18 +238,18 @@ void PmixCollTree::ProgressCollectTree_() {
       result = ProgressDownFwd_();
       break;
     default:
-      CRANE_ERROR("{:p}: unknown state {}", static_cast<void*>(this), ToString(m_state_));
+      CRANE_ERROR("{:p}: unknown state {}", static_cast<void*>(this),
+                  ToString(m_state_));
     }
   } while (result);
 }
 
 bool PmixCollTree::ProgressCollect_() {
+  CRANE_DEBUG("{:p}: progress collect: state={}, local={}, child_cntr={}",
+              static_cast<void*>(this), ToString(m_state_), m_contrib_local_,
+              m_contrib_children_);
 
-  CRANE_DEBUG("{:p}: progress collect: state={}, local={}, child_cntr={}", 
-    static_cast<void*>(this), ToString(m_state_), m_contrib_local_, m_contrib_children_);
-
-  if (CollTreeState::COLLECT != m_state_)
-    return false;
+  if (CollTreeState::COLLECT != m_state_) return false;
 
   if (!m_contrib_local_ || m_contrib_children_ != m_childrn_cnt_) {
     /* Not yet ready to go to the next step */
@@ -245,12 +258,12 @@ bool PmixCollTree::ProgressCollect_() {
 
   // Currently, there is only a direct connection.
   /* We will need to forward aggregated
-                 * message back to our children */
+   * message back to our children */
   m_state_ = CollTreeState::UPFWD;
 
   if (!m_parent_host_.empty()) {
-    CRANE_DEBUG("{:p}: ProgressCollect_: send data to parent {}, seq: {}", 
-      static_cast<void*>(this), m_parent_host_, m_seq_);
+    CRANE_DEBUG("{:p}: ProgressCollect_: send data to parent {}, seq: {}",
+                static_cast<void*>(this), m_parent_host_, m_seq_);
 
     m_upfwd_status_ = CollTreeSndState::ACTIVE;
 
@@ -274,8 +287,7 @@ bool PmixCollTree::ProgressCollect_() {
     }
     auto self = shared_from_this();
     stub->PmixTreeUpwardForwardNoBlock(
-         request,
-        [ seq = this->m_seq_, self](bool ok) {
+        request, [seq = this->m_seq_, self](bool ok) {
           std::lock_guard lock(self->m_lock_);
           if (!ok) {
             CRANE_ERROR("Cannot send data (size = {}), to {}, seq = {}",
@@ -312,38 +324,40 @@ bool PmixCollTree::ProgressCollect_() {
 }
 
 bool PmixCollTree::ProgressUpFwd_() {
-
   if (m_state_ != CollTreeState::UPFWD) {
-    CRANE_ERROR("{:p}: invalid state {}, expected UPFWD", static_cast<void*>(this), ToString(m_state_));
+    CRANE_ERROR("{:p}: invalid state {}, expected UPFWD",
+                static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
     m_craned_client_->TerminateTasks();
     return false;
   }
 
-  CRANE_TRACE("{:p}: progress upfwd: state={}, snd_status={}, local={}, child_cntr={}, seq_num={}",
-              static_cast<void*>(this), ToString(m_state_),
-              static_cast<int>(m_upfwd_status_),
-              m_contrib_local_, m_contrib_children_, m_seq_);
+  CRANE_TRACE(
+      "{:p}: progress upfwd: state={}, snd_status={}, local={}, child_cntr={}, "
+      "seq_num={}",
+      static_cast<void*>(this), ToString(m_state_),
+      static_cast<int>(m_upfwd_status_), m_contrib_local_, m_contrib_children_,
+      m_seq_);
 
   switch (m_upfwd_status_) {
-    case CollTreeSndState::FAILED:
-      PmixCollLocalCbNodata_(PMIX_ERROR);
-      ResetCollTree_();
-      return false;
-    case CollTreeSndState::ACTIVE:
-      /* still waiting for the send completion */
-      return false;
-    case CollTreeSndState::DONE:
-      if (m_contrib_prnt_) {
-        /* all-set to go to the next stage */
-        break;
-      }
-      return false;
-    default:
-      CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
-      m_state_ = CollTreeState::SYNC;
-      m_craned_client_->TerminateTasks();
-      return false;
+  case CollTreeSndState::FAILED:
+    PmixCollLocalCbNodata_(PMIX_ERROR);
+    ResetCollTree_();
+    return false;
+  case CollTreeSndState::ACTIVE:
+    /* still waiting for the send completion */
+    return false;
+  case CollTreeSndState::DONE:
+    if (m_contrib_prnt_) {
+      /* all-set to go to the next stage */
+      break;
+    }
+    return false;
+  default:
+    CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
+    m_state_ = CollTreeState::SYNC;
+    m_craned_client_->TerminateTasks();
+    return false;
   }
 
   ResetCollTreeUpFwd_();
@@ -354,7 +368,8 @@ bool PmixCollTree::ProgressUpFwd_() {
   m_downfwd_cb_wait_ = m_childrn_cnt_;
 
   for (const auto& host : m_childrn_hosts_) {
-    CRANE_DEBUG("{:p}: ProgressUpFwd_: send data to child {}, seq: {}", static_cast<void*>(this), host, m_seq_);
+    CRANE_DEBUG("{:p}: ProgressUpFwd_: send data to child {}, seq: {}",
+                static_cast<void*>(this), host, m_seq_);
     crane::grpc::pmix::PmixTreeDownwardForwardReq request{};
 
     for (auto& proc : m_procs_) {
@@ -369,15 +384,15 @@ bool PmixCollTree::ProgressUpFwd_() {
 
     auto stub = m_pmix_client_->GetPmixStub(host);
     if (!stub) {
-      CRANE_ERROR("stub is null, cannot send data (size = {}), to {}", this->m_downfwd_buf_.size(), host);
+      CRANE_ERROR("stub is null, cannot send data (size = {}), to {}",
+                  this->m_downfwd_buf_.size(), host);
       this->m_downfwd_buf_.clear();
       this->m_downfwd_status_ = CollTreeSndState::FAILED;
       return false;
     }
     auto self = shared_from_this();
     stub->PmixTreeDownwardForwardNoBlock(
-         request,
-        [ seq = this->m_seq_, self](bool ok) {
+        request, [seq = this->m_seq_, self](bool ok) {
           std::lock_guard lock(self->m_lock_);
           if (!ok) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
@@ -395,11 +410,11 @@ bool PmixCollTree::ProgressUpFwd_() {
 
           self->m_downfwd_cb_cnt_++;
 
-          CRANE_DEBUG(
-              "{:p}: state: {}, snd_status={}, compl_cnt={}/{}",
-              static_cast<void*>(self.get()), static_cast<int>(self->m_state_),
-              static_cast<int>(self->m_downfwd_status_),
-              self->m_downfwd_cb_cnt_, self->m_downfwd_cb_wait_);
+          CRANE_DEBUG("{:p}: state: {}, snd_status={}, compl_cnt={}/{}",
+                      static_cast<void*>(self.get()),
+                      static_cast<int>(self->m_state_),
+                      static_cast<int>(self->m_downfwd_status_),
+                      self->m_downfwd_cb_cnt_, self->m_downfwd_cb_wait_);
 
           self->ProgressCollectTree_();
         });
@@ -412,18 +427,20 @@ bool PmixCollTree::ProgressUpFwd_() {
     cb_data->coll = this;
     cb_data->seq = m_seq_;
     m_downfwd_cb_wait_++;
-    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(), m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn, cb_data.release());
+    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
+                       m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn,
+                       cb_data.release());
 
     m_cbfunc_ = nullptr;
     m_cbdata_ = nullptr;
-    CRANE_DEBUG("{:p}: local delivery, size = {}", static_cast<void*>(this), m_downfwd_buf_.size());
+    CRANE_DEBUG("{:p}: local delivery, size = {}", static_cast<void*>(this),
+                m_downfwd_buf_.size());
   }
 
   return true;
 }
 
 bool PmixCollTree::ProgressUpFwdWsc_() {
-
   switch (m_upfwd_status_) {
   case CollTreeSndState::FAILED:
     if (m_cbfunc_) {
@@ -453,9 +470,7 @@ bool PmixCollTree::ProgressUpFwdWsc_() {
 }
 
 bool PmixCollTree::ProgressUpFwdWpc_() {
-
-  if (!m_contrib_prnt_)
-    return false;
+  if (!m_contrib_prnt_) return false;
 
   /* Need to wait only for the local completion callback if installed*/
   m_downfwd_status_ = CollTreeSndState::ACTIVE;
@@ -470,11 +485,14 @@ bool PmixCollTree::ProgressUpFwdWpc_() {
     cb_data->coll = this;
     cb_data->seq = m_seq_;
 
-    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(), m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn, cb_data.release());
+    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
+                       m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn,
+                       cb_data.release());
     m_downfwd_cb_wait_++;
     m_cbfunc_ = nullptr;
     m_cbdata_ = nullptr;
-    CRANE_DEBUG("{:p}: local delivery, size = {}", static_cast<void*>(this), m_downfwd_buf_.size());
+    CRANE_DEBUG("{:p}: local delivery, size = {}", static_cast<void*>(this),
+                m_downfwd_buf_.size());
   }
 
   return true;
@@ -489,7 +507,8 @@ bool PmixCollTree::ProgressDownFwd_() {
   case CollTreeSndState::ACTIVE:
     return false;
   case CollTreeSndState::FAILED:
-    CRANE_ERROR("{:p}: failed to send, abort collective", static_cast<void*>(this));
+    CRANE_ERROR("{:p}: failed to send, abort collective",
+                static_cast<void*>(this));
     PmixCollLocalCbNodata_(PMIX_ERROR);
     ResetCollTree_();
     return false;
@@ -501,19 +520,20 @@ bool PmixCollTree::ProgressDownFwd_() {
     return false;
   }
 
-  CRANE_DEBUG("{:p}: {} seq={} is DONE", static_cast<void*>(this), ToString(m_type_), m_seq_);
+  CRANE_DEBUG("{:p}: {} seq={} is DONE", static_cast<void*>(this),
+              ToString(m_type_), m_seq_);
   ResetCollTree_();
 
   return true;
 }
 
 bool PmixCollTree::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
-                              const std::string& data) {
+                                     const std::string& data) {
   std::lock_guard lock(m_lock_);
 
   int child_id = -1;
-  auto it = std::find(m_childrn_hosts_.begin(),
-                      m_childrn_hosts_.end(), peer_host);
+  auto it =
+      std::find(m_childrn_hosts_.begin(), m_childrn_hosts_.end(), peer_host);
 
   if (it == m_childrn_hosts_.end()) {
     CRANE_DEBUG("contribution from the non-child node {}", peer_host);
@@ -521,43 +541,56 @@ bool PmixCollTree::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
     child_id = std::distance(m_childrn_hosts_.begin(), it);
   }
 
-  CRANE_DEBUG("{:p}: contrib/rem from node_id={}, child_id={}, seq: {}, native_seq: {}, state={}, size={}",
-              static_cast<void*>(this), peer_host, child_id, seq, m_seq_, ToString(m_state_), data.size());
+  CRANE_DEBUG(
+      "{:p}: contrib/rem from node_id={}, child_id={}, seq: {}, native_seq: "
+      "{}, state={}, size={}",
+      static_cast<void*>(this), peer_host, child_id, seq, m_seq_,
+      ToString(m_state_), data.size());
 
   switch (m_state_) {
   case CollTreeState::SYNC:
     m_ts_ = std::chrono::steady_clock::now();
   case CollTreeState::COLLECT:
     if (m_seq_ != seq) {
-      CRANE_ERROR("{:p}: unexpected contrib from {} (child #{}) seq = {}, coll->seq = {}, state={}",
-                    static_cast<void*>(this), peer_host, child_id, seq, m_seq_, ToString(m_state_));
+      CRANE_ERROR(
+          "{:p}: unexpected contrib from {} (child #{}) seq = {}, coll->seq = "
+          "{}, state={}",
+          static_cast<void*>(this), peer_host, child_id, seq, m_seq_,
+          ToString(m_state_));
       goto error;
     }
     break;
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WSC:
     CRANE_ERROR("{:p}: unexpected contrib from {}, state = {}",
-                  static_cast<void*>(this), peer_host, ToString(m_state_));
+                static_cast<void*>(this), peer_host, ToString(m_state_));
     goto error;
   case CollTreeState::UPFWD_WPC:
   case CollTreeState::DOWNFWD:
-    CRANE_DEBUG("{:p}: contrib for the next coll. node_id={}, child={} seq={}, coll->seq={}, state={}",
-                  static_cast<void*>(this), peer_host, child_id, seq, m_seq_, ToString(m_state_));
-    if (m_seq_+1 != seq) {
-      CRANE_ERROR("{:p}: unexpected contrib from {}(x:{}) seq = {}, coll->seq = {}, state={}",
-                  static_cast<void*>(this), peer_host, child_id, seq, m_seq_, ToString(m_state_));
+    CRANE_DEBUG(
+        "{:p}: contrib for the next coll. node_id={}, child={} seq={}, "
+        "coll->seq={}, state={}",
+        static_cast<void*>(this), peer_host, child_id, seq, m_seq_,
+        ToString(m_state_));
+    if (m_seq_ + 1 != seq) {
+      CRANE_ERROR(
+          "{:p}: unexpected contrib from {}(x:{}) seq = {}, coll->seq = {}, "
+          "state={}",
+          static_cast<void*>(this), peer_host, child_id, seq, m_seq_,
+          ToString(m_state_));
       goto error;
     }
     break;
   default:
-    CRANE_ERROR("{:p}: unknown collective state {}",
-                  static_cast<void*>(this), ToString(m_state_));
+    CRANE_ERROR("{:p}: unknown collective state {}", static_cast<void*>(this),
+                ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
     goto error2;
   }
 
   if (child_id < 0 || child_id >= static_cast<int>(m_contrib_child_.size())) {
-    CRANE_ERROR("{:p}: invalid child_id={} from {}", static_cast<void*>(this), child_id, peer_host);
+    CRANE_ERROR("{:p}: invalid child_id={} from {}", static_cast<void*>(this),
+                child_id, peer_host);
     goto error;
   }
 
@@ -586,45 +619,52 @@ error2:
 }
 
 bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
-                               const std::string& data) {
-
+                                      const std::string& data) {
   std::lock_guard lock(m_lock_);
 
   std::string expected_host = m_parent_host_;
 
   if (expected_host != peer_host) {
-    CRANE_ERROR("{:p}: parent contrib from bad node_id={}, expect={}", static_cast<void*>(this), peer_host, expected_host);
+    CRANE_ERROR("{:p}: parent contrib from bad node_id={}, expect={}",
+                static_cast<void*>(this), peer_host, expected_host);
     ProgressCollectTree_();
     return true;
   }
 
-  CRANE_DEBUG("{:p}: contrib/rem node_id={}: state={}, size={}", static_cast<void*>(this), peer_host, ToString(m_state_), data.size());
+  CRANE_DEBUG("{:p}: contrib/rem node_id={}: state={}, size={}",
+              static_cast<void*>(this), peer_host, ToString(m_state_),
+              data.size());
 
   switch (m_state_) {
   case CollTreeState::SYNC:
   case CollTreeState::COLLECT:
     CRANE_DEBUG("{:p}: prev contrib node_id={}: seq={}, cur_seq={}, state={}",
-                static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
-    if (m_seq_-1 != seq) {
-      CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
-                  static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
+                static_cast<void*>(this), peer_host, seq, m_seq_,
+                ToString(m_state_));
+    if (m_seq_ - 1 != seq) {
+      CRANE_ERROR(
+          "{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
+          static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
       goto error;
     }
     ProgressCollectTree_();
     return true;
   case CollTreeState::UPFWD_WSC:
     CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
-                  static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_state_));
+                static_cast<void*>(this), peer_host, seq, m_seq_,
+                static_cast<int>(m_state_));
     goto error;
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WPC:
     break;
   case CollTreeState::DOWNFWD:
     CRANE_DEBUG("{:p}: double contrib node_id={} seq={}, cur_seq={}, state={}",
-              static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
+                static_cast<void*>(this), peer_host, seq, m_seq_,
+                ToString(m_state_));
     if (m_seq_ != seq) {
-      CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
-                  static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
+      CRANE_ERROR(
+          "{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
+          static_cast<void*>(this), peer_host, seq, m_seq_, ToString(m_state_));
       goto error;
     }
     ProgressCollectTree_();
@@ -635,7 +675,8 @@ bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
   }
 
   if (m_contrib_prnt_) {
-    CRANE_DEBUG("{:p}: multiple contributions from parent {}", static_cast<void*>(this), peer_host);
+    CRANE_DEBUG("{:p}: multiple contributions from parent {}",
+                static_cast<void*>(this), peer_host);
     ProgressCollectTree_();
     return true;
   }
@@ -645,7 +686,8 @@ bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
 
   ProgressCollectTree_();
 
-  CRANE_DEBUG("{:p}: finish: node_id={}, state={}", static_cast<void*>(this), peer_host,  ToString(m_state_));
+  CRANE_DEBUG("{:p}: finish: node_id={}, state={}", static_cast<void*>(this),
+              peer_host, ToString(m_state_));
 
   return true;
 
@@ -657,48 +699,47 @@ error2:
 }
 
 void PmixCollTree::ResetCollTree_() {
-
-  CRANE_TRACE("{:p}: reset coll tree: state={}, seq: {}, ", static_cast<void*>(this), ToString(m_state_), m_seq_);
+  CRANE_TRACE("{:p}: reset coll tree: state={}, seq: {}, ",
+              static_cast<void*>(this), ToString(m_state_), m_seq_);
 
   switch (m_state_) {
-    case CollTreeState::SYNC:
-      break;
-    case CollTreeState::COLLECT:
-    case CollTreeState::UPFWD:
-    case CollTreeState::UPFWD_WSC:
-      this->m_seq_++;
+  case CollTreeState::SYNC:
+    break;
+  case CollTreeState::COLLECT:
+  case CollTreeState::UPFWD:
+  case CollTreeState::UPFWD_WSC:
+    this->m_seq_++;
+    m_state_ = CollTreeState::SYNC;
+    this->ResetCollTreeUpFwd_();
+    this->ResetCollTreeDownFwd_();
+    this->m_cbdata_ = nullptr;
+    this->m_cbfunc_ = nullptr;
+    // Clear the timestamp so IsTimedOut() returns false for the idle coll.
+    m_ts_ = {};
+    break;
+  case CollTreeState::DOWNFWD:
+  case CollTreeState::UPFWD_WPC:
+    this->m_seq_++;
+    this->ResetCollTreeDownFwd_();
+    if (m_contrib_local_ || m_contrib_children_) {
+      /* Next collective was already started — refresh the activity timestamp
+       * so IsTimedOut() is relative to the new fence, not the old one. */
+      m_state_ = CollTreeState::COLLECT;
+      m_ts_ = std::chrono::steady_clock::now();
+    } else {
+      // No pending contributions: coll is truly idle.
       m_state_ = CollTreeState::SYNC;
-      this->ResetCollTreeUpFwd_();
-      this->ResetCollTreeDownFwd_();
-      this->m_cbdata_ = nullptr;
-      this->m_cbfunc_ = nullptr;
-      // Clear the timestamp so IsTimedOut() returns false for the idle coll.
       m_ts_ = {};
-      break;
-    case CollTreeState::DOWNFWD:
-    case CollTreeState::UPFWD_WPC:
-      this->m_seq_++;
-      this->ResetCollTreeDownFwd_();
-      if (m_contrib_local_ || m_contrib_children_) {
-        /* Next collective was already started — refresh the activity timestamp
-         * so IsTimedOut() is relative to the new fence, not the old one. */
-        m_state_ = CollTreeState::COLLECT;
-        m_ts_ = std::chrono::steady_clock::now();
-      } else {
-        // No pending contributions: coll is truly idle.
-        m_state_ = CollTreeState::SYNC;
-        m_ts_ = {};
-      }
-      break;
-    default:
-      m_state_ = CollTreeState::SYNC;
-      CRANE_ERROR("unknown state {}", ToString(m_state_));
-      m_craned_client_->TerminateTasks();
+    }
+    break;
+  default:
+    m_state_ = CollTreeState::SYNC;
+    CRANE_ERROR("unknown state {}", ToString(m_state_));
+    m_craned_client_->TerminateTasks();
   }
 }
 
 void PmixCollTree::ResetCollTreeUpFwd_() {
-
   m_contrib_children_ = 0;
   m_contrib_local_ = false;
   m_contrib_child_.assign(m_childrn_cnt_, false);
@@ -718,7 +759,8 @@ void PmixCollTree::ResetCollTreeDownFwd_() {
 
 void PmixCollTree::PmixCollLocalCbNodata_(int status) {
   if (m_cbfunc_) {
-    PmixLibModexInvoke(m_cbfunc_, status, nullptr, 0, m_cbdata_, nullptr, nullptr);
+    PmixLibModexInvoke(m_cbfunc_, status, nullptr, 0, m_cbdata_, nullptr,
+                       nullptr);
     m_cbfunc_ = nullptr;
     m_cbdata_ = nullptr;
   }
@@ -753,21 +795,25 @@ void PmixCollTree::TreeReleaseFn(void* rel_data) {
   coll->m_downfwd_buf_.clear();
 
   if (cb_data->seq != cb_data->coll->m_seq_) {
-    CRANE_ERROR("{:p}: collective was reset: my_seq={}, cur_seq={}", static_cast<void*>(cb_data->coll), cb_data->seq, cb_data->coll->m_seq_);
+    CRANE_ERROR("{:p}: collective was reset: my_seq={}, cur_seq={}",
+                static_cast<void*>(cb_data->coll), cb_data->seq,
+                cb_data->coll->m_seq_);
     goto exit;
   }
 
   assert(coll->m_state_ == CollTreeState::DOWNFWD);
 
   coll->m_downfwd_cb_cnt_++;
-  CRANE_DEBUG("{:p}: state: {}, snd_status={}, compl_cnt={}/{}", static_cast<void*>(coll), ToString(coll->m_state_), static_cast<int>(coll->m_downfwd_status_), coll->m_downfwd_cb_cnt_, coll->m_downfwd_cb_wait_);
+  CRANE_DEBUG("{:p}: state: {}, snd_status={}, compl_cnt={}/{}",
+              static_cast<void*>(coll), ToString(coll->m_state_),
+              static_cast<int>(coll->m_downfwd_status_),
+              coll->m_downfwd_cb_cnt_, coll->m_downfwd_cb_wait_);
 
   coll->ProgressCollectTree_();
 
 exit:
-    delete cb_data;
+  delete cb_data;
 }
 
-
 #endif
-} // namespace pmix
+}  // namespace pmix

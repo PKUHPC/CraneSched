@@ -23,14 +23,13 @@
 #include "PmixCommon.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
-
 #include "concurrentqueue/concurrentqueue.h"
 #include "uvw/async.h"
 #include "uvw/loop.h"
 #include "uvw/poll.h"
 
 #ifdef HAVE_UCX
-#include <ucp/api/ucp.h>
+#  include <ucp/api/ucp.h>
 
 // Forward declaration so the constructor signature compiles without pulling in
 // the full PmixUcxClient header at this level.
@@ -47,7 +46,7 @@ class PmixUcxClient;
 #ifdef HAVE_UCX
 struct PmixUcxReq {
   PmixUcxMsgType type{};
-  std::string    data;
+  std::string data;
   PmixUcxServer* self{nullptr};
 };
 #endif
@@ -55,7 +54,7 @@ struct PmixUcxReq {
 class PmixUcxServiceImpl {
  public:
   explicit PmixUcxServiceImpl(PmixDModexReqManager* dmodex_mgr,
-                              PmixState*            pmix_state)
+                              PmixState* pmix_state)
       : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {}
 
 #ifdef HAVE_UCX
@@ -68,7 +67,7 @@ class PmixUcxServiceImpl {
 
  private:
   PmixDModexReqManager* m_dmodex_mgr_;
-  PmixState*            m_pmix_state_;
+  PmixState* m_pmix_state_;
 };
 
 class PmixUcxServer : public PmixASyncServer {
@@ -79,10 +78,8 @@ class PmixUcxServer : public PmixASyncServer {
   // ucx_client — the companion UCX client; injected here so Init() never
   //   needs to call PmixServer::GetInstance().
   explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr,
-                         PmixState*            pmix_state,
-                         CranedClient*         craned_client,
-                         uvw::loop*            main_uvw_loop,
-                         PmixUcxClient*        ucx_client)
+                         PmixState* pmix_state, CranedClient* craned_client,
+                         uvw::loop* main_uvw_loop, PmixUcxClient* ucx_client)
       : m_dmodex_mgr_(dmodex_mgr),
         m_pmix_state_(pmix_state),
         m_craned_client_(craned_client),
@@ -101,33 +98,31 @@ class PmixUcxServer : public PmixASyncServer {
   void RegisterReceivesAllTypes_();
   void RegisterReceivesForType_(PmixUcxMsgType type, int count);
 
-  static void RecvHandle_(void*                      request,
-                          ucs_status_t               status,
-                          const ucp_tag_recv_info_t* info,
-                          void*                      user_data);
+  static void RecvHandle_(void* request, ucs_status_t status,
+                          const ucp_tag_recv_info_t* info, void* user_data);
 
   void EvCleanUcxProcessReqQueueCb_();
 
   static PmixUcxMsgType TagToType_(uint64_t tag);
 
-  ucp_context_h  m_ucp_context_{nullptr};
-  ucp_worker_h   m_ucp_worker_{nullptr};
+  ucp_context_h m_ucp_context_{nullptr};
+  ucp_worker_h m_ucp_worker_{nullptr};
   ucp_address_t* m_ucx_addr_{nullptr};
-  size_t         m_ucx_alen_{0};
-  int            m_server_fd_{-1};
+  size_t m_ucx_alen_{0};
+  int m_server_fd_{-1};
 
   std::unique_ptr<PmixUcxServiceImpl> m_service_impl_;
 
   PmixDModexReqManager* m_dmodex_mgr_;
-  PmixState*            m_pmix_state_;
-  CranedClient*         m_craned_client_;
-  uvw::loop*            m_main_uvw_loop_{nullptr}; // injected, not owned
-  PmixUcxClient*        m_ucx_client_{nullptr};    // injected, not owned
+  PmixState* m_pmix_state_;
+  CranedClient* m_craned_client_;
+  uvw::loop* m_main_uvw_loop_{nullptr};   // injected, not owned
+  PmixUcxClient* m_ucx_client_{nullptr};  // injected, not owned
 
-  std::shared_ptr<uvw::loop>         m_ucx_loop_;
-  std::thread                        m_ucx_thread_;
-  std::shared_ptr<uvw::poll_handle>  m_ucx_poll_; 
-  std::shared_ptr<uvw::async_handle> m_ucx_stop_;   
+  std::shared_ptr<uvw::loop> m_ucx_loop_;
+  std::thread m_ucx_thread_;
+  std::shared_ptr<uvw::poll_handle> m_ucx_poll_;
+  std::shared_ptr<uvw::async_handle> m_ucx_stop_;
 
   std::shared_ptr<uvw::async_handle> m_pmix_async_;
 

@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -43,22 +43,26 @@ class PmixGrpcStub : public PmixStub {
   ~PmixGrpcStub() override = default;
 
   void SendPmixRingMsgNoBlock(
-      const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::SendPmixRingMsgReq &request,
+      AsyncCallback callback) override;
 
   void PmixTreeUpwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request,
+      AsyncCallback callback) override;
 
   void PmixTreeDownwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request,
+      AsyncCallback callback) override;
 
   void PmixDModexRequestNoBlock(
-      const crane::grpc::pmix::PmixDModexRequestReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixDModexRequestReq &request,
+      AsyncCallback callback) override;
 
   void PmixDModexResponseNoBlock(
-      const crane::grpc::pmix::PmixDModexResponseReq &request, AsyncCallback callback) override;
+      const crane::grpc::pmix::PmixDModexResponseReq &request,
+      AsyncCallback callback) override;
 
  private:
-
   PmixGrpcClient *m_pmix_client_;
 
   std::shared_ptr<grpc::Channel> m_channel_;
@@ -72,11 +76,12 @@ class PmixGrpcStub : public PmixStub {
 
 class PmixGrpcClient : public PmixClient {
  public:
-  explicit PmixGrpcClient(int node_num) : m_node_num_(node_num){}
+  explicit PmixGrpcClient(int node_num) : m_node_num_(node_num) {}
 
   ~PmixGrpcClient() override = default;
 
-  void EmplacePmixStub(const CranedId &craned_id, const std::string& port) override;
+  void EmplacePmixStub(const CranedId &craned_id,
+                       const std::string &port) override;
 
   std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) override;
 
@@ -84,12 +89,12 @@ class PmixGrpcClient : public PmixClient {
 
   bool WaitAllStubReady() override {
     if (m_node_num_ == 1) return true;
-    
-    std::unique_lock<std::mutex> lock(m_mutex_);
-    if (GetChannelCount()+1 >= m_node_num_) return true;
 
-    bool ready = m_cv_.wait_for(lock, std::chrono::seconds(5), [this](){
-        return GetChannelCount()+1 >= m_node_num_; 
+    std::unique_lock<std::mutex> lock(m_mutex_);
+    if (GetChannelCount() + 1 >= m_node_num_) return true;
+
+    bool ready = m_cv_.wait_for(lock, std::chrono::seconds(5), [this]() {
+      return GetChannelCount() + 1 >= m_node_num_;
     });
 
     return ready;
@@ -101,11 +106,11 @@ class PmixGrpcClient : public PmixClient {
   using NodeHashMap = absl::node_hash_map<K, V, Hash>;
 
   using CranedIdToStubMap = phmap::parallel_flat_hash_map<
-      CranedId,
-      std::shared_ptr<PmixGrpcStub>, phmap::priv::hash_default_hash<CranedId>,
+      CranedId, std::shared_ptr<PmixGrpcStub>,
+      phmap::priv::hash_default_hash<CranedId>,
       phmap::priv::hash_default_eq<CranedId>,
-      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>>, 4,
-      std::shared_mutex>;
+      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>>,
+      4, std::shared_mutex>;
 
   CranedIdToStubMap m_craned_id_stub_map_;
 
@@ -117,4 +122,4 @@ class PmixGrpcClient : public PmixClient {
   std::atomic_uint64_t m_channel_count_{0};
 };
 
-} // namespace pmix
+}  // namespace pmix

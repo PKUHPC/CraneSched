@@ -20,58 +20,54 @@
 
 #ifdef HAVE_PMIX
 
-#include "Pmix.h"
-#include "PmixColl/PmixColl.h"
-#include "absl/synchronization/blocking_counter.h"
-#include "crane/Logger.h"
+#  include "Pmix.h"
+#  include "PmixColl/PmixColl.h"
+#  include "absl/synchronization/blocking_counter.h"
+#  include "crane/Logger.h"
 
 namespace pmix {
 
 // Static member definition.
 size_t PmixServerCallbacks::s_errhandler_ref = 0;
 
-// ── Lifecycle callbacks ───────────────────────────────────────────────────────
+// ── Lifecycle callbacks
+// ───────────────────────────────────────────────────────
 
 int PmixServerCallbacks::ClientConnected(const pmix_proc_t* proc,
-                                          void* /*server_object*/,
-                                          pmix_op_cbfunc_t cbfunc,
-                                          void* cbdata) {
+                                         void* /*server_object*/,
+                                         pmix_op_cbfunc_t cbfunc,
+                                         void* cbdata) {
   CRANE_DEBUG("ClientConnected: proc=[{}:{}]", proc->nspace, proc->rank);
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
 }
 
 pmix_status_t PmixServerCallbacks::ClientFinalized(const pmix_proc_t* proc,
-                                                    void* /*server_object*/,
-                                                    pmix_op_cbfunc_t cbfunc,
-                                                    void* cbdata) {
+                                                   void* /*server_object*/,
+                                                   pmix_op_cbfunc_t cbfunc,
+                                                   void* cbdata) {
   CRANE_DEBUG("ClientFinalized: proc=[{}:{}]", proc->nspace, proc->rank);
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
 }
 
-pmix_status_t PmixServerCallbacks::Abort(const pmix_proc_t* /*pmix_proc*/,
-                                          void* /*server_object*/,
-                                          int status, const char msg[],
-                                          pmix_proc_t /*pmix_procs*/[],
-                                          size_t /*nprocs*/,
-                                          pmix_op_cbfunc_t cbfunc,
-                                          void* cbdata) {
+pmix_status_t PmixServerCallbacks::Abort(
+    const pmix_proc_t* /*pmix_proc*/, void* /*server_object*/, int status,
+    const char msg[], pmix_proc_t /*pmix_procs*/[], size_t /*nprocs*/,
+    pmix_op_cbfunc_t cbfunc, void* cbdata) {
   CRANE_WARN("PMIx Abort invoked: status={}, msg={}", status, msg);
   PmixServer::GetInstance()->GetCranedClient()->TerminateTasks();
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
 }
 
-// ── Fence (collective) ────────────────────────────────────────────────────────
+// ── Fence (collective)
+// ────────────────────────────────────────────────────────
 
-pmix_status_t PmixServerCallbacks::FenceNb(const pmix_proc_t procs_v2[],
-                                            size_t nprocs,
-                                            const pmix_info_t info[],
-                                            size_t ninfo, char* data,
-                                            size_t ndata,
-                                            pmix_modex_cbfunc_t cbfunc,
-                                            void* cbdata) {
+pmix_status_t PmixServerCallbacks::FenceNb(
+    const pmix_proc_t procs_v2[], size_t nprocs, const pmix_info_t info[],
+    size_t ninfo, char* data, size_t ndata, pmix_modex_cbfunc_t cbfunc,
+    void* cbdata) {
   CRANE_DEBUG("FenceNb: nprocs={}, ndata={}", nprocs, ndata);
 
   std::vector<pmix_proc_t> procs;
@@ -120,18 +116,18 @@ pmix_status_t PmixServerCallbacks::FenceNb(const pmix_proc_t procs_v2[],
   return PMIX_SUCCESS;
 }
 
-// ── Direct modex ──────────────────────────────────────────────────────────────
+// ── Direct modex
+// ──────────────────────────────────────────────────────────────
 
 pmix_status_t PmixServerCallbacks::DModex(const pmix_proc_t* proc,
-                                           const pmix_info_t* /*info*/,
-                                           size_t /*ninfo*/,
-                                           pmix_modex_cbfunc_t cbfunc,
-                                           void* cbdata) {
+                                          const pmix_info_t* /*info*/,
+                                          size_t /*ninfo*/,
+                                          pmix_modex_cbfunc_t cbfunc,
+                                          void* cbdata) {
   CRANE_DEBUG("DModex: proc=[{}:{}]", proc->nspace, proc->rank);
   auto* srv = PmixServer::GetInstance();
-  if (!srv->GetDmodexReqManager()->PmixDModexGet(proc->nspace,
-                                                  static_cast<int>(proc->rank),
-                                                  cbfunc, cbdata)) {
+  if (!srv->GetDmodexReqManager()->PmixDModexGet(
+          proc->nspace, static_cast<int>(proc->rank), cbfunc, cbdata)) {
     CRANE_ERROR("DModex: PmixDModexGet failed for [{}:{}]", proc->nspace,
                 proc->rank);
     cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
@@ -140,7 +136,8 @@ pmix_status_t PmixServerCallbacks::DModex(const pmix_proc_t* proc,
   return PMIX_SUCCESS;
 }
 
-// ── Job control ───────────────────────────────────────────────────────────────
+// ── Job control
+// ───────────────────────────────────────────────────────────────
 
 pmix_status_t PmixServerCallbacks::JobControl(
     const pmix_proc_t* /*proct*/, const pmix_proc_t* /*targets*/,
@@ -150,53 +147,52 @@ pmix_status_t PmixServerCallbacks::JobControl(
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
-// ── Unsupported publish/lookup/spawn/connect operations ───────────────────────
+// ── Unsupported publish/lookup/spawn/connect operations
+// ───────────────────────
 
 pmix_status_t PmixServerCallbacks::Publish(const pmix_proc_t*,
-                                            const pmix_info_t[], size_t,
-                                            pmix_op_cbfunc_t, void*) {
+                                           const pmix_info_t[], size_t,
+                                           pmix_op_cbfunc_t, void*) {
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
 pmix_status_t PmixServerCallbacks::Lookup(const pmix_proc_t*, char**,
-                                           const pmix_info_t[], size_t,
-                                           pmix_lookup_cbfunc_t, void*) {
+                                          const pmix_info_t[], size_t,
+                                          pmix_lookup_cbfunc_t, void*) {
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
 pmix_status_t PmixServerCallbacks::Unpublish(const pmix_proc_t*, char**,
+                                             const pmix_info_t[], size_t,
+                                             pmix_op_cbfunc_t, void*) {
+  return PMIX_ERR_NOT_SUPPORTED;
+}
+
+pmix_status_t PmixServerCallbacks::Spawn(const pmix_proc_t*,
+                                         const pmix_info_t[], size_t,
+                                         const pmix_app_t[], size_t,
+                                         pmix_spawn_cbfunc_t, void*) {
+  return PMIX_ERR_NOT_SUPPORTED;
+}
+
+pmix_status_t PmixServerCallbacks::Connect(const pmix_proc_t[], size_t,
+                                           const pmix_info_t[], size_t,
+                                           pmix_op_cbfunc_t, void*) {
+  return PMIX_ERR_NOT_SUPPORTED;
+}
+
+pmix_status_t PmixServerCallbacks::Disconnect(const pmix_proc_t[], size_t,
                                               const pmix_info_t[], size_t,
                                               pmix_op_cbfunc_t, void*) {
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
-pmix_status_t PmixServerCallbacks::Spawn(const pmix_proc_t*,
-                                          const pmix_info_t[], size_t,
-                                          const pmix_app_t[], size_t,
-                                          pmix_spawn_cbfunc_t, void*) {
-  return PMIX_ERR_NOT_SUPPORTED;
-}
+// ── Internal async callbacks
+// ──────────────────────────────────────────────────
 
-pmix_status_t PmixServerCallbacks::Connect(const pmix_proc_t[], size_t,
-                                            const pmix_info_t[], size_t,
-                                            pmix_op_cbfunc_t, void*) {
-  return PMIX_ERR_NOT_SUPPORTED;
-}
-
-pmix_status_t PmixServerCallbacks::Disconnect(const pmix_proc_t[], size_t,
-                                               const pmix_info_t[], size_t,
-                                               pmix_op_cbfunc_t, void*) {
-  return PMIX_ERR_NOT_SUPPORTED;
-}
-
-// ── Internal async callbacks ──────────────────────────────────────────────────
-
-void PmixServerCallbacks::AppCb(pmix_status_t status,
-                                  pmix_info_t[] /*info*/,
-                                  size_t /*ninfo*/,
-                                  void* provided_cbdata,
-                                  pmix_op_cbfunc_t /*cbfunc*/,
-                                  void* /*cbdata*/) {
+void PmixServerCallbacks::AppCb(pmix_status_t status, pmix_info_t[] /*info*/,
+                                size_t /*ninfo*/, void* provided_cbdata,
+                                pmix_op_cbfunc_t /*cbfunc*/, void* /*cbdata*/) {
   auto* bc = reinterpret_cast<absl::BlockingCounter*>(provided_cbdata);
   bc->DecrementCount();
   CRANE_DEBUG("AppCb: status={}: {}", status, PMIx_Error_string(status));
@@ -209,8 +205,8 @@ void PmixServerCallbacks::OpCb(pmix_status_t status, void* cbdata) {
 }
 
 void PmixServerCallbacks::ErrHandlerRegCb(pmix_status_t status,
-                                            size_t errhandler_ref,
-                                            void* /*cbdata*/) {
+                                          size_t errhandler_ref,
+                                          void* /*cbdata*/) {
   if (status == PMIX_SUCCESS) s_errhandler_ref = errhandler_ref;
   CRANE_DEBUG("ErrHandlerRegCb: status={}, ref={}", status,
               static_cast<int>(errhandler_ref));
@@ -221,8 +217,8 @@ void PmixServerCallbacks::ErrHandler(
     const pmix_proc_t* source, pmix_info_t[] /*info*/, size_t /*ninfo*/,
     pmix_info_t* /*results*/, size_t /*nresults*/,
     pmix_event_notification_cbfunc_fn_t /*cbfunc*/, void* /*cbdata*/) {
-  CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]",
-              status, source->nspace, source->rank);
+  CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]", status,
+              source->nspace, source->rank);
   PmixServer::GetInstance()->GetCranedClient()->TerminateTasks();
 }
 

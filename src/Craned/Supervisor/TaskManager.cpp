@@ -28,10 +28,10 @@
 #include <limits>
 #include <variant>
 
-#include "Pmix.h"
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
+#include "Pmix.h"
 #include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
@@ -2708,8 +2708,7 @@ bool TaskManager::InitPmixPreFork() {
         .CraneScriptDir = g_config.CraneScriptDir,
         .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
 
-    if (!m_pmix_server_->Init(pmix_config, m_step_.GetStep()))
-      return false;
+    if (!m_pmix_server_->Init(pmix_config, m_step_.GetStep())) return false;
   }
 
   return true;
@@ -2718,26 +2717,27 @@ bool TaskManager::InitPmixPreFork() {
 bool TaskManager::ReceivePmixPort(
     const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
   if (!m_pmix_server_) {
-    CRANE_ERROR("[Step#{}.{}] PMIx server is not initialized when receiving "
-               "pmix ports.",
-               g_config.JobId, g_config.StepId);
+    CRANE_ERROR(
+        "[Step#{}.{}] PMIx server is not initialized when receiving "
+        "pmix ports.",
+        g_config.JobId, g_config.StepId);
     return false;
   }
 
   auto* pmix_client = m_pmix_server_->GetPmixClient();
   if (!pmix_client) {
     CRANE_ERROR("[Step#{}.{}] PMIx client is null when receiving pmix ports.",
-               g_config.JobId, g_config.StepId);
+                g_config.JobId, g_config.StepId);
     return false;
   }
 
-  CRANE_DEBUG("[Step#{}.{}] Receiving {} PMIx port(s).",
-              g_config.JobId, g_config.StepId, request.pmix_ports().size());
+  CRANE_DEBUG("[Step#{}.{}] Receiving {} PMIx port(s).", g_config.JobId,
+              g_config.StepId, request.pmix_ports().size());
 
   for (const auto& pmix_port : request.pmix_ports()) {
     CRANE_TRACE("[Step#{}.{}] Emplacing PMIx stub: craned_id={}, port={}",
-                g_config.JobId, g_config.StepId,
-                pmix_port.craned_id(), pmix_port.port());
+                g_config.JobId, g_config.StepId, pmix_port.craned_id(),
+                pmix_port.port());
     pmix_client->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
   }
 

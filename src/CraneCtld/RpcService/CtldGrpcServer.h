@@ -224,9 +224,9 @@ class CtldForInternalServiceImpl final
       override;
 
   grpc::Status BroadcastPmixPort(
-     grpc::ServerContext *context,
-     const crane::grpc::BroadcastPmixPortRequest *request,
-     crane::grpc::BroadcastPmixPortReply *response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::BroadcastPmixPortRequest *request,
+      crane::grpc::BroadcastPmixPortReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;

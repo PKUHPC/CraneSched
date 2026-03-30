@@ -399,9 +399,7 @@ void StartServer(int grpc_output_fd) {
              static_cast<int>(g_config.StepSpec.step_type()));
 
   StepStatus status{StepStatus::Invalid};
-  g_thread_pool->detach_task([&]() {
-    g_server->Wait();
-  });
+  g_thread_pool->detach_task([&]() { g_server->Wait(); });
 
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
@@ -462,7 +460,6 @@ void StartServer(int grpc_output_fd) {
 
   g_task_mgr->SupervisorFinishInit(status);
 
-  
   g_task_mgr->Wait();
 
   g_server.reset();

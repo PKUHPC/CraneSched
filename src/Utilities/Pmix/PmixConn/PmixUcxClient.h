@@ -18,15 +18,15 @@
 
 #pragma once
 
-#include "PmixClient.h"
-#include "PmixCommon.h"
-#include "protos/Pmix.grpc.pb.h"
-
-#include "concurrentqueue/concurrentqueue.h"
 #include <parallel_hashmap/phmap.h>
 
+#include "PmixClient.h"
+#include "PmixCommon.h"
+#include "concurrentqueue/concurrentqueue.h"
+#include "protos/Pmix.grpc.pb.h"
+
 #ifdef HAVE_UCX
-#include <ucp/api/ucp.h>
+#  include <ucp/api/ucp.h>
 #endif
 
 #include <atomic>
@@ -44,8 +44,8 @@ class PmixUcxClient;
 #ifdef HAVE_UCX
 
 struct PmixSendCtx {
-  AsyncCallback  callback;
-  std::string    buffer;              // owned — valid until SendHandle_ fires
+  AsyncCallback callback;
+  std::string buffer;  // owned — valid until SendHandle_ fires
   PmixUcxClient* client{nullptr};
 };
 #endif
@@ -79,15 +79,14 @@ class PmixUcxStub : public PmixStub {
 
  private:
   // Serialize payload → apply tag → post async send
-  void SendMessage_(PmixUcxMsgType type,
-                    std::string    data,
-                    AsyncCallback  callback);
+  void SendMessage_(PmixUcxMsgType type, std::string data,
+                    AsyncCallback callback);
 
   static void SendHandle_(void* request, ucs_status_t status, void* user_data);
 
-  PmixUcxClient* m_client_;      // non-owning
-  ucp_ep_h       m_ep_{nullptr};
-  CranedId       m_craned_id_;
+  PmixUcxClient* m_client_;  // non-owning
+  ucp_ep_h m_ep_{nullptr};
+  CranedId m_craned_id_;
 
   friend class PmixUcxClient;
 #endif  // HAVE_UCX
@@ -99,11 +98,14 @@ class PmixUcxStub : public PmixStub {
 // Lifecycle:
 //   1. Construct (node_num)
 //   2. InitUcxWorker()        Called by PmixUcxServer::Init() to inject worker
-//   3. SetNotifyFn()          Called by PmixUcxServer::Init() to inject notify function
+//   3. SetNotifyFn()          Called by PmixUcxServer::Init() to inject notify
+//   function
 //   4. EmplacePmixStub() × N  Concurrency-safe, idempotent on duplicate key
 //   5. WaitAllStubReady()     Block until node_num-1 connections are ready
-//   6. GetPmixStub()          Can be called at any time, returns nullptr on timeout
-//   7. DrainSendCallbacks()   Called periodically on PMIx Loop thread to consume deferred callbacks
+//   6. GetPmixStub()          Can be called at any time, returns nullptr on
+//   timeout
+//   7. DrainSendCallbacks()   Called periodically on PMIx Loop thread to
+//   consume deferred callbacks
 // ─────────────────────────────────────────────────────────────────────────────
 class PmixUcxClient : public PmixClient {
  public:
@@ -111,13 +113,9 @@ class PmixUcxClient : public PmixClient {
   ~PmixUcxClient() override = default;
 
 #ifdef HAVE_UCX
-  void InitUcxWorker(ucp_worker_h worker) {
-    m_ucp_worker_ = worker;
-  }
+  void InitUcxWorker(ucp_worker_h worker) { m_ucp_worker_ = worker; }
 
-  void SetNotifyFn(std::function<void()> fn) {
-    m_notify_fn_ = std::move(fn);
-  }
+  void SetNotifyFn(std::function<void()> fn) { m_notify_fn_ = std::move(fn); }
 
   void DrainSendCallbacks() {
     std::pair<AsyncCallback, bool> item;
@@ -126,7 +124,7 @@ class PmixUcxClient : public PmixClient {
     }
   }
 
-  void EmplacePmixStub(const CranedId&    craned_id,
+  void EmplacePmixStub(const CranedId& craned_id,
                        const std::string& addr_bytes) override;
 
   std::shared_ptr<PmixStub> GetPmixStub(const CranedId& craned_id) override;
@@ -139,8 +137,7 @@ class PmixUcxClient : public PmixClient {
 
  private:
   bool AllStubsReady_() const {
-    return static_cast<int>(
-               m_channel_count_.load(std::memory_order_acquire)) >=
+    return static_cast<int>(m_channel_count_.load(std::memory_order_acquire)) >=
            m_node_num_ - 1;
   }
 
@@ -151,11 +148,11 @@ class PmixUcxClient : public PmixClient {
       std::allocator<std::pair<const CranedId, std::shared_ptr<PmixUcxStub>>>,
       4, std::shared_mutex>;
 
-  StubMap                 m_stub_map_;
-  mutable std::mutex      m_cv_mu_;
+  StubMap m_stub_map_;
+  mutable std::mutex m_cv_mu_;
   std::condition_variable m_cv_;
 
-  ucp_worker_h  m_ucp_worker_{nullptr}; 
+  ucp_worker_h m_ucp_worker_{nullptr};
 
   moodycamel::ConcurrentQueue<std::pair<AsyncCallback, bool>> m_send_cb_queue_;
 
@@ -164,7 +161,7 @@ class PmixUcxClient : public PmixClient {
   friend class PmixUcxStub;
 #endif  // HAVE_UCX
 
-  int                   m_node_num_;
+  int m_node_num_;
   std::atomic<uint64_t> m_channel_count_{0};
 };
 

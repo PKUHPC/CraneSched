@@ -772,10 +772,12 @@ class JobScheduler {
   using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
   using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
   using PmixPortsMetaMap = phmap::parallel_flat_hash_map<
-      PmixPortsMetaMapKey, PmixPortsMetaMapValue, phmap::priv::hash_default_hash<PmixPortsMetaMapKey>,
+      PmixPortsMetaMapKey, PmixPortsMetaMapValue,
+      phmap::priv::hash_default_hash<PmixPortsMetaMapKey>,
       phmap::priv::hash_default_eq<PmixPortsMetaMapKey>,
-      std::allocator<std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>>, 4,
-      std::shared_mutex>;
+      std::allocator<
+          std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>>,
+      4, std::shared_mutex>;
 
  public:
   JobScheduler();
@@ -1196,7 +1198,6 @@ class JobScheduler {
   void DelDeadlineTimer_(job_id_t job_id);
 
   PmixPortsMetaMap m_pmix_ports_meta_;
-
 };
 
 }  // namespace Ctld

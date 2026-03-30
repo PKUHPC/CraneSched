@@ -794,17 +794,14 @@ void CtldClient::StepStatusChangeAsync(
 void CtldClient::BroadcastPmixPort(
     const crane::grpc::BroadcastPmixPortRequest& request,
     crane::grpc::BroadcastPmixPortReply* response) {
-
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
 
-  grpc::Status status =
-      m_stub_->BroadcastPmixPort(&context, request, response);
+  grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
   if (!status.ok()) {
     CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
-                static_cast<int>(status.error_code()),
-                status.error_message());
+                static_cast<int>(status.error_code()), status.error_message());
   }
 }
 

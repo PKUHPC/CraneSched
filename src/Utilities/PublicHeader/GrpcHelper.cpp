@@ -114,11 +114,12 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(
 }
 
 void ServerBuilderAddTcpInsecureListeningRandomPort(
-    grpc::ServerBuilder* builder, const std::string& address, int* select_port) {
+    grpc::ServerBuilder* builder, const std::string& address,
+    int* select_port) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), 0);
-  builder->AddListeningPort(listen_addr_port,
-                            grpc::InsecureServerCredentials(), select_port);
+  builder->AddListeningPort(listen_addr_port, grpc::InsecureServerCredentials(),
+                            select_port);
 }
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
