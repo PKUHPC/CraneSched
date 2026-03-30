@@ -128,6 +128,11 @@ CraneErrCode StepInstance::Prepare() {
 }
 
 CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
+  CRANE_TRACE_SCOPE_FROM_REMOTE(spawn_span, "step/supervisor_spawn",
+                                this->traceparent);
+  spawn_span.SetAttribute("job_id", job_id);
+  spawn_span.SetAttribute("step_id", step_id);
+
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -188,6 +193,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     FileOutputStream ostream(craned_supervisor_fd);
 
     // Do Supervisor Init
+    CRANE_TRACE_CHILD_NAMED(init_span, spawn_span, "step/send_init");
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(job_id);
     init_req.set_job_name(step_to_d.name());
@@ -338,6 +344,10 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       }
     }
 
+    init_req.set_tracing_enabled(g_config.Tracing.Enabled);
+    if (!this->traceparent.empty())
+      init_req.set_traceparent(this->traceparent);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
@@ -357,7 +367,10 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     }
 
     CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
+    init_span.End();
 
+    CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span,
+                            "step/supervisor_ready");
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,

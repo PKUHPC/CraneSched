@@ -161,6 +161,7 @@
 
 #ifdef CRANE_ENABLE_TRACING
 #  include "crane/TracerManager.h"
+#  include "opentelemetry/trace/propagation/http_trace_context.h"
 #  include "opentelemetry/trace/provider.h"
 #  include "opentelemetry/trace/span.h"
 #  include "opentelemetry/trace/tracer.h"
@@ -279,6 +280,14 @@ class ScopedSpan {
     }
   }
 
+  /// Set the span's status code (OK, ERROR, or UNSET).
+  void SetStatus(opentelemetry::trace::StatusCode code,
+                 std::string_view description = {}) {
+    if (span_ && !ended_) {
+      span_->SetStatus(code, std::string(description));
+    }
+  }
+
  private:
   /// No-op constructor (for when tracing is disabled at runtime).
   ScopedSpan() : ended_(true) {}
@@ -287,6 +296,48 @@ class ScopedSpan {
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span_;
   bool ended_ = true;
 };
+
+// ============================================================================
+// Cross-process trace context propagation (W3C TraceContext format)
+// ============================================================================
+
+/// Serialize a SpanContext to W3C traceparent format:
+/// "00-{trace_id_32hex}-{span_id_16hex}-{flags_2hex}" (55 chars)
+inline std::string SerializeTraceParent(
+    const opentelemetry::trace::SpanContext& ctx) {
+  if (!ctx.IsValid()) return {};
+  std::string result(55, '\0');
+  result[0] = '0';
+  result[1] = '0';
+  result[2] = '-';
+  ctx.trace_id().ToLowerBase16(
+      opentelemetry::nostd::span<char, 32>(&result[3], 32));
+  result[35] = '-';
+  ctx.span_id().ToLowerBase16(
+      opentelemetry::nostd::span<char, 16>(&result[36], 16));
+  result[52] = '-';
+  ctx.trace_flags().ToLowerBase16(
+      opentelemetry::nostd::span<char, 2>(&result[53], 2));
+  return result;
+}
+
+/// Deserialize a W3C traceparent string to SpanContext.
+/// Returns SpanContext::GetInvalid() on any parse failure (never throws).
+inline opentelemetry::trace::SpanContext DeserializeTraceParent(
+    std::string_view tp) {
+  namespace prop = opentelemetry::trace::propagation;
+  if (tp.size() != 55 || tp[0] != '0' || tp[1] != '0')
+    return opentelemetry::trace::SpanContext::GetInvalid();
+  opentelemetry::trace::TraceId trace_id =
+      prop::HttpTraceContext::TraceIdFromHex(tp.substr(3, 32));
+  opentelemetry::trace::SpanId span_id =
+      prop::HttpTraceContext::SpanIdFromHex(tp.substr(36, 16));
+  opentelemetry::trace::TraceFlags flags =
+      prop::HttpTraceContext::TraceFlagsFromHex(tp.substr(53, 2));
+  if (!trace_id.IsValid() || !span_id.IsValid())
+    return opentelemetry::trace::SpanContext::GetInvalid();
+  return opentelemetry::trace::SpanContext(trace_id, span_id, flags, true);
+}
 
 // ============================================================================
 // Macros (CRANE_ENABLE_TRACING is defined)
@@ -333,6 +384,23 @@ class ScopedSpan {
 /// Add an event to the CRANE_TRACE_SCOPE span in the current scope.
 #  define CRANE_TRACE_EVENT(event_name) _crane_scope_span_.AddEvent(event_name)
 
+/// Set the status on the CRANE_TRACE_SCOPE span in the current scope.
+#  define CRANE_TRACE_SET_STATUS(code, desc) \
+    _crane_scope_span_.SetStatus(code, desc)
+
+/// Create a child span from a serialized W3C traceparent string.
+/// Falls back to a root span if the traceparent is empty or invalid.
+#  define CRANE_TRACE_SCOPE_FROM_REMOTE(var, name, traceparent_str)        \
+    ::crane::ScopedSpan var = [&]() -> ::crane::ScopedSpan {               \
+      auto _tp_ctx_ = ::crane::DeserializeTraceParent(traceparent_str);    \
+      if (_tp_ctx_.IsValid())                                              \
+        return ::crane::ScopedSpan(                                        \
+            name, ::crane::TracerManager::GetInstance().GetTracerSafe(),    \
+            _tp_ctx_);                                                     \
+      return ::crane::ScopedSpan(                                          \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe());     \
+    }()
+
 #else  // CRANE_ENABLE_TRACING not defined
 
 // ============================================================================
@@ -348,6 +416,7 @@ class ScopedSpan {
   [[nodiscard]] ScopedSpan CreateChild(std::string_view) const { return {}; }
   [[nodiscard]] bool IsActive() const { return false; }
   void AddEvent(std::string_view) {}
+  void SetStatus(int, std::string_view = {}) {}
 };
 
 #  define CRANE_TRACE_SCOPE(name) (void)0
@@ -357,6 +426,8 @@ class ScopedSpan {
 #  define CRANE_TRACE_CHILD_NAMED(var, parent, name) ::crane::ScopedSpan var
 #  define CRANE_TRACE_SET_ATTR(key, value) (void)0
 #  define CRANE_TRACE_EVENT(event_name) (void)0
+#  define CRANE_TRACE_SET_STATUS(code, desc) (void)0
+#  define CRANE_TRACE_SCOPE_FROM_REMOTE(var, name, tp) ::crane::ScopedSpan var
 
 #endif  // CRANE_ENABLE_TRACING
 

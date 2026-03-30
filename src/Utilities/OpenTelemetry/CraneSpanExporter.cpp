@@ -13,6 +13,7 @@
 #  include "crane/CraneSpanExporter.h"
 
 #  include "crane/Logger.h"
+#  include "crane/TracerManager.h"
 
 namespace crane {
 
@@ -102,6 +103,15 @@ crane::grpc::plugin::SpanInfo CraneSpanExporter::ConvertSpan(
   for (const auto& [key, value] : span.GetAttributes()) {
     (*info.mutable_attributes())[key] = AttributeToString(value);
   }
+
+  // Map span status code
+  auto status_code = span.GetStatus();
+  if (status_code == opentelemetry::trace::StatusCode::kOk)
+    info.set_status(crane::grpc::plugin::SPAN_STATUS_OK);
+  else if (status_code == opentelemetry::trace::StatusCode::kError)
+    info.set_status(crane::grpc::plugin::SPAN_STATUS_ERROR);
+
+  info.set_service_name(TracerManager::GetInstance().ServiceName());
 
   return info;
 }

@@ -111,6 +111,8 @@ message InitSupervisorRequest {
   JobLifecycleHookConfig job_lifecycle_hook_config = 30;
 
   bool tracing_enabled = 31;
+
+  optional string traceparent = 32;  // W3C traceparent for distributed tracing
 }
 
 message SupervisorReady {

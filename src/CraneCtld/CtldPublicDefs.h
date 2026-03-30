@@ -559,6 +559,9 @@ struct StepStatusChangeContext {
   std::unordered_set<std::unique_ptr<TaskInCtld>> job_ptrs;
   // Ended jobs will transfer from embedded db to mongodb
   std::unordered_set<TaskInCtld*> job_raw_ptrs;
+
+  // Trace context lookup for RPC worker threads (job_id -> traceparent)
+  std::unordered_map<job_id_t, std::string> job_traceparents;
 };
 
 // Abstract interface of all the steps in Ctld.
@@ -896,6 +899,11 @@ struct TaskInCtld {
   // Might change at each scheduling cycle.
   ResourceV2 allocated_res;
 
+  // W3C traceparent for distributed tracing. Set at Alloc time, read-only
+  // thereafter. Propagated to Craned via JobToD and to Supervisor via
+  // InitSupervisorRequest.
+  std::string traceparent_;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
 
@@ -1067,6 +1075,9 @@ struct TaskInCtld {
 
   void SetAllocatedRes(ResourceV2&& val);
   ResourceV2 const& AllocatedRes() const { return allocated_res; }
+
+  void SetTraceparent(std::string tp) { traceparent_ = std::move(tp); }
+  const std::string& Traceparent() const { return traceparent_; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(task_id_t dep_job_id, absl::Time event_time);

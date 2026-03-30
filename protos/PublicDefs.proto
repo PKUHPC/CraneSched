@@ -365,6 +365,8 @@ message JobToD {
   StepToD daemon_step = 8;
 
   string name = 9;
+
+  optional string traceparent = 10;  // W3C traceparent for distributed tracing
 }
 
 enum StepType {

@@ -242,7 +242,11 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   for (auto& job : jobs) {
     task_id_t job_id = job.job_id;
 
-    CRANE_TRACE_POINT_ATTR("Alloc Job", "job_id", job_id);
+    {
+      CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/alloc",
+                                    job.job_to_d.traceparent());
+      span.SetAttribute("job_id", job_id);
+    }
 
     uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
@@ -261,7 +265,6 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   std::vector<StepInstance*> steps_to_free;
 
   for (job_id_t job_id : job_ids) {
-    CRANE_TRACE_POINT_ATTR("Free Job", "job_id", job_id);
     auto job = FreeJobInfo_(job_id);
     if (!job.has_value()) {
       CRANE_INFO(
@@ -277,6 +280,12 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
           .reason = "Job not found on craned during free request",
           .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       continue;
+    }
+
+    {
+      CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/free",
+                                    job->job_to_d.traceparent());
+      span.SetAttribute("job_id", job_id);
     }
 
     for (auto& step : job->step_map | std::views::values) {
@@ -325,6 +334,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       // in the corresponding handler (EvGrpcExecuteTaskCb_).
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
+      step_inst->traceparent = job_ptr->job_to_d.traceparent();
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
                                    .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
@@ -438,7 +448,9 @@ bool JobManager::EvCheckSupervisorRunning_() {
     FreeStepAllocation_(std::move(steps_to_clean));
     if (!jobs_to_clean.empty()) {
       for (const auto& job : jobs_to_clean) {
-        CRANE_TRACE_POINT_ATTR("Finish Release", "job_id", job.job_id);
+        CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/finish_release",
+                                      job.job_to_d.traceparent());
+        span.SetAttribute("job_id", job.job_id);
       }
       FreeJobAllocation_(std::move(jobs_to_clean));
     }
@@ -493,6 +505,10 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
                                 need_run_prolog = elem.need_run_prolog,
                                 job_env = elem.job_env] {
       if (need_run_prolog) {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(prolog_span, "step/prolog",
+                                      execution->traceparent);
+        prolog_span.SetAttribute("job_id", execution->job_id);
+        prolog_span.SetAttribute("step_id", execution->step_id);
         if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
                                       job_env))
           return;

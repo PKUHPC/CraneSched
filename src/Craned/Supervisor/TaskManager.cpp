@@ -2270,12 +2270,12 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     DelTerminationTimer_();
     DelSignalTimers_();
     if (!m_step_.orphaned) {
-      {
-        CRANE_TRACE_SCOPE_NAMED(span, "Task Status Change (finish)");
-        span.SetAttribute("job_id", m_step_.job_id);
-        span.SetAttribute("step_id", m_step_.step_id);
-        span.SetAttribute("task_id", task_id);
-      }
+      CRANE_TRACE_SCOPE_FROM_REMOTE(finish_span, "step/finish",
+                                    g_config.Tracing.Traceparent);
+      finish_span.SetAttribute("job_id", m_step_.job_id);
+      finish_span.SetAttribute("step_id", m_step_.step_id);
+      finish_span.SetAttribute(
+          "exit_code", static_cast<int64_t>(status.max_exit_code));
       g_craned_client->StepStatusChangeAsync(
           status.final_status_on_termination, status.max_exit_code,
           status.final_reason_on_termination);
@@ -2799,6 +2799,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
   ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
     m_step_.GotNewStatus(StepStatus::Running);
+
+    CRANE_TRACE_SCOPE_FROM_REMOTE(exec_span, "step/execute",
+                                  g_config.Tracing.Traceparent);
+    exec_span.SetAttribute("job_id", m_step_.job_id);
+    exec_span.SetAttribute("step_id", m_step_.step_id);
+    exec_span.SetAttribute("task_count",
+                           static_cast<int64_t>(m_step_.task_ids.size()));
+
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
       if (m_step_.IsPod()) {
@@ -2812,13 +2820,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
         instance = std::make_unique<ProcInstance>(&m_step_, task_id);
       }
       m_step_.AddTaskInstance(task_id, std::move(instance));
-
-      {
-        CRANE_TRACE_SCOPE_NAMED(span, "Execute Task");
-        span.SetAttribute("job_id", m_step_.job_id);
-        span.SetAttribute("step_id", m_step_.step_id);
-        span.SetAttribute("task_id", task_id);
-      }
     }
 
     m_step_.pwd.Init(m_step_.uid);
@@ -2834,6 +2835,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     }
 
     {
+      CRANE_TRACE_CHILD_NAMED(prep_span, exec_span, "step/prepare");
       auto err = m_step_.Prepare();
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
@@ -2904,6 +2906,11 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
+    CRANE_TRACE_CHILD_NAMED(launch_span, exec_span, "step/task_launch");
+    launch_span.SetAttribute(
+        "task_count",
+        static_cast<int64_t>(m_step_.task_ids.size()));
+
     CraneErrCode err = CraneErrCode::SUCCESS;
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
@@ -2920,6 +2927,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
         m_exec_id_task_id_map_[exec_id] = task_id;
       }
     }
+    launch_span.End();
 
     elem.ok_prom.set_value(err);
   }

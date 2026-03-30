@@ -18,19 +18,12 @@
 
 #pragma once
 
-#include <cstdint>
-#include <iostream>
-#include <memory>
 #include <string>
-#include <unordered_map>
 
 #ifdef CRANE_ENABLE_TRACING
-#  include "opentelemetry/sdk/trace/processor.h"
-#  include "opentelemetry/sdk/trace/simple_processor_factory.h"
+#  include "opentelemetry/sdk/trace/exporter.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
-#  include "opentelemetry/sdk/trace/tracer_provider_factory.h"
 #  include "opentelemetry/trace/provider.h"
-#  include "opentelemetry/trace/span.h"
 #  include "opentelemetry/trace/tracer.h"
 #endif
 
@@ -47,23 +40,13 @@ class TracerManager {
       const std::string& service_name,
       std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter);
 
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
-      const std::string& span_name);
-
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateRootSpan(
-      const std::string& span_name);
-
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateChildSpan(
-      const std::string& span_name,
-      const opentelemetry::trace::SpanContext& parent_context);
-
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> GetTracer();
-
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
   GetTracerSafe() {
     return tracer_;
   }
 #endif
+
+  const std::string& ServiceName() const { return service_name_; }
 
   void Shutdown();
 

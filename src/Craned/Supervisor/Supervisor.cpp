@@ -171,6 +171,7 @@ int InitFromStdin(int argc, char** argv) {
 
   // Tracing config
   g_config.Tracing.Enabled = msg.tracing_enabled();
+  g_config.Tracing.Traceparent = msg.traceparent();
 
   g_config.SupervisorLogFile =
       std::filesystem::path(msg.log_dir()) /

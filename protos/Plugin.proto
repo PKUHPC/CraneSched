@@ -118,6 +118,12 @@ message UpdateLicensesHookReply {
   bool ok = 1;
 }
 
+enum SpanStatus {
+  SPAN_STATUS_UNSET = 0;
+  SPAN_STATUS_OK = 1;
+  SPAN_STATUS_ERROR = 2;
+}
+
 message SpanInfo {
   string trace_id = 1;
   string span_id = 2;
@@ -126,6 +132,8 @@ message SpanInfo {
   google.protobuf.Timestamp start_time = 5;
   google.protobuf.Timestamp end_time = 6;
   map<string, string> attributes = 7;
+  SpanStatus status = 8;
+  string service_name = 9;
 }
 
 message TraceHookRequest {

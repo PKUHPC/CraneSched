@@ -920,6 +920,8 @@ void TaskScheduler::ScheduleThread_() {
       // We use the time now as the base time across the whole algorithm.
       absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
+      CRANE_TRACE_SCOPE_NAMED(sched_cycle, "scheduling/cycle");
+
       std::vector<DependencyEvent> dep_events;
       size_t approx_size = m_dependency_event_queue_.size_approx();
       if (approx_size > 0) {
@@ -988,7 +990,14 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
-      m_node_selection_algo_->NodeSelect(now, running_jobs, pending_jobs);
+      {
+        CRANE_TRACE_CHILD_NAMED(ns_span, sched_cycle,
+                                "scheduling/node_select");
+        ns_span.SetAttribute(
+            "pending_count",
+            static_cast<int64_t>(pending_jobs.size()));
+        m_node_selection_algo_->NodeSelect(now, running_jobs, pending_jobs);
+      }
 
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
@@ -997,6 +1006,8 @@ void TaskScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+      CRANE_TRACE_CHILD_NAMED(rv_span, sched_cycle,
+                              "scheduling/resource_validate");
 
       // All events reduce resources during scheduling should be handled here.
       // Resource increase(such as job ended) events are not considered here,
@@ -1117,7 +1128,16 @@ void TaskScheduler::ScheduleThread_() {
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
 
-          CRANE_TRACE_POINT_ATTR("Alloc Job", "job_id", job->TaskId());
+          {
+            CRANE_TRACE_SCOPE_NAMED(alloc_span, "job/alloc");
+            alloc_span.SetAttribute("job_id", job->TaskId());
+            alloc_span.SetAttribute("partition", job->partition_id);
+            alloc_span.SetAttribute(
+                "node_count",
+                static_cast<int64_t>(job->CranedIds().size()));
+            job->SetTraceparent(
+                crane::SerializeTraceParent(alloc_span.GetContext()));
+          }
 
           job->SetStatus(crane::grpc::TaskStatus::Configuring);
 
@@ -1152,6 +1172,11 @@ void TaskScheduler::ScheduleThread_() {
       // Resource has been subtracted, other resource reduce events are
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
+
+      rv_span.SetAttribute(
+          "allocated_count",
+          static_cast<int64_t>(jobs_to_run.size()));
+      rv_span.End();
 
       num_tasks_single_execution = jobs_to_run.size();
 
@@ -1194,6 +1219,11 @@ void TaskScheduler::ScheduleThread_() {
       std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
 
       // Move jobs into running queue.
+      CRANE_TRACE_CHILD_NAMED(db_span, sched_cycle,
+                              "scheduling/db_persist");
+      db_span.SetAttribute("job_count",
+                           static_cast<int64_t>(jobs_to_run.size()));
+
       txn_id_t txn_id{0};
       bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
       if (!ok) {
@@ -1242,6 +1272,7 @@ void TaskScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      db_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Append steps to embedded DB costed {} ms",
@@ -1251,6 +1282,12 @@ void TaskScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
+      CRANE_TRACE_CHILD_NAMED(rpc_aj_span, sched_cycle,
+                              "scheduling/rpc_alloc_jobs");
+      rpc_aj_span.SetAttribute(
+          "craned_count",
+          static_cast<int64_t>(craned_alloc_job_map.size()));
+
       std::latch alloc_job_latch(craned_alloc_job_map.size());
       for (auto&& iter : craned_alloc_job_map) {
         CranedId const& craned_id = iter.first;
@@ -1306,6 +1343,7 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      rpc_aj_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Alloc job costed {} ms",
@@ -1313,6 +1351,12 @@ void TaskScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+      CRANE_TRACE_CHILD_NAMED(rpc_as_span, sched_cycle,
+                              "scheduling/rpc_alloc_steps");
+      rpc_as_span.SetAttribute(
+          "craned_count",
+          static_cast<int64_t>(craned_alloc_steps.size()));
+
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1359,6 +1403,7 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      rpc_as_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Alloc daemon steps costed {} ms",
@@ -1404,6 +1449,13 @@ void TaskScheduler::ScheduleThread_() {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
+
+      sched_cycle.SetAttribute(
+          "allocated_count",
+          static_cast<int64_t>(jobs_created.size()));
+      sched_cycle.SetAttribute(
+          "failed_count",
+          static_cast<int64_t>(jobs_failed.size()));
 
       schedule_end = end;
       CRANE_TRACE(
@@ -3395,6 +3447,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   args.resize(actual_size);
   auto begin_time = std::chrono::steady_clock::now();
 
+  CRANE_TRACE_SCOPE_NAMED(sc_span, "status_change/process");
+  sc_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
+
   StepStatusChangeContext context{};
   context.rn_step_raw_ptrs.reserve(actual_size);
   context.step_ptrs.reserve(actual_size);
@@ -3447,7 +3502,16 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     if (job_finished_status.has_value()) {
       CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
                   job_finished_status.value());
-      CRANE_TRACE_POINT_ATTR("Receive Task End", "job_id", task->TaskId());
+      CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end",
+                                    task->Traceparent());
+      end_span.SetAttribute("job_id", task->TaskId());
+      end_span.SetAttribute(
+          "status",
+          static_cast<int64_t>(job_finished_status.value().first));
+      end_span.SetAttribute(
+          "exit_code",
+          static_cast<int64_t>(job_finished_status.value().second));
+
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
 
@@ -3539,6 +3603,15 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
   }
 
+  // Populate traceparent lookup for RPC worker threads
+  for (auto* job : context.rn_job_raw_ptrs)
+    context.job_traceparents[job->TaskId()] = job->Traceparent();
+  for (auto* job : context.job_raw_ptrs)
+    context.job_traceparents[job->TaskId()] = job->Traceparent();
+
+  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span,
+                          "status_change/rpc_fanout");
+
   std::latch alloc_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
 
@@ -3621,7 +3694,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         for (const auto& [job_id, step_ids] :
              context.craned_step_exec_map.at(craned_id)) {
-          CRANE_TRACE_POINT_ATTR("Execute Job", "job_id", job_id);
+          CRANE_TRACE_SCOPE_FROM_REMOTE(exec_span, "job/execute",
+                                        context.job_traceparents[job_id]);
+          exec_span.SetAttribute("job_id", job_id);
         }
         CraneExpected failed_steps =
             stub->ExecuteSteps(context.craned_step_exec_map.at(craned_id));
@@ -3706,7 +3781,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         const auto& jobs = context.craned_jobs_to_free.at(craned_id);
         for (const auto& job_id : jobs) {
-          CRANE_TRACE_POINT_ATTR("Release Job", "job_id", job_id);
+          CRANE_TRACE_SCOPE_FROM_REMOTE(rel_span, "job/release",
+                                        context.job_traceparents[job_id]);
+          rel_span.SetAttribute("job_id", job_id);
         }
         auto err = stub->FreeJobs(jobs);
         if (err != CraneErrCode::SUCCESS) {
@@ -3733,6 +3810,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   orphaned_step_latch.wait();
   cancel_step_latch.wait();
   free_job_latch.wait();
+  rpc_fanout_span.End();
+
+  CRANE_TRACE_CHILD_NAMED(db_commit_span, sc_span,
+                          "status_change/db_commit");
 
   txn_id_t txn_id;
 
@@ -3778,7 +3859,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   // Jobs will update in embedded db
   for (auto* job : context.rn_job_raw_ptrs) {
-    CRANE_TRACE_POINT_ATTR("Commit Job Status", "job_id", job->TaskId());
+    CRANE_TRACE_SCOPE_FROM_REMOTE(commit_span, "job/commit",
+                                  job->Traceparent());
+    commit_span.SetAttribute("job_id", job->TaskId());
     if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
                                                        job->RuntimeAttr()))
       CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfTask()",

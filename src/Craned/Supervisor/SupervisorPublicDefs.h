@@ -90,6 +90,7 @@ struct Config {
 
   struct TracingConfig {
     bool Enabled{false};
+    std::string Traceparent;
   };
   TracingConfig Tracing;
 
