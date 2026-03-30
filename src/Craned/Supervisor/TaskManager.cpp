@@ -2364,7 +2364,7 @@ CraneErrCode ProcInstance::Spawn() {
     std::unordered_map<std::string, std::string> pmix_env;
     if (m_parent_step_inst_->IsCrun() &&
         m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
-      auto result = g_pmix_server->SetupFork(task_id);
+      auto result = g_task_mgr->GetPmixServer()->SetupFork(task_id);
       if (!result) {
         fmt::print(stderr,
                    "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
@@ -2699,7 +2699,7 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
 bool TaskManager::InitPmixPreFork() {
   if (m_step_.IsCrun() &&
       m_step_.GetStep().interactive_meta().mpi() == "pmix") {
-    g_pmix_server = std::make_unique<pmix::PmixServer>();
+    m_pmix_server_ = std::make_unique<pmix::PmixServer>();
     pmix::Config pmix_config{
         .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
         .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
@@ -2708,8 +2708,37 @@ bool TaskManager::InitPmixPreFork() {
         .CraneScriptDir = g_config.CraneScriptDir,
         .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
 
-    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep()))
+    if (!m_pmix_server_->Init(pmix_config, m_step_.GetStep()))
       return false;
+  }
+
+  return true;
+}
+
+bool TaskManager::ReceivePmixPort(
+    const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
+  if (!m_pmix_server_) {
+    CRANE_ERROR("[Step#{}.{}] PMIx server is not initialized when receiving "
+               "pmix ports.",
+               g_config.JobId, g_config.StepId);
+    return false;
+  }
+
+  auto* pmix_client = m_pmix_server_->GetPmixClient();
+  if (!pmix_client) {
+    CRANE_ERROR("[Step#{}.{}] PMIx client is null when receiving pmix ports.",
+               g_config.JobId, g_config.StepId);
+    return false;
+  }
+
+  CRANE_DEBUG("[Step#{}.{}] Receiving {} PMIx port(s).",
+              g_config.JobId, g_config.StepId, request.pmix_ports().size());
+
+  for (const auto& pmix_port : request.pmix_ports()) {
+    CRANE_TRACE("[Step#{}.{}] Emplacing PMIx stub: craned_id={}, port={}",
+                g_config.JobId, g_config.StepId,
+                pmix_port.craned_id(), pmix_port.port());
+    pmix_client->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
   }
 
   return true;

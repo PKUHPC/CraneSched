@@ -182,7 +182,7 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib
     CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}",
       static_cast<void*>(&coll_ring_ctx), m_next_craned_id_, coll_ring_ctx.seq, hop_seq, data.size(), contrib_id);
 
-    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_next_craned_id_);
+    auto stub = m_pmix_client_->GetPmixStub(m_next_craned_id_);
     if (!stub) {
       CRANE_ERROR("{:p}, PmixStub is not get, cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
       coll_ring_ctx.ring_buf.clear();
@@ -227,7 +227,7 @@ void PmixCollRing::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   if (!coll_ring_ctx.in_use) {
     CRANE_ERROR("{:p}: coll_ring_ctx is not in use, seq={}, please check!",
                 static_cast<void*>(this), coll_ring_ctx.seq);
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return;
   }
 
@@ -326,7 +326,7 @@ bool PmixCollRing::ProcessRingRequest(
      * This will 100% lead to application hang.
      */
     CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return false;
   }
 

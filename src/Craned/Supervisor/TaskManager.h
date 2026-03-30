@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "Pmix.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
@@ -551,6 +552,9 @@ class TaskManager {
 
   bool InitPmixPreFork();
 
+  bool ReceivePmixPort(
+      const crane::grpc::supervisor::ReceivePmixPortRequest& request);
+
   void Wait();
   // Shutdown supervisor asynchronously with given status, exit code and reason.
   // Status change will be sent only if daemon step.
@@ -655,6 +659,8 @@ class TaskManager {
   void SetAllowDaemonShutdown() { m_allow_daemon_shutdown_ = true; }
 
   void Shutdown() { m_supervisor_exit_ = true; }
+
+  pmix::PmixServer* GetPmixServer() const { return m_pmix_server_.get(); }
 
  private:
   template <class T>
@@ -775,6 +781,8 @@ class TaskManager {
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
+
+  std::unique_ptr<pmix::PmixServer> m_pmix_server_;
 };
 
 }  // namespace Craned::Supervisor

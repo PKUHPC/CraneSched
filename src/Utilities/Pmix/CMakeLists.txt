@@ -21,6 +21,8 @@ add_library(Utility_Pmix
         
         CranedClient.h
         CranedClient.cpp
+        PmixCallbacks.h
+        PmixCallbacks.cpp
         PmixCommon.h
         PmixDModex.h
         PmixDModex.cpp

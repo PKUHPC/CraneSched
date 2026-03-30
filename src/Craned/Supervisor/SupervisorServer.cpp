@@ -19,7 +19,6 @@
 #include "SupervisorServer.h"
 
 #include "CranedClient.h"
-#include "Pmix.h"
 #include "TaskManager.h"
 
 namespace Craned::Supervisor {
@@ -116,20 +115,9 @@ grpc::Status SupervisorServiceImpl::ReceivePmixPort(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ReceivePmixPortRequest* request,
     crane::grpc::supervisor::ReceivePmixPortReply* response) {
-
-  CRANE_TRACE("Received ReceivePmixPort gRPC with {} pmix ports.", request->pmix_ports().size());
-
-  if (!g_pmix_server || !g_pmix_server->GetPmixClient()) {
-    CRANE_ERROR("PMIx server/client is not initialized.");
-    response->set_ok(false);
-    return Status::OK;
-  }
-
-  for (const auto& pmix_port : request->pmix_ports()) {
-    g_pmix_server->GetPmixClient()->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
-  }
-
-  response->set_ok(true);
+  CRANE_TRACE("Received ReceivePmixPort gRPC with {} pmix ports.",
+              request->pmix_ports().size());
+  response->set_ok(g_task_mgr->ReceivePmixPort(*request));
   return Status::OK;
 }
 

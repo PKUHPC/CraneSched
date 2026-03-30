@@ -31,6 +31,9 @@
 
 #ifdef HAVE_UCX
 #include <ucp/api/ucp.h>
+
+// Forward declaration so the constructor signature compiles without pulling in
+// the full PmixUcxClient header at this level.
 #endif
 
 #include <atomic>
@@ -39,6 +42,7 @@
 namespace pmix {
 
 class PmixUcxServer;
+class PmixUcxClient;
 
 #ifdef HAVE_UCX
 struct PmixUcxReq {
@@ -70,12 +74,20 @@ class PmixUcxServiceImpl {
 class PmixUcxServer : public PmixASyncServer {
  public:
 #ifdef HAVE_UCX
+  // main_uvw_loop — the PmixServer's primary uvw loop used to create the
+  //   cross-thread async handle (m_pmix_async_).
+  // ucx_client — the companion UCX client; injected here so Init() never
+  //   needs to call PmixServer::GetInstance().
   explicit PmixUcxServer(PmixDModexReqManager* dmodex_mgr,
                          PmixState*            pmix_state,
-                         CranedClient*         craned_client)
+                         CranedClient*         craned_client,
+                         uvw::loop*            main_uvw_loop,
+                         PmixUcxClient*        ucx_client)
       : m_dmodex_mgr_(dmodex_mgr),
         m_pmix_state_(pmix_state),
-        m_craned_client_(craned_client) {}
+        m_craned_client_(craned_client),
+        m_main_uvw_loop_(main_uvw_loop),
+        m_ucx_client_(ucx_client) {}
 
   ~PmixUcxServer() override { Shutdown(); }
 
@@ -109,6 +121,8 @@ class PmixUcxServer : public PmixASyncServer {
   PmixDModexReqManager* m_dmodex_mgr_;
   PmixState*            m_pmix_state_;
   CranedClient*         m_craned_client_;
+  uvw::loop*            m_main_uvw_loop_{nullptr}; // injected, not owned
+  PmixUcxClient*        m_ucx_client_{nullptr};    // injected, not owned
 
   std::shared_ptr<uvw::loop>         m_ucx_loop_;
   std::thread                        m_ucx_thread_;

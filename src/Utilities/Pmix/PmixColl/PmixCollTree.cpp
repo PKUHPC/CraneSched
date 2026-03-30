@@ -170,7 +170,7 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data, pmix_modex_cbfu
   default:
     CRANE_ERROR("{:p}: local contrib while active collective, state = {}", static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return false;
   }
 
@@ -265,9 +265,9 @@ bool PmixCollTree::ProgressCollect_() {
     request.set_msg(m_upfwd_buf_);
     request.set_seq(this->m_seq_);
 
-    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_parent_host_);
+    auto stub = m_pmix_client_->GetPmixStub(m_parent_host_);
     if (!stub) {
-      CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_upfwd_buf_.size(), this->m_parent_host_);
+      CRANE_ERROR("Stub not found for host: {}", this->m_parent_host_);
       this->m_upfwd_buf_.clear();
       this->m_upfwd_status_ = CollTreeSndState::FAILED;
       return false;
@@ -316,7 +316,7 @@ bool PmixCollTree::ProgressUpFwd_() {
   if (m_state_ != CollTreeState::UPFWD) {
     CRANE_ERROR("{:p}: invalid state {}, expected UPFWD", static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return false;
   }
 
@@ -342,7 +342,7 @@ bool PmixCollTree::ProgressUpFwd_() {
     default:
       CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
       m_state_ = CollTreeState::SYNC;
-      g_pmix_server->GetCranedClient()->TerminateTasks();
+      m_craned_client_->TerminateTasks();
       return false;
   }
 
@@ -367,7 +367,7 @@ bool PmixCollTree::ProgressUpFwd_() {
     request.set_msg(m_downfwd_buf_);
     request.set_seq(this->m_seq_);
 
-    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(host);
+    auto stub = m_pmix_client_->GetPmixStub(host);
     if (!stub) {
       CRANE_ERROR("stub is null, cannot send data (size = {}), to {}", this->m_downfwd_buf_.size(), host);
       this->m_downfwd_buf_.clear();
@@ -442,7 +442,7 @@ bool PmixCollTree::ProgressUpFwdWsc_() {
   default:
     CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
     m_state_ = CollTreeState::SYNC;
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return false;
   }
 
@@ -497,7 +497,7 @@ bool PmixCollTree::ProgressDownFwd_() {
     break;
   default:
     m_state_ = CollTreeState::SYNC;
-    g_pmix_server->GetCranedClient()->TerminateTasks();
+    m_craned_client_->TerminateTasks();
     return false;
   }
 
@@ -581,7 +581,7 @@ proceed:
 error:
   ResetCollTree_();
 error2:
-  g_pmix_server->GetCranedClient()->TerminateTasks();
+  m_craned_client_->TerminateTasks();
   return false;
 }
 
@@ -652,7 +652,7 @@ bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
 error:
   ResetCollTree_();
 error2:
-  g_pmix_server->GetCranedClient()->TerminateTasks();
+  m_craned_client_->TerminateTasks();
   return false;
 }
 
@@ -687,7 +687,7 @@ void PmixCollTree::ResetCollTree_() {
     default:
       m_state_ = CollTreeState::SYNC;
       CRANE_ERROR("unknown state {}", ToString(m_state_));
-      g_pmix_server->GetCranedClient()->TerminateTasks();
+      m_craned_client_->TerminateTasks();
   }
 }
 

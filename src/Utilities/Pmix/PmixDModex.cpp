@@ -21,6 +21,7 @@
 #include "CranedClient.h"
 #include "Pmix.h"
 #include "PmixCommon.h"
+#include "PmixConn/PmixClient.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "crane/Logger.h"
 #include "protos/Crane.pb.h"
@@ -34,7 +35,8 @@ namespace {
 void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData *>(cbdata);
 
-  CRANE_DEBUG("DmodexFn is called");
+  CRANE_DEBUG("DModexOpCb: seq_num={}, craned_id={}", dmo_modex_cb_data->seq_num,
+              dmo_modex_cb_data->craned_id);
 
   crane::grpc::pmix::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
@@ -42,17 +44,18 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   request.set_status(PMIX_SUCCESS);
   request.set_craned_id(dmo_modex_cb_data->craned_id);
 
-  if (!g_pmix_server->GetPmixClient()) {
-    CRANE_ERROR("PmicClient is null, cannot send direct modex response to {}",
+  // Use the injected PmixClient pointer — no global access needed.
+  if (!dmo_modex_cb_data->pmix_client) {
+    CRANE_ERROR("PmixClient is null in DModexCbData, cannot send direct modex response to {}",
                 dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
   }
 
-  auto stub =
-      g_pmix_server->GetPmixClient()->GetPmixStub(dmo_modex_cb_data->craned_id);
+  auto stub = dmo_modex_cb_data->pmix_client->GetPmixStub(dmo_modex_cb_data->craned_id);
   if (!stub) {
-    CRANE_ERROR("Stub for craned_id {} not found, cannot send direct modex response.", dmo_modex_cb_data->craned_id);
+    CRANE_ERROR("Stub for craned_id={} not found, cannot send direct modex response.",
+                dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
   }
@@ -113,10 +116,10 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   request.set_local_namespace(pmix_namespace);
   request.set_craned_id(m_pmix_job_info_.hostname);
 
-  auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(craned_id);
+  auto stub = m_pmix_client_->GetPmixStub(craned_id);
   if (!stub) {
-    CRANE_ERROR("[#{}] Stub {} is not get, pmixDModex rpc failed.",
-                pmix_namespace, craned_id);
+    CRANE_ERROR("DModexGet: stub for {} not found, pmixDModex rpc failed.",
+                craned_id);
     PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
                        nullptr);
     return false;
@@ -164,6 +167,7 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
   dmo_modex_cb_data->craned_id = craned_id;
   dmo_modex_cb_data->nspace = pmix_proc.nspace;
   dmo_modex_cb_data->rank = pmix_proc.rank;
+  dmo_modex_cb_data->pmix_client = m_pmix_client_;  // inject client pointer
   auto rc = PMIx_server_dmodex_request(&pmix_proc, DModexOpCb,
                                        dmo_modex_cb_data.release());
   if (rc != PMIX_SUCCESS) {
@@ -208,9 +212,9 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
   request.set_status(status);
   request.set_seq_num(seq_num);
 
-  auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(craned_id);
+  auto stub = m_pmix_client_->GetPmixStub(craned_id);
   if (!stub) {
-    CRANE_ERROR("Stub is null, cannot send direct modex error response to {}", craned_id);
+    CRANE_ERROR("ResponseWithError_: stub for {} is null", craned_id);
     return;
   }
 
@@ -228,7 +232,7 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
     util::lock_guard lock(m_dmodex_mutex_);
     auto it = m_pmix_dmodex_req_list_.begin();
     while (it != m_pmix_dmodex_req_list_.end()) {
-      if (now - it->ts > g_pmix_server->GetTimeout()) {
+      if (static_cast<uint64_t>(now - it->ts) > m_timeout_) {
         CRANE_ERROR("DModex request with seq_num={} timed out!", it->seq_num);
         PmixLibModexInvoke(it->cb_func, PMIX_ERR_TIMEOUT, nullptr, 0,
                            it->cb_data, nullptr, nullptr);

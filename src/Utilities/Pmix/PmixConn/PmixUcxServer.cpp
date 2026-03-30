@@ -162,7 +162,7 @@ bool PmixUcxServer::Init(const Config& config) {
 
   {
     auto* ucx_client =
-        dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
+        m_ucx_client_;
     if (!ucx_client) {
       CRANE_ERROR("GetPmixClient() is not PmixUcxClient");
       goto err_addr;
@@ -180,7 +180,7 @@ bool PmixUcxServer::Init(const Config& config) {
   }
 
   m_pmix_async_ =
-      g_pmix_server->GetUvwLoop()->resource<uvw::async_handle>();
+      m_main_uvw_loop_->resource<uvw::async_handle>();
   m_pmix_async_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanUcxProcessReqQueueCb_();
@@ -188,7 +188,7 @@ bool PmixUcxServer::Init(const Config& config) {
 
   {
     auto* ucx_client =
-        dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
+        m_ucx_client_;
     if (ucx_client) {
       ucx_client->SetNotifyFn([this]() {
         if (m_pmix_async_) m_pmix_async_->send();
@@ -385,7 +385,7 @@ void PmixUcxServer::RecvHandle_(void*                      ucp_req,
 void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
   {
     auto* ucx_client =
-        dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
+        m_ucx_client_;
     if (ucx_client) ucx_client->DrainSendCallbacks();
   }
 
