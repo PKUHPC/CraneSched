@@ -357,7 +357,7 @@ grpc::Status CranedServiceImpl::SuspendJobs(
   }
 
   bool all_ok = true;
-  for (auto job_id : request->job_ids()) {
+  for (auto job_id : request->job_id_list()) {
     auto steps = g_job_mgr->GetAllocatedJobSteps(job_id);
     for (auto step_id : steps) {
       auto stub = g_job_mgr->GetSupervisorStub(job_id, step_id);
@@ -390,7 +390,7 @@ grpc::Status CranedServiceImpl::ResumeJobs(
   }
 
   bool all_ok = true;
-  for (auto job_id : request->job_ids()) {
+  for (auto job_id : request->job_id_list()) {
     auto steps = g_job_mgr->GetAllocatedJobSteps(job_id);
     for (auto step_id : steps) {
       auto stub = g_job_mgr->GetSupervisorStub(job_id, step_id);

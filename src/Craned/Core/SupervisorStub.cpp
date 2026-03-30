@@ -203,7 +203,7 @@ CraneErrCode SupervisorStub::SuspendJob(job_id_t job_id) {
   ClientContext context;
   crane::grpc::supervisor::SuspendJobRequest request;
   crane::grpc::supervisor::SuspendJobReply reply;
-  request.set_job_id(job_id);
+  (void)job_id;
   auto ok = m_stub_->SuspendJob(&context, request, &reply);
   if (ok.ok())
     return reply.ok() ? CraneErrCode::SUCCESS
@@ -216,7 +216,7 @@ CraneErrCode SupervisorStub::ResumeJob(job_id_t job_id) {
   ClientContext context;
   crane::grpc::supervisor::ResumeJobRequest request;
   crane::grpc::supervisor::ResumeJobReply reply;
-  request.set_job_id(job_id);
+  (void)job_id;
   auto ok = m_stub_->ResumeJob(&context, request, &reply);
   if (ok.ok())
     return reply.ok() ? CraneErrCode::SUCCESS

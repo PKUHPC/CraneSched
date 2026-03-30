@@ -317,7 +317,7 @@ CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t> &job_ids) {
 
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
-  for (auto id : job_ids) request.add_job_ids(id);
+  for (auto id : job_ids) request.add_job_id_list(id);
   status = m_stub_->SuspendJobs(&context, request, &reply);
 
   if (!status.ok()) {
@@ -343,7 +343,7 @@ CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
 
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
-  for (auto id : job_ids) request.add_job_ids(id);
+  for (auto id : job_ids) request.add_job_id_list(id);
   status = m_stub_->ResumeJobs(&context, request, &reply);
 
   if (!status.ok()) {
