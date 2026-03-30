@@ -481,10 +481,19 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
     resolved_path = resolved_path / fmt::format("Crane-{}.out", g_config.JobId);
 
   std::string resolved_path_pattern = resolved_path.string();
+
   absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
                        {"%u", m_parent_step_inst_->pwd.Username()},
                        {"%x", m_parent_step_inst_->GetStep().name()}},
                       &resolved_path_pattern);
+
+  // Replace %a only for array jobs (when array_task_id is set in proto)
+  if (m_parent_step_inst_->GetStep().has_array_task_id()) {
+    absl::StrReplaceAll(
+        {{"%a",
+          std::to_string(m_parent_step_inst_->GetStep().array_task_id())}},
+        &resolved_path_pattern);
+  }
 
   return resolved_path_pattern;
 }

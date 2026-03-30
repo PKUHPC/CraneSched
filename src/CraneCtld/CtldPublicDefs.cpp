@@ -599,6 +599,11 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCount());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
 
+  // Pass array_task_id from TaskToCtld to StepToD via proto field
+  if (job->TaskToCtld().has_array_task_id()) {
+    step_to_d.set_array_task_id(job->TaskToCtld().array_task_id());
+  }
+
   return step_to_d;
 }
 
@@ -1794,6 +1799,11 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
     (*mutable_env)[k] = v;
   }
   job_info->set_ntasks(ntasks);
+
+  // Fill array_task_id from TaskToCtld for cqueue/cacct display
+  if (TaskToCtld().has_array_task_id()) {
+    job_info->set_array_task_id(TaskToCtld().array_task_id());
+  }
 }
 
 int JobInCtld::SchedulePendingSteps(

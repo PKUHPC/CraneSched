@@ -93,6 +93,10 @@ message SubmitBatchJobReply {
 message SubmitBatchJobsRequest {
   JobToCtld job = 1;
   uint32 count = 2;
+  // Array mode: index list for array tasks.
+  // When non-empty, array mode is used and count field is ignored.
+  // Backend loops over this list to create tasks.
+  repeated uint32 array_task_ids = 3;
 }
 
 message SubmitBatchJobsReply {

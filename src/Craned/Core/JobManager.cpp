@@ -91,6 +91,13 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+
+  // Inject CRANE_ARRAY_TASK_ID from StepToD proto field for array jobs
+  if (daemon_step_to_d.has_array_task_id()) {
+    env_map.emplace("CRANE_ARRAY_TASK_ID",
+                    std::to_string(daemon_step_to_d.array_task_id()));
+  }
+
   return env_map;
 }
 

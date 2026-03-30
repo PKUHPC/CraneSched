@@ -614,13 +614,24 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
 
   std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
 
-  uint32_t job_count = request->count();
+  bool is_array = request->array_task_ids_size() > 0;
+  uint32_t job_count =
+      is_array ? request->array_task_ids_size() : request->count();
   const auto& job_to_ctld = request->job();
   results.reserve(job_count);
 
-  for (int i = 0; i < job_count; i++) {
+  for (uint32_t i = 0; i < job_count; i++) {
     auto job = std::make_unique<JobInCtld>();
-    job->SetFieldsByJobToCtld(job_to_ctld);
+
+    if (is_array) {
+      // Array mode: copy job_to_ctld and set array_task_id proto field
+      auto modified_job = job_to_ctld;
+      modified_job.set_array_task_id(
+          static_cast<int32_t>(request->array_task_ids(i)));
+      job->SetFieldsByJobToCtld(modified_job);
+    } else {
+      job->SetFieldsByJobToCtld(job_to_ctld);
+    }
 
     auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
     results.emplace_back(std::move(result));

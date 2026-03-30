@@ -240,6 +240,9 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional DeviceMap gres_per_node = 52;
+
+  // Array task index, -1 means non-array job
+  optional int32 array_task_id = 60;
 }
 
 message JobInEmbeddedDb {
@@ -420,6 +423,9 @@ message StepToD {
   string task_prolog = 30;
   string task_epilog = 31;
   repeated Signal signals = 32;
+
+  // Array task index, passed from CraneCtld to Craned via RPC
+  optional int32 array_task_id = 40;
 }
 
 message JobStepsToD {
@@ -605,6 +611,9 @@ message JobInfo {
   map<string, string> env = 42;
   string submit_hostname = 43;
   uint32 ntasks = 44;
+
+  // Array task index
+  optional int32 array_task_id = 50;
 }
 
 message StepInfo {
