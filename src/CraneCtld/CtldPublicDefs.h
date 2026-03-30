@@ -947,6 +947,12 @@ struct JobInCtld {
 
   double mandated_priority{0.0};
 
+  // Wall-clock time when the job was suspended.
+  // Used to extend end_time upon resume so that suspended time
+  // does not count toward the execution timeout (matching Slurm behavior).
+  // Persisted to the database via RuntimeAttr.
+  absl::Time suspend_time{absl::InfinitePast()};
+
   // Helper function
  public:
   // =================== Get Attr ==================
@@ -1014,6 +1020,9 @@ struct JobInCtld {
   void SetEndTimeByUnixSecond(uint64_t val);
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
+
+  void SetSuspendTime(absl::Time const& val);
+  absl::Time const& SuspendTime() const { return suspend_time; }
 
   void SetActualLicenses(
       std::unordered_map<LicenseId, uint32_t>&& actual_licenses);

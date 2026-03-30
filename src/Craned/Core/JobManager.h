@@ -117,6 +117,11 @@ class JobManager {
 
   std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
 
+  std::vector<step_id_t> GetAllocatedJobSteps(job_id_t job_id);
+
+  std::shared_ptr<SupervisorStub> GetSupervisorStub(job_id_t job_id,
+                                                    step_id_t step_id);
+
   uint32_t GetStepExitCode(job_id_t job_id, step_id_t step_id);
   google::protobuf::Timestamp GetStepEndTime(job_id_t job_id,
                                              step_id_t step_id);

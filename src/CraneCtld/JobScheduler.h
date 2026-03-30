@@ -789,6 +789,11 @@ class JobScheduler {
       job_id_t job_id, std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
 
+  std::vector<CraneErrCode> SuspendRunningJobs(
+      const std::vector<task_id_t>& job_ids);
+  std::vector<CraneErrCode> ResumeSuspendedJobs(
+      const std::vector<task_id_t>& job_ids);
+
   CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
 
   CraneErrCode ChangeJobExtraAttrs(job_id_t job_id,

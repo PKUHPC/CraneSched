@@ -53,6 +53,8 @@ class SupervisorStub {
       std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
   CraneErrCode MigrateSshProcToCg(pid_t pid);
+  CraneErrCode SuspendJob(job_id_t job_id);
+  CraneErrCode ResumeJob(job_id_t job_id);
   CraneErrCode ShutdownSupervisor();
 
  private:

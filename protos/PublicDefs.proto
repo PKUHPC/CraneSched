@@ -117,8 +117,9 @@ enum JobStatus {
   Configuring = 7;
   Starting = 8;
   Completing = 9;
+  Suspended = 10;
+  Deadline = 11;
 
-  Deadline = 10;
   Invalid = 15;
 }
 
@@ -274,6 +275,11 @@ message RuntimeAttrOfJob {
   JobStatus primary_step_status = 21;
   uint32 primary_step_exit_code = 22;
   map<string, uint32> actual_licenses = 23;
+
+  // Wall-clock time when the job was suspended.
+  // Used to extend end_time upon resume so that suspended time
+  // does not count toward the execution timeout.
+  google.protobuf.Timestamp suspend_time = 24;
 }
 
 message StepToCtld {

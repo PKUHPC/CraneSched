@@ -1548,6 +1548,17 @@ void JobInCtld::SetEndTimeByUnixSecond(uint64_t val) {
   runtime_attr.mutable_end_time()->set_seconds(val);
 }
 
+void JobInCtld::SetSuspendTime(absl::Time const& val) {
+  suspend_time = val;
+  // Use 0 to represent "not suspended" (InfinitePast) in the proto,
+  // since a valid suspend timestamp is always > 0.
+  if (val == absl::InfinitePast()) {
+    runtime_attr.mutable_suspend_time()->set_seconds(0);
+  } else {
+    runtime_attr.mutable_suspend_time()->set_seconds(ToUnixSeconds(val));
+  }
+}
+
 void JobInCtld::SetActualLicenses(
     std::unordered_map<LicenseId, uint32_t>&& actual_licenses) {
   auto* mutable_map = runtime_attr.mutable_actual_licenses();
@@ -1741,6 +1752,13 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
   licenses_count = std::unordered_map{runtime_attr.actual_licenses().begin(),
                                       runtime_attr.actual_licenses().end()};
+
+  int64_t suspend_sec = runtime_attr.suspend_time().seconds();
+  if (suspend_sec > 0) {
+    suspend_time = absl::FromUnixSeconds(suspend_sec);
+  } else {
+    suspend_time = absl::InfinitePast();
+  }
 }
 
 void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {

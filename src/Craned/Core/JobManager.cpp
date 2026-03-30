@@ -960,6 +960,27 @@ JobManager::GetAllocatedJobSteps() {
   return job_steps;
 }
 
+std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
+  std::vector<step_id_t> result;
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return result;
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  for (const auto& [step_id, step] : job_ptr->step_map) {
+    result.push_back(step_id);
+  }
+  return result;
+}
+
+std::shared_ptr<SupervisorStub> JobManager::GetSupervisorStub(
+    job_id_t job_id, step_id_t step_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return nullptr;
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  auto it = job_ptr->step_map.find(step_id);
+  if (it == job_ptr->step_map.end()) return nullptr;
+  return it->second->supervisor_stub;
+}
+
 uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {

@@ -306,6 +306,58 @@ CraneErrCode CranedStub::ChangeJobTimeConstraint(
   return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
+CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t> &job_ids) {
+  using crane::grpc::SuspendJobsReply;
+  using crane::grpc::SuspendJobsRequest;
+
+  ClientContext context;
+  Status status;
+  SuspendJobsRequest request;
+  SuspendJobsReply reply;
+
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto id : job_ids) request.add_job_ids(id);
+  status = m_stub_->SuspendJobs(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("SuspendJobs to Craned {} failed: {} ", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
+  using crane::grpc::ResumeJobsReply;
+  using crane::grpc::ResumeJobsRequest;
+
+  ClientContext context;
+  Status status;
+  ResumeJobsRequest request;
+  ResumeJobsReply reply;
+
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto id : job_ids) request.add_job_ids(id);
+  status = m_stub_->ResumeJobs(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("ResumeJobs to Craned {} failed: {} ", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
 crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(
     const crane::grpc::AttachContainerStepRequest &request) {
   using crane::grpc::AttachContainerStepReply;

@@ -611,6 +611,16 @@ class CgroupManager {
   static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
                                           uint64_t &oom_kill, uint64_t &oom);
 
+  // Freeze/Thaw cgroup by absolute cgroup path.
+  // For cgroup v1: writes "FROZEN"/"THAWED" to freezer.state
+  // For cgroup v2: writes "1"/"0" to cgroup.freeze
+  static bool FreezeCgroupByPath(const std::string &cg_path);
+  static bool ThawCgroupByPath(const std::string &cg_path);
+
+  // Freeze/Thaw all child cgroups under the given path.
+  static bool FreezeChildCgroupsByPath(const std::string &cg_path);
+  static bool ThawChildCgroupsByPath(const std::string &cg_path);
+
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
       const std::string &cgroup_str, ControllerFlags preferred_controllers,

@@ -864,6 +864,92 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   return true;
 }
 
+namespace {
+
+bool WriteFreezerValue(const std::filesystem::path &file_path,
+                       const std::string &value) {
+  std::ofstream ofs(file_path);
+  if (!ofs.is_open()) {
+    CRANE_ERROR("Failed to open freezer file: {}", file_path.string());
+    return false;
+  }
+  ofs << value;
+  if (ofs.fail()) {
+    CRANE_ERROR("Failed to write '{}' to freezer file: {}", value,
+                file_path.string());
+    return false;
+  }
+  return true;
+}
+
+bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
+  std::error_code ec;
+  if (!std::filesystem::exists(cg_path, ec)) {
+    CRANE_ERROR("Cgroup path '{}' does not exist: {}", cg_path, ec.message());
+    return false;
+  }
+
+  if (CgroupManager::IsCgV2()) {
+    // cgroup v2: write "1" to freeze, "0" to thaw via cgroup.freeze
+    auto freeze_file = std::filesystem::path(cg_path) / "cgroup.freeze";
+    return WriteFreezerValue(freeze_file, freeze ? "1" : "0");
+  }
+
+  // cgroup v1: write "FROZEN"/"THAWED" to freezer.state under the freezer
+  // controller hierarchy
+  auto freezer_path =
+      CgConstant::kSystemCgPathPrefix /
+      CgConstant::GetControllerStringView(
+          CgConstant::Controller::FREEZE_CONTROLLER) /
+      std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
+
+  if (!std::filesystem::exists(freezer_path, ec)) {
+    CRANE_ERROR("Freezer cgroup path '{}' does not exist: {}",
+                freezer_path.string(), ec.message());
+    return false;
+  }
+
+  auto state_file = freezer_path / "freezer.state";
+  return WriteFreezerValue(state_file, freeze ? "FROZEN" : "THAWED");
+}
+
+bool ChangeChildCgroupsFreezerState(const std::string &cg_path, bool freeze) {
+  std::error_code ec;
+  bool all_ok = true;
+  for (auto &entry : std::filesystem::directory_iterator(cg_path, ec)) {
+    if (entry.is_directory(ec)) {
+      if (!ChangeFreezerStateByPath(entry.path().string(), freeze)) {
+        CRANE_ERROR("Failed to {} child cgroup: {}", freeze ? "freeze" : "thaw",
+                    entry.path().string());
+        all_ok = false;
+      }
+    }
+  }
+  return all_ok;
+}
+
+}  // namespace
+
+bool CgroupManager::FreezeCgroupByPath(const std::string &cg_path) {
+  CRANE_DEBUG("Freezing cgroup: {}", cg_path);
+  return ChangeFreezerStateByPath(cg_path, true);
+}
+
+bool CgroupManager::ThawCgroupByPath(const std::string &cg_path) {
+  CRANE_DEBUG("Thawing cgroup: {}", cg_path);
+  return ChangeFreezerStateByPath(cg_path, false);
+}
+
+bool CgroupManager::FreezeChildCgroupsByPath(const std::string &cg_path) {
+  CRANE_DEBUG("Freezing child cgroups under: {}", cg_path);
+  return ChangeChildCgroupsFreezerState(cg_path, true);
+}
+
+bool CgroupManager::ThawChildCgroupsByPath(const std::string &cg_path) {
+  CRANE_DEBUG("Thawing child cgroups under: {}", cg_path);
+  return ChangeChildCgroupsFreezerState(cg_path, false);
+}
+
 bool Cgroup::SetControllerValue(CgConstant::Controller controller,
                                 CgConstant::ControllerFile controller_file,
                                 uint64_t value) {

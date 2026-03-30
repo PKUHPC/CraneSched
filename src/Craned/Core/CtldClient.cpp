@@ -622,6 +622,24 @@ void CtldClient::Init() {
               continue;
             }
 
+            // Handle Suspended status from Ctld: re-freeze cgroup to ensure
+            // consistency after Craned restart
+            if (ctld_status == StepStatus::Suspended) {
+              CRANE_INFO(
+                  "[Step #{}.{}] Ctld reports Suspended, re-freezing cgroup.",
+                  job_id, step_id);
+              auto stub = g_job_mgr->GetSupervisorStub(job_id, step_id);
+              if (stub) {
+                stub->SuspendJob(job_id);
+              } else {
+                CRANE_WARN(
+                    "[Step #{}.{}] Failed to get supervisor stub for "
+                    "re-freeze during recovery.",
+                    job_id, step_id);
+              }
+              continue;
+            }
+
             int ctld_priority = GetStatusPriority(ctld_status);
             int craned_priority = GetStatusPriority(craned_status);
 

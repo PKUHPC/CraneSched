@@ -199,6 +199,32 @@ CraneErrCode SupervisorStub::MigrateSshProcToCg(pid_t pid) {
   }
 }
 
+CraneErrCode SupervisorStub::SuspendJob(job_id_t job_id) {
+  ClientContext context;
+  crane::grpc::supervisor::SuspendJobRequest request;
+  crane::grpc::supervisor::SuspendJobReply reply;
+  request.set_job_id(job_id);
+  auto ok = m_stub_->SuspendJob(&context, request, &reply);
+  if (ok.ok())
+    return reply.ok() ? CraneErrCode::SUCCESS
+                      : CraneErrCode::ERR_GENERIC_FAILURE;
+  CRANE_ERROR("SuspendJob RPC failed: {}", ok.error_message());
+  return CraneErrCode::ERR_RPC_FAILURE;
+}
+
+CraneErrCode SupervisorStub::ResumeJob(job_id_t job_id) {
+  ClientContext context;
+  crane::grpc::supervisor::ResumeJobRequest request;
+  crane::grpc::supervisor::ResumeJobReply reply;
+  request.set_job_id(job_id);
+  auto ok = m_stub_->ResumeJob(&context, request, &reply);
+  if (ok.ok())
+    return reply.ok() ? CraneErrCode::SUCCESS
+                      : CraneErrCode::ERR_GENERIC_FAILURE;
+  CRANE_ERROR("ResumeJob RPC failed: {}", ok.error_message());
+  return CraneErrCode::ERR_RPC_FAILURE;
+}
+
 CraneErrCode SupervisorStub::ShutdownSupervisor() {
   ClientContext context;
   crane::grpc::supervisor::ShutdownSupervisorRequest request;
