@@ -20,12 +20,15 @@
 #pragma once
 
 #include "PmixColl.h"
-
 #include "PmixCommon.h"
-
 #include "crane/Logger.h"
 
 namespace pmix {
+
+// Forward declarations — full types included in PmixCollTree.cpp.
+class PmixClient;
+class CranedClient;
+
 
 enum class CollTreeState : std::uint8_t {
   SYNC,
@@ -68,8 +71,13 @@ inline std::string ToString(CollTreeSndState state) {
 class PmixCollTree : public Coll, public std::enable_shared_from_this<PmixCollTree> {
 public:
 #ifdef HAVE_PMIX
-  PmixCollTree(const PmixJobInfo& job_info)
-      : m_pmix_job_info_(job_info) {};
+  // pmix_client and craned_client are injected so this class never needs to
+  // call PmixServer::GetInstance().
+  PmixCollTree(const PmixJobInfo& job_info, PmixClient* pmix_client,
+               CranedClient* craned_client)
+      : m_pmix_job_info_(job_info),
+        m_pmix_client_(pmix_client),
+        m_craned_client_(craned_client) {}
 
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) override;
 
@@ -114,7 +122,9 @@ private:
     uint32_t seq;
   };
 
-  PmixJobInfo m_pmix_job_info_;
+  PmixJobInfo   m_pmix_job_info_;
+  PmixClient*   m_pmix_client_{nullptr};   // injected, not owned
+  CranedClient* m_craned_client_{nullptr}; // injected, not owned
 
   CollTreeState m_state_;
   bool m_contrib_local_;

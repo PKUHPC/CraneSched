@@ -27,17 +27,29 @@
 
 namespace pmix {
 
+// Forward declarations — avoid including PmixConn headers at this level.
+class PmixClient;
+class CranedClient;
+
 class PmixState {
 public:
 #ifdef HAVE_PMIX
-  PmixState(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
-  
-  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs);
+  // pmix_client and craned_client are injected so collective objects created
+  // here never need to call PmixServer::GetInstance().
+  PmixState(const PmixJobInfo& job_info, PmixClient* pmix_client,
+            CranedClient* craned_client)
+      : m_pmix_job_info_(job_info),
+        m_pmix_client_(pmix_client),
+        m_craned_client_(craned_client) {}
+
+  std::shared_ptr<Coll> PmixStateCollGet(CollType type,
+                                          const std::vector<pmix_proc_t>& procs);
 
   // TODO: pmixp_state_coll_cleanup();
 private:
-
-  PmixJobInfo m_pmix_job_info_;
+  PmixJobInfo   m_pmix_job_info_;
+  PmixClient*   m_pmix_client_{nullptr};   // injected, not owned
+  CranedClient* m_craned_client_{nullptr}; // injected, not owned
 
   util::rw_mutex m_mutex_;
   std::vector<std::shared_ptr<Coll>> m_coll_list_;

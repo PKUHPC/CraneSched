@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "CranedClient.h"
+#include "PmixCallbacks.h"
 #include "PmixConn/PmixASyncServer.h"
 #include "PmixConn/PmixClient.h"
 #include "PmixConn/PmixUcxServer.h"
@@ -56,6 +57,11 @@ class PmixServer {
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(
       uint32_t rank);
 
+  // Returns the singleton PmixServer instance (valid after Init(), null after
+  // destruction).  All PMIx C callbacks reach server state through this accessor
+  // instead of a raw global variable.
+  static PmixServer* GetInstance() { return s_instance_; }
+
   uint64_t GetTimeout() const { return m_timeout_; }
 
   std::string GetFenceType() const { return m_pmix_job_info_.fence_type; }
@@ -80,6 +86,10 @@ class PmixServer {
   template <typename T>
   pmix_info_t InfoLoad_(const std::string& key, const T& val,
                         pmix_data_type_t data_type);
+
+  // Singleton instance pointer — set by Init(), cleared by ~PmixServer().
+  // Private so external code must use GetInstance().
+  static PmixServer* s_instance_;
 #endif
 
   PmixJobInfo m_pmix_job_info_;
@@ -100,5 +110,3 @@ class PmixServer {
 };
 
 }  // namespace pmix
-
-inline std::unique_ptr<pmix::PmixServer> g_pmix_server;
