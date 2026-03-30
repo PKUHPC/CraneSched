@@ -209,7 +209,7 @@ bool PmixUcxServer::Init(const Config& config) {
   m_ucx_stop_ = m_ucx_loop_->resource<uvw::async_handle>();
   m_ucx_stop_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        // 收到停止信号: 关闭 UCX Loop 的所有句柄
+        // Received stop signal: close all handles in the UCX loop
         if (m_ucx_poll_) {
           m_ucx_poll_->stop();
           m_ucx_poll_->close();

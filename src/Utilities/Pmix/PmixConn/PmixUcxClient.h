@@ -78,7 +78,7 @@ class PmixUcxStub : public PmixStub {
       AsyncCallback callback) override;
 
  private:
-  // 序列化 payload → 打 tag → 投递异步 send
+  // Serialize payload → apply tag → post async send
   void SendMessage_(PmixUcxMsgType type,
                     std::string    data,
                     AsyncCallback  callback);

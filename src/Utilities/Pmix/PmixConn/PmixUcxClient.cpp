@@ -81,7 +81,7 @@ void PmixUcxStub::SendMessage_(PmixUcxMsgType type,
     delete ctx;
     if (m_client_->m_notify_fn_) m_client_->m_notify_fn_();
   }
-  // else: 异步 — SendHandle_ 负责入队 + 通知
+  // else: async — SendHandle_ is responsible for enqueuing + notification
 }
 
 
