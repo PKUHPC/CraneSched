@@ -197,11 +197,14 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 
   m_cleanup_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-         m_dmodex_mgr_->CleanupTimeoutRequests();
+        // Periodically clean up timed-out direct-modex requests.
+        m_dmodex_mgr_->CleanupTimeoutRequests();
+        // Periodically abort collectives that have been stalled too long.
+        m_pmix_state_->CleanupTimeoutColls(m_timeout_);
       }
   );
 
-  m_cleanup_timer_handle_->start(std::chrono::seconds(m_timeout_), std::chrono::seconds(m_timeout_));
+  m_cleanup_timer_handle_->start(m_timeout_, m_timeout_);
 
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PmixLoopThread_");
@@ -342,10 +345,10 @@ bool PmixServer::InfoSet_(const Config& config, const crane::grpc::StepToD& step
     auto timeout_str = step.env().at("CRANE_PMIX_TIMEOUT");
     if (timeout_str != "") {
       try {
-        m_timeout_ = std::stoul(timeout_str);
+        m_timeout_ = std::chrono::seconds(std::stoul(timeout_str));
       } catch (const std::exception& e) {
         CRANE_WARN("Failed to parse {} with error {}, use default timeout {}s",
-                  timeout_str, e.what(), m_timeout_);
+                  timeout_str, e.what(), m_timeout_.count());
       }
     }
   }

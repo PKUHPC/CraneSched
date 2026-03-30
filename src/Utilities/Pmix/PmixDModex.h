@@ -51,7 +51,7 @@ public:
   // pmix_client and timeout are injected at construction time so this class
   // never needs to call PmixServer::GetInstance().
   PmixDModexReqManager(const PmixJobInfo& job_info, PmixClient* pmix_client,
-                        uint64_t timeout)
+                        std::chrono::seconds timeout)
       : m_pmix_job_info_(job_info),
         m_pmix_client_(pmix_client),
         m_timeout_(timeout) {}
@@ -72,16 +72,16 @@ private:
   void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
                           int status);
 
-  PmixJobInfo  m_pmix_job_info_;
-  PmixClient*  m_pmix_client_{nullptr};  // injected, not owned
-  uint64_t     m_timeout_{5};
+  PmixJobInfo          m_pmix_job_info_;
+  PmixClient*          m_pmix_client_{nullptr};  // injected, not owned
+  std::chrono::seconds m_timeout_{5};
 
-  struct PmixDModexReq {
-    uint32_t seq_num;
-    time_t   ts;
-    pmix_modex_cbfunc_t cb_func;
-    void*    cb_data;
-  };
+   struct PmixDModexReq {
+     uint32_t seq_num;
+     std::chrono::steady_clock::time_point ts;
+     pmix_modex_cbfunc_t cb_func;
+     void* cb_data;
+   };
 
   uint32_t      m_dmdx_seq_num_ = 0;
   util::mutex   m_dmodex_mutex_;

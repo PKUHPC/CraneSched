@@ -156,7 +156,7 @@ CollRingCtx* PmixCollRing::CollRingCtxNew_() {
 bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
                            uint32_t hop_seq, const std::string& data) {
 
-  m_ts_ = time(nullptr);
+  m_ts_ = std::chrono::steady_clock::now();
   coll_ring_ctx.ring_buf.append(data);
 
   /* check for ring is complete */
@@ -270,6 +270,37 @@ void PmixCollRing::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   } while (result);
 }
 
+void PmixCollRing::AbortOnTimeout() {
+  std::lock_guard lock(m_lock_);
+
+  // Check whether any context is actively progressing (not just idle SYNC).
+  bool any_active = std::ranges::any_of(m_ctx_array_, [](const CollRingCtx& ctx) {
+    return ctx.in_use && ctx.state != CollRingState::SYNC;
+  });
+
+  if (!any_active) return;
+
+  CRANE_ERROR("coll {:p}: ring collective timed out (seq={})",
+              static_cast<void*>(this), m_seq_);
+
+  // Fire the pending callback with a timeout error so the MPI process is
+  // not left waiting forever.
+  if (m_cbfunc_) {
+    m_cbfunc_(PMIX_ERR_TIMEOUT, nullptr, 0, m_cbdata_, nullptr, nullptr);
+    m_cbfunc_ = nullptr;
+    m_cbdata_ = nullptr;
+  }
+
+  // Reset every in-use ring context.
+  for (auto& ctx : m_ctx_array_) {
+    if (ctx.in_use) ResetCollRing_(ctx);
+  }
+
+  // Clear the activity timestamp so IsTimedOut() returns false for the
+  // freshly reset (SYNC) state.
+  m_ts_ = {};
+}
+
 void PmixCollRing::RingReleaseFn(void* rel_data) {
   auto* cb_data = static_cast<CbData*>(rel_data);
 
@@ -302,7 +333,10 @@ void PmixCollRing::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
   coll_ring_ctx.contrib_local = false;
   coll_ring_ctx.contrib_prev = 0;
   coll_ring_ctx.forward_cnt = 0;
-  m_ts_ = time(nullptr);
+  // Clear the activity timestamp so IsTimedOut() returns false once
+  // all ring contexts are idle.  CollRingContrib_() refreshes it when
+  // the next fence starts.
+  m_ts_ = {};
   coll_ring_ctx.contrib_map.assign(m_peers_cnt_, false);
   coll_ring_ctx.ring_buf.clear();
 }
