@@ -96,6 +96,8 @@ public:
       return false; 
   }
 
+  void AbortOnTimeout() override;
+
   static void TreeReleaseFn(void* rel_data);
 
 private:

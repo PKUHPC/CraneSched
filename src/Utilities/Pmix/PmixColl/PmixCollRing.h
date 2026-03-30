@@ -84,7 +84,9 @@ public:
   bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
                           const std::string& data) override { CRANE_ERROR("Not implemented");  return false;};
 
-  static void RingReleaseFn(void* rel_data);         
+  void AbortOnTimeout() override;
+
+  static void RingReleaseFn(void* rel_data);
 private:
   /* ring coll functions */
   bool PmixCollRingInit_(const std::set<std::string>& hostset);

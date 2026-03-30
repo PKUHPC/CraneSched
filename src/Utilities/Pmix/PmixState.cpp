@@ -83,5 +83,28 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   return coll;
 }
 
+void PmixState::CleanupTimeoutColls(std::chrono::seconds timeout) {
+  util::write_lock_guard lock_guard(m_mutex_);
+
+  auto before = m_coll_list_.size();
+
+  // Erase any collective that has exceeded the timeout, after aborting it.
+  std::erase_if(m_coll_list_, [timeout](const std::shared_ptr<Coll>& coll) {
+    if (!coll->IsTimedOut(timeout)) return false;
+    CRANE_WARN("Collective {:p} (type={}) timed out after {}s, aborting.",
+               static_cast<void*>(coll.get()), ToString(coll->GetType()),
+               timeout.count());
+    coll->AbortOnTimeout();
+    return true;
+  });
+
+  auto removed = before - m_coll_list_.size();
+  if (removed > 0) {
+    CRANE_INFO("CleanupTimeoutColls: removed {} timed-out collective(s), "
+               "{} remaining.",
+               removed, m_coll_list_.size());
+  }
+}
+
 #endif
 } // namespace pmix

@@ -45,7 +45,10 @@ public:
   std::shared_ptr<Coll> PmixStateCollGet(CollType type,
                                           const std::vector<pmix_proc_t>& procs);
 
-  // TODO: pmixp_state_coll_cleanup();
+  // Scan all active collectives and abort any that have been waiting longer
+  // than timeout_sec seconds.  Called periodically from the uvw cleanup timer.
+  void CleanupTimeoutColls(std::chrono::seconds timeout);
+
 private:
   PmixJobInfo   m_pmix_job_info_;
   PmixClient*   m_pmix_client_{nullptr};   // injected, not owned

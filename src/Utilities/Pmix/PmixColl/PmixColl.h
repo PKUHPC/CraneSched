@@ -103,6 +103,18 @@ class Coll {
   const std::vector<pmix_proc_t>& GetProcs() const { return m_procs_; }
   CollType GetType() const { return m_type_; }
 
+  // Returns true when the collective has been active longer than timeout.
+  // Called by PmixState::CleanupTimeoutColls from outside the class hierarchy.
+  bool IsTimedOut(std::chrono::seconds timeout) const {
+    if (m_ts_ == std::chrono::steady_clock::time_point{}) return false;
+    return std::chrono::steady_clock::now() - m_ts_ > timeout;
+  }
+
+  // Abort this collective: invoke the pending callback with PMIX_ERR_TIMEOUT
+  // and reset internal state so the object can be reused or discarded.
+  // Called by PmixState::CleanupTimeoutColls from outside the class hierarchy.
+  virtual void AbortOnTimeout() = 0;
+
  protected:
   std::mutex m_lock_;
   uint32_t m_seq_{};
@@ -113,7 +125,10 @@ class Coll {
   uint32_t m_peers_cnt_{};
   pmix_modex_cbfunc_t m_cbfunc_{};
   void* m_cbdata_{};
-  time_t m_ts_{}, m_ts_next_{};
+  // Timestamp when this collective became active (set on first contribution).
+  // Default-constructed time_point{} (epoch) signals "idle/not started".
+  // m_ts_next_ is reserved for future use (e.g. per-step stall deadline).
+  std::chrono::steady_clock::time_point m_ts_{};
 #endif
 };
 

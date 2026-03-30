@@ -62,7 +62,7 @@ class PmixServer {
   // instead of a raw global variable.
   static PmixServer* GetInstance() { return s_instance_; }
 
-  uint64_t GetTimeout() const { return m_timeout_; }
+  std::chrono::seconds GetTimeout() const { return m_timeout_; }
 
   std::string GetFenceType() const { return m_pmix_job_info_.fence_type; }
 
@@ -94,7 +94,7 @@ class PmixServer {
 
   PmixJobInfo m_pmix_job_info_;
 
-  uint64_t m_timeout_{5};
+  std::chrono::seconds m_timeout_{5};
 
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;

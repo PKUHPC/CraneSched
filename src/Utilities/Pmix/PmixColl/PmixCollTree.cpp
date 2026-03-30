@@ -149,7 +149,7 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data, pmix_modex_cbfu
 
   switch (m_state_) {
   case CollTreeState::SYNC:
-    m_ts_ = time(nullptr);
+    m_ts_ = std::chrono::steady_clock::now();
   case CollTreeState::COLLECT:
     break;
   case CollTreeState::DOWNFWD:
@@ -526,7 +526,7 @@ bool PmixCollTree::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
 
   switch (m_state_) {
   case CollTreeState::SYNC:
-    m_ts_ = time(nullptr);
+    m_ts_ = std::chrono::steady_clock::now();
   case CollTreeState::COLLECT:
     if (m_seq_ != seq) {
       CRANE_ERROR("{:p}: unexpected contrib from {} (child #{}) seq = {}, coll->seq = {}, state={}",
@@ -672,16 +672,22 @@ void PmixCollTree::ResetCollTree_() {
       this->ResetCollTreeDownFwd_();
       this->m_cbdata_ = nullptr;
       this->m_cbfunc_ = nullptr;
+      // Clear the timestamp so IsTimedOut() returns false for the idle coll.
+      m_ts_ = {};
       break;
     case CollTreeState::DOWNFWD:
     case CollTreeState::UPFWD_WPC:
       this->m_seq_++;
       this->ResetCollTreeDownFwd_();
       if (m_contrib_local_ || m_contrib_children_) {
-        /* next collective was already started */
+        /* Next collective was already started — refresh the activity timestamp
+         * so IsTimedOut() is relative to the new fence, not the old one. */
         m_state_ = CollTreeState::COLLECT;
+        m_ts_ = std::chrono::steady_clock::now();
       } else {
+        // No pending contributions: coll is truly idle.
         m_state_ = CollTreeState::SYNC;
+        m_ts_ = {};
       }
       break;
     default:
@@ -716,6 +722,25 @@ void PmixCollTree::PmixCollLocalCbNodata_(int status) {
     m_cbfunc_ = nullptr;
     m_cbdata_ = nullptr;
   }
+}
+
+void PmixCollTree::AbortOnTimeout() {
+  std::lock_guard lock(m_lock_);
+
+  // Nothing pending when the collective is idle.
+  if (m_state_ == CollTreeState::SYNC) return;
+
+  CRANE_ERROR("coll {:p}: tree collective timed out (state={}, seq={})",
+              static_cast<void*>(this), ToString(m_state_), m_seq_);
+
+  // Invoke the pending local callback with a timeout error so the MPI
+  // process is not left waiting forever.
+  PmixCollLocalCbNodata_(PMIX_ERR_TIMEOUT);
+  ResetCollTree_();
+
+  // Clear the activity timestamp so IsTimedOut() returns false for the
+  // freshly reset (SYNC) state.
+  m_ts_ = {};
 }
 
 void PmixCollTree::TreeReleaseFn(void* rel_data) {

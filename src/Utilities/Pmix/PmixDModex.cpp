@@ -103,7 +103,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
     util::lock_guard lock(m_dmodex_mutex_);
     m_pmix_dmodex_req_list_.emplace_back(
         PmixDModexReq{.seq_num = m_dmdx_seq_num_,
-                      .ts = time(nullptr),
+                      .ts = std::chrono::steady_clock::now(),
                       .cb_func = cbfunc,
                       .cb_data = cbdata});
     request.set_seq_num(m_dmdx_seq_num_++);
@@ -226,14 +226,15 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
 }
 
 void PmixDModexReqManager::CleanupTimeoutRequests() {
-  time_t now = time(nullptr);
+  auto now = std::chrono::steady_clock::now();
 
   {
     util::lock_guard lock(m_dmodex_mutex_);
     auto it = m_pmix_dmodex_req_list_.begin();
     while (it != m_pmix_dmodex_req_list_.end()) {
-      if (static_cast<uint64_t>(now - it->ts) > m_timeout_) {
-        CRANE_ERROR("DModex request with seq_num={} timed out!", it->seq_num);
+      if (now - it->ts > m_timeout_) {
+        CRANE_ERROR("DModex request seq_num={} timed out after {}s",
+                    it->seq_num, m_timeout_.count());
         PmixLibModexInvoke(it->cb_func, PMIX_ERR_TIMEOUT, nullptr, 0,
                            it->cb_data, nullptr, nullptr);
         it = m_pmix_dmodex_req_list_.erase(it);
