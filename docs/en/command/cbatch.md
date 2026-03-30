@@ -112,6 +112,7 @@ Container-related options are used to create Pod jobs that support container exe
 - **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
 - **-D, --chdir string**: Working directory of the job
 - **--extra-attr string**: Extra attributes of the job (JSON format)
+- **-a, --array string**: Submit an array job with `start-end` range (e.g., `0-9`), mutually exclusive with `--repeat`
 - **--repeat uint32**: Submit job multiple times (default: 1)
 - **--wrap string**: Wrap command string in a shell script and submit
 - **--json**: Output in JSON format
@@ -149,6 +150,7 @@ Usage:
 
 Flags:
   -A, --account string           Account used for the job
+  -a, --array string             Submit an array job using index range start-end
   -b, --begin string             Defer job until specified time.
   -D, --chdir string             Working directory of the job
       --comment string           Comment of the job
@@ -473,6 +475,21 @@ JOBID PARTITION NAME     USER ACCOUNT STATUS TYPE    TIME      TIMELIMIT NODES N
 174   CPU       Test_Job root ROOT    Running Batch 00:00:02 00:03:01   1     cranetest03
 ```
 
+### Array Submission (Simplified)
+
+Submit an array as one batched request using an index range (only `start-end` is supported in this version):
+```bash
+cbatch --array 0-2 test.sh
+```
+```text
+[root@cranetest01 zhouhao]# cbatch --array 0-2 cbatch_test.sh
+Job id allocated: 181, 180, 179.
+```
+
+Notes:
+- `--array` and `--repeat` are mutually exclusive.
+- `%a` can be used in output/error file patterns as the array index (for example: `-o out_%a_%j.log`).
+
 ## Environment Variables
 
 Common environment variables available in batch scripts:
@@ -480,6 +497,7 @@ Common environment variables available in batch scripts:
 | Variable | Description |
 |----------|-------------|
 | **CRANE_JOB_NODELIST** | List of allocated nodes |
+| **%a** | Array task index (for use in file patterns) |
 | **%j** | Job ID (for use in file patterns) |
 
 ## Multi-node Parallel Jobs

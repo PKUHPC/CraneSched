@@ -512,7 +512,9 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
       // Job array's master job allocation number.
       //  {'A', ""}
       // Job array ID (index) number.
-      {'a', "0"},
+      {'a', m_parent_step_inst_->GetStep().has_array_task_id()
+                ? std::to_string(m_parent_step_inst_->GetStep().array_task_id())
+                : "0"},
       // jobid.stepid of the running job (e.g. "128.0")
       {'J', fmt::format("{}.{}", g_config.JobId, g_config.StepId)},
       // job id

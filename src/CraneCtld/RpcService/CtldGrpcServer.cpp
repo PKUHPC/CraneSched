@@ -621,11 +621,49 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
 
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
+
+  const bool has_array_start = job_to_ctld.has_array_index_start();
+  const bool has_array_end = job_to_ctld.has_array_index_end();
+  const bool has_array_spec = has_array_start || has_array_end;
+
+  if (has_array_start != has_array_end) {
+    response->add_job_id_list(0);
+    response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  uint32_t array_start = 0;
+  uint32_t array_end = 0;
+  if (has_array_spec) {
+    array_start = job_to_ctld.array_index_start();
+    array_end = job_to_ctld.array_index_end();
+
+    if (array_end < array_start) {
+      response->add_job_id_list(0);
+      response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+
+    const uint64_t expected_count = static_cast<uint64_t>(array_end) -
+                                    static_cast<uint64_t>(array_start) + 1;
+    if (expected_count != static_cast<uint64_t>(job_count)) {
+      response->add_job_id_list(0);
+      response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+  }
+
   results.reserve(job_count);
 
-  for (int i = 0; i < job_count; i++) {
+  for (uint32_t i = 0; i < job_count; i++) {
     auto job = std::make_unique<JobInCtld>();
-    job->SetFieldsByJobToCtld(job_to_ctld);
+    if (has_array_spec) {
+      auto expanded_job = job_to_ctld;
+      expanded_job.set_array_task_id(array_start + i);
+      job->SetFieldsByJobToCtld(expanded_job);
+    } else {
+      job->SetFieldsByJobToCtld(job_to_ctld);
+    }
 
     auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
     results.emplace_back(std::move(result));

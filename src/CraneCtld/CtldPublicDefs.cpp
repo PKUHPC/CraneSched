@@ -989,6 +989,9 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   step.set_nodelist(job.JobToCtld().nodelist());
   step.set_task_prolog(job.JobToCtld().task_prolog());
   step.set_task_epilog(job.JobToCtld().task_epilog());
+  if (job.JobToCtld().has_array_task_id()) {
+    step.set_array_task_id(job.JobToCtld().array_task_id());
+  }
 
   step.mutable_deadline_time()->set_seconds(absl::ToUnixSeconds(deadline_time));
   *MutableStepToCtld() = std::move(step);
@@ -1183,6 +1186,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
+  if (StepToCtld().has_array_task_id()) {
+    step_to_d.set_array_task_id(StepToCtld().array_task_id());
+  }
 
   return step_to_d;
 }

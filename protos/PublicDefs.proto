@@ -244,6 +244,12 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
+
+  // Job array spec for this submission (inclusive range).
+  optional uint32 array_index_start = 53;
+  optional uint32 array_index_end = 54;
+  // The concrete index of this task after expansion.
+  optional uint32 array_task_id = 55;
 }
 
 message JobInEmbeddedDb {
@@ -329,6 +335,8 @@ message StepToCtld {
   optional uint64 mem_per_node = 38;
   optional GresMap gres_per_node = 39;
   google.protobuf.Timestamp deadline_time = 40;
+
+  optional uint32 array_task_id = 41;
 }
 
 message RuntimeAttrOfStep {
@@ -434,6 +442,8 @@ message StepToD {
   string task_epilog = 31;
   repeated Signal signals = 32;
   google.protobuf.Timestamp deadline_time = 33;
+
+  optional uint32 array_task_id = 35;
 
   // task_node_list[task_id] = index of the node in nodelist that owns this task.
   // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
