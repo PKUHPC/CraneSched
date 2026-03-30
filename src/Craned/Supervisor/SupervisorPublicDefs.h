@@ -30,10 +30,10 @@ using Common::CgroupManager;
 using Common::EnvMap;
 
 using StepToSupv = crane::grpc::StepToD;
-using StepStatus = crane::grpc::TaskStatus;
+using StepStatus = crane::grpc::JobStatus;
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
-  crane::grpc::TaskStatus new_status{};
+  crane::grpc::JobStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
 };

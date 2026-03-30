@@ -548,7 +548,7 @@ void CtldClient::Init() {
         // Craned valid status:
         //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
         //     OutOfMemory)
-        //   - Completing (All task finished on CommonStep / Asked to exit on
+        //   - Completing (All steps finished on CommonStep / Asked to exit on
         //     DaemonStep, during Epilog)
         //   - Running
         //   - Starting (Only for CommonStep)
@@ -598,7 +598,7 @@ void CtldClient::Init() {
 
             // Special case: Handle timeout-during-offline scenario
             // This occurs when Craned goes offline and comes back online after
-            // task timeout. Only DaemonStep can be Running here because:
+            // job timeout. Only DaemonStep can be Running here because:
             // - DaemonStep waits for Epilog to complete before terminating
             // - CommonSteps should already be killed by Timer and in terminal
             //   state
@@ -772,18 +772,18 @@ void CtldClient::SetPingFailedCb(std::function<void()>&& cb) {
 }
 
 void CtldClient::StepStatusChangeAsync(
-    StepStatusChangeQueueElem&& task_status_change) {
+    StepStatusChangeQueueElem&& step_status_change) {
   absl::MutexLock lock(&m_step_status_change_mtx_);
 
   CRANE_TRACE(
       "[Step #{}.{}] Step status change added to queue, status {},code {}.",
-      task_status_change.job_id, task_status_change.step_id,
-      task_status_change.new_status, task_status_change.exit_code);
-  m_step_status_change_list_.emplace_back(std::move(task_status_change));
+      step_status_change.job_id, step_status_change.step_id,
+      step_status_change.new_status, step_status_change.exit_code);
+  m_step_status_change_list_.emplace_back(std::move(step_status_change));
 }
 
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                                       crane::grpc::TaskStatus new_status,
+                                       crane::grpc::JobStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string> reason) {
   StepStatusChangeQueueElem elem{
@@ -909,7 +909,7 @@ void CtldClient::AsyncSendThread_() {
   grpc_connectivity_state grpc_state;
   bool prev_connected = false, connected = false;
 
-  // Variable for TaskStatusChange sending part.
+  // Variable for StepStatusChange sending part.
   absl::Condition cond(
       +[](decltype(m_step_status_change_list_)* queue) {
         return !queue->empty();
@@ -961,7 +961,7 @@ void CtldClient::AsyncSendThread_() {
 
     if (g_ctld_client_sm->IsReadyNow() == false) continue;
 
-    // TaskStatusChange sending is done in this grpc channel maintaining thread
+    // StepStatusChange sending is done in this grpc channel maintaining thread
     // if the channel is connected.
     // This is equivalent to sharing some time slice with grpc sending,
     // i.e. this thread is maintaining grpc channel and sending rpc at the same
@@ -996,7 +996,7 @@ bool CtldClient::SendStatusChanges_(
 
     auto status_change = changes.front();
 
-    CRANE_TRACE("[Step #{}.{}] Sending TaskStatusChange.", status_change.job_id,
+    CRANE_TRACE("[Step #{}.{}] Sending StepStatusChange.", status_change.job_id,
                 status_change.step_id);
 
     request.set_craned_id(m_craned_id_);
@@ -1011,7 +1011,7 @@ bool CtldClient::SendStatusChanges_(
     status = m_stub_->StepStatusChange(&context, request, &reply);
     if (!status.ok()) {
       CRANE_ERROR(
-          "Failed to send TaskStatusChange: "
+          "Failed to send StepStatusChange: "
           "{{Step: #{}.{}, NewStatus: {}}}, reason: {} | {}, code: {}",
           status_change.job_id, status_change.step_id, status_change.new_status,
           status.error_message(), context.debug_error_string(),
@@ -1024,7 +1024,7 @@ bool CtldClient::SendStatusChanges_(
         return false;
       }
       // If some messages are not sent due to channel failure,
-      // put them back into m_task_status_change_list_
+      // put them back into m_step_status_change_list_
       if (!changes.empty()) {
         m_step_status_change_mtx_.Lock();
         m_step_status_change_list_.splice(m_step_status_change_list_.begin(),

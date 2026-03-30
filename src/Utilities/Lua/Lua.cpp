@@ -161,21 +161,19 @@ void LuaEnvironment::RegisterFunctions_() {
   m_crane_table_["ERROR"] = static_cast<int>(CraneErrCode::ERR_LUA_FAILED);
   m_crane_table_["SUCCESS"] = static_cast<int>(CraneErrCode::SUCCESS);
 
-  m_crane_table_["Pending"] =
-      static_cast<int>(crane::grpc::TaskStatus::Pending);
-  m_crane_table_["Running"] =
-      static_cast<int>(crane::grpc::TaskStatus::Running);
+  m_crane_table_["Pending"] = static_cast<int>(crane::grpc::JobStatus::Pending);
+  m_crane_table_["Running"] = static_cast<int>(crane::grpc::JobStatus::Running);
   m_crane_table_["Completed"] =
-      static_cast<int>(crane::grpc::TaskStatus::Completed);
-  m_crane_table_["Failed"] = static_cast<int>(crane::grpc::TaskStatus::Failed);
+      static_cast<int>(crane::grpc::JobStatus::Completed);
+  m_crane_table_["Failed"] = static_cast<int>(crane::grpc::JobStatus::Failed);
   m_crane_table_["Cancelled"] =
-      static_cast<int>(crane::grpc::TaskStatus::Cancelled);
+      static_cast<int>(crane::grpc::JobStatus::Cancelled);
   m_crane_table_["OutOfMemory"] =
-      static_cast<int>(crane::grpc::TaskStatus::OutOfMemory);
+      static_cast<int>(crane::grpc::JobStatus::OutOfMemory);
 
-  m_crane_table_["Batch"] = static_cast<int>(crane::grpc::TaskType::Batch);
+  m_crane_table_["Batch"] = static_cast<int>(crane::grpc::JobType::Batch);
   m_crane_table_["Interactive"] =
-      static_cast<int>(crane::grpc::TaskType::Interactive);
+      static_cast<int>(crane::grpc::JobType::Interactive);
 
   // other used flags
 }

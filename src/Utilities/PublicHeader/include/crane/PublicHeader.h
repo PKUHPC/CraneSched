@@ -33,7 +33,7 @@
 #endif
 
 using job_id_t = uint32_t;
-using task_id_t = uint32_t;
+using task_id_t = uint32_t;  // Task ID within a step (Supervisor layer)
 using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
@@ -68,7 +68,7 @@ inline const char* const kDefaultPluginConfigPath = "/etc/crane/plugin.yaml";
 inline const char* const kUnlimitedQosName = "UNLIMITED";
 inline const char* const kHostFilePath = "/etc/hosts";
 
-inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
+inline constexpr size_t kDefaultQueryJobNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 inline constexpr double kMemoryToleranceGB = 0.01;
@@ -111,10 +111,10 @@ inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
 inline const char* const kResourceTypeGpu = "gpu";
 
-constexpr uint64_t kTaskMinTimeLimitSec = 11;
-constexpr int64_t kTaskMaxTimeLimitSec =
+constexpr uint64_t kJobMinTimeLimitSec = 11;
+constexpr int64_t kJobMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
-constexpr int64_t kTaskMaxTimeStampSec =
+constexpr int64_t kJobMaxTimeStampSec =
     google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
 
 constexpr uint64_t kCranedPingIntervalSec = 10;
@@ -223,21 +223,21 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 40 - 44
         "Generic failure",
-        "Not enough resources for the task",
+        "Not enough resources for the job",
         "Non-existent error",
-        "Not enough nodes in the partition for the task",
+        "Not enough nodes in the partition for the job",
         "Invalid node list",
 
         // 45 - 49
         "Invalid exclude node list",
         "Time limit reached the user's limit",
         "CPUs per task reached the user's limit",
-        "Not enough nodes for the task",
+        "Not enough nodes for the job",
         "System error",
 
         // 50 - 54
-        "Existing task",
-        "The number of pending tasks exceeded the maximum value",
+        "Existing job",
+        "The number of pending jobs exceeded the maximum value",
         "Invalid parameter",
         "Stop error",
         "Permission denied",
@@ -271,7 +271,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Revocation of the certificate failed, Please check the logs",
 
         // 75 - 79
-        "User information does not match, unable to submit the task.",
+        "User information does not match, unable to submit the job.",
         "You need to set --force for this operation.",
         "Invalid username",
         "Legal licenses",
@@ -280,7 +280,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 80 - 84
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
-        "Task is pending or container is not ready.",
+        "Job is pending or container is not ready.",
         "Requested CRI operation is not supported in multi-node steps.",
         "Invalid memory format",
 
@@ -302,13 +302,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
-        "Cannot delete user with active tasks.",
+        "Cannot delete user with active jobs.",
         "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
 
         "Not a valide resource string",
         "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
-        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)"
-        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_TASK_BEYOND)"
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)"
     };
 // clang-format on
 }  // namespace Internal

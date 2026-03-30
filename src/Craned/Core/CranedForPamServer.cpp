@@ -28,7 +28,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
     const crane::grpc::QueryStepFromPortForwardRequest *request,
     crane::grpc::QueryStepFromPortForwardReply *response) {
   bool ok;
-  bool task_id_found = false;
+  bool job_id_found = false;
   bool remote_is_craned = false;
 
   // May be craned or cfored
@@ -42,21 +42,21 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   if (ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) {
     if (g_config.Ipv4ToCranedHostname.contains(crane_addr4)) {
       CRANE_TRACE(
-          "Receive QueryTaskIdFromPortForward from Pam module: "
+          "Receive QueryJobIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
           "This ssh comes from a CraneD node. uid: {}",
           request->ssh_remote_port(), request->ssh_remote_address(),
           request->uid());
       // In the addresses of CraneD nodes. This ssh request comes from a
-      // CraneD node. Check if the remote port belongs to a task. If so, move
-      // it in to the cgroup of this task.
+      // CraneD node. Check if the remote port belongs to a job. If so, move
+      // it in to the cgroup of this job.
       crane_port = g_config.ListenConf.CranedListenPort;
       remote_is_craned = true;
     }
   } else if (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)) {
     if (g_config.Ipv6ToCranedHostname.contains(crane_addr6)) {
       CRANE_TRACE(
-          "Receive QueryTaskIdFromPortForward from Pam module: "
+          "Receive QueryJobIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
           "This ssh comes from a CraneD node. uid: {}",
           request->ssh_remote_port(), request->ssh_remote_address(),
@@ -74,10 +74,10 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
 
   if (!remote_is_craned) {
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
-    // Check if the user's uid is running a task. If so, move it in to the
-    // cgroup of his first task. If not so, reject this ssh request.
+    // Check if the user's uid is running a job. If so, move it in to the
+    // cgroup of his first job. If not so, reject this ssh request.
     CRANE_TRACE(
-        "Receive QueryTaskIdFromPortForward from Pam module: "
+        "Receive QueryJobIdFromPortForward from Pam module: "
         "ssh_remote_port: {}, ssh_remote_address: {}. "
         "This ssh comes from a user machine. uid: {}",
         request->ssh_remote_port(), request->ssh_remote_address(),
@@ -142,7 +142,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   }
 
   if (!status_remote_service.ok()) {
-    CRANE_WARN("QueryTaskIdFromPort gRPC call failed: {}. Remote is craned: {}",
+    CRANE_WARN("QueryJobIdFromPort gRPC call failed: {}. Remote is craned: {}",
                status_remote_service.error_message(), remote_is_craned);
   }
 
@@ -151,26 +151,26 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
     response->set_job_id(reply_from_remote_service.job_id());
 
     CRANE_TRACE(
-        "ssh client with remote port {} belongs to task #{}. "
-        "Moving this ssh session process into the task's cgroup",
+        "ssh client with remote port {} belongs to job #{}. "
+        "Moving this ssh session process into the job's cgroup",
         request->ssh_remote_port(), reply_from_remote_service.job_id());
     return Status::OK;
   } else {
-    std::optional<TaskInfoOfUid> info_opt =
-        g_job_mgr->QueryTaskInfoOfUid(request->uid());
+    std::optional<JobInfoOfUid> info_opt =
+        g_job_mgr->QueryJobInfoOfUid(request->uid());
     if (info_opt.has_value()) {
       auto info = info_opt.value();
       CRANE_TRACE(
-          "Found a task #{} belonging to uid {}. "
-          "This ssh session process is going to be moved into the task's "
+          "Found a job #{} belonging to uid {}. "
+          "This ssh session process is going to be moved into the job's "
           "cgroup",
-          info.first_task_id, request->uid());
-      response->set_job_id(info.first_task_id);
+          info.first_job_id, request->uid());
+      response->set_job_id(info.first_job_id);
       response->set_ok(true);
     } else {
       CRANE_TRACE(
-          "This ssh session can't be moved into uid {}'s tasks. "
-          "This uid has no task on this node. "
+          "This ssh session can't be moved into uid {}'s jobs. "
+          "This uid has no job on this node. "
           "Reject this ssh request.");
       response->set_ok(false);
     }
@@ -188,14 +188,14 @@ grpc::Status CranedForPamServiceImpl::MigrateSshProcToCgroup(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
-              request->task_id());
+  CRANE_TRACE("Moving pid {} to cgroup of job #{}", request->pid(),
+              request->job_id());
 
   bool ok =
-      g_job_mgr->MigrateProcToCgroupOfJob(request->pid(), request->task_id());
+      g_job_mgr->MigrateProcToCgroupOfJob(request->pid(), request->job_id());
   if (!ok) {
-    CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
-               request->pid(), request->task_id());
+    CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, job #{}",
+               request->pid(), request->job_id());
     response->set_ok(false);
   } else {
     response->set_ok(true);
@@ -214,14 +214,14 @@ grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  auto task_env_map =
-      g_job_mgr->QuerySshStepEnvVariables(request->task_id(), kDaemonStepId);
-  if (!task_env_map.has_value()) {
-    CRANE_ERROR("Failed to get env of job #{}", request->task_id());
+  auto job_env_map =
+      g_job_mgr->QuerySshStepEnvVariables(request->job_id(), kDaemonStepId);
+  if (!job_env_map.has_value()) {
+    CRANE_ERROR("Failed to get env of job #{}", request->job_id());
     response->set_ok(false);
     return Status::OK;
   }
-  for (const auto &[name, value] : task_env_map.value())
+  for (const auto &[name, value] : job_env_map.value())
     response->mutable_env_map()->emplace(name, value);
   response->set_ok(true);
   return Status::OK;

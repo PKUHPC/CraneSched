@@ -37,9 +37,9 @@ class LuaJobHandler {
   LuaJobHandler& operator=(LuaJobHandler&&) = delete;
 
   static CraneRichError JobSubmit(const std::string& lua_script,
-                                  TaskInCtld* task);
+                                  JobInCtld* job);
   static CraneRichError JobModify(const std::string& lua_script,
-                                  TaskInCtld* task);
+                                  JobInCtld* job);
 
  private:
 #ifdef HAVE_LUA

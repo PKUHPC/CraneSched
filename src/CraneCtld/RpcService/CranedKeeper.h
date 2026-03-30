@@ -73,7 +73,7 @@ class CranedStub {
 
   CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
 
-  CraneErrCode FreeJobs(const std::vector<task_id_t> &task);
+  CraneErrCode FreeJobs(const std::vector<job_id_t> &jobs);
 
   CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
 
@@ -89,7 +89,7 @@ class CranedStub {
   CraneErrCode TerminateOrphanedSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
+  CraneErrCode ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds);
 
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest &request);

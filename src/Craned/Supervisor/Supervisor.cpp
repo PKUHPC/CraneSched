@@ -383,7 +383,7 @@ void StartServer(int grpc_output_fd) {
         ready = false;
       } else {
         // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto ok_prom = g_task_mgr->ExecuteTaskAsync();
+        auto ok_prom = g_task_mgr->ExecuteStepAsync();
         if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to start daemon step, code: {}",
                       static_cast<int>(err));

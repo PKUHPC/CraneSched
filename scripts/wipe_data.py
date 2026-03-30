@@ -19,7 +19,7 @@ logging.getLogger("pymongo").setLevel(logging.INFO)
 class Collection(Enum):
     ACCT = "acct_table"
     QOS = "qos_table"
-    TASK = "task_table"
+    JOB = "job_table"
     USER = "user_table"
     WCKEY = "wckey_table"
     RESOURCE = "license_resource_table"
@@ -170,10 +170,10 @@ def parse_arguments():
         help="Include qos_table in MongoDB wipe.",
     )
     parser.add_argument(
-        "-t",
-        "--task_table",
+        "-j",
+        "--job_table",
         action="store_true",
-        help="Include task_table in MongoDB wipe.",
+        help="Include job_table in MongoDB wipe.",
     )
     parser.add_argument(
         "-u",
@@ -237,11 +237,11 @@ def _main():
     if args.mode in ["mongo", "all"]:
         db = connect_to_mongo(username, password, host, port, dbname)
         to_wipe = []
-        if not any([args.acct_table, args.qos_table, args.task_table, args.user_table, args.wckey_table, args.resource_table]):
+        if not any([args.acct_table, args.qos_table, args.job_table, args.user_table, args.wckey_table, args.resource_table]):
             to_wipe = [
                 Collection.ACCT,
                 Collection.QOS,
-                Collection.TASK,
+                Collection.JOB,
                 Collection.USER,
                 Collection.WCKEY,
                 Collection.RESOURCE,
@@ -255,8 +255,8 @@ def _main():
                 to_wipe.append(Collection.ACCT)
             if args.qos_table:
                 to_wipe.append(Collection.QOS)
-            if args.task_table:
-                to_wipe.append(Collection.TASK)
+            if args.job_table:
+                to_wipe.append(Collection.JOB)
             if args.user_table:
                 to_wipe.append(Collection.USER)
             if args.wckey_table:

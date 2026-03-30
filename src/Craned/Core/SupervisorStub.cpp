@@ -65,7 +65,7 @@ SupervisorStub::InitAndGetRecoveredMap() {
         CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
             supv_ids = stub->CheckStatus();
         if (!supv_ids) {
-          CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
+          CRANE_ERROR("CheckStepStatus for {} failed, removing it.",
                       file.string());
           std::error_code ec;
           std::filesystem::remove(file, ec);
@@ -98,10 +98,10 @@ SupervisorStub::InitAndGetRecoveredMap() {
 
 CraneErrCode SupervisorStub::ExecuteStep() {
   ClientContext context;
-  crane::grpc::supervisor::TaskExecutionRequest request;
-  crane::grpc::supervisor::TaskExecutionReply reply;
+  crane::grpc::supervisor::StepExecutionRequest request;
+  crane::grpc::supervisor::StepExecutionReply reply;
 
-  auto ok = m_stub_->ExecuteTask(&context, request, &reply);
+  auto ok = m_stub_->ExecuteStep(&context, request, &reply);
   if (!ok.ok()) {
     CRANE_ERROR("ExecuteStep failed: reply {},{}", ok.ok(), ok.error_message());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -141,37 +141,37 @@ SupervisorStub::CheckStatus() {
   return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
 }
 
-CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
+CraneErrCode SupervisorStub::TerminateStep(bool mark_as_orphaned,
                                            bool terminated_by_user) {
   ClientContext context;
-  crane::grpc::supervisor::TerminateTaskRequest request;
-  crane::grpc::supervisor::TerminateTaskReply reply;
+  crane::grpc::supervisor::TerminateStepRequest request;
+  crane::grpc::supervisor::TerminateStepReply reply;
 
   request.set_mark_orphaned(mark_as_orphaned);
   request.set_terminated_by_user(terminated_by_user);
 
-  auto ok = m_stub_->TerminateTask(&context, request, &reply);
+  auto ok = m_stub_->TerminateStep(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
     return CraneErrCode::SUCCESS;
   }
-  CRANE_ERROR("TerminateTask failed: reply {},{}", reply.ok(),
+  CRANE_ERROR("TerminateStep failed: reply {},{}", reply.ok(),
               ok.error_message());
 
-  CRANE_WARN("TerminateTask failed: reply {},{}", reply.ok(),
+  CRANE_WARN("TerminateStep failed: reply {},{}", reply.ok(),
              ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
+CraneErrCode SupervisorStub::ChangeStepTimeLimit(absl::Duration time_limit) {
   ClientContext context;
-  crane::grpc::supervisor::ChangeTaskTimeLimitRequest request;
-  crane::grpc::supervisor::ChangeTaskTimeLimitReply reply;
+  crane::grpc::supervisor::ChangeStepTimeLimitRequest request;
+  crane::grpc::supervisor::ChangeStepTimeLimitReply reply;
 
   request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit));
-  auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
+  auto ok = m_stub_->ChangeStepTimeLimit(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_WARN("ChangeTaskTimeLimit failed: reply {},{}", reply.ok(),
+  CRANE_WARN("ChangeStepTimeLimit failed: reply {},{}", reply.ok(),
              ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }

@@ -718,7 +718,7 @@ CgroupManager::GetJobBpfMapCgroupsV2_(
 
   absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>> results;
 
-  auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
+  auto add_job = [&results, &cg_ino_job_id_map](BpfKey *key) {
     // Skip log level record.
     if (key->cgroup_id == 0) {
       return;
@@ -735,11 +735,11 @@ CgroupManager::GetJobBpfMapCgroupsV2_(
     return results;
   }
 
-  add_task(pre_key.get());
+  add_job(pre_key.get());
   auto cur_key = std::make_unique<BpfKey>();
   while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
                                cur_key.get(), sizeof(BpfKey)) == 0) {
-    add_task(cur_key.get());
+    add_job(cur_key.get());
     pre_key.swap(cur_key);
   }
   if (init_ebpf) bpf_runtime_info.CloseBpfObj();
@@ -1397,7 +1397,7 @@ void BpfRuntimeInfo::Destroy() {
   }
   // always one key for logging
   if (bpf_map_count == 1) {
-    // All task end
+    // All jobs end
     RmBpfDeviceMap();
   }
 }

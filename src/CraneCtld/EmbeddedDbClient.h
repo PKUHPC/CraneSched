@@ -163,15 +163,15 @@ class BerkeleyDb : public IEmbeddedDb {
 
 class EmbeddedDbClient {
  private:
-  using db_id_t = task_db_id_t;
-  using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+  using db_id_t = job_db_id_t;
+  using JobInEmbeddedDb = crane::grpc::JobInEmbeddedDb;
   using StepInEmbeddedDb = crane::grpc::StepInEmbeddedDb;
 
  public:
   struct DbSnapshot {
-    std::unordered_map<db_id_t, TaskInEmbeddedDb> pending_queue;
-    std::unordered_map<db_id_t, TaskInEmbeddedDb> running_queue;
-    std::unordered_map<db_id_t, TaskInEmbeddedDb> final_queue;
+    std::unordered_map<db_id_t, JobInEmbeddedDb> pending_queue;
+    std::unordered_map<db_id_t, JobInEmbeddedDb> running_queue;
+    std::unordered_map<db_id_t, JobInEmbeddedDb> final_queue;
   };
 
   struct StepDbSnapshot {
@@ -183,11 +183,11 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
-  bool ResetNextTaskId(task_id_t next_task_id, db_id_t next_task_db_id);
+  bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id);
 
   bool ResetNextStepDbId();
 
-  bool PurgeAllTaskHistory();
+  bool PurgeAllJobHistory();
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
@@ -240,46 +240,45 @@ class EmbeddedDbClient {
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
-  bool AppendTasksToPendingAndAdvanceTaskIds(
-      const std::vector<TaskInCtld*>& tasks);
+  bool AppendJobsToPendingAndAdvanceJobIds(const std::vector<JobInCtld*>& jobs);
 
-  bool PurgeEndedTasks(
-      const std::unordered_map<job_id_t, task_db_id_t>& job_ids);
+  bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 
-  bool UpdateRuntimeAttrOfTask(
+  bool UpdateRuntimeAttrOfJob(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
     return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                             GetVariableDbEntryName_(db_id), &runtime_attr)
         .has_value();
   }
 
-  bool UpdateTaskToCtld(txn_id_t txn_id, db_id_t db_id,
-                        crane::grpc::TaskToCtld const& task_to_ctld) {
+  bool UpdateJobToCtld(txn_id_t txn_id, db_id_t db_id,
+                       crane::grpc::JobToCtld const& job_to_ctld_ref) {
     return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
-                            GetFixedDbEntryName_(db_id), &task_to_ctld)
+                            GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
         .has_value();
   }
 
-  bool UpdateRuntimeAttrOfTaskIfExists(
+  bool UpdateRuntimeAttrOfJobIfExists(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
     return StoreTypeIntoDbIfExists_(m_variable_db_.get(), txn_id,
                                     GetVariableDbEntryName_(db_id),
                                     &runtime_attr)
         .has_value();
   }
 
-  bool UpdateTaskToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                                crane::grpc::TaskToCtld const& task_to_ctld) {
+  bool UpdateJobToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
+                               crane::grpc::JobToCtld const& job_to_ctld_ref) {
     return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
-                                    GetFixedDbEntryName_(db_id), &task_to_ctld)
+                                    GetFixedDbEntryName_(db_id),
+                                    &job_to_ctld_ref)
         .has_value();
   }
 
-  bool FetchTaskDataInDb(txn_id_t txn_id, db_id_t db_id,
-                         TaskInEmbeddedDb* task_in_db) {  // Only used in test
-    return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
+  bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
+                        JobInEmbeddedDb* job_in_db) {  // Only used in test
+    return FetchJobDataInDbAtomic_(txn_id, db_id, job_in_db).has_value();
   }
 
   bool AppendSteps(const std::vector<StepInCtld*>& steps);
@@ -343,11 +342,11 @@ class EmbeddedDbClient {
     return fmt::format("{}S", db_id);
   }
 
-  inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {
+  inline static bool IsVariableDbJobDataEntry_(std::string const& key) {
     return key.back() == 'S';
   }
 
-  inline static task_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
+  inline static job_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
     return std::stol(key.substr(0, key.size() - 1));
   }
 
@@ -391,16 +390,16 @@ class EmbeddedDbClient {
 
   // Helper functions for basic embedded db operations
 
-  inline std::expected<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
-      txn_id_t txn_id, db_id_t db_id, TaskInEmbeddedDb* task_in_db) {
+  inline std::expected<size_t, DbErrorCode> FetchJobDataInDbAtomic_(
+      txn_id_t txn_id, db_id_t db_id, JobInEmbeddedDb* job_in_db) {
     auto result =
         FetchTypeFromDb_(m_fixed_db_.get(), txn_id, GetFixedDbEntryName_(db_id),
-                         task_in_db->mutable_task_to_ctld());
+                         job_in_db->mutable_job_to_ctld());
     if (!result) return result;
 
     return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
                             GetVariableDbEntryName_(db_id),
-                            task_in_db->mutable_runtime_attr());
+                            job_in_db->mutable_runtime_attr());
   }
 
   inline std::expected<size_t, DbErrorCode> FetchStepDataInDbAtomic_(
@@ -625,14 +624,14 @@ class EmbeddedDbClient {
 
   // -----------
 
-  inline static std::string const s_next_task_db_id_str_{"NDI"};
-  inline static std::string const s_next_task_id_str_{"NI"};
+  inline static std::string const s_next_job_db_id_str_{"NDI"};
+  inline static std::string const s_next_job_id_str_{"NI"};
 
-  inline static absl::Mutex s_task_id_and_db_id_mtx_;
-  inline static task_id_t s_next_task_id_
-      ABSL_GUARDED_BY(s_task_id_and_db_id_mtx_);
-  inline static db_id_t s_next_task_db_id_
-      ABSL_GUARDED_BY(s_task_id_and_db_id_mtx_);
+  inline static absl::Mutex s_job_id_and_db_id_mtx_;
+  inline static job_id_t s_next_job_id_
+      ABSL_GUARDED_BY(s_job_id_and_db_id_mtx_);
+  inline static db_id_t s_next_job_db_id_
+      ABSL_GUARDED_BY(s_job_id_and_db_id_mtx_);
 
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;

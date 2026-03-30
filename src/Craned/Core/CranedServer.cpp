@@ -302,13 +302,13 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto task_env_map =
-      g_job_mgr->QuerySshStepEnvVariables(request->task_id(), kDaemonStepId);
-  if (task_env_map.error()) {
-    CRANE_ERROR("Failed to get step env of job #{}", request->task_id());
+  auto job_env_map =
+      g_job_mgr->QuerySshStepEnvVariables(request->job_id(), kDaemonStepId);
+  if (job_env_map.error()) {
+    CRANE_ERROR("Failed to get step env of job #{}", request->job_id());
     return Status::OK;
   }
-  for (const auto &[name, value] : task_env_map.value())
+  for (const auto &[name, value] : job_env_map.value())
     response->mutable_env_map()->emplace(name, value);
   response->set_ok(true);
 
@@ -325,12 +325,12 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto err = g_job_mgr->ChangeStepTimelimit(request->task_id(), kPrimaryStepId,
+  auto err = g_job_mgr->ChangeStepTimelimit(request->job_id(), kPrimaryStepId,
                                             request->time_limit_seconds());
 
   if (err.error()) {
-    CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
-                request->task_id(), kPrimaryStepId);
+    CRANE_ERROR("[Step #{}.{}] Failed to change job time limit",
+                request->job_id(), kPrimaryStepId);
     return Status::OK;
   }
   response->set_ok(true);

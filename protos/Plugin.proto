@@ -25,35 +25,35 @@ import "PublicDefs.proto";
 import "google/protobuf/timestamp.proto";
 
 message StartHookRequest {
-  repeated TaskInfo task_info_list = 1;
+  repeated JobInfo job_info_list = 1;
 }
 
 message StartHookReply {
-  message TaskIdReply {
+  message JobIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
+    uint32 job_id = 2;
     string failure_reason = 3;
   }
 
-  repeated TaskIdReply result = 1;
+  repeated JobIdReply result = 1;
 }
 
 message EndHookRequest {
-  repeated TaskInfo task_info_list = 1;
+  repeated JobInfo job_info_list = 1;
 }
 
 message EndHookReply {
-  message TaskIdReply {
+  message JobIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
+    uint32 job_id = 2;
     string failure_reason = 3;
   }
 
-  repeated TaskIdReply result = 1;
+  repeated JobIdReply result = 1;
 }
 
 message CreateCgroupHookRequest {
-  uint32 task_id = 1;
+  uint32 job_id = 1;
   string cgroup = 2;
   ResourceInNode resource = 3;
 }
@@ -63,7 +63,7 @@ message CreateCgroupHookReply {
 }
 
 message DestroyCgroupHookRequest {
-  uint32 task_id = 1;
+  uint32 job_id = 1;
   string cgroup = 2;
 }
 

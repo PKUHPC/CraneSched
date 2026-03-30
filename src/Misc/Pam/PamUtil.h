@@ -41,10 +41,10 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
                              const std::string &remote_address,
-                             uint16_t port_to_query, uint32_t *task_id);
+                             uint16_t port_to_query, uint32_t *job_id);
 
 bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
-                                         task_id_t task_id);
+                                         job_id_t job_id);
 
 struct PamConfig {
   std::string CraneConfigFilePath;

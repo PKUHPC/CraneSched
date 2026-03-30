@@ -566,11 +566,11 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   // There is no race during Init stage.
   // No lock is needed.
   ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      0, m_variable_db_.get(), s_next_task_id_str_, &s_next_task_id_, 1u);
+      0, m_variable_db_.get(), s_next_job_id_str_, &s_next_job_id_, 1u);
   if (!ok) return false;
 
   ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      0, m_variable_db_.get(), s_next_task_db_id_str_, &s_next_task_db_id_, 1L);
+      0, m_variable_db_.get(), s_next_job_db_id_str_, &s_next_job_db_id_, 1L);
   if (!ok) return false;
 
   ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
@@ -585,38 +585,38 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   return true;
 }
 
-bool EmbeddedDbClient::ResetNextTaskId(task_id_t next_task_id,
-                                       db_id_t next_task_db_id) {
+bool EmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
+                                      db_id_t next_job_db_id) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
-  absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
+  absl::MutexLock lock_ids(&s_job_id_and_db_id_mtx_);
 
-  // Reset task ID counters in variable_db (0 = skip, >0 = reset to value)
+  // Reset job ID counters in variable_db (0 = skip, >0 = reset to value)
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
-  if (next_task_id > 0) {
-    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
-                              &next_task_id);
+  if (next_job_id > 0) {
+    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_id_str_,
+                              &next_job_id);
     if (!result) {
-      CRANE_ERROR("Failed to reset next_task_id.");
+      CRANE_ERROR("Failed to reset next_job_id.");
       return false;
     }
   }
 
-  if (next_task_db_id > 0) {
+  if (next_job_db_id > 0) {
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                              s_next_task_db_id_str_, &next_task_db_id);
+                              s_next_job_db_id_str_, &next_job_db_id);
     if (!result) {
-      CRANE_ERROR("Failed to reset next_task_db_id.");
+      CRANE_ERROR("Failed to reset next_job_db_id.");
       return false;
     }
   }
 
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
-  // Also reset step counters when task IDs are reset
-  if (next_task_id > 0) {
+  // Also reset step counters when job IDs are reset
+  if (next_job_id > 0) {
     absl::MutexLock lock_steps(&s_step_id_mtx_);
 
     if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
@@ -644,11 +644,11 @@ bool EmbeddedDbClient::ResetNextTaskId(task_id_t next_task_id,
   }
 
   // Update in-memory values
-  if (next_task_id > 0) s_next_task_id_ = next_task_id;
-  if (next_task_db_id > 0) s_next_task_db_id_ = next_task_db_id;
+  if (next_job_id > 0) s_next_job_id_ = next_job_id;
+  if (next_job_db_id > 0) s_next_job_db_id_ = next_job_db_id;
 
-  CRANE_INFO("Task ID counters reset: next_task_id={}, next_task_db_id={}.",
-             s_next_task_id_, s_next_task_db_id_);
+  CRANE_INFO("Job ID counters reset: next_job_id={}, next_job_db_id={}.",
+             s_next_job_id_, s_next_job_db_id_);
   return true;
 }
 
@@ -685,15 +685,15 @@ bool EmbeddedDbClient::ResetNextStepDbId() {
   return true;
 }
 
-bool EmbeddedDbClient::PurgeAllTaskHistory() {
+bool EmbeddedDbClient::PurgeAllJobHistory() {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> res;
 
-  // Collect all task data keys from variable_db (keys ending with 'S')
+  // Collect all job data keys from variable_db (keys ending with 'S')
   std::vector<std::string> var_keys;
   res = m_variable_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&&) {
-        if (IsVariableDbTaskDataEntry_(key)) var_keys.push_back(key);
+        if (IsVariableDbJobDataEntry_(key)) var_keys.push_back(key);
         return true;
       });
   if (!res) {
@@ -714,7 +714,7 @@ bool EmbeddedDbClient::PurgeAllTaskHistory() {
     if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
   }
 
-  // Collect all task data keys from fixed_db (keys ending with 'T')
+  // Collect all job data keys from fixed_db (keys ending with 'T')
   std::vector<std::string> fixed_keys;
   res =
       m_fixed_db_->IterateAllKv([&](std::string&& key, std::vector<uint8_t>&&) {
@@ -786,13 +786,13 @@ bool EmbeddedDbClient::PurgeAllTaskHistory() {
     if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
   }
 
-  CRANE_INFO("All task/step history purged from embedded DB.");
+  CRANE_INFO("All job/step history purged from embedded DB.");
   return true;
 }
 
 bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
-  using TaskStatus = crane::grpc::TaskStatus;
-  using RuntimeAttr = crane::grpc::RuntimeAttrOfTask;
+  using JobStatus = crane::grpc::JobStatus;
+  using RuntimeAttr = crane::grpc::RuntimeAttrOfJob;
 
   std::expected<void, DbErrorCode> result;
   std::unordered_map<db_id_t, RuntimeAttr> db_id_runtime_attr_map;
@@ -800,16 +800,16 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   result = m_variable_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&& value) {
         // Skip if not RuntimeAttr
-        if (!IsVariableDbTaskDataEntry_(key)) return true;
+        if (!IsVariableDbJobDataEntry_(key)) return true;
 
-        task_db_id_t id = ExtractDbIdFromEntry_(key);
+        job_db_id_t id = ExtractDbIdFromEntry_(key);
 
         RuntimeAttr runtime_attr;
         runtime_attr.ParseFromArray(value.data(), value.size());
 
         db_id_runtime_attr_map.emplace(id, std::move(runtime_attr));
 
-        // Record all task_id here and don't delete any key,
+        // Record all job_id here and don't delete any key,
         // so true is returned.
         return true;
       });
@@ -819,39 +819,39 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
     return false;
   }
 
-  result = m_fixed_db_->IterateAllKv(
-      [&](std::string&& key, std::vector<uint8_t>&& value) {
-        task_db_id_t id = ExtractDbIdFromEntry_(key);
+  result = m_fixed_db_->IterateAllKv([&](std::string&& key,
+                                         std::vector<uint8_t>&& value) {
+    job_db_id_t id = ExtractDbIdFromEntry_(key);
 
-        // Delete incomplete task fixed data,
-        // where fixed data are stored but variable data are missing.
-        auto runtime_attr_it = db_id_runtime_attr_map.find(id);
-        if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
+    // Delete incomplete job fixed data,
+    // where fixed data are stored but variable data are missing.
+    auto runtime_attr_it = db_id_runtime_attr_map.find(id);
+    if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
 
-        TaskStatus status = runtime_attr_it->second.status();
+    JobStatus status = runtime_attr_it->second.status();
 
-        // Assemble TaskInEmbeddedDb here.
-        TaskInEmbeddedDb task;
-        *task.mutable_runtime_attr() = std::move(runtime_attr_it->second);
-        task.mutable_task_to_ctld()->ParseFromArray(value.data(), value.size());
+    // Assemble JobInEmbeddedDb here.
+    JobInEmbeddedDb job_data;
+    *job_data.mutable_runtime_attr() = std::move(runtime_attr_it->second);
+    job_data.mutable_job_to_ctld()->ParseFromArray(value.data(), value.size());
 
-        // Dispatch to different queues by status.
-        switch (status) {
-        case crane::grpc::Pending:
-          snapshot->pending_queue.emplace(id, std::move(task));
-          break;
-        case crane::grpc::Running:
-        case crane::grpc::Starting:
-        case crane::grpc::Configuring:
-        case crane::grpc::Completing:
-          snapshot->running_queue.emplace(id, std::move(task));
-          break;
-        default:
-          snapshot->final_queue.emplace(id, std::move(task));
-          break;
-        }
-        return true;
-      });
+    // Dispatch to different queues by status.
+    switch (status) {
+    case crane::grpc::Pending:
+      snapshot->pending_queue.emplace(id, std::move(job_data));
+      break;
+    case crane::grpc::Running:
+    case crane::grpc::Starting:
+    case crane::grpc::Configuring:
+    case crane::grpc::Completing:
+      snapshot->running_queue.emplace(id, std::move(job_data));
+      break;
+    default:
+      snapshot->final_queue.emplace(id, std::move(job_data));
+      break;
+    }
+    return true;
+  });
 
   if (!result) {
     CRANE_ERROR("Failed to restore fixed data into queues!");
@@ -862,7 +862,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 }
 
 bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
-  using TaskStatus = crane::grpc::TaskStatus;
+  using JobStatus = crane::grpc::JobStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfStep;
 
   std::expected<void, DbErrorCode> result;
@@ -880,7 +880,7 @@ bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
 
         db_id_runtime_attr_map.emplace(id, std::move(runtime_attr));
 
-        // Record all task_id here and don't delete any key,
+        // Record all job_id here and don't delete any key,
         // so true is returned.
         return true;
       });
@@ -894,14 +894,14 @@ bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
                                               std::vector<uint8_t>&& value) {
     step_db_id_t id = ExtractStepDbIdFromEntry_(key);
 
-    // Delete incomplete task fixed data,
+    // Delete incomplete job fixed data,
     // where fixed data are stored but variable data are missing.
     auto runtime_attr_it = db_id_runtime_attr_map.find(id);
     if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
 
-    TaskStatus status = runtime_attr_it->second.status();
+    JobStatus status = runtime_attr_it->second.status();
 
-    // Assemble TaskInEmbeddedDb here.
+    // Assemble JobInEmbeddedDb here.
     StepInEmbeddedDb step;
     *step.mutable_runtime_attr() = std::move(runtime_attr_it->second);
     step.mutable_step_to_ctld()->ParseFromArray(value.data(), value.size());
@@ -956,8 +956,8 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
   return true;
 }
 
-bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
-    const std::vector<TaskInCtld*>& tasks) {
+bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
+    const std::vector<JobInCtld*>& jobs) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -965,24 +965,24 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   // one single thread and the lock here is actually useless.
   // However, it costs little and prevents race condition,
   // so we just leave it here.
-  absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
+  absl::MutexLock lock_ids(&s_job_id_and_db_id_mtx_);
 
-  uint32_t task_id{s_next_task_id_};
-  db_id_t task_db_id{s_next_task_db_id_};
+  uint32_t job_id{s_next_job_id_};
+  db_id_t job_db_id{s_next_job_db_id_};
 
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
 
-  for (const auto& task : tasks) {
-    task->SetTaskId(task_id++);
-    task->SetTaskDbId(task_db_id++);
+  for (const auto& job : jobs) {
+    job->SetJobId(job_id++);
+    job->SetJobDbId(job_db_id++);
 
     result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
-                              GetFixedDbEntryName_(task->TaskDbId()),
-                              &task->TaskToCtld());
+                              GetFixedDbEntryName_(job->JobDbId()),
+                              &job->JobToCtld());
     if (!result) {
       CRANE_ERROR(
-          "Failed to store the fixed data of task id: {} / task db id: {}.",
-          task->TaskId(), task->TaskDbId());
+          "Failed to store the fixed data of job id: {} / job db id: {}.",
+          job->JobId(), job->JobDbId());
 
       // Just drop this batch if any of them failed.
       return false;
@@ -993,46 +993,46 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
-  for (const auto& task : tasks) {
+  for (const auto& job : jobs) {
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                              GetVariableDbEntryName_(task->TaskDbId()),
-                              &task->RuntimeAttr());
+                              GetVariableDbEntryName_(job->JobDbId()),
+                              &job->RuntimeAttr());
     if (!result) {
       CRANE_ERROR(
           "Failed to store the variable data of "
-          "task id: {} / task db id: {}.",
-          task->TaskId(), task->TaskDbId());
+          "job id: {} / job db id: {}.",
+          job->JobId(), job->JobDbId());
       return false;
     }
   }
 
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
-                            &task_id);
+  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_id_str_,
+                            &job_id);
   if (!result) {
-    CRANE_ERROR("Failed to store next_task_id.");
+    CRANE_ERROR("Failed to store next_job_id.");
     return false;
   }
 
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            s_next_task_db_id_str_, &task_db_id);
+  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_db_id_str_,
+                            &job_db_id);
   if (!result) {
-    CRANE_ERROR("Failed to store next_task_db_id.");
+    CRANE_ERROR("Failed to store next_job_db_id.");
     return false;
   }
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
-  s_next_task_id_ = task_id;
-  s_next_task_db_id_ = task_db_id;
+  s_next_job_id_ = job_id;
+  s_next_job_db_id_ = job_db_id;
 
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedTasks(
-    const std::unordered_map<job_id_t, task_db_id_t>& job_ids) {
+bool EmbeddedDbClient::PurgeEndedJobs(
+    const std::unordered_map<job_id_t, job_db_id_t>& job_ids) {
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
-  // 1. when inserting task data, fixed data db is written before variable db;
-  // 2. when erasing task data, fixed data db is erased after variable db;
+  // 1. when inserting job data, fixed data db is written before variable db;
+  // 2. when erasing job data, fixed data db is erased after variable db;
 
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> res;

@@ -35,10 +35,10 @@ using crane::grpc::supervisor::Supervisor;
 class SupervisorServiceImpl : public Supervisor::Service {
  public:
   SupervisorServiceImpl() = default;
-  grpc::Status ExecuteTask(
+  grpc::Status ExecuteStep(
       grpc::ServerContext* context,
-      const crane::grpc::supervisor::TaskExecutionRequest* request,
-      crane::grpc::supervisor::TaskExecutionReply* response) override;
+      const crane::grpc::supervisor::StepExecutionRequest* request,
+      crane::grpc::supervisor::StepExecutionReply* response) override;
 
   grpc::Status QueryEnvMap(
       grpc::ServerContext* context,
@@ -50,15 +50,15 @@ class SupervisorServiceImpl : public Supervisor::Service {
       const crane::grpc::supervisor::CheckStatusRequest* request,
       crane::grpc::supervisor::CheckStatusReply* response) override;
 
-  grpc::Status ChangeTaskTimeLimit(
+  grpc::Status ChangeStepTimeLimit(
       grpc::ServerContext* context,
-      const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
-      crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) override;
+      const crane::grpc::supervisor::ChangeStepTimeLimitRequest* request,
+      crane::grpc::supervisor::ChangeStepTimeLimitReply* response) override;
 
-  grpc::Status TerminateTask(
+  grpc::Status TerminateStep(
       grpc::ServerContext* context,
-      const crane::grpc::supervisor::TerminateTaskRequest* request,
-      crane::grpc::supervisor::TerminateTaskReply* response) override;
+      const crane::grpc::supervisor::TerminateStepRequest* request,
+      crane::grpc::supervisor::TerminateStepReply* response) override;
 
   grpc::Status MigrateSshProcToCgroup(
       grpc::ServerContext* context,

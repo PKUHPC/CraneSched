@@ -23,7 +23,7 @@
 #define PAM_STR_TRUE ("T")
 #define PAM_STR_FALSE ("F")
 #define PAM_ITEM_AUTH_RESULT ("AUTH_RES")
-#define PAM_ITEM_TASK_ID ("TASK_ID")
+#define PAM_ITEM_JOB_ID ("JOB_ID")
 
 static std::once_flag g_init_flag;
 static bool g_module_initialized{false};
@@ -78,22 +78,22 @@ extern "C" {
     return PAM_AUTH_ERR;
   }
 
-  uint32_t task_id;
+  uint32_t job_id;
 
   pam_syslog(pamh, LOG_ERR, "[Crane] Try to query %s for remote port %hu",
              remote_address.c_str(), port);
 
-  ok = GrpcQueryPortFromCraned(pamh, uid, remote_address, port, &task_id);
+  ok = GrpcQueryPortFromCraned(pamh, uid, remote_address, port, &job_id);
 
   if (ok) {
     pam_syslog(pamh, LOG_ERR,
                "[Crane] Accepted ssh connection with remote port %hu ", port);
 
     char *auth_result = strdup(PAM_STR_TRUE);
-    char *task_id_str = strdup(std::to_string(task_id).c_str());
+    char *job_id_str = strdup(std::to_string(job_id).c_str());
 
     pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
-    pam_set_data(pamh, PAM_ITEM_TASK_ID, task_id_str, clean_up_cb);
+    pam_set_data(pamh, PAM_ITEM_JOB_ID, job_id_str, clean_up_cb);
 
     return PAM_SUCCESS;
   } else {
@@ -111,9 +111,9 @@ extern "C" {
 
 [[maybe_unused]] int pam_sm_open_session(pam_handle_t *pamh, int flags,
                                          int argc, const char **argv) {
-  int task_id;
+  int job_id;
   char *auth_result;
-  char *task_id_str;
+  char *job_id_str;
 
   bool ok;
   std::string username;
@@ -141,16 +141,16 @@ extern "C" {
 
   pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
   if (strcmp(auth_result, PAM_STR_TRUE) == 0) {
-    pam_get_data(pamh, PAM_ITEM_TASK_ID, (const void **)&task_id_str);
+    pam_get_data(pamh, PAM_ITEM_JOB_ID, (const void **)&job_id_str);
 
     pam_syslog(
         pamh, LOG_ERR,
-        "[Crane] open_session retrieved task_id: %s. Moving it to cgroups",
-        task_id_str);
+        "[Crane] open_session retrieved job_id: %s. Moving it to cgroups",
+        job_id_str);
 
-    task_id = std::atoi(task_id_str);
+    job_id = std::atoi(job_id_str);
 
-    ok = GrpcMigrateSshProcToCgroupAndSetEnv(pamh, getpid(), task_id);
+    ok = GrpcMigrateSshProcToCgroupAndSetEnv(pamh, getpid(), job_id);
     if (ok) {
       return PAM_SUCCESS;
     } else {
@@ -161,7 +161,7 @@ extern "C" {
     }
   } else {
     // If auth result is false, it indicates that system administrator allow a
-    // user with no task running to log in, and then we just let it pass.
+    // user with no job running to log in, and then we just let it pass.
     return PAM_SUCCESS;
   }
 }

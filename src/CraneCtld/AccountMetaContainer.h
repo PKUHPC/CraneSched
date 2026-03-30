@@ -58,7 +58,7 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
       std::shared_mutex>;
 
-  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+  using UserToJobNumMap = phmap::parallel_flat_hash_map<
       std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, uint32_t>>, 4,
@@ -73,18 +73,18 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
+  CraneErrCode TryMallocQosSubmitResource(JobInCtld& job);
 
-  void MallocQosSubmitResource(const TaskInCtld& task);
+  void MallocQosSubmitResource(const JobInCtld& job);
 
-  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+  void MallocQosResourceToRecoveredRunningJob(JobInCtld& job);
 
   std::expected<void, std::string> CheckAndMallocQosResource(
       const PdJobInScheduler& job);
 
-  void FreeQosSubmitResource(const TaskInCtld& task);
+  void FreeQosSubmitResource(const JobInCtld& job);
 
-  void FreeQosResource(const TaskInCtld& task);
+  void FreeQosResource(const JobInCtld& job);
 
   // When a user/account object is deleted, resources need to be reset.
   void DeleteUserMeta(const std::string& username);
@@ -93,11 +93,11 @@ class AccountMetaContainer final {
 
   void DeleteQosMeta(const std::string& qos);
 
-  void UserAddTask(const std::string& username);
+  void UserAddJob(const std::string& username);
 
-  void UserReduceTask(const std::string& username);
+  void UserReduceJob(const std::string& username);
 
-  bool UserHasTask(const std::string& username);
+  bool UserHasJob(const std::string& username);
 
  private:
   const static int kNumStripes = 128;
@@ -106,13 +106,13 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  CraneErrCode CheckUserQosSubmitResourceUsage_(const TaskInCtld& task,
+  CraneErrCode CheckUserQosSubmitResourceUsage_(const JobInCtld& job,
                                                 const Qos& qos);
 
-  CraneErrCode CheckAccountQosSubmitResourceUsage_(const TaskInCtld& task,
+  CraneErrCode CheckAccountQosSubmitResourceUsage_(const JobInCtld& job,
                                                    const Qos& qos);
 
-  CraneErrCode CheckQosSubmitResourceUsage_(const TaskInCtld& task,
+  CraneErrCode CheckQosSubmitResourceUsage_(const JobInCtld& job,
                                             const Qos& qos);
 
   std::expected<void, std::string> CheckQosResource_(
@@ -149,7 +149,7 @@ class AccountMetaContainer final {
   ResourceMetaMap m_user_meta_map_;
   ResourceMetaMap m_account_meta_map_;
   QosResourceMap m_qos_meta_map_;
-  UserToTaskNumMap m_user_to_task_map_;
+  UserToJobNumMap m_user_to_job_map_;
 };
 
 }  // namespace Ctld

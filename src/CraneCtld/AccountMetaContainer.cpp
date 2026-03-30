@@ -21,7 +21,7 @@
 #include <absl/time/time.h>
 
 #include "AccountManager.h"
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 
 namespace Ctld {
 
@@ -62,21 +62,20 @@ std::string MetaResource::DebugString() const {
       util::ReadableResourceView(resource));
 }
 
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
-    TaskInCtld& task) {
+CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   CRANE_TRACE(
       "TryMallocQosSubmitResource for job of user {} and account {}.....",
-      task.Username(), task.account);
+      job.Username(), job.account);
 
-  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
+  auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) {
-    CRANE_ERROR("Unknown QOS '{}'", task.qos);
+    CRANE_ERROR("Unknown QOS '{}'", job.qos);
     return CraneErrCode::ERR_INVALID_QOS;
   }
 
-  const ResourceView& resource_use = task.req_total_res_view;
+  const ResourceView& resource_use = job.req_total_res_view;
 
   if (qos->max_submit_jobs_per_user == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
@@ -93,72 +92,72 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
       !CheckTres_(resource_use, qos->max_tres_per_account) ||
       !CheckTres_(resource_use, qos->max_tres))
-    return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
 
-  task.qos_priority = qos->priority;
+  job.qos_priority = qos->priority;
 
-  if (task.time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
-    task.time_limit = qos->max_time_limit_per_task;
-  } else if (task.time_limit > qos->max_time_limit_per_task) {
+  if (job.time_limit >= absl::Seconds(kJobMaxTimeLimitSec)) {
+    job.time_limit = qos->max_time_limit_per_job;
+  } else if (job.time_limit > qos->max_time_limit_per_job) {
     CRANE_TRACE("time-limit beyond the user's limit");
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
 
   // Lock the specified user/account/qos to minimize the impact on other users
   // and accounts.
-  std::scoped_lock user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  auto account_locks = LockAccountStripes_(task.account_chain);
-  std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
+  std::scoped_lock user_lock(m_user_stripes_[StripeForKey_(job.Username())]);
+  auto account_locks = LockAccountStripes_(job.account_chain);
+  std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  result = CheckUserQosSubmitResourceUsage_(task, *qos);
+  result = CheckUserQosSubmitResourceUsage_(job, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckAccountQosSubmitResourceUsage_(task, *qos);
+  result = CheckAccountQosSubmitResourceUsage_(job, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceUsage_(task, *qos);
+  result = CheckQosSubmitResourceUsage_(job, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  MallocQosSubmitResource(task);
+  MallocQosSubmitResource(job);
 
   return result;
 }
 
-void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
+void AccountMetaContainer::MallocQosSubmitResource(const JobInCtld& job) {
   CRANE_DEBUG(
       "Malloc QOS {} submit resource for job of user {} and account {}.",
-      task.qos, task.Username(), task.account);
+      job.qos, job.Username(), job.account);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
                              .submit_jobs_count = 1,
                              .wall_time = absl::ZeroDuration()};
-  DoMallocResource_(task.TaskId(), task.Username(), task.account_chain,
-                    task.qos, meta_resource);
+  DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                    meta_resource);
 }
 
-void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
-    TaskInCtld& task) {
-  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
+void AccountMetaContainer::MallocQosResourceToRecoveredRunningJob(
+    JobInCtld& job) {
+  auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   // Under normal circumstances, QoS must exist.
   if (!qos) {
-    CRANE_ERROR("Try to malloc resource from an unknown qos {}", task.qos);
+    CRANE_ERROR("Try to malloc resource from an unknown qos {}", job.qos);
     return;
   }
 
   CRANE_DEBUG(
       "Malloc QOS {} resource for recover job {} of user {} and account {}.",
-      task.qos, task.TaskId(), task.Username(), task.account);
+      job.qos, job.JobId(), job.Username(), job.account);
 
-  g_account_meta_container->UserAddTask(task.Username());
+  g_account_meta_container->UserAddJob(job.Username());
 
-  MetaResource meta_resource{.resource = task.allocated_res_view,
+  MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
                              .submit_jobs_count = 1,
-                             .wall_time = task.time_limit};
+                             .wall_time = job.time_limit};
 
-  DoMallocResource_(task.TaskId(), task.Username(), task.account_chain,
-                    task.qos, meta_resource);
+  DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                    meta_resource);
 }
 
 std::expected<void, std::string>
@@ -191,43 +190,43 @@ AccountMetaContainer::CheckAndMallocQosResource(const PdJobInScheduler& job) {
   return {};
 }
 
-void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
+void AccountMetaContainer::FreeQosSubmitResource(const JobInCtld& job) {
   CRANE_DEBUG(
       "Free QOS {} submit resource for job {} of user {} and account {}.",
-      task.qos, task.TaskId(), task.Username(), task.account);
+      job.qos, job.JobId(), job.Username(), job.account);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
                              .submit_jobs_count = 1,
                              .wall_time = absl::ZeroDuration()};
 
-  DoFreeResource_(task.TaskId(), task.Username(), task.account_chain, task.qos,
+  DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   meta_resource);
 }
 
-void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
+void AccountMetaContainer::FreeQosResource(const JobInCtld& job) {
   CRANE_DEBUG("Free QOS {} resource for job {} of user {} and account {}.",
-              task.qos, task.TaskId(), task.Username(), task.account);
+              job.qos, job.JobId(), job.Username(), job.account);
 
-  MetaResource meta_resource{.resource = task.allocated_res_view,
+  MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
                              .submit_jobs_count = 1,
-                             .wall_time = task.time_limit};
+                             .wall_time = job.time_limit};
 
-  DoFreeResource_(task.TaskId(), task.Username(), task.account_chain, task.qos,
+  DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   meta_resource);
 }
 
-void AccountMetaContainer::UserAddTask(const std::string& username) {
-  m_user_to_task_map_.try_emplace_l(
+void AccountMetaContainer::UserAddJob(const std::string& username) {
+  m_user_to_job_map_.try_emplace_l(
       username,
       [&](std::pair<const std::string, uint32_t>& pair) { ++pair.second; }, 1);
 }
 
-void AccountMetaContainer::UserReduceTask(const std::string& username) {
+void AccountMetaContainer::UserReduceJob(const std::string& username) {
   bool is_contains = false;
 
-  m_user_to_task_map_.if_contains(
+  m_user_to_job_map_.if_contains(
       username, [&](std::pair<const std::string, uint32_t>& pair) {
         is_contains = true;
         if (pair.second == 0) {
@@ -238,13 +237,13 @@ void AccountMetaContainer::UserReduceTask(const std::string& username) {
       });
 
   if (!is_contains)
-    CRANE_ERROR("User '{}' not found in m_user_to_task_map_.", username);
+    CRANE_ERROR("User '{}' not found in m_user_to_job_map_.", username);
 }
 
-bool AccountMetaContainer::UserHasTask(const std::string& username) {
+bool AccountMetaContainer::UserHasJob(const std::string& username) {
   bool result = false;
 
-  m_user_to_task_map_.if_contains(
+  m_user_to_job_map_.if_contains(
       username, [&](std::pair<const std::string, uint32_t>& pair) {
         if (pair.second > 0) result = true;
       });
@@ -270,14 +269,14 @@ void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
  */
 
 CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
-    const TaskInCtld& task, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
   m_user_meta_map_.if_contains(
-      task.Username(),
+      job.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& qos_to_resource_map = pair.second;
-        auto iter = qos_to_resource_map.find(task.qos);
+        auto iter = qos_to_resource_map.find(job.qos);
         if (iter == qos_to_resource_map.end()) return;
 
         auto& val = iter->second;
@@ -292,7 +291,7 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
             return;
           }
-          ResourceView resource_use{task.req_total_res_view};
+          ResourceView resource_use{job.req_total_res_view};
           resource_use += val.resource;
           // Compatible with the max_cpu_per_user parameter.
           if (resource_use.CpuCount() > qos.max_cpus_per_user) {
@@ -310,15 +309,15 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
 }
 
 CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
-    const TaskInCtld& task, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
-  for (const auto& account_name : task.account_chain) {
+  for (const auto& account_name : job.account_chain) {
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& qos_to_resource_map = pair.second;
-          auto iter = qos_to_resource_map.find(task.qos);
+          auto iter = qos_to_resource_map.find(job.qos);
           if (iter == qos_to_resource_map.end()) return;
 
           auto& val = iter->second;
@@ -333,7 +332,7 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
               result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
               return;
             }
-            ResourceView resource_use{task.req_total_res_view};
+            ResourceView resource_use{job.req_total_res_view};
             resource_use += val.resource;
             if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
@@ -347,10 +346,10 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
-    const TaskInCtld& task, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
   m_qos_meta_map_.if_contains(
-      task.qos, [&](std::pair<const std::string, MetaResource>& pair) {
+      job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         auto& val = pair.second;
         if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
           result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
@@ -363,15 +362,15 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
           }
 
           if (qos.max_wall > absl::ZeroDuration()) {
-            if (val.wall_time + task.time_limit > qos.max_wall) {
+            if (val.wall_time + job.time_limit > qos.max_wall) {
               result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
               return;
             }
           }
-          ResourceView resource_use{task.req_total_res_view};
+          ResourceView resource_use{job.req_total_res_view};
           resource_use += val.resource;
           if (!CheckTres_(resource_use, qos.max_tres)) {
-            result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+            result = CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
             return;
           }
         }
@@ -410,7 +409,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
     auto iter = pair.second.find(job.qos);
     if (iter == pair.second.end()) {
       CRANE_ERROR(
-          "Qos '{}' not found for user '{}', cannot free resource for task {}.",
+          "Qos '{}' not found for user '{}', cannot free resource for job {}.",
           job.qos, job.username, job.job_id);
       result = std::unexpected("QosResourceLimit");
       return;
@@ -658,7 +657,7 @@ void AccountMetaContainer::DoFreeResource_(
         }
       });
 
-  UserReduceTask(username);
+  UserReduceJob(username);
 }
 
 }  // namespace Ctld

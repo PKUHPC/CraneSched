@@ -69,15 +69,15 @@ class PluginClient {
 
   // These functions are used to add HookEvent into the event queue.
   // Launched by Ctld
-  void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-  void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  void StartHookAsync(std::vector<crane::grpc::JobInfo> jobs);
+  void EndHookAsync(std::vector<crane::grpc::JobInfo> jobs);
   void NodeEventHookAsync(
       std::vector<crane::grpc::plugin::CranedEventInfo> events);
 
   // Launched by Craned
-  void CreateCgroupHookAsync(task_id_t task_id, const std::string& cgroup,
+  void CreateCgroupHookAsync(job_id_t job_id, const std::string& cgroup,
                              const crane::grpc::ResourceInNode& resource);
-  void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
+  void DestroyCgroupHookAsync(job_id_t job_id, const std::string& cgroup);
 
   void UpdatePowerStateHookAsync(const std::string& craned_id,
                                  crane::grpc::CranedControlState state,

@@ -3,8 +3,8 @@ add_executable(cranectld
         CtldPublicDefs.cpp
         DbClient.h
         DbClient.cpp
-        TaskScheduler.h
-        TaskScheduler.cpp
+        JobScheduler.h
+        JobScheduler.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
         AccountManager.h

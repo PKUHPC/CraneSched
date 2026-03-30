@@ -23,12 +23,12 @@
 
 namespace Craned::Supervisor {
 
-grpc::Status SupervisorServiceImpl::ExecuteTask(
+grpc::Status SupervisorServiceImpl::ExecuteStep(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::TaskExecutionRequest* request,
-    crane::grpc::supervisor::TaskExecutionReply* response) {
+    const crane::grpc::supervisor::StepExecutionRequest* request,
+    crane::grpc::supervisor::StepExecutionReply* response) {
   CRANE_ASSERT(g_config.StepSpec.step_type() != crane::grpc::StepType::DAEMON);
-  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
+  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteStepAsync();
   code_future.wait();
 
   CraneErrCode ok = code_future.get();
@@ -65,11 +65,11 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::ChangeTaskTimeLimit(
+grpc::Status SupervisorServiceImpl::ChangeStepTimeLimit(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
-    crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) {
-  auto ok = g_task_mgr->ChangeTaskTimeLimitAsync(
+    const crane::grpc::supervisor::ChangeStepTimeLimitRequest* request,
+    crane::grpc::supervisor::ChangeStepTimeLimitReply* response) {
+  auto ok = g_task_mgr->ChangeStepTimeLimitAsync(
       absl::Seconds(request->time_limit_seconds()));
   ok.wait();
   if (ok.get() != CraneErrCode::SUCCESS) {
@@ -80,11 +80,11 @@ grpc::Status SupervisorServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::TerminateTask(
+grpc::Status SupervisorServiceImpl::TerminateStep(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::TerminateTaskRequest* request,
-    crane::grpc::supervisor::TerminateTaskReply* response) {
-  g_task_mgr->TerminateTaskAsync(request->mark_orphaned(),
+    const crane::grpc::supervisor::TerminateStepRequest* request,
+    crane::grpc::supervisor::TerminateStepReply* response) {
+  g_task_mgr->TerminateStepAsync(request->mark_orphaned(),
                                  request->terminated_by_user()
                                      ? TerminatedBy::CANCELLED_BY_USER
                                      : TerminatedBy::NONE);
@@ -118,9 +118,9 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     // 1. Normal case: Pod remains running with no container (Running)
     // 2. Abnormal case: Pod failed to launch before (Failed)
 
-    // Here is the case #1. Trigger task killing and wait for pod exit,
+    // Here is the case #1. Trigger step killing and wait for pod exit,
     // where ShutdownSupervisor will be called.
-    g_task_mgr->TerminateTaskAsync(false, TerminatedBy::CANCELLED_BY_USER);
+    g_task_mgr->TerminateStepAsync(false, TerminatedBy::CANCELLED_BY_USER);
     return Status::OK;
   }
 

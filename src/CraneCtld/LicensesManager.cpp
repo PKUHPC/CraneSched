@@ -18,7 +18,7 @@
 
 #include "LicensesManager.h"
 
-#include "TaskScheduler.h"
+#include "JobScheduler.h"
 
 namespace Ctld {
 
@@ -132,7 +132,7 @@ void LicensesManager::GetLicensesInfo(
 }
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld::License>&
+    const google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>&
         lic_id_to_count,
     bool is_license_or) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
