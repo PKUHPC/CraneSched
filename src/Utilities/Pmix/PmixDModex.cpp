@@ -35,8 +35,8 @@ namespace {
 void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData *>(cbdata);
 
-  CRANE_DEBUG("DModexOpCb: seq_num={}, craned_id={}", dmo_modex_cb_data->seq_num,
-              dmo_modex_cb_data->craned_id);
+  CRANE_DEBUG("DModexOpCb: seq_num={}, craned_id={}",
+              dmo_modex_cb_data->seq_num, dmo_modex_cb_data->craned_id);
 
   crane::grpc::pmix::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
@@ -46,16 +46,20 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
   // Use the injected PmixClient pointer — no global access needed.
   if (!dmo_modex_cb_data->pmix_client) {
-    CRANE_ERROR("PmixClient is null in DModexCbData, cannot send direct modex response to {}",
-                dmo_modex_cb_data->craned_id);
+    CRANE_ERROR(
+        "PmixClient is null in DModexCbData, cannot send direct modex response "
+        "to {}",
+        dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
   }
 
-  auto stub = dmo_modex_cb_data->pmix_client->GetPmixStub(dmo_modex_cb_data->craned_id);
+  auto stub =
+      dmo_modex_cb_data->pmix_client->GetPmixStub(dmo_modex_cb_data->craned_id);
   if (!stub) {
-    CRANE_ERROR("Stub for craned_id={} not found, cannot send direct modex response.",
-                dmo_modex_cb_data->craned_id);
+    CRANE_ERROR(
+        "Stub for craned_id={} not found, cannot send direct modex response.",
+        dmo_modex_cb_data->craned_id);
     delete dmo_modex_cb_data;
     return;
   }
@@ -153,8 +157,7 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
   if (m_pmix_job_info_.task_num <= pmix_proc.rank) {
     CRANE_ERROR(
         "Bad request from {}: nspace {} has only {} ranks, asked for {}",
-        craned_id, pmix_proc.nspace, m_pmix_job_info_.task_num,
-        pmix_proc.rank);
+        craned_id, pmix_proc.nspace, m_pmix_job_info_.task_num, pmix_proc.rank);
     ResponseWithError_(seq_num, craned_id, PMIX_ERR_BAD_PARAM);
     return;
   }
@@ -245,5 +248,5 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
   }
 }
 
-#endif 
+#endif
 }  // namespace pmix

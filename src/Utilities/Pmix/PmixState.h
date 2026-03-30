@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -22,7 +22,6 @@
 
 #include "PmixColl/PmixColl.h"
 #include "PmixCommon.h"
-
 #include "crane/Lock.h"
 
 namespace pmix {
@@ -32,7 +31,7 @@ class PmixClient;
 class CranedClient;
 
 class PmixState {
-public:
+ public:
 #ifdef HAVE_PMIX
   // pmix_client and craned_client are injected so collective objects created
   // here never need to call PmixServer::GetInstance().
@@ -43,20 +42,20 @@ public:
         m_craned_client_(craned_client) {}
 
   std::shared_ptr<Coll> PmixStateCollGet(CollType type,
-                                          const std::vector<pmix_proc_t>& procs);
+                                         const std::vector<pmix_proc_t>& procs);
 
   // Scan all active collectives and abort any that have been waiting longer
   // than timeout_sec seconds.  Called periodically from the uvw cleanup timer.
   void CleanupTimeoutColls(std::chrono::seconds timeout);
 
-private:
-  PmixJobInfo   m_pmix_job_info_;
-  PmixClient*   m_pmix_client_{nullptr};   // injected, not owned
-  CranedClient* m_craned_client_{nullptr}; // injected, not owned
+ private:
+  PmixJobInfo m_pmix_job_info_;
+  PmixClient* m_pmix_client_{nullptr};      // injected, not owned
+  CranedClient* m_craned_client_{nullptr};  // injected, not owned
 
   util::rw_mutex m_mutex_;
   std::vector<std::shared_ptr<Coll>> m_coll_list_;
 #endif
 };
 
-} // namespace pmix
+}  // namespace pmix

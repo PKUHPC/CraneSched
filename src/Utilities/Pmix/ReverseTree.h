@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -25,12 +25,14 @@
 
 #define REVERSE_TREE_WIDTH 7
 #define REVERSE_TREE_CHILDREN_TIMEOUT 60 /* seconds */
-#define REVERSE_TREE_PARENT_RETRY 5 /* count, 1 sec per attempt */
+#define REVERSE_TREE_PARENT_RETRY 5      /* count, 1 sec per attempt */
 
 namespace pmix {
 
-void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent, int *num_children, int *depth, int *total_depth);
+void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
+                     int *num_children, int *depth, int *total_depth);
 
-int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth, std::vector<int> * children);
+int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth,
+                              std::vector<int> *children);
 
-}
+}  // namespace pmix

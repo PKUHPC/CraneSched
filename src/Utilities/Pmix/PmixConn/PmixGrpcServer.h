@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,13 +18,11 @@
 
 #pragma once
 
+#include "CranedClient.h"
 #include "PmixASyncServer.h"
-
 #include "PmixCommon.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
-#include "CranedClient.h"
-
 #include "grpcpp/server.h"
 #include "protos/Pmix.grpc.pb.h"
 #include "protos/Pmix.pb.h"
@@ -40,40 +38,48 @@ using grpc::Status;
 using crane::grpc::pmix::Pmix;
 
 class PmixGrpcServiceImpl final : public Pmix::CallbackService {
-public:
-  PmixGrpcServiceImpl(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state) :
-      m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {}
+ public:
+  PmixGrpcServiceImpl(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state)
+      : m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state) {}
 #ifdef HAVE_PMIX
   grpc::ServerUnaryReactor* SendPmixRingMsg(
-    grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
-    crane::grpc::pmix::SendPmixRingMsgReply *response) override;
+      grpc::CallbackServerContext* context,
+      const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
+      crane::grpc::pmix::SendPmixRingMsgReply* response) override;
 
   grpc::ServerUnaryReactor* PmixTreeUpwardForward(
-    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeUpwardForwardReq *request,
-    crane::grpc::pmix::PmixTreeUpwardForwardReply *response) override;
+      grpc::CallbackServerContext* context,
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq* request,
+      crane::grpc::pmix::PmixTreeUpwardForwardReply* response) override;
 
   grpc::ServerUnaryReactor* PmixTreeDownwardForward(
-    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeDownwardForwardReq* request,
-    crane::grpc::pmix::PmixTreeDownwardForwardReply* response) override;
+      grpc::CallbackServerContext* context,
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq* request,
+      crane::grpc::pmix::PmixTreeDownwardForwardReply* response) override;
 
   grpc::ServerUnaryReactor* PmixDModexRequest(
-    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexRequestReq* request,
-    crane::grpc::pmix::PmixDModexRequestReply* response) override;
+      grpc::CallbackServerContext* context,
+      const crane::grpc::pmix::PmixDModexRequestReq* request,
+      crane::grpc::pmix::PmixDModexRequestReply* response) override;
 
   grpc::ServerUnaryReactor* PmixDModexResponse(
-    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
-    crane::grpc::pmix::PmixDModexResponseReply* response) override;
+      grpc::CallbackServerContext* context,
+      const crane::grpc::pmix::PmixDModexResponseReq* request,
+      crane::grpc::pmix::PmixDModexResponseReply* response) override;
 #endif
 
-private:
+ private:
   PmixDModexReqManager* m_dmodex_mgr_;
   PmixState* m_pmix_state_;
 };
 
-class PmixGrpcServer: public PmixASyncServer {
-public:
-  explicit PmixGrpcServer(PmixDModexReqManager* dmodex_mgr, PmixState* pmix_state, CranedClient* craned_client)
-      :m_dmodex_mgr_(dmodex_mgr), m_pmix_state_(pmix_state), m_craned_client_(craned_client) {}
+class PmixGrpcServer : public PmixASyncServer {
+ public:
+  explicit PmixGrpcServer(PmixDModexReqManager* dmodex_mgr,
+                          PmixState* pmix_state, CranedClient* craned_client)
+      : m_dmodex_mgr_(dmodex_mgr),
+        m_pmix_state_(pmix_state),
+        m_craned_client_(craned_client) {}
 
   bool Init(const Config& config) override;
 
@@ -81,8 +87,7 @@ public:
 
   void Wait() override { m_server_->Wait(); }
 
-private:
-
+ private:
   PmixDModexReqManager* m_dmodex_mgr_;
   PmixState* m_pmix_state_;
   CranedClient* m_craned_client_;
@@ -93,4 +98,4 @@ private:
   friend class PmixGrpcServiceImpl;
 };
 
-} // namespace pmix
+}  // namespace pmix

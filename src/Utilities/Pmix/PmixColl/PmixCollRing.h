@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2026 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 #pragma once
 
 #include "PmixColl.h"
@@ -29,7 +28,6 @@ namespace pmix {
 class PmixClient;
 class CranedClient;
 
-
 #define PMIX_COLL_RING_CTX_NUM 3
 
 enum class CollRingState : std::uint8_t {
@@ -39,28 +37,33 @@ enum class CollRingState : std::uint8_t {
 };
 
 inline std::string ToString(CollRingState state) {
-  switch(state) {
-  case CollRingState::SYNC:      return "SYNC";
-  case CollRingState::PROGRESS:  return "PROGRESS";
-  case CollRingState::FINALIZE:  return "FINALIZE";
-  default:                       return "UNKNOWN";
+  switch (state) {
+  case CollRingState::SYNC:
+    return "SYNC";
+  case CollRingState::PROGRESS:
+    return "PROGRESS";
+  case CollRingState::FINALIZE:
+    return "FINALIZE";
+  default:
+    return "UNKNOWN";
   }
 };
 
 struct CollRingCtx {
-    int peers_cnt;
-    bool in_use;
-    uint32_t seq;
-    bool contrib_local;
-    uint32_t contrib_prev;
-    uint32_t forward_cnt;
-    std::vector<bool> contrib_map;
-    CollRingState state;
-    std::string ring_buf;
+  int peers_cnt;
+  bool in_use;
+  uint32_t seq;
+  bool contrib_local;
+  uint32_t contrib_prev;
+  uint32_t forward_cnt;
+  std::vector<bool> contrib_map;
+  CollRingState state;
+  std::string ring_buf;
 };
 
-class PmixCollRing : public Coll, public std::enable_shared_from_this<PmixCollRing> {
-public:
+class PmixCollRing : public Coll,
+                     public std::enable_shared_from_this<PmixCollRing> {
+ public:
 #ifdef HAVE_PMIX
   // pmix_client and craned_client are injected so this class never needs to
   // call PmixServer::GetInstance().
@@ -70,24 +73,33 @@ public:
         m_pmix_client_(pmix_client),
         m_craned_client_(craned_client) {}
 
-  bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs) override;
+  bool PmixCollInit(CollType type,
+                    const std::vector<pmix_proc_t>& procs) override;
 
-  bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc, void* cbdata) override;
+  bool PmixCollContribLocal(const std::string& data, pmix_modex_cbfunc_t cbfunc,
+                            void* cbdata) override;
 
   bool ProcessRingRequest(
       const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
       const std::string& msg) override;
 
   bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
-                         const std::string& data) override { CRANE_ERROR("Not implemented");  return false;};
+                         const std::string& data) override {
+    CRANE_ERROR("Not implemented");
+    return false;
+  };
 
   bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
-                          const std::string& data) override { CRANE_ERROR("Not implemented");  return false;};
+                          const std::string& data) override {
+    CRANE_ERROR("Not implemented");
+    return false;
+  };
 
   void AbortOnTimeout() override;
 
   static void RingReleaseFn(void* rel_data);
-private:
+
+ private:
   /* ring coll functions */
   bool PmixCollRingInit_(const std::set<std::string>& hostset);
   bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
@@ -104,7 +116,9 @@ private:
 
   void ResetCollRing_(CollRingCtx& coll_ring_ctx);
 
-  bool PmixCollRingNeighbor_(const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
+  bool PmixCollRingNeighbor_(
+      const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+      const std::string& msg);
 
   struct CbData {
     PmixCollRing* coll;
@@ -112,9 +126,9 @@ private:
     uint32_t seq;
   };
 
-  PmixJobInfo   m_pmix_job_info_;
-  PmixClient*   m_pmix_client_{nullptr};   // injected, not owned
-  CranedClient* m_craned_client_{nullptr}; // injected, not owned
+  PmixJobInfo m_pmix_job_info_;
+  PmixClient* m_pmix_client_{nullptr};      // injected, not owned
+  CranedClient* m_craned_client_{nullptr};  // injected, not owned
 
   int m_next_peerid_{};
   CranedId m_next_craned_id_;
@@ -122,4 +136,4 @@ private:
 #endif
 };
 
-} // namespace pmix
+}  // namespace pmix

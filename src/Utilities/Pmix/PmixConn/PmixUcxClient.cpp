@@ -17,6 +17,7 @@
  */
 
 #include "PmixUcxClient.h"
+
 #include "crane/Logger.h"
 
 namespace pmix {
@@ -30,7 +31,7 @@ PmixUcxStub::~PmixUcxStub() {
 
   ucp_request_param_t param{};
   param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
-  param.flags        = UCP_EP_CLOSE_FLAG_FORCE;
+  param.flags = UCP_EP_CLOSE_FLAG_FORCE;
 
   // MULTI mode: no external lock required
   void* req = ucp_ep_close_nbx(m_ep_, &param);
@@ -49,20 +50,18 @@ PmixUcxStub::~PmixUcxStub() {
   m_ep_ = nullptr;
 }
 
-void PmixUcxStub::SendMessage_(PmixUcxMsgType type,
-                               std::string    data,
-                               AsyncCallback  callback) {
+void PmixUcxStub::SendMessage_(PmixUcxMsgType type, std::string data,
+                               AsyncCallback callback) {
   const ucp_tag_t tag =
       (static_cast<uint64_t>(type) << kTagTypeShift) | (1ULL & kTagLowMask);
 
-  auto*        ctx = new PmixSendCtx{std::move(callback), std::move(data), m_client_};
-  const void*  buf = ctx->buffer.data();
+  auto* ctx = new PmixSendCtx{std::move(callback), std::move(data), m_client_};
+  const void* buf = ctx->buffer.data();
   const size_t len = ctx->buffer.size();
 
   ucp_request_param_t param{};
-  param.op_attr_mask =
-      UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
-  param.cb.send   = SendHandle_;
+  param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+  param.cb.send = SendHandle_;
   param.user_data = ctx;
 
   // MULTI mode: direct call, thread-safe
@@ -84,7 +83,6 @@ void PmixUcxStub::SendMessage_(PmixUcxMsgType type,
   // else: async — SendHandle_ is responsible for enqueuing + notification
 }
 
-
 void PmixUcxStub::SendHandle_(void* request, ucs_status_t status,
                               void* user_data) {
   auto* ctx = static_cast<PmixSendCtx*>(user_data);
@@ -104,16 +102,16 @@ void PmixUcxStub::SendHandle_(void* request, ucs_status_t status,
   if (UCS_PTR_IS_PTR(request)) ucp_request_free(request);
 }
 
-#define PMIX_STUB_SEND(msg_type, req_obj, cb)                      \
-  do {                                                             \
-    std::string _data;                                             \
-    if (!(req_obj).SerializeToString(&_data)) {                    \
-      CRANE_ERROR("Failed to serialize " #req_obj);                \
-      (cb)(false);                                                 \
-      return;                                                      \
-    }                                                              \
-    SendMessage_((msg_type), std::move(_data), std::move(cb));     \
-  } while (0)
+#  define PMIX_STUB_SEND(msg_type, req_obj, cb)                  \
+    do {                                                         \
+      std::string _data;                                         \
+      if (!(req_obj).SerializeToString(&_data)) {                \
+        CRANE_ERROR("Failed to serialize " #req_obj);            \
+        (cb)(false);                                             \
+        return;                                                  \
+      }                                                          \
+      SendMessage_((msg_type), std::move(_data), std::move(cb)); \
+    } while (0)
 
 void PmixUcxStub::SendPmixRingMsgNoBlock(
     const crane::grpc::pmix::SendPmixRingMsgReq& req, AsyncCallback cb) {
@@ -124,7 +122,8 @@ void PmixUcxStub::PmixTreeUpwardForwardNoBlock(
   PMIX_STUB_SEND(PmixUcxMsgType::PMIX_UCX_TREE_UPWARD_FORWARD, req, cb);
 }
 void PmixUcxStub::PmixTreeDownwardForwardNoBlock(
-    const crane::grpc::pmix::PmixTreeDownwardForwardReq& req, AsyncCallback cb) {
+    const crane::grpc::pmix::PmixTreeDownwardForwardReq& req,
+    AsyncCallback cb) {
   PMIX_STUB_SEND(PmixUcxMsgType::PMIX_UCX_TREE_DOWNWARD_FORWARD, req, cb);
 }
 void PmixUcxStub::PmixDModexRequestNoBlock(
@@ -135,9 +134,9 @@ void PmixUcxStub::PmixDModexResponseNoBlock(
     const crane::grpc::pmix::PmixDModexResponseReq& req, AsyncCallback cb) {
   PMIX_STUB_SEND(PmixUcxMsgType::PMIX_UCX_DMDEX_RESPONSE, req, cb);
 }
-#undef PMIX_STUB_SEND
+#  undef PMIX_STUB_SEND
 
-void PmixUcxClient::EmplacePmixStub(const CranedId&    craned_id,
+void PmixUcxClient::EmplacePmixStub(const CranedId& craned_id,
                                     const std::string& addr_bytes) {
   if (m_stub_map_.contains(craned_id)) {
     CRANE_WARN("PmixUcxStub for {} already exists, skip", craned_id);
@@ -147,17 +146,17 @@ void PmixUcxClient::EmplacePmixStub(const CranedId&    craned_id,
   const auto* server_addr =
       reinterpret_cast<const ucp_address_t*>(addr_bytes.data());
 
-  auto stub          = std::make_shared<PmixUcxStub>(this);
+  auto stub = std::make_shared<PmixUcxStub>(this);
   stub->m_craned_id_ = craned_id;
 
   ucp_ep_params_t ep_params{};
   ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
-  ep_params.address    = server_addr;
+  ep_params.address = server_addr;
 
   ucs_status_t status = ucp_ep_create(m_ucp_worker_, &ep_params, &stub->m_ep_);
   if (status != UCS_OK) {
-    CRANE_ERROR("ucp_ep_create for {} failed: {}",
-                craned_id, ucs_status_string(status));
+    CRANE_ERROR("ucp_ep_create for {} failed: {}", craned_id,
+                ucs_status_string(status));
     return;
   }
 
@@ -169,17 +168,17 @@ void PmixUcxClient::EmplacePmixStub(const CranedId&    craned_id,
 
   const uint64_t cur =
       m_channel_count_.fetch_add(1, std::memory_order_release) + 1;
-  CRANE_TRACE("UCX channel to {} ready. channels={}/{}",
-              craned_id, cur, m_node_num_ - 1);
+  CRANE_TRACE("UCX channel to {} ready. channels={}/{}", craned_id, cur,
+              m_node_num_ - 1);
   m_cv_.notify_all();
 }
 
 std::shared_ptr<PmixStub> PmixUcxClient::GetPmixStub(
     const CranedId& craned_id) {
   std::shared_ptr<PmixUcxStub> pmix_stub = nullptr;
-  m_stub_map_.if_contains(craned_id,
-      [&](const StubMap::value_type& kv) { pmix_stub = kv.second; });
-      
+  m_stub_map_.if_contains(
+      craned_id, [&](const StubMap::value_type& kv) { pmix_stub = kv.second; });
+
   return pmix_stub;
 }
 

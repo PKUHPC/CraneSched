@@ -34,19 +34,24 @@ class PmixStub {
   virtual ~PmixStub() = default;
 
   virtual void SendPmixRingMsgNoBlock(
-      const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) = 0;
+      const crane::grpc::pmix::SendPmixRingMsgReq &request,
+      AsyncCallback callback) = 0;
 
   virtual void PmixTreeUpwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request, AsyncCallback callback) = 0;
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request,
+      AsyncCallback callback) = 0;
 
   virtual void PmixTreeDownwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request, AsyncCallback callback) = 0;
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request,
+      AsyncCallback callback) = 0;
 
   virtual void PmixDModexRequestNoBlock(
-      const crane::grpc::pmix::PmixDModexRequestReq &request, AsyncCallback callback) = 0;
+      const crane::grpc::pmix::PmixDModexRequestReq &request,
+      AsyncCallback callback) = 0;
 
   virtual void PmixDModexResponseNoBlock(
-      const crane::grpc::pmix::PmixDModexResponseReq &request, AsyncCallback callback) = 0;
+      const crane::grpc::pmix::PmixDModexResponseReq &request,
+      AsyncCallback callback) = 0;
 };
 
 class PmixClient {

@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,8 +19,8 @@
 #include "PmixState.h"
 
 #include "CranedClient.h"
-#include "PmixColl/PmixCollTree.h"
 #include "PmixColl/PmixCollRing.h"
+#include "PmixColl/PmixCollTree.h"
 #include "PmixConn/PmixClient.h"
 #include "crane/PublicHeader.h"
 
@@ -29,7 +29,6 @@ namespace pmix {
 #ifdef HAVE_PMIX
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     CollType type, const std::vector<pmix_proc_t>& procs) {
-
   util::write_lock_guard lock_guard(m_mutex_);
 
   for (const auto& coll : m_coll_list_) {
@@ -40,7 +39,10 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
 
     bool all_match = true;
     for (size_t i = 0; i < procs.size(); i++) {
-      if (i >= coll->GetProcNum()) { all_match = false; break; }
+      if (i >= coll->GetProcNum()) {
+        all_match = false;
+        break;
+      }
       const auto* proc = coll->GetProcs(i);
       if (!proc || std::strcmp(proc->nspace, procs[i].nspace) != 0 ||
           proc->rank != procs[i].rank) {
@@ -53,21 +55,21 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
 
   std::shared_ptr<Coll> coll = nullptr;
   switch (type) {
-    case CollType::FENCE_TREE:
-      coll = std::make_shared<PmixCollTree>(m_pmix_job_info_, m_pmix_client_,
-                                             m_craned_client_);
-      break;
-    case CollType::FENCE_RING:
-      coll = std::make_shared<PmixCollRing>(m_pmix_job_info_, m_pmix_client_,
-                                             m_craned_client_);
-      break;
-    default:
-      CRANE_ERROR("Unsupported collective type: {}", ToString(type));
-      return nullptr;
+  case CollType::FENCE_TREE:
+    coll = std::make_shared<PmixCollTree>(m_pmix_job_info_, m_pmix_client_,
+                                          m_craned_client_);
+    break;
+  case CollType::FENCE_RING:
+    coll = std::make_shared<PmixCollRing>(m_pmix_job_info_, m_pmix_client_,
+                                          m_craned_client_);
+    break;
+  default:
+    CRANE_ERROR("Unsupported collective type: {}", ToString(type));
+    return nullptr;
   }
 
-  CRANE_TRACE("Creating new collective: type={}, proc_count={}",
-              ToString(type), procs.size());
+  CRANE_TRACE("Creating new collective: type={}, proc_count={}", ToString(type),
+              procs.size());
 
   if (!coll->PmixCollInit(type, procs)) {
     CRANE_ERROR("Failed to initialize collective: type={}, proc_count={}",
@@ -78,7 +80,8 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   m_coll_list_.emplace_back(coll);
 
   CRANE_DEBUG("New collective {:p} added to state: type={}, total_colls={}",
-              static_cast<void*>(coll.get()), ToString(type), m_coll_list_.size());
+              static_cast<void*>(coll.get()), ToString(type),
+              m_coll_list_.size());
 
   return coll;
 }
@@ -100,11 +103,12 @@ void PmixState::CleanupTimeoutColls(std::chrono::seconds timeout) {
 
   auto removed = before - m_coll_list_.size();
   if (removed > 0) {
-    CRANE_INFO("CleanupTimeoutColls: removed {} timed-out collective(s), "
-               "{} remaining.",
-               removed, m_coll_list_.size());
+    CRANE_INFO(
+        "CleanupTimeoutColls: removed {} timed-out collective(s), "
+        "{} remaining.",
+        removed, m_coll_list_.size());
   }
 }
 
 #endif
-} // namespace pmix
+}  // namespace pmix

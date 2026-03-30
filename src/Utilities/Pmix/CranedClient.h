@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,18 +19,16 @@
 #pragma once
 
 #include "PmixCommon.h"
-
 #include "crane/Lock.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
-
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
 namespace pmix {
 
 class CranedClient {
-public:
+ public:
   CranedClient(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
 
   ~CranedClient() = default;
@@ -41,7 +39,7 @@ public:
 
   bool BroadcastPmixPort(const std::string& pmix_port);
 
-private:
+ private:
   PmixJobInfo m_pmix_job_info_;
 
   std::shared_ptr<grpc::Channel> m_channel_;
@@ -49,4 +47,4 @@ private:
   std::unique_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
 
-} // namespace pmix
+}  // namespace pmix

@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,7 +24,8 @@
 
 namespace pmix {
 
-PmixGrpcStub::PmixGrpcStub(PmixGrpcClient* pmix_client) : m_pmix_client_(pmix_client) {}
+PmixGrpcStub::PmixGrpcStub(PmixGrpcClient* pmix_client)
+    : m_pmix_client_(pmix_client) {}
 
 void PmixGrpcStub::SendPmixRingMsgNoBlock(
     const crane::grpc::pmix::SendPmixRingMsgReq& request,
@@ -32,32 +33,38 @@ void PmixGrpcStub::SendPmixRingMsgNoBlock(
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::pmix::SendPmixRingMsgReply>();
 
-  m_stub_->async()->SendPmixRingMsg(context.get(), &request, reply.get(),
-                                    [context, reply, callback](grpc::Status status) {
-                                        callback(status.ok() && reply->ok());
-                                    });
-
+  m_stub_->async()->SendPmixRingMsg(
+      context.get(), &request, reply.get(),
+      [context, reply, callback](grpc::Status status) {
+        callback(status.ok() && reply->ok());
+      });
 }
 
 void PmixGrpcStub::PmixTreeUpwardForwardNoBlock(
     const crane::grpc::pmix::PmixTreeUpwardForwardReq& request,
     AsyncCallback callback) {
   auto context = std::make_shared<grpc::ClientContext>();
-  auto reply = std::make_shared<crane::grpc::pmix::PmixTreeUpwardForwardReply>();
+  auto reply =
+      std::make_shared<crane::grpc::pmix::PmixTreeUpwardForwardReply>();
 
-  m_stub_->async()->PmixTreeUpwardForward(context.get(), &request, reply.get(), [context, reply, callback](grpc::Status status) {
-    callback(status.ok() && reply->ok());
-  });
+  m_stub_->async()->PmixTreeUpwardForward(
+      context.get(), &request, reply.get(),
+      [context, reply, callback](grpc::Status status) {
+        callback(status.ok() && reply->ok());
+      });
 }
 
 void PmixGrpcStub::PmixTreeDownwardForwardNoBlock(
     const crane::grpc::pmix::PmixTreeDownwardForwardReq& request,
     AsyncCallback callback) {
   auto context = std::make_shared<grpc::ClientContext>();
-  auto reply = std::make_shared<crane::grpc::pmix::PmixTreeDownwardForwardReply>();
-  m_stub_->async()->PmixTreeDownwardForward(context.get(), &request, reply.get(), [context, reply, callback](grpc::Status status) {
-    callback(status.ok() && reply->ok());
-  });
+  auto reply =
+      std::make_shared<crane::grpc::pmix::PmixTreeDownwardForwardReply>();
+  m_stub_->async()->PmixTreeDownwardForward(
+      context.get(), &request, reply.get(),
+      [context, reply, callback](grpc::Status status) {
+        callback(status.ok() && reply->ok());
+      });
 }
 
 void PmixGrpcStub::PmixDModexRequestNoBlock(
@@ -65,9 +72,11 @@ void PmixGrpcStub::PmixDModexRequestNoBlock(
     AsyncCallback callback) {
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::pmix::PmixDModexRequestReply>();
-  m_stub_->async()->PmixDModexRequest(context.get(), &request, reply.get(), [context, reply, callback](grpc::Status status) {
-    callback(status.ok() && reply->ok());
-  });
+  m_stub_->async()->PmixDModexRequest(
+      context.get(), &request, reply.get(),
+      [context, reply, callback](grpc::Status status) {
+        callback(status.ok() && reply->ok());
+      });
 }
 
 void PmixGrpcStub::PmixDModexResponseNoBlock(
@@ -75,15 +84,15 @@ void PmixGrpcStub::PmixDModexResponseNoBlock(
     AsyncCallback callback) {
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::pmix::PmixDModexResponseReply>();
-  m_stub_->async()->PmixDModexResponse(context.get(), &request, reply.get(), [context, reply, callback](grpc::Status status) {
-    callback(status.ok() && reply->ok());
-  });
+  m_stub_->async()->PmixDModexResponse(
+      context.get(), &request, reply.get(),
+      [context, reply, callback](grpc::Status status) {
+        callback(status.ok() && reply->ok());
+      });
 }
 
-
 void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
-                                 const std::string& port) {
-
+                                     const std::string& port) {
   std::string ip_addr = craned_id;
 
   // ipv4_t ipv4_addr;
@@ -107,7 +116,7 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   int cur_count = m_channel_count_.fetch_add(1) + 1;
   CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}/{}", craned_id,
-              ip_addr, port, cur_count, m_node_num_-1);
+              ip_addr, port, cur_count, m_node_num_ - 1);
 
   craned->m_channel_ =
       CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
@@ -118,23 +127,22 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   m_craned_id_stub_map_.emplace(craned_id, craned);
 
-
   {
     std::lock_guard<std::mutex> lock(m_mutex_);
-    if (cur_count+1 >= m_node_num_) {
+    if (cur_count + 1 >= m_node_num_) {
       m_cv_.notify_one();
     }
   }
-
 }
 
-std::shared_ptr<PmixStub> PmixGrpcClient::GetPmixStub(const CranedId& craned_id) {
-
+std::shared_ptr<PmixStub> PmixGrpcClient::GetPmixStub(
+    const CranedId& craned_id) {
   std::shared_ptr<PmixGrpcStub> pmix_stub = nullptr;
-    m_craned_id_stub_map_.if_contains(
-      craned_id, [&](std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>& pair) {
-          pmix_stub = pair.second;
-    });
+  m_craned_id_stub_map_.if_contains(
+      craned_id,
+      [&](std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>& pair) {
+        pmix_stub = pair.second;
+      });
 
   if (!pmix_stub) {
     CRANE_ERROR("No gRPC stub found for craned_id={}, channel_count={}/{}",
@@ -144,4 +152,4 @@ std::shared_ptr<PmixStub> PmixGrpcClient::GetPmixStub(const CranedId& craned_id)
   return pmix_stub;
 }
 
-} // namespace pmix
+}  // namespace pmix
