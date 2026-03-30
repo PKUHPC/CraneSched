@@ -1115,11 +1115,12 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   uint32_t node_index = 0;
   for (const auto& node_name : m_craned_ids_) {
     auto it = this->craned_task_map.find(node_name);
-    if (it == this->craned_task_map.end()) continue;
-    for (const auto& task_id : it->second) {
-      step_to_d.mutable_task_node_list()->Set(task_id, node_index);
+    if (it != this->craned_task_map.end()) {
+      for (const auto& task_id : it->second) {
+        step_to_d.mutable_task_node_list()->Set(task_id, node_index);
+      }
     }
-    node_index++;
+    ++node_index;
   }
 
   step_to_d.mutable_start_time()->set_seconds(
