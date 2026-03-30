@@ -863,7 +863,7 @@ message StreamCrunRequest {
   enum CrunRequestType {
     JOB_REQUEST = 0;
     STEP_REQUEST = 4;
-    JOB_COMPLETION_REQUEST = 1;
+    STEP_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
     STEP_X11_FORWARD = 3;
   }
@@ -878,7 +878,7 @@ message StreamCrunRequest {
     StepToCtld step = 2;
   }
 
-  message JobCompleteReq {
+  message StepCompleteReq {
     JobStatus status = 1;
   }
 
@@ -899,7 +899,7 @@ message StreamCrunRequest {
   oneof payload {
     JobReq payload_job_req = 2;
     StepReq payload_step_req = 6;
-    JobCompleteReq payload_job_complete_req = 3;
+    StepCompleteReq payload_step_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
     StepX11ForwardReq payload_step_x11_forward_req = 5;
   }
@@ -907,10 +907,10 @@ message StreamCrunRequest {
 
 message StreamCrunReply {
   enum CforedCrunReplyType {
-    JOB_ID_REPLY = 0;
-    JOB_RES_ALLOC_REPLY = 1;
-    JOB_CANCEL_REQUEST = 2;
-    JOB_COMPLETION_ACK_REPLY = 3;
+    STEP_ID_REPLY = 0;
+    STEP_RES_ALLOC_REPLY = 1;
+    STEP_CANCEL_REQUEST = 2;
+    STEP_COMPLETION_ACK_REPLY = 3;
     TASK_IO_FORWARD = 4;
     TASK_IO_FORWARD_READY = 5;
     STEP_X11_FORWARD = 6;
@@ -919,22 +919,22 @@ message StreamCrunReply {
     STEP_X11_EOF = 9;
   }
 
-  message JobIdReply {
+  message StepIdReply {
     bool ok = 1;
     uint32 job_id = 2;
     uint32 step_id = 3;
     string failure_reason = 4;
   }
 
-  message JobResAllocatedReply {
+  message StepResAllocatedReply {
     bool ok = 1;
     string allocated_craned_regex = 2;
     repeated string craned_ids = 3;
   }
 
-  message JobCancelRequest {}
+  message StepCancelRequest {}
 
-  message JobCompletionAckReply {
+  message StepCompletionAckReply {
     bool ok = 1;
   }
 
@@ -971,10 +971,10 @@ message StreamCrunReply {
   CforedCrunReplyType type = 1;
 
   oneof payload {
-    JobIdReply payload_job_id_reply = 2;
-    JobResAllocatedReply payload_job_alloc_reply = 3;
-    JobCancelRequest payload_job_cancel_request = 4;
-    JobCompletionAckReply payload_job_completion_ack_reply = 5;
+    StepIdReply payload_step_id_reply = 2;
+    StepResAllocatedReply payload_step_alloc_reply = 3;
+    StepCancelRequest payload_step_cancel_request = 4;
+    StepCompletionAckReply payload_step_completion_ack_reply = 5;
     TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
     TaskIOForwardReply payload_task_io_forward_reply = 7;
     StepX11ForwardReply payload_step_x11_forward_reply = 8;
