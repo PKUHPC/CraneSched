@@ -30,6 +30,11 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::SendPmixRingMsg(
     grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
     crane::grpc::pmix::SendPmixRingMsgReply *response) {
 
+  CRANE_TRACE("RPC SendPmixRingMsg received: seq={}, contrib_id={}, from={}",
+              request->pmix_ring_msg_hdr().seq(),
+              request->pmix_ring_msg_hdr().contrib_id(),
+              request->pmix_ring_msg_hdr().craned_id());
+
   auto* reactor = context->DefaultReactor();
 
   std::vector<pmix_proc_t> procs;
@@ -63,6 +68,9 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeUpwardForward(
   grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeUpwardForwardReq *request,
   crane::grpc::pmix::PmixTreeUpwardForwardReply *response) {
 
+  CRANE_TRACE("RPC PmixTreeUpwardForward received: from={}, seq={}, data_size={}",
+              request->peer_host(), request->seq(), request->msg().size());
+
   auto* reactor = context->DefaultReactor();
 
   std::vector<pmix_proc_t> procs;
@@ -93,6 +101,9 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeUpwardForward(
 grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeDownwardForward(
   grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeDownwardForwardReq* request,
   crane::grpc::pmix::PmixTreeDownwardForwardReply* response) {
+
+  CRANE_TRACE("RPC PmixTreeDownwardForward received: from={}, seq={}, data_size={}",
+              request->peer_host(), request->seq(), request->msg().size());
 
   auto* reactor = context->DefaultReactor();
 
@@ -127,6 +138,10 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexRequestReq* request,
     crane::grpc::pmix::PmixDModexRequestReply* response) {
 
+  CRANE_TRACE("RPC PmixDModexRequest received: from={}, seq={}, nspace={}, rank={}",
+              request->craned_id(), request->seq_num(),
+              request->pmix_proc().nspace(), request->pmix_proc().rank());
+
   auto* reactor = context->DefaultReactor();
 
   pmix_proc_t proc;
@@ -146,6 +161,10 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
 grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
     crane::grpc::pmix::PmixDModexResponseReply* response) {
+  CRANE_TRACE("RPC PmixDModexResponse received: from={}, seq={}, status={}, data_size={}",
+              request->craned_id(), request->seq_num(),
+              request->status(), request->data().size());
+
   auto* reactor = context->DefaultReactor();
 
   m_dmodex_mgr_->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());

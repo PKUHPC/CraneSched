@@ -62,9 +62,19 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
       return nullptr;
   }
 
-  if (!coll->PmixCollInit(type, procs)) return nullptr;
+  CRANE_TRACE("Creating new collective: type={}, proc_count={}",
+              ToString(type), procs.size());
+
+  if (!coll->PmixCollInit(type, procs)) {
+    CRANE_ERROR("Failed to initialize collective: type={}, proc_count={}",
+                ToString(type), procs.size());
+    return nullptr;
+  }
 
   m_coll_list_.emplace_back(coll);
+
+  CRANE_DEBUG("New collective {:p} added to state: type={}, total_colls={}",
+              static_cast<void*>(coll.get()), ToString(type), m_coll_list_.size());
 
   return coll;
 }

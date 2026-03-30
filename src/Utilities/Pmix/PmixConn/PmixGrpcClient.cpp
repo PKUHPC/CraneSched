@@ -135,6 +135,12 @@ std::shared_ptr<PmixStub> PmixGrpcClient::GetPmixStub(const CranedId& craned_id)
       craned_id, [&](std::pair<const CranedId, std::shared_ptr<PmixGrpcStub>>& pair) {
           pmix_stub = pair.second;
     });
+
+  if (!pmix_stub) {
+    CRANE_ERROR("No gRPC stub found for craned_id={}, channel_count={}/{}",
+                craned_id, m_channel_count_.load(), m_node_num_ - 1);
+  }
+
   return pmix_stub;
 }
 

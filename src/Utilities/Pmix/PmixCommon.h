@@ -77,17 +77,17 @@ enum class PmixUcxMsgType : uint16_t {
 };
 
 #ifdef HAVE_UCX
-// tag 中 type 字段的起始 bit 位
+// Starting bit position of the type field in the UCX tag
 static constexpr int      kTagTypeShift     = 48;
-// type 字段的掩码 (高 16 bit)
+// Mask for the type field in the tag (upper 16 bits)
 static constexpr uint64_t kTagTypeMask      = 0xFFFF000000000000ULL;
-// 低 48 bit 的掩码
+// Mask for the lower 48 bits of the tag
 static constexpr uint64_t kTagLowMask       = 0x0000FFFFFFFFFFFFULL;
 
-// 每种消息类型同时预投递的 recv buffer 数量
+// Number of pre-posted recv buffers per message type (inflight count)
 static constexpr int      kInflightPerType  = 8;
 
-// 单条 UCX 消息的最大缓冲区 (4 MB, 覆盖 PMIx fence 数据量)
+// Maximum buffer size for a single UCX message (4 MB, covers PMIx fence data)
 static constexpr size_t   kAmMaxMessageSize = 4ULL * 1024 * 1024;
 #endif  // HAVE_UCX
 

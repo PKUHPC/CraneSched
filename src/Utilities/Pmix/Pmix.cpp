@@ -626,7 +626,7 @@ bool PmixServer::JobSet_() {
   info_list.emplace_back(InfoLoad_(PMIX_NODE_SIZE, m_pmix_job_info_.node_num, PMIX_UINT32));
   info_list.emplace_back(InfoLoad_(PMIX_MAX_PROCS, m_pmix_job_info_.task_num, PMIX_UINT32));
 
-  // TODO：_set_topology
+  // TODO: _set_topology
 
   if (PMIX_VERSION_MAJOR >= 5)
     info_list.emplace_back(InfoLoad_(PMIX_USERID, m_pmix_job_info_.uid, PMIX_UINT32));
