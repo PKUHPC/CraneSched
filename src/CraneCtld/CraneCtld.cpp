@@ -951,7 +951,6 @@ void DestroyCtldGlobalVariables() {
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
-  g_task_scheduler.reset();
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();

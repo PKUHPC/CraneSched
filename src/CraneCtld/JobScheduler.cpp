@@ -1113,7 +1113,7 @@ void JobScheduler::ScheduleThread_() {
 
           {
             CRANE_TRACE_SCOPE_NAMED(alloc_span, "job/alloc");
-            alloc_span.SetAttribute("job_id", job->TaskId());
+            alloc_span.SetAttribute("job_id", job->JobId());
             alloc_span.SetAttribute("partition", job->partition_id);
             alloc_span.SetAttribute(
                 "node_count",
@@ -3477,8 +3477,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       CRANE_TRACE("[Job #{}] Completed with status {}.", job_id,
                   job_finished_status.value());
       CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end",
-                                    task->Traceparent());
-      end_span.SetAttribute("job_id", task->TaskId());
+                                    job->Traceparent());
+      end_span.SetAttribute("job_id", job->JobId());
       end_span.SetAttribute(
           "status",
           static_cast<int64_t>(job_finished_status.value().first));
@@ -3578,18 +3578,9 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   // Populate traceparent lookup for RPC worker threads
   for (auto* job : context.rn_job_raw_ptrs)
-    context.job_traceparents[job->TaskId()] = job->Traceparent();
+    context.job_traceparents[job->JobId()] = job->Traceparent();
   for (auto* job : context.job_raw_ptrs)
-    context.job_traceparents[job->TaskId()] = job->Traceparent();
-
-  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span,
-                          "status_change/rpc_fanout");
-
-  // Populate traceparent lookup for RPC worker threads
-  for (auto* job : context.rn_job_raw_ptrs)
-    context.job_traceparents[job->TaskId()] = job->Traceparent();
-  for (auto* job : context.job_raw_ptrs)
-    context.job_traceparents[job->TaskId()] = job->Traceparent();
+    context.job_traceparents[job->JobId()] = job->Traceparent();
 
   CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span,
                           "status_change/rpc_fanout");
@@ -3843,7 +3834,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   for (auto* job : context.rn_job_raw_ptrs) {
     CRANE_TRACE_SCOPE_FROM_REMOTE(commit_span, "job/commit",
                                   job->Traceparent());
-    commit_span.SetAttribute("job_id", job->TaskId());
+    commit_span.SetAttribute("job_id", job->JobId());
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(txn_id, job->JobDbId(),
                                                       job->RuntimeAttr()))
       CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfJob()",

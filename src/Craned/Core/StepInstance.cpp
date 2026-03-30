@@ -24,6 +24,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "crane/CriClient.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
