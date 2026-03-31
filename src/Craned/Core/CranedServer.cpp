@@ -358,21 +358,11 @@ grpc::Status CranedServiceImpl::SuspendJobs(
 
   bool all_ok = true;
   for (auto job_id : request->job_id_list()) {
-    auto steps = g_job_mgr->GetAllocatedJobSteps(job_id);
-    for (auto step_id : steps) {
-      auto stub = g_job_mgr->GetSupervisorStub(job_id, step_id);
-      if (!stub) {
-        CRANE_ERROR("[Step #{}.{}] No supervisor stub for suspend", job_id,
-                    step_id);
-        all_ok = false;
-        continue;
-      }
-      auto err = stub->SuspendJob(job_id);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Failed to suspend: {}", job_id, step_id,
-                    CraneErrStr(err));
-        all_ok = false;
-      }
+    auto err = g_job_mgr->SuspendJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("[Job #{}] Failed to suspend by cgroup: {}", job_id,
+                  CraneErrStr(err));
+      all_ok = false;
     }
   }
 
@@ -391,21 +381,11 @@ grpc::Status CranedServiceImpl::ResumeJobs(
 
   bool all_ok = true;
   for (auto job_id : request->job_id_list()) {
-    auto steps = g_job_mgr->GetAllocatedJobSteps(job_id);
-    for (auto step_id : steps) {
-      auto stub = g_job_mgr->GetSupervisorStub(job_id, step_id);
-      if (!stub) {
-        CRANE_ERROR("[Step #{}.{}] No supervisor stub for resume", job_id,
-                    step_id);
-        all_ok = false;
-        continue;
-      }
-      auto err = stub->ResumeJob(job_id);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Failed to resume: {}", job_id, step_id,
-                    CraneErrStr(err));
-        all_ok = false;
-      }
+    auto err = g_job_mgr->ResumeJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("[Job #{}] Failed to resume by cgroup: {}", job_id,
+                  CraneErrStr(err));
+      all_ok = false;
     }
   }
 

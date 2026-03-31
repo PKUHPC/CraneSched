@@ -971,6 +971,60 @@ std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
   return result;
 }
 
+CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) {
+    CRANE_WARN("[Job #{}] Failed to suspend: job allocation not found.",
+               job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  if (!job_ptr->cgroup) {
+    CRANE_WARN("[Job #{}] Failed to suspend: job cgroup not found.", job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
+  bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
+  if (root_ok && children_ok) {
+    CRANE_INFO("[Job #{}] Frozen job cgroup: {}", job_id, job_cg_abs_path);
+    return CraneErrCode::SUCCESS;
+  }
+
+  CRANE_ERROR(
+      "[Job #{}] Failed to freeze job cgroup {}, root_ok={}, children_ok={}",
+      job_id, job_cg_abs_path, root_ok, children_ok);
+  return CraneErrCode::ERR_CGROUP;
+}
+
+CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) {
+    CRANE_WARN("[Job #{}] Failed to resume: job allocation not found.",
+               job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  if (!job_ptr->cgroup) {
+    CRANE_WARN("[Job #{}] Failed to resume: job cgroup not found.", job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
+  bool root_ok = CgroupManager::ThawCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::ThawChildCgroupsByPath(job_cg_abs_path);
+  if (root_ok && children_ok) {
+    CRANE_INFO("[Job #{}] Thawed job cgroup: {}", job_id, job_cg_abs_path);
+    return CraneErrCode::SUCCESS;
+  }
+
+  CRANE_ERROR(
+      "[Job #{}] Failed to thaw job cgroup {}, root_ok={}, children_ok={}",
+      job_id, job_cg_abs_path, root_ok, children_ok);
+  return CraneErrCode::ERR_CGROUP;
+}
+
 std::shared_ptr<SupervisorStub> JobManager::GetSupervisorStub(
     job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);

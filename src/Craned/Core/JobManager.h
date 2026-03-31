@@ -119,6 +119,10 @@ class JobManager {
 
   std::vector<step_id_t> GetAllocatedJobSteps(job_id_t job_id);
 
+  CraneErrCode SuspendJobByCgroup(job_id_t job_id);
+
+  CraneErrCode ResumeJobByCgroup(job_id_t job_id);
+
   std::shared_ptr<SupervisorStub> GetSupervisorStub(job_id_t job_id,
                                                     step_id_t step_id);
 
