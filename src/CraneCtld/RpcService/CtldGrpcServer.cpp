@@ -551,8 +551,8 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
           absl::BlockingCounter broadcast_bl(pair.second.size());
           const auto pmix_ports_snapshot = pair.second;
           for (const auto& craned_id : request->craned_ids()) {
-            std::thread([craned_id,              // by value: each thread owns its id
-                         &pmix_ports_snapshot,   // stable for the life of Wait()
+            std::thread([craned_id,  // by value: each thread owns its id
+                         &pmix_ports_snapshot,  // stable for the life of Wait()
                          &broadcast_bl, &broadcast_all_ok, request]() {
               auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
               if (!craned_stub) {
