@@ -4701,7 +4701,7 @@ void JobScheduler::PersistAndTransferJobsToMongodb_(
 
 CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
     JobInCtld* job) {
-  if (job->IsBatch()) {
+  if (job->JobToCtld().has_io_meta()) {
     auto* io_meta = job->MutableJobToCtld()->mutable_io_meta();
     if (!io_meta->has_open_mode_append())
       io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
