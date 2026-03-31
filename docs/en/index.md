@@ -5,7 +5,7 @@ hide:
 
 # CraneSched
 
-<p class="lead">Next-generation HPC+AI converged compute scheduling system — China's first open-source, domestically-developed compute scheduler for unified HPC and AI workloads.</p>
+<p class="lead">A next-generation open-source compute scheduler for unified HPC and AI workloads.</p>
 
 <p>CraneSched is a distributed job scheduling system jointly developed by Peking University, the Changsha Institute of Computing and Digital Economy of Peking University, and Changsha Jianshan Tatu Technology Co., Ltd. Targeting HPC and AI workloads, it unifies supercomputing and AI computing resources, breaks down traditional compute barriers, and delivers efficient, stable, and reliable computing services across education, industry, meteorology, defense, and more.</p>
 
@@ -119,7 +119,7 @@ CraneSched comprehensively benchmarks against Slurm in scheduling capabilities, 
 | Native Container Orchestration (CRI/CNI) | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Native container orchestration based on CRI/CNI standards |
 | Multi-Tenant Container Network Isolation | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | CNI-based multi-tenant network isolation (Calico Underlay) |
 | Container RDMA Network Support | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Supports SR-IOV shared RNIC and direct passthrough |
-| Domestic Hardware Compatibility | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Full support for domestic CPUs, GPUs/NPUs, and operating systems |
+| Extended Hardware Compatibility | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Supports diverse CPU architectures (x86, ARM, RISC-V) and accelerators from multiple vendors including Nvidia, AMD, Huawei Ascend, and more |
 | HPC+AI Converged Scheduling | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | One cluster handles both HPC and AI workloads |
 | AI Job Runtime Prediction | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | LLM-based job runtime prediction with 41% accuracy improvement |
 
