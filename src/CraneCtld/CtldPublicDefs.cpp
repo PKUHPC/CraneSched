@@ -825,6 +825,9 @@ void DaemonStepInCtld::SetFieldsOfStepInfo(
 }
 
 void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
+  bool is_container_batch_primary =
+      job.IsContainer() && job.TaskToCtld().has_batch_meta();
+
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);
   type = job.type;
@@ -894,8 +897,10 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   task_epilog = job.JobToCtld().task_epilog();
   // FIXME: Following job fields should set by scheduler
   task_id_t cur_task_id = 0;
-  if (job.IsBatch() || job.IsCalloc()) {
-    // Batch/Calloc: will launch one job on one node only
+  if (job.IsBatch() || job.IsCalloc() || is_container_batch_primary) {
+    // Batch-like primary steps only launch one orchestration task on one node.
+    // For cbatch --pod we intentionally keep job.StepResAvail() untouched so
+    // that appended container steps can reuse the job allocation.
     craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
     task_res_map[cur_task_id] =
         job.AllocatedRes().at(job.executing_craned_ids.front());
@@ -1941,6 +1946,7 @@ int JobInCtld::SchedulePendingSteps(
     step->SetExecutionNodes({step_craned_ids.begin(), step_craned_ids.end()});
     step->SetStartTime(now);
     step->SetStatus(crane::grpc::JobStatus::Configuring);
+
     if (step->ia_meta.has_value()) {
       const auto& meta = step->ia_meta.value();
       meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{

@@ -115,7 +115,20 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  CRANE_INFO("Grpc shutdown request received.");
+  auto is_finished_status = [](StepStatus status) {
+    switch (status) {
+    case StepStatus::ExceedTimeLimit:
+    case StepStatus::OutOfMemory:
+    case StepStatus::Cancelled:
+    case StepStatus::Failed:
+    case StepStatus::Completed:
+      return true;
+    default:
+      return false;
+    }
+  };
+
+  CRANE_INFO("Daemon step is requested to shutdown.");
 
   // Set actively shutdown flag so that the daemon step can exit.
   g_task_mgr->SetActivelyShutdown();
@@ -134,7 +147,13 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
   }
 
   // In any other case, we can shutdown directly.
-  g_task_mgr->ShutdownSupervisorAsync();
+  auto status = g_task_mgr->GetStepStatus();
+  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
+      is_finished_status(status)) {
+    g_task_mgr->ShutdownSupervisorAsync(status);
+  } else {
+    g_task_mgr->ShutdownSupervisorAsync();
+  }
   return Status::OK;
 }
 

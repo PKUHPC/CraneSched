@@ -72,17 +72,18 @@ class StepInstance {
 
   std::optional<X11Meta> x11_meta;
 
-  std::string cgroup_path;  // resolved cgroup path
   std::optional<std::filesystem::path> script_path;
 
-  // Only daemon step may migrate ssh procs to cgroup
+  // Cgroup of this step
+  // For daemon step, this cgroup will be used for SSH user.
+  // For common step, this cgroup will be the parent of all task cgroups.
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
   struct TerminationStatus {
     // Will return to crun for interactive steps
     uint32_t max_exit_code{0};
     StepStatus final_status_on_termination{StepStatus::Completed};
-    std::string final_reason_on_termination{""};
+    std::string final_reason_on_termination;
   };
 
   TerminationStatus final_termination_status;
@@ -95,7 +96,7 @@ class StepInstance {
         job_id(step.job_id()),
         step_id(step.step_id()),
         task_ids(step.task_res_map() | std::views::keys |
-                 std::ranges::to<std::vector>()),
+                 std::ranges::to<std::vector<task_id_t>>()),
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
@@ -120,6 +121,8 @@ class StepInstance {
   // Do some preparation needed by all tasks.
   CraneErrCode Prepare();
   void CleanUp();
+
+  static bool IsFinishedStatus(const StepStatus& status);
 
   /*
   A Step can be classified from multiple perspectives:
@@ -271,7 +274,6 @@ class ITaskInstance {
   StepInstance* m_parent_step_inst_;
   TaskExitInfo m_exit_info_{};
   EnvMap m_env_;
-  std::unique_ptr<Common::CgroupInterface> m_task_cg;
 };
 
 class PodInstance : public ITaskInstance {
@@ -511,6 +513,9 @@ class ProcInstance : public ITaskInstance {
                                     bool is_batch_stdout,
                                     bool* is_local_file) const;
 
+  // Process task has its own cgroup.
+  std::unique_ptr<Common::CgroupInterface> m_task_cg_;
+
   std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
 
@@ -614,6 +619,8 @@ class TaskManager {
 
   std::future<CraneErrCode> ExecuteStepAsync();
 
+  std::future<CraneErrCode> ExecutePodAsync();
+
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
   std::future<CraneErrCode> ChangeStepTimeConstraintAsync(
@@ -648,6 +655,9 @@ class TaskManager {
     std::optional<int64_t> deadline_time{std::nullopt};
   };
   void EvShutdownSupervisorCb_();
+
+  // For daemon step of a container job, we need to create a pod for it.
+  void EvExecutePodCb_();
 
   // Process exited
   void EvSigchldCb_();
@@ -684,6 +694,9 @@ class TaskManager {
   // Handle event stream for ContainerInstance
   std::shared_ptr<uvw::async_handle> m_cri_event_handle_;
   ConcurrentQueue<cri::api::ContainerStatus> m_cri_event_queue_;
+
+  // Create pod for daemon step of container job.
+  std::shared_ptr<uvw::async_handle> m_execute_pod_async_handle_;
 
   // Task is already terminated
   std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;

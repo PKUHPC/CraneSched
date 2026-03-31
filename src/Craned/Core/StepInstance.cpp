@@ -119,6 +119,7 @@ CraneErrCode StepInstance::Prepare() {
       CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
       false);
   if (!cg_expt) return cg_expt.error();
+
   this->crane_cgroup = std::move(cg_expt.value());
   auto* cg = this->crane_cgroup.get();
   return CraneErrCode::SUCCESS;
@@ -214,7 +215,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.mutable_env()->insert(job_env_map.begin(), job_env_map.end());
 
     std::string cgroup_path_str = this->crane_cgroup->CgroupPath().string();
-    init_req.set_cgroup_path(cgroup_path_str);
+    init_req.set_supv_cgroup_path(cgroup_path_str);
     CRANE_TRACE("[Step #{}.{}] Setting cgroup path: {}", job_id, step_id,
                 cgroup_path_str);
 

@@ -110,7 +110,9 @@ struct Config {
   step_id_t StepId;
   StepToSupv StepSpec;
   std::atomic_int TaskCount;
-  std::string CgroupPath;  // resolved cgroup path for OOM monitoring
+
+  // Cgroup path of this supervisor (crane system cgroup)
+  std::string SupvCgroupPath;
 
   struct JobLifecycleHookConfig {
     std::vector<std::string> Prologs;
