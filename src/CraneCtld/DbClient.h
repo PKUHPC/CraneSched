@@ -231,12 +231,14 @@ class MongodbClient {
 
   // Database schema migration
   static constexpr int kCurrentDbSchemaVersion = 1;
+  static constexpr const char* kV0CollectionName = "task_table";
   bool CheckAndMigrateDbSchema_();
   bool RecoverInterruptedMigration_();
   std::optional<int> GetDbSchemaVersion_();
   bool SetDbSchemaVersion_(int version);
-  bool CopyTaskTableForMigration_();
-  bool SwapMigratedTaskTable_(int from_version, int to_version);
+  bool CopyJobTableForMigration_(const std::string& source_collection);
+  bool SwapMigratedJobTable_(const std::string& source_collection,
+                             int from_version, int to_version);
   void CleanupMigrationTemp_();
   bool MigrateV0ToV1_();
 
@@ -659,10 +661,6 @@ class MongodbClient {
                               const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
-  // TODO: Renaming from "task_table" to "job_table" requires a database
-  // migration for existing deployments. A migration script should rename the
-  // MongoDB collection (db.task_table.renameCollection("job_table")) and be
-  // integrated into the upgrade procedure before this change is released.
   const std::string m_job_collection_name_{"job_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
@@ -672,7 +670,7 @@ class MongodbClient {
   const std::string m_license_resource_collection_name_{
       "license_resource_table"};
 
-  const std::string m_migration_temp_collection_name_{"task_table_migrating"};
+  const std::string m_migration_temp_collection_name_{"job_table_migrating"};
   const std::string m_metadata_collection_name_{"metadata_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
   const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
