@@ -133,7 +133,7 @@ class PmixCollTree : public Coll,
   void PmixCollLocalCbNodata_(int status);
 
   struct CbData {
-    PmixCollTree* coll;
+    std::shared_ptr<PmixCollTree> coll;
     uint32_t seq;
   };
 

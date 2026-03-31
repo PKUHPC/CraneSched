@@ -41,7 +41,7 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   crane::grpc::pmix::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
   request.set_data(data, sz);
-  request.set_status(PMIX_SUCCESS);
+  request.set_status(status);
   request.set_craned_id(dmo_modex_cb_data->craned_id);
 
   // Use the injected PmixClient pointer — no global access needed.
@@ -103,8 +103,10 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
 
   crane::grpc::pmix::PmixDModexRequestReq request{};
 
+  uint32_t assigned_seq{};
   {
     util::lock_guard lock(m_dmodex_mutex_);
+    assigned_seq = m_dmdx_seq_num_;
     m_pmix_dmodex_req_list_.emplace_back(
         PmixDModexReq{.seq_num = m_dmdx_seq_num_,
                       .ts = std::chrono::steady_clock::now(),
@@ -112,6 +114,17 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
                       .cb_data = cbdata});
     request.set_seq_num(m_dmdx_seq_num_++);
   }
+
+  // Helper: remove the pending request entry by seq_num.
+  // Must be called on every error path to prevent double-callback from
+  // CleanupTimeoutRequests().
+  auto remove_req = [this, assigned_seq]() {
+    util::lock_guard lock(m_dmodex_mutex_);
+    std::erase_if(m_pmix_dmodex_req_list_,
+                  [assigned_seq](const auto &r) {
+                    return r.seq_num == assigned_seq;
+                  });
+  };
 
   auto *pmix_proc = request.mutable_pmix_proc();
   pmix_proc->set_nspace(pmix_namespace);
@@ -124,6 +137,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   if (!stub) {
     CRANE_ERROR("DModexGet: stub for {} not found, pmixDModex rpc failed.",
                 craned_id);
+    remove_req();
     PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
                        nullptr);
     return false;
@@ -132,13 +146,15 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   CRANE_TRACE("PmixDModexRequest to {} for nspace={}, rank={}", craned_id,
               pmix_namespace, rank);
 
-  stub->PmixDModexRequestNoBlock(request, [cbfunc, cbdata](bool ok) {
-    if (!ok) {
-      CRANE_ERROR("PmixDModex rpc failed.");
-      PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
-                         nullptr);
-    }
-  });
+  stub->PmixDModexRequestNoBlock(
+      request, [cbfunc, cbdata, remove_req](bool ok) {
+        if (!ok) {
+          CRANE_ERROR("PmixDModex rpc failed.");
+          remove_req();
+          PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
+                             nullptr);
+        }
+      });
 
   return true;
 }
@@ -246,6 +262,18 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
       }
     }
   }
+}
+
+void PmixDModexReqManager::DrainAllRequests() {
+  util::lock_guard lock(m_dmodex_mutex_);
+
+  for (auto& req : m_pmix_dmodex_req_list_) {
+    CRANE_WARN("DrainAllRequests: cancelling dmodex seq_num={} on shutdown",
+               req.seq_num);
+    PmixLibModexInvoke(req.cb_func, PMIX_ERR_TIMEOUT, nullptr, 0, req.cb_data,
+                       nullptr, nullptr);
+  }
+  m_pmix_dmodex_req_list_.clear();
 }
 
 #endif

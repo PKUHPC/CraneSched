@@ -59,7 +59,11 @@ class PmixServer {
   // Returns the singleton PmixServer instance (valid after Init(), null after
   // destruction).  All PMIx C callbacks reach server state through this
   // accessor instead of a raw global variable.
+#ifdef HAVE_PMIX
   static PmixServer* GetInstance() { return s_instance_; }
+#else
+  static PmixServer* GetInstance() { return nullptr; }
+#endif
 
   std::chrono::seconds GetTimeout() const { return m_timeout_; }
 

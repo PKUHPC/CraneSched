@@ -156,15 +156,23 @@ PmixServer::~PmixServer() {
                                   OpCbWrapper, nullptr);
   }
 
+  // Drain all active collectives and pending dmodex requests before destroying
+  // PmixClient.  Any in-flight gRPC callbacks that still hold a
+  // shared_ptr<Coll> (via 'self') will see a stale seq and take the
+  // early-return path, so they will NOT dereference the raw m_pmix_client_
+  // pointer after it is reset below.
+  if (m_pmix_state_) m_pmix_state_->AbortAllColls();
+  if (m_dmodex_mgr_) m_dmodex_mgr_->DrainAllRequests();
+
   int rc = PMIx_server_finalize();
   if (rc != PMIX_SUCCESS)
     CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
 
   m_pmix_async_server_.reset();
-  m_pmix_client_.reset();
-  m_craned_client_.reset();
   m_dmodex_mgr_.reset();
   m_pmix_state_.reset();
+  m_pmix_client_.reset();
+  m_craned_client_.reset();
 
   CRANE_TRACE("[Step#{}.{}] Finalize PmixServer.", m_pmix_job_info_.job_id,
               m_pmix_job_info_.step_id);
@@ -469,7 +477,7 @@ bool PmixServer::PmixInit_() const {
   PMIX_INFO_LOAD(&server_info[server_info_size - 1], PMIX_SERVER_TMPDIR,
                  m_pmix_job_info_.server_tmpdir.c_str(), PMIX_STRING);
   rc = PMIx_server_init(&s_crane_pmix_module, server_info, server_info_size);
-  PMIX_INFO_DESTRUCT(server_info);
+  PMIX_INFO_FREE(server_info, server_info_size);
   if (PMIX_SUCCESS != rc) {
     CRANE_ERROR("Pmix Server Init failed with error {}", PMIx_Error_string(rc));
     return false;
@@ -583,7 +591,7 @@ bool PmixServer::JobSet_() {
 
   // node_list node1,node2,node3
   std::unique_ptr<char, decltype(&free)> regex(nullptr, &free);
-  char* raw_regex;
+  char* raw_regex = nullptr;
   rc = PMIx_generate_regex(m_pmix_job_info_.node_list_str.c_str(), &raw_regex);
   regex.reset(raw_regex);
   if (rc != PMIX_SUCCESS) {
@@ -606,7 +614,7 @@ bool PmixServer::JobSet_() {
                       ";"));
 
   std::unique_ptr<char, decltype(&free)> ppn(nullptr, &free);
-  char* raw_ppn;
+  char* raw_ppn = nullptr;
   rc = PMIx_generate_ppn(ppn_str.c_str(), &raw_ppn);
   ppn.reset(raw_ppn);
   if (rc != PMIX_SUCCESS) {
@@ -617,6 +625,11 @@ bool PmixServer::JobSet_() {
   info_list.emplace_back(InfoLoad_(PMIX_ANL_MAP, ppn, PMIX_STRING));
 
   std::string ranks_str = absl::StrJoin(local_ranks, ",");
+  if (local_ranks.empty()) {
+    CRANE_ERROR("No local PMIx ranks assigned on node {}",
+                m_pmix_job_info_.hostname);
+    return false;
+  }
   // Identifies the set of processes of the same task on the same physical node.
   info_list.emplace_back(InfoLoad_(PMIX_LOCAL_PEERS, ranks_str, PMIX_STRING));
   info_list.emplace_back(
@@ -634,7 +647,7 @@ bool PmixServer::JobSet_() {
         m_pmix_job_info_.nspace.c_str(),
         static_cast<int>(m_pmix_job_info_.ntasks_per_node), ns_info,
         info_list.size(), OpCbWrapper, &bc);
-    PMIX_INFO_DESTRUCT(ns_info);
+    PMIX_INFO_FREE(ns_info, info_list.size());
     if (rc != PMIX_SUCCESS) {
       CRANE_ERROR("Error: PMIx_server_register_nspace. {}",
                   PMIx_Error_string(rc));

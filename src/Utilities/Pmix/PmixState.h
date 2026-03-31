@@ -48,6 +48,8 @@ class PmixState {
   // than timeout_sec seconds.  Called periodically from the uvw cleanup timer.
   void CleanupTimeoutColls(std::chrono::seconds timeout);
 
+  void AbortAllColls();
+
  private:
   PmixJobInfo m_pmix_job_info_;
   PmixClient* m_pmix_client_{nullptr};      // injected, not owned

@@ -462,12 +462,20 @@ void StartServer(int grpc_output_fd) {
 
   g_task_mgr->Wait();
 
+  // Wait for all thread-pool tasks (including the detached g_server->Wait()
+  // task) to finish before destroying g_server.  Without this, g_server.reset()
+  // could free the gRPC Server object while the thread-pool thread is still
+  // executing inside Server::Wait(), causing use-after-free UB.
+  g_thread_pool->wait();
   g_server.reset();
   g_task_mgr.reset();
 
   g_craned_client.reset();
   g_plugin_client.reset();
 
+  // Wait again for any tasks that may have been spawned during the reset
+  // sequence above (e.g. PodInstance::Cleanup detaches a task to remove
+  // temporary config/lock files).
   g_thread_pool->wait();
   g_thread_pool.reset();
 

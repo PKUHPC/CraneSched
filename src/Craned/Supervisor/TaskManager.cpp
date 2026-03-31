@@ -2374,7 +2374,7 @@ CraneErrCode ProcInstance::Spawn() {
     }
 
     for (const auto& [k, v] : pmix_env) {
-      m_env_.emplace(k, v);
+      m_env_.insert_or_assign(k, v);
     }
 
     if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
