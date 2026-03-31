@@ -120,10 +120,9 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   // CleanupTimeoutRequests().
   auto remove_req = [this, assigned_seq]() {
     util::lock_guard lock(m_dmodex_mutex_);
-    std::erase_if(m_pmix_dmodex_req_list_,
-                  [assigned_seq](const auto &r) {
-                    return r.seq_num == assigned_seq;
-                  });
+    std::erase_if(m_pmix_dmodex_req_list_, [assigned_seq](const auto &r) {
+      return r.seq_num == assigned_seq;
+    });
   };
 
   auto *pmix_proc = request.mutable_pmix_proc();
@@ -267,7 +266,7 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
 void PmixDModexReqManager::DrainAllRequests() {
   util::lock_guard lock(m_dmodex_mutex_);
 
-  for (auto& req : m_pmix_dmodex_req_list_) {
+  for (auto &req : m_pmix_dmodex_req_list_) {
     CRANE_WARN("DrainAllRequests: cancelling dmodex seq_num={} on shutdown",
                req.seq_num);
     PmixLibModexInvoke(req.cb_func, PMIX_ERR_TIMEOUT, nullptr, 0, req.cb_data,
