@@ -166,7 +166,7 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskMetaReply(bool ok, const std::string &failure_reason,
+  bool WriteStepMetaReply(bool ok, const std::string &failure_reason,
                           const crane::grpc::StepToCtld &step, int32_t pid) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;

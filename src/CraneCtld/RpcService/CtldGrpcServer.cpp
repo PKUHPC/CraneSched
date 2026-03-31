@@ -375,7 +375,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto job = std::make_unique<JobInCtld>();
           job->SetFieldsByJobToCtld(payload.job());
 
-          CRANE_TRACE("[Job #{}] Recv TASK_REQUEST.", task->TaskId());
+          CRANE_TRACE("[Job #{}] Recv JOB_REQUEST.", job->JobId());
 
           InteractiveMeta meta;
           meta.cfored_name = cfored_name;
@@ -503,7 +503,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           std::string failure_reason;
           bool ok = true;
           crane::grpc::StepToCtld step;
-          if (!g_task_scheduler->QueryStepAndNodeRegex(
+          if (!g_job_scheduler->QueryStepAndNodeRegex(
                   payload.job_id(), payload.step_id(), &step)) {
             ok = false;
             failure_reason = "Step not found";
@@ -514,26 +514,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
               failure_reason = "permission denied";
             }
           }
-          stream_writer->WriteTaskMetaReply(ok, failure_reason, step,
+          stream_writer->WriteStepMetaReply(ok, failure_reason, step,
                                             payload.cattach_pid());
-        } break;
-
-        case StreamCforedRequest::JOB_META_REQUEST: { // TODO: change to JOB_META_REQUEST
-          auto const &payload = cfored_request.payload_job_meta_req();
-          CRANE_TRACE("Recv JobMetaReq of Job #{}", payload.job_id());
-          std::string failure_reason;
-          bool ok = true;
-          crane::grpc::JobToCtld job;
-          if (!g_job_scheduler->QueryJobUseId(payload.job_id(), &job)) {
-            ok = false;
-            failure_reason = "Job not found";
-          } else {
-            if (payload.uid() != job.uid() && !g_account_manager->CheckUidIsAdmin(payload.uid())) {
-              ok = false;
-              failure_reason = "permission denied";
-            }
-          }
-          stream_writer->WriteJobMetaReply(ok, failure_reason, job, payload.cattach_pid());
         } break;
 
         case StreamCforedRequest::JOB_COMPLETION_REQUEST: {

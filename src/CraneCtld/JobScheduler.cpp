@@ -5015,17 +5015,17 @@ void JobScheduler::QueryJobsInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
-bool TaskScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
+bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
                                           crane::grpc::StepToCtld* step) {
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  auto iter = m_running_task_map_.find(job_id);
-  if (iter == m_running_task_map_.end()) return false;
+  LockGuard running_guard(&m_running_job_map_mtx_);
+  auto iter = m_running_job_map_.find(job_id);
+  if (iter == m_running_job_map_.end()) return false;
 
   if (step_id == 0) return false;
 
   auto* job = iter->second.get();
 
-  if (step_id == 1) {
+  if (step_id == kPrimaryStepId) {
     *step = job->PrimaryStep()->StepToCtld();
     step->set_nodelist(iter->second->allocated_craneds_regex);
     return true;
@@ -5035,16 +5035,6 @@ bool TaskScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
   if (step_iter == job->Steps().end()) return false;
   *step = step_iter->second->StepToCtld();
   step->set_nodelist(iter->second->allocated_craneds_regex);
-  return true;
-}
-
-bool TaskScheduler::QueryTaskUseId(task_id_t task_id, crane::grpc::TaskToCtld* task) {
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  auto iter = m_running_task_map_.find(task_id);
-  if (iter == m_running_task_map_.end()) return false;
-
-  *task = iter->second->TaskToCtld();
-  task->set_nodelist(iter->second->GetAllocatedCranedsRegex());
   return true;
 }
 
