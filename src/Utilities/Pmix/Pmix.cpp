@@ -141,7 +141,9 @@ static pmix_server_module_t s_crane_pmix_module = {
 
 // Singleton definition — one per process, set by Init(), cleared by
 // ~PmixServer().
+#ifdef HAVE_PMIX
 PmixServer* PmixServer::s_instance_ = nullptr;
+#endif
 
 PmixServer::~PmixServer() {
 #ifdef HAVE_PMIX
