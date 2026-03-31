@@ -107,7 +107,9 @@ pmix_status_t PmixServerCallbacks::FenceNb(
     return PMIX_ERROR;
   }
 
-  if (!coll->PmixCollContribLocal(std::string(data, ndata), cbfunc, cbdata)) {
+  std::string local_data;
+  if (data != nullptr && ndata > 0) local_data.assign(data, ndata);
+  if (!coll->PmixCollContribLocal(local_data, cbfunc, cbdata)) {
     CRANE_ERROR("FenceNb: failed to contribute local data to collective");
     cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
     return PMIX_ERROR;

@@ -424,7 +424,7 @@ bool PmixCollTree::ProgressUpFwd_() {
 
   if (m_cbfunc_) {
     auto cb_data = std::make_unique<CbData>();
-    cb_data->coll = this;
+    cb_data->coll = shared_from_this();
     cb_data->seq = m_seq_;
     m_downfwd_cb_wait_++;
     PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
@@ -482,7 +482,7 @@ bool PmixCollTree::ProgressUpFwdWpc_() {
   /* local delivery */
   if (this->m_cbfunc_) {
     auto cb_data = std::make_unique<CbData>();
-    cb_data->coll = this;
+    cb_data->coll = shared_from_this();
     cb_data->seq = m_seq_;
 
     PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
@@ -790,13 +790,13 @@ void PmixCollTree::TreeReleaseFn(void* rel_data) {
 
   std::lock_guard lock(cb_data->coll->m_lock_);
 
-  PmixCollTree* coll = cb_data->coll;
+  PmixCollTree* coll = cb_data->coll.get();
 
   coll->m_downfwd_buf_.clear();
 
   if (cb_data->seq != cb_data->coll->m_seq_) {
     CRANE_ERROR("{:p}: collective was reset: my_seq={}, cur_seq={}",
-                static_cast<void*>(cb_data->coll), cb_data->seq,
+                static_cast<void*>(cb_data->coll.get()), cb_data->seq,
                 cb_data->coll->m_seq_);
     goto exit;
   }

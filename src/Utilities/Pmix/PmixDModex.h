@@ -67,6 +67,8 @@ class PmixDModexReqManager {
 
   void CleanupTimeoutRequests();
 
+  void DrainAllRequests();
+
  private:
   void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
                           int status);

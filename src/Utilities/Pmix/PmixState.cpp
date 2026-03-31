@@ -110,5 +110,16 @@ void PmixState::CleanupTimeoutColls(std::chrono::seconds timeout) {
   }
 }
 
+void PmixState::AbortAllColls() {
+  util::write_lock_guard lock(m_mutex_);
+
+  for (auto& coll : m_coll_list_) {
+    CRANE_WARN("AbortAllColls: aborting collective {:p} (type={})",
+               static_cast<void*>(coll.get()), ToString(coll->GetType()));
+    coll->AbortOnTimeout();
+  }
+  m_coll_list_.clear();
+}
+
 #endif
 }  // namespace pmix
