@@ -351,8 +351,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
-    if (!this->traceparent.empty())
-      init_req.set_traceparent(this->traceparent);
+    if (!this->traceparent.empty()) init_req.set_traceparent(this->traceparent);
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
@@ -377,8 +376,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
     init_span.End();
 
-    CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span,
-                            "step/supervisor_ready");
+    CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span, "step/supervisor_ready");
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,

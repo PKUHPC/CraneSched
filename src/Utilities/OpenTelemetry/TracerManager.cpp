@@ -95,8 +95,9 @@ void TracerManager::Shutdown() {
 
   // Step 3: Flush and shutdown the provider
   if (tracer_provider_) {
-    auto* sdk_provider = static_cast<opentelemetry::sdk::trace::TracerProvider*>(
-        tracer_provider_.get());
+    auto* sdk_provider =
+        static_cast<opentelemetry::sdk::trace::TracerProvider*>(
+            tracer_provider_.get());
     sdk_provider->ForceFlush(std::chrono::milliseconds(5000));
     sdk_provider->Shutdown();
   }

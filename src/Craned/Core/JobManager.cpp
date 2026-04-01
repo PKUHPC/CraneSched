@@ -1278,8 +1278,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
           auto status = result.error();
           CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
                       status.exit_code, status.signal_num);
-          epilog_span.SetStatus(crane::StatusCode::kError,
-                                "job_epilog_failed");
+          epilog_span.SetStatus(crane::StatusCode::kError, "job_epilog_failed");
           g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
         } else {
           CRANE_DEBUG("[Job #{}]: Epilog success", job_id);

@@ -533,10 +533,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
   job->SetFieldsByJobToCtld(request->job());
 
   // Generate submit_id from the trace context (reuse trace_id)
-  std::string submit_tp =
-      crane::SerializeTraceParent(submit_span.GetContext());
-  std::string submit_id =
-      submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
   job->SetSubmitId(submit_id);
   job->SetSubmitTraceparent(submit_tp);
   submit_span.SetAttribute("crane.submit_id", submit_id);
@@ -667,10 +665,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   }
 
   // Generate shared submit_id for all jobs in the batch
-  std::string submit_tp =
-      crane::SerializeTraceParent(submit_span.GetContext());
-  std::string submit_id =
-      submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
   submit_span.SetAttribute("crane.submit_id", submit_id);
 
   std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;

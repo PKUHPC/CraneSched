@@ -468,32 +468,32 @@ inline opentelemetry::trace::SpanContext DeserializeTraceParent(
 
 /// Create a child span from a serialized W3C traceparent string.
 /// Falls back to a root span if the traceparent is empty or invalid.
-#  define CRANE_TRACE_SCOPE_FROM_REMOTE(var, name, traceparent_str)        \
-    ::crane::ScopedSpan var = [&]() -> ::crane::ScopedSpan {               \
-      auto _tp_ctx_ = ::crane::DeserializeTraceParent(traceparent_str);    \
-      if (_tp_ctx_.IsValid())                                              \
-        return ::crane::ScopedSpan(                                        \
-            name, ::crane::TracerManager::GetInstance().GetTracerSafe(),    \
-            _tp_ctx_);                                                     \
-      return ::crane::ScopedSpan(                                          \
-          name, ::crane::TracerManager::GetInstance().GetTracerSafe());     \
+#  define CRANE_TRACE_SCOPE_FROM_REMOTE(var, name, traceparent_str)      \
+    ::crane::ScopedSpan var = [&]() -> ::crane::ScopedSpan {             \
+      auto _tp_ctx_ = ::crane::DeserializeTraceParent(traceparent_str);  \
+      if (_tp_ctx_.IsValid())                                            \
+        return ::crane::ScopedSpan(                                      \
+            name, ::crane::TracerManager::GetInstance().GetTracerSafe(), \
+            _tp_ctx_);                                                   \
+      return ::crane::ScopedSpan(                                        \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe());  \
     }()
 
 /// Create a ManualSpan (non-RAII, caller must call End()).
-#  define CRANE_TRACE_MANUAL(var, name)                                  \
-    ::crane::ManualSpan var(                                             \
+#  define CRANE_TRACE_MANUAL(var, name)                              \
+    ::crane::ManualSpan var(                                         \
         name, ::crane::TracerManager::GetInstance().GetTracerSafe())
 
 /// Create a ManualSpan as child of a remote traceparent.
-#  define CRANE_TRACE_MANUAL_FROM_REMOTE(var, name, traceparent_str)      \
-    ::crane::ManualSpan var = [&]() -> ::crane::ManualSpan {              \
-      auto _tp_ = ::crane::DeserializeTraceParent(traceparent_str);       \
-      if (_tp_.IsValid())                                                 \
-        return ::crane::ManualSpan(                                       \
-            name, ::crane::TracerManager::GetInstance().GetTracerSafe(),   \
-            _tp_);                                                        \
-      return ::crane::ManualSpan(                                         \
-          name, ::crane::TracerManager::GetInstance().GetTracerSafe());    \
+#  define CRANE_TRACE_MANUAL_FROM_REMOTE(var, name, traceparent_str)     \
+    ::crane::ManualSpan var = [&]() -> ::crane::ManualSpan {             \
+      auto _tp_ = ::crane::DeserializeTraceParent(traceparent_str);      \
+      if (_tp_.IsValid())                                                \
+        return ::crane::ManualSpan(                                      \
+            name, ::crane::TracerManager::GetInstance().GetTracerSafe(), \
+            _tp_);                                                       \
+      return ::crane::ManualSpan(                                        \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe());  \
     }()
 
 #else  // CRANE_ENABLE_TRACING not defined

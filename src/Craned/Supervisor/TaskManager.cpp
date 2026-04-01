@@ -2312,8 +2312,8 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                                     g_config.Tracing.Traceparent);
       finish_span.SetAttribute("job_id", m_step_.job_id);
       finish_span.SetAttribute("step_id", m_step_.step_id);
-      finish_span.SetAttribute(
-          "exit_code", static_cast<int64_t>(status.max_exit_code));
+      finish_span.SetAttribute("exit_code",
+                               static_cast<int64_t>(status.max_exit_code));
       if (status.max_exit_code != 0)
         finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
       g_craned_client->StepStatusChangeAsync(
@@ -2604,8 +2604,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         auto status = result.error();
         CRANE_DEBUG("[Task #{}]: step task_epilog failed status={}:{}", task_id,
                     status.exit_code, status.signal_num);
-        epilog_span.SetStatus(crane::StatusCode::kError,
-                              "task_epilog_failed");
+        epilog_span.SetStatus(crane::StatusCode::kError, "task_epilog_failed");
       } else {
         CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
       }
@@ -2970,9 +2969,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
     CRANE_TRACE_CHILD_NAMED(launch_span, exec_span, "step/task_launch");
-    launch_span.SetAttribute(
-        "task_count",
-        static_cast<int64_t>(m_step_.task_ids.size()));
+    launch_span.SetAttribute("task_count",
+                             static_cast<int64_t>(m_step_.task_ids.size()));
 
     CraneErrCode err = CraneErrCode::SUCCESS;
     for (auto task_id : m_step_.task_ids) {

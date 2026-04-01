@@ -975,11 +975,9 @@ void JobScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
 
       {
-        CRANE_TRACE_CHILD_NAMED(ns_span, sched_cycle,
-                                "scheduling/node_select");
-        ns_span.SetAttribute(
-            "pending_count",
-            static_cast<int64_t>(pending_jobs.size()));
+        CRANE_TRACE_CHILD_NAMED(ns_span, sched_cycle, "scheduling/node_select");
+        ns_span.SetAttribute("pending_count",
+                             static_cast<int64_t>(pending_jobs.size()));
         m_node_selection_algo_->NodeSelect(now, running_jobs, pending_jobs);
       }
 
@@ -1118,11 +1116,9 @@ void JobScheduler::ScheduleThread_() {
             lifecycle_span.SetAttribute("job_id", job->JobId());
             lifecycle_span.SetAttribute("partition", job->partition_id);
             if (!job->SubmitId().empty())
-              lifecycle_span.SetAttribute("crane.submit_id",
-                                          job->SubmitId());
+              lifecycle_span.SetAttribute("crane.submit_id", job->SubmitId());
             lifecycle_span.SetAttribute(
-                "node_count",
-                static_cast<int64_t>(job->CranedIds().size()));
+                "node_count", static_cast<int64_t>(job->CranedIds().size()));
             job->SetTraceparent(
                 crane::SerializeTraceParent(lifecycle_span.GetContext()));
             job->LifecycleSpan() = std::move(lifecycle_span);
@@ -1162,9 +1158,8 @@ void JobScheduler::ScheduleThread_() {
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
 
-      rv_span.SetAttribute(
-          "allocated_count",
-          static_cast<int64_t>(jobs_to_run.size()));
+      rv_span.SetAttribute("allocated_count",
+                           static_cast<int64_t>(jobs_to_run.size()));
       rv_span.End();
 
       num_jobs_single_execution = jobs_to_run.size();
@@ -1208,8 +1203,7 @@ void JobScheduler::ScheduleThread_() {
       std::vector<std::unique_ptr<JobInCtld>> jobs_failed;
 
       // Move jobs into running queue.
-      CRANE_TRACE_CHILD_NAMED(db_span, sched_cycle,
-                              "scheduling/db_persist");
+      CRANE_TRACE_CHILD_NAMED(db_span, sched_cycle, "scheduling/db_persist");
       db_span.SetAttribute("job_count",
                            static_cast<int64_t>(jobs_to_run.size()));
 
@@ -1274,8 +1268,7 @@ void JobScheduler::ScheduleThread_() {
       CRANE_TRACE_CHILD_NAMED(rpc_aj_span, sched_cycle,
                               "scheduling/rpc_alloc_jobs");
       rpc_aj_span.SetAttribute(
-          "craned_count",
-          static_cast<int64_t>(craned_alloc_job_map.size()));
+          "craned_count", static_cast<int64_t>(craned_alloc_job_map.size()));
 
       std::latch alloc_job_latch(craned_alloc_job_map.size());
       for (auto&& iter : craned_alloc_job_map) {
@@ -1342,9 +1335,8 @@ void JobScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
       CRANE_TRACE_CHILD_NAMED(rpc_as_span, sched_cycle,
                               "scheduling/rpc_alloc_steps");
-      rpc_as_span.SetAttribute(
-          "craned_count",
-          static_cast<int64_t>(craned_alloc_steps.size()));
+      rpc_as_span.SetAttribute("craned_count",
+                               static_cast<int64_t>(craned_alloc_steps.size()));
 
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
@@ -1442,12 +1434,10 @@ void JobScheduler::ScheduleThread_() {
             post_sched_time_point;
       }
 
-      sched_cycle.SetAttribute(
-          "allocated_count",
-          static_cast<int64_t>(jobs_created.size()));
-      sched_cycle.SetAttribute(
-          "failed_count",
-          static_cast<int64_t>(jobs_failed.size()));
+      sched_cycle.SetAttribute("allocated_count",
+                               static_cast<int64_t>(jobs_created.size()));
+      sched_cycle.SetAttribute("failed_count",
+                               static_cast<int64_t>(jobs_failed.size()));
 
       schedule_end = end;
       CRANE_TRACE(
@@ -3500,16 +3490,15 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     if (job_finished_status.has_value()) {
       CRANE_TRACE("[Job #{}] Completed with status {}.", job_id,
                   job_finished_status.value());
-      CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end",
-                                    job->Traceparent());
+      CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end", job->Traceparent());
       end_span.SetAttribute("job_id", job->JobId());
       end_span.SetAttribute(
-          "status",
-          static_cast<int64_t>(job_finished_status.value().first));
+          "status", static_cast<int64_t>(job_finished_status.value().first));
       end_span.SetAttribute(
           "exit_code",
           static_cast<int64_t>(job_finished_status.value().second));
-      if (job_finished_status.value().first != crane::grpc::JobStatus::Completed)
+      if (job_finished_status.value().first !=
+          crane::grpc::JobStatus::Completed)
         end_span.SetStatus(crane::StatusCode::kError, "job_failed");
 
       job->SetStatus(job_finished_status.value().first);
@@ -3619,8 +3608,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     }
   }
 
-  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span,
-                          "status_change/rpc_fanout");
+  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span, "status_change/rpc_fanout");
 
   std::latch alloc_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
@@ -3822,8 +3810,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   free_job_latch.wait();
   rpc_fanout_span.End();
 
-  CRANE_TRACE_CHILD_NAMED(db_commit_span, sc_span,
-                          "status_change/db_commit");
+  CRANE_TRACE_CHILD_NAMED(db_commit_span, sc_span, "status_change/db_commit");
 
   txn_id_t txn_id;
 
@@ -3892,15 +3879,15 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   // End lifecycle spans for completed jobs (before ownership transfer)
   for (auto* job : context.rn_job_raw_ptrs) {
     if (job->LifecycleSpan().IsActive()) {
-      job->LifecycleSpan().SetAttribute(
-          "final_status", static_cast<int64_t>(job->Status()));
+      job->LifecycleSpan().SetAttribute("final_status",
+                                        static_cast<int64_t>(job->Status()));
       job->LifecycleSpan().End();
     }
   }
   for (auto* job : context.job_raw_ptrs) {
     if (job->LifecycleSpan().IsActive()) {
-      job->LifecycleSpan().SetAttribute(
-          "final_status", static_cast<int64_t>(job->Status()));
+      job->LifecycleSpan().SetAttribute("final_status",
+                                        static_cast<int64_t>(job->Status()));
       job->LifecycleSpan().End();
     }
   }
