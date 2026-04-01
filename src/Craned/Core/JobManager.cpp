@@ -253,11 +253,10 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
 
-    {
-      CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/alloc",
-                                    job.job_to_d.traceparent());
-      span.SetAttribute("job_id", job_id);
-    }
+    CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc",
+                                  job.job_to_d.traceparent());
+    alloc_span.SetAttribute("job_id", job_id);
+    alloc_span.SetAttribute("crane.dimension", "lifecycle");
 
     uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
@@ -521,8 +520,10 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
         prolog_span.SetAttribute("job_id", execution->job_id);
         prolog_span.SetAttribute("step_id", execution->step_id);
         if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
-                                      job_env))
+                                      job_env)) {
+          prolog_span.SetStatus(crane::StatusCode::kError, "prolog_failed");
           return;
+        }
       }
 
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
@@ -1248,8 +1249,13 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     if (!g_config.JobLifecycleHook.Epilogs.empty() &&
         !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
-      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap(),
+      // Capture traceparent before job is moved into m_completing_job_
+      std::string tp = job.job_to_d.traceparent();
+      g_thread_pool->detach_task([job_id, tp, env_map = job.GetJobEnvMap(),
                                   this]() {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "job/epilog", tp);
+        epilog_span.SetAttribute("job_id", job_id);
+
         bool script_lock = false;
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
           m_prolog_serial_mutex_.Lock();
@@ -1272,6 +1278,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
           auto status = result.error();
           CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
                       status.exit_code, status.signal_num);
+          epilog_span.SetStatus(crane::StatusCode::kError,
+                                "job_epilog_failed");
           g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
         } else {
           CRANE_DEBUG("[Job #{}]: Epilog success", job_id);

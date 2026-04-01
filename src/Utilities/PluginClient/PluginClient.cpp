@@ -62,11 +62,15 @@ void PluginClient::AsyncSendThread_() {
   bool prev_conn_state = false;
 
   while (true) {
-    if (m_thread_stop_.load()) break;
+    bool stopping = m_thread_stop_.load();
 
-    // Check channel connection
+    if (stopping && m_event_queue_.size_approx() == 0) break;
+
+    // Check channel connection (shorter timeout when stopping)
+    auto timeout = stopping ? std::chrono::milliseconds(500)
+                            : std::chrono::milliseconds(3000);
     auto connected = m_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::milliseconds(3000));
+        std::chrono::system_clock::now() + timeout);
 
     if (!prev_conn_state && connected) {
       CRANE_INFO("[Plugin] Plugind is connected.");
@@ -74,6 +78,7 @@ void PluginClient::AsyncSendThread_() {
     prev_conn_state = connected;
 
     if (!connected) {
+      if (stopping) break;  // Don't wait forever during shutdown
       CRANE_INFO("[Plugin] Plugind is not connected. Reconnecting...");
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
@@ -81,6 +86,7 @@ void PluginClient::AsyncSendThread_() {
 
     auto approx_size = m_event_queue_.size_approx();
     if (approx_size == 0) {
+      if (stopping) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
@@ -109,8 +115,8 @@ void PluginClient::AsyncSendThread_() {
             int(status.error_code()));
 
         if (status.error_code() == grpc::UNAVAILABLE) {
-          // If some messages are not sent due to channel failure,
-          // put them back into m_event_queue_
+          // During shutdown, drop unsent events instead of retrying
+          if (stopping) break;
           if (!events.empty()) {
             m_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
                                         events.size());

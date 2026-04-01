@@ -147,6 +147,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
   if (pipe(supervisor_craned_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -154,6 +155,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(supervisor_craned_pipe[0]);
     close(supervisor_craned_pipe[1]);
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -169,6 +171,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   if (child_pid == -1) {
     CRANE_ERROR("[Step #{}.{}] fork() failed: {}", job_id, step_id,
                 strerror(errno));
+    spawn_span.SetStatus(crane::StatusCode::kError, "fork_failed");
 
     close(craned_supervisor_pipe[0]);
     close(craned_supervisor_pipe[1]);
@@ -361,6 +364,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
                   job_id, step_id, strerror(ostream.GetErrno()));
+      init_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
+      spawn_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
 
       crane_cgroup->KillAllProcesses(SIGKILL);
 
@@ -389,6 +394,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
         CRANE_ERROR("[Step #{}.{}] False from subprocess {}.", job_id, step_id,
                     child_pid);
 
+      ready_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
+      spawn_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
       crane_cgroup->KillAllProcesses(SIGKILL);
 
       close(craned_supervisor_fd);

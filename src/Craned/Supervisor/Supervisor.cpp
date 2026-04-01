@@ -334,17 +334,6 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   PasswordEntry::InitializeEntrySize();
 
-#ifdef CRANE_ENABLE_TRACING
-  {
-    auto exporter =
-        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
-    crane::TracerManager::GetInstance().Initialize("Supervisor",
-                                                   std::move(exporter));
-  }
-  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
-                                 std::memory_order_release);
-#endif
-
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
   g_thread_pool = std::make_unique<BS::thread_pool>(
@@ -361,6 +350,21 @@ void GlobalVariableInit(int grpc_output_fd) {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode),
+        std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode));
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+#endif
 
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 

@@ -986,17 +986,6 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-#ifdef CRANE_ENABLE_TRACING
-  {
-    auto exporter =
-        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
-    crane::TracerManager::GetInstance().Initialize("CraneCtld",
-                                                   std::move(exporter));
-  }
-  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
-                                 std::memory_order_release);
-#endif
-
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
       [] { util::SetCurrentThreadName("BsThreadPool"); });
@@ -1012,6 +1001,19 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize("CraneCtld",
+                                                   std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize("CraneCtld");
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+#endif
 
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();

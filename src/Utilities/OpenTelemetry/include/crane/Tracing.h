@@ -177,6 +177,8 @@ inline std::atomic<bool> g_tracing_enabled{false};
 
 #ifdef CRANE_ENABLE_TRACING
 
+using StatusCode = opentelemetry::trace::StatusCode;
+
 /// RAII wrapper around an OpenTelemetry span.
 ///
 /// - Constructor starts the span (if both compile-time and runtime enabled).
@@ -297,6 +299,82 @@ class ScopedSpan {
   bool ended_ = true;
 };
 
+/// Non-RAII span for long-lived operations that cross scope boundaries.
+///
+/// Unlike ScopedSpan, ManualSpan does NOT auto-end on destruction.
+/// The caller MUST call End() explicitly when the operation completes.
+/// Designed for storing on persistent objects (e.g., JobInCtld).
+///
+/// Example:
+///   CRANE_TRACE_MANUAL(span, "job/lifecycle");
+///   span.SetAttribute("job_id", 123);
+///   job->lifecycle_span_ = std::move(span);
+///   // ... hours later, in a different thread ...
+///   job->lifecycle_span_.End();
+class ManualSpan {
+ public:
+  ManualSpan() = default;
+
+  ManualSpan(
+      std::string_view name,
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer)
+      : tracer_(std::move(tracer)) {
+    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+      span_ = tracer_->StartSpan(std::string(name));
+    }
+  }
+
+  ManualSpan(
+      std::string_view name,
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer,
+      const opentelemetry::trace::SpanContext& parent_ctx)
+      : tracer_(std::move(tracer)) {
+    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+      opentelemetry::trace::StartSpanOptions opts;
+      opts.parent = parent_ctx;
+      span_ = tracer_->StartSpan(std::string(name), opts);
+    }
+  }
+
+  ~ManualSpan() = default;  // Does NOT call End()
+
+  ManualSpan(const ManualSpan&) = delete;
+  ManualSpan& operator=(const ManualSpan&) = delete;
+  ManualSpan(ManualSpan&&) noexcept = default;
+  ManualSpan& operator=(ManualSpan&&) noexcept = default;
+
+  void End() {
+    if (span_) {
+      span_->End();
+      span_.reset();
+    }
+  }
+
+  template <typename T>
+  void SetAttribute(std::string_view key, const T& value) {
+    if (span_) span_->SetAttribute(std::string(key), value);
+  }
+
+  void AddEvent(std::string_view event_name) {
+    if (span_) span_->AddEvent(std::string(event_name));
+  }
+
+  void SetStatus(StatusCode code, std::string_view desc = {}) {
+    if (span_) span_->SetStatus(code, std::string(desc));
+  }
+
+  [[nodiscard]] bool IsActive() const { return span_ != nullptr; }
+
+  [[nodiscard]] opentelemetry::trace::SpanContext GetContext() const {
+    return span_ ? span_->GetContext()
+                 : opentelemetry::trace::SpanContext::GetInvalid();
+  }
+
+ private:
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span_;
+};
+
 // ============================================================================
 // Cross-process trace context propagation (W3C TraceContext format)
 // ============================================================================
@@ -401,11 +479,31 @@ inline opentelemetry::trace::SpanContext DeserializeTraceParent(
           name, ::crane::TracerManager::GetInstance().GetTracerSafe());     \
     }()
 
+/// Create a ManualSpan (non-RAII, caller must call End()).
+#  define CRANE_TRACE_MANUAL(var, name)                                  \
+    ::crane::ManualSpan var(                                             \
+        name, ::crane::TracerManager::GetInstance().GetTracerSafe())
+
+/// Create a ManualSpan as child of a remote traceparent.
+#  define CRANE_TRACE_MANUAL_FROM_REMOTE(var, name, traceparent_str)      \
+    ::crane::ManualSpan var = [&]() -> ::crane::ManualSpan {              \
+      auto _tp_ = ::crane::DeserializeTraceParent(traceparent_str);       \
+      if (_tp_.IsValid())                                                 \
+        return ::crane::ManualSpan(                                       \
+            name, ::crane::TracerManager::GetInstance().GetTracerSafe(),   \
+            _tp_);                                                        \
+      return ::crane::ManualSpan(                                         \
+          name, ::crane::TracerManager::GetInstance().GetTracerSafe());    \
+    }()
+
 #else  // CRANE_ENABLE_TRACING not defined
 
 // ============================================================================
 // No-op stub (zero overhead when tracing is compiled out)
 // ============================================================================
+
+/// Stub StatusCode so call sites compile without #ifdef guards.
+enum class StatusCode { kUnset = 0, kOk = 1, kError = 2 };
 
 class ScopedSpan {
  public:
@@ -416,7 +514,7 @@ class ScopedSpan {
   [[nodiscard]] ScopedSpan CreateChild(std::string_view) const { return {}; }
   [[nodiscard]] bool IsActive() const { return false; }
   void AddEvent(std::string_view) {}
-  void SetStatus(int, std::string_view = {}) {}
+  void SetStatus(StatusCode, std::string_view = {}) {}
 };
 
 #  define CRANE_TRACE_SCOPE(name) (void)0
@@ -428,6 +526,20 @@ class ScopedSpan {
 #  define CRANE_TRACE_EVENT(event_name) (void)0
 #  define CRANE_TRACE_SET_STATUS(code, desc) (void)0
 #  define CRANE_TRACE_SCOPE_FROM_REMOTE(var, name, tp) ::crane::ScopedSpan var
+
+class ManualSpan {
+ public:
+  ManualSpan() = default;
+  void End() {}
+  template <typename T>
+  void SetAttribute(std::string_view, const T&) {}
+  void AddEvent(std::string_view) {}
+  void SetStatus(StatusCode, std::string_view = {}) {}
+  [[nodiscard]] bool IsActive() const { return false; }
+};
+
+#  define CRANE_TRACE_MANUAL(var, name) ::crane::ManualSpan var
+#  define CRANE_TRACE_MANUAL_FROM_REMOTE(var, name, tp) ::crane::ManualSpan var
 
 #endif  // CRANE_ENABLE_TRACING
 

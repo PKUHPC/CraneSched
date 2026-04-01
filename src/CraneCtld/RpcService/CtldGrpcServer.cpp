@@ -32,6 +32,7 @@
 #include "Security/VaultClient.h"
 #include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -502,12 +503,27 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  CRANE_TRACE_SCOPE_NAMED(submit_span, "submit/request");
+  submit_span.SetAttribute("crane.dimension", "submit");
+  submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
+  submit_span.SetAttribute("partition",
+                           std::string(request->job().partition_name()));
+
+  {
+    CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid());
+        msg) {
+      auth_span.SetStatus(crane::StatusCode::kError, msg.value());
+      submit_span.SetStatus(crane::StatusCode::kError, "auth_failed");
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+    }
+  }
 
   // Check job type
   if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
+    submit_span.SetStatus(crane::StatusCode::kError, "cri_disabled");
     response->set_ok(false);
     response->set_code(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
@@ -515,30 +531,54 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
 
   auto job = std::make_unique<JobInCtld>();
   job->SetFieldsByJobToCtld(request->job());
-  auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
-  if (lua_result) {
-    auto rich_err = lua_result.value().get();
-    if (rich_err.code() != CraneErrCode::SUCCESS) {
-      response->set_ok(false);
-      response->set_code(rich_err.code());
-      response->set_reason(rich_err.description());
-      return grpc::Status::OK;
+
+  // Generate submit_id from the trace context (reuse trace_id)
+  std::string submit_tp =
+      crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id =
+      submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  job->SetSubmitId(submit_id);
+  job->SetSubmitTraceparent(submit_tp);
+  submit_span.SetAttribute("crane.submit_id", submit_id);
+
+  {
+    CRANE_TRACE_CHILD_NAMED(lua_span, submit_span, "submit/lua_check");
+    auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
+    if (lua_result) {
+      auto rich_err = lua_result.value().get();
+      if (rich_err.code() != CraneErrCode::SUCCESS) {
+        lua_span.SetStatus(crane::StatusCode::kError, "lua_rejected");
+        submit_span.SetStatus(crane::StatusCode::kError, "lua_rejected");
+        response->set_ok(false);
+        response->set_code(rich_err.code());
+        response->set_reason(rich_err.description());
+        return grpc::Status::OK;
+      }
     }
   }
 
-  auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
-  if (result.has_value()) {
-    CraneExpected<job_id_t> job_result = result.value().get();
-    if (job_result.has_value()) {
-      response->set_ok(true);
-      response->set_job_id(job_result.value());
+  {
+    CRANE_TRACE_CHILD_NAMED(enqueue_span, submit_span, "submit/enqueue");
+    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
+    if (result.has_value()) {
+      CraneExpected<job_id_t> job_result = result.value().get();
+      if (job_result.has_value()) {
+        enqueue_span.SetAttribute("job_id", job_result.value());
+        submit_span.SetAttribute("job_id", job_result.value());
+        response->set_ok(true);
+        response->set_job_id(job_result.value());
+      } else {
+        enqueue_span.SetStatus(crane::StatusCode::kError, "enqueue_failed");
+        submit_span.SetStatus(crane::StatusCode::kError, "enqueue_failed");
+        response->set_ok(false);
+        response->set_code(job_result.error());
+      }
     } else {
+      enqueue_span.SetStatus(crane::StatusCode::kError, "validation_failed");
+      submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       response->set_ok(false);
-      response->set_code(job_result.error());
+      response->set_code(result.error());
     }
-  } else {
-    response->set_ok(false);
-    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -601,16 +641,37 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  CRANE_TRACE_SCOPE_NAMED(submit_span, "submit/batch_request");
+  submit_span.SetAttribute("crane.dimension", "submit");
+  submit_span.SetAttribute("count", static_cast<int64_t>(request->count()));
+  submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
+
+  {
+    CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid());
+        msg) {
+      auth_span.SetStatus(crane::StatusCode::kError, msg.value());
+      submit_span.SetStatus(crane::StatusCode::kError, "auth_failed");
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+    }
+  }
 
   // Check job type
   if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
+    submit_span.SetStatus(crane::StatusCode::kError, "cri_disabled");
     response->add_job_id_list(0);
     response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
   }
+
+  // Generate shared submit_id for all jobs in the batch
+  std::string submit_tp =
+      crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id =
+      submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  submit_span.SetAttribute("crane.submit_id", submit_id);
 
   std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
 
@@ -621,6 +682,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   for (int i = 0; i < job_count; i++) {
     auto job = std::make_unique<JobInCtld>();
     job->SetFieldsByJobToCtld(job_to_ctld);
+    job->SetSubmitId(submit_id);
+    job->SetSubmitTraceparent(submit_tp);
 
     auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
     results.emplace_back(std::move(result));
