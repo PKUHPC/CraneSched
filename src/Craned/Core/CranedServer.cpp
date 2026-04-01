@@ -24,7 +24,6 @@
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
 

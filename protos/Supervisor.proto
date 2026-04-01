@@ -167,20 +167,6 @@ message MigrateSshProcToCgroupReply {
   ErrCode err_code = 1;
 }
 
-message SuspendJobRequest {}
-
-message SuspendJobReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message ResumeJobRequest {}
-
-message ResumeJobReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
 message ShutdownSupervisorRequest {}
 
 message ShutdownSupervisorReply {}
@@ -192,7 +178,5 @@ service Supervisor {
   rpc ChangeStepTimeConstraint(ChangeStepTimeConstraintRequest) returns (ChangeStepTimeConstraintReply);
   rpc TerminateStep(TerminateStepRequest) returns (TerminateStepReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
-  rpc SuspendJob(SuspendJobRequest) returns (SuspendJobReply);
-  rpc ResumeJob(ResumeJobRequest) returns (ResumeJobReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }

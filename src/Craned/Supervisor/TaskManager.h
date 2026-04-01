@@ -625,9 +625,6 @@ class TaskManager {
 
   std::future<CraneErrCode> MigrateSshProcToCgroupAsync(pid_t pid);
 
-  std::future<CraneErrCode> SuspendJobAsync();
-  std::future<CraneErrCode> ResumeJobAsync();
-
   void SetActivelyShutdown() { m_active_shutdown_ = true; }
 
   void Shutdown() { m_supervisor_exit_ = true; }
@@ -670,8 +667,6 @@ class TaskManager {
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
-  void EvGrpcSuspendJobCb_();
-  void EvGrpcResumeJobCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -720,12 +715,6 @@ class TaskManager {
       m_grpc_migrate_ssh_proc_to_cgroup_async_handle_;
   ConcurrentQueue<std::pair<pid_t, std::promise<CraneErrCode>>>
       m_grpc_migrate_ssh_proc_to_cgroup_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_grpc_suspend_job_async_handle_;
-  ConcurrentQueue<std::promise<CraneErrCode>> m_grpc_suspend_job_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_grpc_resume_job_async_handle_;
-  ConcurrentQueue<std::promise<CraneErrCode>> m_grpc_resume_job_queue_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;

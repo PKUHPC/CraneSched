@@ -533,7 +533,6 @@ void CtldClient::Init() {
               std::inserter(valid_job_steps[job_id],
                             valid_job_steps[job_id].end()));
         }
-        std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
         std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
@@ -722,11 +721,6 @@ void CtldClient::Init() {
           CRANE_INFO("Freeing invalid jobs: [{}].",
                      absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(std::move(invalid_jobs));
-        }
-        if (!completing_jobs.empty()) {
-          CRANE_INFO("Terminating completing jobs: [{}].",
-                     absl::StrJoin(completing_jobs, ","));
-          g_job_mgr->FreeJobs(std::move(completing_jobs));
         }
         if (!completing_steps.empty()) {
           CRANE_INFO("Terminating completing steps: [{}].",

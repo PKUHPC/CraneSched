@@ -111,26 +111,6 @@ grpc::Status SupervisorServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::SuspendJob(
-    grpc::ServerContext* context,
-    const crane::grpc::supervisor::SuspendJobRequest* request,
-    crane::grpc::supervisor::SuspendJobReply* response) {
-  auto err = g_task_mgr->SuspendJobAsync();
-  err.wait();
-  response->set_ok(err.get() == CraneErrCode::SUCCESS);
-  return Status::OK;
-}
-
-grpc::Status SupervisorServiceImpl::ResumeJob(
-    grpc::ServerContext* context,
-    const crane::grpc::supervisor::ResumeJobRequest* request,
-    crane::grpc::supervisor::ResumeJobReply* response) {
-  auto err = g_task_mgr->ResumeJobAsync();
-  err.wait();
-  response->set_ok(err.get() == CraneErrCode::SUCCESS);
-  return Status::OK;
-}
-
 grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,

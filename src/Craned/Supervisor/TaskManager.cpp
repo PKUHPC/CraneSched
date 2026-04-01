@@ -2520,18 +2520,6 @@ TaskManager::TaskManager()
         EvGrpcMigrateSshProcToCgroupCb_();
       });
 
-  m_grpc_suspend_job_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_grpc_suspend_job_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcSuspendJobCb_();
-      });
-
-  m_grpc_resume_job_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_grpc_resume_job_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcResumeJobCb_();
-      });
-
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -3387,76 +3375,6 @@ void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
     if (m_step_.step_user_cg->MigrateProcIn(pid)) {
       prom.set_value(CraneErrCode::SUCCESS);
     } else {
-      prom.set_value(CraneErrCode::ERR_CGROUP);
-    }
-  }
-}
-
-std::future<CraneErrCode> TaskManager::SuspendJobAsync() {
-  CRANE_INFO("[Step #{}.{}] Suspend job requested.", m_step_.job_id,
-             m_step_.step_id);
-  std::promise<CraneErrCode> prom;
-  auto fut = prom.get_future();
-  m_grpc_suspend_job_queue_.enqueue(std::move(prom));
-  m_grpc_suspend_job_async_handle_->send();
-  return fut;
-}
-
-std::future<CraneErrCode> TaskManager::ResumeJobAsync() {
-  CRANE_INFO("[Step #{}.{}] Resume job requested.", m_step_.job_id,
-             m_step_.step_id);
-  std::promise<CraneErrCode> prom;
-  auto fut = prom.get_future();
-  m_grpc_resume_job_queue_.enqueue(std::move(prom));
-  m_grpc_resume_job_async_handle_->send();
-  return fut;
-}
-
-void TaskManager::EvGrpcSuspendJobCb_() {
-  std::promise<CraneErrCode> prom;
-  while (m_grpc_suspend_job_queue_.try_dequeue(prom)) {
-    if (m_step_.cgroup_path.empty()) {
-      CRANE_ERROR("[Step #{}.{}] Cannot suspend: cgroup path is empty.",
-                  m_step_.job_id, m_step_.step_id);
-      prom.set_value(CraneErrCode::ERR_CGROUP);
-      continue;
-    }
-
-    auto cg_abs_path =
-        (Common::CgConstant::kSystemCgPathPrefix / m_step_.cgroup_path)
-            .string();
-    if (CgroupManager::FreezeChildCgroupsByPath(cg_abs_path)) {
-      CRANE_INFO("[Step #{}.{}] Successfully frozen cgroup: {}", m_step_.job_id,
-                 m_step_.step_id, cg_abs_path);
-      prom.set_value(CraneErrCode::SUCCESS);
-    } else {
-      CRANE_ERROR("[Step #{}.{}] Failed to freeze cgroup: {}", m_step_.job_id,
-                  m_step_.step_id, cg_abs_path);
-      prom.set_value(CraneErrCode::ERR_CGROUP);
-    }
-  }
-}
-
-void TaskManager::EvGrpcResumeJobCb_() {
-  std::promise<CraneErrCode> prom;
-  while (m_grpc_resume_job_queue_.try_dequeue(prom)) {
-    if (m_step_.cgroup_path.empty()) {
-      CRANE_ERROR("[Step #{}.{}] Cannot resume: cgroup path is empty.",
-                  m_step_.job_id, m_step_.step_id);
-      prom.set_value(CraneErrCode::ERR_CGROUP);
-      continue;
-    }
-
-    auto cg_abs_path =
-        (Common::CgConstant::kSystemCgPathPrefix / m_step_.cgroup_path)
-            .string();
-    if (CgroupManager::ThawChildCgroupsByPath(cg_abs_path)) {
-      CRANE_INFO("[Step #{}.{}] Successfully thawed cgroup: {}", m_step_.job_id,
-                 m_step_.step_id, cg_abs_path);
-      prom.set_value(CraneErrCode::SUCCESS);
-    } else {
-      CRANE_ERROR("[Step #{}.{}] Failed to thaw cgroup: {}", m_step_.job_id,
-                  m_step_.step_id, cg_abs_path);
       prom.set_value(CraneErrCode::ERR_CGROUP);
     }
   }
