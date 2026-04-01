@@ -521,6 +521,13 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
 
     if (ok) {
+      // Track bytes dequeued for TASK_OUTPUT to maintain m_output_queue_bytes_
+      size_t tracked_len = 0;
+      if (fwd_req.type == StreamStepIORequest::TASK_OUTPUT) {
+        tracked_len = std::get<IOFwdRequest>(fwd_req.data).len;
+        m_output_queue_bytes_.fetch_sub(tracked_len, std::memory_order::relaxed);
+      }
+
       StreamStepIORequest request;
       request.set_type(fwd_req.type);
       std::visit(
@@ -558,9 +565,20 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
               }},
           fwd_req.data);
 
+      // Wait for any pending write; detect reconnect mid-wait
       while (write_pending->load(std::memory_order::acquire)) {
-        if (m_wait_reconn_.load(std::memory_order::acquire)) goto exited;
+        if (m_wait_reconn_.load(std::memory_order::acquire)) {
+          // Reconnect exit: do NOT mark output as drained; data is preserved in queue
+          CRANE_TRACE("CleanOutputQueueThread: reconnect exit, queue data preserved.");
+          return ;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
+
+      // One more check before issuing the write
+      if (m_wait_reconn_.load(std::memory_order::acquire)) {
+        CRANE_TRACE("CleanOutputQueueThread: reconnect exit, queue data preserved.");
+        return ;
       }
 
       CRANE_TRACE("Writing output type: {}...", static_cast<int>(fwd_req.type));
@@ -571,9 +589,9 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
   }
 
-exited:
+  // Normal exit: m_stopped_ is true and queue is fully drained
   m_output_drained_.store(true, std::memory_order::release);
-  CRANE_TRACE("CleanOutputQueueThread exited.");
+  CRANE_TRACE("CleanOutputQueueThread: normal exit, output drained.");
 }
 
 void CforedClient::AsyncSendRecvThread_() {
@@ -587,32 +605,50 @@ void CforedClient::AsyncSendRecvThread_() {
     End,
   };
 
-  while(!m_stopped_) {
-    if (m_wait_reconn_ && m_cfored_channel_->GetState(true) == GRPC_CHANNEL_READY) {
-      if (m_reconnect_attempts_.load() > kMaxReconnectAttempts) {
-        CRANE_ERROR("Cfored reconnect failed.");
-        absl::MutexLock lock(&m_mtx_);
-        for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
-          CRANE_ERROR(
-              "[Task #{}] Markd task io stopped due to cfored conn failure.",
-              task_id);
-          m_stop_task_io_queue_.enqueue(task_id);
-          m_clean_stop_task_io_queue_async_handle_->send();
+  while (!m_stopped_) {
+    if (m_wait_reconn_) {
+      uint32_t attempts = m_reconnect_attempts_.load();
+      if (attempts > kMaxReconnectAttempts) {
+        CRANE_ERROR("Cfored reconnect failed after {} attempts.", attempts);
+        {
+          absl::MutexLock lock(&m_mtx_);
+          for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+            CRANE_ERROR(
+                "[Task #{}] Marked task io stopped due to cfored conn failure.",
+                task_id);
+            m_stop_task_io_queue_.enqueue(task_id);
+            m_clean_stop_task_io_queue_async_handle_->send();
+          }
         }
         CRANE_ERROR("Terminating step due to cfored connection failure.");
         g_task_mgr->TerminateStepAsync(
             false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
         m_stopped_ = true;
         m_wait_reconn_ = false;
-        return ;
+        return;
       }
+
+      // Exponential backoff with upper bound of kMaxReconnectIntervalSec
+      int interval = static_cast<int>(
+          std::min(attempts, kMaxReconnectIntervalSec));
+      CRANE_INFO("Reconnecting to cfored {} (attempt {}/{}), waiting {}s...",
+                 m_cfored_name_, attempts + 1, kMaxReconnectAttempts, interval);
       m_reconnect_attempts_++;
-      CRANE_TRACE("Attempting to reconnect cfored {} for the {} time...",
-                 m_cfored_name_, m_reconnect_attempts_.load());
-      int interval =
-          std::min(m_reconnect_attempts_.load(), kMaxReconnectIntervalSec);
       std::this_thread::sleep_for(std::chrono::seconds(interval));
-      continue;
+
+      // Trigger channel reconnect and check current state
+      auto ch_state = m_cfored_channel_->GetState(true);
+      if (ch_state == GRPC_CHANNEL_TRANSIENT_FAILURE ||
+          ch_state == GRPC_CHANNEL_SHUTDOWN) {
+        CRANE_TRACE("Channel state {} not yet usable, retrying...",
+                    static_cast<int>(ch_state));
+        continue;
+      }
+
+      // Channel is IDLE, CONNECTING, or READY: proceed to create new stream
+      CRANE_INFO("Channel state {} usable, creating new stream...",
+                 static_cast<int>(ch_state));
+      m_wait_reconn_ = false;
     }
 
     std::thread output_clean_thread;
@@ -692,6 +728,20 @@ void CforedClient::AsyncSendRecvThread_() {
         }
         CRANE_DEBUG("Cfored connection failed, wait reconnect...");
         m_wait_reconn_ = true;
+
+        // Close all active X11 proxy connections on disconnect
+        {
+          bool has_x11 = false;
+          {
+            absl::MutexLock lock(&m_mtx_);
+            for (auto& [id, _] : m_x11_fd_info_map_) {
+              m_x11_fwd_remote_eof_queue_.enqueue(id);
+              has_x11 = true;
+            }
+          }
+          if (has_x11) m_clean_x11_fwd_remote_eof_queue_async_handle_->send();
+        }
+
         if (output_clean_thread.joinable()) output_clean_thread.join();
         break;
       }
@@ -730,6 +780,9 @@ void CforedClient::AsyncSendRecvThread_() {
         } else if (tag == Tag::Read) {
           CRANE_TRACE("Cfored RegisterAck Read. Start Forwarding..");
           state = State::Forwarding;
+
+          // Reset output drained flag for this new connection session
+          m_output_drained_.store(false, std::memory_order::release);
 
           // Issue initial read request
           reply.Clear();
@@ -904,6 +957,18 @@ void CforedClient::TaskEnd(task_id_t task_id) {
 void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
                                      size_t len) {
   CRANE_TRACE("Receive TaskOutputForward len: {}.", len);
+
+  // Enforce output queue size limit to prevent unbounded memory growth
+  size_t prev =
+      m_output_queue_bytes_.fetch_add(len, std::memory_order::relaxed);
+  if (prev + len > kMaxOutputQueueBytes) {
+    m_output_queue_bytes_.fetch_sub(len, std::memory_order::relaxed);
+    CRANE_WARN(
+        "Output queue overflow ({}/{} bytes), dropping {} bytes of task output.",
+        prev, kMaxOutputQueueBytes, len);
+    return;
+  }
+
   m_task_fwd_req_queue_.enqueue(FwdRequest{
       .type = StreamStepIORequest::TASK_OUTPUT,
       .data =
