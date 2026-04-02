@@ -573,6 +573,16 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       }
     }
 
+    std::vector<char*> envp;
+    envp.reserve(args.envs.size() + 1);
+    for (const auto& [name, value] : args.envs) {
+      std::string env_entry = name + "=" + value;
+      envp.emplace_back(const_cast<char*>(env_entry.c_str()));
+    }
+    envp.push_back(nullptr);
+
+    const char* exec_argv[] = {script.c_str(), nullptr};
+
     // =========================================================================
     // Child process
     // =========================================================================
@@ -585,15 +595,18 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 ||
           dup2(stdout_pipe[1], STDERR_FILENO) == -1) {
         close(stdout_pipe[1]);
-        fmt::print(stderr, "[Subprocess] dup2 failed: {} ({})\n",
-                   strerror(errno), errno);
-        _exit(EXIT_FAILURE);
+        const char msg[] = "[Subprocess] dup2 failed\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
       }
       close(stdout_pipe[1]);  // original fd no longer needed after dup2
 
       // Close every fd >= 3 to avoid leaking parent file descriptors into
       // the script (e.g. sockets, log files, gRPC channels).
-      CloseFdFrom(3);
+    #if defined(__linux__) && defined(SYS_close_range)
+      syscall(SYS_close_range, 3, UINT_MAX, 0);  // 单次系统调用
+    #else
+        CloseFdFrom(3);
+    #endif
 
       // Place the child in its own process group so KillPg() can send
       // signals to the entire group (child + any grandchildren it spawns).
@@ -603,7 +616,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // (e.g., to move the child into a cgroup before exec).
       if (args.at_child_setup_cb) {
         if (!args.at_child_setup_cb(getpid())) {
-          fmt::print(stderr, "[Subprocess] child setup callback failed\n");
+          const char msg[] = "[Subprocess] child setup callback failed\n";
+          write(STDERR_FILENO, msg, sizeof(msg) - 1);
           _exit(EXIT_FAILURE);
         }
       }
@@ -612,33 +626,25 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // the script.  Group must be dropped first (setgid fails after setuid
       // on most Linux configurations).
       if (setgid(args.run_gid) != 0) {
-        fmt::print(stderr, "[Subprocess] setgid(%u) failed: {} ({})\n",
-                   args.run_gid, strerror(errno), errno);
+        const char msg[] = "[Subprocess] setgid failed\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
         _exit(EXIT_FAILURE);
       }
       if (setuid(args.run_uid) != 0) {
-        fmt::print(stderr, "[Subprocess] setuid(%u) failed: {} ({})\n",
-                   args.run_uid, strerror(errno), errno);
+        const char msg[] = "[Subprocess] setuid failed\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
         _exit(EXIT_FAILURE);
-      }
-
-      // Populate the environment for the script.
-      for (const auto& [name, value] : args.envs) {
-        if (setenv(name.c_str(), value.c_str(), 1) != 0) {
-          fmt::print(stderr, "[Subprocess] setenv({}={}) failed: {} ({})\n",
-                     name, value, strerror(errno), errno);
-          _exit(EXIT_FAILURE);
-        }
       }
 
       // Replace the child image with the script.  execvp searches PATH, but
       // since the script path is absolute, PATH is irrelevant here.
-      std::vector<const char*> argv = {script.c_str(), nullptr};
-      execvp(argv[0], const_cast<char* const*>(argv.data()));
+      execvpe(exec_argv[0],
+            const_cast<char* const*>(exec_argv),
+            envp.data());
 
       // If execvp() returns, it has failed.
-      fmt::print(stderr, "[Subprocess] execvp('{}') failed: {}\n", script,
-                 strerror(errno));
+      const char msg[] = "[Subprocess] execvp failed\n";
+      write(STDERR_FILENO, msg, sizeof(msg) - 1);
       _exit(EXIT_FAILURE);
 
     } else {
@@ -811,7 +817,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // -----------------------------------------------------------------------
       pipe_handle->on<uvw::error_event>(
           [&](uvw::error_event& e, uvw::pipe_handle&) {
-            CRANE_WARN("Pipe error for script '{}': {}.", script, e.what());
+            CRANE_WARN("Pipe error for script '{}'({}): {}.", script, pid, e.what());
             has_error = true;
             result = std::unexpected(
                 RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
@@ -905,9 +911,37 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         CRANE_TRACE("Script '{}' timed out before its event loop started.",
                     script);
         KillPg(pid);
+
+        // Reap the child and capture its true exit status to avoid leaving
+        // a zombie process.
+        int raw_status = 0;
+        if (use_watcher) {
+          // The fork_and_watch_fn hook is responsible for calling waitpid();
+          // block on the future to ensure the child is fully reaped before
+          // we return.
+          raw_status = exit_future.get();
+        } else {
+          // Plain fork() path: we must reap the child ourselves.
+          waitpid(pid, &raw_status, 0);
+        }
+
+        // Decode the raw waitpid() status (same logic as try_finish()).
+        int exit_code = 0;
+        int signal_num = 0;
+        if (WIFEXITED(raw_status)) {
+          exit_code = WEXITSTATUS(raw_status);
+        } else if (WIFSIGNALED(raw_status)) {
+          signal_num = WTERMSIG(raw_status);
+        } else {
+          exit_code = raw_status;  // unexpected status, treat as error
+        }
+
+        CRANE_TRACE("Script '{}' timed out (exit_code={}, signal={}).",
+                    script, exit_code, signal_num);
         pipe_handle->close();
         result = std::unexpected(
-            RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+            RunPrologEpilogStatus{.exit_code = exit_code,
+                                  .signal_num = signal_num});
         return;
       }
 
