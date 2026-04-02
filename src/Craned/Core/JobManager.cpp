@@ -1163,6 +1163,18 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
         terminate_step_ids = {elem.step_id};
       }
 
+      // When a job is suspended, its cgroup may be frozen. In cgroup v1,
+      // frozen processes cannot respond to SIGKILL. Thaw the job cgroup
+      // before terminating steps to ensure cancel can take effect.
+      if (job_instance->cgroup) {
+        auto cg_path = job_instance->cgroup->CgroupPath().string();
+        CgroupManager::ThawCgroupByPath(cg_path);
+        CgroupManager::ThawChildCgroupsByPath(cg_path);
+        CRANE_DEBUG(
+            "[Job #{}] Thawed job cgroup before terminating steps.",
+            elem.job_id);
+      }
+
       for (auto step_id : terminate_step_ids) {
         auto& step_instance = job_instance->step_map.at(step_id);
         auto stub = step_instance->supervisor_stub;
