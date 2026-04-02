@@ -570,6 +570,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
         if (m_wait_reconn_.load(std::memory_order::acquire)) {
           // Reconnect exit: do NOT mark output as drained; data is preserved in queue
           CRANE_TRACE("CleanOutputQueueThread: reconnect exit, queue data preserved.");
+          m_output_drained_.store(true, std::memory_order::release);
           return ;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -577,7 +578,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
 
       // One more check before issuing the write
       if (m_wait_reconn_.load(std::memory_order::acquire)) {
-        CRANE_TRACE("CleanOutputQueueThread: reconnect exit, queue data preserved.");
+        CRANE_TRACE("CleanOutputQueueThread: reconnect exit");
+        m_output_drained_.store(true, std::memory_order::release);
         return ;
       }
 
@@ -589,7 +591,6 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
   }
 
-  // Normal exit: m_stopped_ is true and queue is fully drained
   m_output_drained_.store(true, std::memory_order::release);
   CRANE_TRACE("CleanOutputQueueThread: normal exit, output drained.");
 }
