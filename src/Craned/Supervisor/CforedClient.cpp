@@ -280,12 +280,12 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
         }
         meta.out_handle.pipe = ph;
 
-      ph->on<uvw::data_event>([this, task_id](uvw::data_event& e,
-                                              uvw::pipe_handle&) {
-        if (e.length > 0) {
-          this->TaskOutPutForward(task_id, std::move(e.data), e.length);
-        }
-      });
+      ph->on<uvw::data_event>(
+          [this, task_id](uvw::data_event& e, uvw::pipe_handle&) {
+            if (e.length > 0) {
+              this->TaskOutPutForward(task_id, std::move(e.data), e.length);
+            }
+          });
 
         ph->on<uvw::end_event>([this, tid = task_id, on_finish](
                                    uvw::end_event&, uvw::pipe_handle& h) {
@@ -387,12 +387,12 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       }
       meta.out_handle.tty = th;
 
-      th->on<uvw::data_event>([this, task_id](uvw::data_event& e,
-                                              uvw::tty_handle&) {
-        if (e.length > 0) {
-          this->TaskOutPutForward(task_id, std::move(e.data), e.length);
-        }
-      });
+      th->on<uvw::data_event>(
+          [this, task_id](uvw::data_event& e, uvw::tty_handle&) {
+            if (e.length > 0) {
+              this->TaskOutPutForward(task_id, std::move(e.data), e.length);
+            }
+          });
 
       th->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::tty_handle& h) {
         // The remote end is closed, go to EOF process.
@@ -527,7 +527,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       size_t tracked_len = 0;
       if (fwd_req.type == StreamStepIORequest::TASK_OUTPUT) {
         tracked_len = std::get<IOFwdRequest>(fwd_req.data).len;
-        m_output_queue_bytes_.fetch_sub(tracked_len, std::memory_order::relaxed);
+        m_output_queue_bytes_.fetch_sub(tracked_len,
+                                        std::memory_order::relaxed);
       }
 
       StreamStepIORequest request;
@@ -571,10 +572,12 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       // Wait for any pending write; detect reconnect mid-wait
       while (write_pending->load(std::memory_order::acquire)) {
         if (m_wait_reconn_.load(std::memory_order::acquire)) {
-          // Reconnect exit: do NOT mark output as drained; data is preserved in queue
-          CRANE_TRACE("CleanOutputQueueThread: reconnect exit, queue data preserved.");
+          // Reconnect exit: do NOT mark output as drained; data is preserved in
+          // queue
+          CRANE_TRACE(
+              "CleanOutputQueueThread: reconnect exit, queue data preserved.");
           m_output_drained_.store(true, std::memory_order::release);
-          return ;
+          return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
       }
@@ -583,7 +586,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       if (m_wait_reconn_.load(std::memory_order::acquire)) {
         CRANE_TRACE("CleanOutputQueueThread: reconnect exit");
         m_output_drained_.store(true, std::memory_order::release);
-        return ;
+        return;
       }
 
       CRANE_TRACE("Writing output type: {}...", static_cast<int>(fwd_req.type));
@@ -633,8 +636,8 @@ void CforedClient::AsyncSendRecvThread_() {
       }
 
       // Exponential backoff with upper bound of kMaxReconnectIntervalSec
-      int interval = static_cast<int>(
-          std::min(attempts, kMaxReconnectIntervalSec));
+      int interval =
+          static_cast<int>(std::min(attempts, kMaxReconnectIntervalSec));
       CRANE_INFO("Reconnecting to cfored {} (attempt {}/{}), waiting {}s...",
                  m_cfored_name_, attempts + 1, kMaxReconnectAttempts, interval);
       m_reconnect_attempts_++;
@@ -671,7 +674,8 @@ void CforedClient::AsyncSendRecvThread_() {
 
     State state = State::Registering;
     while (true) {
-      auto ddl = std::chrono::system_clock::now() + std::chrono::milliseconds(50);
+      auto ddl =
+          std::chrono::system_clock::now() + std::chrono::milliseconds(50);
       next_status = m_cq_.AsyncNext((void**)&tag, &ok, ddl);
       // CRANE_TRACE("NextStatus: {}, ok: {}, Tag received: {}, state: {}",
       //             int(next_status), ok, intptr_t(tag), int(state));
@@ -792,15 +796,16 @@ void CforedClient::AsyncSendRecvThread_() {
           stream->Read(&reply, (void*)Tag::Read);
 
           // Start output forwarding thread
-          output_clean_thread =
-              std::thread(&CforedClient::CleanOutputQueueAndWriteToStreamThread_,
-                          this, stream.get(), &write_pending);
+          output_clean_thread = std::thread(
+              &CforedClient::CleanOutputQueueAndWriteToStreamThread_, this,
+              stream.get(), &write_pending);
         }
       } break;
 
       case State::Forwarding: {
         CRANE_TRACE("Forwarding State");
-        // Do nothing for acknowledgements of successful writes in Forward State.
+        // Do nothing for acknowledgements of successful writes in Forward
+        // State.
         if (tag == Tag::Write) {
           write_pending.store(false, std::memory_order::release);
           break;
@@ -921,7 +926,6 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_TRACE("Next state: {}", int(state));
       if (state == State::End) break;
     }
-
   }
 } 
 
@@ -968,7 +972,8 @@ void CforedClient::TaskOutPutForward(task_id_t task_id,
   if (prev + len > kMaxOutputQueueBytes) {
     m_output_queue_bytes_.fetch_sub(len, std::memory_order::relaxed);
     CRANE_WARN(
-        "Output queue overflow ({}/{} bytes), dropping {} bytes of task output.",
+        "Output queue overflow ({}/{} bytes), dropping {} bytes of task "
+        "output.",
         prev, kMaxOutputQueueBytes, len);
     return;
   }
@@ -976,6 +981,7 @@ void CforedClient::TaskOutPutForward(task_id_t task_id,
   m_task_fwd_req_queue_.enqueue(FwdRequest{
       .type = StreamStepIORequest::TASK_OUTPUT,
       .data =
+         
           IOFwdRequest{.is_stdout = true, .task_id = task_id, .data = std::move(data), .len = len},
   });
 }
