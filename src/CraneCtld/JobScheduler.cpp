@@ -2926,6 +2926,13 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   for (auto& [job_id, step_ids] : request.filter_ids()) {
     filter_ids[job_id].insert(step_ids.steps().begin(), step_ids.steps().end());
   }
+
+  std::unordered_map<job_id_t, std::unordered_set<uint32_t>>
+      filter_array_task_ids;
+  for (auto& [job_id, task_ids] : request.filter_array_task_ids()) {
+    filter_array_task_ids[job_id].insert(
+        task_ids.array_task_ids().begin(), task_ids.array_task_ids().end());
+  }
   auto not_found_jobs =
       filter_ids | std::views::keys | std::ranges::to<std::unordered_set>();
   if (filter_ids.empty()) {
@@ -3090,12 +3097,22 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       }
     }
   };
+  auto rng_filter_array_task = [&](JobInCtld* job) {
+    if (filter_array_task_ids.empty()) return true;
+    job_id_t job_id = job->JobId();
+    auto it = filter_array_task_ids.find(job_id);
+    if (it == filter_array_task_ids.end()) return true;
+    if (!job->JobToCtld().has_array_task_id()) return false;
+    return it->second.contains(job->JobToCtld().array_task_id());
+  };
+
   auto joined_filters = ranges::views::filter(rng_filter_state) |
                         ranges::views::filter(rng_filter_partition) |
                         ranges::views::filter(rng_filter_account) |
                         ranges::views::filter(rng_filter_user_name) |
                         ranges::views::filter(rng_filter_job_name) |
-                        ranges::views::filter(rng_filter_nodes);
+                        ranges::views::filter(rng_filter_nodes) |
+                        ranges::views::filter(rng_filter_array_task);
 
   auto pending_job_id_rng =
       pd_input_rng | joined_filters | ranges::views::transform(rng_get_job_id);

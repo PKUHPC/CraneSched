@@ -205,6 +205,10 @@ message CancelJobRequest {
   string filter_job_name = 6;
   repeated string filter_nodes = 7;
   string filter_username = 8;
+
+  // Per-job array task ID filters. Key is job_id, value is list of
+  // array_task_ids to cancel.
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
 }
 
 message CancelJobReply {

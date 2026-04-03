@@ -463,6 +463,10 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
+message ArrayTaskIds {
+  repeated uint32 array_task_ids = 1;
+}
+
 message IoMeta {
   // Append mode for output and error files
   optional bool open_mode_append = 1;
