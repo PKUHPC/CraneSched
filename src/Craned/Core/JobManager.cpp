@@ -985,16 +985,15 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   }
 
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
-  bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
-  bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
-  if (root_ok && children_ok) {
-    CRANE_INFO("[Job #{}] Frozen job cgroup: {}", job_id, job_cg_abs_path);
+  bool ok = CgroupManager::FreezeUserCgroupsUnderJob(job_cg_abs_path);
+  if (ok) {
+    CRANE_INFO("[Job #{}] Frozen user cgroups under job: {}", job_id,
+               job_cg_abs_path);
     return CraneErrCode::SUCCESS;
   }
 
-  CRANE_ERROR(
-      "[Job #{}] Failed to freeze job cgroup {}, root_ok={}, children_ok={}",
-      job_id, job_cg_abs_path, root_ok, children_ok);
+  CRANE_ERROR("[Job #{}] Failed to freeze user cgroups under job {}",
+              job_id, job_cg_abs_path);
   return CraneErrCode::ERR_CGROUP;
 }
 
@@ -1012,16 +1011,15 @@ CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
   }
 
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
-  bool root_ok = CgroupManager::ThawCgroupByPath(job_cg_abs_path);
-  bool children_ok = CgroupManager::ThawChildCgroupsByPath(job_cg_abs_path);
-  if (root_ok && children_ok) {
-    CRANE_INFO("[Job #{}] Thawed job cgroup: {}", job_id, job_cg_abs_path);
+  bool ok = CgroupManager::ThawUserCgroupsUnderJob(job_cg_abs_path);
+  if (ok) {
+    CRANE_INFO("[Job #{}] Thawed user cgroups under job: {}", job_id,
+               job_cg_abs_path);
     return CraneErrCode::SUCCESS;
   }
 
-  CRANE_ERROR(
-      "[Job #{}] Failed to thaw job cgroup {}, root_ok={}, children_ok={}",
-      job_id, job_cg_abs_path, root_ok, children_ok);
+  CRANE_ERROR("[Job #{}] Failed to thaw user cgroups under job {}",
+              job_id, job_cg_abs_path);
   return CraneErrCode::ERR_CGROUP;
 }
 
@@ -1168,10 +1166,9 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
       // before terminating steps to ensure cancel can take effect.
       if (job_instance->cgroup) {
         auto cg_path = job_instance->cgroup->CgroupPath().string();
-        CgroupManager::ThawCgroupByPath(cg_path);
-        CgroupManager::ThawChildCgroupsByPath(cg_path);
+        CgroupManager::ThawUserCgroupsUnderJob(cg_path);
         CRANE_DEBUG(
-            "[Job #{}] Thawed job cgroup before terminating steps.",
+            "[Job #{}] Thawed user cgroups before terminating steps.",
             elem.job_id);
       }
 

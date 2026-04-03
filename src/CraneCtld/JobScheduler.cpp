@@ -1894,6 +1894,17 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
       return true;
     };
 
+    // Check if job is pending (cannot be suspended).
+    // Lock ordering: pending_guard before running_guard.
+    {
+      LockGuard pending_guard(&m_pending_job_map_mtx_);
+      if (m_pending_job_map_.contains(job_id)) {
+        CRANE_TRACE("Job #{} is pending, cannot suspend", job_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+    }
+
     {
       LockGuard running_guard(&m_running_job_map_mtx_);
       auto iter = m_running_job_map_.find(job_id);
