@@ -635,14 +635,13 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_INFO("Reconnecting to cfored {} (attempt {}/{}), waiting {}s...",
                  m_cfored_name_, attempts + 1, kMaxReconnectAttempts, interval);
       m_reconnect_attempts_++;
-      std::this_thread::sleep_for(std::chrono::seconds(interval));
 
       // Trigger channel reconnect and check current state
       auto ch_state = m_cfored_channel_->GetState(true);
-      if (ch_state == GRPC_CHANNEL_TRANSIENT_FAILURE ||
-          ch_state == GRPC_CHANNEL_SHUTDOWN) {
+      if (ch_state != GRPC_CHANNEL_READY) {
         CRANE_TRACE("Channel state {} not yet usable, retrying...",
                     static_cast<int>(ch_state));
+        std::this_thread::sleep_for(std::chrono::seconds(interval));
         continue;
       }
 
