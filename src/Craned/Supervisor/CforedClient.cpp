@@ -280,11 +280,12 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
         }
         meta.out_handle.pipe = ph;
 
-        ph->on<uvw::data_event>([this](uvw::data_event& e, uvw::pipe_handle&) {
-          if (e.length > 0) {
-            this->TaskOutPutForward(std::move(e.data), e.length);
-          }
-        });
+      ph->on<uvw::data_event>([this, task_id](uvw::data_event& e,
+                                              uvw::pipe_handle&) {
+        if (e.length > 0) {
+          this->TaskOutPutForward(task_id, std::move(e.data), e.length);
+        }
+      });
 
         ph->on<uvw::end_event>([this, tid = task_id, on_finish](
                                    uvw::end_event&, uvw::pipe_handle& h) {
@@ -386,9 +387,10 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       }
       meta.out_handle.tty = th;
 
-      th->on<uvw::data_event>([this](uvw::data_event& e, uvw::tty_handle&) {
+      th->on<uvw::data_event>([this, task_id](uvw::data_event& e,
+                                              uvw::tty_handle&) {
         if (e.length > 0) {
-          this->TaskOutPutForward(std::move(e.data), e.length);
+          this->TaskOutPutForward(task_id, std::move(e.data), e.length);
         }
       });
 
@@ -540,6 +542,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
                   auto* payload = request.mutable_payload_task_err_output_req();
                   payload->set_msg(req.data.get(), req.len);
                 }
+                payload->set_task_id(req.task_id);
               },
               [&request](X11FwdConnectReq& req) {
                 auto* payload = request.mutable_payload_step_x11_fwd_conn_req();
@@ -954,9 +957,10 @@ void CforedClient::TaskEnd(task_id_t task_id) {
   g_task_mgr->FinalizeTaskAsync(task_id);
 };
 
-void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
+void CforedClient::TaskOutPutForward(task_id_t task_id,
+                                     std::unique_ptr<char[]>&& data,
                                      size_t len) {
-  CRANE_TRACE("Receive TaskOutputForward len: {}.", len);
+  CRANE_TRACE("Receive TaskOutputForward task_id:{} len: {}.", task_id, len);
 
   // Enforce output queue size limit to prevent unbounded memory growth
   size_t prev =
@@ -972,7 +976,7 @@ void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
   m_task_fwd_req_queue_.enqueue(FwdRequest{
       .type = StreamStepIORequest::TASK_OUTPUT,
       .data =
-          IOFwdRequest{.is_stdout = true, .data = std::move(data), .len = len},
+          IOFwdRequest{.is_stdout = true, .task_id = task_id, .data = std::move(data), .len = len},
   });
 }
 void CforedClient::TaskErrOutPutForward(std::unique_ptr<char[]>&& data,
