@@ -285,7 +285,7 @@ class JobManager {
 
   std::thread m_uvw_thread_;
 
-  absl::Mutex m_fork_reap_mu_;
+  std::mutex m_fork_reap_mu_;
   ChildExitWatcher m_exit_watcher_;
 };
 }  // namespace Craned

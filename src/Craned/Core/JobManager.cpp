@@ -451,7 +451,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
-  absl::MutexLock lock(&m_fork_reap_mu_);
+  std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
   int status;
   pid_t pid;
   while (true) {
@@ -737,7 +737,7 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
 
     args.fork_and_watch_fn = [this](std::function<pid_t()> do_fork)
         -> std::optional<std::pair<pid_t, std::future<int>>> {
-      absl::MutexLock lock(&m_fork_reap_mu_);
+      std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
       pid_t pid = do_fork();
       if (pid < 0) return std::nullopt;
       if (pid == 0) return std::make_pair(pid, std::future<int>{});
@@ -1254,7 +1254,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         run_epilog_args.fork_and_watch_fn =
             [this](std::function<pid_t()> do_fork)
             -> std::optional<std::pair<pid_t, std::future<int>>> {
-          absl::MutexLock lock(&m_fork_reap_mu_);
+          std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
           pid_t pid = do_fork();
           if (pid < 0) return std::nullopt;
           if (pid == 0) return std::make_pair(pid, std::future<int>{});

@@ -539,6 +539,17 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         exit_future;  // valid only in parent when use_watcher==true
     bool use_watcher = false;
 
+    std::vector<char*> envp;
+    std::vector<std::string> env_storage;
+    envp.reserve(args.envs.size() + 1);
+    for (const auto& [name, value] : args.envs) {
+      env_storage.emplace_back(name + "=" + value);
+      envp.emplace_back(const_cast<char*>(env_storage.back().c_str()));
+    }
+    envp.emplace_back(nullptr);
+
+    const char* exec_argv[] = {script.c_str(), nullptr};
+
     if (args.fork_and_watch_fn) {
       auto fork_result = args.fork_and_watch_fn([]() { return fork(); });
 
@@ -573,16 +584,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       }
     }
 
-    std::vector<char*> envp;
-    envp.reserve(args.envs.size() + 1);
-    for (const auto& [name, value] : args.envs) {
-      std::string env_entry = name + "=" + value;
-      envp.emplace_back(const_cast<char*>(env_entry.c_str()));
-    }
-    envp.push_back(nullptr);
-
-    const char* exec_argv[] = {script.c_str(), nullptr};
-
     // =========================================================================
     // Child process
     // =========================================================================
@@ -614,6 +615,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
       // Optional caller-supplied callback executed in the child context
       // (e.g., to move the child into a cgroup before exec).
+      // TODO: move to parent
       if (args.at_child_setup_cb) {
         if (!args.at_child_setup_cb(getpid())) {
           const char msg[] = "[Subprocess] child setup callback failed\n";
