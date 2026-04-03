@@ -117,7 +117,8 @@ class CforedClient {
 
   void AsyncSendRecvThread_();
 
-  void TaskOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
+  void TaskOutPutForward(task_id_t task_id, std::unique_ptr<char[]>&& data,
+                         size_t len);
 
   void TaskErrOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
@@ -141,6 +142,7 @@ class CforedClient {
   struct IOFwdRequest {
     // true for stdout, false for stderr
     bool is_stdout;
+    task_id_t task_id{0};  // The rank/id of the task that produced this output.
     std::unique_ptr<char[]> data;
     size_t len;
   };
