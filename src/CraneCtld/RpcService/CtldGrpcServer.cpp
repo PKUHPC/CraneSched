@@ -975,10 +975,15 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     for (size_t i = 0; i < vec_ids.size(); i++) {
       if (results[i] == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(fmt::format(
+            "Job #{} is not suspended.", vec_ids[i]));
       } else {
         response->add_not_modified_jobs(vec_ids[i]);
         response->add_not_modified_reasons(
-            fmt::format("Failed to resume job: {}.", CraneErrStr(results[i])));
+            fmt::format("Failed to resume job #{}: {}.", vec_ids[i],
+                        CraneErrStr(results[i])));
       }
     }
   } else {

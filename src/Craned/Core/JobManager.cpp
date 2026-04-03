@@ -986,15 +986,35 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
 
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
   bool ok = CgroupManager::FreezeUserCgroupsUnderJob(job_cg_abs_path);
-  if (ok) {
-    CRANE_INFO("[Job #{}] Frozen user cgroups under job: {}", job_id,
-               job_cg_abs_path);
-    return CraneErrCode::SUCCESS;
+  if (!ok) {
+    CRANE_ERROR("[Job #{}] Failed to freeze user cgroups under job {}",
+                job_id, job_cg_abs_path);
+    return CraneErrCode::ERR_CGROUP;
   }
 
-  CRANE_ERROR("[Job #{}] Failed to freeze user cgroups under job {}",
-              job_id, job_cg_abs_path);
-  return CraneErrCode::ERR_CGROUP;
+  CRANE_INFO("[Job #{}] Frozen user cgroups under job: {}", job_id,
+             job_cg_abs_path);
+
+  // Pause the termination timer of each step's Supervisor so that
+  // suspended time does not count towards the time limit.
+  // On resume, the controller will call ChangeJobTimeLimit with the
+  // correct extended value.
+  {
+    absl::MutexLock lk(job_ptr->step_map_mtx.get());
+    for (auto& [step_id, step] : job_ptr->step_map) {
+      if (step->supervisor_stub) {
+        auto err = step->supervisor_stub->ChangeStepTimeLimit(
+            absl::Seconds(INT64_MAX / 2));
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_WARN("[Step #{}.{}] Failed to pause termination timer "
+                     "on suspend",
+                     job_id, step_id);
+        }
+      }
+    }
+  }
+
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
