@@ -104,6 +104,7 @@ class JobManager {
       job_id_t job_id, step_id_t step_id,
       std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
+
   std::optional<JobInfoOfUid> QueryJobInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, job_id_t job_id);

@@ -956,17 +956,18 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     for (size_t i = 0; i < vec_ids.size(); i++) {
       if (results[i] == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
       } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
         response->add_not_modified_jobs(vec_ids[i]);
-        response->add_not_modified_reasons(fmt::format(
-            "Failed to suspend job #{}: Job is not in a suspendable "
-            "state.",
-            vec_ids[i]));
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not in a suspendable state.", vec_ids[i]));
       } else {
         response->add_not_modified_jobs(vec_ids[i]);
-        response->add_not_modified_reasons(fmt::format(
-            "Failed to suspend job #{}: {}.", vec_ids[i],
-            CraneErrStr(results[i])));
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
       }
     }
   } else if (request->attribute() == ModifyJobRequest::Resume) {
@@ -975,15 +976,18 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     for (size_t i = 0; i < vec_ids.size(); i++) {
       if (results[i] == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
       } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
         response->add_not_modified_jobs(vec_ids[i]);
-        response->add_not_modified_reasons(fmt::format(
-            "Job #{} is not suspended.", vec_ids[i]));
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not suspended.", vec_ids[i]));
       } else {
         response->add_not_modified_jobs(vec_ids[i]);
         response->add_not_modified_reasons(
-            fmt::format("Failed to resume job #{}: {}.", vec_ids[i],
-                        CraneErrStr(results[i])));
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
       }
     }
   } else {
