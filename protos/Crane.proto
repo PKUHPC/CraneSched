@@ -304,6 +304,10 @@ message ModifyJobRequest {
     int64 hold_seconds = 7;
     google.protobuf.Timestamp deadline_time = 8;
   }
+
+  // Per-job array task ID filter for modifying specific array tasks.
+  // Key is parent job_id, value is list of array_task_ids to modify.
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 8;
 }
 
 message ModifyJobReply {
@@ -634,6 +638,10 @@ message QueryJobsInfoRequest {
   repeated string filter_nodename_list = 14;
 
   bool option_include_completed_jobs = 15;
+
+  // Per-job array task ID filters for array job queries.
+  // Key is parent job_id, value is list of array_task_ids to return.
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 16;
 }
 
 message QueryJobsInfoReply {

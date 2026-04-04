@@ -285,6 +285,17 @@ message RuntimeAttrOfJob {
   // Used to extend end_time upon resume so that suspended time
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
+
+  // For array children: the parent job's job_id.
+  // If set, this job is an expanded array task.
+  optional uint32 parent_job_id = 25;
+
+  // For array parents: the first child's pre-allocated job_id.
+  // Children IDs are sequential: first_child_job_id, first_child_job_id+1, ...
+  optional uint32 first_child_job_id = 26;
+
+  // For array parents: whether the array has been expanded into children.
+  optional bool array_expanded = 27;
 }
 
 message StepToCtld {
@@ -653,6 +664,9 @@ message JobInfo {
   optional uint32 array_index_start = 46;
   optional uint32 array_index_end = 47;
   optional uint32 array_task_id = 48;
+
+  // For array children: parent job's job_id.
+  optional uint32 parent_job_id = 49;
 }
 
 message StepInfo {

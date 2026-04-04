@@ -809,6 +809,11 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
+  // Resolve a parent job_id + array_task_ids to the actual child job_ids.
+  std::vector<job_id_t> ResolveArrayChildren(
+      job_id_t parent_id,
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
+
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
                                        crane::grpc::JobStatus new_status,
@@ -1031,6 +1036,10 @@ class JobScheduler {
 
   std::thread m_schedule_thread_;
   void ScheduleThread_();
+
+  // Expand an array parent into individual child tasks.
+  // Called from ScheduleThread_ while holding m_pending_job_map_mtx_.
+  void ExpandArrayParent_(JobInCtld* parent);
 
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();

@@ -653,25 +653,16 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     }
   }
 
-  results.reserve(job_count);
+  if (has_array_spec) {
+    // Array job: submit ONE parent job. Expansion into individual tasks
+    // happens at scheduling time in ScheduleThread_.
+    auto parent_job = std::make_unique<JobInCtld>();
+    // Do NOT set array_task_id - the parent represents the whole array.
+    parent_job->SetFieldsByJobToCtld(job_to_ctld);
 
-  for (uint32_t i = 0; i < job_count; i++) {
-    auto job = std::make_unique<JobInCtld>();
-    if (has_array_spec) {
-      auto expanded_job = job_to_ctld;
-      expanded_job.set_array_task_id(array_start + i);
-      job->SetFieldsByJobToCtld(expanded_job);
-    } else {
-      job->SetFieldsByJobToCtld(job_to_ctld);
-    }
-
-    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
-    results.emplace_back(std::move(result));
-  }
-
-  for (auto& res : results) {
-    if (res.has_value()) {
-      CraneExpected<job_id_t> job_result = res.value().get();
+    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(parent_job));
+    if (result.has_value()) {
+      CraneExpected<job_id_t> job_result = result.value().get();
       if (job_result.has_value()) {
         response->mutable_job_id_list()->Add(job_result.value());
       } else {
@@ -680,7 +671,32 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       }
     } else {
       response->mutable_job_id_list()->Add(0);
-      response->mutable_code_list()->Add(res.error());
+      response->mutable_code_list()->Add(result.error());
+    }
+  } else {
+    // Non-array jobs: submit individually (repeat count).
+    results.reserve(job_count);
+    for (uint32_t i = 0; i < job_count; i++) {
+      auto job = std::make_unique<JobInCtld>();
+      job->SetFieldsByJobToCtld(job_to_ctld);
+
+      auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
+      results.emplace_back(std::move(result));
+    }
+
+    for (auto& res : results) {
+      if (res.has_value()) {
+        CraneExpected<job_id_t> job_result = res.value().get();
+        if (job_result.has_value()) {
+          response->mutable_job_id_list()->Add(job_result.value());
+        } else {
+          response->mutable_job_id_list()->Add(0);
+          response->mutable_code_list()->Add(job_result.error());
+        }
+      } else {
+        response->mutable_job_id_list()->Add(0);
+        response->mutable_code_list()->Add(res.error());
+      }
     }
   }
 
@@ -900,6 +916,35 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     job_ids.assign(request->job_ids().begin(), request->job_ids().end());
   } else {
     g_job_scheduler->JobModifyLuaCheck(*request, response, &job_ids);
+  }
+
+  // Resolve parent→children for array_task filters.
+  if (!request->filter_array_task_ids().empty()) {
+    std::list<job_id_t> resolved_ids;
+    for (auto job_id : job_ids) {
+      auto it = request->filter_array_task_ids().find(job_id);
+      if (it == request->filter_array_task_ids().end()) {
+        // No array_task filter for this job, keep as-is.
+        resolved_ids.push_back(job_id);
+        continue;
+      }
+      // Resolve parent to specific children via scheduler.
+      auto child_ids = g_job_scheduler->ResolveArrayChildren(
+          job_id, it->second.array_task_ids());
+      if (child_ids.empty()) {
+        // No matching children found - report back to user.
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Job #{} is not an array parent or no matching array "
+            "tasks found.",
+            job_id));
+        continue;
+      }
+      for (auto child_id : child_ids) {
+        resolved_ids.push_back(child_id);
+      }
+    }
+    job_ids = std::move(resolved_ids);
   }
 
   CraneErrCode err;

@@ -1770,6 +1770,18 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   } else {
     suspend_time = absl::InfinitePast();
   }
+
+  // Restore array parent/child tracking fields from runtime attr.
+  if (runtime_attr.has_parent_job_id()) {
+    parent_job_id = runtime_attr.parent_job_id();
+  }
+  if (runtime_attr.has_first_child_job_id()) {
+    first_child_job_id = runtime_attr.first_child_job_id();
+  }
+  if (runtime_attr.has_array_expanded()) {
+    array_expanded = runtime_attr.array_expanded();
+  }
+  }
 }
 
 void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
@@ -1810,6 +1822,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   }
   if (job_to_ctld.has_array_task_id()) {
     job_info->set_array_task_id(job_to_ctld.array_task_id());
+  }
+  if (parent_job_id.has_value()) {
+    job_info->set_parent_job_id(parent_job_id.value());
   }
 
   // Only pass container meta if it's a container step

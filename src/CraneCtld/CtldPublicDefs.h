@@ -866,6 +866,31 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
+  // Array job tracking fields.
+  // For array parents: whether expansion into children has occurred.
+  bool array_expanded{false};
+  // For array parents: the first child's pre-allocated job_id.
+  job_id_t first_child_job_id{0};
+  // For array children: the parent array job's job_id.
+  std::optional<job_id_t> parent_job_id;
+
+  // Returns true if this is an array parent (has array range but no
+  // array_task_id).
+  bool IsArrayParent() const {
+    return job_to_ctld.has_array_index_start() &&
+           job_to_ctld.has_array_index_end() &&
+           !job_to_ctld.has_array_task_id();
+  }
+
+  // Returns true if this is an expanded array child.
+  bool IsArrayChild() const { return parent_job_id.has_value(); }
+
+  uint32_t ArrayTaskCount() const {
+    if (!IsArrayParent()) return 0;
+    return job_to_ctld.array_index_end() -
+           job_to_ctld.array_index_start() + 1;
+  }
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -977,6 +1002,7 @@ struct JobInCtld {
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
   crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob* MutableRuntimeAttr() { return &runtime_attr; }
 
   // =================== Setter/Getter ===================
 

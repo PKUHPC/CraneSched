@@ -242,6 +242,12 @@ class EmbeddedDbClient {
 
   bool AppendJobsToPendingAndAdvanceJobIds(const std::vector<JobInCtld*>& jobs);
 
+  // Persist child jobs that already have pre-allocated job_ids and job_db_ids.
+  // Does NOT advance the global ID counters (they were already reserved).
+  // Also updates the parent's runtime attr to mark it as expanded.
+  bool AppendChildJobsToDb(const std::vector<JobInCtld*>& jobs,
+                           JobInCtld* parent);
+
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 
   bool UpdateRuntimeAttrOfJob(

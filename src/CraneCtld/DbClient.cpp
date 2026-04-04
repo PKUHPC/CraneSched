@@ -682,14 +682,89 @@ bool MongodbClient::FetchJobRecords(
   }
 
   bool has_job_ids_constraint = !request->filter_ids().empty();
-  if (has_job_ids_constraint) {
-    filter.append(kvp("job_id", [&request](sub_document job_id_doc) {
-      array job_id_array;
-      for (const auto& job_id : request->filter_ids() | std::views::keys) {
-        job_id_array.append(static_cast<std::int32_t>(job_id));
+  bool has_array_task_constraint = !request->filter_array_task_ids().empty();
+
+  if (has_job_ids_constraint || has_array_task_constraint) {
+    // When both job_id and array_task filters are present, we need an $or:
+    //   - Non-array jobs matched by job_id directly
+    //   - Array children matched by parent_job_id + array_task_id
+    // Without array_task filter, just use job_id $in as before.
+    if (has_array_task_constraint) {
+      // ALL parent IDs in filter_array_task_ids are excluded from the
+      // direct job_id match, regardless of whether their task list is
+      // empty.  An empty task list means "match no children" — the
+      // parent itself must not leak into the results either.
+      std::unordered_set<uint32_t> parent_ids_with_task_filter;
+      bool has_any_array_tasks = false;
+      for (const auto& [pid, task_ids] : request->filter_array_task_ids()) {
+        parent_ids_with_task_filter.insert(pid);
+        if (!task_ids.array_task_ids().empty()) {
+          has_any_array_tasks = true;
+        }
       }
-      job_id_doc.append(kvp("$in", job_id_array));
-    }));
+
+      // Check if there are any non-array job_ids for Branch 1.
+      bool has_non_array_job_ids = false;
+      if (has_job_ids_constraint) {
+        for (const auto& job_id :
+             request->filter_ids() | std::views::keys) {
+          if (!parent_ids_with_task_filter.contains(job_id)) {
+            has_non_array_job_ids = true;
+            break;
+          }
+        }
+      }
+
+      // Guard: only build $or if at least one branch will be non-empty.
+      if (has_non_array_job_ids || has_any_array_tasks) {
+        filter.append(kvp("$or", [&](sub_array or_array) {
+          // Branch 1: Non-array-filtered job_ids (direct match).
+          if (has_non_array_job_ids) {
+            array non_array_job_ids;
+            for (const auto& job_id :
+                 request->filter_ids() | std::views::keys) {
+              if (!parent_ids_with_task_filter.contains(job_id)) {
+                non_array_job_ids.append(static_cast<std::int32_t>(job_id));
+              }
+            }
+            or_array.append([&](sub_document match_doc) {
+              match_doc.append(
+                  kvp("job_id", [&](sub_document in_doc) {
+                    in_doc.append(kvp("$in", non_array_job_ids));
+                  }));
+            });
+          }
+
+          // Branch 2: Array children matched by parent_job_id + task_id.
+          for (const auto& [parent_id, task_ids] :
+               request->filter_array_task_ids()) {
+            for (const auto& task_id : task_ids.array_task_ids()) {
+              or_array.append([&](sub_document match_doc) {
+                match_doc.append(kvp(
+                    "parent_job_id", static_cast<std::int32_t>(parent_id)));
+                match_doc.append(kvp(
+                    "array_task_id", static_cast<std::int32_t>(task_id)));
+              });
+            }
+          }
+        }));
+      } else {
+        // Both branches are empty (e.g. filter_array_task_ids had keys
+        // but all with empty task lists). Add an impossible condition
+        // so the query returns zero results instead of a wide scan.
+        filter.append(kvp("job_id", -1));
+      }
+    } else {
+      // No array_task filter: simple job_id $in.
+      filter.append(kvp("job_id", [&request](sub_document job_id_doc) {
+        array job_id_array;
+        for (const auto& job_id :
+             request->filter_ids() | std::views::keys) {
+          job_id_array.append(static_cast<std::int32_t>(job_id));
+        }
+        job_id_doc.append(kvp("$in", job_id_array));
+      }));
+    }
   }
 
   bool has_job_status_constraint = !request->filter_states().empty();
@@ -841,6 +916,12 @@ bool MongodbClient::FetchJobRecords(
           auto value = ViewGetArithmeticValue_<int64_t>(field);
           if (value >= 0) {
             job_info.set_array_task_id(static_cast<uint32_t>(value));
+          }
+        }
+        if (auto field = view["parent_job_id"]; field) {
+          auto value = ViewGetArithmeticValue_<int64_t>(field);
+          if (value >= 0) {
+            job_info.set_parent_job_id(static_cast<uint32_t>(value));
           }
         }
 
@@ -4319,9 +4400,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
   // 45 array_index_start array_index_end array_task_id submit_hostname
-  // 49 req_nodes exclude_nodes execution_nodes deadline
+  // 49 req_nodes exclude_nodes execution_nodes deadline parent_job_id
   // clang-format off
-  std::array<std::string, 53> fields{
+  std::array<std::string, 54> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4342,8 +4423,8 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 48
     "array_index_start", "array_index_end", "array_task_id", "submit_hostname",
-    // 49 - 52
-    "req_nodes", "exclude_nodes", "execution_nodes", "deadline"
+    // 49 - 53
+    "req_nodes", "exclude_nodes", "execution_nodes", "deadline", "parent_job_id"
   };
   // clang-format on
 
@@ -4360,7 +4441,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              int32_t, int32_t, int32_t, std::string,                /*45-48*/
              std::list<CranedId>, std::list<CranedId>,              /*49-50*/
-             std::vector<CranedId>, int64_t>                        /*51-52*/
+             std::vector<CranedId>, int64_t, int32_t>               /*51-53*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4401,10 +4482,12 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           // 45-48
           array_index_start, array_index_end, array_task_id,
           job_to_ctld.submit_hostname(),
-          // 49-52
+          // 49-53
           req_node_list, exclude_node_list,
-          execution_nodes, job_to_ctld.deadline_time().seconds()};
-
+          execution_nodes, job_to_ctld.deadline_time().seconds(),
+          runtime_attr.has_parent_job_id()
+              ? static_cast<int32_t>(runtime_attr.parent_job_id())
+              : int32_t{-1}};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4496,10 +4579,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 array_index_start array_index_end array_task_id submit_hostname
-  // 49 req_nodes exclude_nodes execution_nodes deadline
+  // 49 req_nodes exclude_nodes execution_nodes deadline parent_job_id
 
   // clang-format off
-  std::array<std::string, 53> fields{
+  std::array<std::string, 54> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4520,10 +4603,16 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 48
       "array_index_start", "array_index_end", "array_task_id", "submit_hostname",
-      // 49 - 52
-      "req_nodes", "exclude_nodes", "execution_nodes", "deadline"
+      // 49 - 53
+      "req_nodes", "exclude_nodes", "execution_nodes", "deadline",
+      "parent_job_id"
   };
   // clang-format on
+
+  int32_t parent_job_id_val = -1;
+  if (job->parent_job_id.has_value()) {
+    parent_job_id_val = static_cast<int32_t>(job->parent_job_id.value());
+  }
 
   std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
              int64_t, int64_t, std::string, std::string, int32_t,   /*5-9*/
@@ -4538,9 +4627,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
                   std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
                   int32_t, int32_t, int32_t, std::string,                /*45-48*/
                   std::unordered_set<CranedId>,                          /*49*/
-                  std::unordered_set<CranedId>, std::vector<CranedId>,
-                  int64_t> /*50-52*/
-      values{         // 0-4
+                  std::unordered_set<CranedId>, std::vector<CranedId>,   /*50-51*/
+                  int64_t, int32_t>                                      /*52-53*/
+      values{                                                       // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
              // 5-9
@@ -4576,7 +4665,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              // 49-52
              job->included_nodes, job->excluded_nodes,
              job->executing_craned_ids,
-             absl::ToUnixSeconds(job->deadline_time)};
+             // 49-53
+             job->included_nodes, job->excluded_nodes,
+             job->executing_craned_ids,
+             absl::ToUnixSeconds(job->deadline_time),
+             parent_job_id_val};
 
   return DocumentConstructor_(fields, values);
 }
