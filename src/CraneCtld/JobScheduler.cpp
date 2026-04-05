@@ -2990,8 +2990,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   std::unordered_map<job_id_t, std::unordered_set<uint32_t>>
       filter_array_task_ids;
   for (auto& [job_id, task_ids] : request.filter_array_task_ids()) {
-    filter_array_task_ids[job_id].insert(
-        task_ids.array_task_ids().begin(), task_ids.array_task_ids().end());
+    filter_array_task_ids[job_id].insert(task_ids.array_task_ids().begin(),
+                                         task_ids.array_task_ids().end());
     // Ensure array_task filter keys are also in filter_ids so they enter
     // the candidate set and not_found tracking.
     if (!filter_ids.contains(job_id)) {
@@ -3195,8 +3195,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     std::vector<job_id_t> parent_ids_to_resolve;
     for (auto& [job_id, _] : filter_ids) {
       auto pd_it = m_pending_job_map_.find(job_id);
-      if (pd_it != m_pending_job_map_.end() &&
-          pd_it->second->IsArrayParent()) {
+      if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
         parent_ids_to_resolve.push_back(job_id);
       }
     }
@@ -5209,8 +5208,7 @@ void JobScheduler::QueryJobsInRam(
   }
 
   // Re-select range after potential filter_ids mutation.
-  id_filtered_job_rng =
-      no_ids_constraint ? all_job_rng : filtered_job_rng;
+  id_filtered_job_rng = no_ids_constraint ? all_job_rng : filtered_job_rng;
 
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
@@ -6776,8 +6774,7 @@ std::vector<job_id_t> JobScheduler::ResolveArrayChildren(
   LockGuard pending_guard(&m_pending_job_map_mtx_);
 
   auto pd_it = m_pending_job_map_.find(parent_id);
-  if (pd_it == m_pending_job_map_.end() ||
-      !pd_it->second->IsArrayParent()) {
+  if (pd_it == m_pending_job_map_.end() || !pd_it->second->IsArrayParent()) {
     return result;
   }
 
