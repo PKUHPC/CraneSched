@@ -36,6 +36,80 @@
 namespace Ctld {
 using namespace std::chrono_literals;
 
+namespace {
+
+bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
+                                   crane::grpc::JobStatus status,
+                                   absl::Time end_time,
+                                   absl::Time suspend_time,
+                                   const char* failure_reason) {
+  auto prev_status = job->Status();
+  auto prev_end_time = job->EndTime();
+  auto prev_suspend_time = job->SuspendTime();
+
+  job->SetStatus(status);
+  job->SetEndTime(end_time);
+  job->SetSuspendTime(suspend_time);
+
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+          0, job->JobDbId(), job->RuntimeAttr())) {
+    job->SetStatus(prev_status);
+    job->SetEndTime(prev_end_time);
+    job->SetSuspendTime(prev_suspend_time);
+    CRANE_ERROR("Failed to persist runtime state for job #{} during {}",
+                job_id, failure_reason);
+    return false;
+  }
+
+  return true;
+}
+
+bool SuspendJobOnNodes_(
+    const std::vector<CranedId>& craned_ids,
+    const std::vector<job_id_t>& broadcast_job_ids, task_id_t job_id,
+    const char* failure_reason) {
+  if (craned_ids.empty()) return true;
+
+  bool suspend_failed = false;
+  Mutex suspend_result_mtx;
+  absl::BlockingCounter suspend_counter(craned_ids.size());
+
+  for (const auto& craned_id : craned_ids) {
+    g_thread_pool->detach_task([&, craned_id]() {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) {
+        CRANE_ERROR(
+            "{} for job #{} on craned {}: stub unavailable. "
+            "Node may remain running.",
+            failure_reason, job_id, craned_id);
+        {
+          LockGuard lock(&suspend_result_mtx);
+          suspend_failed = true;
+        }
+        suspend_counter.DecrementCount();
+        return;
+      }
+
+      CraneErrCode err = stub->SuspendJobs(broadcast_job_ids);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("{} for job #{} on craned {}: {}. Node may remain running.",
+                    failure_reason, job_id, craned_id, CraneErrStr(err));
+        {
+          LockGuard lock(&suspend_result_mtx);
+          suspend_failed = true;
+        }
+      }
+
+      suspend_counter.DecrementCount();
+    });
+  }
+
+  suspend_counter.Wait();
+  return !suspend_failed;
+}
+
+}  // namespace
+
 JobScheduler::JobScheduler() {
   if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
     CRANE_INFO("basic priority sorter is selected.");
@@ -1898,6 +1972,23 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
       return true;
     };
 
+    auto persist_current_suspended_state =
+        [&](absl::Time suspend_time, const char* failure_reason) {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          auto iter = m_running_job_map_.find(job_id);
+          if (iter == m_running_job_map_.end()) {
+            CRANE_WARN(
+                "Job #{} disappeared while converging to Suspended during {}",
+                job_id, failure_reason);
+            return false;
+          }
+
+          JobInCtld* job = iter->second.get();
+          return PersistJobRuntimeStateNoLock_(
+              job, job_id, crane::grpc::Suspended, job->EndTime(),
+              suspend_time, failure_reason);
+        };
+
     // Check if job is pending (cannot be suspended).
     // Lock ordering: pending_guard before running_guard.
     {
@@ -2058,8 +2149,26 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
         if (!persist_status(crane::grpc::Running, "rollback after suspend failure")) {
           CRANE_ERROR(
               "Failed to rollback status to Running for job #{} after suspend "
-              "failure. Status remains Suspended but nodes are unfrozen.",
+              "failure. Re-suspending all nodes to converge with ctld state.",
               job_id);
+
+          if (SuspendJobOnNodes_(executing_nodes, broadcast_job_ids, job_id,
+                                 "Converge suspend failed")) {
+            const absl::Time converge_suspend_time = absl::Now();
+            if (!persist_current_suspended_state(
+                    converge_suspend_time,
+                    "converging after suspend rollback status persist failure")) {
+              CRANE_ERROR(
+                  "Job #{} was re-suspended to match ctld state, but failed "
+                  "to persist the refreshed suspend_time.",
+                  job_id);
+            }
+          } else {
+            CRANE_ERROR(
+                "Job #{} converge suspend incomplete after suspend rollback "
+                "status persist failure. Manual intervention may be required.",
+                job_id);
+          }
         }
       } else {
         CRANE_ERROR(
@@ -2114,6 +2223,44 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
             job_id);
       }
     };
+
+    auto persist_resuspended_state_after_failed_resume =
+        [&](absl::Time rollback_suspend_time, const char* failure_reason) {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          auto iter = m_running_job_map_.find(job_id);
+          if (iter == m_running_job_map_.end()) {
+            CRANE_WARN(
+                "Job #{} disappeared while persisting resuspended state during "
+                "{}.",
+                job_id, failure_reason);
+            return false;
+          }
+
+          JobInCtld* job = iter->second.get();
+          // Keep the already-extended end_time because the suspend interval
+          // before this resume attempt is real. Only time after the rollback
+          // re-freeze should count as newly suspended.
+          return PersistJobRuntimeStateNoLock_(
+              job, job_id, crane::grpc::Suspended, job->EndTime(),
+              rollback_suspend_time, failure_reason);
+        };
+
+    auto persist_running_after_incomplete_resume_rollback =
+        [&](const char* failure_reason) {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          auto iter = m_running_job_map_.find(job_id);
+          if (iter == m_running_job_map_.end()) {
+            CRANE_WARN(
+                "Job #{} disappeared while persisting Running state during {}.",
+                job_id, failure_reason);
+            return false;
+          }
+
+          JobInCtld* job = iter->second.get();
+          return PersistJobRuntimeStateNoLock_(
+              job, job_id, crane::grpc::Running, job->EndTime(),
+              absl::InfinitePast(), failure_reason);
+        };
 
     {
       LockGuard running_guard(&m_running_job_map_mtx_);
@@ -2270,34 +2417,34 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
           "re-suspending successfully resumed nodes.",
           job_id);
 
-      if (!resumed_nodes.empty()) {
-        absl::BlockingCounter rollback_counter(resumed_nodes.size());
-        for (const auto& craned_id : resumed_nodes) {
-          g_thread_pool->detach_task([&, craned_id]() {
-            auto stub = g_craned_keeper->GetCranedStub(craned_id);
-            if (!stub || stub->Invalid()) {
-              CRANE_WARN(
-                  "Rollback suspend skipped for job #{} on craned {}: "
-                  "stub unavailable",
-                  job_id, craned_id);
-              rollback_counter.DecrementCount();
-              return;
-            }
+      const bool rollback_suspend_succeeded =
+          SuspendJobOnNodes_(resumed_nodes, broadcast_job_ids, job_id,
+                             "Rollback suspend failed");
 
-            CraneErrCode rb_err = stub->SuspendJobs(broadcast_job_ids);
-            if (rb_err != CraneErrCode::SUCCESS) {
-              CRANE_WARN(
-                  "Rollback suspend failed for job #{} on craned {}: {}",
-                  job_id, craned_id, CraneErrStr(rb_err));
-            }
-
-            rollback_counter.DecrementCount();
-          });
+      if (resumed_nodes.empty()) {
+        rollback_resume_preparation();
+      } else if (rollback_suspend_succeeded) {
+        if (!persist_resuspended_state_after_failed_resume(
+                absl::Now(), "partial resume rollback")) {
+          CRANE_WARN(
+              "Failed to persist resuspended state for job #{} after partial "
+              "resume rollback",
+              job_id);
         }
-        rollback_counter.Wait();
+      } else {
+        if (!persist_running_after_incomplete_resume_rollback(
+                "partial resume rollback incomplete")) {
+          CRANE_ERROR(
+              "Job #{} rollback incomplete after partial resume failure and "
+              "failed to persist fallback Running state.",
+              job_id);
+        }
+        CRANE_ERROR(
+            "Job #{} rollback incomplete after partial resume failure: some "
+            "nodes may remain running. Manual intervention may be required.",
+            job_id);
       }
 
-      rollback_resume_preparation();
       results.emplace_back(failure_code == CraneErrCode::SUCCESS
                                ? CraneErrCode::ERR_GENERIC_FAILURE
                                : failure_code);
@@ -2329,35 +2476,37 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
           job->SetStatus(prev_status);
           CRANE_ERROR("Failed to persist resumed status for job #{}", job_id);
 
-          absl::BlockingCounter rollback_counter(executing_nodes.size());
-          for (const auto& craned_id : executing_nodes) {
-            g_thread_pool->detach_task([&, craned_id]() {
-              auto stub = g_craned_keeper->GetCranedStub(craned_id);
-              if (stub && !stub->Invalid()) {
-                CraneErrCode rb_err = stub->SuspendJobs(broadcast_job_ids);
-                if (rb_err != CraneErrCode::SUCCESS) {
-                  CRANE_WARN(
-                      "Rollback suspend failed for job #{} on craned {} "
-                      "after status persist failure: {}",
-                      job_id, craned_id, CraneErrStr(rb_err));
-                }
-              }
-              rollback_counter.DecrementCount();
-            });
-          }
-          rollback_counter.Wait();
+          if (SuspendJobOnNodes_(executing_nodes, broadcast_job_ids, job_id,
+                                 "Rollback suspend failed after status persist failure")) {
+            const absl::Time rollback_suspend_time = absl::Now();
 
-          job->SetEndTime(prev_end_time);
-          job->SetSuspendTime(prev_suspend_time);
-          if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
-                  0, job->JobDbId(), job->RuntimeAttr())) {
-            CRANE_WARN(
-                "Failed to persist full rollback after resume status persist "
-                "failure for job #{}",
+            // Keep the extended end_time because the prior suspended interval
+            // has already been accounted for before sending ResumeJobs.
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Suspended, job->EndTime(),
+                    rollback_suspend_time,
+                    "resume status persist failure rollback")) {
+              CRANE_WARN(
+                  "Failed to persist rollback after resume status persist "
+                  "failure for job #{}",
+                  job_id);
+            }
+          } else {
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Running, job->EndTime(),
+                    absl::InfinitePast(),
+                    "resume status persist failure incomplete rollback")) {
+              CRANE_ERROR(
+                  "Job #{} rollback incomplete after resume status persist "
+                  "failure and failed to persist fallback Running state.",
+                  job_id);
+            }
+            CRANE_ERROR(
+                "Job #{} rollback incomplete after resume status persist "
+                "failure: some nodes may remain running. Manual intervention "
+                "may be required.",
                 job_id);
           }
-          resume_prep_applied = false;
-
           results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
           continue;
         }
@@ -2446,38 +2595,9 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
 
     if (timelimit_update_failed) {
       // Rollback: re-suspend the job on all nodes
-      bool rollback_suspend_failed = false;
-      Mutex rollback_result_mtx;
-      absl::BlockingCounter rollback_counter(executing_nodes.size());
-      for (const auto& craned_id : executing_nodes) {
-        g_thread_pool->detach_task([&, craned_id]() {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub && !stub->Invalid()) {
-            CraneErrCode rb_err = stub->SuspendJobs(broadcast_job_ids);
-            if (rb_err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR(
-                  "Rollback suspend failed for job #{} on craned {} after "
-                  "timelimit update failure: {}. Node may remain running.",
-                  job_id, craned_id, CraneErrStr(rb_err));
-              {
-                LockGuard lock(&rollback_result_mtx);
-                rollback_suspend_failed = true;
-              }
-            }
-          } else {
-            CRANE_ERROR(
-                "Rollback suspend failed for job #{} on craned {}: "
-                "stub unavailable. Node may remain running.",
-                job_id, craned_id);
-            {
-              LockGuard lock(&rollback_result_mtx);
-              rollback_suspend_failed = true;
-            }
-          }
-          rollback_counter.DecrementCount();
-        });
-      }
-      rollback_counter.Wait();
+      const bool rollback_suspend_succeeded =
+          SuspendJobOnNodes_(executing_nodes, broadcast_job_ids, job_id,
+                             "Rollback suspend failed after timelimit update failure");
 
       // Rollback status and time attributes only if all nodes were successfully suspended
       {
@@ -2486,16 +2606,15 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         if (iter != m_running_job_map_.end()) {
           JobInCtld* job = iter->second.get();
 
-          if (!rollback_suspend_failed) {
-            // All nodes successfully suspended, rollback time and set status to Suspended
-            job->SetEndTime(prev_end_time);
-            job->SetSuspendTime(prev_suspend_time);
-            job->SetStatus(crane::grpc::Suspended);
-            if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
-                    0, job->JobDbId(), job->RuntimeAttr())) {
+          if (rollback_suspend_succeeded) {
+            // Keep the extended end_time so the already-finished suspend
+            // interval before this resume attempt remains accounted for.
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Suspended, job->EndTime(),
+                    absl::Now(), "timelimit update failure rollback")) {
               CRANE_WARN(
-                  "Failed to persist rollback status for job #{} after timelimit "
-                  "update failure",
+                  "Failed to persist rollback status for job #{} after "
+                  "timelimit update failure",
                   job_id);
             }
           } else {
