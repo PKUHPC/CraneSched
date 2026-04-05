@@ -24,7 +24,7 @@ class Collection(Enum):
     WCKEY = "wckey_table"
     RESOURCE = "license_resource_table"
 
-    METADATA = "metadata_table"
+    METADATA_TABLE = "metadata_table"
     ACC_HOUR = "acc_usage_hour_table"
     ACC_DAY = "acc_usage_day_table"
     ACC_MONTH = "acc_usage_month_table"
@@ -121,7 +121,7 @@ def wipe_summary_metadata(db):
     """Delete only job summary metadata documents in metadata_table."""
     try:
         logger.debug("Wiping job summary metadata in metadata_table...")
-        db[Collection.METADATA.value].delete_many({"_id": {"$regex": "^job_summary_"}})
+        db[Collection.METADATA_TABLE.value].delete_many({"_id": {"$regex": "^job_summary_"}})
     except Exception as e:
         logger.error(f"Error wiping job summary metadata: {e}")
         raise e
