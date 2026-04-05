@@ -2342,28 +2342,7 @@ MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
     auto metadata_id = SummaryMetadataIdFromType_(summary_type);
     auto filter = make_document(kvp("_id", metadata_id));
     auto doc_opt = metadata_coll.find_one(filter.view());
-    if (!doc_opt) {
-      // Backward compatibility for old deployments where the state is still in
-      // summary_time_table. Lazily migrate to metadata_table on read.
-      auto legacy_summary_coll =
-          (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
-      auto legacy_filter =
-          make_document(kvp("_id", JobSummaryTypeToString_(summary_type)));
-      auto legacy_doc_opt = legacy_summary_coll.find_one(legacy_filter.view());
-      if (!legacy_doc_opt) return std::nullopt;
-
-      auto legacy_doc = legacy_doc_opt->view();
-      auto legacy_it = legacy_doc.find("last_success_time");
-      if (legacy_it == legacy_doc.end()) return std::nullopt;
-      if (legacy_it->type() == bsoncxx::type::k_date) {
-        auto tp_ms = std::chrono::sys_time<std::chrono::milliseconds>{
-            legacy_it->get_date().value};
-        auto tp_sec = std::chrono::time_point_cast<std::chrono::seconds>(tp_ms);
-        UpdateJobSummaryLastSuccessTime_(summary_type, tp_sec);
-        return tp_sec;
-      }
-      return std::nullopt;
-    }
+    if (!doc_opt) return std::nullopt;
     auto doc = doc_opt->view();
     auto it = doc.find("last_success_time");
     if (it == doc.end()) return std::nullopt;
@@ -2400,25 +2379,7 @@ bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
     auto metadata_id = SummaryMetadataIdFromType_(type);
     auto filter = make_document(kvp("_id", metadata_id));
     auto doc_opt = metadata_coll.find_one(filter.view());
-    if (!doc_opt) {
-      // Backward compatibility for old deployments where the state is still in
-      // summary_time_table. Lazily migrate to metadata_table on read.
-      auto legacy_summary_coll =
-          (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
-      auto legacy_filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
-      auto legacy_doc_opt = legacy_summary_coll.find_one(legacy_filter.view());
-      if (!legacy_doc_opt) return false;
-
-      auto legacy_doc = legacy_doc_opt->view();
-      auto legacy_it = legacy_doc.find("initial_completed");
-      if (legacy_it != legacy_doc.end() &&
-          legacy_it->type() == bsoncxx::type::k_bool &&
-          legacy_it->get_bool().value) {
-        SetInitialAggregationCompleted_(type, true);
-        return true;
-      }
-      return false;
-    }
+    if (!doc_opt) return false;
 
     auto doc = doc_opt->view();
     auto it = doc.find("initial_completed");
