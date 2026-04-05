@@ -33,6 +33,7 @@ message StepStatusChangeRequest {
   uint32 exit_code = 5;
   string reason = 6;
   google.protobuf.Timestamp timestamp = 7;
+  optional JobStatus final_status = 8;
 }
 
 message StepStatusChangeReply {
@@ -171,15 +172,6 @@ message ResumeJobsRequest {
 }
 
 message ResumeJobsReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message TerminateOrphanedStepRequest {
-  map<uint32, JobStepIds> job_step_ids_map = 1;
-}
-
-message TerminateOrphanedStepReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -1446,7 +1438,6 @@ service Craned {
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
   rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
   rpc ResumeJobs(ResumeJobsRequest) returns (ResumeJobsReply);
-  rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
   rpc ChangeJobTimeConstraint(ChangeJobTimeConstraintRequest) returns (ChangeJobTimeConstraintReply);
 
   /*

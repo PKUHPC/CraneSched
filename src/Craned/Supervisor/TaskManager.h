@@ -58,8 +58,6 @@ class StepInstance {
   std::vector<std::shared_ptr<uvw::timer_handle>> signal_timers;
   PasswordEntry pwd;
 
-  bool orphaned{false};
-
   job_id_t job_id{};
   step_id_t step_id{};
   std::vector<task_id_t> task_ids;
@@ -647,7 +645,7 @@ class TaskManager {
   std::future<CraneErrCode> ChangeStepTimeConstraintAsync(
       std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time);
 
-  void TerminateStepAsync(bool mark_as_orphaned, TaskFinalizeCause cause);
+  void TerminateStepAsync(TaskFinalizeCause cause);
 
   // A dedicated termination path for pod in daemon step.
   void TerminatePodInDaemonStepAsync();
@@ -670,7 +668,6 @@ class TaskManager {
 
   struct StepTerminateQueueElem {
     TaskFinalizeCause cause{TaskFinalizeCause::NORMAL};
-    bool mark_as_orphaned{false};
   };
 
   struct DaemonPodTerminateQueueElem {};

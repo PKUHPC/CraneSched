@@ -88,9 +88,6 @@ class CranedStub {
       crane::grpc::TerminateSource terminate_source =
           crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
-  CraneErrCode TerminateOrphanedSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
-
   CraneErrCode ChangeJobTimeConstraint(
       uint32_t job_id, std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);

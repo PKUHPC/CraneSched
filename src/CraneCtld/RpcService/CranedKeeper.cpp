@@ -100,40 +100,6 @@ CraneErrCode CranedStub::TerminateSteps(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::TerminateOrphanedSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
-  using crane::grpc::TerminateOrphanedStepReply;
-  using crane::grpc::TerminateOrphanedStepRequest;
-
-  ClientContext context;
-  Status status;
-  TerminateOrphanedStepRequest request;
-  TerminateOrphanedStepReply reply;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
-
-  auto &job_step_map = *request.mutable_job_step_ids_map();
-
-  for (const auto &[job_id, step_ids] : steps) {
-    job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
-                                                 step_ids.end());
-  }
-  status = m_stub_->TerminateOrphanedStep(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_DEBUG(
-        "TerminateOrphanedJobs RPC for Node {} returned status not ok: {}",
-        m_craned_id_, status.error_message());
-    HandleGrpcErrorCode_(status.error_code());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-  UpdateLastActiveTime();
-
-  if (reply.ok())
-    return CraneErrCode::SUCCESS;
-  else
-    return CraneErrCode::ERR_GENERIC_FAILURE;
-}
-
 CraneErrCode CranedStub::AllocJobs(
     const std::vector<crane::grpc::JobToD> &jobs) {
   using crane::grpc::AllocJobsReply;
