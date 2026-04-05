@@ -2299,7 +2299,8 @@ std::string MongodbClient::SummaryMetadataIdFromType_(
 bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
     JobSummary::Type summary_type, std::chrono::sys_seconds last_success) {
   try {
-    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
+    auto metadata_coll =
+        (*GetClient_())[m_db_name_][m_metadata_collection_name_];
     auto last_success_date = bsoncxx::types::b_date{
         std::chrono::time_point_cast<std::chrono::milliseconds>(last_success)};
 
@@ -2308,8 +2309,8 @@ bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
             std::chrono::system_clock::now())};
     using bsoncxx::builder::basic::make_document;
 
-    auto filter = make_document(
-        kvp("_id", SummaryMetadataIdFromType_(summary_type)));
+    auto filter =
+        make_document(kvp("_id", SummaryMetadataIdFromType_(summary_type)));
 
     // Build the update document:
     // - $max: only update last_success_time if the new value is greater than
@@ -2335,7 +2336,8 @@ bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
 std::optional<std::chrono::sys_seconds>
 MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
   try {
-    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
+    auto metadata_coll =
+        (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
@@ -2372,7 +2374,8 @@ MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
 
 bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
   try {
-    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
+    auto metadata_coll =
+        (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
@@ -2398,18 +2401,18 @@ bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
 void MongodbClient::SetInitialAggregationCompleted_(JobSummary::Type type,
                                                     bool completed) {
   try {
-    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
+    auto metadata_coll =
+        (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
 
-    auto filter =
-        make_document(kvp("_id", SummaryMetadataIdFromType_(type)));
+    auto filter = make_document(kvp("_id", SummaryMetadataIdFromType_(type)));
     auto update = make_document(
         kvp("$set", make_document(kvp("initial_completed", completed))));
 
     metadata_coll.update_one(filter.view(), update.view(),
-                            mongocxx::options::update{}.upsert(true));
+                             mongocxx::options::update{}.upsert(true));
 
     CRANE_INFO("Set initial_completed={} for {}", completed,
                JobSummaryTypeToString_(type));
