@@ -139,7 +139,14 @@ class JobManager {
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id,
                           crane::grpc::TerminateSource terminate_source);
 
-  void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
+  void MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id);
+
+  // Send Completing + Terminal as two separate status changes.
+  // Used for error paths where Craned detects failure and needs to
+  // drive both AllNodesCompleting and AllNodesFinished on CraneCtld.
+  void SendCompletingAndTerminal_(job_id_t job_id, step_id_t step_id,
+                                  crane::grpc::JobStatus terminal_status,
+                                  uint32_t exit_code, std::string reason);
 
   /**
    *
@@ -159,6 +166,7 @@ class JobManager {
                              crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
+                             std::optional<crane::grpc::JobStatus> final_status,
                              const google::protobuf::Timestamp& timestamp);
 
   // Wait internal libuv base loop to exit...
@@ -243,6 +251,7 @@ class JobManager {
   void ActivateStepStatusChangeAsync_(
       job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
       uint32_t exit_code, std::optional<std::string> reason,
+      std::optional<crane::grpc::JobStatus> final_status,
       const google::protobuf::Timestamp& timestamp);
 
   // Contains all the jobs that are running on this Craned node.

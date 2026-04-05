@@ -532,10 +532,6 @@ struct StepStatusChangeContext {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_step_exec_map;
-  // Error steps to terminate with orphaned status
-  std::unordered_map<CranedId,
-                     std::unordered_map<job_id_t, std::set<step_id_t>>>
-      craned_orphaned_steps{};
   // Common step to cancel, caused by a finished primary step
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
@@ -620,6 +616,7 @@ struct StepInCtld {
 
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
+  std::unordered_set<CranedId> m_completing_nodes_;
 
   // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -695,6 +692,9 @@ struct StepInCtld {
   }
   void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
+
+  void StepOnNodeCompleting(const CranedId& node);
+  bool AllNodesCompleting() const;
 
   void SetSubmitTime(absl::Time submit_time);
   absl::Time SubmitTime() const { return m_submit_time_; }

@@ -150,8 +150,7 @@ SupervisorStub::CheckStatus() {
   return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
 }
 
-CraneErrCode SupervisorStub::TerminateStep(
-    bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source) {
+CraneErrCode SupervisorStub::TerminateStep(crane::grpc::TerminateSource terminate_source) {
   ClientContext context;
   context.set_wait_for_ready(true);
   context.set_deadline(std::chrono::system_clock::now() +
@@ -159,7 +158,6 @@ CraneErrCode SupervisorStub::TerminateStep(
   crane::grpc::supervisor::TerminateStepRequest request;
   crane::grpc::supervisor::TerminateStepReply reply;
 
-  request.set_mark_orphaned(mark_as_orphaned);
   request.set_terminate_source(terminate_source);
 
   auto ok = m_stub_->TerminateStep(&context, request, &reply);

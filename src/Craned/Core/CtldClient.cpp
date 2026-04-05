@@ -707,10 +707,18 @@ void CtldClient::Init() {
         if (!invalid_steps.empty()) {
           CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
                      util::JobStepsToString(invalid_steps));
-          for (auto [job_id, steps] : invalid_steps) {
-            for (auto step_id : steps)
-              g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
+          // Mark as silent cleanup (no status forwarded to CraneCtld),
+          // then FreeSteps triggers CleanUpJobAndStepsAsync which
+          // terminates supervisors and waits for exit via timer.
+          std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+              steps_to_free;
+          for (auto& [job_id, steps] : invalid_steps) {
+            for (auto step_id : steps) {
+              g_job_mgr->MarkStepSilentCleanup(job_id, step_id);
+              steps_to_free[job_id].insert(step_id);
+            }
           }
+          g_job_mgr->FreeSteps(std::move(steps_to_free));
         }
         if (!invalid_jobs.empty()) {
           CRANE_INFO("Freeing invalid jobs: [{}].",
@@ -1016,6 +1024,8 @@ bool CtldClient::SendStatusChanges_(
     *request.mutable_timestamp() = status_change.timestamp;
     if (status_change.reason.has_value())
       request.set_reason(status_change.reason.value());
+    if (status_change.final_status.has_value())
+      request.set_final_status(status_change.final_status.value());
 
     status = m_stub_->StepStatusChange(&context, request, &reply);
     if (!status.ok()) {
