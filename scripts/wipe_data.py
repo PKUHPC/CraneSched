@@ -24,7 +24,7 @@ class Collection(Enum):
     WCKEY = "wckey_table"
     RESOURCE = "license_resource_table"
 
-    SUMMARY = "summary_time_table"
+    METADATA = "metadata_table"
     ACC_HOUR = "acc_usage_hour_table"
     ACC_DAY = "acc_usage_day_table"
     ACC_MONTH = "acc_usage_month_table"
@@ -115,6 +115,16 @@ def wipe_mongo(db, collections: list[Collection]):
     """Handle MongoDB collection wiping based on user input."""
     for c in collections:
         wipe_collection(db, c)
+
+
+def wipe_summary_metadata(db):
+    """Delete only job summary metadata documents in metadata_table."""
+    try:
+        logger.debug("Wiping job summary metadata in metadata_table...")
+        db[Collection.METADATA.value].delete_many({"_id": {"$regex": "^job_summary_"}})
+    except Exception as e:
+        logger.error(f"Error wiping job summary metadata: {e}")
+        raise e
 
 
 def connect_to_mongo(username, password, host, port, dbname):
@@ -245,11 +255,11 @@ def _main():
                 Collection.USER,
                 Collection.WCKEY,
                 Collection.RESOURCE,
-                Collection.SUMMARY,
                 Collection.ACC_HOUR,
                 Collection.ACC_DAY,
                 Collection.ACC_MONTH
             ]  # Default to all
+            wipe_summary_metadata(db)
         else:
             if args.acct_table:
                 to_wipe.append(Collection.ACCT)
@@ -264,10 +274,10 @@ def _main():
             if args.resource_table:
                 to_wipe.append(Collection.RESOURCE)
             if args.summary_table:
-                to_wipe.append(Collection.SUMMARY)
                 to_wipe.append(Collection.ACC_HOUR)
                 to_wipe.append(Collection.ACC_DAY)
                 to_wipe.append(Collection.ACC_MONTH)
+                wipe_summary_metadata(db)
         wipe_mongo(db, to_wipe)
 
     # Handle embedded database cleanup

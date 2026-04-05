@@ -2291,11 +2291,15 @@ std::string MongodbClient::JobSummaryTypeToString_(
   }
 }
 
+std::string MongodbClient::SummaryMetadataIdFromType_(
+    JobSummary::Type summary_type) {
+  return "job_summary_" + JobSummaryTypeToString_(summary_type);
+}
+
 bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
     JobSummary::Type summary_type, std::chrono::sys_seconds last_success) {
   try {
-    auto summary_coll =
-        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
     auto last_success_date = bsoncxx::types::b_date{
         std::chrono::time_point_cast<std::chrono::milliseconds>(last_success)};
 
@@ -2304,8 +2308,8 @@ bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
             std::chrono::system_clock::now())};
     using bsoncxx::builder::basic::make_document;
 
-    auto filter =
-        make_document(kvp("_id", JobSummaryTypeToString_(summary_type)));
+    auto filter = make_document(
+        kvp("_id", SummaryMetadataIdFromType_(summary_type)));
 
     // Build the update document:
     // - $max: only update last_success_time if the new value is greater than
@@ -2316,7 +2320,7 @@ bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
         kvp("$set", make_document(kvp("update_time", update_date))));
 
     // Execute the update operation with upsert=true (insert if not exists)
-    auto result = summary_coll.update_one(
+    auto result = metadata_coll.update_one(
         filter.view(), update.view(), mongocxx::options::update{}.upsert(true));
 
     return true;
@@ -2331,16 +2335,35 @@ bool MongodbClient::UpdateJobSummaryLastSuccessTime_(
 std::optional<std::chrono::sys_seconds>
 MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
   try {
-    auto summary_coll =
-        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
-    auto filter =
-        make_document(kvp("_id", JobSummaryTypeToString_(summary_type)));
-    auto doc_opt = summary_coll.find_one(filter.view());
-    if (!doc_opt) return std::nullopt;
+    auto metadata_id = SummaryMetadataIdFromType_(summary_type);
+    auto filter = make_document(kvp("_id", metadata_id));
+    auto doc_opt = metadata_coll.find_one(filter.view());
+    if (!doc_opt) {
+      // Backward compatibility for old deployments where the state is still in
+      // summary_time_table. Lazily migrate to metadata_table on read.
+      auto legacy_summary_coll =
+          (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+      auto legacy_filter =
+          make_document(kvp("_id", JobSummaryTypeToString_(summary_type)));
+      auto legacy_doc_opt = legacy_summary_coll.find_one(legacy_filter.view());
+      if (!legacy_doc_opt) return std::nullopt;
 
+      auto legacy_doc = legacy_doc_opt->view();
+      auto legacy_it = legacy_doc.find("last_success_time");
+      if (legacy_it == legacy_doc.end()) return std::nullopt;
+      if (legacy_it->type() == bsoncxx::type::k_date) {
+        auto tp_ms = std::chrono::sys_time<std::chrono::milliseconds>{
+            legacy_it->get_date().value};
+        auto tp_sec = std::chrono::time_point_cast<std::chrono::seconds>(tp_ms);
+        UpdateJobSummaryLastSuccessTime_(summary_type, tp_sec);
+        return tp_sec;
+      }
+      return std::nullopt;
+    }
     auto doc = doc_opt->view();
     auto it = doc.find("last_success_time");
     if (it == doc.end()) return std::nullopt;
@@ -2363,21 +2386,39 @@ MongodbClient::GetJobSummaryLastSuccessTime_(JobSummary::Type summary_type) {
         fmt::format(
             "Get summary last success time failed: {}, type={}, coll={}.",
             e.what(), JobSummaryTypeToString_(summary_type),
-            m_summary_time_collection_name_));
+            m_metadata_collection_name_));
     return std::nullopt;
   }
 }
 
 bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
   try {
-    auto summary_coll =
-        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
-    auto filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
-    auto doc_opt = summary_coll.find_one(filter.view());
-    if (!doc_opt) return false;
+    auto metadata_id = SummaryMetadataIdFromType_(type);
+    auto filter = make_document(kvp("_id", metadata_id));
+    auto doc_opt = metadata_coll.find_one(filter.view());
+    if (!doc_opt) {
+      // Backward compatibility for old deployments where the state is still in
+      // summary_time_table. Lazily migrate to metadata_table on read.
+      auto legacy_summary_coll =
+          (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+      auto legacy_filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
+      auto legacy_doc_opt = legacy_summary_coll.find_one(legacy_filter.view());
+      if (!legacy_doc_opt) return false;
+
+      auto legacy_doc = legacy_doc_opt->view();
+      auto legacy_it = legacy_doc.find("initial_completed");
+      if (legacy_it != legacy_doc.end() &&
+          legacy_it->type() == bsoncxx::type::k_bool &&
+          legacy_it->get_bool().value) {
+        SetInitialAggregationCompleted_(type, true);
+        return true;
+      }
+      return false;
+    }
 
     auto doc = doc_opt->view();
     auto it = doc.find("initial_completed");
@@ -2396,17 +2437,17 @@ bool MongodbClient::GetInitialAggregationCompleted_(JobSummary::Type type) {
 void MongodbClient::SetInitialAggregationCompleted_(JobSummary::Type type,
                                                     bool completed) {
   try {
-    auto summary_coll =
-        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto metadata_coll = (*GetClient_())[m_db_name_][m_metadata_collection_name_];
 
     using bsoncxx::builder::basic::kvp;
     using bsoncxx::builder::basic::make_document;
 
-    auto filter = make_document(kvp("_id", JobSummaryTypeToString_(type)));
+    auto filter =
+        make_document(kvp("_id", SummaryMetadataIdFromType_(type)));
     auto update = make_document(
         kvp("$set", make_document(kvp("initial_completed", completed))));
 
-    summary_coll.update_one(filter.view(), update.view(),
+    metadata_coll.update_one(filter.view(), update.view(),
                             mongocxx::options::update{}.upsert(true));
 
     CRANE_INFO("Set initial_completed={} for {}", completed,

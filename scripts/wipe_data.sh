@@ -5,7 +5,7 @@ mode(1:acct_table | 2:qos_table | \
 3:job_table | 4:user_table+wckey_table | \
 5:all | 6:acct_table+qos_table+user_table+wckey_table | \
 7:license_resource_table | \
-8:hour_table+day_table+month_table |9: summary_time_table)"
+8:hour_table+day_table+month_table |9: summary_metadata(metadata_table: _id^job_summary_))"
 
 if [ "$#" -ne 1 ]; then
   echo "Parameter error: please input mode num!"
@@ -31,6 +31,14 @@ function wipe_collection() {
   mongosh --username "$username" --password "$password" --host "$host" --port "$port" --authenticationDatabase admin <<EOF
     use $dbname
     db.$1.deleteMany({})
+    exit
+EOF
+}
+
+function wipe_summary_metadata() {
+  mongosh --username "$username" --password "$password" --host "$host" --port "$port" --authenticationDatabase admin <<EOF
+    use $dbname
+    db.metadata_table.deleteMany({_id: /^job_summary_/})
     exit
 EOF
 }
@@ -69,5 +77,5 @@ if [ "$mode" -eq 5 ] || [ "$mode" -eq 8 ]; then
 fi
 
 if [ "$mode" -eq 5 ] || [ "$mode" -eq 9 ]; then
-  wipe_collection summary_time_table
+  wipe_summary_metadata
 fi
