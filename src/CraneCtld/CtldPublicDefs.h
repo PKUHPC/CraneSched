@@ -883,8 +883,8 @@ struct JobInCtld {
                           ? job_to_ctld.array_index_stride()
                           : 1;
     if (stride == 0) stride = 1;  // Avoid division by zero
-    uint32_t range = job_to_ctld.array_index_end() -
-                     job_to_ctld.array_index_start();
+    uint32_t range =
+        job_to_ctld.array_index_end() - job_to_ctld.array_index_start();
     return range / stride + 1;
   }
 

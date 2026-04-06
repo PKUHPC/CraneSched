@@ -649,8 +649,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       return grpc::Status::OK;
     }
 
-    const uint64_t range = static_cast<uint64_t>(array_end) -
-                           static_cast<uint64_t>(array_start);
+    const uint64_t range =
+        static_cast<uint64_t>(array_end) - static_cast<uint64_t>(array_start);
     const uint64_t expected_count = range / array_stride + 1;
     if (expected_count != static_cast<uint64_t>(job_count)) {
       response->add_job_id_list(0);
@@ -940,10 +940,10 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
       if (child_ids.empty()) {
         // No matching children found - report back to user.
         response->add_not_modified_jobs(job_id);
-        response->add_not_modified_reasons(fmt::format(
-            "Job #{} is not an array parent or no matching array "
-            "tasks found.",
-            job_id));
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not an array parent or no matching array "
+                        "tasks found.",
+                        job_id));
         continue;
       }
       for (auto child_id : child_ids) {

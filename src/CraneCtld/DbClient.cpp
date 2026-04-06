@@ -706,8 +706,7 @@ bool MongodbClient::FetchJobRecords(
       // Check if there are any non-array job_ids for Branch 1.
       bool has_non_array_job_ids = false;
       if (has_job_ids_constraint) {
-        for (const auto& job_id :
-             request->filter_ids() | std::views::keys) {
+        for (const auto& job_id : request->filter_ids() | std::views::keys) {
           if (!parent_ids_with_task_filter.contains(job_id)) {
             has_non_array_job_ids = true;
             break;
@@ -728,10 +727,9 @@ bool MongodbClient::FetchJobRecords(
               }
             }
             or_array.append([&](sub_document match_doc) {
-              match_doc.append(
-                  kvp("job_id", [&](sub_document in_doc) {
-                    in_doc.append(kvp("$in", non_array_job_ids));
-                  }));
+              match_doc.append(kvp("job_id", [&](sub_document in_doc) {
+                in_doc.append(kvp("$in", non_array_job_ids));
+              }));
             });
           }
 
@@ -740,10 +738,10 @@ bool MongodbClient::FetchJobRecords(
                request->filter_array_task_ids()) {
             for (const auto& task_id : task_ids.array_task_ids()) {
               or_array.append([&](sub_document match_doc) {
-                match_doc.append(kvp(
-                    "parent_job_id", static_cast<std::int32_t>(parent_id)));
-                match_doc.append(kvp(
-                    "array_task_id", static_cast<std::int32_t>(task_id)));
+                match_doc.append(
+                    kvp("parent_job_id", static_cast<std::int32_t>(parent_id)));
+                match_doc.append(
+                    kvp("array_task_id", static_cast<std::int32_t>(task_id)));
               });
             }
           }
@@ -758,8 +756,7 @@ bool MongodbClient::FetchJobRecords(
       // No array_task filter: simple job_id $in.
       filter.append(kvp("job_id", [&request](sub_document job_id_doc) {
         array job_id_array;
-        for (const auto& job_id :
-             request->filter_ids() | std::views::keys) {
+        for (const auto& job_id : request->filter_ids() | std::views::keys) {
           job_id_array.append(static_cast<std::int32_t>(job_id));
         }
         job_id_doc.append(kvp("$in", job_id_array));
