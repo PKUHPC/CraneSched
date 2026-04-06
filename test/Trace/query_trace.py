@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Query and visualize CraneSched distributed traces from InfluxDB.
 
-Supports flat table output and tree-based flame graph visualization.
+Supports flat table output, tree-based flame graph visualization,
+and Chrome Trace Event Format export for chrome://tracing and Perfetto UI.
 """
 
 import os
 import argparse
 import sys
 import re
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
@@ -83,6 +85,8 @@ def setup_args():
     # Output
     p.add_argument("--verbose", "-v", action="store_true", help="Show all attributes")
     p.add_argument("--tree",    "-t", action="store_true", help="Tree view (flame graph style)")
+    p.add_argument("--chrome",  type=str, metavar="FILE",
+                   help="Export to Chrome Trace Event Format JSON (for chrome://tracing or ui.perfetto.dev)")
 
     return p.parse_args()
 
@@ -294,6 +298,87 @@ def print_tree(spans: list[Span], verbose: bool):
         print()
 
 
+# ── Chrome Trace Event Format Export ────────────────────────────────────────
+
+def export_chrome(spans: list[Span], output_path: str):
+    """Export spans to Chrome Trace Event Format JSON.
+
+    Open the output file in:
+      - chrome://tracing (Load button)
+      - ui.perfetto.dev (drag & drop)
+    """
+    if not spans:
+        print("No spans to export.")
+        return
+
+    # Assign stable pid per unique service
+    services = sorted({s.service for s in spans})
+    svc_to_pid = {svc: i + 1 for i, svc in enumerate(services)}
+
+    # Build parent→children map for tid assignment
+    by_id = {s.span_id: s for s in spans}
+    span_tid: dict[str, int] = {}
+    tid_counter = [0]
+
+    def assign_tid(span: Span) -> int:
+        if span.span_id in span_tid:
+            return span_tid[span.span_id]
+        if span.parent_span_id in span_tid:
+            # Child shares parent's tid (nesting in same thread)
+            tid = span_tid[span.parent_span_id]
+        else:
+            tid_counter[0] += 1
+            tid = tid_counter[0]
+        span_tid[span.span_id] = tid
+        return tid
+
+    # Assign tids: process roots first, then children
+    roots = [s for s in spans if s.is_root or s.parent_span_id not in by_id]
+    others = [s for s in spans if s not in roots]
+    for s in roots:
+        assign_tid(s)
+    for s in sorted(others, key=lambda x: x.start_time or x.name):
+        assign_tid(s)
+
+    events = []
+
+    # Metadata events: process names
+    for svc, pid in svc_to_pid.items():
+        events.append({
+            "name": "process_name", "ph": "M", "pid": pid, "tid": 0,
+            "args": {"name": svc if svc != "-" else "unknown"}
+        })
+
+    # Span events
+    for s in spans:
+        ts_us = int(s.start_time.timestamp() * 1_000_000) if s.start_time else 0
+        pid = svc_to_pid.get(s.service, 0)
+        tid = span_tid.get(s.span_id, 0)
+
+        args = dict(s.attrs)
+        args["trace_id"] = s.trace_id
+        args["span_id"] = s.span_id
+        if s.parent_span_id and s.parent_span_id != "0000000000000000":
+            args["parent_span_id"] = s.parent_span_id
+
+        events.append({
+            "name": s.name,
+            "ph": "X",
+            "ts": ts_us,
+            "dur": max(s.duration_us, 1),  # Perfetto needs dur >= 1
+            "pid": pid,
+            "tid": tid,
+            "cat": s.service,
+            "args": args,
+        })
+
+    with open(output_path, "w") as f:
+        json.dump(events, f, indent=2, default=str)
+
+    print(f"Exported {len(spans)} spans to {output_path}")
+    print(f"Open in browser: chrome://tracing or https://ui.perfetto.dev")
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -305,7 +390,9 @@ def main():
         with InfluxDBClient(url=args.url, token=args.token, org=args.org) as client:
             spans = query_spans(client, args)
 
-            if args.tree:
+            if args.chrome:
+                export_chrome(spans, args.chrome)
+            elif args.tree:
                 print_tree(spans, args.verbose)
             else:
                 print_flat(spans, args.verbose)
