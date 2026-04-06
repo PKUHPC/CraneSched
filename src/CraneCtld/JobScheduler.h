@@ -1041,6 +1041,15 @@ class JobScheduler {
   // Called from ScheduleThread_ while holding m_pending_job_map_mtx_.
   void ExpandArrayParent_(JobInCtld* parent);
 
+  // Check if an array parent has been expanded by checking if the first child exists.
+  // Must be called while holding m_pending_job_map_mtx_.
+  bool IsArrayExpanded_(const JobInCtld* parent) const {
+    if (!parent->IsArrayParent() || parent->FirstChildJobId() == 0) {
+      return false;
+    }
+    return m_pending_job_map_.find(parent->FirstChildJobId()) != m_pending_job_map_.end();
+  }
+
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();
 

@@ -900,18 +900,6 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_submit_hostname(
             view["submit_hostname"].get_string().value);
 
-        if (auto field = view["array_index_start"]; field) {
-          auto value = ViewGetArithmeticValue_<int64_t>(field);
-          if (value >= 0) {
-            job_info.set_array_index_start(static_cast<uint32_t>(value));
-          }
-        }
-        if (auto field = view["array_index_end"]; field) {
-          auto value = ViewGetArithmeticValue_<int64_t>(field);
-          if (value >= 0) {
-            job_info.set_array_index_end(static_cast<uint32_t>(value));
-          }
-        }
         if (auto field = view["array_task_id"]; field) {
           auto value = ViewGetArithmeticValue_<int64_t>(field);
           if (value >= 0) {
@@ -4346,15 +4334,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  int32_t array_index_start = -1;
-  int32_t array_index_end = -1;
   int32_t array_task_id = -1;
-  if (job_to_ctld.has_array_index_start()) {
-    array_index_start = static_cast<int32_t>(job_to_ctld.array_index_start());
-  }
-  if (job_to_ctld.has_array_index_end()) {
-    array_index_end = static_cast<int32_t>(job_to_ctld.array_index_end());
-  }
   if (job_to_ctld.has_array_task_id()) {
     array_task_id = static_cast<int32_t>(job_to_ctld.array_task_id());
   }
@@ -4555,16 +4535,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  int32_t array_index_start = -1;
-  int32_t array_index_end = -1;
   int32_t array_task_id = -1;
-  if (job->JobToCtld().has_array_index_start()) {
-    array_index_start =
-        static_cast<int32_t>(job->JobToCtld().array_index_start());
-  }
-  if (job->JobToCtld().has_array_index_end()) {
-    array_index_end = static_cast<int32_t>(job->JobToCtld().array_index_end());
-  }
   if (job->JobToCtld().has_array_task_id()) {
     array_task_id = static_cast<int32_t>(job->JobToCtld().array_task_id());
   }
@@ -4610,8 +4581,8 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // clang-format on
 
   int32_t parent_job_id_val = -1;
-  if (job->parent_job_id.has_value()) {
-    parent_job_id_val = static_cast<int32_t>(job->parent_job_id.value());
+  if (job->ParentJobId().has_value()) {
+    parent_job_id_val = static_cast<int32_t>(job->ParentJobId().value());
   }
 
   std::tuple<int32_t, job_db_id_t, int64_t, bool, std::string,      /*0-4*/
@@ -4662,9 +4633,6 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              // 45-48
              array_index_start, array_index_end, array_task_id,
              job->submit_hostname,
-             // 49-52
-             job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids,
              // 49-53
              job->included_nodes, job->excluded_nodes,
              job->executing_craned_ids,

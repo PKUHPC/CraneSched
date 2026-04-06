@@ -989,9 +989,6 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   step.set_nodelist(job.JobToCtld().nodelist());
   step.set_task_prolog(job.JobToCtld().task_prolog());
   step.set_task_epilog(job.JobToCtld().task_epilog());
-  if (job.JobToCtld().has_array_task_id()) {
-    step.set_array_task_id(job.JobToCtld().array_task_id());
-  }
 
   step.mutable_deadline_time()->set_seconds(absl::ToUnixSeconds(deadline_time));
   *MutableStepToCtld() = std::move(step);
@@ -1585,6 +1582,16 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+void JobInCtld::SetFirstChildJobId(job_id_t val) {
+  first_child_job_id = val;
+  runtime_attr.set_first_child_job_id(val);
+}
+
+void JobInCtld::SetParentJobId(job_id_t val) {
+  parent_job_id = val;
+  runtime_attr.set_parent_job_id(val);
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1814,12 +1821,6 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
 
   job_info->set_submit_hostname(submit_hostname);
 
-  if (job_to_ctld.has_array_index_start()) {
-    job_info->set_array_index_start(job_to_ctld.array_index_start());
-  }
-  if (job_to_ctld.has_array_index_end()) {
-    job_info->set_array_index_end(job_to_ctld.array_index_end());
-  }
   if (job_to_ctld.has_array_task_id()) {
     job_info->set_array_task_id(job_to_ctld.array_task_id());
   }

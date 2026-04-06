@@ -981,10 +981,7 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     // the first child's job_id.
     if (job->IsArrayParent()) {
       uint32_t array_count = job->ArrayTaskCount();
-      job->first_child_job_id = job_id;
-      // Store first_child_job_id in runtime attr for persistence.
-      job->MutableRuntimeAttr()->set_first_child_job_id(
-          job->first_child_job_id);
+      job->SetFirstChildJobId(job_id);
       // Advance counters to reserve child IDs.
       job_id += array_count;
       job_db_id += array_count;

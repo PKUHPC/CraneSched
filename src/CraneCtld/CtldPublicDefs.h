@@ -866,14 +866,6 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
-  // Array job tracking fields.
-  // For array parents: whether expansion into children has occurred.
-  bool array_expanded{false};
-  // For array parents: the first child's pre-allocated job_id.
-  job_id_t first_child_job_id{0};
-  // For array children: the parent array job's job_id.
-  std::optional<job_id_t> parent_job_id;
-
   // Returns true if this is an array parent (has array range but no
   // array_task_id).
   bool IsArrayParent() const {
@@ -887,8 +879,13 @@ struct JobInCtld {
 
   uint32_t ArrayTaskCount() const {
     if (!IsArrayParent()) return 0;
-    return job_to_ctld.array_index_end() -
-           job_to_ctld.array_index_start() + 1;
+    uint32_t stride = job_to_ctld.has_array_index_stride()
+                          ? job_to_ctld.array_index_stride()
+                          : 1;
+    if (stride == 0) stride = 1;  // Avoid division by zero
+    uint32_t range = job_to_ctld.array_index_end() -
+                     job_to_ctld.array_index_start();
+    return range / stride + 1;
   }
 
  private:
@@ -936,6 +933,12 @@ struct JobInCtld {
 
   // Might change at each scheduling cycle.
   ResourceV3 allocated_res;
+
+  // Array job tracking fields.
+  // For array parents: the first child's pre-allocated job_id.
+  job_id_t first_child_job_id{0};
+  // For array children: the parent array job's job_id.
+  std::optional<job_id_t> parent_job_id;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
@@ -1058,6 +1061,13 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  // Array job tracking accessors
+  void SetFirstChildJobId(job_id_t val);
+  job_id_t FirstChildJobId() const { return first_child_job_id; }
+
+  void SetParentJobId(job_id_t val);
+  std::optional<job_id_t> const& ParentJobId() const { return parent_job_id; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

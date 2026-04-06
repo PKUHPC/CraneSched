@@ -248,6 +248,7 @@ message JobToCtld {
   // Job array spec for this submission (inclusive range).
   optional uint32 array_index_start = 53;
   optional uint32 array_index_end = 54;
+  optional uint32 array_index_stride = 56;
   // The concrete index of this task after expansion.
   optional uint32 array_task_id = 55;
 }

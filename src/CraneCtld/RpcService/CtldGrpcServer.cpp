@@ -634,9 +634,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
 
   uint32_t array_start = 0;
   uint32_t array_end = 0;
+  uint32_t array_stride = 1;
   if (has_array_spec) {
     array_start = job_to_ctld.array_index_start();
     array_end = job_to_ctld.array_index_end();
+    if (job_to_ctld.has_array_index_stride()) {
+      array_stride = job_to_ctld.array_index_stride();
+    }
+    if (array_stride == 0) array_stride = 1;
 
     if (array_end < array_start) {
       response->add_job_id_list(0);
@@ -644,8 +649,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       return grpc::Status::OK;
     }
 
-    const uint64_t expected_count = static_cast<uint64_t>(array_end) -
-                                    static_cast<uint64_t>(array_start) + 1;
+    const uint64_t range = static_cast<uint64_t>(array_end) -
+                           static_cast<uint64_t>(array_start);
+    const uint64_t expected_count = range / array_stride + 1;
     if (expected_count != static_cast<uint64_t>(job_count)) {
       response->add_job_id_list(0);
       response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
