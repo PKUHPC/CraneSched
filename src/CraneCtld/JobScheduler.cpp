@@ -69,7 +69,7 @@ bool SuspendJobOnNodes_(const std::vector<CranedId>& craned_ids,
   if (craned_ids.empty()) return true;
 
   bool suspend_failed = false;
-  Mutex suspend_result_mtx;
+  absl::Mutex suspend_result_mtx;
   absl::BlockingCounter suspend_counter(craned_ids.size());
 
   for (const auto& craned_id : craned_ids) {
@@ -81,7 +81,7 @@ bool SuspendJobOnNodes_(const std::vector<CranedId>& craned_ids,
             "Node may remain running.",
             failure_reason, job_id, craned_id);
         {
-          LockGuard lock(&suspend_result_mtx);
+          absl::MutexLock lock(&suspend_result_mtx);
           suspend_failed = true;
         }
         suspend_counter.DecrementCount();
@@ -93,7 +93,7 @@ bool SuspendJobOnNodes_(const std::vector<CranedId>& craned_ids,
         CRANE_ERROR("{} for job #{} on craned {}: {}. Node may remain running.",
                     failure_reason, job_id, craned_id, CraneErrStr(err));
         {
-          LockGuard lock(&suspend_result_mtx);
+          absl::MutexLock lock(&suspend_result_mtx);
           suspend_failed = true;
         }
       }
