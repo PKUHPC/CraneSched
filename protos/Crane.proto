@@ -206,9 +206,9 @@ message CancelJobRequest {
   repeated string filter_nodes = 7;
   string filter_username = 8;
 
-  // Per-job array task ID filters. Key is job_id, value is list of
-  // array_task_ids to cancel.
-  map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
+  // Per-job array job ID filters. Key is array_id, value is list of
+  // array_job_ids to cancel.
+  map<uint32, ArrayJobIds> filter_array_job_ids = 9;
 }
 
 message CancelJobReply {
@@ -305,9 +305,9 @@ message ModifyJobRequest {
     google.protobuf.Timestamp deadline_time = 8;
   }
 
-  // Per-job array task ID filter for modifying specific array tasks.
-  // Key is parent job_id, value is list of array_task_ids to modify.
-  map<uint32, ArrayTaskIds> filter_array_task_ids = 8;
+  // Per-job array job ID filter for modifying specific array jobs.
+  // Key is array_id, value is list of array_job_ids to modify.
+  map<uint32, ArrayJobIds> filter_array_job_ids = 8;
 }
 
 message ModifyJobReply {
@@ -639,9 +639,9 @@ message QueryJobsInfoRequest {
 
   bool option_include_completed_jobs = 15;
 
-  // Per-job array task ID filters for array job queries.
-  // Key is parent job_id, value is list of array_task_ids to return.
-  map<uint32, ArrayTaskIds> filter_array_task_ids = 16;
+  // Per-job array job ID filters for array job queries.
+  // Key is array_id, value is list of array_job_ids to return.
+  map<uint32, ArrayJobIds> filter_array_job_ids = 16;
 }
 
 message QueryJobsInfoReply {

@@ -1587,6 +1587,11 @@ void JobInCtld::SetFirstChildJobId(job_id_t val) {
   runtime_attr.set_first_child_job_id(val);
 }
 
+void JobInCtld::SetFirstChildJobDbId(job_db_id_t val) {
+  first_child_job_db_id = val;
+  runtime_attr.set_first_child_job_db_id(val);
+}
+
 void JobInCtld::SetParentJobId(job_id_t val) {
   parent_job_id = val;
   runtime_attr.set_parent_job_id(val);
@@ -1821,8 +1826,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
 
   job_info->set_submit_hostname(submit_hostname);
 
-  if (job_to_ctld.has_array_task_id()) {
-    job_info->set_array_task_id(job_to_ctld.array_task_id());
+  if (job_to_ctld.has_array_job_id()) {
+    job_info->set_array_job_id(job_to_ctld.array_job_id());
   }
   if (parent_job_id.has_value()) {
     job_info->set_parent_job_id(parent_job_id.value());

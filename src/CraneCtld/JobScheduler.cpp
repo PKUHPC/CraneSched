@@ -1228,7 +1228,7 @@ void JobScheduler::ScheduleThread_() {
 
             // Find the first pending child.
             job_id_t first_child = job->FirstChildJobId();
-            uint32_t count = job->ArrayTaskCount();
+            uint32_t count = job->ArrayJobCount();
             JobInCtld* child_to_schedule = nullptr;
             for (uint32_t i = 0; i < count; i++) {
               job_id_t child_id = first_child + i;
@@ -1352,7 +1352,7 @@ void JobScheduler::ScheduleThread_() {
           if (!job->IsArrayParent() || !IsArrayExpanded_(job.get())) continue;
 
           job_id_t first_child = job->FirstChildJobId();
-          uint32_t count = job->ArrayTaskCount();
+          uint32_t count = job->ArrayJobCount();
           bool all_children_done = true;
 
           for (uint32_t i = 0; i < count; i++) {
@@ -3051,10 +3051,10 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   }
 
   std::unordered_map<job_id_t, std::unordered_set<uint32_t>>
-      filter_array_task_ids;
-  for (auto& [job_id, task_ids] : request.filter_array_task_ids()) {
-    filter_array_task_ids[job_id].insert(task_ids.array_task_ids().begin(),
-                                         task_ids.array_task_ids().end());
+      filter_array_job_ids;
+  for (auto& [job_id, task_ids] : request.filter_array_job_ids()) {
+    filter_array_job_ids[job_id].insert(task_ids.array_job_ids().begin(),
+                                         task_ids.array_job_ids().end());
     // Ensure array_task filter keys are also in filter_ids so they enter
     // the candidate set and not_found tracking.
     if (!filter_ids.contains(job_id)) {
@@ -3228,12 +3228,12 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     }
   };
   auto rng_filter_array_task = [&](JobInCtld* job) {
-    if (filter_array_task_ids.empty()) return true;
+    if (filter_array_job_ids.empty()) return true;
     job_id_t job_id = job->JobId();
-    auto it = filter_array_task_ids.find(job_id);
-    if (it == filter_array_task_ids.end()) return true;
-    if (!job->JobToCtld().has_array_task_id()) return false;
-    return it->second.contains(job->JobToCtld().array_task_id());
+    auto it = filter_array_job_ids.find(job_id);
+    if (it == filter_array_job_ids.end()) return true;
+    if (!job->JobToCtld().has_array_job_id()) return false;
+    return it->second.contains(job->JobToCtld().array_job_id());
   };
 
   auto joined_filters = ranges::views::filter(rng_filter_state) |
@@ -3271,9 +3271,9 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
         ExpandArrayParent_(parent);
       }
 
-      bool has_task_filter = filter_array_task_ids.contains(parent_id);
+      bool has_task_filter = filter_array_job_ids.contains(parent_id);
       job_id_t first_child = parent->FirstChildJobId();
-      uint32_t count = parent->ArrayTaskCount();
+      uint32_t count = parent->ArrayJobCount();
       uint32_t array_start = parent->JobToCtld().array_index_start();
       uint32_t array_stride = parent->JobToCtld().has_array_index_stride()
                                   ? parent->JobToCtld().array_index_stride()
@@ -3282,9 +3282,9 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
       for (uint32_t i = 0; i < count; i++) {
         job_id_t child_id = first_child + i;
-        uint32_t array_task_id = array_start + i * array_stride;
+        uint32_t array_job_id = array_start + i * array_stride;
         if (has_task_filter &&
-            !filter_array_task_ids[parent_id].contains(array_task_id)) {
+            !filter_array_job_ids[parent_id].contains(array_job_id)) {
           continue;
         }
         if (!filter_ids.contains(child_id)) {
@@ -5093,18 +5093,25 @@ void JobScheduler::QueryJobsInRam(
                                                       step_ids.steps().end());
   }
 
-  // Parse array_task_id filter for queries.
+  // Parse array_job_id filter for queries.
   std::unordered_map<job_id_t, std::unordered_set<uint32_t>>
-      query_array_task_ids;
-  for (auto& [job_id, task_ids] : request->filter_array_task_ids()) {
-    query_array_task_ids[job_id].insert(task_ids.array_task_ids().begin(),
-                                        task_ids.array_task_ids().end());
-    // Ensure parent is in filter set.
-    if (req_steps.find(job_id) == req_steps.end()) {
-      req_steps[job_id];
+      query_array_job_ids;
+  bool has_array_job_constraint = !request->filter_array_job_ids().empty();
+  if (!no_ids_constraint) {
+    for (auto& [job_id, task_ids] : request->filter_array_job_ids()) {
+      query_array_job_ids[job_id].insert(task_ids.array_job_ids().begin(),
+                                          task_ids.array_job_ids().end());
+      // Ensure parent is in filter set.
+      if (req_steps.find(job_id) == req_steps.end()) {
+        req_steps[job_id];
+      }
     }
   }
-  bool no_array_task_constraint = query_array_task_ids.empty();
+  bool no_array_task_constraint = query_array_job_ids.empty();
+  if (no_ids_constraint && has_array_job_constraint) {
+    // Array child filtering must be scoped by explicit parent job_ids.
+    no_ids_constraint = false;
+  }
 
   bool no_job_states_constraint = request->filter_states().empty();
   std::unordered_set<int> req_job_states(request->filter_states().begin(),
@@ -5192,8 +5199,8 @@ void JobScheduler::QueryJobsInRam(
                         ranges::views::take(num_limit);
 
   // For query: resolve parent→children when array_task filter is specified.
-  // When query_array_task_ids specifies a parent job_id with certain
-  // array_task_ids, we need to find the corresponding child job_ids and
+  // When query_array_job_ids specifies a parent job_id with certain
+  // array_job_ids, we need to find the corresponding child job_ids and
   // add them to req_steps so the ID-filtered path picks them up.
   // This is done after lock acquisition (see below).
 
@@ -5235,13 +5242,13 @@ void JobScheduler::QueryJobsInRam(
 
   // Resolve parent→children for array_task query filter under lock.
   if (!no_array_task_constraint) {
-    for (auto& [parent_id, task_ids] : query_array_task_ids) {
+    for (auto& [parent_id, task_ids] : query_array_job_ids) {
       auto pd_it = m_pending_job_map_.find(parent_id);
       if (pd_it == m_pending_job_map_.end() ||
           !pd_it->second->IsArrayParent()) {
         // Not an array parent — remove from filter set so the raw
         // job_id doesn't leak into results.  Matches DB-path
-        // semantics where all filter_array_task_ids keys are
+        // semantics where all filter_array_job_ids keys are
         // excluded from the direct job_id branch.
         req_steps.erase(parent_id);
         continue;
@@ -5259,11 +5266,11 @@ void JobScheduler::QueryJobsInRam(
                                   ? parent->JobToCtld().array_index_stride()
                                   : 1;
       if (array_stride == 0) array_stride = 1;
-      uint32_t count = parent->ArrayTaskCount();
+      uint32_t count = parent->ArrayJobCount();
 
       for (uint32_t i = 0; i < count; i++) {
-        uint32_t array_task_id = array_start + i * array_stride;
-        if (!task_ids.contains(array_task_id)) continue;
+        uint32_t array_job_id = array_start + i * array_stride;
+        if (!task_ids.contains(array_job_id)) continue;
         job_id_t child_id = first_child + i;
         // Add child to filter set so it's picked up by the ID path.
         if (req_steps.find(child_id) == req_steps.end()) {
@@ -6210,6 +6217,21 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   if (!CheckIfTimeLimitIsValid(job->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  const auto& job_to_ctld = job->JobToCtld();
+  const bool has_array_start = job_to_ctld.has_array_index_start();
+  const bool has_array_end = job_to_ctld.has_array_index_end();
+  if (has_array_start != has_array_end) {
+    CRANE_DEBUG("Job #{} has incomplete array range spec.", job->JobId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+  if (has_array_start &&
+      job_to_ctld.array_index_end() < job_to_ctld.array_index_start()) {
+    CRANE_DEBUG("Job #{} has invalid array range [{}-{}].", job->JobId(),
+                job_to_ctld.array_index_start(),
+                job_to_ctld.array_index_end());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+
   // Check res req valid
   if (job->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", job->JobId());
@@ -6777,32 +6799,28 @@ void JobScheduler::ExpandArrayParent_(JobInCtld* parent) {
                               ? parent->JobToCtld().array_index_stride()
                               : 1;
   if (array_stride == 0) array_stride = 1;  // Avoid infinite loop
-  uint32_t array_count = parent->ArrayTaskCount();
+  uint32_t array_job_count = parent->ArrayJobCount();
   job_id_t first_child_id = parent->FirstChildJobId();
-  job_db_id_t first_child_db_id = parent->JobDbId() + 1;
 
   CRANE_INFO(
       "Expanding array parent job #{} (range [{}-{}:{}]) into {} children "
       "starting at job_id {}.",
-      parent->JobId(), array_start, array_end, array_stride, array_count,
+      parent->JobId(), array_start, array_end, array_stride, array_job_count,
       first_child_id);
 
   std::vector<std::unique_ptr<JobInCtld>> children;
   std::vector<JobInCtld*> child_ptrs;
-  children.reserve(array_count);
-  child_ptrs.reserve(array_count);
+  children.reserve(array_job_count);
+  child_ptrs.reserve(array_job_count);
 
-  for (uint32_t i = 0; i < array_count; i++) {
+  for (uint32_t i = 0; i < array_job_count; i++) {
     auto child = std::make_unique<JobInCtld>();
 
-    // Copy the parent's job spec as template and set the array_task_id.
+    // Copy the parent's job spec as template and set the array_job_id.
     auto child_spec = parent->JobToCtld();
-    child_spec.set_array_task_id(array_start + i * array_stride);
+    child_spec.set_array_job_id(array_start + i * array_stride);
     child->SetFieldsByJobToCtld(child_spec);
 
-    // Assign pre-allocated IDs.
-    child->SetJobId(first_child_id + i);
-    child->SetJobDbId(first_child_db_id + i);
     child->SetStatus(crane::grpc::Pending);
     child->SetSubmitTime(parent->SubmitTime());
 
@@ -6831,13 +6849,13 @@ void JobScheduler::ExpandArrayParent_(JobInCtld* parent) {
                                    std::memory_order_release);
 
   CRANE_INFO("Array parent job #{} expanded into {} children (job_ids {}-{}).",
-             parent->JobId(), array_count, first_child_id,
-             first_child_id + array_count - 1);
+             parent->JobId(), array_job_count, first_child_id,
+             first_child_id + array_job_count - 1);
 }
 
 std::vector<job_id_t> JobScheduler::ResolveArrayChildren(
     job_id_t parent_id,
-    const google::protobuf::RepeatedField<uint32_t>& array_task_ids) {
+    const google::protobuf::RepeatedField<uint32_t>& array_job_ids) {
   std::vector<job_id_t> result;
 
   LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -6862,13 +6880,13 @@ std::vector<job_id_t> JobScheduler::ResolveArrayChildren(
   if (array_stride == 0) array_stride = 1;
 
   std::unordered_set<uint32_t> seen;
-  for (auto task_id : array_task_ids) {
+  for (auto task_id : array_job_ids) {
     if (task_id < array_start) continue;
     uint32_t diff = task_id - array_start;
     // Check if task_id is valid (must be aligned with stride)
     if (diff % array_stride != 0) continue;
     uint32_t offset = diff / array_stride;
-    if (offset >= parent->ArrayTaskCount()) continue;
+    if (offset >= parent->ArrayJobCount()) continue;
     if (seen.insert(task_id).second) {
       result.push_back(first_child + offset);
     }

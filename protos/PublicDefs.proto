@@ -249,8 +249,8 @@ message JobToCtld {
   optional uint32 array_index_start = 53;
   optional uint32 array_index_end = 54;
   optional uint32 array_index_stride = 56;
-  // The concrete index of this task after expansion.
-  optional uint32 array_task_id = 55;
+  // The concrete index of this job after expansion.
+  optional uint32 array_job_id = 55;
 }
 
 message JobInEmbeddedDb {
@@ -455,7 +455,7 @@ message StepToD {
   repeated Signal signals = 32;
   google.protobuf.Timestamp deadline_time = 33;
 
-  optional uint32 array_task_id = 35;
+  optional uint32 array_job_id = 35;
 
   // task_node_list[task_id] = index of the node in nodelist that owns this task.
   // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
@@ -475,8 +475,8 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message ArrayTaskIds {
-  repeated uint32 array_task_ids = 1;
+message ArrayJobIds {
+  repeated uint32 array_job_ids = 1;
 }
 
 message IoMeta {

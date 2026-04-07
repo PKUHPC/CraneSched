@@ -624,13 +624,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
 
   const bool has_array_start = job_to_ctld.has_array_index_start();
   const bool has_array_end = job_to_ctld.has_array_index_end();
-  const bool has_array_spec = has_array_start || has_array_end;
-
-  if (has_array_start != has_array_end) {
-    response->add_job_id_list(0);
-    response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
-    return grpc::Status::OK;
-  }
+  const bool has_array_spec = has_array_start && has_array_end;
 
   uint32_t array_start = 0;
   uint32_t array_end = 0;
@@ -642,12 +636,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       array_stride = job_to_ctld.array_index_stride();
     }
     if (array_stride == 0) array_stride = 1;
-
-    if (array_end < array_start) {
-      response->add_job_id_list(0);
-      response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
-      return grpc::Status::OK;
-    }
 
     const uint64_t range =
         static_cast<uint64_t>(array_end) - static_cast<uint64_t>(array_start);
@@ -663,7 +651,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     // Array job: submit ONE parent job. Expansion into individual tasks
     // happens at scheduling time in ScheduleThread_.
     auto parent_job = std::make_unique<JobInCtld>();
-    // Do NOT set array_task_id - the parent represents the whole array.
+    // Do NOT set array_job_id - the parent represents the whole array.
     parent_job->SetFieldsByJobToCtld(job_to_ctld);
 
     auto result = g_job_scheduler->SubmitJobToScheduler(std::move(parent_job));
@@ -924,19 +912,19 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     g_job_scheduler->JobModifyLuaCheck(*request, response, &job_ids);
   }
 
-  // Resolve parent→children for array_task filters.
-  if (!request->filter_array_task_ids().empty()) {
+  // Resolve parent→children for array_job filters.
+  if (!request->filter_array_job_ids().empty()) {
     std::list<job_id_t> resolved_ids;
     for (auto job_id : job_ids) {
-      auto it = request->filter_array_task_ids().find(job_id);
-      if (it == request->filter_array_task_ids().end()) {
-        // No array_task filter for this job, keep as-is.
+      auto it = request->filter_array_job_ids().find(job_id);
+      if (it == request->filter_array_job_ids().end()) {
+        // No array_job filter for this job, keep as-is.
         resolved_ids.push_back(job_id);
         continue;
       }
       // Resolve parent to specific children via scheduler.
       auto child_ids = g_job_scheduler->ResolveArrayChildren(
-          job_id, it->second.array_task_ids());
+          job_id, it->second.array_job_ids());
       if (child_ids.empty()) {
         // No matching children found - report back to user.
         response->add_not_modified_jobs(job_id);

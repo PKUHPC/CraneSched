@@ -867,17 +867,17 @@ struct JobInCtld {
   std::string submit_hostname;
 
   // Returns true if this is an array parent (has array range but no
-  // array_task_id).
+  // array_job_id).
   bool IsArrayParent() const {
     return job_to_ctld.has_array_index_start() &&
            job_to_ctld.has_array_index_end() &&
-           !job_to_ctld.has_array_task_id();
+           !job_to_ctld.has_array_job_id();
   }
 
   // Returns true if this is an expanded array child.
   bool IsArrayChild() const { return parent_job_id.has_value(); }
 
-  uint32_t ArrayTaskCount() const {
+  uint32_t ArrayJobCount() const {
     if (!IsArrayParent()) return 0;
     uint32_t stride = job_to_ctld.has_array_index_stride()
                           ? job_to_ctld.array_index_stride()
@@ -937,6 +937,8 @@ struct JobInCtld {
   // Array job tracking fields.
   // For array parents: the first child's pre-allocated job_id.
   job_id_t first_child_job_id{0};
+  // For array parents: the first child's pre-allocated job_db_id.
+  job_db_id_t first_child_job_db_id{0};
   // For array children: the parent array job's job_id.
   std::optional<job_id_t> parent_job_id;
 
@@ -1005,7 +1007,6 @@ struct JobInCtld {
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
   crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
-  crane::grpc::RuntimeAttrOfJob* MutableRuntimeAttr() { return &runtime_attr; }
 
   // =================== Setter/Getter ===================
 
@@ -1065,6 +1066,8 @@ struct JobInCtld {
   // Array job tracking accessors
   void SetFirstChildJobId(job_id_t val);
   job_id_t FirstChildJobId() const { return first_child_job_id; }
+  void SetFirstChildJobDbId(job_db_id_t val);
+  job_db_id_t FirstChildJobDbId() const { return first_child_job_db_id; }
 
   void SetParentJobId(job_id_t val);
   std::optional<job_id_t> const& ParentJobId() const { return parent_job_id; }
