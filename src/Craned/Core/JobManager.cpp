@@ -591,31 +591,30 @@ CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
   }
 
   absl::MutexLock lock(job->step_map_mtx.get());
-  std::vector<step_id_t> failed_steps;
 
+  // For resume operations, supervisor_stub being unavailable should not be
+  // a fatal error. After thaw, processes will naturally resume and the time
+  // limit will take effect on the next check.
   for (auto& [step_id, step] : job->step_map) {
     if (step->supervisor_stub) {
       auto err =
           step->supervisor_stub->ChangeStepTimeLimit(absl::Seconds(new_timelimit_sec));
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR(
-            "[Step #{}.{}] Failed to change step timelimit to {} seconds",
+        CRANE_WARN(
+            "[Step #{}.{}] Failed to change step timelimit to {} seconds, "
+            "but continuing (step may have completed or supervisor unavailable)",
             job_id, step_id, new_timelimit_sec);
-        failed_steps.push_back(step_id);
       }
     } else {
-      CRANE_WARN("[Step #{}.{}] Supervisor stub is null when changing timelimit",
-                 job_id, step_id);
-      failed_steps.push_back(step_id);
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor stub is null when changing timelimit, "
+          "but continuing (step may have completed or be in transition)",
+          job_id, step_id);
     }
   }
 
-  if (!failed_steps.empty()) {
-    CRANE_ERROR("[Job #{}] Failed to change timelimit for {} steps", job_id,
-                failed_steps.size());
-    return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
-  }
-
+  // Even if some steps failed, return success as this should not block
+  // resume operations
   return {};
 }
 
