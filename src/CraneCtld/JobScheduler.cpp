@@ -3054,7 +3054,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       filter_array_job_ids;
   for (auto& [job_id, task_ids] : request.filter_array_job_ids()) {
     filter_array_job_ids[job_id].insert(task_ids.array_job_ids().begin(),
-                                         task_ids.array_job_ids().end());
+                                        task_ids.array_job_ids().end());
     // Ensure array_task filter keys are also in filter_ids so they enter
     // the candidate set and not_found tracking.
     if (!filter_ids.contains(job_id)) {
@@ -5100,7 +5100,7 @@ void JobScheduler::QueryJobsInRam(
   if (!no_ids_constraint) {
     for (auto& [job_id, task_ids] : request->filter_array_job_ids()) {
       query_array_job_ids[job_id].insert(task_ids.array_job_ids().begin(),
-                                          task_ids.array_job_ids().end());
+                                         task_ids.array_job_ids().end());
       // Ensure parent is in filter set.
       if (req_steps.find(job_id) == req_steps.end()) {
         req_steps[job_id];
@@ -6227,8 +6227,7 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   if (has_array_start &&
       job_to_ctld.array_index_end() < job_to_ctld.array_index_start()) {
     CRANE_DEBUG("Job #{} has invalid array range [{}-{}].", job->JobId(),
-                job_to_ctld.array_index_start(),
-                job_to_ctld.array_index_end());
+                job_to_ctld.array_index_start(), job_to_ctld.array_index_end());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
 

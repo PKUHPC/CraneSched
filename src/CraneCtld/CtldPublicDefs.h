@@ -870,8 +870,7 @@ struct JobInCtld {
   // array_job_id).
   bool IsArrayParent() const {
     return job_to_ctld.has_array_index_start() &&
-           job_to_ctld.has_array_index_end() &&
-           !job_to_ctld.has_array_job_id();
+           job_to_ctld.has_array_index_end() && !job_to_ctld.has_array_job_id();
   }
 
   // Returns true if this is an expanded array child.

@@ -744,9 +744,8 @@ bool MongodbClient::FetchJobRecords(
               or_array.append([&](sub_document match_doc) {
                 match_doc.append(
                     kvp("parent_job_id", static_cast<std::int32_t>(parent_id)));
-                match_doc.append(
-                    kvp("array_job_id",
-                        static_cast<std::int32_t>(array_job_id)));
+                match_doc.append(kvp("array_job_id",
+                                     static_cast<std::int32_t>(array_job_id)));
               });
             }
           }
