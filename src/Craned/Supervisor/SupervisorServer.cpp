@@ -95,8 +95,8 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     crane::grpc::supervisor::TerminateStepReply* response) {
   g_task_mgr->TerminateStepAsync(request->mark_orphaned(),
                                  request->terminated_by_user()
-                                     ? TerminatedBy::CANCELLED_BY_USER
-                                     : TerminatedBy::NONE);
+                                     ? TaskFinalizeCause::CANCELLED_BY_USER
+                                     : TaskFinalizeCause::NATURAL_EXIT);
   response->set_ok(true);
   return Status::OK;
 }
@@ -142,7 +142,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
 
     // Here is the case #1. Trigger step killing and wait for pod exit,
     // where ShutdownSupervisor will be called.
-    g_task_mgr->TerminateStepAsync(false, TerminatedBy::CANCELLED_BY_USER);
+    g_task_mgr->TerminateStepAsync(false, TaskFinalizeCause::CANCELLED_BY_USER);
     return Status::OK;
   }
 

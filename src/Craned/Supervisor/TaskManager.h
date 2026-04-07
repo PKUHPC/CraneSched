@@ -33,13 +33,21 @@
 
 namespace Craned::Supervisor {
 
-enum class TerminatedBy : uint8_t {
-  NONE = 0,
+using TaskExecId = std::variant<std::string, pid_t>;
+
+enum class TaskFinalizeCause : uint8_t {
+  NATURAL_EXIT = 0,
+  TASK_PREPARE_FAILED,
+  TASK_SPAWN_FAILED,
+  STEP_PWD_LOOKUP_FAILED,
+  STEP_PREPARE_FAILED,
+  STEP_CGROUP_FAILED,
+  TIME_LIMIT_EXCEEDED,
   CANCELLED_BY_USER,
-  TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM,
-  TERMINATION_BY_CFORED_CONN_FAILURE,
-  TERMINATION_BY_DEADLINE
+  CFORED_DISCONNECTED,
+  POD_STOP_REQUESTED,
+  INTERACTIVE_NO_PROCESS,
+  DEADLINE
 };
 
 class ITaskInstance;
@@ -224,13 +232,23 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
+// Task exiting info (after task is spawned)
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
   int value{0};
 };
 
-using TaskExecId = std::variant<std::string, pid_t>;
+struct TaskFinalInfo {
+  // Semantic cause that drives final status resolution.
+  TaskFinalizeCause cause{TaskFinalizeCause::NATURAL_EXIT};
+
+  // Task exited after spawning. Raw exit info from waitpid/CRI events.
+  std::optional<TaskExitInfo> raw_exit{std::nullopt};
+
+  // Extra diagnostic information for status reporting.
+  std::optional<std::string> reason;
+};
 
 class ITaskInstance {
  public:
@@ -253,7 +271,7 @@ class ITaskInstance {
     return m_parent_step_inst_->GetStep();
   }
 
-  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
+  [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -267,13 +285,13 @@ class ITaskInstance {
   virtual void InitEnvMap();
 
   task_id_t task_id{0};
-  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
-  TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
+  // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   StepInstance* m_parent_step_inst_;
-  TaskExitInfo m_exit_info_{};
   EnvMap m_env_;
+  TaskFinalInfo m_final_info_{};
+  // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
 class PodInstance : public ITaskInstance {
@@ -599,9 +617,6 @@ class TaskManager {
     m_step_.signal_timers.clear();
   }
 
-  // Should called in uvw thread, otherwise data race may happen.
-  void TaskFinish_(task_id_t task_id, crane::grpc::JobStatus new_status,
-                   uint32_t exit_code, std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
@@ -615,7 +630,9 @@ class TaskManager {
 
   StepStatus GetStepStatus() const { return m_step_.GetStatus(); }
 
-  void TaskStopAndDoStatusChange(task_id_t task_id);
+  void FinalizeTaskAsync(task_id_t task_id);
+  void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
+                         std::optional<std::string> reason = std::nullopt);
 
   std::future<CraneErrCode> ExecuteStepAsync();
 
@@ -626,7 +643,7 @@ class TaskManager {
   std::future<CraneErrCode> ChangeStepTimeConstraintAsync(
       std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time);
 
-  void TerminateStepAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
+  void TerminateStepAsync(bool mark_as_orphaned, TaskFinalizeCause cause);
 
   void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
 
@@ -645,7 +662,7 @@ class TaskManager {
   };
 
   struct StepTerminateQueueElem {
-    TerminatedBy termination_reason{TerminatedBy::NONE};
+    TaskFinalizeCause cause{TaskFinalizeCause::NATURAL_EXIT};
     bool mark_as_orphaned{false};
   };
 
@@ -667,16 +684,25 @@ class TaskManager {
   // Container exited
   void EvCleanCriEventQueueCb_();
 
+  // Handle stopped tasks
+  void EvCleanFinalizingTaskQueueCb_();
+
   // Handle step termination requests
   void EvStepTimerCb_(bool is_deadline);
   void EvCleanTerminateStepQueueCb_();
-  void EvCleanStepStopQueueCb_();
+  void EvCleanStepStopQueueCb_();  // TODO: FIXME
   void EvCleanChangeStepTimeConstraintQueueCb_();
 
   void EvGrpcExecuteStepCb_();
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
+
+  // Task sink for finalized tasks. Task will be removed here.
+  // Should called in uvw thread, otherwise data race may happen.
+  void ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
+                            uint32_t exit_code,
+                            std::optional<std::string> reason);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -699,8 +725,8 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_execute_pod_async_handle_;
 
   // Task is already terminated
-  std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_stopped_queue_;
+  std::shared_ptr<uvw::async_handle> m_task_finalizing_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_finalizing_queue_;
 
   // Step is requested to be terminated
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;

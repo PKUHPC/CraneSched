@@ -826,7 +826,7 @@ void DaemonStepInCtld::SetFieldsOfStepInfo(
 
 void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   bool is_container_batch_primary =
-      job.IsContainer() && job.TaskToCtld().has_batch_meta();
+      job.IsContainer() && job.JobToCtld().has_batch_meta();
 
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);

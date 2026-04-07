@@ -666,8 +666,8 @@ void CforedClient::AsyncSendRecvThread_() {
         m_clean_stop_task_io_queue_async_handle_->send();
       }
       CRANE_ERROR("Terminating step due to cfored connection failure.");
-      g_task_mgr->TerminateStepAsync(
-          false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
+      g_task_mgr->TerminateStepAsync(false,
+                                     TaskFinalizeCause::CFORED_DISCONNECTED);
       state = State::End;
     }
 
@@ -868,7 +868,7 @@ void CforedClient::TaskEnd(task_id_t task_id) {
     absl::MutexLock lock(&m_mtx_);
     m_fwd_meta_map.erase(task_id);
   }
-  g_task_mgr->TaskStopAndDoStatusChange(task_id);
+  g_task_mgr->FinalizeTaskAsync(task_id);
 };
 
 void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
