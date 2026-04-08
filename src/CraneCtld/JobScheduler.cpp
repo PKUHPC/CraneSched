@@ -1820,7 +1820,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       job->deadline_time = absl_deadline_time.value();
       job->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
           absl::ToUnixSeconds(absl_deadline_time.value()));
-      if (is_pending && job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+      if (is_pending &&
+          job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
         m_job_deadline_timer_create_queue_.enqueue(
             {job_id, deadline_time.value()});
         m_job_deadline_timer_create_async_handle_->send();

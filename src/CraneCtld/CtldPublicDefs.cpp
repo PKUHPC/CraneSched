@@ -1142,7 +1142,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
   step_to_d.mutable_deadline_time()->set_seconds(
       ToUnixSeconds(this->deadline_time));
-      
+
   switch (this->type) {
   case crane::grpc::Batch:
     step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
