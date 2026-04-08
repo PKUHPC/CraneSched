@@ -882,6 +882,28 @@ bool WriteFreezerValue(const std::filesystem::path &file_path,
   return true;
 }
 
+bool EnsureFreezerCgroupPathExists(const std::filesystem::path &freezer_path) {
+  std::error_code ec;
+  if (std::filesystem::exists(freezer_path, ec)) return true;
+
+  if (ec) {
+    CRANE_ERROR("Failed to stat freezer cgroup path '{}': {}",
+                freezer_path.string(), ec.message());
+    return false;
+  }
+
+  // Suspend/resume may be the first feature that needs the freezer controller
+  // hierarchy on cgroup v1, so create the matching path lazily when needed.
+  std::filesystem::create_directories(freezer_path, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to create freezer cgroup path '{}': {}",
+                freezer_path.string(), ec.message());
+    return false;
+  }
+
+  return true;
+}
+
 bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
   std::error_code ec;
   if (!std::filesystem::exists(cg_path, ec)) {
@@ -903,9 +925,7 @@ bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
           CgConstant::Controller::FREEZE_CONTROLLER) /
       std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
 
-  if (!std::filesystem::exists(freezer_path, ec)) {
-    CRANE_ERROR("Freezer cgroup path '{}' does not exist: {}",
-                freezer_path.string(), ec.message());
+  if (!EnsureFreezerCgroupPathExists(freezer_path)) {
     return false;
   }
 
