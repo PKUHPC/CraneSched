@@ -33,7 +33,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Craned::NewStub(m_channel_);
 }
 
-void CranedClient::TerminateTasks() {
+void CranedClient::TerminateSteps() {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 

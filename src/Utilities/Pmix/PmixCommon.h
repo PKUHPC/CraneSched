@@ -53,7 +53,7 @@ struct PmixJobInfo {
   std::string node_list_str;
   uint32_t node_id{};
   uint32_t node_num{1};
-  uint32_t ntasks_per_node{};
+  uint32_t node_tasks{0};
   uint32_t task_num{};
   std::vector<uint32_t> task_map;
 

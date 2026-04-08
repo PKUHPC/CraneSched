@@ -35,7 +35,7 @@ class CranedClient {
 
   void InitChannelAndStub(const std::string& endpoint);
 
-  void TerminateTasks();
+  void TerminateSteps();
 
   bool BroadcastPmixPort(const std::string& pmix_port);
 

@@ -136,7 +136,6 @@ class Coll {
   void* m_cbdata_{};
   // Timestamp when this collective became active (set on first contribution).
   // Default-constructed time_point{} (epoch) signals "idle/not started".
-  // m_ts_next_ is reserved for future use (e.g. per-step stall deadline).
   std::chrono::steady_clock::time_point m_ts_{};
 #endif
 };

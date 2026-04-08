@@ -33,7 +33,7 @@ endif()
 add_definitions(-DHAVE_PMIX)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
+pkg_check_modules(UCX IMPORTED_TARGET ucx)
 if (UCX_FOUND)
     message(STATUS "UCX found! include: ${UCX_INCLUDE_DIRS}, library: ${UCX_LIBRARIES}")
     add_definitions(-DHAVE_UCX)

@@ -131,6 +131,16 @@ void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
     return;
   }
 
+  // width <= 0 would cause an infinite loop in Dep() (InitPow(0,i)==0 means
+  // x never advances) and a divide-by-zero in SearchTree(); reject early.
+  if (width <= 0) {
+    *parent = -1;
+    *num_children = -1;
+    *depth = -1;
+    *max_depth = -1;
+    return;
+  }
+
   /*
    * If width is more than nodes total, then don't bother trying to
    * figure out the tree as there isn't a tree. All nodes just directly

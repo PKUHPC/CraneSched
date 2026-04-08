@@ -72,6 +72,9 @@ constexpr task_id_t kCriStepTaskId = 0;
 constexpr step_id_t kDaemonStepId = 0;
 constexpr step_id_t kPrimaryStepId = 1;
 
+// Supported MPI type strings for interactive_meta().mpi()
+constexpr std::string_view kMpiTypePmix = "pmix";
+
 inline const char* const kCtldDefaultPort = "10011";
 inline const char* const kCranedDefaultPort = "10010";
 inline const char* const kCforedDefaultPort = "10012";
