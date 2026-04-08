@@ -115,15 +115,12 @@ void StepInstance::CleanUp() {
 }
 
 CraneErrCode StepInstance::Prepare() {
-  auto cg_expt = CgroupManager::CreateOrOpenCgroup(
-      CgroupManager::CgroupStrByStepId(job_id, step_id, true), false);
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
+      false);
   if (!cg_expt) return cg_expt.error();
   this->crane_cgroup = std::move(cg_expt.value());
   auto* cg = this->crane_cgroup.get();
-  CraneErrCode err = CgroupManager::SetCgroupResource(cg, step_to_d.res());
-  if (err != CraneErrCode::SUCCESS) {
-    return err;
-  }
   return CraneErrCode::SUCCESS;
 }
 
@@ -404,6 +401,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
       std::abort();
     }
+
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
@@ -411,7 +409,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     util::os::CloseFdFromExcept(3,
                                 {craned_supervisor_fd, supervisor_craned_fd});
-
     // Prepare the command line arguments.
     std::vector<std::string> string_argv;
     std::vector<const char*> argv;

@@ -87,8 +87,9 @@ int InitFromStdin(int argc, char** argv) {
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
   if (!ok) {
     fmt::print(stderr,
-               "[Supervisor pid#{}] Failed to recv message from Craned.\n",
-               getpid());
+               "[Supervisor pid#{}] Failed to recv message from Craned with "
+               "input fd {},output fd{}.\n",
+               getpid(), grpc_input_fd, grpc_output_fd);
     std::abort();
   }
   close(grpc_input_fd);

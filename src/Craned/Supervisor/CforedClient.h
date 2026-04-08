@@ -28,26 +28,38 @@ namespace Craned::Supervisor {
 class CforedClient {
   struct X11FdInfo {
     int fd;
-    std::atomic<bool> sock_stopped;
     std::shared_ptr<uvw::tcp_handle> sock;
+    std::atomic<bool> sock_stopped;
+
+    // Cannot write to process x11 fd after input stopped
+    bool x11_input_stopped{false};
   };
 
   struct TaskFwdMeta {
     task_id_t task_id{0};
     bool pty{false};
+
     struct OutHandle {
       std::shared_ptr<uvw::pipe_handle> pipe;
       std::shared_ptr<uvw::tty_handle> tty;
     };
     OutHandle out_handle{};
+    std::shared_ptr<uvw::pipe_handle> err_handle{};
 
     int stdin_write{-1};
     int stdout_read{-1};
+    int stderr_read{-1};
 
     bool input_stopped{false};
     bool output_stopped{false};
+    bool err_stopped{false};
 
     bool proc_stopped{false};
+
+    // Deferred exit status: filled by TaskProcessStop(), sent after output
+    // drain to guarantee all TASK_OUTPUT precedes TASK_EXIT_STATUS.
+    uint32_t exit_code{0};
+    bool signaled{false};
   };
 
   using x11_local_id_t = uint32_t;
@@ -63,7 +75,8 @@ class CforedClient {
   void InitChannelAndStub(const std::string& cfored_name);
 
   bool InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id, int stdin_write,
-                                        int stdout_read, bool pty);
+                                        int stdout_read, int stderr_read,
+                                        bool pty);
 
   uint16_t InitUvX11FwdHandler();
 
@@ -73,7 +86,6 @@ class CforedClient {
   const std::string& CforedName() const { return m_cfored_name_; }
 
  private:
-  bool TaskOutputFinishNoLock_(task_id_t task_id);
   uint16_t SetupX11forwarding_();
 
   static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
@@ -107,6 +119,8 @@ class CforedClient {
 
   void TaskOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
+  void TaskErrOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
+
   void StepX11ConnectForward(x11_local_id_t x11_local_id);
 
   void StepX11OutPutForward(x11_local_id_t x11_local_id,
@@ -123,6 +137,8 @@ class CforedClient {
   std::atomic<bool> m_output_drained_{false};
 
   struct IOFwdRequest {
+    // true for stdout, false for stderr
+    bool is_stdout;
     std::unique_ptr<char[]> data;
     size_t len;
   };

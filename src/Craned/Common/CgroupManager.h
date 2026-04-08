@@ -575,7 +575,6 @@ class CgroupManager {
    * \param recover recover cgroup instead creating new one.
    * \param min_mem minimum memory size for cgroup, default none, for job cgroup
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
-   *
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,

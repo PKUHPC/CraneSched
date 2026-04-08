@@ -1266,7 +1266,7 @@ void JobManager::StepStatusChangeAsync(
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateStepStatusChangeAsync_(job_id, step_id, new_status, exit_code,
-                                 std::move(reason), timestamp);
+                                 std::move(reason), std::move(timestamp));
 }
 
 }  // namespace Craned

@@ -106,7 +106,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  CRANE_INFO("Daemon step is requested to shutdown.");
+  CRANE_INFO("Grpc shutdown request received.");
 
   // Set actively shutdown flag so that the daemon step can exit.
   g_task_mgr->SetActivelyShutdown();

@@ -97,6 +97,7 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
+        job->SetEndTime(absl::Now());
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
         if (!ok) {
@@ -3243,19 +3244,15 @@ void JobScheduler::CleanStepSubmitQueueCb_() {
     if (it != m_running_job_map_.end()) {
       step->job = it->second.get();
       step->SetSubmitTime(now);
-      auto err = AcquireStepAttributes(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
+      auto ok = HandleUnsetOptionalInStepToCtld(step.get());
+      if (ok) ok = AcquireStepAttributes(step.get());
+      if (ok) ok = CheckStepValidity(step.get());
+      if (ok) {
+        valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
+      } else {
+        elems[pos].second.set_value(std::unexpected{ok.error()});
         step.reset();
-        continue;
       }
-      err = CheckStepValidity(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
-        step.reset();
-        continue;
-      }
-      valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
     } else {
       elems[pos].second.set_value(
           std::unexpected(CraneErrCode::ERR_INVALID_JOB_ID));
@@ -4704,10 +4701,10 @@ void JobScheduler::PersistAndTransferJobsToMongodb_(
 
 CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
     JobInCtld* job) {
-  if (job->IsBatch()) {
-    auto* batch_meta = job->MutableJobToCtld()->mutable_batch_meta();
-    if (!batch_meta->has_open_mode_append())
-      batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  if (job->JobToCtld().has_io_meta()) {
+    auto* io_meta = job->MutableJobToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
   return {};
@@ -5046,6 +5043,16 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
     return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
+  return {};
+}
+
+CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
+    StepInCtld* step) {
+  if (step->StepToCtld().has_io_meta()) {
+    auto* io_meta = step->MutableStepToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  }
   return {};
 }
 

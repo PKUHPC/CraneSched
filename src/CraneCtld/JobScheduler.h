@@ -918,6 +918,7 @@ class JobScheduler {
   static CraneExpected<void> AcquireJobAttributes(JobInCtld* job);
   static CraneExpected<void> CheckJobValidity(JobInCtld* job);
 
+  static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
