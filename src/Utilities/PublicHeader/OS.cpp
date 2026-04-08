@@ -603,11 +603,11 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
       // Close every fd >= 3 to avoid leaking parent file descriptors into
       // the script (e.g. sockets, log files, gRPC channels).
-    #if defined(__linux__) && defined(SYS_close_range)
+#if defined(__linux__) && defined(SYS_close_range)
       syscall(SYS_close_range, 3, UINT_MAX, 0);  // 单次系统调用
-    #else
-        CloseFdFrom(3);
-    #endif
+#else
+      CloseFdFrom(3);
+#endif
 
       // Place the child in its own process group so KillPg() can send
       // signals to the entire group (child + any grandchildren it spawns).
@@ -640,9 +640,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
       // Replace the child image with the script.  execvp searches PATH, but
       // since the script path is absolute, PATH is irrelevant here.
-      execvpe(exec_argv[0],
-            const_cast<char* const*>(exec_argv),
-            envp.data());
+      execvpe(exec_argv[0], const_cast<char* const*>(exec_argv), envp.data());
 
       // If execvp() returns, it has failed.
       const char msg[] = "[Subprocess] execvp failed\n";
@@ -819,7 +817,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // -----------------------------------------------------------------------
       pipe_handle->on<uvw::error_event>(
           [&](uvw::error_event& e, uvw::pipe_handle&) {
-            CRANE_WARN("Pipe error for script '{}'({}): {}.", script, pid, e.what());
+            CRANE_WARN("Pipe error for script '{}'({}): {}.", script, pid,
+                       e.what());
             has_error = true;
             result = std::unexpected(
                 RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
@@ -938,12 +937,12 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
           exit_code = raw_status;  // unexpected status, treat as error
         }
 
-        CRANE_TRACE("Script '{}' timed out (exit_code={}, signal={}).",
-                    script, exit_code, signal_num);
+        CRANE_TRACE("Script '{}' timed out (exit_code={}, signal={}).", script,
+                    exit_code, signal_num);
         pipe_handle->close();
-        result = std::unexpected(
-            RunPrologEpilogStatus{.exit_code = exit_code,
-                                  .signal_num = signal_num});
+        result =
+            std::unexpected(RunPrologEpilogStatus{.exit_code = exit_code,
+                                                  .signal_num = signal_num});
         return;
       }
 
