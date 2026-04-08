@@ -2214,8 +2214,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       }
 
       JobInCtld* job = iter->second.get();
+      job->SetEndTime(prev_end_time);
       job->SetSuspendTime(prev_suspend_time);
-      // No need to rollback end_time (it was never modified)
 
       if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
               0, job->JobDbId(), job->RuntimeAttr())) {
