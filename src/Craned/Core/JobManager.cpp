@@ -598,7 +598,7 @@ CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
   for (auto& [step_id, step] : job->step_map) {
     if (step->supervisor_stub) {
       auto err =
-          step->supervisor_stub->ChangeStepTimeLimit(absl::Seconds(new_timelimit_sec));
+          step->supervisor_stub->ChangeStepTimeConstraint(new_timelimit_sec, std::nullopt);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_WARN(
             "[Step #{}.{}] Failed to change step timelimit to {} seconds, "
@@ -1032,24 +1032,10 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   CRANE_INFO("[Job #{}] Frozen user cgroups under job: {}", job_id,
              job_cg_abs_path);
 
-  // Pause the termination timer of each step's Supervisor so that
-  // suspended time does not count towards the time limit.
-  // On resume, the controller will call ChangeJobTimeLimit with the
-  // correct extended value.
-  {
-    absl::MutexLock lk(job_ptr->step_map_mtx.get());
-    for (auto& [step_id, step] : job_ptr->step_map) {
-      if (step->supervisor_stub) {
-        auto err = step->supervisor_stub->ChangeStepTimeLimit(
-            absl::Seconds(INT64_MAX / 2));
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_WARN("[Step #{}.{}] Failed to pause termination timer "
-                     "on suspend",
-                     job_id, step_id);
-        }
-      }
-    }
-  }
+  // Note: We do NOT pause the termination timer. This follows Slurm's
+  // behavior where suspended time counts toward the job's time limit.
+  // The timer continues to run, and if it expires while the job is
+  // suspended, the job will be terminated.
 
   return CraneErrCode::SUCCESS;
 }

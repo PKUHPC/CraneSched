@@ -2214,8 +2214,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       }
 
       JobInCtld* job = iter->second.get();
-      job->SetEndTime(prev_end_time);
       job->SetSuspendTime(prev_suspend_time);
+      // No need to rollback end_time (it was never modified)
 
       if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
               0, job->JobDbId(), job->RuntimeAttr())) {
@@ -2300,9 +2300,6 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       // min(start_time + time_limit + suspended_time, deadline).
       // This ensures the job respects both time_limit and deadline constraints.
       if (job->SuspendTime() != absl::InfinitePast()) {
-        prev_end_time = job->EndTime();
-        prev_suspend_time = job->SuspendTime();
-
         absl::Duration suspended_duration = absl::Now() - job->SuspendTime();
         if (suspended_duration > absl::ZeroDuration()) {
           absl::Time new_end_time = job->EndTime() + suspended_duration;
@@ -2345,7 +2342,7 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       // (includes original time_limit + total suspended time, capped by deadline if set).
       new_time_limit_secs =
           absl::ToInt64Seconds(job->EndTime() - job->StartTime());
-      
+
       // Also send deadline to craned if it's set
       if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
         new_deadline_secs = absl::ToUnixSeconds(job->deadline_time);
