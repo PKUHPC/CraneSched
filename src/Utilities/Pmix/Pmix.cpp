@@ -186,9 +186,6 @@ PmixServer::~PmixServer() {
 
 bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 #ifdef HAVE_PMIX
-  // Register singleton early so callbacks can reach server state immediately.
-  s_instance_ = this;
-
   CRANE_TRACE("[Step#{}.{}] Initializing PmixServer...", step.job_id(),
               step.step_id());
   m_uvw_loop_ = uvw::loop::create();
@@ -199,7 +196,7 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
 
   // ConnInit_ creates m_pmix_client_ and m_craned_client_ first, then
   // injects them into m_dmodex_mgr_ and m_pmix_state_.
-  if (!ConnInit_(config)) return false;
+  if (!ConnInit_(config)) goto err_conn;
 
   CRANE_TRACE("[Step#{}.{}] PmixServer conn initialized.", step.job_id(),
               step.step_id());
@@ -236,13 +233,33 @@ bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
     m_uvw_loop_->run();
   });
 
-  if (!JobSet_()) return false;
+  if (!JobSet_()) goto err_thread;
 
   CRANE_INFO("Launch the PMIx server, dir: {}, version {}.{}.{}",
              m_pmix_job_info_.server_tmpdir, PMIX_VERSION_MAJOR,
              PMIX_VERSION_MINOR, PMIX_VERSION_RELEASE);
 
+  // Only register the singleton after full initialization succeeds.
+  s_instance_ = this;
   return true;
+
+err_thread:
+  // Stop the UVW loop thread before tearing down PMIx connections.
+  m_cq_closed_ = true;
+  if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  m_uvw_loop_.reset();
+  // fall through to clean up PMIx and connections
+
+err_conn:
+  if (m_pmix_state_) m_pmix_state_->AbortAllColls();
+  if (m_dmodex_mgr_) m_dmodex_mgr_->DrainAllRequests();
+  PMIx_server_finalize();
+  m_pmix_async_server_.reset();
+  m_dmodex_mgr_.reset();
+  m_pmix_state_.reset();
+  m_pmix_client_.reset();
+  m_craned_client_.reset();
+  return false;
 #else
   CRANE_ERROR("PMIx support is not enabled in this build.");
   return false;
@@ -313,7 +330,7 @@ bool PmixServer::InfoSet_(const Config& config,
       "crane.pmix.{}.{}", m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
 
   m_pmix_job_info_.node_num = step.node_num();
-  // Use the actual total task count, NOT ntasks_per_node * node_num,
+  // Use the actual total task count, NOT node_tasks * node_num,
   // because tasks may not be evenly distributed across nodes.
   m_pmix_job_info_.task_num = step.task_node_list().size();
   std::string hostname;
@@ -353,9 +370,9 @@ bool PmixServer::InfoSet_(const Config& config,
   m_pmix_job_info_.task_map.assign(step.task_node_list().begin(),
                                    step.task_node_list().end());
 
-  // ntasks_per_node: the actual number of tasks on THIS specific node.
+  // node_tasks: the actual number of tasks on THIS specific node.
   for (const auto& node_id : step.task_node_list()) {
-    if (node_id == m_pmix_job_info_.node_id) m_pmix_job_info_.ntasks_per_node++;
+    if (node_id == m_pmix_job_info_.node_id) m_pmix_job_info_.node_tasks++;
   }
 
   if (step.env().contains("CRANE_PMIX_TIMEOUT")) {
@@ -371,9 +388,11 @@ bool PmixServer::InfoSet_(const Config& config,
   }
 
   m_pmix_job_info_.server_tmpdir =
-      fmt::format("{}pmix.crane.{}/pmix.{}.{}", config.CraneBaseDir,
-                  m_pmix_job_info_.hostname, m_pmix_job_info_.job_id,
-                  m_pmix_job_info_.step_id);
+      (std::filesystem::path(config.CraneBaseDir) /
+       fmt::format("pmix.crane.{}", m_pmix_job_info_.hostname) /
+       fmt::format("pmix.{}.{}", m_pmix_job_info_.job_id,
+                   m_pmix_job_info_.step_id))
+          .string();
 
   if (step.env().contains("PMIXP_PMIXLIB_TMPDIR")) {
     // pmixlib_tmpdir is left for the user to configure, as the directory must
@@ -382,7 +401,7 @@ bool PmixServer::InfoSet_(const Config& config,
     std::string pmixlib_tmpdir = step.env().at("PMIXP_PMIXLIB_TMPDIR");
     if (!pmixlib_tmpdir.empty()) {
       m_pmix_job_info_.cli_tmpdir_base =
-          fmt::format("{}pmix.crane.cli", pmixlib_tmpdir);
+          (std::filesystem::path(pmixlib_tmpdir) / "pmix.crane.cli").string();
       m_pmix_job_info_.cli_tmpdir =
           fmt::format("{}/spmix_appdir_{}.{}.{}",
                       m_pmix_job_info_.cli_tmpdir_base, m_pmix_job_info_.uid,
@@ -560,7 +579,7 @@ bool PmixServer::JobSet_() {
                      PMIX_UINT16);
       PMIX_INFO_LOAD(&proc_data_arr[6], PMIX_LOCAL_RANK, &local_rank,
                      PMIX_UINT16);
-      local_ranks.emplace_back(local_rank);
+      local_ranks.emplace_back(rank);  // store global rank for PMIX_LOCAL_PEERS
     }
 
     PMIX_INFO_LOAD(&proc_data_arr[7], PMIX_HOSTNAME, rank_hostname.c_str(),
@@ -579,9 +598,9 @@ bool PmixServer::JobSet_() {
   info_list.emplace_back(
       InfoLoad_(PMIX_JOB_SIZE, m_pmix_job_info_.task_num, PMIX_UINT32));
   info_list.emplace_back(InfoLoad_(
-      PMIX_LOCAL_SIZE, m_pmix_job_info_.ntasks_per_node, PMIX_UINT32));
+      PMIX_LOCAL_SIZE, m_pmix_job_info_.node_tasks, PMIX_UINT32));
   info_list.emplace_back(
-      InfoLoad_(PMIX_NODE_SIZE, m_pmix_job_info_.node_num, PMIX_UINT32));
+      InfoLoad_(PMIX_NODE_SIZE, m_pmix_job_info_.node_tasks, PMIX_UINT32));
   info_list.emplace_back(
       InfoLoad_(PMIX_MAX_PROCS, m_pmix_job_info_.task_num, PMIX_UINT32));
 
@@ -598,6 +617,7 @@ bool PmixServer::JobSet_() {
   regex.reset(raw_regex);
   if (rc != PMIX_SUCCESS) {
     CRANE_ERROR("Error: PMIx_generate_regex. {}", PMIx_Error_string(rc));
+    for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }
   info_list.emplace_back(InfoLoad_(PMIX_NODE_MAP, regex, PMIX_STRING));
@@ -621,6 +641,7 @@ bool PmixServer::JobSet_() {
   ppn.reset(raw_ppn);
   if (rc != PMIX_SUCCESS) {
     CRANE_ERROR("Error: PMIx_generate_ppn. {}", PMIx_Error_string(rc));
+    for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }
   info_list.emplace_back(InfoLoad_(PMIX_PROC_MAP, ppn, PMIX_STRING));
@@ -630,12 +651,14 @@ bool PmixServer::JobSet_() {
   if (local_ranks.empty()) {
     CRANE_ERROR("No local PMIx ranks assigned on node {}",
                 m_pmix_job_info_.hostname);
+    for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }
-  // Identifies the set of processes of the same task on the same physical node.
+  // PMIX_LOCAL_PEERS: global namespace ranks of processes sharing this node.
+  // PMIX_LOCALLDR: global rank of the local leader (lowest-numbered on node).
   info_list.emplace_back(InfoLoad_(PMIX_LOCAL_PEERS, ranks_str, PMIX_STRING));
   info_list.emplace_back(
-      InfoLoad_(PMIX_LOCALLDR, local_ranks.front(), PMIX_UINT32));
+      InfoLoad_(PMIX_LOCALLDR, my_node_start_rank, PMIX_UINT32));
 
   pmix_info_t* ns_info;
   PMIX_INFO_CREATE(ns_info, info_list.size());
@@ -647,7 +670,7 @@ bool PmixServer::JobSet_() {
     absl::BlockingCounter bc(1);
     rc = PMIx_server_register_nspace(
         m_pmix_job_info_.nspace.c_str(),
-        static_cast<int>(m_pmix_job_info_.ntasks_per_node), ns_info,
+        static_cast<int>(m_pmix_job_info_.node_tasks), ns_info,
         info_list.size(), OpCbWrapper, &bc);
     PMIX_INFO_FREE(ns_info, info_list.size());
     if (rc != PMIX_SUCCESS) {
@@ -660,9 +683,9 @@ bool PmixServer::JobSet_() {
 
   {
     absl::BlockingCounter bc(1);
-    if (PMIX_SUCCESS !=
-        PMIx_server_setup_local_support(m_pmix_job_info_.nspace.c_str(),
-                                        nullptr, 0, OpCbWrapper, &bc)) {
+    rc = PMIx_server_setup_local_support(m_pmix_job_info_.nspace.c_str(),
+                                         nullptr, 0, OpCbWrapper, &bc);
+    if (rc != PMIX_SUCCESS) {
       CRANE_ERROR("Setup local support failed: {}", PMIx_Error_string(rc));
       return false;
     }
@@ -681,9 +704,10 @@ bool PmixServer::JobSet_() {
     proc.rank = global_rank;
     {
       absl::BlockingCounter bc(1);
-      if (PMIX_SUCCESS != PMIx_server_register_client(
-                              &proc, m_pmix_job_info_.uid, m_pmix_job_info_.gid,
-                              nullptr, OpCbWrapper, &bc)) {
+      rc = PMIx_server_register_client(&proc, m_pmix_job_info_.uid,
+                                       m_pmix_job_info_.gid, nullptr,
+                                       OpCbWrapper, &bc);
+      if (rc != PMIX_SUCCESS) {
         CRANE_ERROR(
             "Pmix register_client failed for global rank {} with error {}",
             global_rank, PMIx_Error_string(rc));

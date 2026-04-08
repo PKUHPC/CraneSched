@@ -463,6 +463,8 @@ CraneErrCode CranedStub::ReceivePmixPort(
   using crane::grpc::ReceivePmixPortRequest;
 
   ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
   Status status;
   ReceivePmixPortRequest request;
   ReceivePmixPortReply reply;

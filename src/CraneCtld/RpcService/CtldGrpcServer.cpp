@@ -351,11 +351,17 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (job->IsCrun() &&
-              job->JobToCtld().interactive_meta().mpi() == "pmix") {
+          if (job->IsCrun()) {
+            const auto& mpi = job->JobToCtld().interactive_meta().mpi();
+            if (!mpi.empty() && mpi != kMpiTypePmix) {
+              result = std::unexpected(fmt::format(
+                  "Unsupported MPI type: '{}'. Supported types: {}", mpi,
+                  kMpiTypePmix));
+            } else if (mpi == kMpiTypePmix) {
 #ifndef HAVE_PMIX
-            result = std::unexpected("MPI type pmix is not supported.");
+              result = std::unexpected("MPI type pmix is not supported.");
 #endif
+            }
           }
 
           if (result) {
@@ -424,7 +430,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (step->StepToCtld().interactive_meta().mpi() == "pmix") {
+          
+          const auto& mpi = step->StepToCtld().interactive_meta().mpi();
+          if (!mpi.empty() && mpi != kMpiTypePmix) {
+            result = std::unexpected(fmt::format(
+                "Unsupported MPI type: '{}'. Supported types: {}", mpi,
+                kMpiTypePmix));
+          } else if (mpi == kMpiTypePmix) {
 #ifndef HAVE_PMIX
             result = std::unexpected("MPI type pmix is not supported.");
 #endif

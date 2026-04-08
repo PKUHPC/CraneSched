@@ -235,7 +235,7 @@ void PmixCollRing::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   if (!coll_ring_ctx.in_use) {
     CRANE_ERROR("{:p}: coll_ring_ctx is not in use, seq={}, please check!",
                 static_cast<void*>(this), coll_ring_ctx.seq);
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return;
   }
 
@@ -328,7 +328,7 @@ void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
   if (!m_cbfunc_) return;
 
   auto cb_data = std::make_unique<CbData>();
-  cb_data->coll = this;
+  cb_data->coll = shared_from_this();
   cb_data->coll_ring_ctx = &coll_ring_ctx;
 
   PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, coll_ring_ctx.ring_buf.data(),
@@ -378,7 +378,7 @@ bool PmixCollRing::ProcessRingRequest(
      */
     CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}",
                 static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 

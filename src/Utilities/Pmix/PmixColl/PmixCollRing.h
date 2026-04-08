@@ -121,7 +121,7 @@ class PmixCollRing : public Coll,
       const std::string& msg);
 
   struct CbData {
-    PmixCollRing* coll;
+    std::shared_ptr<PmixCollRing> coll;
     CollRingCtx* coll_ring_ctx;
     uint32_t seq;
   };

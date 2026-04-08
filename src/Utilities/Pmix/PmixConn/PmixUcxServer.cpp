@@ -367,7 +367,9 @@ void PmixUcxServer::RecvHandle_(void* ucp_req, ucs_status_t status,
 
     self->m_req_queue_.enqueue(req);
 
-    self->m_pmix_async_->send();
+    if (!self->m_shutdown_.load(std::memory_order_acquire)) {
+      self->m_pmix_async_->send();
+    }
   } else {
     if (status != UCS_ERR_CANCELED) {
       CRANE_ERROR("UCX recv failed: {}", ucs_status_string(status));

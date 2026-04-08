@@ -56,7 +56,7 @@ pmix_status_t PmixServerCallbacks::Abort(
     const char msg[], pmix_proc_t /*pmix_procs*/[], size_t /*nprocs*/,
     pmix_op_cbfunc_t cbfunc, void* cbdata) {
   CRANE_WARN("PMIx Abort invoked: status={}, msg={}", status, msg);
-  PmixServer::GetInstance()->GetCranedClient()->TerminateTasks();
+  PmixServer::GetInstance()->GetCranedClient()->TerminateSteps();
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
 }
@@ -218,10 +218,16 @@ void PmixServerCallbacks::ErrHandler(
     size_t /*evhdlr_registration_id*/, pmix_status_t status,
     const pmix_proc_t* source, pmix_info_t[] /*info*/, size_t /*ninfo*/,
     pmix_info_t* /*results*/, size_t /*nresults*/,
-    pmix_event_notification_cbfunc_fn_t /*cbfunc*/, void* /*cbdata*/) {
+    pmix_event_notification_cbfunc_fn_t cbfunc, void* cbdata) {
   CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]", status,
               source->nspace, source->rank);
-  PmixServer::GetInstance()->GetCranedClient()->TerminateTasks();
+  PmixServer::GetInstance()->GetCranedClient()->TerminateSteps();
+  // Signal PMIx that this event handler has completed.  Per the PMIx event
+  // notification specification this call is mandatory: omitting it permanently
+  // blocks the PMIx progress thread and prevents any subsequent event handlers
+  // from executing.
+  if (cbfunc)
+    cbfunc(PMIX_EVENT_ACTION_COMPLETE, nullptr, 0, nullptr, nullptr, cbdata);
 }
 
 }  // namespace pmix

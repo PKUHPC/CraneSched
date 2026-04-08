@@ -182,7 +182,7 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data,
     CRANE_ERROR("{:p}: local contrib while active collective, state = {}",
                 static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 
@@ -328,7 +328,7 @@ bool PmixCollTree::ProgressUpFwd_() {
     CRANE_ERROR("{:p}: invalid state {}, expected UPFWD",
                 static_cast<void*>(this), ToString(m_state_));
     m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 
@@ -356,7 +356,7 @@ bool PmixCollTree::ProgressUpFwd_() {
   default:
     CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
     m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 
@@ -459,7 +459,7 @@ bool PmixCollTree::ProgressUpFwdWsc_() {
   default:
     CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
     m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 
@@ -516,7 +516,7 @@ bool PmixCollTree::ProgressDownFwd_() {
     break;
   default:
     m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
     return false;
   }
 
@@ -614,7 +614,7 @@ proceed:
 error:
   ResetCollTree_();
 error2:
-  m_craned_client_->TerminateTasks();
+  m_craned_client_->TerminateSteps();
   return false;
 }
 
@@ -694,7 +694,7 @@ bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
 error:
   ResetCollTree_();
 error2:
-  m_craned_client_->TerminateTasks();
+  m_craned_client_->TerminateSteps();
   return false;
 }
 
@@ -735,7 +735,7 @@ void PmixCollTree::ResetCollTree_() {
   default:
     m_state_ = CollTreeState::SYNC;
     CRANE_ERROR("unknown state {}", ToString(m_state_));
-    m_craned_client_->TerminateTasks();
+    m_craned_client_->TerminateSteps();
   }
 }
 

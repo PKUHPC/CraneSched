@@ -434,6 +434,8 @@ void ITaskInstance::InitEnvMap() {
     }
     m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
   }
+
+
 }
 
 ProcInstance::~ProcInstance() {
@@ -463,6 +465,23 @@ void ProcInstance::InitEnvMap() {
   }
   m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
   m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
+
+  std::unordered_map<std::string, std::string> pmix_env;
+  if (m_parent_step_inst_->IsCrun() &&
+      m_parent_step_inst_->GetStep().interactive_meta().mpi() ==
+            kMpiTypePmix) {
+    auto result = g_task_mgr->GetPmixServer()->SetupFork(task_id);
+    if (!result) {
+      fmt::print(stderr,
+                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
+      std::abort();
+    }
+    pmix_env = result.value();
+  }
+
+  for (const auto& [k, v] : pmix_env) {
+      m_env_.insert_or_assign(k, v);
+  }
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -2361,22 +2380,6 @@ CraneErrCode ProcInstance::Spawn() {
     // Apply environment variables
     InitEnvMap();
 
-    std::unordered_map<std::string, std::string> pmix_env;
-    if (m_parent_step_inst_->IsCrun() &&
-        m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
-      auto result = g_task_mgr->GetPmixServer()->SetupFork(task_id);
-      if (!result) {
-        fmt::print(stderr,
-                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
-        std::abort();
-      }
-      pmix_env = result.value();
-    }
-
-    for (const auto& [k, v] : pmix_env) {
-      m_env_.insert_or_assign(k, v);
-    }
-
     if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
       RunPrologEpilogArgs run_prolog_args{
           .scripts = g_config.JobLifecycleHook.TaskPrologs,
@@ -2698,7 +2701,7 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
 
 bool TaskManager::InitPmixPreFork() {
   if (m_step_.IsCrun() &&
-      m_step_.GetStep().interactive_meta().mpi() == "pmix") {
+      m_step_.GetStep().interactive_meta().mpi() == kMpiTypePmix) {
     m_pmix_server_ = std::make_unique<pmix::PmixServer>();
     pmix::Config pmix_config{
         .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
