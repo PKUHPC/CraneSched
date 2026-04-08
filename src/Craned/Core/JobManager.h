@@ -284,6 +284,9 @@ class JobManager {
   util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial
 
   std::thread m_uvw_thread_;
+
+  std::mutex m_fork_reap_mu_;
+  ChildExitWatcher m_exit_watcher_;
 };
 }  // namespace Craned
 

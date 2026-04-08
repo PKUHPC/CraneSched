@@ -451,6 +451,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
+  std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
   int status;
   pid_t pid;
   while (true) {
@@ -458,7 +459,9 @@ void JobManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      CRANE_TRACE("Child pid {} exit", pid);
+      if (!m_exit_watcher_.TryDeliver(pid, status)) {
+        CRANE_TRACE("Child pid {} exit", pid);
+      }
       // We do nothing now
     } else if (pid == 0) {
       // There's no child that needs reaping.
@@ -731,6 +734,15 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
         .run_uid = 0,
         .run_gid = 0,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+    args.fork_and_watch_fn = [this](std::function<pid_t()> do_fork)
+        -> std::optional<std::pair<pid_t, std::future<int>>> {
+      std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+      pid_t pid = do_fork();
+      if (pid < 0) return std::nullopt;
+      if (pid == 0) return std::make_pair(pid, std::future<int>{});
+      return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+    };
 
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
       args.at_child_setup_cb = [this, job_id](pid_t pid) {
@@ -1238,6 +1250,17 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             .run_uid = 0,
             .run_gid = 0,
             .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+        run_epilog_args.fork_and_watch_fn =
+            [this](std::function<pid_t()> do_fork)
+            -> std::optional<std::pair<pid_t, std::future<int>>> {
+          std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+          pid_t pid = do_fork();
+          if (pid < 0) return std::nullopt;
+          if (pid == 0) return std::make_pair(pid, std::future<int>{});
+          return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+        };
+
         if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
           run_epilog_args.timeout_sec =
               g_config.JobLifecycleHook.PrologEpilogTimeout;

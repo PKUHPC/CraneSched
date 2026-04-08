@@ -2927,6 +2927,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
