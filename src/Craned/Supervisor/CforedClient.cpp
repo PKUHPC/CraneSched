@@ -539,11 +539,11 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
                 if (req.is_stdout) {
                   auto* payload = request.mutable_payload_task_output_req();
                   payload->set_msg(req.data.get(), req.len);
+                  payload->set_task_id(req.task_id);
                 } else {
                   auto* payload = request.mutable_payload_task_err_output_req();
                   payload->set_msg(req.data.get(), req.len);
                 }
-                payload->set_task_id(req.task_id);
               },
               [&request](X11FwdConnectReq& req) {
                 auto* payload = request.mutable_payload_step_x11_fwd_conn_req();
