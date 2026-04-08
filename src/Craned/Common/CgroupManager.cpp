@@ -935,8 +935,13 @@ bool CgroupManager::FreezeUserCgroupsUnderJob(
     return false;
   }
   bool all_ok = true;
-  for (auto &entry :
-       std::filesystem::directory_iterator(job_cg_path, ec)) {
+  std::filesystem::directory_iterator dir_it(job_cg_path, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to create directory iterator for '{}': {}",
+                job_cg_path, ec.message());
+    return false;
+  }
+  for (auto &entry : dir_it) {
     if (!entry.is_directory(ec)) continue;
     std::string name = entry.path().filename().string();
     if (name.find(CgConstant::kStepCgNamePrefix) != 0) continue;
@@ -961,8 +966,13 @@ bool CgroupManager::ThawUserCgroupsUnderJob(
     return false;
   }
   bool all_ok = true;
-  for (auto &entry :
-       std::filesystem::directory_iterator(job_cg_path, ec)) {
+  std::filesystem::directory_iterator dir_it(job_cg_path, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to create directory iterator for '{}': {}",
+                job_cg_path, ec.message());
+    return false;
+  }
+  for (auto &entry : dir_it) {
     if (!entry.is_directory(ec)) continue;
     std::string name = entry.path().filename().string();
     if (name.find(CgConstant::kStepCgNamePrefix) != 0) continue;

@@ -329,7 +329,27 @@ CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t> &job_ids) {
   UpdateLastActiveTime();
   if (reply.ok()) return CraneErrCode::SUCCESS;
 
-  return CraneErrCode::ERR_GENERIC_FAILURE;
+  // Log the detailed reason from Craned and parse error code
+  CraneErrCode err_code = CraneErrCode::ERR_GENERIC_FAILURE;
+  if (!reply.reason().empty()) {
+    CRANE_ERROR("SuspendJobs to Craned {} failed: {}", m_craned_id_,
+                reply.reason());
+
+    // Parse error code from reason string
+    const std::string& reason = reply.reason();
+    if (reason.find("CGroup error") != std::string::npos ||
+        reason.find("Failed to freeze") != std::string::npos) {
+      err_code = CraneErrCode::ERR_CGROUP;
+    } else if (reason.find("not found") != std::string::npos ||
+               reason.find("does not exist") != std::string::npos) {
+      err_code = CraneErrCode::ERR_NON_EXISTENT;
+    }
+  } else {
+    CRANE_ERROR("SuspendJobs to Craned {} failed with no reason provided",
+                m_craned_id_);
+  }
+
+  return err_code;
 }
 
 CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
@@ -355,7 +375,27 @@ CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
   UpdateLastActiveTime();
   if (reply.ok()) return CraneErrCode::SUCCESS;
 
-  return CraneErrCode::ERR_GENERIC_FAILURE;
+  // Log the detailed reason from Craned and parse error code
+  CraneErrCode err_code = CraneErrCode::ERR_GENERIC_FAILURE;
+  if (!reply.reason().empty()) {
+    CRANE_ERROR("ResumeJobs to Craned {} failed: {}", m_craned_id_,
+                reply.reason());
+
+    // Parse error code from reason string
+    const std::string& reason = reply.reason();
+    if (reason.find("CGroup error") != std::string::npos ||
+        reason.find("Failed to thaw") != std::string::npos) {
+      err_code = CraneErrCode::ERR_CGROUP;
+    } else if (reason.find("not found") != std::string::npos ||
+               reason.find("does not exist") != std::string::npos) {
+      err_code = CraneErrCode::ERR_NON_EXISTENT;
+    }
+  } else {
+    CRANE_ERROR("ResumeJobs to Craned {} failed with no reason provided",
+                m_craned_id_);
+  }
+
+  return err_code;
 }
 
 crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(

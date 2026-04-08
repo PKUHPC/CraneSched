@@ -356,16 +356,22 @@ grpc::Status CranedServiceImpl::SuspendJobs(
   }
 
   bool all_ok = true;
+  std::vector<std::string> failure_reasons;
   for (auto job_id : request->job_id_list()) {
     auto err = g_job_mgr->SuspendJobByCgroup(job_id);
     if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Job #{}] Failed to suspend by cgroup: {}", job_id,
-                  CraneErrStr(err));
+      std::string reason = fmt::format("[Job #{}] Failed to suspend: {}",
+                                       job_id, CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
       all_ok = false;
     }
   }
 
   response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
   return Status::OK;
 }
 
@@ -379,16 +385,22 @@ grpc::Status CranedServiceImpl::ResumeJobs(
   }
 
   bool all_ok = true;
+  std::vector<std::string> failure_reasons;
   for (auto job_id : request->job_id_list()) {
     auto err = g_job_mgr->ResumeJobByCgroup(job_id);
     if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Job #{}] Failed to resume by cgroup: {}", job_id,
-                  CraneErrStr(err));
+      std::string reason = fmt::format("[Job #{}] Failed to resume: {}",
+                                       job_id, CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
       all_ok = false;
     }
   }
 
   response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
   return Status::OK;
 }
 
