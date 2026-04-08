@@ -5024,9 +5024,19 @@ bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
   if (step_id == 0) return false;
 
   auto* job = iter->second.get();
+  if (!job) {
+    CRANE_DEBUG("Job {} not found in running job map.", job_id);
+    return false;
+  }
 
   if (step_id == kPrimaryStepId) {
-    *step = job->PrimaryStep()->StepToCtld();
+    auto* primary_step = job->PrimaryStep();
+    if (!primary_step) {
+      CRANE_DEBUG("PrimaryStep is null for job {}", job_id);
+      return false;
+    }
+
+    *step = primary_step->StepToCtld();
     step->set_nodelist(iter->second->allocated_craneds_regex);
     return true;
   }
