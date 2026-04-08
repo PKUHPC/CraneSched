@@ -40,6 +40,10 @@
 #include "Security/VaultClient.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -771,6 +775,12 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Tracing"]) {
+        const auto& tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
@@ -938,6 +948,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();
@@ -988,6 +1001,19 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize("CraneCtld",
+                                                   std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize("CraneCtld");
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+#endif
 
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();

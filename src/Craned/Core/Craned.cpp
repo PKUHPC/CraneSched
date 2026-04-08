@@ -43,6 +43,10 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 using namespace Craned::Common;
 using Craned::g_config;
@@ -977,6 +981,12 @@ void ParseConfig(int argc, char** argv) {
         }
       }  // end of JobLifecycleHook
 
+      if (config["Tracing"]) {
+        const auto& tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
@@ -1360,6 +1370,20 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Craned@{}", g_config.Hostname), std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Craned@{}", g_config.Hostname));
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+#endif
+
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 
@@ -1408,6 +1432,9 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();

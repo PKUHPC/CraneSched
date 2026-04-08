@@ -25,6 +25,7 @@
 #include "CommonPublicDefs.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/TracerManager.h"
 
 namespace Craned {
 
@@ -142,6 +143,11 @@ struct Config {
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct TracingConfig {
+    bool Enabled{false};
+  };
+  TracingConfig Tracing;
 
   struct SupervisorConfig {
     std::filesystem::path Path;

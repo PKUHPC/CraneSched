@@ -55,6 +55,8 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
+option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 
 option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)

@@ -11,7 +11,8 @@
                 "ENABLE_UNQLITE": "ON",
                 "ENABLE_BERKELEY_DB": "OFF",
                 "CRANE_FULL_DYNAMIC": "OFF",
-                "CRANE_USE_GITEE_SOURCE": "OFF"
+                "CRANE_USE_GITEE_SOURCE": "OFF",
+                "CRANE_ENABLE_TRACING": "ON"
             }
         },
         {

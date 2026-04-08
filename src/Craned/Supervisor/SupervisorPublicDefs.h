@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/TracerManager.h"
 
 namespace Craned::Supervisor {
 
@@ -86,6 +87,12 @@ struct Config {
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct TracingConfig {
+    bool Enabled{false};
+    std::string Traceparent;
+  };
+  TracingConfig Tracing;
 
   bool CompressedRpc{};
 

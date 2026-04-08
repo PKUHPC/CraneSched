@@ -7,3 +7,5 @@ add_subdirectory(Lua)
 add_subdirectory(PasswordEntry)
 add_subdirectory(PluginClient)
 add_subdirectory(PublicHeader)
+
+add_subdirectory(OpenTelemetry)

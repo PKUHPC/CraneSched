@@ -21,6 +21,8 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -163,6 +165,11 @@ struct Config {
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct TracingConfig {
+    bool Enabled{false};
+  };
+  TracingConfig Tracing;
 
   struct ContainerConfig {
     bool Enabled{false};
@@ -556,6 +563,9 @@ struct StepStatusChangeContext {
   std::unordered_set<std::unique_ptr<JobInCtld>> job_ptrs;
   // Ended jobs will transfer from embedded db to mongodb
   std::unordered_set<JobInCtld*> job_raw_ptrs;
+
+  // Trace context lookup for RPC worker threads (job_id -> traceparent)
+  std::unordered_map<job_id_t, std::string> job_traceparents;
 };
 
 // Abstract interface of all the steps in Ctld.
@@ -910,6 +920,21 @@ struct JobInCtld {
   // Might change at each scheduling cycle.
   ResourceV2 allocated_res;
 
+  // W3C traceparent for distributed tracing. Set at Alloc time, read-only
+  // thereafter. Propagated to Craned via JobToD and to Supervisor via
+  // InitSupervisorRequest.
+  std::string traceparent_;
+
+  // D1 submission trace context. Set at gRPC entry, used for submit/validate
+  // child span. In-memory only (not propagated via proto).
+  std::string submit_traceparent_;
+  // Hex trace_id from D1 root span, used to correlate D1↔D3 dimensions.
+  std::string submit_id_;
+
+  // Non-RAII lifecycle span covering the entire job execution.
+  // Created at alloc time, End() called when job completes.
+  crane::ManualSpan lifecycle_span_;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
 
@@ -1079,6 +1104,18 @@ struct JobInCtld {
 
   void SetAllocatedRes(ResourceV2&& val);
   ResourceV2 const& AllocatedRes() const { return allocated_res; }
+
+  void SetTraceparent(std::string tp) { traceparent_ = std::move(tp); }
+  const std::string& Traceparent() const { return traceparent_; }
+
+  void SetSubmitTraceparent(std::string tp) {
+    submit_traceparent_ = std::move(tp);
+  }
+  const std::string& SubmitTraceparent() const { return submit_traceparent_; }
+  void SetSubmitId(std::string id) { submit_id_ = std::move(id); }
+  const std::string& SubmitId() const { return submit_id_; }
+
+  crane::ManualSpan& LifecycleSpan() { return lifecycle_span_; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);

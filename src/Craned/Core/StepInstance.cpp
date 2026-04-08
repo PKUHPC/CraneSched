@@ -24,6 +24,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "crane/CriClient.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
@@ -125,6 +126,11 @@ CraneErrCode StepInstance::Prepare() {
 }
 
 CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
+  CRANE_TRACE_SCOPE_FROM_REMOTE(spawn_span, "step/supervisor_spawn",
+                                this->traceparent);
+  spawn_span.SetAttribute("job_id", job_id);
+  spawn_span.SetAttribute("step_id", step_id);
+
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -138,6 +144,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
   if (pipe(supervisor_craned_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -145,6 +152,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(supervisor_craned_pipe[0]);
     close(supervisor_craned_pipe[1]);
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -160,6 +168,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   if (child_pid == -1) {
     CRANE_ERROR("[Step #{}.{}] fork() failed: {}", job_id, step_id,
                 strerror(errno));
+    spawn_span.SetStatus(crane::StatusCode::kError, "fork_failed");
 
     close(craned_supervisor_pipe[0]);
     close(craned_supervisor_pipe[1]);
@@ -185,6 +194,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     FileOutputStream ostream(craned_supervisor_fd);
 
     // Do Supervisor Init
+    CRANE_TRACE_CHILD_NAMED(init_span, spawn_span, "step/send_init");
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(job_id);
     init_req.set_job_name(step_to_d.name());
@@ -337,6 +347,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
+    init_req.set_tracing_enabled(g_config.Tracing.Enabled);
+    if (!this->traceparent.empty()) init_req.set_traceparent(this->traceparent);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
@@ -347,6 +360,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
                   job_id, step_id, strerror(ostream.GetErrno()));
+      init_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
+      spawn_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
 
       crane_cgroup->KillAllProcesses(SIGKILL);
 
@@ -356,7 +371,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     }
 
     CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
+    init_span.End();
 
+    CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span, "step/supervisor_ready");
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,
@@ -372,6 +389,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
         CRANE_ERROR("[Step #{}.{}] False from subprocess {}.", job_id, step_id,
                     child_pid);
 
+      ready_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
+      spawn_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
       crane_cgroup->KillAllProcesses(SIGKILL);
 
       close(craned_supervisor_fd);
