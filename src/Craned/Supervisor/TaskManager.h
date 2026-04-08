@@ -344,6 +344,7 @@ class PodInstance : public ITaskInstance {
   CraneErrCode SetPodSandboxConfig_(
       const crane::grpc::PodJobAdditionalMeta& pod_meta);
   CraneErrCode PersistPodSandboxInfo_();
+  CraneErrCode StopAndRemovePodSandbox_(std::string_view context);
 
   cri::api::PodSandboxConfig m_pod_config_;
   std::string m_pod_id_;

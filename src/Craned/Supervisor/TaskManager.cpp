@@ -1440,6 +1440,27 @@ CraneErrCode PodInstance::PersistPodSandboxInfo_() {
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode PodInstance::StopAndRemovePodSandbox_(std::string_view context) {
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto stop_ret = cri_client->StopPodSandbox(m_pod_id_);
+  if (!stop_ret.has_value()) {
+    const auto& rich_err = stop_ret.error();
+    CRANE_WARN("Failed to stop pod sandbox {} {} for job #{}: {}", m_pod_id_,
+               context, g_config.JobId, rich_err.description());
+  }
+
+  auto remove_ret = cri_client->RemovePodSandbox(m_pod_id_);
+  if (!remove_ret.has_value()) {
+    const auto& rich_err = remove_ret.error();
+    CRANE_ERROR("Failed to remove pod sandbox {} {} for job #{}: {}", m_pod_id_,
+                context, g_config.JobId, rich_err.description());
+    return rich_err.code();
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 CraneErrCode PodInstance::Prepare() {
   const auto& step_to_supv = m_parent_step_inst_->GetStep();
   const auto* pod_meta =
@@ -1496,6 +1517,11 @@ CraneErrCode PodInstance::Spawn() {
   if (auto err = PersistPodSandboxInfo_(); err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to persist pod sandbox config for job #{}",
                 g_config.JobId);
+    if (StopAndRemovePodSandbox_("after persist error") ==
+        CraneErrCode::SUCCESS) {
+      m_pod_id_.clear();
+    }
+
     return err;
   }
 
@@ -1505,23 +1531,9 @@ CraneErrCode PodInstance::Spawn() {
 }
 
 CraneErrCode PodInstance::Kill(int /*signum*/) {
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
-
-  auto result = cri_client->StopPodSandbox(m_pod_id_);
-  if (!result.has_value()) {
-    const auto& rich_err = result.error();
-    CRANE_ERROR("Failed to stop pod sandbox {} for job #{}: {}", m_pod_id_,
-                g_config.JobId, rich_err.description());
-    // Try best effort to remove pod sandbox, continue even if stopping fails.
-  }
-
-  result = cri_client->RemovePodSandbox(m_pod_id_);
-  if (!result.has_value()) {
-    const auto& rich_err = result.error();
-    CRANE_ERROR("Failed to remove pod sandbox {} for job #{}: {}", m_pod_id_,
-                g_config.JobId, rich_err.description());
-    return rich_err.code();
-  }
+  if (auto err = StopAndRemovePodSandbox_("during stop request");
+      err != CraneErrCode::SUCCESS)
+    return err;
 
   CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
   HandlePodExited();
@@ -2793,14 +2805,12 @@ void TaskManager::EvExecutePodCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      for (auto task_id : m_step_.task_ids)
-        FinalizeTaskAsync(
-            task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
-            std::format("Failed to look up password entry for uid {}",
-                        m_step_.uid));
-
-      err = CraneErrCode::ERR_SYSTEM_ERR;
-      break;
+      FinalizeTaskAsync(
+          task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
+          std::format("Failed to look up password entry for uid {}",
+                      m_step_.uid));
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
     }
 
     err = m_step_.Prepare();
@@ -2809,8 +2819,8 @@ void TaskManager::EvExecutePodCb_() {
       FinalizeTaskAsync(task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
                         std::format("Failed to prepare pod step, code: {}",
                                     static_cast<int>(err)));
-      err = CraneErrCode::ERR_SYSTEM_ERR;
-      break;
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
     }
 
     // For pod step, we will use job's cgroup directly.
@@ -2826,9 +2836,9 @@ void TaskManager::EvExecutePodCb_() {
       CRANE_INFO("Pod is running, pod id: {}.", std::get<std::string>(pod_id));
       m_exec_id_task_id_map_[pod_id] = task_id;
     }
-  }
 
-  ev.ok_prom.set_value(err);
+    ev.ok_prom.set_value(err);
+  }
 }
 
 std::future<CraneErrCode> TaskManager::ExecutePodAsync() {
