@@ -3685,7 +3685,8 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         int64_t(std::numeric_limits<
                 decltype(qos->max_submit_jobs_per_account)>::max()));
     qos->max_time_limit_per_job = absl::Seconds(
-        qos_view[Qos::FieldStringOfMaxTimeLimitPerJob()].get_int64().value);
+        ViewValueOr_(qos_view[Qos::FieldStringOfMaxTimeLimitPerJob()],
+                     int64_t(kJobMaxTimeLimitSec)));
     qos->max_jobs = ViewValueOr_(
         qos_view[Qos::FieldStringOfMaxJobs()],
         int64_t(std::numeric_limits<decltype(qos->max_jobs)>::max()));
