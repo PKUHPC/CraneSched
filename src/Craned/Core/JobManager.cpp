@@ -18,9 +18,12 @@
 
 #include "JobManager.h"
 
+#include <fstream>
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <filesystem>
+#include <set>
 #include <utility>
 
 #include "CranedPublicDefs.h"
@@ -34,6 +37,141 @@ namespace Craned {
 
 using Common::kStepRequestCheckIntervalMs;
 using namespace std::chrono_literals;
+
+namespace {
+
+constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
+
+std::filesystem::path GetV1ControllerPath_(const std::string& cg_path,
+                                           Common::CgConstant::Controller ctrl) {
+  return Common::CgConstant::kSystemCgPathPrefix /
+         Common::CgConstant::GetControllerStringView(ctrl) /
+         std::filesystem::relative(cg_path,
+                                   Common::CgConstant::kSystemCgPathPrefix);
+}
+
+bool IsCgroupFrozenByPath_(const std::string& cg_path) {
+  std::error_code ec;
+  std::filesystem::path state_file;
+
+  if (CgroupManager::IsCgV2()) {
+    state_file = std::filesystem::path(cg_path) / "cgroup.freeze";
+  } else {
+    state_file =
+        GetV1ControllerPath_(cg_path,
+                             Common::CgConstant::Controller::FREEZE_CONTROLLER) /
+        "freezer.state";
+  }
+
+  if (!std::filesystem::exists(state_file, ec)) return false;
+
+  std::ifstream ifs(state_file);
+  if (!ifs.is_open()) return false;
+
+  std::string state;
+  ifs >> state;
+  if (CgroupManager::IsCgV2()) return state == "1";
+  return state == "FROZEN" || state == "FREEZING";
+}
+
+bool ParseHexMask_(const std::string& line, uint64_t* mask) {
+  auto pos = line.find(':');
+  if (pos == std::string::npos) return false;
+
+  auto value_pos = line.find_first_not_of(" \t", pos + 1);
+  if (value_pos == std::string::npos) return false;
+
+  try {
+    *mask = std::stoull(line.substr(value_pos), nullptr, 16);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool ProcHasPendingSigkill_(pid_t pid) {
+  std::ifstream ifs(fmt::format("/proc/{}/status", pid));
+  if (!ifs.is_open()) return false;
+
+  std::string line;
+  uint64_t sig_pnd = 0;
+  uint64_t shd_pnd = 0;
+  while (std::getline(ifs, line)) {
+    if (line.rfind("SigPnd:", 0) == 0) {
+      ParseHexMask_(line, &sig_pnd);
+    } else if (line.rfind("ShdPnd:", 0) == 0) {
+      ParseHexMask_(line, &shd_pnd);
+    }
+  }
+
+  return ((sig_pnd | shd_pnd) & kPendingSigkillMask) != 0;
+}
+
+bool FindPendingSigkillInCgroupByPath_(const std::string& cg_path,
+                                       pid_t* pending_pid) {
+  std::filesystem::path root_path = cg_path;
+  if (!CgroupManager::IsCgV2()) {
+    root_path = GetV1ControllerPath_(
+        cg_path, Common::CgConstant::Controller::MEMORY_CONTROLLER);
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(root_path, ec)) return false;
+
+  std::set<pid_t> pids;
+  auto scan_dir = [&](const std::filesystem::path& dir_path) {
+    std::ifstream ifs(dir_path / "cgroup.procs");
+    if (!ifs.is_open()) return;
+
+    pid_t pid;
+    while (ifs >> pid) pids.insert(pid);
+  };
+
+  scan_dir(root_path);
+
+  std::filesystem::recursive_directory_iterator dir_it(root_path, ec);
+  if (!ec) {
+    for (auto& entry : dir_it) {
+      if (!entry.is_directory(ec)) continue;
+      scan_dir(entry.path());
+    }
+  }
+
+  for (pid_t pid : pids) {
+    if (ProcHasPendingSigkill_(pid)) {
+      *pending_pid = pid;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void ThawFrozenJobsWithPendingSigkill_(
+    const std::vector<std::pair<job_id_t, std::string>>& jobs) {
+  for (const auto& [job_id, cg_path] : jobs) {
+    if (!IsCgroupFrozenByPath_(cg_path)) continue;
+
+    pid_t pending_pid = 0;
+    if (!FindPendingSigkillInCgroupByPath_(cg_path, &pending_pid)) continue;
+
+    CRANE_WARN(
+        "[Job #{}] Detected pending SIGKILL on pid {} while frozen. "
+        "Thawing job cgroup.",
+        job_id, pending_pid);
+
+    bool root_ok = CgroupManager::ThawCgroupByPath(cg_path);
+    bool children_ok = CgroupManager::ThawChildCgroupsByPath(cg_path);
+    if (!root_ok || !children_ok) {
+      CRANE_ERROR(
+          "[Job #{}] Failed to thaw job cgroup {} after pending SIGKILL, "
+          "root_ok={}, children_ok={}",
+          job_id, cg_path, root_ok, children_ok);
+    }
+  }
+}
+
+}  // namespace
 
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
@@ -376,10 +514,23 @@ void JobManager::FreeSteps(
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
+  std::vector<std::pair<job_id_t, std::string>> jobs_to_check_pending_sigkill;
   std::vector<JobInD> jobs_to_clean;
   // Step is completing, get ownership here.
   std::vector<std::unique_ptr<StepInstance>> steps_to_clean;
   {
+    {
+      auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+      jobs_to_check_pending_sigkill.reserve(job_map_ptr->size());
+      for (auto& [job_id, job] : *job_map_ptr) {
+        auto* job_ptr = job.RawPtr();
+        if (job_ptr->cgroup) {
+          jobs_to_check_pending_sigkill.emplace_back(
+              job_id, job_ptr->cgroup->CgroupPath().string());
+        }
+      }
+    }
+
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto& [step, retry_count] : m_completing_step_retry_map_) {
@@ -433,6 +584,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
       }
     }
   }
+
+  ThawFrozenJobsWithPendingSigkill_(jobs_to_check_pending_sigkill);
 
   if (!steps_to_clean.empty()) {
     CRANE_TRACE("Supervisor for Step [{}] found to be exited",
@@ -1022,15 +1175,16 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   }
 
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
-  bool ok = CgroupManager::FreezeUserCgroupsUnderJob(job_cg_abs_path);
-  if (!ok) {
-    CRANE_ERROR("[Job #{}] Failed to freeze user cgroups under job {}",
-                job_id, job_cg_abs_path);
+  bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
+  if (!root_ok || !children_ok) {
+    CRANE_ERROR(
+        "[Job #{}] Failed to freeze job cgroup {}, root_ok={}, children_ok={}",
+        job_id, job_cg_abs_path, root_ok, children_ok);
     return CraneErrCode::ERR_CGROUP;
   }
 
-  CRANE_INFO("[Job #{}] Frozen user cgroups under job: {}", job_id,
-             job_cg_abs_path);
+  CRANE_INFO("[Job #{}] Frozen job cgroup: {}", job_id, job_cg_abs_path);
 
   // Note: We do NOT pause the termination timer. This follows Slurm's
   // behavior where suspended time counts toward the job's time limit.
@@ -1054,16 +1208,17 @@ CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
   }
 
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
-  bool ok = CgroupManager::ThawUserCgroupsUnderJob(job_cg_abs_path);
-  if (ok) {
-    CRANE_INFO("[Job #{}] Thawed user cgroups under job: {}", job_id,
-               job_cg_abs_path);
-    return CraneErrCode::SUCCESS;
+  bool root_ok = CgroupManager::ThawCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::ThawChildCgroupsByPath(job_cg_abs_path);
+  if (!root_ok || !children_ok) {
+    CRANE_ERROR(
+        "[Job #{}] Failed to thaw job cgroup {}, root_ok={}, children_ok={}",
+        job_id, job_cg_abs_path, root_ok, children_ok);
+    return CraneErrCode::ERR_CGROUP;
   }
 
-  CRANE_ERROR("[Job #{}] Failed to thaw user cgroups under job {}",
-              job_id, job_cg_abs_path);
-  return CraneErrCode::ERR_CGROUP;
+  CRANE_INFO("[Job #{}] Thawed job cgroup: {}", job_id, job_cg_abs_path);
+  return CraneErrCode::SUCCESS;
 }
 
 std::shared_ptr<SupervisorStub> JobManager::GetSupervisorStub(
@@ -1209,10 +1364,10 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
       // before terminating steps to ensure cancel can take effect.
       if (job_instance->cgroup) {
         auto cg_path = job_instance->cgroup->CgroupPath().string();
-        CgroupManager::ThawUserCgroupsUnderJob(cg_path);
-        CRANE_DEBUG(
-            "[Job #{}] Thawed user cgroups before terminating steps.",
-            elem.job_id);
+        CgroupManager::ThawCgroupByPath(cg_path);
+        CgroupManager::ThawChildCgroupsByPath(cg_path);
+        CRANE_DEBUG("[Job #{}] Thawed job cgroup before terminating steps.",
+                    elem.job_id);
       }
 
       for (auto step_id : terminate_step_ids) {

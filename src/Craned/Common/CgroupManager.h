@@ -618,10 +618,9 @@ class CgroupManager {
   static bool FreezeCgroupByPath(const std::string &cg_path);
   static bool ThawCgroupByPath(const std::string &cg_path);
 
-  // Freeze/Thaw only user/ subdirectories under each step of a job cgroup,
-  // leaving system/ subdirectories (where Supervisor lives) untouched.
-  static bool FreezeUserCgroupsUnderJob(const std::string &job_cg_path);
-  static bool ThawUserCgroupsUnderJob(const std::string &job_cg_path);
+  // Freeze/Thaw all direct child cgroups under the given path.
+  static bool FreezeChildCgroupsByPath(const std::string &cg_path);
+  static bool ThawChildCgroupsByPath(const std::string &cg_path);
 
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
