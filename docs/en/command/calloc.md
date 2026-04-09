@@ -17,6 +17,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
 - **--L, --licenses**: The licenses that the job requires to use, format: `lic1:2,lic2:4` or `lic1:2|lic2:4`
 
+
 ### Job Information
 - **-J, --job-name string**: Job name
 - **-A, --account string**: Account for job submission
@@ -24,6 +25,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **-q, --qos string**: Quality of Service (QoS) for the job
 - **-t, --time string**: Time limit, format: `[day-]hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days and 1 second, or `10:1:2` for 10 hours, 1 minute, 2 seconds)
 - **--comment string**: Job comment
+- **--deadline string**：Deadline setted per task
 
 ### Node Selection
 - **-w, --nodelist string**: Nodes to allocate (comma-separated list)

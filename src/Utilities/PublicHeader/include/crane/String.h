@@ -234,7 +234,7 @@ constexpr std::array<std::string_view, crane::grpc::JobStatus_ARRAYSIZE>
         "Starting",
         "Completing",
         // 10 - 14
-        "Invalid",
+        "Deadline",
         "Invalid",
         "Invalid",
         "Invalid",

@@ -25,6 +25,9 @@ Display cacct version information.
 :   **Applies to:** `Job`, `Step`  
 Configuration file path. Default: "/etc/crane/config.yaml".
 
+**%deadline/%Deadline**
+
+：Display job deadline
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `Job`, `Step`  

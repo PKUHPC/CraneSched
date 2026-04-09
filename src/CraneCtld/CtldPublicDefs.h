@@ -591,6 +591,7 @@ struct StepInCtld {
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
+  absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
 
   // In daemon step of container job, only use pod_meta.
   // In common step of container job, both are provided.
@@ -852,6 +853,7 @@ struct JobInCtld {
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
+  absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
 
   bool exclusive{false};
 

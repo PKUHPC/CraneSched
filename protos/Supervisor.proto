@@ -140,11 +140,12 @@ message CheckStatusReply {
   bool ok = 5;
 }
 
-message ChangeStepTimeLimitRequest {
-  int64 time_limit_seconds = 1;
+message ChangeStepTimeConstraintRequest {
+  optional int64 time_limit_seconds = 1;
+  optional int64 deadline_time = 2;
 }
 
-message ChangeStepTimeLimitReply {
+message ChangeStepTimeConstraintReply {
   bool ok = 1;
 }
 
@@ -174,7 +175,7 @@ service Supervisor {
   rpc ExecuteStep(StepExecutionRequest) returns (StepExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
-  rpc ChangeStepTimeLimit(ChangeStepTimeLimitRequest) returns (ChangeStepTimeLimitReply);
+  rpc ChangeStepTimeConstraint(ChangeStepTimeConstraintRequest) returns (ChangeStepTimeConstraintReply);
   rpc TerminateStep(TerminateStepRequest) returns (TerminateStepReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);

@@ -26,6 +26,10 @@ Display cqueue version information.
 :   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
+**--deadline** **string**
+
+: Display deadline
+
 **-F, --full**
 
 :   **Applies to:** `job`, `step`  
@@ -130,6 +134,7 @@ When querying jobs (default mode), the following fields are displayed:
 - **TimeLimit**: Time limit for the job
 - **Nodes**: Number of nodes allocated
 - **NodeList**: Names of nodes where the job is running
+- **Deadline**： Deadline of the job
 
 When querying steps (using `--step`), the following fields are displayed:
 
@@ -151,6 +156,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 | %a         | Account         | Account associated with the job                             |
 | %c         | AllocCpus       | CPUs allocated to the job                                   |
 | %C         | ReqCpus         | Total CPUs requested by the job                             |
+| %deadline  | Deadline        | Deadline time of the job                                    |
 | %e         | ElapsedTime     | Elapsed time since job started                              |
 | %h         | Held            | Hold state of the job                                       |
 | %j         | JobID           | Job ID                                                      |

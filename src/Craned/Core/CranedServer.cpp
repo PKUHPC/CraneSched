@@ -315,26 +315,34 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
+grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     grpc::ServerContext *context,
-    const crane::grpc::ChangeJobTimeLimitRequest *request,
-    crane::grpc::ChangeJobTimeLimitReply *response) {
+    const crane::grpc::ChangeJobTimeConstraintRequest *request,
+    crane::grpc::ChangeJobTimeConstraintReply *response) {
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto err = g_job_mgr->ChangeStepTimelimit(request->job_id(), kPrimaryStepId,
-                                            request->time_limit_seconds());
+  std::optional<int64_t> time_limit_seconds =
+      request->has_time_limit_seconds()
+          ? std::optional<int64_t>(request->time_limit_seconds())
+          : std::nullopt;
 
+  std::optional<int64_t> deadline_time =
+      request->has_deadline_time()
+          ? std::optional<int64_t>(request->deadline_time())
+          : std::nullopt;
+
+  auto err = g_job_mgr->ChangeStepTimeConstraint(
+      request->job_id(), kPrimaryStepId, time_limit_seconds, deadline_time);
   if (err.error()) {
-    CRANE_ERROR("[Step #{}.{}] Failed to change job time limit",
+    CRANE_ERROR("[Step #{}.{}] Failed to change job time constraint",
                 request->job_id(), kPrimaryStepId);
     return Status::OK;
   }
   response->set_ok(true);
-
   return Status::OK;
 }
 

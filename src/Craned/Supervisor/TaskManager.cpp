@@ -2452,7 +2452,7 @@ TaskManager::TaskManager()
   m_task_stopped_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_task_stopped_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanTaskStopQueueCb_();
+        EvCleanStepStopQueueCb_();
       });
 
   m_cri_event_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -2466,6 +2466,7 @@ TaskManager::TaskManager()
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanTerminateStepQueueCb_();
       });
+
   m_terminate_step_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_terminate_step_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
@@ -2475,19 +2476,19 @@ TaskManager::TaskManager()
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
-  m_change_step_time_limit_async_handle_ =
+  m_change_step_time_constraint_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_change_step_time_limit_async_handle_->on<uvw::async_event>(
+  m_change_step_time_constraint_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanChangeStepTimeLimitQueueCb_();
+        EvCleanChangeStepTimeConstraintQueueCb_();
       });
-  m_change_step_time_limit_timer_handle_ =
+  m_change_step_time_constraint_timer_handle_ =
       m_uvw_loop_->resource<uvw::timer_handle>();
-  m_change_step_time_limit_timer_handle_->on<uvw::timer_event>(
+  m_change_step_time_constraint_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        m_change_step_time_limit_async_handle_->send();
+        m_change_step_time_constraint_async_handle_->send();
       });
-  m_change_step_time_limit_timer_handle_->start(
+  m_change_step_time_constraint_timer_handle_->start(
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
@@ -2686,17 +2687,33 @@ std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
   return env_future;
 }
 
-std::future<CraneErrCode> TaskManager::ChangeStepTimeLimitAsync(
-    absl::Duration time_limit) {
+std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
+    std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time) {
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
 
-  ChangeStepTimeLimitQueueElem elem;
-  elem.time_limit = time_limit;
+  ChangeStepTimeConstraintQueueElem elem;
   elem.ok_prom = std::move(ok_promise);
+  if (time_limit) {
+    elem.time_limit = time_limit;
+    m_step_.GetMutableStep().mutable_time_limit()->set_seconds(
+        time_limit.value());
+  } else {
+    elem.time_limit =
+        std::optional<int64_t>(m_step_.GetStep().time_limit().seconds());
+  }
 
-  m_step_time_limit_change_queue_.enqueue(std::move(elem));
-  m_change_step_time_limit_async_handle_->send();
+  if (deadline_time) {
+    elem.deadline_time = deadline_time;
+    m_step_.GetMutableStep().mutable_deadline_time()->set_seconds(
+        deadline_time.value());
+  } else {
+    elem.deadline_time =
+        std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
+  }
+
+  m_step_time_constraint_change_queue_.enqueue(std::move(elem));
+  m_change_step_time_constraint_async_handle_->send();
   return ok_future;
 }
 
@@ -2868,10 +2885,11 @@ void TaskManager::EvCleanCriEventQueueCb_() {
   }
 }
 
-void TaskManager::EvStepTimerCb_() {
-  CRANE_TRACE("Step #{}.{} exceeded its time limit. Terminating it...",
-              g_config.JobId, g_config.StepId);
-
+void TaskManager::EvStepTimerCb_(bool is_deadline) {
+  std::string log_reason =
+      is_deadline ? "reached its deadline" : "exceeded its time limit";
+  CRANE_TRACE("Step #{}.{} {}. Terminating it...", g_config.JobId,
+              g_config.StepId, log_reason);
   DelTerminationTimer_();
   DelSignalTimers_();
 
@@ -2881,12 +2899,14 @@ void TaskManager::EvStepTimerCb_() {
                 ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   } else {
     m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
-        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
+        .termination_reason = is_deadline
+                                  ? TerminatedBy::TERMINATION_BY_DEADLINE
+                                  : TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_step_async_handle_->send();
   }
 }
 
-void TaskManager::EvCleanTaskStopQueueCb_() {
+void TaskManager::EvCleanStepStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stopped_queue_.try_dequeue(task_id)) {
     CRANE_INFO("[Task #{}] Stopped and is doing StepStatusChange...", task_id);
@@ -2980,6 +3000,10 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory, exit_code,
                       "Detected by oom_kill counter delta");
           break;
+        case TerminatedBy::TERMINATION_BY_DEADLINE:
+          TaskFinish_(task_id, crane::grpc::JobStatus::Deadline, exit_code,
+                      "Reached task's deadline");
+          break;
         default:
           TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_code,
                       std::nullopt);
@@ -2991,7 +3015,14 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
           TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory,
                       exit_info.value,
-                      "Detected by oom_kill counter delta (no signal)");
+                      std::optional<std::string>(
+                          "Detected by oom_kill counter delta (no signal)"));
+        } else if (task->terminated_by ==
+                   TerminatedBy::TERMINATION_BY_DEADLINE) {
+          TaskFinish_(task_id, crane::grpc::JobStatus::Deadline,
+                      exit_info.value,
+                      std::optional<std::string>(
+                          "Reached task's deadline (no signal)"));
         } else {
           TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_info.value,
                       std::nullopt);
@@ -3030,6 +3061,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
     }
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
+
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Step is not ready to terminate, will check next time.");
@@ -3067,6 +3099,9 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
         task->terminated_by = TerminatedBy::CANCELLED_BY_USER;
+      } else if (elem.termination_reason ==
+                 TerminatedBy::TERMINATION_BY_DEADLINE) {
+        task->terminated_by = TerminatedBy::TERMINATION_BY_DEADLINE;
       }
 
       if (task->GetExecId().has_value()) {
@@ -3077,8 +3112,10 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       } else if (m_step_.IsInteractive()) {
         // For an Interactive task with no process running, it ends
         // immediately.
+
         TaskFinish_(task_id, crane::grpc::JobStatus::Completed,
                     ExitCode::EC_TERMINATED, std::nullopt);
+
       } else {
         CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
       }
@@ -3090,41 +3127,55 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
   }
 }
 
-void TaskManager::EvCleanChangeStepTimeLimitQueueCb_() {
+void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
   absl::Time now = absl::Now();
 
-  ChangeStepTimeLimitQueueElem elem;
-  std::vector<ChangeStepTimeLimitQueueElem> not_ready_elems;
-  while (m_step_time_limit_change_queue_.try_dequeue(elem)) {
+  ChangeStepTimeConstraintQueueElem elem;
+  std::vector<ChangeStepTimeConstraintQueueElem> not_ready_elems;
+  while (m_step_time_constraint_change_queue_.try_dequeue(elem)) {
     if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
-          "Step is not ready to change time limit, will check next time.");
+          "Step is not ready to change time constraint will check next time.");
       continue;
     }
     if (m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Change timelimit for a completing step, ignored.");
+      CRANE_DEBUG("Change time constraint for a completing step, ignored.");
       continue;
     }
     // Delete the old timer.
     DelTerminationTimer_();
     DelSignalTimers_();
+    CRANE_TRACE("Delete the old timer.");
 
     absl::Time start_time =
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
-    absl::Duration const& new_time_limit = elem.time_limit;
+    absl::Duration const& new_time_limit =
+        absl::Seconds(elem.time_limit.value());
 
-    if (now - start_time >= new_time_limit) {
+    if (now - start_time >= new_time_limit ||
+        absl::ToUnixSeconds(now) >= elem.deadline_time.value()) {
       // If the step times out, terminate it.
       StepTerminateQueueElem ev_step_terminate{
           .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
       m_step_terminate_queue_.enqueue(ev_step_terminate);
       m_terminate_step_async_handle_->send();
+
     } else {
       // If the step hasn't timed out, set up a new timer.
-      int64_t new_sec =
-          ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
-      AddTerminationTimer_(new_sec);
+      int64_t new_sec;
+      int64_t deadline_sec =
+          elem.deadline_time.value() - absl::ToUnixSeconds(now);
+      int64_t new_time_limit_sec =
+          ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
+
+      if (deadline_sec <= new_time_limit_sec) {
+        AddTerminationTimer_(deadline_sec, true);
+        new_sec = deadline_sec;
+      } else {
+        AddTerminationTimer_(new_time_limit_sec, false);
+        new_sec = new_time_limit_sec;
+      }
 
       for (const auto& signal : m_step_.GetStep().signals()) {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
@@ -3146,7 +3197,7 @@ void TaskManager::EvCleanChangeStepTimeLimitQueueCb_() {
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
   for (auto& not_ready_elem : not_ready_elems) {
-    m_step_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
+    m_step_time_constraint_change_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 
@@ -3202,9 +3253,18 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
     if (!m_step_.IsDaemon()) {
       // Add a timer to limit the execution time of a task.
-      int64_t sec = m_step_.GetStep().time_limit().seconds();
-      AddTerminationTimer_(sec);
-      CRANE_INFO("Add a timer of {} seconds", sec);
+
+      int64_t time_limit_sec = m_step_.GetStep().time_limit().seconds();
+      int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
+                             absl::ToUnixSeconds(absl::Now());
+      int64_t sec = std::min(deadline_sec, time_limit_sec);
+
+      std::string log_timer =
+          deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
+      bool is_deadline = deadline_sec <= time_limit_sec ? true : false;
+
+      AddTerminationTimer_(sec, is_deadline);
+      CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
 
       for (const auto& signal : m_step_.GetStep().signals()) {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
