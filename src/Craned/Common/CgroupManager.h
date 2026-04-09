@@ -306,6 +306,7 @@ constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
+    CgConstant::Controller::FREEZE_CONTROLLER |
     CgConstant::Controller::DEVICES_CONTROLLER |
     CgConstant::Controller::BLOCK_CONTROLLER;
 

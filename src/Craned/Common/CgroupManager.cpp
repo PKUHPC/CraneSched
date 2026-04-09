@@ -865,7 +865,6 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
 }
 
 namespace {
-
 bool WriteFreezerValue(const std::filesystem::path &file_path,
                        const std::string &value) {
   std::ofstream ofs(file_path);
@@ -882,36 +881,15 @@ bool WriteFreezerValue(const std::filesystem::path &file_path,
   return true;
 }
 
-bool EnsureFreezerCgroupPathExists(const std::filesystem::path &freezer_path) {
-  std::error_code ec;
-  if (std::filesystem::exists(freezer_path, ec)) return true;
-
-  if (ec) {
-    CRANE_ERROR("Failed to stat freezer cgroup path '{}': {}",
-                freezer_path.string(), ec.message());
-    return false;
-  }
-
-  // Suspend/resume may be the first feature that needs the freezer controller
-  // hierarchy on cgroup v1, so create the matching path lazily when needed.
-  std::filesystem::create_directories(freezer_path, ec);
-  if (ec) {
-    CRANE_ERROR("Failed to create freezer cgroup path '{}': {}",
-                freezer_path.string(), ec.message());
-    return false;
-  }
-
-  return true;
-}
-
 bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
   std::error_code ec;
-  if (!std::filesystem::exists(cg_path, ec)) {
-    CRANE_ERROR("Cgroup path '{}' does not exist: {}", cg_path, ec.message());
-    return false;
-  }
-
   if (CgroupManager::IsCgV2()) {
+    if (!std::filesystem::exists(cg_path, ec)) {
+      CRANE_ERROR("Cgroup path '{}' does not exist: {}", cg_path,
+                  ec.message());
+      return false;
+    }
+
     // cgroup v2: write "1" to freeze, "0" to thaw via cgroup.freeze
     auto freeze_file = std::filesystem::path(cg_path) / "cgroup.freeze";
     return WriteFreezerValue(freeze_file, freeze ? "1" : "0");
@@ -919,13 +897,27 @@ bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
 
   // cgroup v1: write "FROZEN"/"THAWED" to freezer.state under the freezer
   // controller hierarchy
+  auto memory_cgroup_path =
+      CgConstant::kSystemCgPathPrefix /
+      CgConstant::GetControllerStringView(
+          CgConstant::Controller::MEMORY_CONTROLLER) /
+      std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
+
+  if (!std::filesystem::exists(memory_cgroup_path, ec)) {
+    CRANE_ERROR("Cgroup path '{}' does not exist: {}",
+                memory_cgroup_path.string(), ec.message());
+    return false;
+  }
+
   auto freezer_path =
       CgConstant::kSystemCgPathPrefix /
       CgConstant::GetControllerStringView(
           CgConstant::Controller::FREEZE_CONTROLLER) /
       std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
 
-  if (!EnsureFreezerCgroupPathExists(freezer_path)) {
+  if (!std::filesystem::exists(freezer_path, ec)) {
+    CRANE_ERROR("Freezer cgroup path '{}' does not exist: {}",
+                freezer_path.string(), ec.message());
     return false;
   }
 
@@ -948,25 +940,35 @@ bool CgroupManager::ThawCgroupByPath(const std::string &cg_path) {
 bool CgroupManager::FreezeUserCgroupsUnderJob(
     const std::string &job_cg_path) {
   CRANE_DEBUG("Freezing user cgroups under job: {}", job_cg_path);
+  std::filesystem::path job_cg_iter_path = job_cg_path;
   std::error_code ec;
-  if (!std::filesystem::exists(job_cg_path, ec)) {
-    CRANE_WARN("Job cgroup path '{}' does not exist for freeze",
-               job_cg_path);
+  if (!IsCgV2()) {
+    job_cg_iter_path =
+        CgConstant::kSystemCgPathPrefix /
+        CgConstant::GetControllerStringView(
+            CgConstant::Controller::MEMORY_CONTROLLER) /
+        std::filesystem::relative(job_cg_path, CgConstant::kSystemCgPathPrefix);
+  }
+
+  if (!std::filesystem::exists(job_cg_iter_path, ec)) {
+    CRANE_WARN("Job cgroup path '{}' does not exist for freeze", job_cg_path);
     return false;
   }
+
   bool all_ok = true;
-  std::filesystem::directory_iterator dir_it(job_cg_path, ec);
+  std::filesystem::directory_iterator dir_it(job_cg_iter_path, ec);
   if (ec) {
     CRANE_ERROR("Failed to create directory iterator for '{}': {}",
-                job_cg_path, ec.message());
+                job_cg_iter_path.string(), ec.message());
     return false;
   }
   for (auto &entry : dir_it) {
     if (!entry.is_directory(ec)) continue;
     std::string name = entry.path().filename().string();
     if (name.find(CgConstant::kStepCgNamePrefix) != 0) continue;
-    auto user_path = entry.path() / "user";
-    if (!std::filesystem::exists(user_path, ec)) continue;
+    auto user_iter_path = entry.path() / "user";
+    if (!std::filesystem::exists(user_iter_path, ec)) continue;
+    auto user_path = std::filesystem::path(job_cg_path) / name / "user";
     if (!FreezeCgroupByPath(user_path.string())) {
       CRANE_ERROR("Failed to freeze user cgroup: {}",
                   user_path.string());
@@ -979,25 +981,35 @@ bool CgroupManager::FreezeUserCgroupsUnderJob(
 bool CgroupManager::ThawUserCgroupsUnderJob(
     const std::string &job_cg_path) {
   CRANE_DEBUG("Thawing user cgroups under job: {}", job_cg_path);
+  std::filesystem::path job_cg_iter_path = job_cg_path;
   std::error_code ec;
-  if (!std::filesystem::exists(job_cg_path, ec)) {
-    CRANE_WARN("Job cgroup path '{}' does not exist for thaw",
-               job_cg_path);
+  if (!IsCgV2()) {
+    job_cg_iter_path =
+        CgConstant::kSystemCgPathPrefix /
+        CgConstant::GetControllerStringView(
+            CgConstant::Controller::MEMORY_CONTROLLER) /
+        std::filesystem::relative(job_cg_path, CgConstant::kSystemCgPathPrefix);
+  }
+
+  if (!std::filesystem::exists(job_cg_iter_path, ec)) {
+    CRANE_WARN("Job cgroup path '{}' does not exist for thaw", job_cg_path);
     return false;
   }
+
   bool all_ok = true;
-  std::filesystem::directory_iterator dir_it(job_cg_path, ec);
+  std::filesystem::directory_iterator dir_it(job_cg_iter_path, ec);
   if (ec) {
     CRANE_ERROR("Failed to create directory iterator for '{}': {}",
-                job_cg_path, ec.message());
+                job_cg_iter_path.string(), ec.message());
     return false;
   }
   for (auto &entry : dir_it) {
     if (!entry.is_directory(ec)) continue;
     std::string name = entry.path().filename().string();
     if (name.find(CgConstant::kStepCgNamePrefix) != 0) continue;
-    auto user_path = entry.path() / "user";
-    if (!std::filesystem::exists(user_path, ec)) continue;
+    auto user_iter_path = entry.path() / "user";
+    if (!std::filesystem::exists(user_iter_path, ec)) continue;
+    auto user_path = std::filesystem::path(job_cg_path) / name / "user";
     if (!ThawCgroupByPath(user_path.string())) {
       CRANE_ERROR("Failed to thaw user cgroup: {}",
                   user_path.string());
