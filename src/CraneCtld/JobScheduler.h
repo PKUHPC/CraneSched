@@ -809,10 +809,10 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
-  // Resolve a parent job_id + array_job_ids to the actual child job_ids.
-  std::vector<job_id_t> ResolveArrayChildren(
+  // Resolve a parent job_id + array_task_ids to the actual child job_ids.
+  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
       job_id_t parent_id,
-      const google::protobuf::RepeatedField<uint32_t>& array_job_ids);
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
@@ -1037,19 +1037,9 @@ class JobScheduler {
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
-  // Expand an array parent into individual child tasks.
-  // Called from ScheduleThread_ while holding m_pending_job_map_mtx_.
-  void ExpandArrayParent_(JobInCtld* parent);
-
-  // Check if an array parent has been expanded by checking if the first child
-  // exists. Must be called while holding m_pending_job_map_mtx_.
-  bool IsArrayExpanded_(const JobInCtld* parent) const {
-    if (!parent->IsArrayParent() || parent->FirstChildJobId() == 0) {
-      return false;
-    }
-    return m_pending_job_map_.find(parent->FirstChildJobId()) !=
-           m_pending_job_map_.end();
-  }
+  // Persist a parent's expanded array children and insert them into the
+  // pending map. Must be called while holding m_pending_job_map_mtx_.
+  bool MaterializeArrayChildrenToPendingMap_(JobInCtld* parent);
 
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();

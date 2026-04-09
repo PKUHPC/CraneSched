@@ -23,8 +23,8 @@
 learning_rates=(0.001 0.005 0.01 0.05 0.1 0.5 1.0 2.0 5.0 10.0)
 
 # 获取当前任务的参数
-# 注意：作业数组的实现可能有所不同
-param_index=$(( ($CRANE_JOB_ID % 10) ))
+# 当前数组任务索引会被显式导出
+param_index=${CRANE_ARRAY_TASK_ID}
 learning_rate=${learning_rates[$param_index]}
 
 echo "Testing with learning_rate=$learning_rate"

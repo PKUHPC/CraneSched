@@ -240,13 +240,13 @@ class EmbeddedDbClient {
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
-  bool AppendJobsToPendingAndAdvanceJobIds(const std::vector<JobInCtld*>& jobs);
-
-  // Persist child jobs for an array parent using the IDs pre-reserved on the
-  // parent in embedded DB. Does NOT advance the global ID counters.
-  // Also updates the parent's runtime attr to mark it as expanded.
-  bool AppendChildJobsToDb(const std::vector<JobInCtld*>& jobs,
-                           JobInCtld* parent);
+  // Assign fresh IDs to jobs, persist them into embedded DB, and advance the
+  // global job counters. When `runtime_attr_job_to_update` is provided, its
+  // runtime attr is updated in the same variable-db transaction after the new
+  // job IDs are assigned.
+  bool AppendJobsToPendingAndAdvanceJobIds(
+      const std::vector<JobInCtld*>& jobs,
+      JobInCtld* runtime_attr_job_to_update = nullptr);
 
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 

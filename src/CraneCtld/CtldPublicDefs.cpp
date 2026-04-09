@@ -547,6 +547,14 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.at(craned_id));
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    job_to_d.set_array_job_id(array_meta->parent_job_id);
+    job_to_d.set_array_task_id(array_meta->task_id);
+    job_to_d.set_array_task_count(array_meta->task_count);
+    job_to_d.set_array_task_min(array_meta->task_min);
+    job_to_d.set_array_task_max(array_meta->task_max);
+    job_to_d.set_array_task_step(array_meta->task_step);
+  }
   return job_to_d;
 }
 
@@ -596,6 +604,11 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
+
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    step_to_d.set_array_job_id(array_meta->parent_job_id);
+    step_to_d.set_array_task_id(array_meta->task_id);
+  }
 
   return step_to_d;
 }
@@ -1187,6 +1200,11 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     step_to_d.set_array_task_id(StepToCtld().array_task_id());
   }
 
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    step_to_d.set_array_job_id(array_meta->parent_job_id);
+    step_to_d.set_array_task_id(array_meta->task_id);
+  }
+
   return step_to_d;
 }
 
@@ -1597,6 +1615,91 @@ void JobInCtld::SetParentJobId(job_id_t val) {
   runtime_attr.set_parent_job_id(val);
 }
 
+std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
+  if (!IsArrayChild() || !parent_job_id.has_value() ||
+      !job_to_ctld.has_array_task_id() ||
+      !job_to_ctld.has_array_index_start() ||
+      !job_to_ctld.has_array_index_end()) {
+    return std::nullopt;
+  }
+
+  uint32_t task_step = job_to_ctld.has_array_index_stride()
+                           ? job_to_ctld.array_index_stride()
+                           : 1;
+  if (task_step == 0) task_step = 1;
+
+  return ArrayTaskMeta{parent_job_id.value(),
+                       job_to_ctld.array_task_id(),
+                       ArrayTaskCount(),
+                       job_to_ctld.array_index_start(),
+                       job_to_ctld.array_index_end(),
+                       task_step};
+}
+
+std::vector<std::unique_ptr<JobInCtld>> JobInCtld::CreateExpandedArrayChildren()
+    const {
+  std::vector<std::unique_ptr<JobInCtld>> children;
+  if (!IsArrayParent()) {
+    return children;
+  }
+
+  uint32_t array_start = job_to_ctld.array_index_start();
+  uint32_t array_stride = job_to_ctld.has_array_index_stride()
+                              ? job_to_ctld.array_index_stride()
+                              : 1;
+  if (array_stride == 0) array_stride = 1;
+
+  uint32_t array_task_count = ArrayTaskCount();
+  children.reserve(array_task_count);
+  for (uint32_t i = 0; i < array_task_count; ++i) {
+    auto child = std::make_unique<JobInCtld>();
+
+    child->SetFieldsByJobToCtld(job_to_ctld);
+    child->MutableJobToCtld()->set_array_task_id(array_start +
+                                                 i * array_stride);
+    child->SetStatus(crane::grpc::Pending);
+    child->SetSubmitTime(SubmitTime());
+    child->SetParentJobId(JobId());
+
+    children.push_back(std::move(child));
+  }
+
+  return children;
+}
+
+std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
+    const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const {
+  std::vector<job_id_t> result;
+  if (!IsArrayParent() || FirstChildJobId() == 0 ||
+      !job_to_ctld.has_array_index_start() ||
+      !job_to_ctld.has_array_index_end()) {
+    return result;
+  }
+
+  uint32_t array_start = job_to_ctld.array_index_start();
+  uint32_t array_stride = job_to_ctld.has_array_index_stride()
+                              ? job_to_ctld.array_index_stride()
+                              : 1;
+  if (array_stride == 0) array_stride = 1;
+
+  std::unordered_set<uint32_t> seen;
+  for (uint32_t task_id : array_task_ids) {
+    if (task_id < array_start) continue;
+
+    uint32_t diff = task_id - array_start;
+    if (diff % array_stride != 0) continue;
+
+    uint32_t offset = diff / array_stride;
+    if (offset >= ArrayTaskCount()) continue;
+
+    if (seen.insert(task_id).second) {
+      result.push_back(FirstChildJobId() + offset);
+    }
+  }
+
+  return result;
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1790,9 +1893,11 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   if (runtime_attr.has_first_child_job_id()) {
     first_child_job_id = runtime_attr.first_child_job_id();
   }
+  if (runtime_attr.has_first_child_job_db_id()) {
+    first_child_job_db_id = runtime_attr.first_child_job_db_id();
+  }
   if (runtime_attr.has_array_expanded()) {
     array_expanded = runtime_attr.array_expanded();
-  }
   }
 }
 
@@ -1826,11 +1931,12 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
 
   job_info->set_submit_hostname(submit_hostname);
 
-  if (job_to_ctld.has_array_job_id()) {
-    job_info->set_array_job_id(job_to_ctld.array_job_id());
+  if (job_to_ctld.has_array_task_id()) {
+    job_info->set_array_task_id(job_to_ctld.array_task_id());
   }
   if (parent_job_id.has_value()) {
     job_info->set_parent_job_id(parent_job_id.value());
+    job_info->set_array_job_id(parent_job_id.value());
   }
 
   // Only pass container meta if it's a container step

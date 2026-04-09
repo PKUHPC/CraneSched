@@ -483,12 +483,12 @@ cbatch --array 0-2 test.sh
 ```
 ```text
 [root@cranetest01 zhouhao]# cbatch --array 0-2 cbatch_test.sh
-Job id allocated: 181, 180, 179.
+Submitted array job 179, array range [0-2].
 ```
 
 Notes:
 - `--array` and `--repeat` are mutually exclusive.
-- `%a` can be used in output/error file patterns as the array index (for example: `-o out_%a_%j.log`).
+- Array jobs expose the parent array job ID and the current task index separately.
 
 ## Environment Variables
 
@@ -497,8 +497,23 @@ Common environment variables available in batch scripts:
 | Variable | Description |
 |----------|-------------|
 | **CRANE_JOB_NODELIST** | List of allocated nodes |
-| **%a** | Array task index (for use in file patterns) |
-| **%j** | Job ID (for use in file patterns) |
+| **CRANE_ARRAY_JOB_ID** | Parent/anchor job ID of the whole array |
+| **CRANE_ARRAY_TASK_ID** | Current array task index |
+| **CRANE_ARRAY_TASK_COUNT** | Total number of array tasks |
+| **CRANE_ARRAY_TASK_MIN** | Minimum array task index |
+| **CRANE_ARRAY_TASK_MAX** | Maximum array task index |
+| **CRANE_ARRAY_TASK_STEP** | Array task index stride |
+
+## File Pattern Placeholders
+
+The following placeholders are expanded in `-o/--output` and `-e/--error`
+patterns:
+
+| Placeholder | Description |
+|-------------|-------------|
+| **%A** | Parent/anchor job ID of the whole array. For non-array jobs, falls back to the current job ID |
+| **%a** | Current array task index. For non-array jobs, expands to `4294967294` |
+| **%j** | Current job ID |
 
 ## Multi-node Parallel Jobs
 

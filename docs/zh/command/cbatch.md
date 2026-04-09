@@ -481,12 +481,12 @@ cbatch --array 0-2 test.sh
 ```
 ```text
 [root@cranetest01 zhouhao]# cbatch --array 0-2 cbatch_test.sh
-Job id allocated: 181, 180, 179.
+Submitted array job 179, array range [0-2].
 ```
 
 说明：
 - `--array` 与 `--repeat` 互斥。
-- 可在输出文件模式中使用 `%a` 表示数组索引（示例：`-o out_%a_%j.log`）。
+- 数组作业会分别暴露整个数组的父作业 ID 与当前任务索引。
 
 ## 环境变量
 
@@ -495,8 +495,22 @@ Job id allocated: 181, 180, 179.
 | 变量 | 说明 |
 |------|------|
 | **CRANE_JOB_NODELIST** | 作业分配的节点列表 |
-| **%a** | 数组索引（用于文件模式） |
-| **%j** | 作业号（用于文件模式） |
+| **CRANE_ARRAY_JOB_ID** | 整个数组的父/锚点作业 ID |
+| **CRANE_ARRAY_TASK_ID** | 当前数组任务索引 |
+| **CRANE_ARRAY_TASK_COUNT** | 数组任务总数 |
+| **CRANE_ARRAY_TASK_MIN** | 数组最小任务索引 |
+| **CRANE_ARRAY_TASK_MAX** | 数组最大任务索引 |
+| **CRANE_ARRAY_TASK_STEP** | 数组任务索引步长 |
+
+## 文件模式占位符
+
+下列占位符会在 `-o/--output` 与 `-e/--error` 文件模式中展开：
+
+| 占位符 | 说明 |
+|--------|------|
+| **%A** | 整个数组的父/锚点作业 ID。对于非数组作业，回退为当前作业 ID |
+| **%a** | 当前数组任务索引。对于非数组作业，展开为 `4294967294` |
+| **%j** | 当前作业 ID |
 
 ## 多节点并行作业
 

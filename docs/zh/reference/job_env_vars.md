@@ -33,6 +33,42 @@ CraneSched 在执行作业时会自动设置一系列环境变量，供作业脚
 
 ---
 
+## 数组作业环境变量
+
+这些变量仅会在展开后的数组子任务中设置。
+
+### CRANE_ARRAY_JOB_ID
+- **说明**：整个数组的父/锚点作业 ID
+- **类型**：整数
+- **示例**：`1000`
+
+### CRANE_ARRAY_TASK_ID
+- **说明**：当前数组任务索引
+- **类型**：整数
+- **示例**：`7`
+
+### CRANE_ARRAY_TASK_COUNT
+- **说明**：数组中的任务总数
+- **类型**：整数
+- **示例**：`16`
+
+### CRANE_ARRAY_TASK_MIN
+- **说明**：数组最小任务索引
+- **类型**：整数
+- **示例**：`0`
+
+### CRANE_ARRAY_TASK_MAX
+- **说明**：数组最大任务索引
+- **类型**：整数
+- **示例**：`15`
+
+### CRANE_ARRAY_TASK_STEP
+- **说明**：数组索引使用的步长
+- **类型**：整数
+- **示例**：`1`
+
+---
+
 ## 作业步环境变量
 
 在作业步内执行时，CraneSched会设置额外的作业步特定环境变量。这些变量帮助脚本和程序区分是作为独立作业运行还是作为作业内的作业步运行。
@@ -148,6 +184,8 @@ CraneSched 在执行作业时会自动设置一系列环境变量，供作业脚
 #SBATCH --time=01:00:00
 
 echo "作业 ID: $CRANE_JOB_ID"
+echo "数组作业 ID: ${CRANE_ARRAY_JOB_ID:-N/A}"
+echo "数组任务索引: ${CRANE_ARRAY_TASK_ID:-N/A}"
 echo "作业名称: $CRANE_JOB_NAME"
 echo "节点列表: $CRANE_JOB_NODELIST"
 echo "节点数量: $CRANE_JOB_NUM_NODES"

@@ -169,7 +169,8 @@ message Signal {
     NONE = 0;
     // (B) Send the signal only to the batch shell, not to other job steps.
     BATCH_ONLY = 1;
-    // (R) Allow this job to overlap with a reservation that has MaxStartDelay set
+    // (R) Allow this job to overlap with a reservation that has MaxStartDelay
+    // set
     RESERVATION_OVERLAP = 2;
   }
   SignalFlag signal_flag = 3;
@@ -249,8 +250,8 @@ message JobToCtld {
   optional uint32 array_index_start = 53;
   optional uint32 array_index_end = 54;
   optional uint32 array_index_stride = 56;
-  // The concrete index of this job after expansion.
-  optional uint32 array_job_id = 55;
+  // The concrete array task index of this job after expansion.
+  optional uint32 array_task_id = 55;
 }
 
 message JobInEmbeddedDb {
@@ -291,12 +292,16 @@ message RuntimeAttrOfJob {
   // If set, this job is an expanded array task.
   optional uint32 parent_job_id = 25;
 
-  // For array parents: the first child's pre-allocated job_id.
+  // For array parents: the first expanded child's job_id.
   // Children IDs are sequential: first_child_job_id, first_child_job_id+1, ...
   optional uint32 first_child_job_id = 26;
 
+  // For array parents: the first expanded child's job_db_id.
+  // Children DB IDs are sequential starting from first_child_job_db_id.
+  optional int64 first_child_job_db_id = 27;
+
   // For array parents: whether the array has been expanded into children.
-  optional bool array_expanded = 27;
+  optional bool array_expanded = 28;
 }
 
 message StepToCtld {
@@ -398,6 +403,15 @@ message JobToD {
   StepToD daemon_step = 8;
 
   string name = 9;
+
+  // Array metadata propagated only for expanded array children.
+  // array_job_id is the parent/anchor job ID of the whole array.
+  optional uint32 array_job_id = 10;
+  optional uint32 array_task_id = 11;
+  optional uint32 array_task_count = 12;
+  optional uint32 array_task_min = 13;
+  optional uint32 array_task_max = 14;
+  optional uint32 array_task_step = 15;
 }
 
 enum StepType {
@@ -427,8 +441,10 @@ message StepToD {
   // If this step is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this step is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
-  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time =
+      14;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time =
+      15;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
 
   map<string, string> env = 17;
@@ -455,14 +471,18 @@ message StepToD {
   repeated Signal signals = 32;
   google.protobuf.Timestamp deadline_time = 33;
 
-  optional uint32 array_job_id = 35;
-
-  // task_node_list[task_id] = index of the node in nodelist that owns this task.
-  // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
+  // task_node_list[task_id] = index of the node in nodelist that owns this
+  // task. Size equals ntasks. Provides the authoritative task_id -> node_idx
+  // mapping.
   repeated uint32 task_node_list = 34;
 
   IoMeta io_meta = 35;
   string sh_script = 36;
+
+  // Array metadata propagated only for expanded array children.
+  // array_job_id is the parent/anchor job ID of the whole array.
+  optional uint32 array_job_id = 37;
+  optional uint32 array_task_id = 38;
 }
 
 message JobStepsToD {
@@ -471,13 +491,9 @@ message JobStepsToD {
   map<uint32, JobStatus> step_status = 3;
 }
 
-message JobStepIds {
-  repeated uint32 steps = 1;
-}
+message JobStepIds { repeated uint32 steps = 1; }
 
-message ArrayJobIds {
-  repeated uint32 array_job_ids = 1;
-}
+message ArrayTaskIds { repeated uint32 array_task_ids = 1; }
 
 message IoMeta {
   // Append mode for output and error files
@@ -647,10 +663,11 @@ message JobInfo {
     string craned_list = 36;
   }
 
-  // The time of different nodes across the whole cluster might not always be synchronized.
-  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
-  // a negative elapsed time might occur.
-  // To avoid this, the elapsed time of a job is calculated on the CraneCtld side.
+  // The time of different nodes across the whole cluster might not always be
+  // synchronized. If the time on the front end node is more than several
+  // seconds ahead of the CraneCtld node, a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a job is calculated on the CraneCtld
+  // side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   bool exclusive = 39;
@@ -706,10 +723,11 @@ message StepInfo {
   uint32 exit_code = 33;
   string craned_list = 36;
 
-  // The time of different nodes across the whole cluster might not always be synchronized.
-  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
-  // a negative elapsed time might occur.
-  // To avoid this, the elapsed time of a step is calculated on the CraneCtld side.
+  // The time of different nodes across the whole cluster might not always be
+  // synchronized. If the time on the front end node is more than several
+  // seconds ahead of the CraneCtld node, a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a step is calculated on the CraneCtld
+  // side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
@@ -800,28 +818,32 @@ enum ErrCode {
   ERR_INVALID_UID = 1;      // Invalid UID passed
   ERR_INVALID_OP_USER = 2;  // Invalid operation user
   ERR_INVALID_USER = 3;     // Invalid user
-  ERR_PERMISSION_USER = 4;  // User permissions too low, no permission to operate
+  ERR_PERMISSION_USER =
+      4;  // User permissions too low, no permission to operate
 
   ERR_BLOCKED_USER = 5;
-  ERR_USER_ALREADY_EXISTS = 6;            // User duplicate account insertion
-  ERR_USER_ACCESS_TO_ACCOUNT_DENIED = 7;  // User does not have permission for the account
-  ERR_INVALID_ADMIN_LEVEL = 8;            // Invalid permission level
-  ERR_USER_ACCOUNT_MISMATCH = 9;          // User does not belong to the account
+  ERR_USER_ALREADY_EXISTS = 6;  // User duplicate account insertion
+  ERR_USER_ACCESS_TO_ACCOUNT_DENIED =
+      7;                        // User does not have permission for the account
+  ERR_INVALID_ADMIN_LEVEL = 8;  // Invalid permission level
+  ERR_USER_ACCOUNT_MISMATCH = 9;  // User does not belong to the account
 
   ERR_NO_ACCOUNT_SPECIFIED = 10;
   ERR_INVALID_ACCOUNT = 11;         // Invalid account
   ERR_ACCOUNT_ALREADY_EXISTS = 12;  // Duplicate account insertion
   ERR_INVALID_PARENT_ACCOUNT = 13;  // Invalid parent account
-  ERR_ACCOUNT_HAS_CHILDREN = 14;    // Account has child nodes，cannot be deleted.
+  ERR_ACCOUNT_HAS_CHILDREN = 14;  // Account has child nodes，cannot be deleted.
 
   ERR_BLOCKED_ACCOUNT = 15;
-  ERR_INVALID_PARTITION = 16;                 // Invalid partition, partition does not exist
-  ERR_PARTITION_MISSING = 17;                 // Account/user does not include this partition
-  ERR_PARTITION_ALREADY_EXISTS = 18;          // Account/user duplicate insertion
-  ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19;  // Parent account does not include this partition
+  ERR_INVALID_PARTITION = 16;  // Invalid partition, partition does not exist
+  ERR_PARTITION_MISSING = 17;  // Account/user does not include this partition
+  ERR_PARTITION_ALREADY_EXISTS = 18;  // Account/user duplicate insertion
+  ERR_PARENT_ACCOUNT_PARTITION_MISSING =
+      19;  // Parent account does not include this partition
 
   ERR_USER_EMPTY_PARTITION = 20;  // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as child nodes contain this partition.
+  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as
+                                  // child nodes contain this partition.
   ERR_HAS_NO_QOS_IN_PARTITION = 22;
   ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
   ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
@@ -832,17 +854,25 @@ enum ErrCode {
   ERR_TIME_LIMIT = 28;             // Invalid time value
   ERR_QOS_MISSING = 29;            // Account/user does not include this QoS.
 
-  ERR_QOS_ALREADY_EXISTS = 30;          // Account/user duplicate insertion.
-  ERR_PARENT_ACCOUNT_QOS_MISSING = 31;  // Parent account does not include this QoS.
-  ERR_SET_ALLOWED_QOS = 32;             // QoS is the default QoS, but not found in the new QoS list.
-  ERR_DEFAULT_QOS_NOT_INHERITED = 33;   // Default QoS is not in the allowed QoS list
-  ERR_DUPLICATE_DEFAULT_QOS = 34;       // Duplicate default QoS setting
+  ERR_QOS_ALREADY_EXISTS = 30;  // Account/user duplicate insertion.
+  ERR_PARENT_ACCOUNT_QOS_MISSING =
+      31;  // Parent account does not include this QoS.
+  ERR_SET_ALLOWED_QOS =
+      32;  // QoS is the default QoS, but not found in the new QoS list.
+  ERR_DEFAULT_QOS_NOT_INHERITED =
+      33;                          // Default QoS is not in the allowed QoS list
+  ERR_DUPLICATE_DEFAULT_QOS = 34;  // Duplicate default QoS setting
 
-  ERR_CHILD_HAS_DEFAULT_QOS = 35;  // Failed to delete the account QoS as child nodes have set it as the default QoS.
-  ERR_SET_ACCOUNT_QOS = 36;        // QoS is used by some descendant node or itself of the account.
-  ERR_SET_DEFAULT_QOS = 37;        // Qos not in allowed qos list or is already the default qos
-  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  //  // QoS cannot be directly deleted when it is set as the default QoS.
-  ERR_UPDATE_DATABASE = 39;                  // Database update failed
+  ERR_CHILD_HAS_DEFAULT_QOS = 35;  // Failed to delete the account QoS as child
+                                   // nodes have set it as the default QoS.
+  ERR_SET_ACCOUNT_QOS =
+      36;  // QoS is used by some descendant node or itself of the account.
+  ERR_SET_DEFAULT_QOS =
+      37;  // Qos not in allowed qos list or is already the default qos
+  ERR_DEFAULT_QOS_MODIFICATION_DENIED =
+      38;  //  // QoS cannot be directly deleted when it is set as the default
+           //  QoS.
+  ERR_UPDATE_DATABASE = 39;  // Database update failed
 
   ERR_GENERIC_FAILURE = 40;
   ERR_NO_RESOURCE = 41;
@@ -876,8 +906,10 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
-  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
-  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
+  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed
+                                 // account list for the partition.
+  ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to
+                            // the deny list for the partition.
   ERR_EBPF = 69;
 
   ERR_SUPERVISOR = 70;
@@ -892,10 +924,13 @@ enum ErrCode {
   ERR_LICENSE_LEGAL_FAILED = 78;
   ERR_INVALID_JOB_ID = 79;
 
-  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
-  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
-  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
-  ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
+  ERR_CRI_GENERIC = 80;   // CRI runtime returns error. For other errors in
+                          // Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81;  // CRI support is disabled in the cluster.
+  ERR_CRI_CONTAINER_NOT_READY =
+      82;  // Job/step is pending or container is not ready.
+  ERR_CRI_MULTIPLE_NODES =
+      83;  // Requested CRI operation is not supported in multi-node steps.
 
   ERR_INVALID_MEM_FORMAT = 84;  // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 85;     // Step resource request exceeds job resource.
@@ -984,15 +1019,17 @@ message AccountInfo {
   bool blocked = 10;
 }
 
-// Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
-//       and is ONLY used for communication between CraneCtld and cacctmgr command.
-//       If an user belongs to multiple accounts, There will be multiple `UserInfo`
-//       messages with `account` pointing to each account.
+// Note: UserInfo DIFFERS from the `User` struct in C++ code and database
+// representation
+//       and is ONLY used for communication between CraneCtld and cacctmgr
+//       command. If an user belongs to multiple accounts, There will be
+//       multiple `UserInfo` messages with `account` pointing to each account.
 //       For example, if a user (uid=1) belongs to accounts `1,2,3`,
-//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2),
-//       (uid=1, account=3).
-//       The c++ code and database representation use a Map<account name, AttrsInAccount> to contain
-//       in ONE UserInfo message all the information belonging to different accounts.
+//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1,
+//       account=2), (uid=1, account=3). The c++ code and database
+//       representation use a Map<account name, AttrsInAccount> to contain in
+//       ONE UserInfo message all the information belonging to different
+//       accounts.
 message UserInfo {
   enum AdminLevel {
     None = 0;
@@ -1071,9 +1108,7 @@ message CranedRemoteMeta {
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
-  message Steps {
-    repeated uint32 steps = 1;
-  }
+  message Steps { repeated uint32 steps = 1; }
   map<uint32, Steps> lost_steps = 6;
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;

@@ -958,7 +958,8 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
 }
 
 bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
-    const std::vector<JobInCtld*>& jobs) {
+    const std::vector<JobInCtld*>& jobs,
+    JobInCtld* runtime_attr_job_to_update) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -977,17 +978,6 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     job->SetJobId(job_id++);
     job->SetJobDbId(job_db_id++);
 
-    // For array parents, reserve extra IDs for children and record
-    // the first child's job_id/job_db_id.
-    if (job->IsArrayParent()) {
-      uint32_t array_job_count = job->ArrayJobCount();
-      job->SetFirstChildJobId(job_id);
-      job->SetFirstChildJobDbId(job_db_id);
-      // Advance counters to reserve child IDs.
-      job_id += array_job_count;
-      job_db_id += array_job_count;
-    }
-
     result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                               GetFixedDbEntryName_(job->JobDbId()),
                               &job->JobToCtld());
@@ -1003,7 +993,23 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
 
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
-  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
+  job_id_t old_first_child_job_id = 0;
+  job_db_id_t old_first_child_job_db_id = 0;
+  if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+    old_first_child_job_id = runtime_attr_job_to_update->FirstChildJobId();
+    old_first_child_job_db_id = runtime_attr_job_to_update->FirstChildJobDbId();
+    runtime_attr_job_to_update->SetFirstChildJobId(jobs.front()->JobId());
+    runtime_attr_job_to_update->SetFirstChildJobDbId(jobs.front()->JobDbId());
+  }
+
+  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) {
+    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+      runtime_attr_job_to_update->SetFirstChildJobDbId(
+          old_first_child_job_db_id);
+    }
+    return false;
+  }
 
   for (const auto& job : jobs) {
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
@@ -1014,6 +1020,26 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
           "Failed to store the variable data of "
           "job id: {} / job db id: {}.",
           job->JobId(), job->JobDbId());
+      if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+        runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+        runtime_attr_job_to_update->SetFirstChildJobDbId(
+            old_first_child_job_db_id);
+      }
+      return false;
+    }
+  }
+
+  if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+    result = StoreTypeIntoDb_(
+        m_variable_db_.get(), txn_id,
+        GetVariableDbEntryName_(runtime_attr_job_to_update->JobDbId()),
+        &runtime_attr_job_to_update->RuntimeAttr());
+    if (!result) {
+      CRANE_ERROR("Failed to update runtime attr of job #{}.",
+                  runtime_attr_job_to_update->JobId());
+      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+      runtime_attr_job_to_update->SetFirstChildJobDbId(
+          old_first_child_job_db_id);
       return false;
     }
   }
@@ -1022,6 +1048,11 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_id.");
+    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+      runtime_attr_job_to_update->SetFirstChildJobDbId(
+          old_first_child_job_db_id);
+    }
     return false;
   }
 
@@ -1029,81 +1060,24 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_db_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_db_id.");
+    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+      runtime_attr_job_to_update->SetFirstChildJobDbId(
+          old_first_child_job_db_id);
+    }
     return false;
   }
-  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
+  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) {
+    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
+      runtime_attr_job_to_update->SetFirstChildJobDbId(
+          old_first_child_job_db_id);
+    }
+    return false;
+  }
 
   s_next_job_id_ = job_id;
   s_next_job_db_id_ = job_db_id;
-
-  return true;
-}
-
-bool EmbeddedDbClient::AppendChildJobsToDb(const std::vector<JobInCtld*>& jobs,
-                                           JobInCtld* parent) {
-  txn_id_t txn_id;
-  std::expected<void, DbErrorCode> result;
-
-  if (!parent) {
-    CRANE_ERROR("AppendChildJobsToDb requires a valid array parent.");
-    return false;
-  }
-
-  job_id_t first_child_job_id = parent->FirstChildJobId();
-  if (first_child_job_id == 0) {
-    CRANE_ERROR("Array parent job #{} is missing first_child_job_id.",
-                parent->JobId());
-    return false;
-  }
-
-  job_db_id_t first_child_job_db_id = parent->FirstChildJobDbId();
-  if (first_child_job_db_id == 0) {
-    // Compatibility fallback for array parents persisted before
-    // first_child_job_db_id was stored explicitly.
-    first_child_job_db_id = parent->JobDbId() + 1;
-  }
-
-  for (uint32_t i = 0; i < jobs.size(); ++i) {
-    jobs[i]->SetJobId(first_child_job_id + i);
-    jobs[i]->SetJobDbId(first_child_job_db_id + i);
-  }
-
-  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
-
-  for (const auto& job : jobs) {
-    result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
-                              GetFixedDbEntryName_(job->JobDbId()),
-                              &job->JobToCtld());
-    if (!result) {
-      CRANE_ERROR("Failed to store fixed data of child job id: {} / db id: {}.",
-                  job->JobId(), job->JobDbId());
-      return false;
-    }
-  }
-  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
-
-  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
-  for (const auto& job : jobs) {
-    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                              GetVariableDbEntryName_(job->JobDbId()),
-                              &job->RuntimeAttr());
-    if (!result) {
-      CRANE_ERROR(
-          "Failed to store variable data of child job id: {} / db id: {}.",
-          job->JobId(), job->JobDbId());
-      return false;
-    }
-  }
-  // Also update parent's runtime attr to mark it as expanded.
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(parent->JobDbId()),
-                            &parent->RuntimeAttr());
-  if (!result) {
-    CRANE_ERROR("Failed to update parent job #{} runtime attr.",
-                parent->JobId());
-    return false;
-  }
-  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   return true;
 }
