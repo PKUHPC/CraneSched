@@ -280,12 +280,12 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
         }
         meta.out_handle.pipe = ph;
 
-      ph->on<uvw::data_event>(
-          [this, task_id](uvw::data_event& e, uvw::pipe_handle&) {
-            if (e.length > 0) {
-              this->TaskOutPutForward(task_id, std::move(e.data), e.length);
-            }
-          });
+        ph->on<uvw::data_event>(
+            [this, task_id](uvw::data_event& e, uvw::pipe_handle&) {
+              if (e.length > 0) {
+                this->TaskOutPutForward(task_id, std::move(e.data), e.length);
+              }
+            });
 
         ph->on<uvw::end_event>([this, tid = task_id, on_finish](
                                    uvw::end_event&, uvw::pipe_handle& h) {
@@ -830,47 +830,47 @@ void CforedClient::AsyncSendRecvThread_() {
 
         m_mtx_.Lock();
 
-      if (reply.type() == StreamStepIOReply::STEP_X11_INPUT) {
-        x11_local_id_t x11_id = reply.payload_step_x11_input_req().local_id();
-        bool eof = reply.payload_step_x11_input_req().eof();
-        auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
-        if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
-          auto& x11_fd_info = x11_fd_info_it->second;
-          if (!x11_fd_info->x11_input_stopped)
-            x11_fd_info->x11_input_stopped =
-                !WriteStringToFd_(*msg, x11_fd_info->fd, eof);
-          if (eof) {
-            CRANE_DEBUG("[X11 #{}] Received EOF.", x11_id);
-            // User closed X11 connection at crun
-            x11_fd_info->sock->close();
-          }
-        } else {
-          CRANE_WARN("Trying to write X11 input to unknown x11_local_id: {}.",
-                     x11_id);
-        }
-      } else {
-        // CRANED_TASK_INPUT
-        bool eof = reply.payload_task_input_req().eof();
-        if (reply.payload_task_input_req().has_task_id()) {
-          task_id_t task_id = reply.payload_task_input_req().task_id();
-          auto fwd_meta_it = m_fwd_meta_map.find(task_id);
-          if (fwd_meta_it != m_fwd_meta_map.end()) {
-            auto& fwd_meta = fwd_meta_it->second;
-            if (!fwd_meta.input_stopped)
-              fwd_meta.input_stopped = !WriteStringToFd_(
-                  *msg, fwd_meta.stdin_write, !fwd_meta.pty && eof);
+        if (reply.type() == StreamStepIOReply::STEP_X11_INPUT) {
+          x11_local_id_t x11_id = reply.payload_step_x11_input_req().local_id();
+          bool eof = reply.payload_step_x11_input_req().eof();
+          auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
+          if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
+            auto& x11_fd_info = x11_fd_info_it->second;
+            if (!x11_fd_info->x11_input_stopped)
+              x11_fd_info->x11_input_stopped =
+                  !WriteStringToFd_(*msg, x11_fd_info->fd, eof);
+            if (eof) {
+              CRANE_DEBUG("[X11 #{}] Received EOF.", x11_id);
+              // User closed X11 connection at crun
+              x11_fd_info->sock->close();
+            }
           } else {
-            CRANE_WARN("Trying to write input to unknown task_id: {}.",
-                       task_id);
+            CRANE_WARN("Trying to write X11 input to unknown x11_local_id: {}.",
+                       x11_id);
           }
         } else {
-          for (auto& fwd_meta : m_fwd_meta_map | std::views::values) {
-            if (!fwd_meta.input_stopped)
-              fwd_meta.input_stopped = !WriteStringToFd_(
-                  *msg, fwd_meta.stdin_write, !fwd_meta.pty && eof);
+          // CRANED_TASK_INPUT
+          bool eof = reply.payload_task_input_req().eof();
+          if (reply.payload_task_input_req().has_task_id()) {
+            task_id_t task_id = reply.payload_task_input_req().task_id();
+            auto fwd_meta_it = m_fwd_meta_map.find(task_id);
+            if (fwd_meta_it != m_fwd_meta_map.end()) {
+              auto& fwd_meta = fwd_meta_it->second;
+              if (!fwd_meta.input_stopped)
+                fwd_meta.input_stopped = !WriteStringToFd_(
+                    *msg, fwd_meta.stdin_write, !fwd_meta.pty && eof);
+            } else {
+              CRANE_WARN("Trying to write input to unknown task_id: {}.",
+                         task_id);
+            }
+          } else {
+            for (auto& fwd_meta : m_fwd_meta_map | std::views::values) {
+              if (!fwd_meta.input_stopped)
+                fwd_meta.input_stopped = !WriteStringToFd_(
+                    *msg, fwd_meta.stdin_write, !fwd_meta.pty && eof);
+            }
           }
         }
-      }
 
         m_mtx_.Unlock();
 
@@ -927,7 +927,7 @@ void CforedClient::AsyncSendRecvThread_() {
       if (state == State::End) break;
     }
   }
-} 
+}
 
 bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                    bool signaled) {
@@ -981,8 +981,11 @@ void CforedClient::TaskOutPutForward(task_id_t task_id,
   m_task_fwd_req_queue_.enqueue(FwdRequest{
       .type = StreamStepIORequest::TASK_OUTPUT,
       .data =
-         
-          IOFwdRequest{.is_stdout = true, .task_id = task_id, .data = std::move(data), .len = len},
+
+          IOFwdRequest{.is_stdout = true,
+                       .task_id = task_id,
+                       .data = std::move(data),
+                       .len = len},
   });
 }
 void CforedClient::TaskErrOutPutForward(std::unique_ptr<char[]>&& data,
