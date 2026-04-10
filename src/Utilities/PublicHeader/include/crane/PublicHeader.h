@@ -102,7 +102,7 @@ inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
-inline constexpr size_t kMaxOutputQueueBytes = 10*1024*1024ULL;
+inline constexpr size_t kMaxOutputQueueBytes = 10 * 1024 * 1024ULL;
 
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
