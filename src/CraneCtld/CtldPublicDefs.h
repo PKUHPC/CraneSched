@@ -91,6 +91,7 @@ struct Config {
     uint32_t SchedulerRpcThreadPoolSize{0};
     uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
+    int32_t MaxRequeueCount{3};
   };
   CraneCtldConf CtldConf;
 
@@ -470,6 +471,10 @@ struct StepStatusChangeContext {
 
   // Jobs whose primary steps need batch AppendSteps after the main loop.
   std::vector<JobInCtld*> pending_append_steps_jobs;
+
+  // Jobs to requeue (collected during status change, processed after lock
+  // release)
+  std::vector<std::unique_ptr<JobInCtld>> requeue_jobs;
 };
 
 // Abstract interface of all the steps in Ctld.
@@ -812,6 +817,7 @@ struct JobInCtld {
   uint32_t exit_code{};
   bool held{false};
   bool cancel_requested{false};
+  bool requeue_requested{false};
   DependenciesInJob dependencies;
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
@@ -963,6 +969,17 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  void SetRequeueRequested(bool val) {
+    requeue_requested = val;
+    runtime_attr.set_requeue_requested(val);
+  }
+  bool RequeueRequested() const { return requeue_requested; }
+
+  int32_t RequeueCount() const { return requeue_count; }
+
+  bool ShouldRequeue() const;
+  void ResetForRequeue();
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

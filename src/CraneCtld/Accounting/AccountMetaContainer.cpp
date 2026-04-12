@@ -217,6 +217,21 @@ void AccountMetaContainer::FreeQosResource(const JobInCtld& job) {
                   meta_resource);
 }
 
+void AccountMetaContainer::FreeQosRunningResource(const JobInCtld& job) {
+  CRANE_DEBUG(
+      "Free QOS {} running resource for requeue job {} of user {} and "
+      "account {}.",
+      job.qos, job.JobId(), job.Username(), job.account);
+
+  MetaResource meta_resource{.resource = job.allocated_res_view,
+                             .jobs_count = 1,
+                             .submit_jobs_count = 0,
+                             .wall_time = job.time_limit};
+
+  DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                  meta_resource);
+}
+
 void AccountMetaContainer::UserAddJob(const std::string& username) {
   m_user_to_job_map_.try_emplace_l(
       username,
