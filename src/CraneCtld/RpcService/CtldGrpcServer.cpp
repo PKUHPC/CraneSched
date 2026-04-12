@@ -670,6 +670,20 @@ grpc::Status CraneCtldServiceImpl::CancelJob(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::RequeueJob(
+    grpc::ServerContext* context,
+    const crane::grpc::RequeueJobRequest* request,
+    crane::grpc::RequeueJobReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->operator_uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  *response = g_job_scheduler->RequeueJob(*request);
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ResetNextJobId(
     grpc::ServerContext* context,
     const crane::grpc::ResetNextJobIdRequest* request,

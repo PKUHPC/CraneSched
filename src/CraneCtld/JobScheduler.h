@@ -844,6 +844,9 @@ class JobScheduler {
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
 
+  crane::grpc::RequeueJobReply RequeueJob(
+      const crane::grpc::RequeueJobRequest& request);
+
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest& request);
 

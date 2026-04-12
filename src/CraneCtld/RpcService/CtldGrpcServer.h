@@ -251,6 +251,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                          const crane::grpc::CancelJobRequest *request,
                          crane::grpc::CancelJobReply *response) override;
 
+  grpc::Status RequeueJob(grpc::ServerContext *context,
+                          const crane::grpc::RequeueJobRequest *request,
+                          crane::grpc::RequeueJobReply *response) override;
+
   grpc::Status QueryJobsInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryJobsInfoRequest *request,

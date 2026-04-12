@@ -3121,6 +3121,64 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   return reply;
 }
 
+crane::grpc::RequeueJobReply JobScheduler::RequeueJob(
+    const crane::grpc::RequeueJobRequest& request) {
+  crane::grpc::RequeueJobReply reply;
+  uid_t operator_uid = request.operator_uid();
+
+  LockGuard running_guard(&m_running_job_map_mtx_);
+
+  for (auto job_id : request.job_ids()) {
+    auto it = m_running_job_map_.find(job_id);
+    if (it == m_running_job_map_.end()) {
+      (*reply.mutable_not_requeued_jobs())[job_id] = "Job not found or not running";
+      continue;
+    }
+
+    auto& job = it->second;
+
+    // Permission check
+    if (operator_uid != 0 && operator_uid != job->uid) {
+      auto result = g_account_manager->CheckIfUidHasPermOnUser(
+          operator_uid, job->Username(), false);
+      if (!result) {
+        (*reply.mutable_not_requeued_jobs())[job_id] = "Permission denied";
+        continue;
+      }
+    }
+
+    // Interactive jobs cannot be requeued
+    if (job->type == crane::grpc::Interactive) {
+      (*reply.mutable_not_requeued_jobs())[job_id] =
+          "Interactive jobs cannot be requeued";
+      continue;
+    }
+
+    // Check requeue count limit
+    if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount) {
+      (*reply.mutable_not_requeued_jobs())[job_id] = fmt::format(
+          "Requeue count {} exceeds max {}", job->RequeueCount(),
+          g_config.CtldConf.MaxRequeueCount);
+      continue;
+    }
+
+    // Mark for requeue and terminate via cancel queue
+    job->SetRequeueRequested(true);
+    auto primary_step = job->PrimaryStep();
+    if (primary_step) {
+      TerminateRunningStepNoLock_(primary_step);
+    } else {
+      CRANE_DEBUG("[Job #{}] No primary step when requeueing, may be completing.",
+                  job_id);
+    }
+
+    reply.add_requeued_jobs(job_id);
+    CRANE_INFO("[Job #{}] Requeue requested by uid {}.", job_id, operator_uid);
+  }
+
+  return reply;
+}
+
 crane::grpc::AttachContainerStepReply JobScheduler::AttachContainerStep(
     const crane::grpc::AttachContainerStepRequest& request) {
   crane::grpc::AttachContainerStepReply response;
@@ -4441,8 +4499,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       job->SetStatus(job_finished_status.value().first);
       job->SetExitCode(job_finished_status.value().second);
 
-      // Validate and adjust end_time to prevent it from exceeding time_limit
-      // by too much. Allow 5 seconds of floating tolerance.
       absl::Time end_time = absl::FromUnixSeconds(timestamp.seconds()) +
                             absl::Nanoseconds(timestamp.nanos());
       absl::Time expected_end_time = job->StartTime() + job->time_limit;
@@ -4457,16 +4513,19 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
       job->SetEndTime(end_time);
 
-      uint32_t job_exit_code = job_finished_status.value().second;
-      job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
-                                   end_time);
-      job->TriggerDependencyEvents(
-          crane::grpc::DependencyType::AFTER_OK,
-          job_exit_code == 0 ? end_time : absl::InfiniteFuture());
-      job->TriggerDependencyEvents(
-          crane::grpc::DependencyType::AFTER_NOT_OK,
-          job_exit_code != 0 ? end_time : absl::InfiniteFuture());
+      // Check if this job should be requeued
+      bool should_requeue = false;
+      if (job->RequeueRequested()) {
+        should_requeue = true;
+      } else if (job->requeue_if_failed &&
+                 job_finished_status.value().first !=
+                     crane::grpc::Completed &&
+                 job->RequeueCount() <
+                     g_config.CtldConf.MaxRequeueCount) {
+        should_requeue = true;
+      }
 
+      // Release resources from nodes
       for (CranedId const& craned_id : job->CranedIds()) {
         auto node_to_job_map_it = m_node_to_jobs_map_.find(craned_id);
         if (node_to_job_map_it == m_node_to_jobs_map_.end()) [[unlikely]] {
@@ -4485,11 +4544,48 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
       if (job->reservation != "")
         g_meta_container->FreeResourceFromResv(job->reservation, job->JobId());
-      g_account_meta_container->FreeQosResource(*job);
-      if (!job->licenses_count.empty())
-        g_licenses_manager->FreeLicense(job->licenses_count);
 
-      if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
+      if (should_requeue) {
+        // Requeue path: free running QoS (keep submit count), free licenses,
+        // don't trigger dependency events, don't move to MongoDB.
+        g_account_meta_container->FreeQosRunningResource(*job);
+        if (!job->licenses_count.empty())
+          g_licenses_manager->FreeLicense(job->licenses_count);
+
+        CRANE_INFO("[Job #{}] Requeueing (count: {}).", job_id,
+                   job->RequeueCount());
+        job->ResetForRequeue();
+
+        // Persist requeue_count to EmbeddedDB
+        g_embedded_db_client->UpdateRuntimeAttrOfJob(
+            0, job->JobDbId(), job->RuntimeAttr());
+
+        m_running_job_map_.erase(iter);
+        // Insert into pending queue directly (submit QoS is already allocated).
+        // Note: acquiring pending_mtx while holding running_mtx here.
+        // This is safe because CleanJobStatusChangeQueueCb_ only runs on a
+        // single thread and won't race with CancelPendingOrRunningJob.
+        {
+          LockGuard pending_guard(&m_pending_job_map_mtx_);
+          m_pending_job_map_.emplace(job->JobId(), std::move(job));
+        }
+      } else {
+        // Normal completion path
+        uint32_t job_exit_code = job_finished_status.value().second;
+        job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                                     end_time);
+        job->TriggerDependencyEvents(
+            crane::grpc::DependencyType::AFTER_OK,
+            job_exit_code == 0 ? end_time : absl::InfiniteFuture());
+        job->TriggerDependencyEvents(
+            crane::grpc::DependencyType::AFTER_NOT_OK,
+            job_exit_code != 0 ? end_time : absl::InfiniteFuture());
+
+        g_account_meta_container->FreeQosResource(*job);
+        if (!job->licenses_count.empty())
+          g_licenses_manager->FreeLicense(job->licenses_count);
+
+        if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
         g_thread_pool->detach_task(
             [job_id = job->JobId(), env_copy = job->env]() {
               RunPrologEpilogArgs run_epilog_ctld_args{
@@ -4520,11 +4616,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       context.job_raw_ptrs.insert(job.get());
       context.job_ptrs.emplace(std::move(job));
 
-      // As for now, job status change includes only
-      // Pending / Running -> Completed / Failed / Cancelled.
-      // It means all job status changes will put the job into mongodb,
-      // so we don't have any branch code here and just put it into mongodb.
       m_running_job_map_.erase(iter);
+      }  // end of normal completion path (else)
     }
   }
 

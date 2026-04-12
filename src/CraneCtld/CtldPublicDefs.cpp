@@ -1591,6 +1591,34 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+void JobInCtld::ResetForRequeue() {
+  requeue_count++;
+  runtime_attr.set_requeue_count(requeue_count);
+
+  requeue_requested = false;
+  cancel_requested = false;
+
+  m_daemon_step_.reset();
+  m_primary_step_.reset();
+  m_steps_.clear();
+  while (!pending_step_ids_.empty()) pending_step_ids_.pop();
+  step_res_avail_ = ResourceV2{};
+
+  craned_ids.clear();
+  executing_craned_ids.clear();
+  allocated_craneds_regex.clear();
+  nodes_alloc = 0;
+  allocated_res_view = ResourceView{};
+  pending_reason.clear();
+
+  SetStatus(crane::grpc::Pending);
+  SetExitCode(0);
+  SetPrimaryStepStatus(crane::grpc::JobStatus{});
+  SetPrimaryStepExitCode(0);
+  start_time = absl::Time{};
+  end_time = absl::Time{};
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1877,6 +1905,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
     (*mutable_env)[k] = v;
   }
   job_info->set_ntasks(ntasks);
+  job_info->set_requeue_count(requeue_count);
+  job_info->set_requeue_if_failed(requeue_if_failed);
 }
 
 int JobInCtld::SchedulePendingSteps(
