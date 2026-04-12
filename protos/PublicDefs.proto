@@ -246,9 +246,9 @@ message JobToCtld {
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
 
-  // Job array spec for this submission (inclusive range).
-  optional uint32 array_index_start = 53;
-  optional uint32 array_index_end = 54;
+  // Job array spec for this submission: [start-end:stride].
+  optional uint32 array_index_start = 53;  // inclusive
+  optional uint32 array_index_end = 54;    // inclusive
   optional uint32 array_index_stride = 56;
   // The concrete array task index of this job after expansion.
   optional uint32 array_task_id = 55;

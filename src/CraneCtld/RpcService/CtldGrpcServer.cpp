@@ -622,34 +622,13 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
 
-  const bool has_array_start = job_to_ctld.has_array_index_start();
-  const bool has_array_end = job_to_ctld.has_array_index_end();
-  const bool has_array_spec = has_array_start && has_array_end;
-
-  uint32_t array_start = 0;
-  uint32_t array_end = 0;
-  uint32_t array_stride = 1;
-  if (has_array_spec) {
-    array_start = job_to_ctld.array_index_start();
-    array_end = job_to_ctld.array_index_end();
-    if (job_to_ctld.has_array_index_stride()) {
-      array_stride = job_to_ctld.array_index_stride();
-    }
-    if (array_stride == 0) array_stride = 1;
-
-    const uint64_t range =
-        static_cast<uint64_t>(array_end) - static_cast<uint64_t>(array_start);
-    const uint64_t expected_count = range / array_stride + 1;
-    if (expected_count != static_cast<uint64_t>(job_count)) {
-      response->add_job_id_list(0);
-      response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
-      return grpc::Status::OK;
-    }
-  }
+  const bool has_array_spec =
+      job_to_ctld.has_array_index_start() && job_to_ctld.has_array_index_end();
 
   if (has_array_spec) {
     // Array job: submit ONE parent job. Expansion into individual tasks
     // happens at scheduling time in ScheduleThread_.
+    // Array parameter legality is checked in JobScheduler::CheckJobValidity.
     auto parent_job = std::make_unique<JobInCtld>();
     // Do NOT set array_task_id here - the parent represents the whole array.
     parent_job->SetFieldsByJobToCtld(job_to_ctld);
