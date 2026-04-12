@@ -959,7 +959,7 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
 
 bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     const std::vector<JobInCtld*>& jobs,
-    JobInCtld* runtime_attr_job_to_update) {
+    JobInCtld* array_parent_to_mark_expanded) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -993,20 +993,17 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
 
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
-  job_id_t old_first_child_job_id = 0;
-  job_db_id_t old_first_child_job_db_id = 0;
-  if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-    old_first_child_job_id = runtime_attr_job_to_update->FirstChildJobId();
-    old_first_child_job_db_id = runtime_attr_job_to_update->FirstChildJobDbId();
-    runtime_attr_job_to_update->SetFirstChildJobId(jobs.front()->JobId());
-    runtime_attr_job_to_update->SetFirstChildJobDbId(jobs.front()->JobDbId());
+  bool old_array_children_expanded = false;
+  if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+    old_array_children_expanded =
+        array_parent_to_mark_expanded->ArrayChildrenExpanded();
+    array_parent_to_mark_expanded->SetArrayChildrenExpanded(true);
   }
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) {
-    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-      runtime_attr_job_to_update->SetFirstChildJobDbId(
-          old_first_child_job_db_id);
+    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+          old_array_children_expanded);
     }
     return false;
   }
@@ -1020,26 +1017,24 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
           "Failed to store the variable data of "
           "job id: {} / job db id: {}.",
           job->JobId(), job->JobDbId());
-      if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-        runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-        runtime_attr_job_to_update->SetFirstChildJobDbId(
-            old_first_child_job_db_id);
+      if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+        array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+            old_array_children_expanded);
       }
       return false;
     }
   }
 
-  if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
+  if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
     result = StoreTypeIntoDb_(
         m_variable_db_.get(), txn_id,
-        GetVariableDbEntryName_(runtime_attr_job_to_update->JobDbId()),
-        &runtime_attr_job_to_update->RuntimeAttr());
+        GetVariableDbEntryName_(array_parent_to_mark_expanded->JobDbId()),
+        &array_parent_to_mark_expanded->RuntimeAttr());
     if (!result) {
       CRANE_ERROR("Failed to update runtime attr of job #{}.",
-                  runtime_attr_job_to_update->JobId());
-      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-      runtime_attr_job_to_update->SetFirstChildJobDbId(
-          old_first_child_job_db_id);
+                  array_parent_to_mark_expanded->JobId());
+      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+          old_array_children_expanded);
       return false;
     }
   }
@@ -1048,10 +1043,9 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_id.");
-    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-      runtime_attr_job_to_update->SetFirstChildJobDbId(
-          old_first_child_job_db_id);
+    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+          old_array_children_expanded);
     }
     return false;
   }
@@ -1060,18 +1054,16 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_db_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_db_id.");
-    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-      runtime_attr_job_to_update->SetFirstChildJobDbId(
-          old_first_child_job_db_id);
+    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+          old_array_children_expanded);
     }
     return false;
   }
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) {
-    if (runtime_attr_job_to_update != nullptr && !jobs.empty()) {
-      runtime_attr_job_to_update->SetFirstChildJobId(old_first_child_job_id);
-      runtime_attr_job_to_update->SetFirstChildJobDbId(
-          old_first_child_job_db_id);
+    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
+      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
+          old_array_children_expanded);
     }
     return false;
   }

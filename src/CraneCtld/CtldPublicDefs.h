@@ -875,15 +875,7 @@ struct JobInCtld {
   }
 
   // Returns true if this is an expanded array child.
-  bool IsArrayChild() const { return parent_job_id.has_value(); }
-
-  template <typename ChildExistsFn>
-  bool HasExpandedArrayChildren(const ChildExistsFn& child_exists) const {
-    if (!IsArrayParent() || FirstChildJobId() == 0) {
-      return false;
-    }
-    return child_exists(FirstChildJobId());
-  }
+  bool IsArrayChild() const { return array_job_id.has_value(); }
 
   uint32_t ArrayTaskCount() const {
     if (!job_to_ctld.has_array_index_start() ||
@@ -905,7 +897,7 @@ struct JobInCtld {
   }
 
   struct ArrayTaskMeta {
-    job_id_t parent_job_id;
+    job_id_t array_job_id;
     uint32_t task_id;
     uint32_t task_count;
     uint32_t task_min;
@@ -915,8 +907,6 @@ struct JobInCtld {
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
   std::vector<std::unique_ptr<JobInCtld>> CreateExpandedArrayChildren() const;
-  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
 
  private:
   /* ------------- [2] -------------
@@ -965,14 +955,10 @@ struct JobInCtld {
   ResourceV3 allocated_res;
 
   // Array job tracking fields.
-  // For array parents: the first expanded child's job_id.
-  job_id_t first_child_job_id{0};
-  // For array parents: the first expanded child's job_db_id.
-  job_db_id_t first_child_job_db_id{0};
-  // For array children: the parent array job's job_id.
-  std::optional<job_id_t> parent_job_id;
-  // Tracks whether an array parent has been expanded into child jobs.
-  bool array_expanded{false};
+  // For array children: the array parent/anchor job_id.
+  std::optional<job_id_t> array_job_id;
+  // For array parents: whether child jobs have been materialized.
+  bool array_children_expanded{false};
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
@@ -1096,18 +1082,10 @@ struct JobInCtld {
   bool CancelRequested() const { return cancel_requested; }
 
   // Array job tracking accessors
-  void SetFirstChildJobId(job_id_t val);
-  job_id_t FirstChildJobId() const { return first_child_job_id; }
-  void SetFirstChildJobDbId(job_db_id_t val);
-  job_db_id_t FirstChildJobDbId() const { return first_child_job_db_id; }
-
-  void SetParentJobId(job_id_t val);
-  std::optional<job_id_t> const& ParentJobId() const { return parent_job_id; }
-  void SetArrayExpanded(bool val) {
-    array_expanded = val;
-    runtime_attr.set_array_expanded(val);
-  }
-  bool ArrayExpanded() const { return array_expanded; }
+  void SetArrayJobId(job_id_t val);
+  std::optional<job_id_t> const& ArrayJobId() const { return array_job_id; }
+  void SetArrayChildrenExpanded(bool val);
+  bool ArrayChildrenExpanded() const { return array_children_expanded; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

@@ -241,12 +241,12 @@ class EmbeddedDbClient {
   // some operation fails, so we don't need anything like AbortTransaction here!
 
   // Assign fresh IDs to jobs, persist them into embedded DB, and advance the
-  // global job counters. When `runtime_attr_job_to_update` is provided, its
+  // global job counters. When `array_parent_to_mark_expanded` is provided, its
   // runtime attr is updated in the same variable-db transaction after the new
-  // job IDs are assigned.
+  // child jobs are assigned.
   bool AppendJobsToPendingAndAdvanceJobIds(
       const std::vector<JobInCtld*>& jobs,
-      JobInCtld* runtime_attr_job_to_update = nullptr);
+      JobInCtld* array_parent_to_mark_expanded = nullptr);
 
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 

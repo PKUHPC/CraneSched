@@ -809,9 +809,9 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
-  // Resolve a parent job_id + array_task_ids to the actual child job_ids.
+  // Resolve an array_job_id + array_task_ids to the actual child job_ids.
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
-      job_id_t parent_id,
+      job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
@@ -961,6 +961,13 @@ class JobScheduler {
   }
 
  private:
+  bool HasMaterializedArrayChildrenNoLock_(JobInCtld* parent);
+  bool HasActiveArrayChildrenNoLock_(job_id_t array_job_id) const;
+  JobInCtld* FindNextPendingArrayChildNoLock_(job_id_t array_job_id) const;
+  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
+      JobInCtld* parent,
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
+
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1038,7 +1045,7 @@ class JobScheduler {
   void ScheduleThread_();
 
   // Persist a parent's expanded array children and insert them into the
-  // pending map. Must be called while holding m_pending_job_map_mtx_.
+  // pending map. Must be called while holding both pending/running map locks.
   bool MaterializeArrayChildrenToPendingMap_(JobInCtld* parent);
 
   std::thread m_step_schedule_thread_;
