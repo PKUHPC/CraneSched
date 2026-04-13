@@ -943,20 +943,43 @@ bool ChangeChildCgroupsFreezerState(const std::string &cg_path, bool freeze) {
   }
 
   bool all_ok = true;
-  std::filesystem::directory_iterator dir_it(cg_iter_path, ec);
+  std::vector<std::filesystem::path> child_paths;
+  std::filesystem::recursive_directory_iterator dir_it(cg_iter_path, ec);
   if (ec) {
-    CRANE_ERROR("Failed to create directory iterator for '{}': {}",
+    CRANE_ERROR("Failed to create recursive directory iterator for '{}': {}",
                 cg_iter_path.string(), ec.message());
     return false;
   }
 
   for (auto &entry : dir_it) {
-    if (!entry.is_directory(ec)) continue;
+    bool is_directory = entry.is_directory(ec);
+    if (ec) {
+      CRANE_ERROR("Failed to inspect child cgroup under '{}': {}",
+                  cg_iter_path.string(), ec.message());
+      return false;
+    }
+    if (!is_directory) continue;
 
-    auto child_path = std::filesystem::path(cg_path) / entry.path().filename();
+    auto rel_path = std::filesystem::relative(entry.path(), cg_iter_path, ec);
+    if (ec) {
+      CRANE_ERROR("Failed to compute relative cgroup path for '{}': {}",
+                  entry.path().string(), ec.message());
+      return false;
+    }
+    child_paths.emplace_back(std::filesystem::path(cg_path) / rel_path);
+  }
+
+  std::ranges::sort(
+      child_paths, [freeze](const auto &lhs, const auto &rhs) {
+        auto lhs_depth = std::ranges::distance(lhs.begin(), lhs.end());
+        auto rhs_depth = std::ranges::distance(rhs.begin(), rhs.end());
+        return freeze ? lhs_depth > rhs_depth : lhs_depth < rhs_depth;
+      });
+
+  for (const auto &child_path : child_paths) {
     if (!ChangeFreezerStateByPath(child_path.string(), freeze)) {
-      CRANE_ERROR("Failed to {} child cgroup: {}", freeze ? "freeze" : "thaw",
-                  child_path.string());
+      CRANE_ERROR("Failed to {} descendant cgroup: {}",
+                  freeze ? "freeze" : "thaw", child_path.string());
       all_ok = false;
     }
   }
