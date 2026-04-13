@@ -2724,8 +2724,6 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     return;
   }
 
-  m_step_.oom_baseline_inited = false;
-
   // One-shot model: nothing to stop, just proceed to cleanup.
   auto err = task->Cleanup();
   if (err != CraneErrCode::SUCCESS) {
@@ -2747,6 +2745,7 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     status.final_status_on_termination = new_status;
 
   if (m_step_.AllTaskFinished()) {
+    m_step_.oom_baseline_inited = false;
     m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     DelSignalTimers_();
