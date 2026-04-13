@@ -333,11 +333,9 @@ bool PmixServer::InfoSet_(const Config& config,
   // Use the actual total task count, NOT node_tasks * node_num,
   // because tasks may not be evenly distributed across nodes.
   m_pmix_job_info_.task_num = step.task_node_list().size();
-  std::string hostname;
-  hostname.resize(256);  // Resize to ensure enough space for the hostname
+  std::string hostname(HOST_NAME_MAX + 1, '\0');
   if (gethostname(hostname.data(), hostname.size()) == 0) {
-    hostname.resize(
-        strlen(hostname.c_str()));  // Resize to actual length of hostname
+    hostname.resize(strlen(hostname.c_str()));
   } else {
     CRANE_ERROR("Failed to get hostname");
     return false;
@@ -403,9 +401,10 @@ bool PmixServer::InfoSet_(const Config& config,
       m_pmix_job_info_.cli_tmpdir_base =
           (std::filesystem::path(pmixlib_tmpdir) / "pmix.crane.cli").string();
       m_pmix_job_info_.cli_tmpdir =
-          fmt::format("{}/spmix_appdir_{}.{}.{}",
-                      m_pmix_job_info_.cli_tmpdir_base, m_pmix_job_info_.uid,
-                      m_pmix_job_info_.job_id, m_pmix_job_info_.step_id);
+          (std::filesystem::path(m_pmix_job_info_.cli_tmpdir_base) /
+           fmt::format("spmix_appdir_{}.{}.{}", m_pmix_job_info_.uid,
+                       m_pmix_job_info_.job_id, m_pmix_job_info_.step_id))
+              .string();
     }
   }
 

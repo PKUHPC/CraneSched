@@ -160,6 +160,9 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data,
   switch (m_state_) {
   case CollTreeState::SYNC:
     m_ts_ = std::chrono::steady_clock::now();
+    [[fallthrough]];  // SYNC → COLLECT: record start timestamp then accept the
+                      // contribution the same way an already-collecting node
+                      // would.
   case CollTreeState::COLLECT:
     break;
   case CollTreeState::DOWNFWD:
@@ -550,6 +553,8 @@ bool PmixCollTree::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
   switch (m_state_) {
   case CollTreeState::SYNC:
     m_ts_ = std::chrono::steady_clock::now();
+    [[fallthrough]];  // SYNC → COLLECT: record start timestamp then
+                      // validate seq and accept the child contribution.
   case CollTreeState::COLLECT:
     if (m_seq_ != seq) {
       CRANE_ERROR(

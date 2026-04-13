@@ -2702,7 +2702,7 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
 bool TaskManager::InitPmixPreFork() {
   if (m_step_.IsCrun() &&
       m_step_.GetStep().interactive_meta().mpi() == kMpiTypePmix) {
-    m_pmix_server_ = std::make_unique<pmix::PmixServer>();
+    auto pmix_server = std::make_unique<pmix::PmixServer>();
     pmix::Config pmix_config{
         .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
         .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
@@ -2711,7 +2711,11 @@ bool TaskManager::InitPmixPreFork() {
         .CraneScriptDir = g_config.CraneScriptDir,
         .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
 
-    if (!m_pmix_server_->Init(pmix_config, m_step_.GetStep())) return false;
+    // Only publish the server after Init() succeeds; a non-null but
+    // un-initialized m_pmix_server_ would let SetupFork() run on a
+    // broken server and cause UB / abort in child processes.
+    if (!pmix_server->Init(pmix_config, m_step_.GetStep())) return false;
+    m_pmix_server_ = std::move(pmix_server);
   }
 
   return true;
