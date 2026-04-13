@@ -138,8 +138,8 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
       status == StepStatus::Completing) {
     auto final_status = g_task_mgr->GetFinalTerminationStatus();
     g_task_mgr->ShutdownSupervisorAsync(
-        final_status.final_status_on_termination,
-        final_status.max_exit_code, final_status.final_reason_on_termination);
+        final_status.final_status_on_termination, final_status.max_exit_code,
+        final_status.final_reason_on_termination);
   } else if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
              IsFinishedStepStatus(status)) {
     g_task_mgr->ShutdownSupervisorAsync(status);
