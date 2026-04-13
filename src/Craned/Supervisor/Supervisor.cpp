@@ -157,7 +157,8 @@ int InitFromStdin(int argc, char** argv) {
       const auto& subid_conf = msg.container_config().subid();
       g_config.Container.SubId.Managed = subid_conf.managed();
       g_config.Container.SubId.UidMappings.clear();
-      g_config.Container.SubId.UidMappings.reserve(subid_conf.uid_mappings_size());
+      g_config.Container.SubId.UidMappings.reserve(
+          subid_conf.uid_mappings_size());
       for (const auto& mapping : subid_conf.uid_mappings()) {
         g_config.Container.SubId.UidMappings.push_back({
             .Id = mapping.id(),
@@ -167,7 +168,8 @@ int InitFromStdin(int argc, char** argv) {
         });
       }
       g_config.Container.SubId.GidMappings.clear();
-      g_config.Container.SubId.GidMappings.reserve(subid_conf.gid_mappings_size());
+      g_config.Container.SubId.GidMappings.reserve(
+          subid_conf.gid_mappings_size());
       for (const auto& mapping : subid_conf.gid_mappings()) {
         g_config.Container.SubId.GidMappings.push_back({
             .Id = mapping.id(),
