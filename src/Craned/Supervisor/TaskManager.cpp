@@ -44,20 +44,6 @@ using namespace std::chrono_literals;
 using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
-bool StepInstance::IsFinishedStatus(const StepStatus& status) {
-  switch (status) {
-  case StepStatus::Deadline:
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed:
-    return true;
-  default:
-    return false;
-  }
-}
-
 CraneErrCode StepInstance::Prepare() {
   if (!(IsCalloc() || IsContainer() || IsPod())) {
     auto sh_path =
@@ -265,6 +251,24 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 }
 
 void StepInstance::GotNewStatus(StepStatus new_status) {
+  if (IsFinishedStepStatus(new_status)) {
+    if (m_status_ == new_status) return;
+
+    if (m_status_ != StepStatus::Running &&
+        m_status_ != StepStatus::Completing &&
+        m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, m_status_.load());
+    }
+
+    m_status_ = new_status;
+    return;
+  }
+
   switch (new_status) {
   case StepStatus::Configuring:
   case StepStatus::Pending:
@@ -314,28 +318,6 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
-    break;
-  }
-
-  // Finished status
-  case StepStatus::Deadline:
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed: {
-    if (m_status_ == new_status) break;
-
-    if (m_status_ != StepStatus::Running &&
-        m_status_ != StepStatus::Completing &&
-        m_status_ != StepStatus::Starting &&
-        m_status_ != StepStatus::Configuring) {
-      CRANE_WARN(
-          "[Step {}.{}] Step status is not "
-          "Running/Completing/Starting/Configuring when receiving new finished "
-          "status {}, current status: {}.",
-          job_id, step_id, new_status, m_status_.load());
-    }
     break;
   }
 

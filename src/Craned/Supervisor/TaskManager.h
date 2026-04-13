@@ -130,8 +130,6 @@ class StepInstance {
   CraneErrCode Prepare();
   void CleanUp();
 
-  static bool IsFinishedStatus(const StepStatus& status);
-
   /*
   A Step can be classified from multiple perspectives:
 

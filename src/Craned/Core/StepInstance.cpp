@@ -45,11 +45,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supervisor_stub(supervisor_stub) {}
 
 void StepInstance::CleanUp() {
-  if (this->status != StepStatus::Completed &&
-      this->status != StepStatus::Failed &&
-      this->status != StepStatus::Cancelled &&
-      this->status != StepStatus::OutOfMemory &&
-      this->status != StepStatus::ExceedTimeLimit) {
+  if (!IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
         "[Step #{}.{}] Cleaning up a step which is not in finished status, "
         "current status: {}.",
@@ -458,6 +454,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 }
 
 void StepInstance::GotNewStatus(const StepStatus& new_status) {
+  if (IsFinishedStepStatus(new_status)) {
+    if (status != StepStatus::Running && status != StepStatus::Completing &&
+        status != StepStatus::Starting && status != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, this->status);
+    }
+
+    status = new_status;
+    return;
+  }
+
   switch (new_status) {
   case StepStatus::Configuring:
   case StepStatus::Pending:
@@ -505,23 +515,6 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
           job_id, step_id, this->status);
-    break;
-  }
-  // Finished status
-  case StepStatus::Deadline:
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed: {
-    if (status != StepStatus::Running && status != StepStatus::Completing &&
-        status != StepStatus::Starting && status != StepStatus::Configuring) {
-      CRANE_WARN(
-          "[Step {}.{}] Step status is not "
-          "Running/Completing/Starting/Configuring when receiving new finished "
-          "status {}, current status: {}.",
-          job_id, step_id, new_status, this->status);
-    }
     break;
   }
   default: {

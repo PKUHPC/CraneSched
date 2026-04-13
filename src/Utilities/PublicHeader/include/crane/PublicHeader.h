@@ -655,3 +655,18 @@ struct VariantVisitor : Ts... {
 
 template <class... Ts>
 VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
+
+[[nodiscard]] constexpr bool IsFinishedStepStatus(
+    crane::grpc::JobStatus status) noexcept {
+  switch (status) {
+  case crane::grpc::JobStatus::Deadline:
+  case crane::grpc::JobStatus::ExceedTimeLimit:
+  case crane::grpc::JobStatus::OutOfMemory:
+  case crane::grpc::JobStatus::Cancelled:
+  case crane::grpc::JobStatus::Failed:
+  case crane::grpc::JobStatus::Completed:
+    return true;
+  default:
+    return false;
+  }
+}
