@@ -400,8 +400,8 @@ void ParseContainerConfig(const YAML::Node& container_config) {
         };
 
         if (mapping.IdCount == 0) {
-          CRANE_ERROR("Container.SubId.{}[{}].IdCount must be > 0.",
-                      field_name, i);
+          CRANE_ERROR("Container.SubId.{}[{}].IdCount must be > 0.", field_name,
+                      i);
           std::exit(1);
         }
         if (mapping.SubIdSize == 0) {
@@ -412,8 +412,8 @@ void ParseContainerConfig(const YAML::Node& container_config) {
 
         uint64_t id_end_exclusive{};
         if (util::AddOverflow(mapping.Id, mapping.IdCount, id_end_exclusive)) {
-          CRANE_ERROR("Container.SubId.{}[{}] id range overflowed.",
-                      field_name, i);
+          CRANE_ERROR("Container.SubId.{}[{}] id range overflowed.", field_name,
+                      i);
           std::exit(1);
         }
 
@@ -434,9 +434,8 @@ void ParseContainerConfig(const YAML::Node& container_config) {
           uint64_t existing_subid_span{};
           uint64_t existing_subid_end_exclusive{};
 
-          [[maybe_unused]] const bool id_overflow =
-              util::AddOverflow(existing.Id, existing.IdCount,
-                                existing_id_end_exclusive);
+          [[maybe_unused]] const bool id_overflow = util::AddOverflow(
+              existing.Id, existing.IdCount, existing_id_end_exclusive);
           [[maybe_unused]] const bool subid_overflow =
               util::MulOverflow(existing.IdCount, existing.SubIdSize,
                                 existing_subid_span) ||
@@ -477,12 +476,10 @@ void ParseContainerConfig(const YAML::Node& container_config) {
     };
 
     if (g_config.Container.SubId.Managed) {
-      g_config.Container.SubId.UidMappings =
-          parse_managed_subid_mappings(subid_config["UidMappings"],
-                                       "UidMappings");
-      g_config.Container.SubId.GidMappings =
-          parse_managed_subid_mappings(subid_config["GidMappings"],
-                                       "GidMappings");
+      g_config.Container.SubId.UidMappings = parse_managed_subid_mappings(
+          subid_config["UidMappings"], "UidMappings");
+      g_config.Container.SubId.GidMappings = parse_managed_subid_mappings(
+          subid_config["GidMappings"], "GidMappings");
     } else {
       g_config.Container.SubId.UidMappings.clear();
       g_config.Container.SubId.GidMappings.clear();
