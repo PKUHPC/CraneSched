@@ -205,9 +205,12 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
             CRANE_ERROR("{:p}, Cannot forward ring data",
                         static_cast<void*>(&coll_ring_ctx));
             coll_ring_ctx.ring_buf.clear();
-            // TODO: check is effective?
-            PmixLibModexInvoke(NULL, PMIX_ERR_TIMEOUT, nullptr, 0, nullptr,
-                               nullptr, nullptr);
+            if (self->m_cbfunc_) {
+              PmixLibModexInvoke(self->m_cbfunc_, PMIX_ERR_TIMEOUT, nullptr, 0,
+                                 self->m_cbdata_, nullptr, nullptr);
+              self->m_cbfunc_ = nullptr;
+              self->m_cbdata_ = nullptr;
+            }
             return;
           }
 

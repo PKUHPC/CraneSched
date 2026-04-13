@@ -542,13 +542,16 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
   auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
 
-  bool pmix_broadcast_completed = false;
   std::atomic<bool> broadcast_all_ok{true};
 
   using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
   using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
 
   PmixPortsMetaMapKey map_key(request->job_id(), request->step_id());
+
+  // Snapshot of the completed port map, populated inside the locked callback.
+  // Empty means not all ports have arrived yet and no broadcast is needed.
+  std::optional<PmixPortsMetaMapValue> ports_to_broadcast;
 
   pmix_ports_map.lazy_emplace_l(
       map_key,
@@ -560,35 +563,10 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
               "[Step#{}.{}] All pmix ports have been collected, start "
               "broadcasting.",
               request->job_id(), request->step_id());
-          absl::BlockingCounter broadcast_bl(pair.second.size());
-          const auto pmix_ports_snapshot = pair.second;
-          for (const auto& craned_id : request->craned_ids()) {
-            std::thread([craned_id,  // by value: each thread owns its id
-                         &pmix_ports_snapshot,  // stable for the life of Wait()
-                         &broadcast_bl, &broadcast_all_ok, request]() {
-              auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-              if (!craned_stub) {
-                CRANE_ERROR(
-                    "[Step#{}.{}] Craned {} stub not found when broadcasting "
-                    "pmix port.",
-                    request->job_id(), request->step_id(), craned_id);
-                broadcast_all_ok.store(false, std::memory_order_relaxed);
-                broadcast_bl.DecrementCount();
-                return;
-              }
-              auto result = craned_stub->ReceivePmixPort(
-                  request->job_id(), request->step_id(), pmix_ports_snapshot);
-              if (result != CraneErrCode::SUCCESS) {
-                CRANE_ERROR(
-                    "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
-                    request->job_id(), request->step_id(), craned_id);
-                broadcast_all_ok.store(false, std::memory_order_relaxed);
-              }
-              broadcast_bl.DecrementCount();
-            }).detach();
-          }
-          broadcast_bl.Wait();
-          pmix_broadcast_completed = true;
+          // Only take a snapshot under the lock; the actual RPC fanout is done
+          // after lazy_emplace_l() returns so the map lock is not held during
+          // potentially slow or failing network calls.
+          ports_to_broadcast = pair.second;
         }
       },
       [&](auto&& ctor) {
@@ -600,7 +578,38 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
         ctor(map_key, std::move(value));
       });
 
-  if (pmix_broadcast_completed) {
+  // The map lock has been released at this point.  Perform the fanout now.
+  if (ports_to_broadcast.has_value()) {
+    const auto& pmix_ports_snapshot = *ports_to_broadcast;
+    absl::BlockingCounter broadcast_bl(pmix_ports_snapshot.size());
+
+    for (const auto& craned_id : request->craned_ids()) {
+      std::thread([craned_id,  // by value: each thread owns its id
+                   &pmix_ports_snapshot,  // stable for the life of Wait()
+                   &broadcast_bl, &broadcast_all_ok, request]() {
+        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!craned_stub) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Craned {} stub not found when broadcasting "
+              "pmix port.",
+              request->job_id(), request->step_id(), craned_id);
+          broadcast_all_ok.store(false, std::memory_order_relaxed);
+          broadcast_bl.DecrementCount();
+          return;
+        }
+        auto result = craned_stub->ReceivePmixPort(
+            request->job_id(), request->step_id(), pmix_ports_snapshot);
+        if (result != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+              request->job_id(), request->step_id(), craned_id);
+          broadcast_all_ok.store(false, std::memory_order_relaxed);
+        }
+        broadcast_bl.DecrementCount();
+      }).detach();
+    }
+    broadcast_bl.Wait();
+
     CRANE_TRACE(
         "[Step#{}.{}] Pmix port broadcast completed, erase the record in Ctld.",
         request->job_id(), request->step_id());
