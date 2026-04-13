@@ -2806,8 +2806,19 @@ void TaskManager::EvExecuteDaemonPodCb_() {
 
   ExecuteStepElem ev;
   auto err = CraneErrCode::SUCCESS;
+  static bool requested = false;
 
   while (m_grpc_execute_step_queue_.try_dequeue(ev)) {
+    // This should never happen.
+    if (requested) {
+      CRANE_ERROR(
+          "Pod step should only execute once, but got another execute "
+          "request. Ignoring this request.");
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
+    requested = true;
+
     // For pod step, use task_id=0 for placeholder.
     task_id_t task_id = 0;
     m_step_.AddTaskInstance(task_id,
