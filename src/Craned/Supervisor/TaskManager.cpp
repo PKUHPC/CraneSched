@@ -3141,6 +3141,7 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
     }
     if (m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Change time constraint for a completing step, ignored.");
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
     // Delete the old timer.

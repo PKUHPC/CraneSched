@@ -303,7 +303,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
 
   auto job_env_map =
       g_job_mgr->QuerySshStepEnvVariables(request->job_id(), kDaemonStepId);
-  if (job_env_map.error()) {
+  if (!job_env_map) {
     CRANE_ERROR("Failed to get step env of job #{}", request->job_id());
     return Status::OK;
   }
@@ -336,7 +336,7 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
 
   auto err = g_job_mgr->ChangeStepTimeConstraint(
       request->job_id(), kPrimaryStepId, time_limit_seconds, deadline_time);
-  if (err.error()) {
+  if (!err) {
     CRANE_ERROR("[Step #{}.{}] Failed to change job time constraint",
                 request->job_id(), kPrimaryStepId);
     return Status::OK;

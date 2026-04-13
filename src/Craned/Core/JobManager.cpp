@@ -723,13 +723,14 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
         google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
-  auto err = stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
-  int64_t sec = time_limit_seconds.value_or(deadline_time.value());
+  auto err =
+      stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
+  int64_t sec = time_limit_seconds.value_or(deadline_time.value_or(0));
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR(
         "[Step #{}.{}] Failed to change step time constraint to {} seconds via "
-        "supervisor RPC",
-        job_id, step_id, sec);
+        "supervisor RPC, err={}",
+        job_id, step_id, sec, static_cast<int>(err));
     return std::unexpected{err};
   }
   return {};
@@ -1174,6 +1175,30 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
     return CraneErrCode::ERR_NON_EXISTENT;
   }
 
+  // Cancel the supervisor termination timer for the primary step BEFORE
+  // freezing the cgroup. The supervisor process lives inside the job's cgroup,
+  // so it must be contacted while still running. This prevents the timer from
+  // firing while the cgroup is frozen; otherwise pending signals
+  // (SIGTERM/SIGKILL) would be delivered when the cgroup is thawed on resume,
+  // killing the process before the time constraint can be updated.
+  // The resume flow will set a new timer with the updated time limit via
+  // ChangeStepTimeConstraint.
+  {
+    absl::MutexLock lock(job_ptr->step_map_mtx.get());
+    auto step_it = job_ptr->step_map.find(kPrimaryStepId);
+    if (step_it != job_ptr->step_map.end() &&
+        step_it->second->supervisor_stub) {
+      auto err = step_it->second->supervisor_stub->ChangeStepTimeConstraint(
+          kJobMaxTimeStampSec, std::nullopt);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_WARN(
+            "[Step #{}.{}] Failed to cancel timer during suspend, "
+            "but continuing (step may have completed)",
+            job_id, kPrimaryStepId);
+      }
+    }
+  }
+
   auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
   bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
   bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
@@ -1185,11 +1210,6 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   }
 
   CRANE_INFO("[Job #{}] Frozen job cgroup: {}", job_id, job_cg_abs_path);
-
-  // Note: We do NOT pause the termination timer. This follows Slurm's
-  // behavior where suspended time counts toward the job's time limit.
-  // The timer continues to run, and if it expires while the job is
-  // suspended, the job will be terminated.
 
   return CraneErrCode::SUCCESS;
 }
