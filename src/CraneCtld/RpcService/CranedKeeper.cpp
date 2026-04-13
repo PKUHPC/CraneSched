@@ -68,7 +68,8 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
 }
 
 CraneErrCode CranedStub::TerminateSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+    crane::grpc::TerminateSource terminate_source) {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 
@@ -85,6 +86,7 @@ CraneErrCode CranedStub::TerminateSteps(
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
+  request.set_terminate_source(terminate_source);
   status = m_stub_->TerminateSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(

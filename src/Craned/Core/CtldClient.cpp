@@ -546,22 +546,17 @@ void CtldClient::Init() {
         //   - Starting
         //   - Configuring
         // Craned valid status:
-        //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
-        //     OutOfMemory)
+        //   - Finished states (see IsFinishedStepStatus())
         //   - Completing (All steps finished on CommonStep / Asked to exit on
         //     DaemonStep, during Epilog)
         //   - Running
         //   - Starting (Only for CommonStep)
         //   - Configuring
         auto GetStatusPriority = [](StepStatus status) -> int {
-          switch (status) {
-          case StepStatus::Completed:
-          case StepStatus::Failed:
-          case StepStatus::ExceedTimeLimit:
-          case StepStatus::Cancelled:
-          case StepStatus::OutOfMemory:
+          if (IsFinishedStepStatus(status))
             return 100;  // Terminal states - highest priority
 
+          switch (status) {
           case StepStatus::Completing:
             return 90;  // Almost terminal
 

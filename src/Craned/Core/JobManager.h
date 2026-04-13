@@ -121,7 +121,8 @@ class JobManager {
   google::protobuf::Timestamp GetStepEndTime(job_id_t job_id,
                                              step_id_t step_id);
 
-  void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
+  void TerminateStepAsync(job_id_t job_id, step_id_t step_id,
+                          crane::grpc::TerminateSource terminate_source);
 
   void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
@@ -189,8 +190,8 @@ class JobManager {
   struct StepTerminateQueueElem {
     job_id_t job_id;
     step_id_t step_id;
-    bool terminated_by_user{false};  // If the job is canceled by user,
-                                     // job->status=Cancelled
+    crane::grpc::TerminateSource terminate_source{
+        crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
     bool mark_as_orphaned{false};
     std::promise<void> terminate_prom;
   };

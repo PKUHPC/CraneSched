@@ -48,7 +48,8 @@ class SupervisorStub {
   CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
   CheckStatus();
 
-  CraneErrCode TerminateStep(bool mark_as_orphaned, bool terminated_by_user);
+  CraneErrCode TerminateStep(bool mark_as_orphaned,
+                             crane::grpc::TerminateSource terminate_source);
   CraneErrCode ChangeStepTimeConstraint(
       std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
