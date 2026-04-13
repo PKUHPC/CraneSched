@@ -41,6 +41,8 @@ using namespace std::chrono_literals;
 namespace {
 
 constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
+constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
+constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
 
 std::filesystem::path GetV1ControllerPath_(const std::string& cg_path,
@@ -105,7 +107,7 @@ bool ProcHasPendingSigkill_(pid_t pid) {
     }
   }
 
-  return ((sig_pnd | shd_pnd) & kPendingSigkillMask) != 0;
+  return ((sig_pnd | shd_pnd) & kPendingThawMask) != 0;
 }
 
 bool FindPendingSigkillInCgroupByPath_(const std::string& cg_path,
@@ -157,7 +159,7 @@ void ThawFrozenJobsWithPendingSigkill_(
     if (!FindPendingSigkillInCgroupByPath_(cg_path, &pending_pid)) continue;
 
     CRANE_WARN(
-        "[Job #{}] Detected pending SIGKILL on pid {} while frozen. "
+        "[Job #{}] Detected pending SIGKILL/SIGCHLD on pid {} while frozen. "
         "Thawing job cgroup.",
         job_id, pending_pid);
 
