@@ -243,9 +243,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       }
       auto* subid_conf = container_conf->mutable_subid();
       subid_conf->set_managed(g_config.Container.SubId.Managed);
-      subid_conf->set_range_size(g_config.Container.SubId.RangeSize);
-      subid_conf->set_base_offset(g_config.Container.SubId.BaseOffset);
-      subid_conf->set_uid_shift(g_config.Container.SubId.UidShift);
+      for (const auto& mapping : g_config.Container.SubId.UidMappings) {
+        auto* uid_mapping = subid_conf->add_uid_mappings();
+        uid_mapping->set_id(mapping.Id);
+        uid_mapping->set_id_count(mapping.IdCount);
+        uid_mapping->set_subid_start(mapping.SubIdStart);
+        uid_mapping->set_subid_size(mapping.SubIdSize);
+      }
+      for (const auto& mapping : g_config.Container.SubId.GidMappings) {
+        auto* gid_mapping = subid_conf->add_gid_mappings();
+        gid_mapping->set_id(mapping.Id);
+        gid_mapping->set_id_count(mapping.IdCount);
+        gid_mapping->set_subid_start(mapping.SubIdStart);
+        gid_mapping->set_subid_size(mapping.SubIdSize);
+      }
     }
 
     if (g_config.Plugin.Enabled) {

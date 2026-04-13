@@ -294,6 +294,8 @@ class ITaskInstance {
   // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
+// NOTE: Pod instance is only used in daemon step.
+// Its creation and termination are DIFFERENT from other tasks.
 class PodInstance : public ITaskInstance {
  public:
   explicit PodInstance(StepInstance* step_spec, task_id_t task_id)

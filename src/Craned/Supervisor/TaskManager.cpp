@@ -1132,35 +1132,58 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   const uint64_t gid = pwd.Gid();
 
   const auto& subid_conf = g_config.Container.SubId;
-  const uint64_t size = subid_conf.RangeSize;
-  const uint64_t uid_shift = subid_conf.UidShift;
-
-  if (uid < uid_shift || gid < uid_shift) {
-    CRANE_ERROR(
-        "Failed to calculate SubId range for user {}: uid/gid [{}, {}] must "
-        "be >= UidShift {}.",
-        pwd.Username(), uid, gid, uid_shift);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  const uint64_t effective_uid = uid - uid_shift;
-  const uint64_t effective_gid = gid - uid_shift;
 
   uint64_t uid_start{};
+  uint64_t uid_count{};
   uint64_t gid_start{};
+  uint64_t gid_count{};
 
-  if (util::MulOverflow(effective_uid, size, uid_start) ||
-      util::AddOverflow(subid_conf.BaseOffset, uid_start, uid_start)) {
-    CRANE_ERROR("Failed to calculate uid_start for user {}: uid overflowed.",
-                pwd.Username());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
+  auto resolve_managed_range = [&](const auto& mappings, uint64_t id,
+                                   std::string_view id_label,
+                                   std::string_view field_name,
+                                   uint64_t& start,
+                                   uint64_t& count) -> bool {
+    for (const auto& mapping : mappings) {
+      uint64_t id_end_exclusive{};
+      if (util::AddOverflow(mapping.Id, mapping.IdCount, id_end_exclusive)) {
+        CRANE_ERROR(
+            "Failed to resolve {} SubId range for user {}: {} mapping "
+            "overflowed.",
+            id_label, pwd.Username(), field_name);
+        return false;
+      }
 
-  if (util::MulOverflow(effective_gid, size, gid_start) ||
-      util::AddOverflow(subid_conf.BaseOffset, gid_start, gid_start)) {
-    CRANE_ERROR("Failed to calculate gid_start for user {}: gid overflowed.",
-                pwd.Username());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+      if (id < mapping.Id || id >= id_end_exclusive) continue;
+
+      const uint64_t id_offset = id - mapping.Id;
+      uint64_t start_offset{};
+      if (util::MulOverflow(id_offset, mapping.SubIdSize, start_offset) ||
+          util::AddOverflow(mapping.SubIdStart, start_offset, start)) {
+        CRANE_ERROR(
+            "Failed to resolve {} SubId range for user {}: {} mapping "
+            "overflowed.",
+            id_label, pwd.Username(), field_name);
+        return false;
+      }
+
+      count = mapping.SubIdSize;
+      return true;
+    }
+
+    CRANE_ERROR(
+        "Failed to resolve {} SubId range for user {}: {} {} is not covered "
+        "by Container.SubId.{}.",
+        id_label, pwd.Username(), id_label, id, field_name);
+    return false;
+  };
+
+  if (subid_conf.Managed) {
+    if (!resolve_managed_range(subid_conf.UidMappings, uid, "uid",
+                               "UidMappings", uid_start, uid_count) ||
+        !resolve_managed_range(subid_conf.GidMappings, gid, "gid",
+                               "GidMappings", gid_start, gid_count)) {
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   }
 
   auto subuid = pwd.SubUidRanges();
@@ -1198,13 +1221,14 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   } else {
     // Managed mode: validate or ensure mappings
     if (uid_exists || gid_exists) {
-      // If any ranges exist, both must match the deterministic mapping
-      if (!matches(subuid, uid_start, size) ||
-          !matches(subgid, gid_start, size)) {
+      // /etc/subuid and /etc/subgid are the higher-priority override.
+      // If they exist, both entries must match the configured mapping exactly.
+      if (!matches(subuid, uid_start, uid_count) ||
+          !matches(subgid, gid_start, gid_count)) {
         CRANE_ERROR(
             "SubId mismatch: expected uid range [{}, {}], gid range [{}, {}] "
             "for user {}, but found uid range [{}, {}], gid range [{}, {}]",
-            uid_start, size, gid_start, size, pwd.Username(),
+            uid_start, uid_count, gid_start, gid_count, pwd.Username(),
             uid_exists ? subuid[0].start : 0, uid_exists ? subuid[0].count : 0,
             gid_exists ? subgid[0].start : 0, gid_exists ? subgid[0].count : 0);
         return CraneErrCode::ERR_SYSTEM_ERR;
@@ -1212,7 +1236,7 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
     } else {
       // Both missing: allocate them
       auto ensure_result = PasswordEntry::EnsureSubIdRanges(
-          pwd.Username(), uid_start, size, gid_start, size);
+          pwd.Username(), uid_start, uid_count, gid_start, gid_count);
       if (!ensure_result) {
         CRANE_ERROR("Failed to ensure SubId ranges for user {}: {}",
                     pwd.Username(), ensure_result.error());
@@ -1224,12 +1248,12 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
       subuid = pwd_recheck.SubUidRanges();
       subgid = pwd_recheck.SubGidRanges();
 
-      if (!matches(subuid, uid_start, size) ||
-          !matches(subgid, gid_start, size)) {
+      if (!matches(subuid, uid_start, uid_count) ||
+          !matches(subgid, gid_start, gid_count)) {
         CRANE_ERROR(
             "SubId verification failed after allocation for user {}: expected "
             "uid range [{}, {}], gid range [{}, {}]",
-            pwd.Username(), uid_start, size, gid_start, size);
+            pwd.Username(), uid_start, uid_count, gid_start, gid_count);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     }
@@ -1239,8 +1263,9 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
       !fits_runtime_mapping(subgid[0].start, subgid[0].count)) {
     CRANE_ERROR(
         "SubId range exceeds runtime 32-bit id mapping limits for user {}: "
-        "uid range [{}, {}], gid range [{}, {}]. Consider reducing "
-        "BaseOffset, increasing UidShift, or using smaller uid/gid values.",
+        "uid range [{}, {}], gid range [{}, {}]. Adjust "
+        "Container.SubId.UidMappings/GidMappings or the user's uid/gid "
+        "assignments.",
         pwd.Username(), subuid[0].start, subuid[0].count, subgid[0].start,
         subgid[0].count);
     return CraneErrCode::ERR_SYSTEM_ERR;

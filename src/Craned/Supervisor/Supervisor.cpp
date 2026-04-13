@@ -156,9 +156,26 @@ int InitFromStdin(int argc, char** argv) {
     if (msg.container_config().has_subid()) {
       const auto& subid_conf = msg.container_config().subid();
       g_config.Container.SubId.Managed = subid_conf.managed();
-      g_config.Container.SubId.RangeSize = subid_conf.range_size();
-      g_config.Container.SubId.BaseOffset = subid_conf.base_offset();
-      g_config.Container.SubId.UidShift = subid_conf.uid_shift();
+      g_config.Container.SubId.UidMappings.clear();
+      g_config.Container.SubId.UidMappings.reserve(subid_conf.uid_mappings_size());
+      for (const auto& mapping : subid_conf.uid_mappings()) {
+        g_config.Container.SubId.UidMappings.push_back({
+            .Id = mapping.id(),
+            .IdCount = mapping.id_count(),
+            .SubIdStart = mapping.subid_start(),
+            .SubIdSize = mapping.subid_size(),
+        });
+      }
+      g_config.Container.SubId.GidMappings.clear();
+      g_config.Container.SubId.GidMappings.reserve(subid_conf.gid_mappings_size());
+      for (const auto& mapping : subid_conf.gid_mappings()) {
+        g_config.Container.SubId.GidMappings.push_back({
+            .Id = mapping.id(),
+            .IdCount = mapping.id_count(),
+            .SubIdStart = mapping.subid_start(),
+            .SubIdSize = mapping.subid_size(),
+        });
+      }
     }
   }
 

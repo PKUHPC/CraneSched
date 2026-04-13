@@ -326,13 +326,13 @@ ls /etc/cdi/
 !!! note
     鹤思系统支持自动管理 SubUID/SubGID 范围（“Managed” 模式）。如需自行管理 SubID，请按以下说明操作。
 
-“Managed” 模式下，鹤思通过 `BaseOffset + (ID - UidShift) × RangeSize` 计算每个用户的 SubUID/SubGID 范围起始值，并维护 `/etc/subuid` 等系统文件。其中 `ID` 对应用户的 UID 或主 GID，`UidShift` 默认为 `0`。若该模式无法满足需求，可手动管理或使用外部服务。
+“Managed” 模式下，鹤思按配置的映射表管理 `/etc/subuid` 和 `/etc/subgid`。每条映射都描述一个主机 UID/GID 区间 `[Id, Id + IdCount)`，以及与之对应的 SubID 起点 `SubIdStart` 和每个账号分配的切片大小 `SubIdSize`。UID 和 GID 需分别配置，且各自的映射区间不得重叠。所有可能使用用户命名空间的 UID/主 GID 都必须被这些映射覆盖，否则容器会在启动时报错。
 
 “Unmanaged” 模式下，鹤思仅通过 `shadow-utils` 的 API 获取系统中的 SubID 信息。因此，管理员必须确保集群内所有节点上的用户具有一致的、不冲突的 SubID 范围。管理员可以手动填写 `/etc/subuid` 和 `/etc/subgid` 文件，或通过 LDAP 服务器集中管理。
 
 部分系统可通过 sssd 服务从 LDAP 服务器获取 SubID 信息。请参考 FreeIPA、OpenLDAP 等解决方案的文档进行配置。
 
-要切换 SubID 管理模式，或对 Managed 模式的参数进行调整，请参见下文的[容器配置说明](#容器配置说明)部分。
+要切换 SubID 管理模式，或配置 Managed 模式使用的显式映射，请参见下文的[容器配置说明](#容器配置说明)部分。
 
 #### BindFs
 
@@ -430,14 +430,11 @@ Container:
 
   # SubUID/SubGID 配置
   SubId:
-    # 是否自动管理 SubID 范围
     Managed: true
-    # 每个用户的 SubUID/SubGID 范围大小
-    RangeSize: 65536
-    # SubUID/SubGID 范围的基础偏移量
-    BaseOffset: 100000
-    # Managed 模式下，从 UID/主 GID 中减去的偏移量
-    UidShift: 0
+    UidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
+    GidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
   
   # BindFs 配置（可选，用于用户命名空间映射）
   BindFs:
@@ -472,14 +469,26 @@ Container:
 SubID（从属用户/组 ID）配置用于容器用户命名空间的安全隔离。
 
 !!! warning
-    某些 LDAP/SSSD 环境会从较大的 UID/GID 起点开始分配用户和组，例如 `65536`。若直接使用真实 UID/GID 参与 Managed 模式计算，会快速跳过前部 SubID 空间，甚至超出容器运行时的 32 位 ID 映射范围。此时可将 `UidShift` 设置为目录服务的起始偏移量，例如 `65536`，使 Managed 模式按较小的连续编号分配 SubID。`UidShift` 会同时作用于 UID 和主 GID，因此仅应在集群 UID/GID 共享同一起始偏移时启用。
+    若启用 `Managed`，请确认 `UidMappings` 和 `GidMappings` 覆盖了所有可能使用用户命名空间的 UID/主 GID，且各映射内部与彼此之间都不会重叠。未被覆盖的用户会在容器启动时直接失败。同时，映射范围必须小于 32 位 uint 整数限制，否则将导致未定义行为。
 
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
-| `Managed` | bool | `true` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：自动添加和验证 SubID 范围<br>- `false`：管理员自行配置 |
-| `RangeSize` | int | `65536` | 每个用户的 SubUID/SubGID 范围大小。必须大于 0，建议值为 65536 |
-| `BaseOffset` | int | `100000` | SubID 范围的基础偏移量。Managed 模式的计算公式为 `start = BaseOffset + (id - UidShift) × RangeSize` |
-| `UidShift` | int | `0` | 仅在 Managed 模式下生效。计算前会从用户 UID 和主 GID 中减去该偏移量，适用于 LDAP/SSSD 等从较大 ID 起点分配用户/组的环境，例如 `65536` |
+| `Managed` | bool | `false` | 是否由鹤思自动管理 SubID 范围。<br>- `true`：按 `UidMappings`/`GidMappings` 自动校验并补齐 `/etc/subuid`、`/etc/subgid`<br>- `false`：管理员自行配置，鹤思仅校验系统中已有的 SubID |
+| `UidMappings` | object[] | `[]` | 仅在 `Managed=true` 时使用。定义宿主机 UID 到 SubUID 的显式映射表。必须是非空数组，且需要覆盖所有会使用用户命名空间的 UID |
+| `GidMappings` | object[] | `[]` | 仅在 `Managed=true` 时使用。定义宿主机主 GID 到 SubGID 的显式映射表。必须是非空数组，且需要覆盖所有会使用用户命名空间的主 GID |
+
+映射项字段说明：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|:-----|:-----|:-------|:-----|
+| `Id` | int | — | 宿主机 UID/GID 区间起点 |
+| `IdCount` | int | — | 从 `Id` 开始覆盖的 UID/GID 数量，必须大于 0 |
+| `SubIdStart` | int | — | 该映射块中第一个账号对应的 SubID 起点 |
+| `SubIdSize` | int | — | 每个账号分配的连续 SubID 数量，必须大于 0 |
+
+对于命中的某条映射，鹤思会为 UID/GID 为 `target_id` 的账号分配区间：
+
+`[SubIdStart + (target_id - Id) × SubIdSize, SubIdStart + (target_id - Id + 1) × SubIdSize)`
 
 ### BindFs 配置
 

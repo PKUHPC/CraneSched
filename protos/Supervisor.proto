@@ -55,10 +55,16 @@ message InitSupervisorRequest {
     BindFsConfig bindfs = 4;
 
     message SubIdConfig {
+      message Mapping {
+        uint64 id = 1;
+        uint64 id_count = 2;
+        uint64 subid_start = 3;
+        uint64 subid_size = 4;
+      }
+
       bool managed = 1;
-      uint64 range_size = 2;
-      uint64 base_offset = 3;
-      uint64 uid_shift = 4;
+      repeated Mapping uid_mappings = 2;
+      repeated Mapping gid_mappings = 3;
     }
     SubIdConfig subid = 5;
 

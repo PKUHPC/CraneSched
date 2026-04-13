@@ -276,6 +276,220 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
       supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
 }
 
+void ParseContainerConfig(const YAML::Node& container_config) {
+  using SubIdMapping = Craned::Config::ContainerConfig::SubIdConfig::Mapping;
+  using util::YamlValueOr;
+
+  g_config.Container.Enabled =
+      YamlValueOr<bool>(container_config["Enabled"], false);
+  if (!g_config.Container.Enabled) return;
+
+  g_config.Container.TempDir =
+      g_config.CraneBaseDir /
+      YamlValueOr(container_config["TempDir"], kDefaultContainerTempDir);
+
+  if (container_config["RuntimeEndpoint"]) {
+    g_config.Container.RuntimeEndpoint =
+        container_config["RuntimeEndpoint"].as<std::string>();
+  } else {
+    CRANE_ERROR("RuntimeEndpoint is not configured.");
+    std::exit(1);
+  }
+
+  // In most cases, ImageEndpoint is the same as RuntimeEndpoint.
+  g_config.Container.ImageEndpoint =
+      YamlValueOr(container_config["ImageEndpoint"],
+                  g_config.Container.RuntimeEndpoint.string());
+
+  // Prepend unix protocol
+  g_config.Container.RuntimeEndpoint =
+      fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
+  g_config.Container.ImageEndpoint =
+      fmt::format("unix://{}", g_config.Container.ImageEndpoint);
+
+  if (container_config["Dns"]) {
+    auto dns_node = container_config["Dns"];
+
+    g_config.Container.Dns.ClusterDomain = util::NormalizeClusterDomain(
+        YamlValueOr(dns_node["ClusterDomain"], kDefaultContainerClusterDomain));
+
+    if (dns_node["Servers"]) {
+      g_config.Container.Dns.Servers.clear();
+      for (const auto& s : dns_node["Servers"]) {
+        auto addr = s.as<std::string>();
+        ipv4_t dummy;
+        if (!crane::StrToIpv4(addr, &dummy)) {
+          CRANE_ERROR("Dns.Servers entry '{}' is not a valid ipv4 address.",
+                      addr);
+          std::exit(1);
+        }
+        g_config.Container.Dns.Servers.push_back(std::move(addr));
+      }
+    }
+    if (dns_node["Searches"]) {
+      for (const auto& s : dns_node["Searches"])
+        g_config.Container.Dns.Searches.push_back(s.as<std::string>());
+    }
+    if (dns_node["Options"]) {
+      for (const auto& s : dns_node["Options"])
+        g_config.Container.Dns.Options.push_back(s.as<std::string>());
+    }
+  }
+
+  if (container_config["BindFs"]) {
+    const auto& bindfs_config = container_config["BindFs"];
+    g_config.Container.BindFs.Enabled =
+        YamlValueOr<bool>(bindfs_config["Enabled"], false);
+
+    if (g_config.Container.BindFs.Enabled) {
+      g_config.Container.BindFs.BindfsBinary =
+          YamlValueOr(bindfs_config["BindfsBinary"],
+                      g_config.Container.BindFs.BindfsBinary.string());
+      g_config.Container.BindFs.FusermountBinary =
+          YamlValueOr(bindfs_config["FusermountBinary"],
+                      g_config.Container.BindFs.FusermountBinary.string());
+      std::filesystem::path mount_base_dir =
+          YamlValueOr(bindfs_config["MountBaseDir"],
+                      g_config.Container.BindFs.MountBaseDir.string());
+
+      if (mount_base_dir.is_relative())
+        mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+      g_config.Container.BindFs.MountBaseDir = std::move(mount_base_dir);
+    }
+  }
+
+  if (container_config["SubId"]) {
+    const auto& subid_config = container_config["SubId"];
+    g_config.Container.SubId.Managed =
+        YamlValueOr<bool>(subid_config["Managed"], false);
+
+    auto parse_managed_subid_mappings =
+        [&](const YAML::Node& mappings_node,
+            std::string_view field_name) -> std::vector<SubIdMapping> {
+      if (!mappings_node || !mappings_node.IsSequence()) {
+        CRANE_ERROR("Container.SubId.{} must be a non-empty sequence.",
+                    field_name);
+        std::exit(1);
+      }
+
+      std::vector<SubIdMapping> mappings;
+      mappings.reserve(mappings_node.size());
+
+      for (std::size_t i = 0; i < mappings_node.size(); ++i) {
+        const auto& mapping_node = mappings_node[i];
+        if (!mapping_node.IsMap()) {
+          CRANE_ERROR("Container.SubId.{}[{}] must be a mapping.", field_name,
+                      i);
+          std::exit(1);
+        }
+
+        if (!mapping_node["Id"] || !mapping_node["IdCount"] ||
+            !mapping_node["SubIdStart"] || !mapping_node["SubIdSize"]) {
+          CRANE_ERROR(
+              "Container.SubId.{}[{}] must contain Id, IdCount, SubIdStart "
+              "and SubIdSize.",
+              field_name, i);
+          std::exit(1);
+        }
+
+        SubIdMapping mapping{
+            .Id = mapping_node["Id"].as<uint64_t>(),
+            .IdCount = mapping_node["IdCount"].as<uint64_t>(),
+            .SubIdStart = mapping_node["SubIdStart"].as<uint64_t>(),
+            .SubIdSize = mapping_node["SubIdSize"].as<uint64_t>(),
+        };
+
+        if (mapping.IdCount == 0) {
+          CRANE_ERROR("Container.SubId.{}[{}].IdCount must be > 0.",
+                      field_name, i);
+          std::exit(1);
+        }
+        if (mapping.SubIdSize == 0) {
+          CRANE_ERROR("Container.SubId.{}[{}].SubIdSize must be > 0.",
+                      field_name, i);
+          std::exit(1);
+        }
+
+        uint64_t id_end_exclusive{};
+        if (util::AddOverflow(mapping.Id, mapping.IdCount, id_end_exclusive)) {
+          CRANE_ERROR("Container.SubId.{}[{}] id range overflowed.",
+                      field_name, i);
+          std::exit(1);
+        }
+
+        uint64_t subid_span{};
+        uint64_t subid_end_exclusive{};
+        if (util::MulOverflow(mapping.IdCount, mapping.SubIdSize, subid_span) ||
+            util::AddOverflow(mapping.SubIdStart, subid_span,
+                              subid_end_exclusive)) {
+          CRANE_ERROR("Container.SubId.{}[{}] subid range overflowed.",
+                      field_name, i);
+          std::exit(1);
+        }
+
+        for (std::size_t j = 0; j < mappings.size(); ++j) {
+          const auto& existing = mappings[j];
+
+          uint64_t existing_id_end_exclusive{};
+          uint64_t existing_subid_span{};
+          uint64_t existing_subid_end_exclusive{};
+
+          [[maybe_unused]] const bool id_overflow =
+              util::AddOverflow(existing.Id, existing.IdCount,
+                                existing_id_end_exclusive);
+          [[maybe_unused]] const bool subid_overflow =
+              util::MulOverflow(existing.IdCount, existing.SubIdSize,
+                                existing_subid_span) ||
+              util::AddOverflow(existing.SubIdStart, existing_subid_span,
+                                existing_subid_end_exclusive);
+          CRANE_ASSERT(!id_overflow && !subid_overflow);
+
+          const bool id_ranges_overlap =
+              mapping.Id < existing_id_end_exclusive &&
+              existing.Id < id_end_exclusive;
+          if (id_ranges_overlap) {
+            CRANE_ERROR("Container.SubId.{}[{}] overlaps id range with [{}].",
+                        field_name, i, j);
+            std::exit(1);
+          }
+
+          const bool subid_ranges_overlap =
+              mapping.SubIdStart < existing_subid_end_exclusive &&
+              existing.SubIdStart < subid_end_exclusive;
+          if (subid_ranges_overlap) {
+            CRANE_ERROR(
+                "Container.SubId.{}[{}] overlaps subid range with [{}].",
+                field_name, i, j);
+            std::exit(1);
+          }
+        }
+
+        mappings.push_back(mapping);
+      }
+
+      if (mappings.empty()) {
+        CRANE_ERROR("Container.SubId.{} must not be empty in managed mode.",
+                    field_name);
+        std::exit(1);
+      }
+
+      return mappings;
+    };
+
+    if (g_config.Container.SubId.Managed) {
+      g_config.Container.SubId.UidMappings =
+          parse_managed_subid_mappings(subid_config["UidMappings"],
+                                       "UidMappings");
+      g_config.Container.SubId.GidMappings =
+          parse_managed_subid_mappings(subid_config["GidMappings"],
+                                       "GidMappings");
+    } else {
+      g_config.Container.SubId.UidMappings.clear();
+      g_config.Container.SubId.GidMappings.clear();
+    }
+  }
+}
+
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("craned");
 
@@ -825,106 +1039,7 @@ void ParseConfig(int argc, char** argv) {
             YamlValueOr<bool>(config["CranedForeground"], false);
 
         if (config["Container"]) {
-          const auto& container_config = config["Container"];
-
-          g_config.Container.Enabled =
-              YamlValueOr<bool>(container_config["Enabled"], false);
-
-          if (g_config.Container.Enabled) {
-            g_config.Container.TempDir =
-                g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
-                                                    kDefaultContainerTempDir);
-
-            if (container_config["RuntimeEndpoint"]) {
-              g_config.Container.RuntimeEndpoint =
-                  container_config["RuntimeEndpoint"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeEndpoint is not configured.");
-              std::exit(1);
-            }
-
-            // In most cases, ImageEndpoint is the same as RuntimeEndpoint.
-            g_config.Container.ImageEndpoint =
-                YamlValueOr(container_config["ImageEndpoint"],
-                            g_config.Container.RuntimeEndpoint.string());
-
-            // Prepend unix protocol
-            g_config.Container.RuntimeEndpoint =
-                fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
-            g_config.Container.ImageEndpoint =
-                fmt::format("unix://{}", g_config.Container.ImageEndpoint);
-
-            if (container_config["Dns"]) {
-              auto dns_node = container_config["Dns"];
-
-              g_config.Container.Dns.ClusterDomain =
-                  util::NormalizeClusterDomain(
-                      YamlValueOr(dns_node["ClusterDomain"],
-                                  kDefaultContainerClusterDomain));
-
-              if (dns_node["Servers"]) {
-                g_config.Container.Dns.Servers.clear();
-                for (const auto& s : dns_node["Servers"]) {
-                  auto addr = s.as<std::string>();
-                  ipv4_t dummy;
-                  if (!crane::StrToIpv4(addr, &dummy)) {
-                    CRANE_ERROR(
-                        "Dns.Servers entry '{}' is not a valid ipv4 address.",
-                        addr);
-                    std::exit(1);
-                  }
-                  g_config.Container.Dns.Servers.push_back(std::move(addr));
-                }
-              }
-              if (dns_node["Searches"]) {
-                for (const auto& s : dns_node["Searches"])
-                  g_config.Container.Dns.Searches.push_back(
-                      s.as<std::string>());
-              }
-              if (dns_node["Options"]) {
-                for (const auto& s : dns_node["Options"])
-                  g_config.Container.Dns.Options.push_back(s.as<std::string>());
-              }
-            }
-
-            if (container_config["BindFs"]) {
-              const auto& bindfs_config = container_config["BindFs"];
-              g_config.Container.BindFs.Enabled =
-                  YamlValueOr<bool>(bindfs_config["Enabled"], false);
-
-              if (g_config.Container.BindFs.Enabled) {
-                g_config.Container.BindFs.BindfsBinary = YamlValueOr(
-                    bindfs_config["BindfsBinary"],
-                    g_config.Container.BindFs.BindfsBinary.string());
-                g_config.Container.BindFs.FusermountBinary = YamlValueOr(
-                    bindfs_config["FusermountBinary"],
-                    g_config.Container.BindFs.FusermountBinary.string());
-                std::filesystem::path mount_base_dir = YamlValueOr(
-                    bindfs_config["MountBaseDir"],
-                    g_config.Container.BindFs.MountBaseDir.string());
-
-                if (mount_base_dir.is_relative())
-                  mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
-                g_config.Container.BindFs.MountBaseDir =
-                    std::move(mount_base_dir);
-              }
-            }
-            if (container_config["SubId"]) {
-              const auto& subid_config = container_config["SubId"];
-              g_config.Container.SubId.Managed =
-                  YamlValueOr<bool>(subid_config["Managed"], true);
-              g_config.Container.SubId.RangeSize =
-                  YamlValueOr<uint64_t>(subid_config["RangeSize"], 65536);
-              g_config.Container.SubId.BaseOffset =
-                  YamlValueOr<uint64_t>(subid_config["BaseOffset"], 100000);
-              g_config.Container.SubId.UidShift =
-                  YamlValueOr<uint64_t>(subid_config["UidShift"], 0);
-            }
-            if (g_config.Container.SubId.RangeSize == 0) {
-              CRANE_ERROR("Container.SubId.RangeSize must be > 0");
-              std::exit(1);
-            }
-          }
+          ParseContainerConfig(config["Container"]);
         }
       }
 
