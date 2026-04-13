@@ -875,6 +875,8 @@ class JobScheduler {
     if (step) {
       if (step->type == crane::grpc::Interactive) {
         auto& meta = step->ia_meta.value();
+        bool cancelled_on_front_end =
+            meta.has_been_cancelled_on_front_end.load();
         meta.has_been_cancelled_on_front_end = true;
         if (step->Status() == crane::grpc::JobStatus::Pending) {
           m_cancel_job_queue_.enqueue(
@@ -882,18 +884,23 @@ class JobScheduler {
           m_cancel_job_async_handle_->send();
           return CraneErrCode::SUCCESS;
         }
+        auto terminate_source =
+            cancelled_on_front_end
+                ? crane::grpc::TERMINATE_SOURCE_USER_CANCEL
+                : crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION;
+        return TerminateRunningStepNoLock_(step, terminate_source);
       } else {
         return CraneErrCode::ERR_INVALID_PARAM;
       }
     } else {
       return CraneErrCode::ERR_NON_EXISTENT;
     }
-
-    return TerminateRunningStepNoLock_(step);
   }
 
   CraneErrCode TerminateRunningStep(
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps) {
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps,
+      crane::grpc::TerminateSource terminate_source =
+          crane::grpc::TERMINATE_SOURCE_USER_CANCEL) {
     LockGuard running_guard(&m_running_job_map_mtx_);
 
     std::vector<CommonStepInCtld*> steps;
@@ -910,7 +917,7 @@ class JobScheduler {
     }
 
     for (auto* step : steps) {
-      auto err = TerminateRunningStepNoLock_(step);
+      auto err = TerminateRunningStepNoLock_(step, terminate_source);
       if (err != CraneErrCode::SUCCESS) return err;
     }
     return CraneErrCode::SUCCESS;
@@ -960,7 +967,9 @@ class JobScheduler {
   static void PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
+  CraneErrCode TerminateRunningStepNoLock_(
+      CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
+                                  crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
@@ -1074,6 +1083,8 @@ class JobScheduler {
     job_id_t job_id;
     step_id_t step_id;
     CranedId craned_id;
+    crane::grpc::TerminateSource terminate_source{
+        crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
   using CancelJobQueueElem =

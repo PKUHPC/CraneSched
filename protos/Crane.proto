@@ -147,6 +147,7 @@ message ExecuteStepsReply {
 
 message TerminateStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
+  TerminateSource terminate_source = 2;
 }
 
 message TerminateStepsReply {

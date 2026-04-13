@@ -158,7 +158,7 @@ message ChangeStepTimeConstraintReply {
 
 message TerminateStepRequest {
   bool mark_orphaned = 1;
-  bool terminated_by_user = 2;
+  crane.grpc.TerminateSource terminate_source = 2;
 }
 
 message TerminateStepReply {

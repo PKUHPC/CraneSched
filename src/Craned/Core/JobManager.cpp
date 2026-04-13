@@ -1033,9 +1033,9 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
     std::vector<JobInD> job_to_clean;
     {
       CRANE_INFO(
-          "[Step #{}.{}] Terminating step, orphaned:{} terminated_by_user:{}.",
+          "[Step #{}.{}] Terminating step, orphaned:{} terminate_source:{}.",
           elem.job_id, elem.step_id, elem.mark_as_orphaned,
-          elem.terminated_by_user);
+          static_cast<int>(elem.terminate_source));
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
@@ -1101,7 +1101,7 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
           continue;
         }
         auto err =
-            stub->TerminateStep(elem.mark_as_orphaned, elem.terminated_by_user);
+            stub->TerminateStep(elem.mark_as_orphaned, elem.terminate_source);
         if (err != CraneErrCode::SUCCESS) {
           // Supervisor dead for some reason.
           CRANE_ERROR("[Step #{}.{}] Failed to terminate.", elem.job_id,
@@ -1152,19 +1152,22 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
   not_ready_elems.clear();
 }
 
-void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
+void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id,
+                                    crane::grpc::TerminateSource terminate_source) {
   StepTerminateQueueElem elem{.job_id = job_id,
                               .step_id = step_id,
-                              .terminated_by_user = true};
+                              .terminate_source = terminate_source};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
 
 void JobManager::MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id,
                                                      step_id_t step_id) {
-  StepTerminateQueueElem elem{.job_id = job_id,
-                              .step_id = step_id,
-                              .mark_as_orphaned = true};
+  StepTerminateQueueElem elem{
+      .job_id = job_id,
+      .step_id = step_id,
+      .terminate_source = crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION,
+      .mark_as_orphaned = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
