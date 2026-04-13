@@ -41,6 +41,7 @@ using namespace std::chrono_literals;
 namespace {
 
 constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
+constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
 
 std::filesystem::path GetV1ControllerPath_(const std::string& cg_path,
                                            Common::CgConstant::Controller ctrl) {
@@ -169,6 +170,41 @@ void ThawFrozenJobsWithPendingSigkill_(
           job_id, cg_path, root_ok, children_ok);
     }
   }
+}
+
+bool IsFinishedStepStatus_(StepStatus status) {
+  switch (status) {
+  case StepStatus::ExceedTimeLimit:
+  case StepStatus::OutOfMemory:
+  case StepStatus::Cancelled:
+  case StepStatus::Failed:
+  case StepStatus::Completed:
+    return true;
+
+  default:
+    return false;
+  }
+}
+
+std::optional<std::pair<uint32_t, std::string>>
+BuildUnexpectedSupervisorExitInfo_(pid_t pid, int status) {
+  if (WIFSIGNALED(status)) {
+    int signal = WTERMSIG(status);
+    return std::make_pair(
+        static_cast<uint32_t>(ExitCode::kTerminationSignalBase + signal),
+        fmt::format("Supervisor pid {} exited unexpectedly due to signal {}.",
+                    pid, signal));
+  }
+
+  if (WIFEXITED(status)) {
+    int exit_code = WEXITSTATUS(status);
+    return std::make_pair(
+        static_cast<uint32_t>(exit_code),
+        fmt::format("Supervisor pid {} exited unexpectedly with code {}.", pid,
+                    exit_code));
+  }
+
+  return std::nullopt;
 }
 
 }  // namespace
@@ -513,6 +549,146 @@ void JobManager::FreeSteps(
   CleanUpJobAndStepsAsync({}, std::move(steps_to_free));
 }
 
+void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
+  auto exit_info = BuildUnexpectedSupervisorExitInfo_(pid, status);
+  if (!exit_info.has_value()) {
+    CRANE_TRACE("Ignoring non-terminal child status {} for pid {}", status,
+                pid);
+    return;
+  }
+
+  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  for (auto& [job_id, job] : *job_map_ptr) {
+    auto* job_ptr = job.RawPtr();
+    absl::MutexLock step_lock(job_ptr->step_map_mtx.get());
+    for (const auto& [step_id, step] : job_ptr->step_map) {
+      if (step == nullptr || step->supv_pid != pid) continue;
+
+      if (step->err_before_supv_start || step->status == StepStatus::Completing ||
+          IsFinishedStepStatus_(step->status)) {
+        CRANE_TRACE(
+            "[Step #{}.{}] Supervisor pid {} exited after step reached status "
+            "{}, ignoring.",
+            job_id, step_id, pid, step->status);
+        return;
+      }
+
+      {
+        absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+        m_unexpected_supervisor_exit_map_[{job_id, step_id}] = {
+            .exit_code = exit_info->first,
+            .reason = exit_info->second,
+            .retry_count = 0};
+      }
+
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor pid {} exited unexpectedly; waiting "
+          "briefly for an in-flight final status update before forcing "
+          "Failed.",
+          job_id, step_id, pid);
+      return;
+    }
+  }
+
+  CRANE_TRACE("Child pid {} exited but is not a tracked supervisor.", pid);
+}
+
+void JobManager::HandleUnexpectedSupervisorExits_() {
+  using StepKey = std::pair<job_id_t, step_id_t>;
+
+  struct PendingFailure {
+    job_id_t job_id;
+    step_id_t step_id;
+    uint32_t exit_code;
+    std::string reason;
+  };
+
+  struct PendingSnapshot {
+    StepKey key;
+    uint32_t exit_code;
+    std::string reason;
+    int retry_count;
+  };
+
+  std::vector<PendingSnapshot> pending;
+  {
+    absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+    pending.reserve(m_unexpected_supervisor_exit_map_.size());
+    for (const auto& [key, info] : m_unexpected_supervisor_exit_map_) {
+      pending.emplace_back(PendingSnapshot{
+          .key = key,
+          .exit_code = info.exit_code,
+          .reason = info.reason,
+          .retry_count = info.retry_count});
+    }
+  }
+
+  std::vector<PendingFailure> failures;
+  std::vector<StepKey> resolved_keys;
+  std::vector<StepKey> retry_keys;
+
+  for (const auto& entry : pending) {
+    const auto& [job_id, step_id] = entry.key;
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_ptr) {
+      resolved_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    bool resolved = false;
+    {
+      absl::MutexLock step_lock(job_ptr->step_map_mtx.get());
+      auto step_it = job_ptr->step_map.find(step_id);
+      if (step_it == job_ptr->step_map.end() || step_it->second == nullptr) {
+        resolved = true;
+      } else {
+        auto* step = step_it->second.get();
+        resolved = step->status == StepStatus::Completing ||
+                   IsFinishedStepStatus_(step->status);
+      }
+    }
+
+    if (resolved) {
+      resolved_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    if (entry.retry_count + 1 < kUnexpectedSupervisorExitGraceRetryCount) {
+      retry_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    failures.emplace_back(PendingFailure{
+        .job_id = job_id,
+        .step_id = step_id,
+        .exit_code = entry.exit_code,
+        .reason = entry.reason});
+    resolved_keys.emplace_back(entry.key);
+  }
+
+  {
+    absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+    for (const auto& key : retry_keys) {
+      auto it = m_unexpected_supervisor_exit_map_.find(key);
+      if (it != m_unexpected_supervisor_exit_map_.end()) ++it->second.retry_count;
+    }
+    for (const auto& key : resolved_keys) {
+      m_unexpected_supervisor_exit_map_.erase(key);
+    }
+  }
+
+  for (auto& failure : failures) {
+    CRANE_WARN(
+        "[Step #{}.{}] Supervisor exited without reporting a final step "
+        "status. Marking step Failed.",
+        failure.job_id, failure.step_id);
+    ActivateStepStatusChangeAsync_(
+        failure.job_id, failure.step_id, StepStatus::Failed,
+        failure.exit_code, std::move(failure.reason),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+  }
+}
+
 bool JobManager::EvCheckSupervisorRunning_() {
   std::vector<std::pair<job_id_t, std::string>> jobs_to_check_pending_sigkill;
   std::vector<JobInD> jobs_to_clean;
@@ -530,6 +706,9 @@ bool JobManager::EvCheckSupervisorRunning_() {
         }
       }
     }
+
+    ThawFrozenJobsWithPendingSigkill_(jobs_to_check_pending_sigkill);
+    HandleUnexpectedSupervisorExits_();
 
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
@@ -585,8 +764,6 @@ bool JobManager::EvCheckSupervisorRunning_() {
     }
   }
 
-  ThawFrozenJobsWithPendingSigkill_(jobs_to_check_pending_sigkill);
-
   if (!steps_to_clean.empty()) {
     CRANE_TRACE("Supervisor for Step [{}] found to be exited",
                 absl::StrJoin(steps_to_clean |
@@ -613,9 +790,8 @@ void JobManager::EvSigchldCb_() {
 
     if (pid > 0) {
       if (!m_exit_watcher_.TryDeliver(pid, status)) {
-        CRANE_TRACE("Child pid {} exit", pid);
+        RecordUnexpectedSupervisorExit_(pid, status);
       }
-      // We do nothing now
     } else if (pid == 0) {
       // There's no child that needs reaping.
       break;
