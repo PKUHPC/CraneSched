@@ -1546,10 +1546,6 @@ CraneErrCode PodInstance::Kill(int /*signum*/) {
 
   CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
   HandlePodExited();
-  // TODO: Currently pod status monitoring is missing. So we had to call
-  // FinalizeTaskAsync() here. See PodInstance::Spawn() for details.
-  g_task_mgr->FinalizeTaskAsync(0, TaskFinalizeCause::POD_STOP_REQUESTED,
-                                "Pod is requested to stop");
 
   return CraneErrCode::SUCCESS;
 }
@@ -2555,10 +2551,18 @@ TaskManager::TaskManager()
         EvCleanCriEventQueueCb_();
       });
 
-  m_execute_pod_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_execute_pod_async_handle_->on<uvw::async_event>(
+  m_execute_daemon_pod_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_execute_daemon_pod_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvExecutePodCb_();
+        EvExecuteDaemonPodCb_();
+      });
+
+  m_terminate_daemon_pod_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_terminate_daemon_pod_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTerminateDaemonPodQueueCb_();
       });
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -2796,7 +2800,7 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   return CraneErrCode::SUCCESS;
 }
 
-void TaskManager::EvExecutePodCb_() {
+void TaskManager::EvExecuteDaemonPodCb_() {
   // This method is only for pod in daemon step.
   CRANE_ASSERT_MSG(m_step_.IsPod(), "PreparePodTask is called in other cases!");
 
@@ -2850,13 +2854,13 @@ void TaskManager::EvExecutePodCb_() {
   }
 }
 
-std::future<CraneErrCode> TaskManager::ExecutePodAsync() {
+std::future<CraneErrCode> TaskManager::ExecutePodInDaemonStepAsync() {
   std::promise<CraneErrCode> ok_promise;
   std::future ok_future = ok_promise.get_future();
 
   auto elem = ExecuteStepElem{.ok_prom = std::move(ok_promise)};
   m_grpc_execute_step_queue_.enqueue(std::move(elem));
-  m_execute_pod_async_handle_->send();
+  m_execute_daemon_pod_async_handle_->send();
 
   return ok_future;
 }
@@ -2908,6 +2912,11 @@ void TaskManager::TerminateStepAsync(bool mark_as_orphaned,
   m_terminate_step_async_handle_->send();
 }
 
+void TaskManager::TerminatePodInDaemonStepAsync() {
+  m_daemon_pod_terminate_queue_.enqueue(DaemonPodTerminateQueueElem{});
+  m_terminate_daemon_pod_async_handle_->send();
+}
+
 void TaskManager::CheckStatusAsync(
     crane::grpc::supervisor::CheckStatusReply* response) {
   std::promise<StepStatus> status_promise;
@@ -2939,7 +2948,7 @@ void TaskManager::EvShutdownSupervisorCb_() {
   do {
     got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
     if (!got_final_status) continue;
-    if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
+    if (m_step_.IsDaemon() && !m_allow_daemon_shutdown_.load()) {
       CRANE_WARN("Daemon step not shutting down unless explicitly requested.");
       continue;
     }
@@ -3194,7 +3203,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
                            std::move(reason));
       continue;
     }
-    case TaskFinalizeCause::POD_STOP_REQUESTED:
+    case TaskFinalizeCause::DAEMON_POD_SHUTDOWN_REQUESTED:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
                            fi->reason);
       continue;
@@ -3258,6 +3267,79 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
   }
 }
 
+void TaskManager::EvCleanTerminateDaemonPodQueueCb_() {
+  constexpr task_id_t kDaemonPodTaskId = 0;
+
+  DaemonPodTerminateQueueElem elem;
+  while (m_daemon_pod_terminate_queue_.try_dequeue(elem)) {
+    CRANE_TRACE("Receive shutdown request for daemon pod #{}.{}.",
+                g_config.JobId, g_config.StepId);
+
+    if (!m_step_.IsDaemon() || !m_step_.IsPod()) {
+      CRANE_ERROR(
+          "Daemon pod shutdown requested for a non-daemon-pod step #{}.{}.",
+          g_config.JobId, g_config.StepId);
+      continue;
+    }
+
+    auto status = m_step_.GetStatus();
+    if (status != StepStatus::Running) {
+      CRANE_DEBUG(
+          "Daemon pod step #{}.{} is no longer running (status: {}), "
+          "shutting down supervisor directly.",
+          g_config.JobId, g_config.StepId, status);
+
+      if (IsFinishedStepStatus(status)) {
+        ShutdownSupervisorAsync(status);
+      } else if (status == StepStatus::Completing) {
+        const auto& final_status = m_step_.final_termination_status;
+        ShutdownSupervisorAsync(final_status.final_status_on_termination,
+                                final_status.max_exit_code,
+                                final_status.final_reason_on_termination);
+      } else {
+        ShutdownSupervisorAsync();
+      }
+      continue;
+    }
+
+    auto shutdown = [&]() -> CraneExpectedRich<void> {
+      auto* task = m_step_.GetTaskInstance(kDaemonPodTaskId);
+      if (task == nullptr) {
+        CraneRichError rich_err;
+        rich_err.set_code(CraneErrCode::ERR_NON_EXISTENT);
+        rich_err.set_description("Daemon pod task missing during shutdown");
+        return std::unexpected(std::move(rich_err));
+      }
+
+      auto* final_info = task->GetFinalInfo();
+      final_info->cause = TaskFinalizeCause::DAEMON_POD_SHUTDOWN_REQUESTED;
+      final_info->reason = "Daemon pod shutdown requested";
+
+      auto err = task->Kill(SIGTERM);
+      if (err != CraneErrCode::SUCCESS) {
+        CraneRichError rich_err;
+        rich_err.set_code(err);
+        rich_err.set_description(
+            std::format("Failed to stop/remove daemon pod: {} ({})",
+                        CraneErrStr(err), static_cast<int>(err)));
+        return std::unexpected(std::move(rich_err));
+      }
+
+      FinalizeTaskAsync(kDaemonPodTaskId);
+      return {};
+    };
+
+    auto ret = shutdown();
+    if (!ret.has_value()) {
+      const auto& rich_err = ret.error();
+      CRANE_ERROR("Failed to shutdown daemon pod #{}.{}: {}", g_config.JobId,
+                  g_config.StepId, rich_err.description());
+      ShutdownSupervisorAsync(StepStatus::Failed, ExitCode::EC_RPC_ERR,
+                              rich_err.description());
+    }
+  }
+}
+
 void TaskManager::EvCleanTerminateStepQueueCb_() {
   StepTerminateQueueElem elem;
   std::vector<StepTerminateQueueElem> not_ready_elems;
@@ -3265,30 +3347,26 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
     CRANE_TRACE("Receive TerminateRunningStep Request for #{}.{}.",
                 g_config.JobId, g_config.StepId);
 
-    if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
-      CRANE_TRACE(
-          "TerminateRunningStep request ignored for daemon step unless active "
-          "shutdown is in progress.",
-          g_config.JobId, g_config.StepId);
+    if (m_step_.IsDaemon()) {
+      if (elem.mark_as_orphaned) {
+        m_step_.orphaned = true;
+        CRANE_INFO("Orphaned daemon step is shutting down directly.");
+        SetAllowDaemonShutdown();
+        ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
+      } else {
+        CRANE_TRACE(
+            "Terminate request for daemon step is ignored. Use "
+            "ShutdownSupervisor to actively stop a daemon pod.");
+      }
       continue;
     }
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = elem.mark_as_orphaned;
+    if (elem.mark_as_orphaned) m_step_.orphaned = true;
 
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(elem);
       CRANE_DEBUG("Step is not ready to terminate, will check next time.");
       continue;
-    }
-
-    if (m_step_.IsDaemon()) {
-      if (elem.mark_as_orphaned)
-        g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      else {
-        CRANE_WARN(
-            "Terminate request for a daemon step without orphaned is ignored.");
-        continue;
-      }
     }
 
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;

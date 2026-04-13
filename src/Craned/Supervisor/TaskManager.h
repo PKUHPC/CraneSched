@@ -44,7 +44,7 @@ enum class TaskFinalizeCause : uint8_t {
   STEP_CGROUP_FAILED,
   CANCELLED_BY_USER,
   CFORED_DISCONNECTED,
-  POD_STOP_REQUESTED,
+  DAEMON_POD_SHUTDOWN_REQUESTED,
   INTERACTIVE_NO_PROCESS,
   TIMEOUT,
   DEADLINE
@@ -630,6 +630,9 @@ class TaskManager {
   }
 
   StepStatus GetStepStatus() const { return m_step_.GetStatus(); }
+  StepInstance::TerminationStatus GetFinalTerminationStatus() const {
+    return m_step_.final_termination_status;
+  }
 
   void FinalizeTaskAsync(task_id_t task_id);
   void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
@@ -637,7 +640,7 @@ class TaskManager {
 
   std::future<CraneErrCode> ExecuteStepAsync();
 
-  std::future<CraneErrCode> ExecutePodAsync();
+  std::future<CraneErrCode> ExecutePodInDaemonStepAsync();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
@@ -646,11 +649,14 @@ class TaskManager {
 
   void TerminateStepAsync(bool mark_as_orphaned, TaskFinalizeCause cause);
 
+  // A dedicated termination path for pod in daemon step.
+  void TerminatePodInDaemonStepAsync();
+
   void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
 
   std::future<CraneErrCode> MigrateSshProcToCgroupAsync(pid_t pid);
 
-  void SetActivelyShutdown() { m_active_shutdown_ = true; }
+  void SetAllowDaemonShutdown() { m_allow_daemon_shutdown_ = true; }
 
   void Shutdown() { m_supervisor_exit_ = true; }
 
@@ -667,6 +673,8 @@ class TaskManager {
     bool mark_as_orphaned{false};
   };
 
+  struct DaemonPodTerminateQueueElem {};
+
   struct ChangeStepTimeConstraintQueueElem {
     std::promise<CraneErrCode> ok_prom;
     std::optional<int64_t> time_limit{std::nullopt};
@@ -674,8 +682,10 @@ class TaskManager {
   };
   void EvShutdownSupervisorCb_();
 
-  // For daemon step of a container job, we need to create a pod for it.
-  void EvExecutePodCb_();
+  // Handle pod creation for daemon step with container support.
+  void EvExecuteDaemonPodCb_();
+  // Handle daemon pod termination requests from ShutdownSupervisor.
+  void EvCleanTerminateDaemonPodQueueCb_();
 
   // Process exited
   void EvSigchldCb_();
@@ -722,7 +732,11 @@ class TaskManager {
   ConcurrentQueue<cri::api::ContainerStatus> m_cri_event_queue_;
 
   // Create pod for daemon step of container job.
-  std::shared_ptr<uvw::async_handle> m_execute_pod_async_handle_;
+  std::shared_ptr<uvw::async_handle> m_execute_daemon_pod_async_handle_;
+
+  // Actively shutdown a running daemon pod.
+  std::shared_ptr<uvw::async_handle> m_terminate_daemon_pod_async_handle_;
+  ConcurrentQueue<DaemonPodTerminateQueueElem> m_daemon_pod_terminate_queue_;
 
   // Task is already terminated
   std::shared_ptr<uvw::async_handle> m_task_finalizing_async_handle_;
@@ -761,7 +775,7 @@ class TaskManager {
   // This is the gate for daemon step. Daemon step will not exit when all tasks
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
-  std::atomic_bool m_active_shutdown_{false};
+  std::atomic_bool m_allow_daemon_shutdown_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
