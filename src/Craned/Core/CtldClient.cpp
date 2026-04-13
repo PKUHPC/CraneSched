@@ -555,6 +555,7 @@ void CtldClient::Init() {
         //   - Configuring
         auto GetStatusPriority = [](StepStatus status) -> int {
           switch (status) {
+          case StepStatus::Deadline:
           case StepStatus::Completed:
           case StepStatus::Failed:
           case StepStatus::ExceedTimeLimit:

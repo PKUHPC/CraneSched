@@ -508,6 +508,7 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
     break;
   }
   // Finished status
+  case StepStatus::Deadline:
   case StepStatus::ExceedTimeLimit:
   case StepStatus::OutOfMemory:
   case StepStatus::Cancelled:

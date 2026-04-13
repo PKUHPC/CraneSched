@@ -693,7 +693,6 @@ class TaskManager {
   // Handle step termination requests
   void EvStepTimerCb_(bool is_deadline);
   void EvCleanTerminateStepQueueCb_();
-  void EvCleanStepStopQueueCb_();  // TODO: FIXME
   void EvCleanChangeStepTimeConstraintQueueCb_();
 
   void EvGrpcExecuteStepCb_();

@@ -117,6 +117,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
   auto is_finished_status = [](StepStatus status) {
     switch (status) {
+    case StepStatus::Deadline:
     case StepStatus::ExceedTimeLimit:
     case StepStatus::OutOfMemory:
     case StepStatus::Cancelled:

@@ -46,6 +46,7 @@ using Common::kStepRequestCheckIntervalMs;
 
 bool StepInstance::IsFinishedStatus(const StepStatus& status) {
   switch (status) {
+  case StepStatus::Deadline:
   case StepStatus::ExceedTimeLimit:
   case StepStatus::OutOfMemory:
   case StepStatus::Cancelled:
@@ -317,6 +318,7 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   // Finished status
+  case StepStatus::Deadline:
   case StepStatus::ExceedTimeLimit:
   case StepStatus::OutOfMemory:
   case StepStatus::Cancelled:
@@ -1140,8 +1142,7 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
 
   auto resolve_managed_range = [&](const auto& mappings, uint64_t id,
                                    std::string_view id_label,
-                                   std::string_view field_name,
-                                   uint64_t& start,
+                                   std::string_view field_name, uint64_t& start,
                                    uint64_t& count) -> bool {
     for (const auto& mapping : mappings) {
       uint64_t id_end_exclusive{};
@@ -3225,7 +3226,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       continue;
     case TaskFinalizeCause::DEADLINE:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Deadline,
-                           ExitCode::EC_DEADLINE, fi->reason);
+                           ExitCode::EC_REACHED_DEADLINE, fi->reason);
       continue;
     case TaskFinalizeCause::NATURAL_EXIT:
       break;
