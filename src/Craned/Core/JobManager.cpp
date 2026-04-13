@@ -1152,8 +1152,9 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
   not_ready_elems.clear();
 }
 
-void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id,
-                                    crane::grpc::TerminateSource terminate_source) {
+void JobManager::TerminateStepAsync(
+    job_id_t job_id, step_id_t step_id,
+    crane::grpc::TerminateSource terminate_source) {
   StepTerminateQueueElem elem{.job_id = job_id,
                               .step_id = step_id,
                               .terminate_source = terminate_source};

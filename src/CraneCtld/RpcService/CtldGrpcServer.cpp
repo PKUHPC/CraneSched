@@ -492,8 +492,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       m_ctld_server_->m_mtx_.Unlock();
 
       g_job_scheduler->TerminateRunningStep(
-          running_steps,
-          crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
+          running_steps, crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
 
       return Status::OK;
     }
