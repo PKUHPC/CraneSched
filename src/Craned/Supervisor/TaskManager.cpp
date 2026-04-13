@@ -3273,7 +3273,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       continue;
     }
 
-    m_step_.orphaned = elem.mark_as_orphaned;
+    if (elem.mark_as_orphaned) m_step_.orphaned = elem.mark_as_orphaned;
 
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(elem);
