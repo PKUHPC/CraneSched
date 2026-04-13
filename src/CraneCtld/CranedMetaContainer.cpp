@@ -191,13 +191,14 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
 
   node_meta->rn_job_res_map.emplace(job_id, job_node_res);
 
-  CRANE_TRACE("[RESTRACK] MallocNode: job={} node={} "
-              "before: avail_cpu={}, in_use_cpu={}, "
-              "alloc_cpu={}",
-              job_id, node_id,
-              static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
-              static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
-              static_cast<double>(job_node_res.GetCpuSet().cpu_count));
+  CRANE_TRACE(
+      "[RESTRACK] MallocNode: job={} node={} "
+      "before: avail_cpu={}, in_use_cpu={}, "
+      "alloc_cpu={}",
+      job_id, node_id,
+      static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
+      static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
+      static_cast<double>(job_node_res.GetCpuSet().cpu_count));
 
   node_meta->res_avail -= job_node_res;
   node_meta->res_in_use += job_node_res;
@@ -242,13 +243,14 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   ResourceInNodeV3 const& resources = resource_iter->second;
 
-  CRANE_TRACE("[RESTRACK] FreeNode: job={} node={} "
-              "before: avail_cpu={}, in_use_cpu={}, "
-              "free_cpu={}",
-              job_id, node_id,
-              static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
-              static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
-              static_cast<double>(resources.GetCpuSet().cpu_count));
+  CRANE_TRACE(
+      "[RESTRACK] FreeNode: job={} node={} "
+      "before: avail_cpu={}, in_use_cpu={}, "
+      "free_cpu={}",
+      job_id, node_id,
+      static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
+      static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
+      static_cast<double>(resources.GetCpuSet().cpu_count));
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
@@ -273,9 +275,10 @@ void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
     return;
   }
 
-  CRANE_TRACE("[RESTRACK] MallocResv: resv={} job={} "
-              "resv_rn_jobs={}",
-              resv_id, job_id, resv_meta->rn_job_res_map.size());
+  CRANE_TRACE(
+      "[RESTRACK] MallocResv: resv={} job={} "
+      "resv_rn_jobs={}",
+      resv_id, job_id, resv_meta->rn_job_res_map.size());
 
   resv_meta->res_avail -= res;
 
@@ -297,9 +300,10 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
     return;
   }
 
-  CRANE_TRACE("[RESTRACK] FreeResv: resv={} job={} "
-              "resv_rn_jobs={}",
-              resv_id, job_id, resv_meta->rn_job_res_map.size());
+  CRANE_TRACE(
+      "[RESTRACK] FreeResv: resv={} job={} "
+      "resv_rn_jobs={}",
+      resv_id, job_id, resv_meta->rn_job_res_map.size());
 
   CRANE_DEBUG("[Job #{}] Freeing resource from reservation {}", job_id,
               resv_id);

@@ -130,12 +130,12 @@ CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
         return buf;
       };
       std::string base = "/sys/fs/cgroup/crane/" + cg_path;
-      CRANE_TRACE("[CGDIAG] [Step #{}.{}] {}: memory.max={} memory.current={} "
-                  "memory.swap.max={}",
-                  job_id, step_id, label,
-                  read_file(base + "/memory.max"),
-                  read_file(base + "/memory.current"),
-                  read_file(base + "/memory.swap.max"));
+      CRANE_TRACE(
+          "[CGDIAG] [Step #{}.{}] {}: memory.max={} memory.current={} "
+          "memory.swap.max={}",
+          job_id, step_id, label, read_file(base + "/memory.max"),
+          read_file(base + "/memory.current"),
+          read_file(base + "/memory.swap.max"));
     };
     dump("overflow", "overflow");
     dump("job", path_info.cg_str);

@@ -4557,7 +4557,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
   };
 
   // clang-format on
-  std::tuple<int32_t, int64_t, bool, int64_t, int64_t,          /*0-4*/
+  std::tuple<int32_t, int64_t, bool, int64_t, int64_t,         /*0-4*/
              std::string, std::string, int32_t,                /*5-7*/
              std::vector<gid_t>, std::string,                  /*8-9*/
              int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/

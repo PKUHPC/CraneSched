@@ -405,7 +405,6 @@ bool StepInstance::EvaluateOomOnExit() {
   return oom_kill > baseline_oom_kill_count;
 }
 
-
 void ITaskInstance::InitEnvMap() {
   // Job env from CraneD
   for (const auto& [name, value] : g_config.JobEnv) {

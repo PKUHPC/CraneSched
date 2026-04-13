@@ -714,7 +714,7 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
       CRANE_ERROR("Failed to parse gres map string: {}", s);
       return false;
     }
-    auto& gc = (*gres_map)[key];
+    auto &gc = (*gres_map)[key];
     auto old = gc.specified[type];
     gc.specified[type] = value;
     gc.total -= old;
