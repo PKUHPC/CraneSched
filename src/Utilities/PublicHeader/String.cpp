@@ -700,6 +700,7 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
     if (items[2] == "unlimited") {
       auto it = gres_map->find(key);
       if (it != gres_map->end()) {
+        it->second.total -= it->second.specified[type];
         it->second.specified.erase(type);
         if (it->second.specified.empty() && it->second.total == 0)
           gres_map->erase(it);
@@ -716,7 +717,8 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
     auto& gc = (*gres_map)[key];
     auto old = gc.specified[type];
     gc.specified[type] = value;
-    gc.total += value - old;
+    gc.total -= old;
+    gc.total += value;
   } else {
     CRANE_ERROR("Failed to parse gres map string: {}", s);
     return false;
