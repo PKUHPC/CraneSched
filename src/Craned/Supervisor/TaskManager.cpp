@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <iterator>
 #include <limits>
 #include <variant>
 
@@ -3075,15 +3076,10 @@ void TaskManager::EvStepTimerCb_(bool is_deadline) {
   DelTerminationTimer_();
   DelSignalTimers_();
 
-  if (m_step_.IsCalloc()) {
-    // Now calloc and cbatch steps only have one task with id 0.
-    FinalizeTaskAsync(0, TaskFinalizeCause::TIME_LIMIT_EXCEEDED);
-  } else {
-    m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
-        .cause = is_deadline ? TaskFinalizeCause::DEADLINE
-                             : TaskFinalizeCause::TIME_LIMIT_EXCEEDED});
-    m_terminate_step_async_handle_->send();
-  }
+  m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
+      .cause = is_deadline ? TaskFinalizeCause::DEADLINE
+                           : TaskFinalizeCause::TIMEOUT});
+  m_terminate_step_async_handle_->send();
 }
 
 void TaskManager::EvCleanFinalizingTaskQueueCb_() {
@@ -3176,7 +3172,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
                            ExitCode::EC_CGROUP_ERR, fi->reason);
       continue;
-    case TaskFinalizeCause::TIME_LIMIT_EXCEEDED:
+    case TaskFinalizeCause::TIMEOUT:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
                            ExitCode::EC_EXCEED_TIME_LIMIT, fi->reason);
       continue;
@@ -3210,7 +3206,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Deadline,
                            ExitCode::EC_REACHED_DEADLINE, fi->reason);
       continue;
-    case TaskFinalizeCause::NATURAL_EXIT:
+    case TaskFinalizeCause::NORMAL:
       break;
     }
 
@@ -3277,13 +3273,14 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       continue;
     }
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = true;
+    m_step_.orphaned = elem.mark_as_orphaned;
 
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(elem);
       CRANE_DEBUG("Step is not ready to terminate, will check next time.");
       continue;
     }
+
     if (m_step_.IsDaemon()) {
       if (elem.mark_as_orphaned)
         g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
@@ -3296,9 +3293,8 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
-    if (m_exec_id_task_id_map_.empty() || elem.mark_as_orphaned) {
-      CRANE_DEBUG(
-          "No task is running or terminated as orphaned, shutting down...");
+    if (elem.mark_as_orphaned) {
+      CRANE_DEBUG("Step is terminated as orphaned, shutting down...");
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
@@ -3318,20 +3314,25 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         if (elem.cause == TaskFinalizeCause::CANCELLED_BY_USER) sig = SIGKILL;
-        task->Kill(sig);  // NOTE: retval discarded
+        task->Kill(sig);
       } else if (m_step_.IsInteractive()) {
-        // For an Interactive task with no process running, it ends
-        // immediately.
-        FinalizeTaskAsync(task_id, TaskFinalizeCause::INTERACTIVE_NO_PROCESS);
+        // Interactive steps such as calloc may have no local process to kill.
+        // Preserve external termination causes (timeout/deadline/cancel) and
+        // only collapse natural-exit requests into the synthetic completion
+        // cause.
+        if (elem.cause == TaskFinalizeCause::NORMAL) {
+          FinalizeTaskAsync(task_id, TaskFinalizeCause::INTERACTIVE_NO_PROCESS);
+        } else {
+          FinalizeTaskAsync(task_id, elem.cause);
+        }
       } else {
-        CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
+        CRANE_ASSERT_MSG(false, "Terminating a step without any task");
       }
     }
   }
 
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_step_terminate_queue_.enqueue(not_ready_elem);
-  }
+  m_step_terminate_queue_.enqueue_bulk(
+      std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
 }
 
 void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
@@ -3359,12 +3360,22 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
     absl::Duration const& new_time_limit =
         absl::Seconds(elem.time_limit.value());
+    absl::Time deadline_time =
+        absl::FromUnixSeconds(elem.deadline_time.value());
+    absl::Time time_limit_end_time = start_time + new_time_limit;
+    bool deadline_reached = now >= deadline_time;
+    bool time_limit_reached = now >= time_limit_end_time;
 
-    if (now - start_time >= new_time_limit ||
-        absl::ToUnixSeconds(now) >= elem.deadline_time.value()) {
-      // If the step times out, terminate it.
-      StepTerminateQueueElem ev_step_terminate{
-          .cause = TaskFinalizeCause::TIME_LIMIT_EXCEEDED};
+    if (deadline_reached &&
+        (!time_limit_reached || deadline_time <= time_limit_end_time)) {
+      StepTerminateQueueElem ev_step_terminate{.cause =
+                                                   TaskFinalizeCause::DEADLINE};
+      m_step_terminate_queue_.enqueue(ev_step_terminate);
+      m_terminate_step_async_handle_->send();
+
+    } else if (time_limit_reached) {
+      StepTerminateQueueElem ev_step_terminate{.cause =
+                                                   TaskFinalizeCause::TIMEOUT};
       m_step_terminate_queue_.enqueue(ev_step_terminate);
       m_terminate_step_async_handle_->send();
 
@@ -3509,7 +3520,10 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
-      m_exec_id_task_id_map_[0] = 0;  // Placeholder
+      // Keep a synthetic running marker so terminate requests for calloc do not
+      // get short-circuited by the "no running task" fast path before the
+      // interactive no-process finalization logic can run.
+      m_exec_id_task_id_map_[0] = 0;
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }

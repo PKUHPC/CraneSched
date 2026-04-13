@@ -36,17 +36,17 @@ namespace Craned::Supervisor {
 using TaskExecId = std::variant<std::string, pid_t>;
 
 enum class TaskFinalizeCause : uint8_t {
-  NATURAL_EXIT = 0,
+  NORMAL = 0,
   TASK_PREPARE_FAILED,
   TASK_SPAWN_FAILED,
   STEP_PWD_LOOKUP_FAILED,
   STEP_PREPARE_FAILED,
   STEP_CGROUP_FAILED,
-  TIME_LIMIT_EXCEEDED,
   CANCELLED_BY_USER,
   CFORED_DISCONNECTED,
   POD_STOP_REQUESTED,
   INTERACTIVE_NO_PROCESS,
+  TIMEOUT,
   DEADLINE
 };
 
@@ -239,7 +239,7 @@ struct TaskExitInfo {
 
 struct TaskFinalInfo {
   // Semantic cause that drives final status resolution.
-  TaskFinalizeCause cause{TaskFinalizeCause::NATURAL_EXIT};
+  TaskFinalizeCause cause{TaskFinalizeCause::NORMAL};
 
   // Task exited after spawning. Raw exit info from waitpid/CRI events.
   std::optional<TaskExitInfo> raw_exit{std::nullopt};
@@ -663,7 +663,7 @@ class TaskManager {
   };
 
   struct StepTerminateQueueElem {
-    TaskFinalizeCause cause{TaskFinalizeCause::NATURAL_EXIT};
+    TaskFinalizeCause cause{TaskFinalizeCause::NORMAL};
     bool mark_as_orphaned{false};
   };
 

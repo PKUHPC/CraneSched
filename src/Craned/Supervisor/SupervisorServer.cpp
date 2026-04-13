@@ -96,7 +96,7 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
   g_task_mgr->TerminateStepAsync(request->mark_orphaned(),
                                  request->terminated_by_user()
                                      ? TaskFinalizeCause::CANCELLED_BY_USER
-                                     : TaskFinalizeCause::NATURAL_EXIT);
+                                     : TaskFinalizeCause::NORMAL);
   response->set_ok(true);
   return Status::OK;
 }
