@@ -24,7 +24,6 @@
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
 
@@ -305,7 +304,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
 
   auto job_env_map =
       g_job_mgr->QuerySshStepEnvVariables(request->job_id(), kDaemonStepId);
-  if (job_env_map.error()) {
+  if (!job_env_map) {
     CRANE_ERROR("Failed to get step env of job #{}", request->job_id());
     return Status::OK;
   }
@@ -338,12 +337,71 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
 
   auto err = g_job_mgr->ChangeStepTimeConstraint(
       request->job_id(), kPrimaryStepId, time_limit_seconds, deadline_time);
-  if (err.error()) {
+  if (!err) {
     CRANE_ERROR("[Step #{}.{}] Failed to change job time constraint",
                 request->job_id(), kPrimaryStepId);
     return Status::OK;
   }
   response->set_ok(true);
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::SuspendJobs(
+    grpc::ServerContext *context,
+    const crane::grpc::SuspendJobsRequest *request,
+    crane::grpc::SuspendJobsReply *response) {
+  response->set_ok(false);
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> failure_reasons;
+  for (auto job_id : request->job_id_list()) {
+    auto err = g_job_mgr->SuspendJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      std::string reason = fmt::format("[Job #{}] Failed to suspend: {}",
+                                       job_id, CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
+      all_ok = false;
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ResumeJobs(
+    grpc::ServerContext *context, const crane::grpc::ResumeJobsRequest *request,
+    crane::grpc::ResumeJobsReply *response) {
+  response->set_ok(false);
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> failure_reasons;
+  for (auto job_id : request->job_id_list()) {
+    auto err = g_job_mgr->ResumeJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      std::string reason = fmt::format("[Job #{}] Failed to resume: {}", job_id,
+                                       CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
+      all_ok = false;
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
   return Status::OK;
 }
 

@@ -951,6 +951,46 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
       }
     }
+  } else if (request->attribute() == ModifyJobRequest::Suspend) {
+    std::vector<task_id_t> vec_ids(job_ids.begin(), job_ids.end());
+    auto results = g_job_scheduler->SuspendRunningJobs(vec_ids);
+    for (size_t i = 0; i < vec_ids.size(); i++) {
+      if (results[i] == CraneErrCode::SUCCESS) {
+        response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
+      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not in a suspendable state.", vec_ids[i]));
+      } else {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
+      }
+    }
+  } else if (request->attribute() == ModifyJobRequest::Resume) {
+    std::vector<task_id_t> vec_ids(job_ids.begin(), job_ids.end());
+    auto results = g_job_scheduler->ResumeSuspendedJobs(vec_ids);
+    for (size_t i = 0; i < vec_ids.size(); i++) {
+      if (results[i] == CraneErrCode::SUCCESS) {
+        response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
+      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not suspended.", vec_ids[i]));
+      } else {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
+      }
+    }
   } else {
     for (auto job_id : job_ids) {
       response->add_not_modified_jobs(job_id);

@@ -104,6 +104,9 @@ class JobManager {
       job_id_t job_id, step_id_t step_id,
       std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
+
+  CraneExpected<void> ChangeAllStepsTimelimit(job_id_t job_id,
+                                              int64_t new_timelimit_sec);
   std::optional<JobInfoOfUid> QueryJobInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, job_id_t job_id);
@@ -116,6 +119,15 @@ class JobManager {
   }
 
   std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
+
+  std::vector<step_id_t> GetAllocatedJobSteps(job_id_t job_id);
+
+  CraneErrCode SuspendJobByCgroup(job_id_t job_id);
+
+  CraneErrCode ResumeJobByCgroup(job_id_t job_id);
+
+  std::shared_ptr<SupervisorStub> GetSupervisorStub(job_id_t job_id,
+                                                    step_id_t step_id);
 
   uint32_t GetStepExitCode(job_id_t job_id, step_id_t step_id);
   google::protobuf::Timestamp GetStepEndTime(job_id_t job_id,
@@ -196,6 +208,12 @@ class JobManager {
     std::promise<void> terminate_prom;
   };
 
+  struct UnexpectedSupervisorExitInfo {
+    uint32_t exit_code;
+    std::string reason;
+    int retry_count{0};
+  };
+
   std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
   std::optional<JobInD> FreeJobInfoNoLock_(
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
@@ -244,6 +262,9 @@ class JobManager {
 
   void EvCleanTerminateStepQueueCb_();
 
+  void RecordUnexpectedSupervisorExit_(pid_t pid, int status);
+  void HandleUnexpectedSupervisorExits_();
+
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -259,6 +280,12 @@ class JobManager {
       m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
   std::unordered_map<job_id_t, JobInD> m_completing_job_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
+
+  absl::Mutex m_unexpected_supervisor_exit_mtx_;
+  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                      UnexpectedSupervisorExitInfo>
+      m_unexpected_supervisor_exit_map_
+          ABSL_GUARDED_BY(m_unexpected_supervisor_exit_mtx_);
 
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
 

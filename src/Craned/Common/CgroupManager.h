@@ -306,6 +306,7 @@ constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
+    CgConstant::Controller::FREEZE_CONTROLLER |
     CgConstant::Controller::DEVICES_CONTROLLER |
     CgConstant::Controller::BLOCK_CONTROLLER;
 
@@ -610,6 +611,16 @@ class CgroupManager {
   // Returns false on any failure.
   static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
                                           uint64_t &oom_kill, uint64_t &oom);
+
+  // Freeze/Thaw cgroup by absolute cgroup path.
+  // For cgroup v1: writes "FROZEN"/"THAWED" to freezer.state
+  // For cgroup v2: writes "1"/"0" to cgroup.freeze
+  static bool FreezeCgroupByPath(const std::string &cg_path);
+  static bool ThawCgroupByPath(const std::string &cg_path);
+
+  // Freeze/Thaw all direct child cgroups under the given path.
+  static bool FreezeChildCgroupsByPath(const std::string &cg_path);
+  static bool ThawChildCgroupsByPath(const std::string &cg_path);
 
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(

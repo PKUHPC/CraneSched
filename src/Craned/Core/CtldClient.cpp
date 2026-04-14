@@ -533,11 +533,11 @@ void CtldClient::Init() {
               std::inserter(valid_job_steps[job_id],
                             valid_job_steps[job_id].end()));
         }
-        std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
         std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
             steps_to_sync{};
+        std::unordered_set<job_id_t> refrozen_jobs{};
 
         // Define status priority for intelligent merging
         // Ctld valid status:
@@ -614,6 +614,25 @@ void CtldClient::Init() {
             if (ctld_status == StepStatus::Completing) {
               CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
               completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            // Handle Suspended status from Ctld: re-freeze cgroup to ensure
+            // consistency after Craned restart
+            if (ctld_status == StepStatus::Suspended) {
+              if (refrozen_jobs.insert(job_id).second) {
+                CRANE_INFO(
+                    "[Job #{}] Ctld reports Suspended, re-freezing by "
+                    "job cgroup during recovery.",
+                    job_id);
+                auto err = g_job_mgr->SuspendJobByCgroup(job_id);
+                if (err != CraneErrCode::SUCCESS) {
+                  CRANE_WARN(
+                      "[Job #{}] Failed to re-freeze job cgroup during "
+                      "recovery: {}",
+                      job_id, CraneErrStr(err));
+                }
+              }
               continue;
             }
 
@@ -697,11 +716,6 @@ void CtldClient::Init() {
           CRANE_INFO("Freeing invalid jobs: [{}].",
                      absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(std::move(invalid_jobs));
-        }
-        if (!completing_jobs.empty()) {
-          CRANE_INFO("Terminating completing jobs: [{}].",
-                     absl::StrJoin(completing_jobs, ","));
-          g_job_mgr->FreeJobs(std::move(completing_jobs));
         }
         if (!completing_steps.empty()) {
           CRANE_INFO("Terminating completing steps: [{}].",
