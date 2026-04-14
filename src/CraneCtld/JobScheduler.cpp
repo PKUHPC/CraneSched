@@ -2304,8 +2304,10 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         if (suspended_duration > absl::ZeroDuration()) {
           absl::Time new_end_time = job->EndTime() + suspended_duration;
 
-          // If deadline is set, take the minimum of extended end_time and deadline
-          if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+          // If deadline is set, take the minimum of extended end_time and
+          // deadline
+          if (job->deadline_time !=
+              absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
             new_end_time = std::min(new_end_time, job->deadline_time);
             CRANE_INFO(
                 "Job #{} pre-resume: extended end_time by {:.1f}s "
@@ -2339,7 +2341,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       resume_prep_applied = true;
 
       // Effective time limit for craned = end_time - start_time
-      // (includes original time_limit + total suspended time, capped by deadline if set).
+      // (includes original time_limit + total suspended time, capped by
+      // deadline if set).
       new_time_limit_secs =
           absl::ToInt64Seconds(job->EndTime() - job->StartTime());
 
@@ -2511,11 +2514,11 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       }
     }
 
-    // Notify all executing craned nodes about the effective time limit and deadline
-    // so they can reset their termination timers correctly.
-    // The timer on craned side should be min(end_time, deadline) - now.
-    // If any node fails, rollback the entire resume operation.
-    // Check again if job still exists before updating time limits.
+    // Notify all executing craned nodes about the effective time limit and
+    // deadline so they can reset their termination timers correctly. The timer
+    // on craned side should be min(end_time, deadline) - now. If any node
+    // fails, rollback the entire resume operation. Check again if job still
+    // exists before updating time limits.
     bool job_still_exists = false;
     {
       LockGuard running_guard(&m_running_job_map_mtx_);
@@ -2537,8 +2540,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
     for (const CranedId& craned_id : executing_nodes) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (stub && !stub->Invalid()) {
-        CraneErrCode err =
-            stub->ChangeJobTimeConstraint(job_id, new_time_limit_secs, new_deadline_secs);
+        CraneErrCode err = stub->ChangeJobTimeConstraint(
+            job_id, new_time_limit_secs, new_deadline_secs);
         if (err != CraneErrCode::SUCCESS) {
           // Check if job completed concurrently before treating as failure
           bool job_completed = false;
@@ -2642,7 +2645,6 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
   }
   return results;
 }
-
 
 CraneErrCode JobScheduler::ChangeJobPriority(job_id_t job_id, double priority) {
   m_pending_job_map_mtx_.Lock();

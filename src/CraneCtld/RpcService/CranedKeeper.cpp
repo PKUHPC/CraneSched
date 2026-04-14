@@ -338,7 +338,7 @@ CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t> &job_ids) {
                 reply.reason());
 
     // Parse error code from reason string
-    const std::string& reason = reply.reason();
+    const std::string &reason = reply.reason();
     if (reason.find("CGroup error") != std::string::npos ||
         reason.find("Failed to freeze") != std::string::npos) {
       err_code = CraneErrCode::ERR_CGROUP;
@@ -384,7 +384,7 @@ CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
                 reply.reason());
 
     // Parse error code from reason string
-    const std::string& reason = reply.reason();
+    const std::string &reason = reply.reason();
     if (reason.find("CGroup error") != std::string::npos ||
         reason.find("Failed to thaw") != std::string::npos) {
       err_code = CraneErrCode::ERR_CGROUP;

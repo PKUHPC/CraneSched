@@ -18,11 +18,11 @@
 
 #include "JobManager.h"
 
-#include <fstream>
 #include <pty.h>
 #include <sys/wait.h>
 
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <utility>
 
@@ -45,8 +45,8 @@ constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
 constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
 
-std::filesystem::path GetV1ControllerPath_(const std::string& cg_path,
-                                           Common::CgConstant::Controller ctrl) {
+std::filesystem::path GetV1ControllerPath_(
+    const std::string& cg_path, Common::CgConstant::Controller ctrl) {
   return Common::CgConstant::kSystemCgPathPrefix /
          Common::CgConstant::GetControllerStringView(ctrl) /
          std::filesystem::relative(cg_path,
@@ -61,8 +61,8 @@ bool IsCgroupFrozenByPath_(const std::string& cg_path) {
     state_file = std::filesystem::path(cg_path) / "cgroup.freeze";
   } else {
     state_file =
-        GetV1ControllerPath_(cg_path,
-                             Common::CgConstant::Controller::FREEZE_CONTROLLER) /
+        GetV1ControllerPath_(
+            cg_path, Common::CgConstant::Controller::FREEZE_CONTROLLER) /
         "freezer.state";
   }
 
@@ -566,7 +566,8 @@ void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
     for (const auto& [step_id, step] : job_ptr->step_map) {
       if (step == nullptr || step->supv_pid != pid) continue;
 
-      if (step->err_before_supv_start || step->status == StepStatus::Completing ||
+      if (step->err_before_supv_start ||
+          step->status == StepStatus::Completing ||
           IsFinishedStepStatus_(step->status)) {
         CRANE_TRACE(
             "[Step #{}.{}] Supervisor pid {} exited after step reached status "
@@ -617,11 +618,10 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
     absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
     pending.reserve(m_unexpected_supervisor_exit_map_.size());
     for (const auto& [key, info] : m_unexpected_supervisor_exit_map_) {
-      pending.emplace_back(PendingSnapshot{
-          .key = key,
-          .exit_code = info.exit_code,
-          .reason = info.reason,
-          .retry_count = info.retry_count});
+      pending.emplace_back(PendingSnapshot{.key = key,
+                                           .exit_code = info.exit_code,
+                                           .reason = info.reason,
+                                           .retry_count = info.retry_count});
     }
   }
 
@@ -660,11 +660,10 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
       continue;
     }
 
-    failures.emplace_back(PendingFailure{
-        .job_id = job_id,
-        .step_id = step_id,
-        .exit_code = entry.exit_code,
-        .reason = entry.reason});
+    failures.emplace_back(PendingFailure{.job_id = job_id,
+                                         .step_id = step_id,
+                                         .exit_code = entry.exit_code,
+                                         .reason = entry.reason});
     resolved_keys.emplace_back(entry.key);
   }
 
@@ -672,7 +671,8 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
     absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
     for (const auto& key : retry_keys) {
       auto it = m_unexpected_supervisor_exit_map_.find(key);
-      if (it != m_unexpected_supervisor_exit_map_.end()) ++it->second.retry_count;
+      if (it != m_unexpected_supervisor_exit_map_.end())
+        ++it->second.retry_count;
     }
     for (const auto& key : resolved_keys) {
       m_unexpected_supervisor_exit_map_.erase(key);
@@ -685,8 +685,8 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
         "status. Marking step Failed.",
         failure.job_id, failure.step_id);
     ActivateStepStatusChangeAsync_(
-        failure.job_id, failure.step_id, StepStatus::Failed,
-        failure.exit_code, std::move(failure.reason),
+        failure.job_id, failure.step_id, StepStatus::Failed, failure.exit_code,
+        std::move(failure.reason),
         google::protobuf::util::TimeUtil::GetCurrentTime());
   }
 }
@@ -901,8 +901,7 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
         google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
-  auto err =
-      stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
+  auto err = stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
   int64_t sec = time_limit_seconds.value_or(deadline_time.value_or(0));
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR(
@@ -929,12 +928,13 @@ CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
   // limit will take effect on the next check.
   for (auto& [step_id, step] : job->step_map) {
     if (step->supervisor_stub) {
-      auto err =
-          step->supervisor_stub->ChangeStepTimeConstraint(new_timelimit_sec, std::nullopt);
+      auto err = step->supervisor_stub->ChangeStepTimeConstraint(
+          new_timelimit_sec, std::nullopt);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_WARN(
             "[Step #{}.{}] Failed to change step timelimit to {} seconds, "
-            "but continuing (step may have completed or supervisor unavailable)",
+            "but continuing (step may have completed or supervisor "
+            "unavailable)",
             job_id, step_id, new_timelimit_sec);
       }
     } else {
@@ -949,7 +949,6 @@ CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
   // resume operations
   return {};
 }
-
 
 CraneExpected<EnvMap> JobManager::QuerySshStepEnvVariables(job_id_t job_id,
                                                            step_id_t step_id) {
@@ -1395,8 +1394,7 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
 CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
-    CRANE_WARN("[Job #{}] Failed to resume: job allocation not found.",
-               job_id);
+    CRANE_WARN("[Job #{}] Failed to resume: job allocation not found.", job_id);
     return CraneErrCode::ERR_NON_EXISTENT;
   }
 

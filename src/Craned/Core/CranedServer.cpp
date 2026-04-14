@@ -390,8 +390,8 @@ grpc::Status CranedServiceImpl::ResumeJobs(
   for (auto job_id : request->job_id_list()) {
     auto err = g_job_mgr->ResumeJobByCgroup(job_id);
     if (err != CraneErrCode::SUCCESS) {
-      std::string reason = fmt::format("[Job #{}] Failed to resume: {}",
-                                       job_id, CraneErrStr(err));
+      std::string reason = fmt::format("[Job #{}] Failed to resume: {}", job_id,
+                                       CraneErrStr(err));
       CRANE_ERROR("{}", reason);
       failure_reasons.push_back(reason);
       all_ok = false;

@@ -885,8 +885,7 @@ bool ChangeFreezerStateByPath(const std::string &cg_path, bool freeze) {
   std::error_code ec;
   if (CgroupManager::IsCgV2()) {
     if (!std::filesystem::exists(cg_path, ec)) {
-      CRANE_ERROR("Cgroup path '{}' does not exist: {}", cg_path,
-                  ec.message());
+      CRANE_ERROR("Cgroup path '{}' does not exist: {}", cg_path, ec.message());
       return false;
     }
 
@@ -969,12 +968,11 @@ bool ChangeChildCgroupsFreezerState(const std::string &cg_path, bool freeze) {
     child_paths.emplace_back(std::filesystem::path(cg_path) / rel_path);
   }
 
-  std::ranges::sort(
-      child_paths, [freeze](const auto &lhs, const auto &rhs) {
-        auto lhs_depth = std::ranges::distance(lhs.begin(), lhs.end());
-        auto rhs_depth = std::ranges::distance(rhs.begin(), rhs.end());
-        return freeze ? lhs_depth > rhs_depth : lhs_depth < rhs_depth;
-      });
+  std::ranges::sort(child_paths, [freeze](const auto &lhs, const auto &rhs) {
+    auto lhs_depth = std::ranges::distance(lhs.begin(), lhs.end());
+    auto rhs_depth = std::ranges::distance(rhs.begin(), rhs.end());
+    return freeze ? lhs_depth > rhs_depth : lhs_depth < rhs_depth;
+  });
 
   for (const auto &child_path : child_paths) {
     if (!ChangeFreezerStateByPath(child_path.string(), freeze)) {
