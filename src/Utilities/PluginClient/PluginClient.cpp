@@ -272,7 +272,7 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
 
 void PluginClient::CreateCgroupHookAsync(
     job_id_t job_id, const std::string& cgroup,
-    const crane::grpc::ResourceInNode& resource) {
+    const crane::grpc::ResourceInNodeV3& resource) {
   auto request =
       std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
   request->set_job_id(job_id);

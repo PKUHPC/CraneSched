@@ -123,7 +123,7 @@ class CranedMetaContainer final {
   };
 
   void MallocResourceFromNode(CranedId node_id, job_id_t job_id,
-                              const ResourceV2& resources);
+                              const ResourceV3& resources);
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t job_id);
 
@@ -154,7 +154,7 @@ class CranedMetaContainer final {
   ResvMetaMapExclusivePtr GetResvMetaMapExclusivePtr();
 
   void MallocResourceFromResv(ResvId resv_id, job_id_t job_id,
-                              const ResourceV2& res);
+                              const ResourceV3& res);
 
   void FreeResourceFromResv(ResvId resv_id, job_id_t job_id);
 

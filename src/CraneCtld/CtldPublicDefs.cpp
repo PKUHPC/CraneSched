@@ -203,10 +203,10 @@ void StepInCtld::SetRequeueCount(std::int32_t count) {
   this->m_runtime_attr_.set_requeue_count(count);
 }
 
-void StepInCtld::SetAllocatedRes(const ResourceV2& res) {
+void StepInCtld::SetAllocatedRes(const ResourceV3& res) {
   this->m_allocated_res_ = res;
   *this->m_runtime_attr_.mutable_allocated_res() =
-      static_cast<crane::grpc::ResourceV2>(res);
+      static_cast<crane::grpc::ResourceV3>(res);
 }
 
 void StepInCtld::SetCranedIds(const std::vector<CranedId>& craned_list) {
@@ -329,29 +329,26 @@ void StepInCtld::RecoverFromDb(
   req_task_res_view.SetToZero();
 
   if (step_to_ctld.has_mem_per_node()) {
-    req_node_res_view.GetAllocatableRes().memory_bytes =
-        step_to_ctld.mem_per_node();
-    req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-        step_to_ctld.mem_per_node();
+    req_node_res_view.SetMemoryBytes(step_to_ctld.mem_per_node());
+    req_node_res_view.SetMemorySwBytes(step_to_ctld.mem_per_node());
   }
   if (step_to_ctld.has_gres_per_node()) {
-    req_node_res_view.GetDeviceMap() =
-        FromGrpcDeviceMap(step_to_ctld.gres_per_node());
+    req_node_res_view.GetGresMap() =
+        FromGrpcGresMap(step_to_ctld.gres_per_node());
   }
 
   if (step_to_ctld.has_cpus_per_task()) {
-    req_task_res_view.GetAllocatableRes().cpu_count =
-        cpu_t(step_to_ctld.cpus_per_task());
+    req_task_res_view.SetCpuCount(cpu_t(step_to_ctld.cpus_per_task()));
 
     if (step_to_ctld.has_mem_per_cpu()) {
       uint64_t mem_per_task =
           static_cast<uint64_t>(step_to_ctld.cpus_per_task()) *
           step_to_ctld.mem_per_cpu();
-      req_task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
-      req_task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
+      req_task_res_view.SetMemoryBytes(mem_per_task);
+      req_task_res_view.SetMemorySwBytes(mem_per_task);
     }
   } else {
-    req_task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
+    req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
   req_total_res_view =
@@ -363,7 +360,7 @@ void StepInCtld::RecoverFromDb(
   SetStepType(runtime_attr.step_type());
 
   SetRequeueCount(runtime_attr.requeue_count());
-  SetAllocatedRes(static_cast<ResourceV2>(runtime_attr.allocated_res()));
+  SetAllocatedRes(static_cast<ResourceV3>(runtime_attr.allocated_res()));
 
   SetCranedIds(
       {runtime_attr.craned_ids().begin(), runtime_attr.craned_ids().end()});
@@ -548,8 +545,8 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_account(job->account);
   job_to_d.set_qos(job->qos);
   job_to_d.set_partition(job->partition_id);
-  *job_to_d.mutable_res() =
-      crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
+  *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
+      m_allocated_res_.at(craned_id));
   return job_to_d;
 }
 
@@ -557,8 +554,8 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
     const CranedId& craned_id) const {
   crane::grpc::StepToD step_to_d;
   auto* mutable_res_in_node = step_to_d.mutable_res();
-  *mutable_res_in_node =
-      static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
+  *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
+      m_allocated_res_.at(craned_id));
 
   step_to_d.set_type(this->type);
   step_to_d.set_step_type(this->step_type);
@@ -597,7 +594,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_cwd(this->job->cwd);
   step_to_d.set_ntasks(this->job->ntasks);
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
-  step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCount());
+  step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
 
   return step_to_d;
@@ -905,11 +902,11 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     task_res_map[cur_task_id] =
         job.AllocatedRes().at(job.executing_craned_ids.front());
   } else {
-    ResourceV2 step_alloc_res;
+    ResourceV3 step_alloc_res;
     task_id_t cur_task_id = 0;
     for (const auto& craned_id : job.CranedIds()) {
-      ResourceInNode& res_avail = job.StepResAvail().at(craned_id);
-      ResourceInNode feasible_res;
+      ResourceInNodeV3& res_avail = job.StepResAvail().at(craned_id);
+      ResourceInNodeV3 feasible_res;
       req_node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
       res_avail -= feasible_res;
       step_alloc_res.AddResourceInNode(craned_id, feasible_res);
@@ -1023,29 +1020,26 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   req_task_res_view.SetToZero();
 
   if (step_to_ctld.has_mem_per_node()) {
-    req_node_res_view.GetAllocatableRes().memory_bytes =
-        step_to_ctld.mem_per_node();
-    req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-        step_to_ctld.mem_per_node();
+    req_node_res_view.SetMemoryBytes(step_to_ctld.mem_per_node());
+    req_node_res_view.SetMemorySwBytes(step_to_ctld.mem_per_node());
   }
   if (step_to_ctld.has_gres_per_node()) {
-    req_node_res_view.GetDeviceMap() =
-        FromGrpcDeviceMap(step_to_ctld.gres_per_node());
+    req_node_res_view.GetGresMap() =
+        FromGrpcGresMap(step_to_ctld.gres_per_node());
   }
 
   if (step_to_ctld.has_cpus_per_task()) {
-    req_task_res_view.GetAllocatableRes().cpu_count =
-        cpu_t(step_to_ctld.cpus_per_task());
+    req_task_res_view.SetCpuCount(cpu_t(step_to_ctld.cpus_per_task()));
   } else {
-    req_task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
+    req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
   if (step_to_ctld.has_mem_per_cpu()) {
     uint64_t mem_per_task =
-        static_cast<double>(req_task_res_view.GetAllocatableRes().cpu_count) *
+        static_cast<double>(req_task_res_view.GetCpuCount()) *
         step_to_ctld.mem_per_cpu();
-    req_task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
-    req_task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
+    req_task_res_view.SetMemoryBytes(mem_per_task);
+    req_task_res_view.SetMemorySwBytes(mem_per_task);
   }
 
   {
@@ -1084,8 +1078,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   crane::grpc::StepToD step_to_d;
 
   auto* mutable_res_in_node = step_to_d.mutable_res();
-  *mutable_res_in_node =
-      static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
+  *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
+      m_allocated_res_.at(craned_id));
 
   // Set type
   step_to_d.set_type(this->type);
@@ -1107,7 +1101,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     for (auto task_id : task_it->second) {
       auto& res = this->task_res_map.at(task_id);
       task_res_map->emplace(task_id,
-                            static_cast<crane::grpc::ResourceInNode>(res));
+                            static_cast<crane::grpc::ResourceInNodeV3>(res));
     }
   }
 
@@ -1583,9 +1577,9 @@ void JobInCtld::SetCachedPriority(double val) {
   runtime_attr.set_cached_priority(val);
 }
 
-void JobInCtld::SetAllocatedRes(ResourceV2&& val) {
+void JobInCtld::SetAllocatedRes(ResourceV3&& val) {
   *runtime_attr.mutable_allocated_res() =
-      static_cast<crane::grpc::ResourceV2>(val);
+      static_cast<crane::grpc::ResourceV3>(val);
   allocated_res = std::move(val);
 }
 
@@ -1652,26 +1646,25 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   req_task_res_view.SetToZero();
 
   if (val.has_mem_per_node()) {
-    req_node_res_view.GetAllocatableRes().memory_bytes = val.mem_per_node();
-    req_node_res_view.GetAllocatableRes().memory_sw_bytes = val.mem_per_node();
+    req_node_res_view.SetMemoryBytes(val.mem_per_node());
+    req_node_res_view.SetMemorySwBytes(val.mem_per_node());
   }
   if (val.has_gres_per_node()) {
-    req_node_res_view.GetDeviceMap() = FromGrpcDeviceMap(val.gres_per_node());
+    req_node_res_view.GetGresMap() = FromGrpcGresMap(val.gres_per_node());
   }
 
   if (val.has_cpus_per_task()) {
-    req_task_res_view.GetAllocatableRes().cpu_count =
-        cpu_t(val.cpus_per_task());
+    req_task_res_view.SetCpuCount(cpu_t(val.cpus_per_task()));
   } else {
-    req_task_res_view.GetAllocatableRes().cpu_count = cpu_t(1);
+    req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
   if (val.has_mem_per_cpu()) {
     uint64_t mem_per_task =
-        static_cast<double>(req_task_res_view.GetAllocatableRes().cpu_count) *
+        static_cast<double>(req_task_res_view.GetCpuCount()) *
         val.mem_per_cpu();
-    req_task_res_view.GetAllocatableRes().memory_bytes = mem_per_task;
-    req_task_res_view.GetAllocatableRes().memory_sw_bytes = mem_per_task;
+    req_task_res_view.SetMemoryBytes(mem_per_task);
+    req_task_res_view.SetMemorySwBytes(mem_per_task);
   }
 
   uid = val.uid();
@@ -1746,7 +1739,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
       executing_craned_ids.emplace_back(craned_ids.front());
     }
 
-    allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
+    allocated_res = static_cast<ResourceV3>(runtime_attr.allocated_res());
     allocated_res_view.SetToZero();
     allocated_res_view += allocated_res;
   }
@@ -1882,7 +1875,7 @@ int JobInCtld::SchedulePendingSteps(
     }
     int max_ntask_per_node = step->ntasks_per_node_max;
     int min_ntask_per_node = step->ntasks_per_node_min;
-    ResourceV2 step_alloc_res;
+    ResourceV3 step_alloc_res;
     struct node_info {
       int ntasks_on_node;
       const CranedId* craned_id;
@@ -1901,12 +1894,12 @@ int JobInCtld::SchedulePendingSteps(
           !step->included_nodes.contains(craned_id)) {
         continue;
       }
-      ResourceInNode feasible_res;
+      ResourceInNodeV3 feasible_res;
       if (!step->req_node_res_view.GetFeasibleResourceInNode(
               step_res_avail_.at(craned_id), &feasible_res)) {
         continue;
       }
-      ResourceInNode res_avail = step_res_avail_.at(craned_id);
+      ResourceInNodeV3 res_avail = step_res_avail_.at(craned_id);
       res_avail -= feasible_res;
       int ntasks_on_node = 0;
       while (ntasks_on_node < max_ntask_per_node &&
@@ -1935,8 +1928,8 @@ int JobInCtld::SchedulePendingSteps(
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
-      ResourceInNode& res_avail = step_res_avail_.at(*info.craned_id);
-      ResourceInNode feasible_res;
+      ResourceInNodeV3& res_avail = step_res_avail_.at(*info.craned_id);
+      ResourceInNodeV3 feasible_res;
       step->req_node_res_view.GetFeasibleResourceInNode(res_avail,
                                                         &feasible_res);
       res_avail -= feasible_res;

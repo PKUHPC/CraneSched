@@ -101,7 +101,7 @@ class MongodbClient {
     std::string wckey;
     std::chrono::sys_seconds start_time;
     std::chrono::sys_seconds end_time;
-    double total_cpus;
+    cpu_t total_cpus;
   };
 
   struct MongoServerVersion {
@@ -516,15 +516,15 @@ class MongodbClient {
       const std::unordered_map<std::string, User::AttrsInAccount>& value);
 
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const DeviceMap& value);
+                           const GresMap& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const std::vector<gid_t>& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const DedicatedResourceInNode& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const ResourceInNode& value);
+                           const ResourceInNodeV3& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const ResourceV2& value);
+                           const ResourceV3& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const std::optional<ContainerMetaInJob>& value);
 
@@ -539,7 +539,7 @@ class MongodbClient {
                            const ResourceView& value);
 
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
-                              const DeviceMap& value);
+                              const GresMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -649,11 +649,11 @@ class MongodbClient {
   void ViewToStepInfo_(const bsoncxx::document::view& view,
                        crane::grpc::StepInfo* step_info);
 
-  DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
+  GresMap BsonToGresMap(const bsoncxx::document::view& doc);
   DedicatedResourceInNode BsonToDedicatedResourceInNode(
       const bsoncxx::document::view& doc);
-  ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
-  ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
+  ResourceInNodeV3 BsonToResourceInNodeV3(const bsoncxx::document::view& doc);
+  ResourceV3 BsonToResourceV3(const bsoncxx::document::view& doc);
   PodMetaInJob BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
 

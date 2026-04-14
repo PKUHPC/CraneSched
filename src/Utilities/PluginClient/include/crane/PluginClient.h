@@ -76,7 +76,7 @@ class PluginClient {
 
   // Launched by Craned
   void CreateCgroupHookAsync(job_id_t job_id, const std::string& cgroup,
-                             const crane::grpc::ResourceInNode& resource);
+                             const crane::grpc::ResourceInNodeV3& resource);
   void DestroyCgroupHookAsync(job_id_t job_id, const std::string& cgroup);
 
   void UpdatePowerStateHookAsync(const std::string& craned_id,

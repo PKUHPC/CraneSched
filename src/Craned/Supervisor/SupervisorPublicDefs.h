@@ -120,6 +120,13 @@ struct Config {
   // Cgroup path of this supervisor (crane system cgroup)
   std::string SupvCgroupPath;
 
+  // Job cgroup str (w/o "crane/" prefix), e.g. "job_1" (v1) or "overflow/job_1"
+  // (v2). Used to construct step/task cgroup paths.
+  std::string JobCgStr;
+
+  // Cpuset cgroup str for v1 migration, e.g. "overflow" or "" (v2/INT).
+  std::string CpusetCgStr;
+
   struct JobLifecycleHookConfig {
     std::vector<std::string> Prologs;
     std::vector<std::string> Epilogs;

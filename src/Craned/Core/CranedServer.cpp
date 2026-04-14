@@ -189,7 +189,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   do {
     auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
     if (pid_to_ids_expt.has_value()) {
-      auto [job_id_opt, step_id_opt, system_flag, task_id_opt] =
+      auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] =
           pid_to_ids_expt.value();
 
       // FIXME: Use step_id_opt after multi-step is supported.

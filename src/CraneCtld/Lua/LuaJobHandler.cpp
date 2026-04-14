@@ -185,24 +185,24 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
 
   lua_env.GetLuaState().new_usertype<ResourceView>("ResourceView",
     "cpu_count", sol::property([](const ResourceView& rv) {
-      return rv.CpuCount();
+      return rv.CpuCountDouble();
     }),
     "memory_bytes", sol::property([](const ResourceView& rv) {
-      return rv.MemoryBytes();
+      return rv.GetMemoryBytes();
     }),
     "device_map", sol::property(
       [&](const ResourceView& rv) {
         sol::table tbl = lua_env.GetLuaState().create_table();
-        for (const auto& [dev_name, pair] : rv.GetDeviceMap()) {
+        for (const auto& [gres_name, gres_count] : rv.GetGresMap()) {
           sol::table entry = lua_env.GetLuaState().create_table();
-          entry["untyped_count"] = pair.first;
+          entry["total_count"] = gres_count.total;
 
           sol::table typed = lua_env.GetLuaState().create_table();
-          for (const auto& [typed_name, typed_count] : pair.second) {
+          for (const auto& [typed_name, typed_count] : gres_count.specified) {
             typed[typed_name] = typed_count;
           }
           entry["typed"] = typed;
-          tbl[dev_name] = entry;
+          tbl[gres_name] = entry;
         }
         return tbl;
       })

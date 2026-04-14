@@ -120,10 +120,12 @@ void SetCurrentThreadName(const std::string& name);
 bool ConvertStringToInt64(const std::string& s, int64_t* val);
 
 std::string ReadableResourceView(const ResourceView& resource);
-std::string ReadableTypedDeviceMap(const DeviceMap& dedicated_resource);
-std::string ReadableDresInNode(const ResourceInNode& dedicated_resource);
+std::string ReadableGresMap(const GresMap& gres_map);
+std::string ReadableDresInNode(const DedicatedResourceInNode& dres);
 std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode& dres_in_node);
+std::string ReadableResourceInNodeV3(const ResourceInNodeV3& res);
+std::string ReadableResourceV3(const ResourceV3& res);
 
 std::string GenerateCommaSeparatedString(int val);
 
@@ -252,7 +254,7 @@ void ParsePrologEpilogHookPaths(const std::string& log_hook_config,
                                 const std::string& config_file_path,
                                 std::vector<std::string>* result);
 
-bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map);
+bool ConvertStringToGresMap(const std::string& s, GresMap* gres_map);
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 

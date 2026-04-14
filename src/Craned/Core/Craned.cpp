@@ -137,8 +137,24 @@ CraneErrCode RecoverCgForJobSteps(
   };
 
   for (auto ids : rn_job_ids_with_cg) {
-    auto [job_id_opt, step_id_opt, system_flag, task_id_opt] = ids;
+    auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] = ids;
     job_id_t job_id = job_id_opt.value();
+
+    // Construct job path info for recovery.
+    // v1: cg_str never has overflow prefix (flat cpuset)
+    // v2: overflow jobs have overflow prefix in unified hierarchy
+    auto job_name = CgroupManager::CgroupStrByJobId(job_id);
+    CgroupPathInfo job_path_info;
+    if (CgroupManager::IsCgV2()) {
+      job_path_info.cg_str = is_overflow
+                                 ? std::string(kOverflowCgName) + "/" + job_name
+                                 : job_name;
+    } else {
+      job_path_info.cg_str = job_name;
+      job_path_info.cpuset_cg_str =
+          is_overflow ? std::string(kOverflowCgName) : "";
+    }
+
     // For craned, we don't care task cgroup
     if (task_id_opt.has_value()) continue;
     if (step_id_opt.has_value()) {
@@ -156,48 +172,51 @@ CraneErrCode RecoverCgForJobSteps(
         }
         CRANE_DEBUG("Recover existing cgroup for step {} of job #{}", step_id,
                     job_id);
+        std::string step_cg_str = CgroupManager::CgroupStrByStepId(
+            job_path_info.cg_str, step_id, system_flag);
         auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-            CgroupManager::CgroupStrByStepId(job_id, step_id, system_flag),
-            step_instance->step_to_d.res(), true);
+            step_cg_str, step_instance->step_to_d.res(), true);
         if (cg_expt.has_value()) {
-          if (system_flag)
+          if (system_flag) {
+            step_instance->cg_str = step_cg_str;
+            step_instance->job_path_info = job_path_info;
             step_instance->crane_cgroup = std::move(cg_expt.value());
+          }
           continue;
         } else {
-          // If the cgroup is found but is unrecoverable, just logging out.
           CRANE_ERROR(
               "Cgroup for step {} of job #{} is found but not "
               "recoverable.",
               step_id, job_id);
         }
       } else {
-        // Job is found in cgroup but not in ctld. Cleaning up.
+        // Step is found in cgroup but not in ctld. Cleaning up.
         CRANE_DEBUG("Removing cgroup for step #{}.{} not in Ctld.", job_id,
                     step_id);
         clean_invalid_cg(ids);
       }
+      continue;
     }
 
-    // Job cgroup recovery
+    // Job cgroup recovery (use AllocateAndGetCgroupForJob for CPU pool routing)
     if (rn_jobs_from_ctld.contains(job_id)) {
-      // Job is found in both ctld and cgroup
       JobInD& job = rn_jobs_from_ctld.at(job_id);
 
-      CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
-      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-          CgroupManager::CgroupStrByJobId(job_id), job.job_to_d.res(), true);
+      CRANE_DEBUG("Recover cgroup for job #{} (overflow={})", job_id,
+                  is_overflow);
+      auto cg_expt = CgroupManager::AllocateAndGetCgroupForJob(
+          job_id, job.job_to_d.res(), true);
       if (cg_expt.has_value()) {
-        // Job cgroup is recovered.
         job.cgroup = std::move(cg_expt.value());
+        job.path_info = job_path_info;
       } else {
-        // If the cgroup is found but is unrecoverable, just logging out.
-        CRANE_ERROR("Cgroup for job #{} is found but not recoverable.", job_id);
+        CRANE_ERROR("Cgroup for job #{} not recoverable.", job_id);
       }
       continue;
     }
-    clean_invalid_cg(ids);
     // Job is found in cgroup but not in ctld. Cleaning up.
     CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
+    clean_invalid_cg(ids);
   }
 
   return CraneErrCode::SUCCESS;
@@ -737,7 +756,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          auto node_res = std::make_shared<ResourceInNode>();
+          auto node_res = std::make_shared<ResourceInNodeV3>();
           std::list<std::string> name_list;
 
           if (node["name"]) {
@@ -750,18 +769,19 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          if (node["cpu"])
-            node_res->allocatable_res.cpu_count =
-                cpu_t(std::stoul(node["cpu"].as<std::string>()));
-          else
+          if (node["cpu"]) {
+            uint32_t cpu_count = std::stoul(node["cpu"].as<std::string>());
+            for (uint32_t i = 0; i < cpu_count; ++i)
+              node_res->GetCpuSet().core_ids.insert(i);
+          } else
             std::exit(1);
 
           if (node["memory"]) {
             auto memory_bytes =
                 util::ParseMemory(node["memory"].as<std::string>());
             if (memory_bytes.has_value()) {
-              node_res->allocatable_res.memory_bytes = memory_bytes.value();
-              node_res->allocatable_res.memory_sw_bytes = memory_bytes.value();
+              node_res->SetMemoryBytes(memory_bytes.value());
+              node_res->SetMemorySwBytes(memory_bytes.value());
             } else {
               CRANE_ERROR("Illegal memory format.");
               std::exit(1);
@@ -1195,7 +1215,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       dev->slot_id = dev->device_file_metas.front().path;
-      node_res->dedicated_res.name_type_slots_map[dev->name][dev->type].emplace(
+      node_res->GetGres().name_type_slots_map[dev->name][dev->type].emplace(
           dev->slot_id);
 
       g_this_node_device[dev->slot_id] = std::move(dev);
@@ -1436,6 +1456,15 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
+  // Initialize CPU pool (overflow cgroup and pool state)
+  {
+    auto node_res = g_config.CranedRes.at(g_config.Hostname);
+    if (!CgroupManager::InitCpuPool(node_res->GetCpuSet().core_ids)) {
+      CRANE_ERROR("Failed to initialize CPU pool.");
+      std::exit(1);
+    }
+  }
+
   // If Container is enabled, connect to CRI runtime.
   if (g_config.Container.Enabled) {
     g_cri_client = std::make_unique<cri::CriClient>();
@@ -1525,6 +1554,8 @@ void WaitForStopAndDoGvarFini() {
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
+
+  CgroupManager::ShutdownCpuPool();
 
   std::exit(0);
 }

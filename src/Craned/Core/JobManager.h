@@ -58,6 +58,9 @@ struct JobInD {
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
 
+  // Cgroup path info for this job. Set when cgroup is created/recovered.
+  Common::CgroupPathInfo path_info;
+
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
