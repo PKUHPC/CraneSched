@@ -243,9 +243,13 @@ Container:
     Options: []
   # SubID configuration
   SubId:
+    # This sample configuration enables managed mode. Adjust the mappings to
+    # cover every user/group which may use userns before deploying.
     Managed: true
-    RangeSize: 65536
-    BaseOffset: 100000
+    UidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
+    GidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
   # BindFS configuration
   BindFs:
     Enabled: false

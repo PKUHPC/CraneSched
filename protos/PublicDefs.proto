@@ -897,6 +897,12 @@ enum EntityType {
   User = 1;
 }
 
+enum TerminateSource {
+  TERMINATE_SOURCE_USER_CANCEL = 0;
+  TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
+  TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
+}
+
 enum OperationType {
   Overwrite = 0;
   Add = 1;

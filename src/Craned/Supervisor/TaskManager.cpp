@@ -24,7 +24,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <iterator>
 #include <limits>
+#include <variant>
 
 #include "CforedClient.h"
 #include "CgroupManager.h"
@@ -32,6 +34,7 @@
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
+#include "crane/Logger.h"
 #include "crane/OS.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -73,7 +76,7 @@ CraneErrCode StepInstance::Prepare() {
   if (IsCrun()) {
     InitCforedClient();
 
-    auto cfored_client = GetCforedClient();
+    auto* cfored_client = GetCforedClient();
     if (x11) {
       X11Meta x11_meta{};
       if (x11_fwd)
@@ -249,6 +252,24 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 }
 
 void StepInstance::GotNewStatus(StepStatus new_status) {
+  if (IsFinishedStepStatus(new_status)) {
+    if (m_status_ == new_status) return;
+
+    if (m_status_ != StepStatus::Running &&
+        m_status_ != StepStatus::Completing &&
+        m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, m_status_.load());
+    }
+
+    m_status_ = new_status;
+    return;
+  }
+
   switch (new_status) {
   case StepStatus::Configuring:
   case StepStatus::Pending:
@@ -274,49 +295,33 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
     }
     break;
   }
+
   case StepStatus::Starting: {
-    if (this->IsDaemon()) {
+    CRANE_ASSERT_MSG(!this->IsDaemon(),
+                     "Daemon step should never be set to STARTING status");
+
+    if (m_status_ != StepStatus::Configuring)
       CRANE_WARN(
-          "[Step {}.{}] Daemon step got invalid status 'Starting' current "
-          "status: {}.",
+          "[Step {}.{}] Step status is not 'Configuring' when "
+          "receiving new status 'Starting', current status: {}.",
           job_id, step_id, m_status_.load());
-      return;
-    } else {
-      if (m_status_ != StepStatus::Configuring)
-        CRANE_WARN(
-            "[Step {}.{}] Step status is not 'Configuring' when "
-            "receiving new status 'Starting', current status: {}.",
-            job_id, step_id, m_status_.load());
-    }
+
     break;
   }
 
   case StepStatus::Completing: {
-    if (m_status_ != StepStatus::Running)
+    // Daemon pod bootstrap may fail before the step ever reaches Running.
+    // In that case TaskFinish_ still drains the single synthetic pod task and
+    // transitions the step into Completing before reporting the final failure.
+    if (m_status_ != StepStatus::Running &&
+        !(this->IsDaemon() && m_status_ == StepStatus::Configuring))
       CRANE_WARN(
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
-  // Finished status
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed: {
-    if (m_status_ != StepStatus::Running &&
-        m_status_ != StepStatus::Completing &&
-        m_status_ != StepStatus::Starting &&
-        m_status_ != StepStatus::Configuring) {
-      CRANE_WARN(
-          "[Step {}.{}] Step status is not "
-          "Running/Completing/Starting/Configuring when receiving new finished "
-          "status {}, current status: {}.",
-          job_id, step_id, new_status, m_status_.load());
-    }
-    break;
-  }
+
   default: {
     std::unreachable();
   }
@@ -344,13 +349,13 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
 void StepInstance::InitOomBaseline() {
-  // Use cgroup path passed from Craned
-  if (g_config.CgroupPath.empty()) {
-    CRANE_ERROR("[OOM] No cgroup path provided from Craned");
+  // Use the step-level workload cgroup selected by Supervisor.
+  if (!step_user_cg) {
+    CRANE_ERROR("[OOM] No workload cgroup path selected for OOM monitoring");
     return;
   }
-  cgroup_path = g_config.CgroupPath;
 
+  auto cgroup_path = step_user_cg->CgroupPath();
   uint64_t oom_kill = 0, oom = 0;
   if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
                                                           oom)) {
@@ -367,11 +372,15 @@ void StepInstance::InitOomBaseline() {
 }
 
 bool StepInstance::EvaluateOomOnExit() {
-  if (!oom_baseline_inited || cgroup_path.empty()) {
-    CRANE_TRACE("[OOM] Skip evaluation: baseline_inited={} path='{}'",
-                oom_baseline_inited, cgroup_path);
+  if (!oom_baseline_inited || !step_user_cg) {
+    CRANE_TRACE(
+        "[OOM] Skip evaluation: baseline_inited={} or no cgroup "
+        "created.",
+        oom_baseline_inited);
     return false;
   }
+
+  auto cgroup_path = step_user_cg->CgroupPath();
   uint64_t oom_kill = 0, oom = 0;
   if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
                                                           oom))
@@ -394,49 +403,6 @@ bool StepInstance::EvaluateOomOnExit() {
       "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
       cgroup_path, baseline_oom_kill_count, oom_kill);
   return oom_kill > baseline_oom_kill_count;
-}
-
-CraneErrCode ITaskInstance::Prepare() {
-  // TODO: Use task res.
-  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
-                                       task_id),
-      m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
-  if (!cg_expt.has_value()) {
-    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
-               g_config.JobId, g_config.StepId, task_id,
-               static_cast<int>(cg_expt.error()));
-    return cg_expt.error();
-  }
-  m_task_cg = std::move(cg_expt.value());
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode ITaskInstance::Cleanup() {
-  if (m_task_cg) {
-    int cnt = 0;
-
-    while (true) {
-      if (m_task_cg->Empty()) break;
-
-      if (cnt >= 5) {
-        CRANE_ERROR(
-            "Couldn't kill the processes in cgroup {} after {} times. "
-            "Skipping it.",
-            m_task_cg->CgroupName(), cnt);
-        break;
-      }
-
-      m_task_cg->KillAllProcesses(SIGKILL);
-      ++cnt;
-      std::this_thread::sleep_for(100ms);
-    }
-    // TODO: Plugin support step cgroup destroy hooks.
-    m_task_cg->Destroy();
-
-    m_task_cg.reset();
-  }
-  return CraneErrCode::SUCCESS;
 }
 
 void ITaskInstance::InitEnvMap() {
@@ -1151,23 +1117,57 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   const uint64_t gid = pwd.Gid();
 
   const auto& subid_conf = g_config.Container.SubId;
-  const uint64_t size = subid_conf.RangeSize;
 
   uint64_t uid_start{};
+  uint64_t uid_count{};
   uint64_t gid_start{};
+  uint64_t gid_count{};
 
-  if (util::MulOverflow(uid, size, uid_start) ||
-      util::AddOverflow(subid_conf.BaseOffset, uid_start, uid_start)) {
-    CRANE_ERROR("Failed to calculate uid_start for user {}: uid overflowed.",
-                pwd.Username());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
+  auto resolve_managed_range = [&](const auto& mappings, uint64_t id,
+                                   std::string_view id_label,
+                                   std::string_view field_name, uint64_t& start,
+                                   uint64_t& count) -> bool {
+    for (const auto& mapping : mappings) {
+      uint64_t id_end_exclusive{};
+      if (util::AddOverflow(mapping.Id, mapping.IdCount, id_end_exclusive)) {
+        CRANE_ERROR(
+            "Failed to resolve {} SubId range for user {}: {} mapping "
+            "overflowed.",
+            id_label, pwd.Username(), field_name);
+        return false;
+      }
 
-  if (util::MulOverflow(gid, size, gid_start) ||
-      util::AddOverflow(subid_conf.BaseOffset, gid_start, gid_start)) {
-    CRANE_ERROR("Failed to calculate gid_start for user {}: gid overflowed.",
-                pwd.Username());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+      if (id < mapping.Id || id >= id_end_exclusive) continue;
+
+      const uint64_t id_offset = id - mapping.Id;
+      uint64_t start_offset{};
+      if (util::MulOverflow(id_offset, mapping.SubIdSize, start_offset) ||
+          util::AddOverflow(mapping.SubIdStart, start_offset, start)) {
+        CRANE_ERROR(
+            "Failed to resolve {} SubId range for user {}: {} mapping "
+            "overflowed.",
+            id_label, pwd.Username(), field_name);
+        return false;
+      }
+
+      count = mapping.SubIdSize;
+      return true;
+    }
+
+    CRANE_ERROR(
+        "Failed to resolve {} SubId range for user {}: {} {} is not covered "
+        "by Container.SubId.{}.",
+        id_label, pwd.Username(), id_label, id, field_name);
+    return false;
+  };
+
+  if (subid_conf.Managed) {
+    if (!resolve_managed_range(subid_conf.UidMappings, uid, "uid",
+                               "UidMappings", uid_start, uid_count) ||
+        !resolve_managed_range(subid_conf.GidMappings, gid, "gid",
+                               "GidMappings", gid_start, gid_count)) {
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   }
 
   auto subuid = pwd.SubUidRanges();
@@ -1180,6 +1180,16 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
                     uint64_t count) -> bool {
     return ranges.Valid() && ranges.Count() == 1 && ranges[0].start == start &&
            ranges[0].count == count;
+  };
+  auto fits_runtime_mapping = [](uint64_t start, uint64_t count) -> bool {
+    if (count == 0) return false;
+
+    constexpr uint64_t kMaxRuntimeId = std::numeric_limits<uint32_t>::max();
+    if (start > kMaxRuntimeId || count > kMaxRuntimeId) return false;
+
+    uint64_t end{};
+    if (util::AddOverflow(start, count - 1, end)) return false;
+    return end <= kMaxRuntimeId;
   };
 
   if (!subid_conf.Managed) {
@@ -1195,13 +1205,14 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
   } else {
     // Managed mode: validate or ensure mappings
     if (uid_exists || gid_exists) {
-      // If any ranges exist, both must match the deterministic mapping
-      if (!matches(subuid, uid_start, size) ||
-          !matches(subgid, gid_start, size)) {
+      // /etc/subuid and /etc/subgid are the higher-priority override.
+      // If they exist, both entries must match the configured mapping exactly.
+      if (!matches(subuid, uid_start, uid_count) ||
+          !matches(subgid, gid_start, gid_count)) {
         CRANE_ERROR(
             "SubId mismatch: expected uid range [{}, {}], gid range [{}, {}] "
             "for user {}, but found uid range [{}, {}], gid range [{}, {}]",
-            uid_start, size, gid_start, size, pwd.Username(),
+            uid_start, uid_count, gid_start, gid_count, pwd.Username(),
             uid_exists ? subuid[0].start : 0, uid_exists ? subuid[0].count : 0,
             gid_exists ? subgid[0].start : 0, gid_exists ? subgid[0].count : 0);
         return CraneErrCode::ERR_SYSTEM_ERR;
@@ -1209,7 +1220,7 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
     } else {
       // Both missing: allocate them
       auto ensure_result = PasswordEntry::EnsureSubIdRanges(
-          pwd.Username(), uid_start, size, gid_start, size);
+          pwd.Username(), uid_start, uid_count, gid_start, gid_count);
       if (!ensure_result) {
         CRANE_ERROR("Failed to ensure SubId ranges for user {}: {}",
                     pwd.Username(), ensure_result.error());
@@ -1221,15 +1232,27 @@ CraneErrCode PodInstance::ResolveUserNsMapping_(
       subuid = pwd_recheck.SubUidRanges();
       subgid = pwd_recheck.SubGidRanges();
 
-      if (!matches(subuid, uid_start, size) ||
-          !matches(subgid, gid_start, size)) {
+      if (!matches(subuid, uid_start, uid_count) ||
+          !matches(subgid, gid_start, gid_count)) {
         CRANE_ERROR(
             "SubId verification failed after allocation for user {}: expected "
             "uid range [{}, {}], gid range [{}, {}]",
-            pwd.Username(), uid_start, size, gid_start, size);
+            pwd.Username(), uid_start, uid_count, gid_start, gid_count);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     }
+  }
+
+  if (!fits_runtime_mapping(subuid[0].start, subuid[0].count) ||
+      !fits_runtime_mapping(subgid[0].start, subgid[0].count)) {
+    CRANE_ERROR(
+        "SubId range exceeds runtime 32-bit id mapping limits for user {}: "
+        "uid range [{}, {}], gid range [{}, {}]. Adjust "
+        "Container.SubId.UidMappings/GidMappings or the user's uid/gid "
+        "assignments.",
+        pwd.Username(), subuid[0].start, subuid[0].count, subgid[0].start,
+        subgid[0].count);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // NOTE: Using 0 as the start of the range no matter run_as_user is 0 or not.
@@ -1337,11 +1360,13 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   // log directory
   m_pod_config_.set_log_directory(m_log_dir_);
 
-  // FIXME: This is just a workaround before we have seperated level of step.
-  // set cgroup parent
+  // FIXME: This is just a workaround. Let's use job's cgroup before resourceV3
+  // refactoring. Here set cgroup parent to <job_id>/
   auto* linux_config = m_pod_config_.mutable_linux();
-  linux_config->set_cgroup_parent(
-      std::filesystem::path(g_config.CgroupPath).parent_path().string());
+  linux_config->set_cgroup_parent(std::filesystem::path(g_config.SupvCgroupPath)
+                                      .parent_path()
+                                      .parent_path()
+                                      .string());
 
   // security context
   auto* sec_ctx = linux_config->mutable_security_context();
@@ -1424,6 +1449,27 @@ CraneErrCode PodInstance::PersistPodSandboxInfo_() {
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode PodInstance::StopAndRemovePodSandbox_(std::string_view context) {
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto stop_ret = cri_client->StopPodSandbox(m_pod_id_);
+  if (!stop_ret.has_value()) {
+    const auto& rich_err = stop_ret.error();
+    CRANE_WARN("Failed to stop pod sandbox {} {} for job #{}: {}", m_pod_id_,
+               context, g_config.JobId, rich_err.description());
+  }
+
+  auto remove_ret = cri_client->RemovePodSandbox(m_pod_id_);
+  if (!remove_ret.has_value()) {
+    const auto& rich_err = remove_ret.error();
+    CRANE_ERROR("Failed to remove pod sandbox {} {} for job #{}: {}", m_pod_id_,
+                context, g_config.JobId, rich_err.description());
+    return rich_err.code();
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 CraneErrCode PodInstance::Prepare() {
   const auto& step_to_supv = m_parent_step_inst_->GetStep();
   const auto* pod_meta =
@@ -1480,6 +1526,11 @@ CraneErrCode PodInstance::Spawn() {
   if (auto err = PersistPodSandboxInfo_(); err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to persist pod sandbox config for job #{}",
                 g_config.JobId);
+    if (StopAndRemovePodSandbox_("after persist error") ==
+        CraneErrCode::SUCCESS) {
+      m_pod_id_.clear();
+    }
+
     return err;
   }
 
@@ -1489,43 +1540,40 @@ CraneErrCode PodInstance::Spawn() {
 }
 
 CraneErrCode PodInstance::Kill(int /*signum*/) {
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
+  if (auto err = StopAndRemovePodSandbox_("during stop request");
+      err != CraneErrCode::SUCCESS)
+    return err;
 
-  auto result = cri_client->StopPodSandbox(m_pod_id_);
-  if (!result.has_value()) {
-    const auto& rich_err = result.error();
-    CRANE_ERROR("Failed to stop pod sandbox {} for job #{}: {}", m_pod_id_,
-                g_config.JobId, rich_err.description());
-    // Try best effort to remove pod sandbox, continue even if stopping fails.
-  }
-
-  result = cri_client->RemovePodSandbox(m_pod_id_);
-  if (!result.has_value()) {
-    const auto& rich_err = result.error();
-    CRANE_ERROR("Failed to remove pod sandbox {} for job #{}: {}", m_pod_id_,
-                g_config.JobId, rich_err.description());
-    return rich_err.code();
-  }
-
-  // TODO: Currently pod status monitoring is missing. So we had to call
-  // TaskStopAndDoStatusChange() here. See Spawn() for details.
   CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
   HandlePodExited();
-  g_task_mgr->TaskStopAndDoStatusChange(0);
 
   return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode PodInstance::Cleanup() {
   g_thread_pool->detach_task([cfg = m_config_file_, lock = m_lock_file_]() {
-    std::error_code ec;
-    bool ok = std::filesystem::remove(cfg, ec);
-    if (!ok)
-      CRANE_ERROR("Failed to remove pod config file {}: {}", cfg, ec.message());
+    auto remove_if_exists = [](const std::filesystem::path& path,
+                               std::string_view label) {
+      if (path.empty()) {
+        CRANE_TRACE("Pod {} file was never created; skipping cleanup.", label);
+        return;
+      }
 
-    ok = std::filesystem::remove(lock, ec);
-    if (!ok)
-      CRANE_ERROR("Failed to remove pod lock file {}: {}", lock, ec.message());
+      std::error_code ec;
+      bool removed = std::filesystem::remove(path, ec);
+      if (removed) return;
+
+      if (ec) {
+        CRANE_ERROR("Failed to remove pod {} file {}: {}", label, path,
+                    ec.message());
+      } else {
+        CRANE_TRACE("Pod {} file {} already absent during cleanup.", label,
+                    path);
+      }
+    };
+
+    remove_if_exists(cfg, "config");
+    remove_if_exists(lock, "lock");
   });
 
   return CraneErrCode::SUCCESS;
@@ -1537,9 +1585,12 @@ const TaskExitInfo& PodInstance::HandlePodExited() {
   //                          ? status.exit_code() - 128
   //                          : status.exit_code();
   // TODO: See PodInstance::Spawn() TODO.
-  m_exit_info_.is_terminated_by_signal = false;
-  m_exit_info_.value = 0;
-  return m_exit_info_;
+  m_final_info_.raw_exit = TaskExitInfo{
+      .is_terminated_by_signal = false,
+      .value = 0,
+  };
+
+  return m_final_info_.raw_exit.value();
 }
 
 void ContainerInstance::InitEnvMap() {
@@ -1552,8 +1603,6 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
-  auto err = ITaskInstance::Prepare();
-  if (err != CraneErrCode::SUCCESS) return err;
   const auto& step_to_supv = m_parent_step_inst_->GetStep();
   const auto* pod_meta =
       step_to_supv.has_pod_meta() ? &step_to_supv.pod_meta() : nullptr;
@@ -1719,21 +1768,20 @@ CraneErrCode ContainerInstance::Kill(int /*signum*/) {
 }
 
 CraneErrCode ContainerInstance::Cleanup() {
-  auto err = ITaskInstance::Cleanup();
-  if (err != CraneErrCode::SUCCESS) return err;
   // For container jobs, Kill() is idempotent.
-  // It's ok to call it (at most) twice to remove container.
-  err = Kill(0);
-  return err;
+  // It's ok to call it twice to remove container.
+  return Kill(0);
 }
 
 const TaskExitInfo& ContainerInstance::HandleContainerExited(
     const cri::api::ContainerStatus& status) {
-  m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
-  m_exit_info_.value = m_exit_info_.is_terminated_by_signal
-                           ? status.exit_code() - 128
-                           : status.exit_code();
-  return m_exit_info_;
+  bool signaled = status.exit_code() > 128;
+  m_final_info_.raw_exit = TaskExitInfo{
+      .is_terminated_by_signal = signaled,
+      .value = signaled ? status.exit_code() - 128 : status.exit_code(),
+  };
+
+  return m_final_info_.raw_exit.value();
 }
 
 CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
@@ -2064,8 +2112,18 @@ CraneErrCode ContainerInstance::SetupIdMappedMounts_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
-  auto err = ITaskInstance::Prepare();
-  if (err != CraneErrCode::SUCCESS) return err;
+  // Create cgroup for task.
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+                                       task_id),
+      m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
+  if (!cg_expt.has_value()) {
+    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+               g_config.JobId, g_config.StepId, task_id,
+               static_cast<int>(cg_expt.error()));
+    return cg_expt.error();
+  }
+  m_task_cg_ = std::move(cg_expt.value());
 
   // Write m_meta_
   if (m_parent_step_inst_->IsCrun()) {
@@ -2135,11 +2193,13 @@ CraneErrCode ProcInstance::Spawn() {
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
+  // NOLINTNEXTLINE(hicpp-avoid-c-arrays, modernize-avoid-c-arrays)
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
   std::vector<int> to_crun_pipe(2, -1);
   std::vector<int> from_crun_pipe(2, -1);
 
+  // NOLINTNEXTLINE(hicpp-no-array-decay)
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
@@ -2164,6 +2224,7 @@ CraneErrCode ProcInstance::Spawn() {
   if (child_pid > 0) {  // Parent proc
     m_pid_ = child_pid;
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}", task_id, m_pid_);
+
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
 
@@ -2172,6 +2233,18 @@ CraneErrCode ProcInstance::Spawn() {
     FileOutputStream ostream(ctrl_fd);
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
+
+    auto handle_comm_err = [this](std::string msg) {
+      // Communication failure caused by process crash or grpc error.
+      // Since now the parent cannot ask the child process to commit suicide,
+      // kill child process here and just return.
+
+      // We must return SUCCESS, as child process will be reaped in SIGCHLD
+      // handler and thus only ONE TaskStatusChange will be triggered!
+
+      m_final_info_.cause = TaskFinalizeCause::TASK_SPAWN_FAILED;
+      m_final_info_.reason = std::move(msg);
+    };
 
     bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
@@ -2203,12 +2276,7 @@ CraneErrCode ProcInstance::Spawn() {
                   child_pid, task_id, strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
-      // Communication failure caused by process crash or grpc error.
-      // Since now the parent cannot ask the child
-      // process to commit suicide, kill child process here and just return.
-      // The child process will be reaped in SIGCHLD handler and
-      // thus only ONE TaskStatusChange will be triggered!
-      err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      handle_comm_err("Failed to flush message to subprocess");
       Kill(SIGKILL);
       return CraneErrCode::SUCCESS;
     }
@@ -2223,8 +2291,7 @@ CraneErrCode ProcInstance::Spawn() {
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid, task_id);
       close(ctrl_fd);
 
-      // See comments above.
-      err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      handle_comm_err("Failed to receive response from subprocess");
       Kill(SIGKILL);
       return CraneErrCode::SUCCESS;
     }
@@ -2235,7 +2302,7 @@ CraneErrCode ProcInstance::Spawn() {
   } else {  // Child proc
     ResetChildProcSigHandler_();
 
-    auto success = m_task_cg->MigrateProcIn(getpid());
+    auto success = m_task_cg_->MigrateProcIn(getpid());
     if (!success) {
       fmt::print(stderr, "[Subprocess] MigrateProcIn returned {}\n", success);
       std::abort();
@@ -2379,7 +2446,7 @@ CraneErrCode ProcInstance::Kill(int signum) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
     // Send the signal to the whole process group.
-    bool success = this->m_task_cg->KillAllProcesses(signum);
+    bool success = this->m_task_cg_->KillAllProcesses(signum);
     if (success) return CraneErrCode::SUCCESS;
 
     CRANE_TRACE("[Task #{}] failed to kill.", task_id);
@@ -2390,32 +2457,55 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
-  auto err = ITaskInstance::Cleanup();
-  if (err != CraneErrCode::SUCCESS) return err;
+  if (m_task_cg_) {
+    int cnt = 0;
 
-  // Dummy return
+    while (true) {
+      if (m_task_cg_->Empty()) break;
+
+      if (cnt >= 5) {
+        CRANE_ERROR(
+            "Couldn't kill the processes in cgroup {} after {} times. "
+            "Skipping it.",
+            m_task_cg_->CgroupName(), cnt);
+        break;
+      }
+
+      m_task_cg_->KillAllProcesses(SIGKILL);
+      ++cnt;
+      std::this_thread::sleep_for(100ms);
+    }
+
+    m_task_cg_->Destroy();
+    m_task_cg_.reset();
+  }
+
+  // TODO: Plugin support step cgroup destroy hooks?
+  // NOTE: Pod and container have seperated cgroup handling.
   return CraneErrCode::SUCCESS;
 }
 
 std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
                                                               int status) {
-  m_exit_info_.pid = pid;
+  auto exit_info = TaskExitInfo{};
+  exit_info.pid = pid;
 
   if (WIFEXITED(status)) {
     // Exited with status WEXITSTATUS(status)
-    m_exit_info_.is_terminated_by_signal = false;
-    m_exit_info_.value = WEXITSTATUS(status);
+    exit_info.is_terminated_by_signal = false;
+    exit_info.value = WEXITSTATUS(status);
   } else if (WIFSIGNALED(status)) {
     // Killed by signal WTERMSIG(status)
-    m_exit_info_.is_terminated_by_signal = true;
-    m_exit_info_.value = WTERMSIG(status);
+    exit_info.is_terminated_by_signal = true;
+    exit_info.value = WTERMSIG(status);
   } else {
     CRANE_TRACE("Received SIGCHLD with status {} for task #{} but ignored.",
                 status, task_id);
     return std::nullopt;
   }
 
-  return std::optional<TaskExitInfo>{m_exit_info_};
+  m_final_info_.raw_exit = std::move(exit_info);
+  return m_final_info_.raw_exit;
 }
 
 TaskManager::TaskManager()
@@ -2449,16 +2539,30 @@ TaskManager::TaskManager()
         EvCleanSigchldQueueCb_();
       });
 
-  m_task_stopped_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_task_stopped_async_handle_->on<uvw::async_event>(
+  m_task_finalizing_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_finalizing_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanStepStopQueueCb_();
+        EvCleanFinalizingTaskQueueCb_();
       });
 
   m_cri_event_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_cri_event_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanCriEventQueueCb_();
+      });
+
+  m_execute_daemon_pod_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_execute_daemon_pod_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvExecuteDaemonPodCb_();
+      });
+
+  m_terminate_daemon_pod_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_terminate_daemon_pod_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTerminateDaemonPodQueueCb_();
       });
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -2585,15 +2689,31 @@ void TaskManager::ShutdownSupervisorAsync(crane::grpc::JobStatus new_status,
   m_shutdown_supervisor_handle_->send();
 }
 
-void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
-  m_task_stopped_queue_.enqueue(task_id);
-  m_task_stopped_async_handle_->send();
+void TaskManager::FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
+                                    std::optional<std::string> reason) {
+  auto* task = m_step_.GetTaskInstance(task_id);
+  if (task == nullptr) {
+    CRANE_DEBUG("[Task #{}] Task not found when setting finalize cause {}.",
+                task_id, static_cast<int>(cause));
+    return;
+  }
+
+  auto* final_info = task->GetFinalInfo();
+  final_info->cause = cause;
+  final_info->reason = std::move(reason);
+
+  m_task_finalizing_queue_.enqueue(task_id);
+  m_task_finalizing_async_handle_->send();
 }
 
-void TaskManager::TaskFinish_(task_id_t task_id,
-                              crane::grpc::JobStatus new_status,
-                              uint32_t exit_code,
-                              std::optional<std::string> reason) {
+void TaskManager::FinalizeTaskAsync(task_id_t task_id) {
+  m_task_finalizing_queue_.enqueue(task_id);
+  m_task_finalizing_async_handle_->send();
+}
+
+void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
+                                       uint32_t exit_code,
+                                       std::optional<std::string> reason) {
   CRANE_TRACE(
       "[Task #{}] Task status changed to {} (exit code: {}, reason: {}).",
       task_id, new_status, exit_code, reason.value_or(""));
@@ -2605,8 +2725,6 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   }
 
   // One-shot model: nothing to stop, just proceed to cleanup.
-  m_step_.oom_baseline_inited = false;
-
   auto err = task->Cleanup();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_WARN("[Task #{}] Failed to cleanup task: {}", task_id,
@@ -2621,10 +2739,13 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     status.final_status_on_termination = new_status;
     status.final_reason_on_termination = reason.value_or("");
   }
+
   // Error status has higher priority than success status.
   if (new_status != StepStatus::Completed)
     status.final_status_on_termination = new_status;
+
   if (m_step_.AllTaskFinished()) {
+    m_step_.oom_baseline_inited = false;
     m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     DelSignalTimers_();
@@ -2659,24 +2780,99 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
-    TaskFinish_(
-        task->task_id, crane::grpc::JobStatus::Failed,
-        ExitCode::EC_FILE_NOT_FOUND,
-        fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
+    FinalizeTaskAsync(
+        task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
+        std::format("Failed to prepare task, code: {}", static_cast<int>(err)));
     return err;
   }
 
-  CRANE_INFO("[Task #{}] Spawning process in task", task->task_id);
+  CRANE_INFO("[Task #{}] Spawning in task", task->task_id);
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
-    TaskFinish_(task->task_id, crane::grpc::JobStatus::Failed,
-                ExitCode::EC_SPAWN_FAILED,
-                fmt::format("Cannot spawn child process in task, code: {}",
-                            static_cast<int>(err)));
+    FinalizeTaskAsync(
+        task->task_id, TaskFinalizeCause::TASK_SPAWN_FAILED,
+        std::format("Cannot spawn child process in task, code: {}",
+                    static_cast<int>(err)));
     return err;
   }
 
   return CraneErrCode::SUCCESS;
+}
+
+void TaskManager::EvExecuteDaemonPodCb_() {
+  // This method is only for pod in daemon step.
+  CRANE_ASSERT_MSG(m_step_.IsPod(), "PreparePodTask is called in other cases!");
+
+  ExecuteStepElem ev;
+  auto err = CraneErrCode::SUCCESS;
+  static bool requested = false;
+
+  while (m_grpc_execute_step_queue_.try_dequeue(ev)) {
+    // This should never happen.
+    if (requested) {
+      CRANE_ERROR(
+          "Pod step should only execute once, but got another execute "
+          "request. Ignoring this request.");
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
+    requested = true;
+
+    // For pod step, use task_id=0 for placeholder.
+    task_id_t task_id = 0;
+    m_step_.AddTaskInstance(task_id,
+                            std::make_unique<PodInstance>(&m_step_, task_id));
+    m_step_.task_ids.emplace_back(task_id);
+    auto* instance = m_step_.GetTaskInstance(task_id);
+
+    m_step_.pwd.Init(m_step_.uid);
+    if (!m_step_.pwd.Valid()) {
+      CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
+      FinalizeTaskAsync(
+          task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
+          std::format("Failed to look up password entry for uid {}",
+                      m_step_.uid));
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
+
+    err = m_step_.Prepare();
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Failed to prepare pod: {}", static_cast<int>(err));
+      FinalizeTaskAsync(task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
+                        std::format("Failed to prepare pod step, code: {}",
+                                    static_cast<int>(err)));
+      ev.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
+
+    // For pod step, we will use job's cgroup directly.
+    // NOTE: This assumes the job's cgroup is created before the pod step
+    // starts.
+    m_step_.step_user_cg = nullptr;
+    // m_step_.InitOomBaseline(); No need to init oom for pod step.
+
+    // Launch execution for pod.
+    err = LaunchExecution_(instance);
+    if (err == CraneErrCode::SUCCESS) {
+      auto pod_id = instance->GetExecId().value();
+      CRANE_INFO("Pod is running, pod id: {}.", std::get<std::string>(pod_id));
+      m_exec_id_task_id_map_[pod_id] = task_id;
+    }
+
+    ev.ok_prom.set_value(err);
+  }
+}
+
+std::future<CraneErrCode> TaskManager::ExecutePodInDaemonStepAsync() {
+  std::promise<CraneErrCode> ok_promise;
+  std::future ok_future = ok_promise.get_future();
+
+  auto elem = ExecuteStepElem{.ok_prom = std::move(ok_promise)};
+  m_grpc_execute_step_queue_.enqueue(std::move(elem));
+  m_execute_daemon_pod_async_handle_->send();
+
+  return ok_future;
 }
 
 std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
@@ -2718,12 +2914,17 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
 }
 
 void TaskManager::TerminateStepAsync(bool mark_as_orphaned,
-                                     TerminatedBy terminated_by) {
+                                     TaskFinalizeCause cause) {
   m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
-      .termination_reason = terminated_by,
+      .cause = cause,
       .mark_as_orphaned = mark_as_orphaned,
   });
   m_terminate_step_async_handle_->send();
+}
+
+void TaskManager::TerminatePodInDaemonStepAsync() {
+  m_daemon_pod_terminate_queue_.enqueue(DaemonPodTerminateQueueElem{});
+  m_terminate_daemon_pod_async_handle_->send();
 }
 
 void TaskManager::CheckStatusAsync(
@@ -2757,10 +2958,11 @@ void TaskManager::EvShutdownSupervisorCb_() {
   do {
     got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
     if (!got_final_status) continue;
-    if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
+    if (m_step_.IsDaemon() && !m_allow_daemon_shutdown_.load()) {
       CRANE_WARN("Daemon step not shutting down unless explicitly requested.");
       continue;
     }
+
     auto& [status, exit_code, reason] = final_status;
     if (m_step_.IsDaemon()) {
       m_step_.GotNewStatus(status);
@@ -2842,7 +3044,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
         m_step_.GetCforedClient()->TaskEnd(task_id);
       }
     } else /* Batch / Calloc */ {
-      TaskStopAndDoStatusChange(task_id);
+      FinalizeTaskAsync(task_id);
     }
   }
 
@@ -2881,7 +3083,7 @@ void TaskManager::EvCleanCriEventQueueCb_() {
       std::unreachable();
     }
 
-    TaskStopAndDoStatusChange(0);
+    FinalizeTaskAsync(0);
   }
 }
 
@@ -2893,24 +3095,24 @@ void TaskManager::EvStepTimerCb_(bool is_deadline) {
   DelTerminationTimer_();
   DelSignalTimers_();
 
-  if (m_step_.IsCalloc()) {
-    // Now calloc and cbatch steps only have one task with id 0.
-    TaskFinish_(0, crane::grpc::JobStatus::ExceedTimeLimit,
-                ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
-  } else {
-    m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
-        .termination_reason = is_deadline
-                                  ? TerminatedBy::TERMINATION_BY_DEADLINE
-                                  : TerminatedBy::TERMINATION_BY_TIMEOUT});
-    m_terminate_step_async_handle_->send();
-  }
+  m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
+      .cause = is_deadline ? TaskFinalizeCause::DEADLINE
+                           : TaskFinalizeCause::TIMEOUT});
+  m_terminate_step_async_handle_->send();
 }
 
-void TaskManager::EvCleanStepStopQueueCb_() {
+void TaskManager::EvCleanFinalizingTaskQueueCb_() {
   task_id_t task_id;
-  while (m_task_stopped_queue_.try_dequeue(task_id)) {
+  while (m_task_finalizing_queue_.try_dequeue(task_id)) {
     CRANE_INFO("[Task #{}] Stopped and is doing StepStatusChange...", task_id);
+
     auto* task = m_step_.GetTaskInstance(task_id);
+    if (task == nullptr) {
+      CRANE_DEBUG("[Task #{}] Task not found in finalizing. Duplicated event?",
+                  task_id);
+      continue;
+    }
+
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
@@ -2924,9 +3126,11 @@ void TaskManager::EvCleanStepStopQueueCb_() {
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
+
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
       if (!result) {
         auto status = result.error();
@@ -2951,6 +3155,7 @@ void TaskManager::EvCleanStepStopQueueCb_() {
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec =
             g_config.JobLifecycleHook.PrologEpilogTimeout;
+
       auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
       if (!result) {
         auto status = result.error();
@@ -2961,86 +3166,186 @@ void TaskManager::EvCleanStepStopQueueCb_() {
       }
     }
 
-    switch (task->err_before_exec) {
-    case CraneErrCode::ERR_PROTOBUF:
-      TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
-                  ExitCode::EC_SPAWN_FAILED, std::nullopt);
-      continue;
+    auto* fi = task->GetFinalInfo();
+    auto raw_exit_code = [](const TaskExitInfo& raw_exit) -> uint32_t {
+      if (raw_exit.is_terminated_by_signal)
+        return raw_exit.value + ExitCode::kTerminationSignalBase;
+      return raw_exit.value;
+    };
 
-    case CraneErrCode::ERR_CGROUP:
-      TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
-                  ExitCode::EC_CGROUP_ERR, std::nullopt);
+    switch (fi->cause) {
+    case TaskFinalizeCause::TASK_PREPARE_FAILED:
+    case TaskFinalizeCause::STEP_PREPARE_FAILED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_FILE_NOT_FOUND, fi->reason);
       continue;
-
-    default:
+    case TaskFinalizeCause::TASK_SPAWN_FAILED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_SPAWN_FAILED, fi->reason);
+      continue;
+    case TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_PERMISSION_DENIED, fi->reason);
+      continue;
+    case TaskFinalizeCause::STEP_CGROUP_FAILED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_CGROUP_ERR, fi->reason);
+      continue;
+    case TaskFinalizeCause::TIMEOUT:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
+                           ExitCode::EC_EXCEED_TIME_LIMIT, fi->reason);
+      continue;
+    case TaskFinalizeCause::CANCELLED_BY_USER: {
+      uint32_t exit_code = fi->raw_exit.has_value()
+                               ? raw_exit_code(*fi->raw_exit)
+                               : ExitCode::EC_TERMINATED;
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Cancelled,
+                           exit_code, fi->reason);
+      continue;
+    }
+    case TaskFinalizeCause::CFORED_DISCONNECTED: {
+      uint32_t exit_code = fi->raw_exit.has_value()
+                               ? raw_exit_code(*fi->raw_exit)
+                               : ExitCode::EC_TERMINATED;
+      auto reason = fi->reason;
+      if (!reason.has_value()) reason = "Cfored connection failure";
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed, exit_code,
+                           std::move(reason));
+      continue;
+    }
+    case TaskFinalizeCause::DAEMON_POD_SHUTDOWN_REQUESTED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
+                           fi->reason);
+      continue;
+    case TaskFinalizeCause::INTERACTIVE_NO_PROCESS:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed,
+                           ExitCode::EC_TERMINATED, fi->reason);
+      continue;
+    case TaskFinalizeCause::DEADLINE:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Deadline,
+                           ExitCode::EC_REACHED_DEADLINE, fi->reason);
+      continue;
+    case TaskFinalizeCause::NORMAL:
       break;
     }
 
-    const auto& exit_info = task->GetExitInfo();
-    if (!m_step_.IsCalloc()) {
-      bool signalled = exit_info.is_terminated_by_signal;
-      if (task->terminated_by == TerminatedBy::NONE) {
-        if (m_step_.EvaluateOomOnExit()) {
-          task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
-        }
-      }
+    if (!fi->raw_exit.has_value()) {
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_TERMINATED,
+                           "Missing raw exit info for natural-exit finalizer");
+      continue;
+    }
 
-      if (signalled) {
-        uint32_t exit_code = exit_info.value + ExitCode::kTerminationSignalBase;
-        switch (task->terminated_by) {
-        case TerminatedBy::CANCELLED_BY_USER:
-          TaskFinish_(task_id, crane::grpc::JobStatus::Cancelled, exit_code,
-                      std::nullopt);
-          break;
-        case TerminatedBy::TERMINATION_BY_TIMEOUT:
-          TaskFinish_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
-                      ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
-          break;
-        case TerminatedBy::TERMINATION_BY_OOM:
-          TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory, exit_code,
-                      "Detected by oom_kill counter delta");
-          break;
-        case TerminatedBy::TERMINATION_BY_DEADLINE:
-          TaskFinish_(task_id, crane::grpc::JobStatus::Deadline, exit_code,
-                      "Reached task's deadline");
-          break;
-        default:
-          TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_code,
-                      std::nullopt);
-        }
-      } else if (exit_info.value == 0) {
-        TaskFinish_(task_id, crane::grpc::JobStatus::Completed, 0,
-                    std::nullopt);
-      } else {
-        if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
-          TaskFinish_(task_id, crane::grpc::JobStatus::OutOfMemory,
-                      exit_info.value,
-                      std::optional<std::string>(
-                          "Detected by oom_kill counter delta (no signal)"));
-        } else if (task->terminated_by ==
-                   TerminatedBy::TERMINATION_BY_DEADLINE) {
-          TaskFinish_(task_id, crane::grpc::JobStatus::Deadline,
-                      exit_info.value,
-                      std::optional<std::string>(
-                          "Reached task's deadline (no signal)"));
+    const auto& raw_exit = fi->raw_exit.value();
+
+    if (!m_step_.IsCalloc()) {
+      bool oom_detected = m_step_.EvaluateOomOnExit();
+
+      if (raw_exit.is_terminated_by_signal) {
+        uint32_t exit_code = raw_exit_code(raw_exit);
+        if (oom_detected) {
+          ResolveFinishedTask_(task_id, crane::grpc::JobStatus::OutOfMemory,
+                               exit_code, "Detected by oom_kill counter delta");
         } else {
-          TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_info.value,
-                      std::nullopt);
+          ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                               exit_code, std::nullopt);
         }
+      } else if (raw_exit.value == 0) {
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
+                             std::nullopt);
+      } else if (oom_detected) {
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::OutOfMemory,
+                             raw_exit.value,
+                             "Detected by oom_kill counter delta (no signal)");
+      } else {
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                             raw_exit.value, std::nullopt);
       }
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
-      if (exit_info.is_terminated_by_signal)
-        TaskFinish_(task_id, crane::grpc::JobStatus::Completed,
-                    exit_info.value + ExitCode::kTerminationSignalBase,
-                    std::nullopt);
-      else if (exit_info.value == 0)
-        TaskFinish_(task_id, crane::grpc::JobStatus::Completed, 0,
-                    std::nullopt);
+      if (raw_exit.is_terminated_by_signal)
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed,
+                             raw_exit_code(raw_exit), std::nullopt);
+      else if (raw_exit.value == 0)
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
+                             std::nullopt);
       else
-        TaskFinish_(task_id, crane::grpc::JobStatus::Failed, exit_info.value,
-                    std::nullopt);
+        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                             raw_exit.value, std::nullopt);
+    }
+  }
+}
+
+void TaskManager::EvCleanTerminateDaemonPodQueueCb_() {
+  constexpr task_id_t kDaemonPodTaskId = 0;
+
+  DaemonPodTerminateQueueElem elem;
+  while (m_daemon_pod_terminate_queue_.try_dequeue(elem)) {
+    CRANE_TRACE("Receive shutdown request for daemon pod #{}.{}.",
+                g_config.JobId, g_config.StepId);
+
+    if (!m_step_.IsDaemon() || !m_step_.IsPod()) {
+      CRANE_ERROR(
+          "Daemon pod shutdown requested for a non-daemon-pod step #{}.{}.",
+          g_config.JobId, g_config.StepId);
+      continue;
+    }
+
+    auto status = m_step_.GetStatus();
+    if (status != StepStatus::Running) {
+      CRANE_DEBUG(
+          "Daemon pod step #{}.{} is no longer running (status: {}), "
+          "shutting down supervisor directly.",
+          g_config.JobId, g_config.StepId, status);
+
+      if (IsFinishedStepStatus(status)) {
+        ShutdownSupervisorAsync(status);
+      } else if (status == StepStatus::Completing) {
+        const auto& final_status = m_step_.final_termination_status;
+        ShutdownSupervisorAsync(final_status.final_status_on_termination,
+                                final_status.max_exit_code,
+                                final_status.final_reason_on_termination);
+      } else {
+        ShutdownSupervisorAsync();
+      }
+      continue;
+    }
+
+    auto shutdown = [&]() -> CraneExpectedRich<void> {
+      auto* task = m_step_.GetTaskInstance(kDaemonPodTaskId);
+      if (task == nullptr) {
+        CraneRichError rich_err;
+        rich_err.set_code(CraneErrCode::ERR_NON_EXISTENT);
+        rich_err.set_description("Daemon pod task missing during shutdown");
+        return std::unexpected(std::move(rich_err));
+      }
+
+      auto* final_info = task->GetFinalInfo();
+      final_info->cause = TaskFinalizeCause::DAEMON_POD_SHUTDOWN_REQUESTED;
+      final_info->reason = "Daemon pod shutdown requested";
+
+      auto err = task->Kill(SIGTERM);
+      if (err != CraneErrCode::SUCCESS) {
+        CraneRichError rich_err;
+        rich_err.set_code(err);
+        rich_err.set_description(
+            std::format("Failed to stop/remove daemon pod: {} ({})",
+                        CraneErrStr(err), static_cast<int>(err)));
+        return std::unexpected(std::move(rich_err));
+      }
+
+      FinalizeTaskAsync(kDaemonPodTaskId);
+      return {};
+    };
+
+    auto ret = shutdown();
+    if (!ret.has_value()) {
+      const auto& rich_err = ret.error();
+      CRANE_ERROR("Failed to shutdown daemon pod #{}.{}: {}", g_config.JobId,
+                  g_config.StepId, rich_err.description());
+      ShutdownSupervisorAsync(StepStatus::Failed, ExitCode::EC_RPC_ERR,
+                              rich_err.description());
     }
   }
 }
@@ -3052,79 +3357,70 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
     CRANE_TRACE("Receive TerminateRunningStep Request for #{}.{}.",
                 g_config.JobId, g_config.StepId);
 
-    if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
-      CRANE_TRACE(
-          "TerminateRunningStep request ignored for daemon step unless active "
-          "shutdown is in progress.",
-          g_config.JobId, g_config.StepId);
+    if (m_step_.IsDaemon()) {
+      if (elem.mark_as_orphaned) {
+        m_step_.orphaned = true;
+        CRANE_INFO("Orphaned daemon step is shutting down directly.");
+        SetAllowDaemonShutdown();
+        ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
+      } else {
+        CRANE_TRACE(
+            "Terminate request for daemon step is ignored. Use "
+            "ShutdownSupervisor to actively stop a daemon pod.");
+      }
       continue;
     }
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
 
     if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
-      not_ready_elems.emplace_back(std::move(elem));
+      not_ready_elems.emplace_back(elem);
       CRANE_DEBUG("Step is not ready to terminate, will check next time.");
       continue;
-    }
-    if (m_step_.IsDaemon()) {
-      if (elem.mark_as_orphaned)
-        g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      else {
-        CRANE_WARN(
-            "Terminate request for a daemon step without orphaned is ignored.");
-        continue;
-      }
     }
 
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
-    if (m_exec_id_task_id_map_.empty() || elem.mark_as_orphaned) {
-      CRANE_DEBUG(
-          "No task is running or terminated as orphaned, shutting down...");
+    if (elem.mark_as_orphaned) {
+      CRANE_DEBUG("Step is terminated as orphaned, shutting down...");
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
     CRANE_TRACE("Terminating all running tasks (orphaned: {}, reason: {})...",
-                elem.mark_as_orphaned,
-                static_cast<int>(elem.termination_reason));
+                elem.mark_as_orphaned, static_cast<int>(elem.cause));
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
-      if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
-        task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
-      } else if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
-        // If termination request is sent by user, send SIGKILL to ensure that
-        // even freezing processes will be terminated immediately.
-        sig = SIGKILL;
-        task->terminated_by = TerminatedBy::CANCELLED_BY_USER;
-      } else if (elem.termination_reason ==
-                 TerminatedBy::TERMINATION_BY_DEADLINE) {
-        task->terminated_by = TerminatedBy::TERMINATION_BY_DEADLINE;
-      }
+      task->GetFinalInfo()->cause = elem.cause;
 
       if (task->GetExecId().has_value()) {
         // Will kill the following types of tasks:
         // 1. Non-interactive Task
         // 2. Interactive Task with a process running
-        task->Kill(sig);  // NOTE: retval discarded
+
+        // If termination request is sent by user, send SIGKILL to ensure that
+        // even freezing processes will be terminated immediately.
+        if (elem.cause == TaskFinalizeCause::CANCELLED_BY_USER) sig = SIGKILL;
+        task->Kill(sig);
       } else if (m_step_.IsInteractive()) {
-        // For an Interactive task with no process running, it ends
-        // immediately.
-
-        TaskFinish_(task_id, crane::grpc::JobStatus::Completed,
-                    ExitCode::EC_TERMINATED, std::nullopt);
-
+        // Interactive steps such as calloc may have no local process to kill.
+        // Preserve external termination causes (timeout/deadline/cancel) and
+        // only collapse natural-exit requests into the synthetic completion
+        // cause.
+        if (elem.cause == TaskFinalizeCause::NORMAL) {
+          FinalizeTaskAsync(task_id, TaskFinalizeCause::INTERACTIVE_NO_PROCESS);
+        } else {
+          FinalizeTaskAsync(task_id, elem.cause);
+        }
       } else {
-        CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
+        CRANE_ASSERT_MSG(false, "Terminating a step without any task");
       }
     }
   }
 
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_step_terminate_queue_.enqueue(not_ready_elem);
-  }
+  m_step_terminate_queue_.enqueue_bulk(
+      std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
 }
 
 void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
@@ -3153,12 +3449,22 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
     absl::Duration const& new_time_limit =
         absl::Seconds(elem.time_limit.value());
+    absl::Time deadline_time =
+        absl::FromUnixSeconds(elem.deadline_time.value());
+    absl::Time time_limit_end_time = start_time + new_time_limit;
+    bool deadline_reached = now >= deadline_time;
+    bool time_limit_reached = now >= time_limit_end_time;
 
-    if (now - start_time >= new_time_limit ||
-        absl::ToUnixSeconds(now) >= elem.deadline_time.value()) {
-      // If the step times out, terminate it.
-      StepTerminateQueueElem ev_step_terminate{
-          .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
+    if (deadline_reached &&
+        (!time_limit_reached || deadline_time <= time_limit_end_time)) {
+      StepTerminateQueueElem ev_step_terminate{.cause =
+                                                   TaskFinalizeCause::DEADLINE};
+      m_step_terminate_queue_.enqueue(ev_step_terminate);
+      m_terminate_step_async_handle_->send();
+
+    } else if (time_limit_reached) {
+      StepTerminateQueueElem ev_step_terminate{.cause =
+                                                   TaskFinalizeCause::TIMEOUT};
       m_step_terminate_queue_.enqueue(ev_step_terminate);
       m_terminate_step_async_handle_->send();
 
@@ -3203,14 +3509,29 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
 }
 
 void TaskManager::EvGrpcExecuteStepCb_() {
+  CRANE_ASSERT_MSG(!m_step_.IsDaemon(),
+                   "Daemon step should never call EvGrpcExecuteTaskCb_");
+
   ExecuteStepElem elem;
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
+    // ExecuteTaskAsync is only used for executable steps. Reaching here with an
+    // empty task list is a fatal error.
+    if (m_step_.task_ids.empty()) {
+      CRANE_ERROR("No task ids assigned for executable step #{}.{}",
+                  m_step_.job_id, m_step_.step_id);
+      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
     m_step_.GotNewStatus(StepStatus::Running);
+
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
       if (m_step_.IsPod()) {
         // Pod
-        instance = std::make_unique<PodInstance>(&m_step_, task_id);
+        CRANE_ERROR(
+            "PodInstance should have been created in EvExecutePodCb_, "
+            "unexpected to create it here.");
       } else if (m_step_.IsContainer()) {
         // Container
         instance = std::make_unique<ContainerInstance>(&m_step_, task_id);
@@ -3225,10 +3546,10 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
       for (auto task_id : m_step_.task_ids)
-        TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
-                    ExitCode::EC_PERMISSION_DENIED,
-                    fmt::format("Failed to look up password entry for uid {}",
-                                m_step_.uid));
+        g_task_mgr->FinalizeTaskAsync(
+            task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
+            fmt::format("Failed to look up password entry for uid {}",
+                        m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
@@ -3239,10 +3560,9 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
                     m_step_.step_id, static_cast<int>(err));
         for (auto task_id : m_step_.task_ids) {
-          g_task_mgr->TaskFinish_(
-              task_id, crane::grpc::JobStatus::Failed,
-              ExitCode::EC_FILE_NOT_FOUND,
-              fmt::format("Failed to prepare step, code: {}",
+          g_task_mgr->FinalizeTaskAsync(
+              task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
+              std::format("Failed to prepare step, code: {}",
                           static_cast<int>(err)));
         }
         elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
@@ -3289,8 +3609,10 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
-      m_exec_id_task_id_map_[0] = 0;  // Placeholder
-      m_step_.InitOomBaseline();
+      // Keep a synthetic running marker so terminate requests for calloc do not
+      // get short-circuited by the "no running task" fast path before the
+      // interactive no-process finalization logic can run.
+      m_exec_id_task_id_map_[0] = 0;
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
@@ -3302,15 +3624,14 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
                   m_step_.step_id);
       for (auto task_id : m_step_.task_ids) {
-        g_task_mgr->TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
-                                ExitCode::EC_CGROUP_ERR,
-                                "Failed to allocate cgroup");
+        g_task_mgr->FinalizeTaskAsync(task_id,
+                                      TaskFinalizeCause::STEP_CGROUP_FAILED,
+                                      "Failed to allocate cgroup");
       }
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
     m_step_.step_user_cg = std::move(cg_expt.value());
-    m_step_.cgroup_path = m_step_.step_user_cg->CgroupPath();
 
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to

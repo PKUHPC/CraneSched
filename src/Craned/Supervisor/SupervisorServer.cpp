@@ -93,10 +93,20 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TerminateStepRequest* request,
     crane::grpc::supervisor::TerminateStepReply* response) {
-  g_task_mgr->TerminateStepAsync(request->mark_orphaned(),
-                                 request->terminated_by_user()
-                                     ? TerminatedBy::CANCELLED_BY_USER
-                                     : TerminatedBy::NONE);
+  TaskFinalizeCause cause;
+  switch (request->terminate_source()) {
+  case crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION:
+    cause = TaskFinalizeCause::NORMAL;
+    break;
+  case crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT:
+    cause = TaskFinalizeCause::CFORED_DISCONNECTED;
+    break;
+  case crane::grpc::TERMINATE_SOURCE_USER_CANCEL:
+  default:
+    cause = TaskFinalizeCause::CANCELLED_BY_USER;
+    break;
+  }
+  g_task_mgr->TerminateStepAsync(request->mark_orphaned(), cause);
   response->set_ok(true);
   return Status::OK;
 }
@@ -115,10 +125,10 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  CRANE_INFO("Grpc shutdown request received.");
+  CRANE_INFO("Daemon step is requested to shutdown.");
 
   // Set actively shutdown flag so that the daemon step can exit.
-  g_task_mgr->SetActivelyShutdown();
+  g_task_mgr->SetAllowDaemonShutdown();
 
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
       g_config.StepSpec.has_pod_meta() &&
@@ -127,14 +137,25 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     // 1. Normal case: Pod remains running with no container (Running)
     // 2. Abnormal case: Pod failed to launch before (Failed)
 
-    // Here is the case #1. Trigger step killing and wait for pod exit,
-    // where ShutdownSupervisor will be called.
-    g_task_mgr->TerminateStepAsync(false, TerminatedBy::CANCELLED_BY_USER);
+    // Here is the case #1. Request a dedicated daemon-pod shutdown.
+    g_task_mgr->TerminatePodInDaemonStepAsync();
     return Status::OK;
   }
 
   // In any other case, we can shutdown directly.
-  g_task_mgr->ShutdownSupervisorAsync();
+  auto status = g_task_mgr->GetStepStatus();
+  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
+      status == StepStatus::Completing) {
+    auto final_status = g_task_mgr->GetFinalTerminationStatus();
+    g_task_mgr->ShutdownSupervisorAsync(
+        final_status.final_status_on_termination, final_status.max_exit_code,
+        final_status.final_reason_on_termination);
+  } else if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
+             IsFinishedStepStatus(status)) {
+    g_task_mgr->ShutdownSupervisorAsync(status);
+  } else {
+    g_task_mgr->ShutdownSupervisorAsync();
+  }
   return Status::OK;
 }
 

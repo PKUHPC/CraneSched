@@ -39,6 +39,7 @@ struct StepInstance {
 
   StepStatus status{StepStatus::Invalid};
   std::shared_ptr<SupervisorStub> supervisor_stub{nullptr};
+
   // job_id/step_id/system group
   std::unique_ptr<CgroupInterface> crane_cgroup{nullptr};
 
@@ -75,7 +76,7 @@ struct StepInstance {
   void ExecuteStepAsync();
 
   // Not implemented yet.
-  CraneExpected<void> TerminateStep(bool mark_as_orphaned,
-                                    bool terminated_by_user);
+  CraneExpected<void> TerminateStep(
+      bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source);
 };
 }  // namespace Craned

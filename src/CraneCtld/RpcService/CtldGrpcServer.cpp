@@ -491,7 +491,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       m_ctld_server_->m_cfored_running_jobs_.erase(cfored_name);
       m_ctld_server_->m_mtx_.Unlock();
 
-      g_job_scheduler->TerminateRunningStep(running_steps);
+      g_job_scheduler->TerminateRunningStep(
+          running_steps, crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
 
       return Status::OK;
     }

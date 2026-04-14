@@ -2851,7 +2851,8 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode JobScheduler::TerminateRunningStepNoLock_(CommonStepInCtld* step) {
+CraneErrCode JobScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -2869,7 +2870,8 @@ CraneErrCode JobScheduler::TerminateRunningStepNoLock_(CommonStepInCtld* step) {
       m_cancel_job_queue_.enqueue(
           CancelRunningJobQueueElem{.job_id = step->job_id,
                                     .step_id = step->StepId(),
-                                    .craned_id = craned_id});
+                                    .craned_id = craned_id,
+                                    .terminate_source = terminate_source});
       m_cancel_job_async_handle_->send();
     }
   }
@@ -3036,7 +3038,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
               meta.cb_step_cancel({step->job_id, step->StepId()});
             }
           } else {
-            TerminateRunningStepNoLock_(step);
+            TerminateRunningStepNoLock_(
+                step, crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
           }
           auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
           auto& job_steps = cancelled_job_steps[job_id];
@@ -3071,7 +3074,17 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
               job_id);
           return;
         }
-        TerminateRunningStepNoLock_(primary_step);
+        if (primary_step->type == crane::grpc::Interactive &&
+            primary_step->ia_meta.has_value()) {
+          auto& meta = primary_step->ia_meta.value();
+          if (!meta.has_been_cancelled_on_front_end) {
+            meta.has_been_cancelled_on_front_end = true;
+            meta.cb_step_cancel({primary_step->job_id, primary_step->StepId()});
+            return;
+          }
+        }
+        TerminateRunningStepNoLock_(primary_step,
+                                    crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
       }
     }
   };
@@ -3880,7 +3893,10 @@ void JobScheduler::CleanCancelJobQueueCb_() {
   // Carry the ownership of JobInCtld for automatic destruction.
   std::vector<std::unique_ptr<JobInCtld>> pending_job_ptr_vec;
   std::vector<std::unique_ptr<CommonStepInCtld>> pending_step_ptr_vec;
-  HashMap<CranedId, std::unordered_map<job_id_t, std::set<step_id_t>>>
+  HashMap<CranedId,
+          std::unordered_map<crane::grpc::TerminateSource,
+                             std::unordered_map<job_id_t, std::set<step_id_t>>,
+                             absl::Hash<crane::grpc::TerminateSource>>>
       running_job_craned_id_map;
 
   size_t actual_size = m_cancel_job_queue_.try_dequeue_bulk(
@@ -3897,8 +3913,10 @@ void JobScheduler::CleanCancelJobQueueCb_() {
               pending_job_ptr_vec.emplace_back(std::move(pd_elem.job));
             },
             [&](CancelRunningJobQueueElem& rn_elem) {
-              running_job_craned_id_map[rn_elem.craned_id][rn_elem.job_id]
-                  .insert(rn_elem.step_id);
+              running_job_craned_id_map[rn_elem.craned_id]
+                                       [rn_elem.terminate_source]
+                                       [rn_elem.job_id]
+                                           .insert(rn_elem.step_id);
             },
             [&](CancelPendingStepQueueElem& pd_step_elem) {
               pending_step_ptr_vec.emplace_back(std::move(pd_step_elem.step));
@@ -3912,48 +3930,56 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       absl::FromUnixSeconds(now.seconds()) + absl::Nanoseconds(now.nanos());
 
   // Process offline craned nodes with timeout check
-  for (auto&& [craned_id, steps] : running_job_craned_id_map) {
+  for (auto&& [craned_id, terminate_batches] : running_job_craned_id_map) {
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      for (auto [job_id, step_ids] : steps) {
-        // Check if the job has exceeded time limit
-        google::protobuf::Timestamp end_timestamp = now;
+      for (auto&& [terminate_source, steps] : terminate_batches) {
+        (void)terminate_source;
+        for (auto [job_id, step_ids] : steps) {
+          // Check if the job has exceeded time limit
+          google::protobuf::Timestamp end_timestamp = now;
 
-        {
-          LockGuard running_guard_for_cancel(&m_running_job_map_mtx_);
-          auto job_it = m_running_job_map_.find(job_id);
-          if (job_it != m_running_job_map_.end()) {
-            JobInCtld* job = job_it->second.get();
-            absl::Time timeout_time = job->StartTime() + job->time_limit;
+          {
+            LockGuard running_guard_for_cancel(&m_running_job_map_mtx_);
+            auto job_it = m_running_job_map_.find(job_id);
+            if (job_it != m_running_job_map_.end()) {
+              JobInCtld* job = job_it->second.get();
+              absl::Time timeout_time = job->StartTime() + job->time_limit;
 
-            // If job exceeded time limit, use timeout time as end_time
-            if (current_time > timeout_time) {
-              end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
-              end_timestamp.set_nanos(0);
-              CRANE_DEBUG(
-                  "[Job #{}] Job exceeded time limit during craned {} "
-                  "offline. "
-                  "Using timeout time {} as end_time instead of cancel time "
-                  "{}.",
-                  job_id, craned_id, absl::FormatTime(timeout_time),
-                  absl::FormatTime(current_time));
+              // If job exceeded time limit, use timeout time as end_time
+              if (current_time > timeout_time) {
+                end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
+                end_timestamp.set_nanos(0);
+                CRANE_DEBUG(
+                    "[Job #{}] Job exceeded time limit during craned {} "
+                    "offline. "
+                    "Using timeout time {} as end_time instead of cancel time "
+                    "{}.",
+                    job_id, craned_id, absl::FormatTime(timeout_time),
+                    absl::FormatTime(current_time));
+              }
             }
           }
+          for (auto step_id : step_ids)
+            StepStatusChangeAsync(job_id, step_id, craned_id,
+                                  crane::grpc::JobStatus::Cancelled,
+                                  ExitCode::EC_TERMINATED, "", end_timestamp);
         }
-
-        for (auto step_id : step_ids)
-          StepStatusChangeAsync(job_id, step_id, craned_id,
-                                crane::grpc::JobStatus::Cancelled,
-                                ExitCode::EC_TERMINATED, "", end_timestamp);
       }
       continue;
     }
-    g_thread_pool->detach_task([id = craned_id, steps_to_cancel = steps]() {
-      CRANE_TRACE("Craned {} is going to cancel [{}].", id,
-                  util::JobStepsToString(steps_to_cancel));
-      auto stub = g_craned_keeper->GetCranedStub(id);
+    for (auto&& [terminate_source, steps] : terminate_batches) {
+      g_thread_pool->detach_task(
+          [id = craned_id, steps_to_cancel = steps, terminate_source]() {
+            CRANE_TRACE("Craned {} is going to terminate [{}] with source {}.",
+                        id, util::JobStepsToString(steps_to_cancel),
+                        static_cast<int>(terminate_source));
+            auto stub = g_craned_keeper->GetCranedStub(id);
 
-      if (stub && !stub->Invalid()) stub->TerminateSteps(steps_to_cancel);
-    });
+            if (stub && !stub->Invalid()) {
+              stub->TerminateSteps(steps_to_cancel, terminate_source);
+            }
+          });
+    }
   }
 
   absl::Time cancel_time = absl::Now();

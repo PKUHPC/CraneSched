@@ -45,11 +45,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supervisor_stub(supervisor_stub) {}
 
 void StepInstance::CleanUp() {
-  if (this->status != StepStatus::Completed &&
-      this->status != StepStatus::Failed &&
-      this->status != StepStatus::Cancelled &&
-      this->status != StepStatus::OutOfMemory &&
-      this->status != StepStatus::ExceedTimeLimit) {
+  if (!IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
         "[Step #{}.{}] Cleaning up a step which is not in finished status, "
         "current status: {}.",
@@ -119,6 +115,7 @@ CraneErrCode StepInstance::Prepare() {
       CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
       false);
   if (!cg_expt) return cg_expt.error();
+
   this->crane_cgroup = std::move(cg_expt.value());
   auto* cg = this->crane_cgroup.get();
   return CraneErrCode::SUCCESS;
@@ -214,7 +211,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.mutable_env()->insert(job_env_map.begin(), job_env_map.end());
 
     std::string cgroup_path_str = this->crane_cgroup->CgroupPath().string();
-    init_req.set_cgroup_path(cgroup_path_str);
+    init_req.set_supv_cgroup_path(cgroup_path_str);
     CRANE_TRACE("[Step #{}.{}] Setting cgroup path: {}", job_id, step_id,
                 cgroup_path_str);
 
@@ -242,8 +239,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       }
       auto* subid_conf = container_conf->mutable_subid();
       subid_conf->set_managed(g_config.Container.SubId.Managed);
-      subid_conf->set_range_size(g_config.Container.SubId.RangeSize);
-      subid_conf->set_base_offset(g_config.Container.SubId.BaseOffset);
+      for (const auto& mapping : g_config.Container.SubId.UidMappings) {
+        auto* uid_mapping = subid_conf->add_uid_mappings();
+        uid_mapping->set_id(mapping.Id);
+        uid_mapping->set_id_count(mapping.IdCount);
+        uid_mapping->set_subid_start(mapping.SubIdStart);
+        uid_mapping->set_subid_size(mapping.SubIdSize);
+      }
+      for (const auto& mapping : g_config.Container.SubId.GidMappings) {
+        auto* gid_mapping = subid_conf->add_gid_mappings();
+        gid_mapping->set_id(mapping.Id);
+        gid_mapping->set_id_count(mapping.IdCount);
+        gid_mapping->set_subid_start(mapping.SubIdStart);
+        gid_mapping->set_subid_size(mapping.SubIdSize);
+      }
     }
 
     if (g_config.Plugin.Enabled) {
@@ -445,6 +454,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 }
 
 void StepInstance::GotNewStatus(const StepStatus& new_status) {
+  if (IsFinishedStepStatus(new_status)) {
+    if (status != StepStatus::Running && status != StepStatus::Completing &&
+        status != StepStatus::Starting && status != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, this->status);
+    }
+
+    status = new_status;
+    return;
+  }
+
   switch (new_status) {
   case StepStatus::Configuring:
   case StepStatus::Pending:
@@ -492,22 +515,6 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
           job_id, step_id, this->status);
-    break;
-  }
-  // Finished status
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed: {
-    if (status != StepStatus::Running && status != StepStatus::Completing &&
-        status != StepStatus::Starting && status != StepStatus::Configuring) {
-      CRANE_WARN(
-          "[Step {}.{}] Step status is not "
-          "Running/Completing/Starting/Configuring when receiving new finished "
-          "status {}, current status: {}.",
-          job_id, step_id, new_status, this->status);
-    }
     break;
   }
   default: {

@@ -76,10 +76,11 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   }
   CRANE_TRACE("Receive TerminateSteps for steps [{}]",
               util::JobStepsToString(job_steps_map));
+  auto terminate_source = request->terminate_source();
 
   for (const auto [job_id, steps] : job_steps_map)
     for (const auto step_id : steps)
-      g_job_mgr->TerminateStepAsync(job_id, step_id);
+      g_job_mgr->TerminateStepAsync(job_id, step_id, terminate_source);
   response->set_ok(true);
 
   return Status::OK;

@@ -73,9 +73,16 @@ struct Config {
     };
     BindFsConfig BindFs;
     struct SubIdConfig {
-      bool Managed{true};
-      uint64_t RangeSize{65536};
-      uint64_t BaseOffset{100000};
+      struct Mapping {
+        uint64_t Id{0};
+        uint64_t IdCount{0};
+        uint64_t SubIdStart{0};
+        uint64_t SubIdSize{0};
+      };
+
+      bool Managed{false};
+      std::vector<Mapping> UidMappings;
+      std::vector<Mapping> GidMappings;
     };
     SubIdConfig SubId;
   };
@@ -109,7 +116,9 @@ struct Config {
   step_id_t StepId;
   StepToSupv StepSpec;
   std::atomic_int TaskCount;
-  std::string CgroupPath;  // resolved cgroup path for OOM monitoring
+
+  // Cgroup path of this supervisor (crane system cgroup)
+  std::string SupvCgroupPath;
 
   struct JobLifecycleHookConfig {
     std::vector<std::string> Prologs;

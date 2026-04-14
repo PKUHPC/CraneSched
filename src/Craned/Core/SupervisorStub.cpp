@@ -141,14 +141,14 @@ SupervisorStub::CheckStatus() {
   return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
 }
 
-CraneErrCode SupervisorStub::TerminateStep(bool mark_as_orphaned,
-                                           bool terminated_by_user) {
+CraneErrCode SupervisorStub::TerminateStep(
+    bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source) {
   ClientContext context;
   crane::grpc::supervisor::TerminateStepRequest request;
   crane::grpc::supervisor::TerminateStepReply reply;
 
   request.set_mark_orphaned(mark_as_orphaned);
-  request.set_terminated_by_user(terminated_by_user);
+  request.set_terminate_source(terminate_source);
 
   auto ok = m_stub_->TerminateStep(&context, request, &reply);
   if (ok.ok() && reply.ok()) {

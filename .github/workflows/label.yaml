@@ -82,22 +82,29 @@ jobs:
             }
             
             // Manage docs label (for both pull_request and workflow_run events)
-            console.log(`Checking docs changes for PR #${prNumber}`);
-            
-            // Get list of files changed in the PR
-            const files = await github.rest.pulls.listFiles({
+            // The docs label should mean "docs-only PR", not "PR touches docs".
+            console.log(`Checking docs-only changes for PR #${prNumber}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
+              per_page: 100,
             });
-            
-            // Check if any file is in the docs directory
-            const hasDocsChanges = files.data.some(file => file.filename.startsWith('docs/'));
-            
+
+            const isDocsFile = (file) =>
+              file.filename.startsWith('docs/') ||
+              file.filename === 'mkdocs.yaml' ||
+              file.filename === '.readthedocs.yaml';
+
+            const hasDocsChanges = files.some(isDocsFile);
+            const isDocsOnly = files.length > 0 && files.every(isDocsFile);
+
             console.log(`Has docs changes: ${hasDocsChanges}`);
-            
-            if (hasDocsChanges) {
-              // Add docs label
+            console.log(`Is docs-only PR: ${isDocsOnly}`);
+
+            if (isDocsOnly) {
+              // Add docs label only for docs-only PRs.
               try {
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
@@ -110,7 +117,7 @@ jobs:
                 console.log(`Error adding docs label: ${error.message}`);
               }
             } else {
-              // Remove docs label if it exists
+              // Remove docs label from mixed or non-doc PRs.
               try {
                 await github.rest.issues.removeLabel({
                   owner: context.repo.owner,

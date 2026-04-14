@@ -84,7 +84,9 @@ class CranedStub {
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
   CraneErrCode TerminateSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+      crane::grpc::TerminateSource terminate_source =
+          crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode TerminateOrphanedSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);

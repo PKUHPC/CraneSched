@@ -122,8 +122,8 @@ int InitFromStdin(int argc, char** argv) {
     g_config.JobEnv.emplace(key, value);
   }
 
-  // Cgroup path for OOM monitoring
-  g_config.CgroupPath = msg.cgroup_path();
+  // Cgroup path of this supervisor (crane system cgroup)
+  g_config.SupvCgroupPath = msg.supv_cgroup_path();
 
   // Container config
   g_config.Container.Enabled = msg.has_container_config();
@@ -156,8 +156,28 @@ int InitFromStdin(int argc, char** argv) {
     if (msg.container_config().has_subid()) {
       const auto& subid_conf = msg.container_config().subid();
       g_config.Container.SubId.Managed = subid_conf.managed();
-      g_config.Container.SubId.RangeSize = subid_conf.range_size();
-      g_config.Container.SubId.BaseOffset = subid_conf.base_offset();
+      g_config.Container.SubId.UidMappings.clear();
+      g_config.Container.SubId.UidMappings.reserve(
+          subid_conf.uid_mappings_size());
+      for (const auto& mapping : subid_conf.uid_mappings()) {
+        g_config.Container.SubId.UidMappings.push_back({
+            .Id = mapping.id(),
+            .IdCount = mapping.id_count(),
+            .SubIdStart = mapping.subid_start(),
+            .SubIdSize = mapping.subid_size(),
+        });
+      }
+      g_config.Container.SubId.GidMappings.clear();
+      g_config.Container.SubId.GidMappings.reserve(
+          subid_conf.gid_mappings_size());
+      for (const auto& mapping : subid_conf.gid_mappings()) {
+        g_config.Container.SubId.GidMappings.push_back({
+            .Id = mapping.id(),
+            .IdCount = mapping.id_count(),
+            .SubIdStart = mapping.subid_start(),
+            .SubIdSize = mapping.subid_size(),
+        });
+      }
     }
   }
 
@@ -386,8 +406,8 @@ void StartServer(int grpc_output_fd) {
         ready = false;
       } else {
         // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto ok_prom = g_task_mgr->ExecuteStepAsync();
-        if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
+        auto err_prom = g_task_mgr->ExecutePodInDaemonStepAsync();
+        if (auto err = err_prom.get(); err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to start daemon step, code: {}",
                       static_cast<int>(err));
           ready = false;
@@ -425,6 +445,7 @@ void StartServer(int grpc_output_fd) {
     // Common step is Starting after supervisor is ready.
     status = StepStatus::Starting;
   }
+
   g_task_mgr->SupervisorFinishInit(status);
 
   g_server->Wait();
