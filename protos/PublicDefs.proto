@@ -44,21 +44,15 @@ message DedicatedResourceInNode {
   map<string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
 }
 
-// ==================== New Resource Types (V3) ====================
-
-// GresCount: tracks total count and per-type specified counts for a GRES
-// Example: {total: 8, specified: {"A100": 4, "H100": 4}}
 message GresCount {
   uint64 total = 1;
-  map<string, uint64> specified = 2;  // type -> count
+  map<string, uint64> specified = 2;
 }
 
-// GresMap: maps GRES name to its count info
 message GresMap {
-  map<string, GresCount> name_gres_map = 1;  // name -> GresCount
+  map<string, GresCount> name_gres_map = 1;
 }
 
-// ResourceView: scheduling phase resource tracking (quantities only, no slot IDs)
 message ResourceView {
   double cpu_count = 1;
   uint64 memory_bytes = 2;
@@ -66,18 +60,14 @@ message ResourceView {
   GresMap gres_map = 4;
 }
 
-// ResourceInNodeV3: Execution phase resource tracking for a single node
-// Tracks actual hardware resources with specific slot IDs
 message ResourceInNodeV3 {
-  repeated uint32 cpu_ids = 1;  // CPU core IDs (valid for integer allocation)
-  double cpu_count = 2;         // Total CPU amount (integer or fractional)
+  repeated uint32 cpu_ids = 1;
+  double cpu_count = 2;
   uint64 memory_bytes = 3;
   uint64 memory_sw_bytes = 4;
   DedicatedResourceInNode gres = 5;
 }
 
-// ResourceV3: Cluster-level execution phase resource tracking
-// Maps node IDs to their specific resource allocations
 message ResourceV3 {
   map<string, ResourceInNodeV3> each_node_res_map = 1;
 }
