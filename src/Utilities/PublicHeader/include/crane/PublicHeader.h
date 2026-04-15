@@ -67,6 +67,8 @@ constexpr int MaxHealthCheckWaitTimeMs = 60000;
 
 inline const char* const kDefaultHost = "0.0.0.0";
 
+// CRI-managed steps (daemon pod / container step) only carry one task.
+constexpr task_id_t kCriStepTaskId = 0;
 constexpr step_id_t kDaemonStepId = 0;
 constexpr step_id_t kPrimaryStepId = 1;
 

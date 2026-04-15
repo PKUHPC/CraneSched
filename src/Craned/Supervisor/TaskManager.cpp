@@ -310,11 +310,9 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Completing: {
-    // Daemon pod bootstrap may fail before the step ever reaches Running.
-    // In that case TaskFinish_ still drains the single synthetic pod task and
-    // transitions the step into Completing before reporting the final failure.
-    if (m_status_ != StepStatus::Running &&
-        !(this->IsDaemon() && m_status_ == StepStatus::Configuring))
+    // TODO: Daemon pod bootstrap may fail before the step ever reaches
+    // Running...
+    if (m_status_ != StepStatus::Running)
       CRANE_WARN(
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
@@ -2822,8 +2820,8 @@ void TaskManager::EvExecuteDaemonPodCb_() {
     }
     requested = true;
 
-    // For pod step, use task_id=0 for placeholder.
-    task_id_t task_id = 0;
+    // CRI-managed steps only have one task whose id is fixed to kCriStepTaskId.
+    task_id_t task_id = kCriStepTaskId;
     m_step_.AddTaskInstance(task_id,
                             std::make_unique<PodInstance>(&m_step_, task_id));
     m_step_.task_ids.emplace_back(task_id);
@@ -3060,14 +3058,19 @@ void TaskManager::EvCleanSigchldQueueCb_() {
 
 void TaskManager::EvCleanCriEventQueueCb_() {
   // TODO: Refactor this to Craned.
+  CRANE_ASSERT_MSG(
+      m_step_.IsPod() || m_step_.IsContainer(),
+      "CRI event queue should only be used by pod/container steps");
+
   cri::api::ContainerStatus status;
   while (m_cri_event_queue_.try_dequeue(status)) {
     // NOTE: a CRI event comes at LEAST once.
-    // For container related steps, task_id always equals to 0.
-    auto* t = m_step_.GetTaskInstance(0);
+    auto* t = m_step_.GetTaskInstance(kCriStepTaskId);
     if (t == nullptr) continue;  // Duplicated event
 
     if (m_step_.IsPod()) {
+      // TODO: This branch is unused as pod doesn't have exit event in
+      // containerd currently.
       auto* task = dynamic_cast<PodInstance*>(t);
       const auto& exit_info = task->HandlePodExited();
 
@@ -3087,7 +3090,7 @@ void TaskManager::EvCleanCriEventQueueCb_() {
       std::unreachable();
     }
 
-    FinalizeTaskAsync(0);
+    FinalizeTaskAsync(kCriStepTaskId);
   }
 }
 
@@ -3282,8 +3285,6 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
 }
 
 void TaskManager::EvCleanTerminateDaemonPodQueueCb_() {
-  constexpr task_id_t kDaemonPodTaskId = 0;
-
   DaemonPodTerminateQueueElem elem;
   while (m_daemon_pod_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE("Receive shutdown request for daemon pod #{}.{}.",
@@ -3317,7 +3318,7 @@ void TaskManager::EvCleanTerminateDaemonPodQueueCb_() {
     }
 
     auto shutdown = [&]() -> CraneExpectedRich<void> {
-      auto* task = m_step_.GetTaskInstance(kDaemonPodTaskId);
+      auto* task = m_step_.GetTaskInstance(kCriStepTaskId);
       if (task == nullptr) {
         CraneRichError rich_err;
         rich_err.set_code(CraneErrCode::ERR_NON_EXISTENT);
@@ -3339,7 +3340,7 @@ void TaskManager::EvCleanTerminateDaemonPodQueueCb_() {
         return std::unexpected(std::move(rich_err));
       }
 
-      FinalizeTaskAsync(kDaemonPodTaskId);
+      FinalizeTaskAsync(kCriStepTaskId);
       return {};
     };
 
