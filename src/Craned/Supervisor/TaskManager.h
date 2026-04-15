@@ -100,6 +100,8 @@ class StepInstance {
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
 
+  std::unique_ptr<pmix::PmixServer> pmix_server;
+
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
         job_id(step.job_id()),
@@ -157,6 +159,7 @@ class StepInstance {
   // Perspective 3: Container support
   [[nodiscard]] bool IsPod() const noexcept;
   [[nodiscard]] bool IsContainer() const noexcept;
+  [[nodiscard]] bool IsPmix() const noexcept;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
 
@@ -781,8 +784,6 @@ class TaskManager {
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
-
-  std::unique_ptr<pmix::PmixServer> m_pmix_server_;
 };
 
 }  // namespace Craned::Supervisor
