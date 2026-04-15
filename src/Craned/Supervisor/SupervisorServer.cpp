@@ -154,6 +154,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
              IsFinishedStepStatus(status)) {
     g_task_mgr->ShutdownSupervisorAsync(status);
   } else {
+    // Shutdown with default completed status.
     g_task_mgr->ShutdownSupervisorAsync();
   }
   return Status::OK;

@@ -2131,7 +2131,7 @@ CraneErrCode ProcInstance::Prepare() {
     auto meta = std::make_unique<BatchInstanceMeta>();
     m_meta_ = std::move(meta);
   }
-  if (IsCrun()) {
+  if (m_parent_step_inst_->IsCrun()) {
     auto* meta = GetCrunMeta_();
     {
       auto [path, fwd] = CrunParseFilePattern_(
@@ -2974,11 +2974,11 @@ void TaskManager::EvShutdownSupervisorCb_() {
       }
     }
 
+    // Non-daemon step don't need to report the status change in shutting down.
     m_step_.CleanUp();
 
     g_craned_client->Shutdown();
     g_server->Shutdown();
-
     this->Shutdown();
   } while (!got_final_status);
 }

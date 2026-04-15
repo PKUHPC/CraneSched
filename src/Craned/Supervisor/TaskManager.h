@@ -261,10 +261,7 @@ class ITaskInstance {
   ITaskInstance& operator=(ITaskInstance&&) = delete;
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
-  [[nodiscard]] bool IsBatch() const { return m_parent_step_inst_->IsBatch(); }
-  [[nodiscard]] bool IsCrun() const { return m_parent_step_inst_->IsCrun(); }
   // Helper methods shared by all task instances
-  StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
     return m_parent_step_inst_->GetStep();
   }
