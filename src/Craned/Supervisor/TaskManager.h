@@ -663,8 +663,6 @@ class TaskManager {
 
   void Shutdown() { m_supervisor_exit_ = true; }
 
-  pmix::PmixServer* GetPmixServer() const { return m_pmix_server_.get(); }
-
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;

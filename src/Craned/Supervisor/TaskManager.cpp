@@ -490,7 +490,7 @@ void ProcInstance::InitEnvMap() {
   if (m_parent_step_inst_->IsCrun() &&
       m_parent_step_inst_->GetStep().interactive_meta().mpi() ==
             kMpiTypePmix) {
-    auto result = g_task_mgr->GetPmixServer()->SetupFork(task_id);
+    auto result = m_parent_step_inst_->pmix_server->SetupFork(task_id);
     if (!result) {
       fmt::print(stderr,
                    "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
@@ -2719,31 +2719,9 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
-bool TaskManager::InitPmixPreFork() {
-  if (m_step_.IsCrun() &&
-      m_step_.GetStep().interactive_meta().mpi() == kMpiTypePmix) {
-    auto pmix_server = std::make_unique<pmix::PmixServer>();
-    pmix::Config pmix_config{
-        .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
-        .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
-        .CompressedRpc = g_config.CompressedRpc,
-        .CraneBaseDir = g_config.CraneBaseDir,
-        .CraneScriptDir = g_config.CraneScriptDir,
-        .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
-
-    // Only publish the server after Init() succeeds; a non-null but
-    // un-initialized m_pmix_server_ would let SetupFork() run on a
-    // broken server and cause UB / abort in child processes.
-    if (!pmix_server->Init(pmix_config, m_step_.GetStep())) return false;
-    m_pmix_server_ = std::move(pmix_server);
-  }
-
-  return true;
-}
-
 bool TaskManager::ReceivePmixPort(
     const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
-  if (!m_pmix_server_) {
+  if (!m_step_.pmix_server) {
     CRANE_ERROR(
         "[Step#{}.{}] PMIx server is not initialized when receiving "
         "pmix ports.",
@@ -2751,7 +2729,7 @@ bool TaskManager::ReceivePmixPort(
     return false;
   }
 
-  auto* pmix_client = m_pmix_server_->GetPmixClient();
+  auto* pmix_client = m_step_.pmix_server->GetPmixClient();
   if (!pmix_client) {
     CRANE_ERROR("[Step#{}.{}] PMIx client is null when receiving pmix ports.",
                 g_config.JobId, g_config.StepId);

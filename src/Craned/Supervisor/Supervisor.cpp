@@ -399,8 +399,6 @@ void StartServer(int grpc_output_fd) {
              static_cast<int>(g_config.StepSpec.step_type()));
 
   StepStatus status{StepStatus::Invalid};
-  g_thread_pool->detach_task([&]() { g_server->Wait(); });
-
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
@@ -448,34 +446,20 @@ void StartServer(int grpc_output_fd) {
     // Daemon step is RUNNING after supervisor and related resources are ready.
     status = ready ? StepStatus::Running : StepStatus::Failed;
   } else {
-    bool ready = true;
-
-    if (!g_task_mgr->InitPmixPreFork()) {
-      CRANE_ERROR("Failed to init pmix server for step.");
-      ready = false;
-    }
     // Common step is Starting after supervisor is ready.
-    status = ready ? StepStatus::Starting : StepStatus::Failed;
+    status = StepStatus::Starting;
   }
 
   g_task_mgr->SupervisorFinishInit(status);
 
-  g_task_mgr->Wait();
-
-  // Wait for all thread-pool tasks (including the detached g_server->Wait()
-  // task) to finish before destroying g_server.  Without this, g_server.reset()
-  // could free the gRPC Server object while the thread-pool thread is still
-  // executing inside Server::Wait(), causing use-after-free UB.
-  g_thread_pool->wait();
+  g_server->Wait();
   g_server.reset();
+  g_task_mgr->Wait();
   g_task_mgr.reset();
 
   g_craned_client.reset();
   g_plugin_client.reset();
 
-  // Wait again for any tasks that may have been spawned during the reset
-  // sequence above (e.g. PodInstance::Cleanup detaches a task to remove
-  // temporary config/lock files).
   g_thread_pool->wait();
   g_thread_pool.reset();
 
