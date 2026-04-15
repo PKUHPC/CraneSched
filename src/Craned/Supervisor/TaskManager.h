@@ -553,8 +553,6 @@ class TaskManager {
 
   void SupervisorFinishInit(StepStatus status);
 
-  bool InitPmixPreFork();
-
   bool ReceivePmixPort(
       const crane::grpc::supervisor::ReceivePmixPortRequest& request);
 
