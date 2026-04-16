@@ -685,75 +685,48 @@ bool MongodbClient::FetchJobRecords(
   bool has_array_task_constraint = !request->filter_array_task_ids().empty();
 
   if (has_job_ids_constraint || has_array_task_constraint) {
-    // When both job_id and array_task filters are present, we need an $or:
-    //   - Non-array jobs matched by job_id directly
-    //   - Array children matched by array_job_id + array_task_id
-    // Without array_task filter, just use job_id $in as before.
     if (has_array_task_constraint) {
-      // ALL array job IDs in filter_array_task_ids are excluded from the
-      // direct job_id match, regardless of whether their array_task_id
-      // list is empty. An empty list means "match no children" — the
-      // array parent itself must not leak into the results either.
+      // Collect array job IDs that have explicit array task filters
       std::unordered_set<uint32_t> array_job_ids_with_task_filter;
-      bool has_any_array_task_ids = false;
       for (const auto& [array_job_id, array_task_ids] :
            request->filter_array_task_ids()) {
         array_job_ids_with_task_filter.insert(array_job_id);
-        if (!array_task_ids.array_task_ids().empty()) {
-          has_any_array_task_ids = true;
-        }
       }
 
-      // Check if there are any non-array job_ids for Branch 1.
-      bool has_non_array_job_ids = false;
-      if (has_job_ids_constraint) {
-        for (const auto& job_id : request->filter_ids() | std::views::keys) {
-          if (!array_job_ids_with_task_filter.contains(job_id)) {
-            has_non_array_job_ids = true;
-            break;
-          }
-        }
-      }
-
-      // Guard: only build $or if at least one branch will be non-empty.
-      if (has_non_array_job_ids || has_any_array_task_ids) {
-        filter.append(kvp("$or", [&](sub_array or_array) {
-          // Branch 1: Non-array-filtered job_ids (direct match).
-          if (has_non_array_job_ids) {
-            array non_array_job_ids;
-            for (const auto& job_id :
-                 request->filter_ids() | std::views::keys) {
-              if (!array_job_ids_with_task_filter.contains(job_id)) {
-                non_array_job_ids.append(static_cast<std::int32_t>(job_id));
-              }
+      // Build $or with two branches:
+      // 1. job_id in requested job_ids (excluding those with array task filters)
+      // 2. (array_job_id, array_task_id) pairs match requested array tasks
+      filter.append(kvp("$or", [&](sub_array or_array) {
+        // Branch 1: Match by job_id (exclude array jobs with task filters)
+        if (has_job_ids_constraint) {
+          array job_id_array;
+          for (const auto& job_id : request->filter_ids() | std::views::keys) {
+            if (!array_job_ids_with_task_filter.contains(job_id)) {
+              job_id_array.append(static_cast<std::int32_t>(job_id));
             }
+          }
+          if (job_id_array.view().length() > 0) {
             or_array.append([&](sub_document match_doc) {
               match_doc.append(kvp("job_id", [&](sub_document in_doc) {
-                in_doc.append(kvp("$in", non_array_job_ids));
+                in_doc.append(kvp("$in", job_id_array));
               }));
             });
           }
+        }
 
-          // Branch 2: Array children matched by array_job_id +
-          // array_task_id.
-          for (const auto& [array_job_id, array_task_ids] :
-               request->filter_array_task_ids()) {
-            for (const auto& array_task_id : array_task_ids.array_task_ids()) {
-              or_array.append([&](sub_document match_doc) {
-                match_doc.append(kvp("array_job_id",
-                                     static_cast<std::int32_t>(array_job_id)));
-                match_doc.append(kvp("array_task_id",
-                                     static_cast<std::int32_t>(array_task_id)));
-              });
-            }
+        // Branch 2: Match by (array_job_id, array_task_id) pairs
+        for (const auto& [array_job_id, array_task_ids] :
+             request->filter_array_task_ids()) {
+          for (const auto& array_task_id : array_task_ids.array_task_ids()) {
+            or_array.append([&](sub_document match_doc) {
+              match_doc.append(kvp("array_job_id",
+                                   static_cast<std::int32_t>(array_job_id)));
+              match_doc.append(kvp("array_task_id",
+                                   static_cast<std::int32_t>(array_task_id)));
+            });
           }
-        }));
-      } else {
-        // Both branches are empty (e.g. filter_array_task_ids had keys
-        // but all with empty array_task_id lists). Add an impossible condition
-        // so the query returns zero results instead of a wide scan.
-        filter.append(kvp("job_id", -1));
-      }
+        }
+      }));
     } else {
       // No array_task filter: simple job_id $in.
       filter.append(kvp("job_id", [&request](sub_document job_id_doc) {

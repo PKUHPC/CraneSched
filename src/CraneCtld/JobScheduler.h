@@ -1048,6 +1048,10 @@ class JobScheduler {
   // pending map. Must be called while holding both pending/running map locks.
   bool MaterializeArrayChildrenToPendingMap_(JobInCtld* parent);
 
+  // Expand all remaining children of an array parent at once.
+  // Used for operations like cancel that need all children to exist.
+  bool MaterializeAllRemainingArrayChildrenToPendingMap_(JobInCtld* parent);
+
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();
 

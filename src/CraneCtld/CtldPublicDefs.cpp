@@ -1610,6 +1610,12 @@ void JobInCtld::SetArrayChildrenExpanded(bool val) {
   runtime_attr.set_array_children_expanded(val);
 }
 
+void JobInCtld::SetNextArrayTaskIndex(uint32_t val) {
+  next_array_task_index = val;
+  // Note: next_array_task_index is NOT persisted to runtime_attr.
+  // It will be reconstructed during recovery by counting existing children.
+}
+
 std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
   if (!IsArrayChild() || !array_job_id.has_value() ||
       !job_to_ctld.has_array_task_id() ||
@@ -1631,11 +1637,15 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
                        task_step};
 }
 
-std::vector<std::unique_ptr<JobInCtld>> JobInCtld::CreateExpandedArrayChildren()
-    const {
-  std::vector<std::unique_ptr<JobInCtld>> children;
+std::unique_ptr<JobInCtld> JobInCtld::CreateNextArrayChild() {
   if (!IsArrayParent()) {
-    return children;
+    return nullptr;
+  }
+
+  uint32_t array_task_count = ArrayTaskCount();
+  if (next_array_task_index >= array_task_count) {
+    // All children have been created.
+    return nullptr;
   }
 
   uint32_t array_start = job_to_ctld.array_index_start();
@@ -1644,18 +1654,39 @@ std::vector<std::unique_ptr<JobInCtld>> JobInCtld::CreateExpandedArrayChildren()
                               : 1;
   if (array_stride == 0) array_stride = 1;
 
+  auto child = std::make_unique<JobInCtld>();
+
+  child->SetFieldsByJobToCtld(job_to_ctld);
+  child->MutableJobToCtld()->set_array_task_id(
+      array_start + next_array_task_index * array_stride);
+  child->SetStatus(crane::grpc::Pending);
+  child->SetSubmitTime(SubmitTime());
+  child->SetArrayJobId(JobId());
+
+  // Increment and persist the index.
+  SetNextArrayTaskIndex(next_array_task_index + 1);
+
+  return child;
+}
+
+std::vector<std::unique_ptr<JobInCtld>>
+JobInCtld::CreateAllRemainingArrayChildren() {
+  std::vector<std::unique_ptr<JobInCtld>> children;
+  if (!IsArrayParent()) {
+    return children;
+  }
+
   uint32_t array_task_count = ArrayTaskCount();
-  children.reserve(array_task_count);
-  for (uint32_t i = 0; i < array_task_count; ++i) {
-    auto child = std::make_unique<JobInCtld>();
+  if (next_array_task_index >= array_task_count) {
+    // All children have been created.
+    return children;
+  }
 
-    child->SetFieldsByJobToCtld(job_to_ctld);
-    child->MutableJobToCtld()->set_array_task_id(array_start +
-                                                 i * array_stride);
-    child->SetStatus(crane::grpc::Pending);
-    child->SetSubmitTime(SubmitTime());
-    child->SetArrayJobId(JobId());
+  uint32_t remaining_count = array_task_count - next_array_task_index;
+  children.reserve(remaining_count);
 
+  // Create all remaining children.
+  while (auto child = CreateNextArrayChild()) {
     children.push_back(std::move(child));
   }
 

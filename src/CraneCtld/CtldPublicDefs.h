@@ -906,7 +906,8 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
-  std::vector<std::unique_ptr<JobInCtld>> CreateExpandedArrayChildren() const;
+  std::unique_ptr<JobInCtld> CreateNextArrayChild();
+  std::vector<std::unique_ptr<JobInCtld>> CreateAllRemainingArrayChildren();
 
  private:
   /* ------------- [2] -------------
@@ -957,8 +958,10 @@ struct JobInCtld {
   // Array job tracking fields.
   // For array children: the array parent/anchor job_id.
   std::optional<job_id_t> array_job_id;
-  // For array parents: whether child jobs have been materialized.
+  // For array parents: whether all child jobs have been materialized.
   bool array_children_expanded{false};
+  // For array parents: the next array task index to expand (offset, not task_id).
+  uint32_t next_array_task_index{0};
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
@@ -1086,6 +1089,8 @@ struct JobInCtld {
   std::optional<job_id_t> const& ArrayJobId() const { return array_job_id; }
   void SetArrayChildrenExpanded(bool val);
   bool ArrayChildrenExpanded() const { return array_children_expanded; }
+  void SetNextArrayTaskIndex(uint32_t val);
+  uint32_t NextArrayTaskIndex() const { return next_array_task_index; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);
