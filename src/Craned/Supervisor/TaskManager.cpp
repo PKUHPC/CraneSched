@@ -2754,11 +2754,9 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     DelTerminationTimer_();
     DelSignalTimers_();
     m_step_.StopCforedClient();
-    if (!m_step_.orphaned) {
-      g_craned_client->StepStatusChangeAsync(
-          status.final_status_on_termination, status.max_exit_code,
-          status.final_reason_on_termination);
-    }
+    g_craned_client->StepStatusChangeAsync(
+        StepStatus::Completing, status.max_exit_code,
+        status.final_reason_on_termination, status.final_status_on_termination);
     ShutdownSupervisorAsync();
   }
 }
@@ -2917,11 +2915,9 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
   return ok_future;
 }
 
-void TaskManager::TerminateStepAsync(bool mark_as_orphaned,
-                                     TaskFinalizeCause cause) {
+void TaskManager::TerminateStepAsync(TaskFinalizeCause cause) {
   m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
       .cause = cause,
-      .mark_as_orphaned = mark_as_orphaned,
   });
   m_terminate_step_async_handle_->send();
 }
@@ -2969,11 +2965,10 @@ void TaskManager::EvShutdownSupervisorCb_() {
 
     auto& [status, exit_code, reason] = final_status;
     if (m_step_.IsDaemon()) {
-      m_step_.GotNewStatus(status);
-      if (!m_step_.orphaned) {
-        CRANE_DEBUG("Sending a {} status as daemon step.", status);
-        g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
-      }
+      m_step_.GotNewStatus(StepStatus::Completing);
+      CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
+      g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
+                                             reason, status);
     }
 
     m_step_.CleanUp();
@@ -3362,37 +3357,40 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
                 g_config.JobId, g_config.StepId);
 
     if (m_step_.IsDaemon()) {
-      if (elem.mark_as_orphaned) {
-        m_step_.orphaned = true;
-        CRANE_INFO("Orphaned daemon step is shutting down directly.");
-        SetAllowDaemonShutdown();
-        ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      } else {
-        CRANE_TRACE(
-            "Terminate request for daemon step is ignored. Use "
-            "ShutdownSupervisor to actively stop a daemon pod.");
-      }
+      CRANE_TRACE(
+          "Terminate request for daemon step is ignored. Use "
+          "ShutdownSupervisor to actively stop a daemon pod.");
       continue;
     }
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = true;
+    auto step_status = m_step_.GetStatus();
 
-    if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
+    if (step_status == StepStatus::Configuring) {
       not_ready_elems.emplace_back(elem);
-      CRANE_DEBUG("Step is not ready to terminate, will check next time.");
+      CRANE_DEBUG("Step status {} not cancellable, defer.", step_status);
+      continue;
+    } else if (step_status == StepStatus::Completing) {
+      CRANE_DEBUG("[Step #{}.{}] Terminating a completing step, ignored.",
+                  g_config.JobId, g_config.StepId);
+      continue;
+    } else if (IsFinishedStepStatus(step_status)) {
+      CRANE_DEBUG("[Step #{}.{}] Terminating a finished step, ignored.",
+                  g_config.JobId, g_config.StepId);
       continue;
     }
 
-    int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
-
-    if (elem.mark_as_orphaned) {
-      CRANE_DEBUG("Step is terminated as orphaned, shutting down...");
+    if (step_status == StepStatus::Starting) {
+      CRANE_DEBUG("Terminating step at Starting state, shutting down...");
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
-    CRANE_TRACE("Terminating all running tasks (orphaned: {}, reason: {})...",
-                elem.mark_as_orphaned, static_cast<int>(elem.cause));
+    CRANE_ASSERT(!m_step_.AllTaskFinished());
+
+    int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
+
+    CRANE_TRACE("Terminating all running tasks (reason: {})...",
+                static_cast<int>(elem.cause));
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);

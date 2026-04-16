@@ -175,7 +175,10 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
-        job->SetEndTime(absl::Now());
+        auto now = absl::Now();
+        auto max_end_time = job->StartTime() + job->time_limit;
+        auto end_time = std::min(now, max_end_time);
+        job->SetEndTime(end_time);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
         if (!ok) {
@@ -4634,28 +4637,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     });
   }
 
-  std::latch orphaned_step_latch{
-      static_cast<std::ptrdiff_t>(context.craned_orphaned_steps.size())};
-  for (const auto& craned_id :
-       context.craned_orphaned_steps | std::views::keys) {
-    m_rpc_worker_pool_->detach_task(
-        [&orphaned_step_latch, craned_id, &context]() {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
-          // If the craned is down, just ignore it.
-          if (stub && !stub->Invalid()) {
-            const auto& steps = context.craned_orphaned_steps.at(craned_id);
-            auto err = stub->TerminateOrphanedSteps(steps);
-            if (err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR(
-                  "Failed to TerminateOrphanedSteps for [{}] jobs on Node {}",
-                  util::JobStepsToString(steps), craned_id);
-            }
-          }
-          orphaned_step_latch.count_down();
-        });
-  }
-
   std::latch cancel_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_cancel_steps.size())};
   for (const auto& craned_id : context.craned_cancel_steps | std::views::keys) {
@@ -4709,7 +4690,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   alloc_step_latch.wait();
   free_step_latch.wait();
   exec_step_latch.wait();
-  orphaned_step_latch.wait();
   cancel_step_latch.wait();
   free_job_latch.wait();
 
@@ -5067,13 +5047,12 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
   }
 }
 
-void JobScheduler::TerminateOrphanedSteps(
+void JobScheduler::TerminateStepsOnOtherNodes(
     const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
     const CranedId& excluded_node) {
-  CRANE_INFO("Terminate orphaned steps: [{}] synced by {}.",
+  CRANE_INFO("Terminate steps on other nodes: [{}] excluding {}.",
              util::JobStepsToString(steps), excluded_node);
 
-  // Now we just terminate all jobs.
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_steps_map;
@@ -5119,9 +5098,9 @@ void JobScheduler::TerminateOrphanedSteps(
         [craned_id, node_job_steps = std::move(craned_steps)] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           if (stub && !stub->Invalid()) {
-            if (auto err = stub->TerminateOrphanedSteps(node_job_steps);
+            if (auto err = stub->TerminateSteps(node_job_steps);
                 err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Failed to terminate orphaned steps [{}] on node {}.",
+              CRANE_ERROR("Failed to terminate steps [{}] on node {}.",
                           util::JobStepsToString(node_job_steps), craned_id);
             }
           }

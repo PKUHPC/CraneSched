@@ -142,12 +142,11 @@ SupervisorStub::CheckStatus() {
 }
 
 CraneErrCode SupervisorStub::TerminateStep(
-    bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source) {
+    crane::grpc::TerminateSource terminate_source) {
   ClientContext context;
   crane::grpc::supervisor::TerminateStepRequest request;
   crane::grpc::supervisor::TerminateStepReply reply;
 
-  request.set_mark_orphaned(mark_as_orphaned);
   request.set_terminate_source(terminate_source);
 
   auto ok = m_stub_->TerminateStep(&context, request, &reply);

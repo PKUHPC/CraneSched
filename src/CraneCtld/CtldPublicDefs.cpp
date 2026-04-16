@@ -246,6 +246,18 @@ void StepInCtld::StepOnNodeFinish(const CranedId& node) {
       m_running_nodes_.begin(), m_running_nodes_.end());
 }
 
+void StepInCtld::StepOnNodeCompleting(const CranedId& node) {
+  this->m_completing_nodes_.insert(node);
+  this->m_runtime_attr_.mutable_completing_nodes()->Assign(
+      m_completing_nodes_.begin(), m_completing_nodes_.end());
+}
+
+bool StepInCtld::AllNodesCompleting() const {
+  return !m_completing_nodes_.empty() &&
+         m_completing_nodes_.size() == m_execute_nodes_.size() &&
+         m_completing_nodes_ == m_execute_nodes_;
+}
+
 void StepInCtld::SetSubmitTime(absl::Time submit_time) {
   m_submit_time_ = submit_time;
   this->m_runtime_attr_.mutable_submit_time()->set_seconds(
@@ -370,6 +382,8 @@ void StepInCtld::RecoverFromDb(
                        runtime_attr.configuring_nodes().end()});
   SetRunningNodes({runtime_attr.running_nodes().begin(),
                    runtime_attr.running_nodes().end()});
+  m_completing_nodes_ = {runtime_attr.completing_nodes().begin(),
+                         runtime_attr.completing_nodes().end()};
 
   SetSubmitTime(absl::FromUnixSeconds(runtime_attr.submit_time().seconds()));
   SetStartTime(absl::FromUnixSeconds(runtime_attr.start_time().seconds()));
@@ -703,21 +717,20 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   case crane::grpc::JobStatus::Running:
   case crane::grpc::JobStatus::Completing:
-    // Completing -> Completed / Failed
-    switch (new_status) {
-    case crane::grpc::JobStatus::Failed:
+    if (new_status == crane::grpc::JobStatus::Completing) {
+      // First report: processes dead, supervisor exiting.
+      // Track in completing_nodes_. FreeJobs is triggered by primary step.
+      this->StepOnNodeCompleting(craned_id);
+      break;
+    }
+
+    if (!IsFinishedStepStatus(new_status))
+      CRANE_WARN("Node {} reported step status {} which is not a valid status.",
+                 craned_id, util::StepStatusToString(new_status));
+    // Terminal report: cleanup done on this node.
+    if (new_status != crane::grpc::JobStatus::Completed) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
-      break;
-
-    case crane::grpc::JobStatus::Completed:
-      break;
-
-    [[unlikely]] default:
-      CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
-                  util::StepStatusToString(this->Status()),
-                  util::StepStatusToString(new_status));
-      return std::nullopt;
     }
 
     this->StepOnNodeFinish(craned_id);
@@ -755,8 +768,9 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       // FreeJobs() and TerminateOrphanedStep() could be called concurrently for
       // the same daemon step, both trying to free the supervisor, double-freed.
 
-      // FreeJobs() is enough to free the daemon step's supervisor.
-      context->craned_jobs_to_free[craned_id].emplace_back(job->JobId());
+      for (const auto& node_id : job->CranedIds()) {
+        context->craned_jobs_to_free[node_id].emplace_back(job->JobId());
+      }
       if (job->IsInteractive()) {
         auto& meta = std::get<InteractiveMeta>(job->meta);
         if (!meta.has_been_cancelled_on_front_end) {
@@ -1199,8 +1213,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   auto step_id = this->StepId();
 
   bool step_finished{false};
-  // Step failed to configure, terminate step
-  bool step_configure_failed{false};
+  bool step_all_completing{false};
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
@@ -1215,8 +1228,19 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     }
     if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus().has_value()) {
-        // Configuring -> Failed
-        step_configure_failed = true;
+        // Configure failed: enter completing flow.
+        // Failed node counts as completing. Cancel other nodes and wait
+        // for them to also complete.
+        CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED, entering completing flow.",
+                   job_id, step_id);
+        this->SetStatus(crane::grpc::JobStatus::Completing);
+        this->StepOnNodeCompleting(craned_id);
+        // Cancel other nodes — their supervisors will send Completing
+        for (const auto& node : this->ExecutionNodes()) {
+          if (node != craned_id)
+            context->craned_cancel_steps[node][job->JobId()].insert(step_id);
+        }
+        step_all_completing = this->AllNodesCompleting();
       } else {
         // Configuring -> Running
         // All supervisor ready without failure, start execution.
@@ -1244,19 +1268,31 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     break;
   case crane::grpc::JobStatus::Running:
   case crane::grpc::JobStatus::Completing:
-    // Running/Completing -> Completed / Failed / Cancelled,
-    // Primary: the job is completed.
-
-    this->StepOnNodeFinish(craned_id);
-    if (new_status != crane::grpc::JobStatus::Completed) {
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
-    }
-    step_finished = this->AllNodesFinished();
-    if (!step_finished) {
-      CRANE_DEBUG(
-          "[Step #{}.{}] got a finish status, waiting for {} status change.",
-          job_id, step_id, this->RunningNodes().size());
+    if (new_status == crane::grpc::JobStatus::Completing) {
+      this->StepOnNodeCompleting(craned_id);
+      step_all_completing = this->AllNodesCompleting();
+      if (!step_all_completing) {
+        CRANE_DEBUG("[Step #{}.{}] got Completing, waiting for {} more nodes.",
+                    job_id, step_id,
+                    this->ExecutionNodes().size() - m_completing_nodes_.size());
+      }
+    } else {
+      if (!IsFinishedStepStatus(new_status)) {
+        CRANE_WARN(
+            "Node {} reported step status {} which is not a valid status.",
+            craned_id, util::StepStatusToString(new_status));
+      }
+      // Terminal report: cleanup done on this node.
+      if (new_status != crane::grpc::JobStatus::Completed) {
+        this->SetErrorStatus(new_status);
+        this->SetErrorExitCode(exit_code);
+      }
+      this->StepOnNodeFinish(craned_id);
+      step_finished = this->AllNodesFinished();
+      if (!step_finished) {
+        CRANE_DEBUG("[Step #{}.{}] got terminal, waiting for {} more nodes.",
+                    job_id, step_id, this->RunningNodes().size());
+      }
     }
     break;
   default:
@@ -1267,14 +1303,22 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                            StepStatusToString(new_status)));
   }
 
-  // Step finish: configure failed or execution status change
-  if (step_finished || step_configure_failed) {
+  // AllNodesCompleting: trigger FreeSteps for step-level cleanup.
+  // User proc stopped but step is NOT released — terminal will arrive after
+  // cleanup.
+  if (step_all_completing) {
+    CRANE_INFO("[Step #{}.{}] Status :{},last status:{}, triggering cleanup.",
+               job_id, step_id, crane::grpc::JobStatus::Completing,
+               this->Status());
+    this->SetStatus(crane::grpc::JobStatus::Completing);
+
+    // Notify frontend (interactive steps)
     if (this->ia_meta.has_value()) {
       auto& meta = this->ia_meta.value();
       if (!meta.has_been_cancelled_on_front_end) {
         meta.has_been_cancelled_on_front_end = true;
         meta.cb_step_cancel({.job_id = job_id, .step_id = step_id});
-        // Completion ack will send in grpc server triggered by job complete
+        // Completion ack will send in grpc server triggered by step complete
         // req
         meta.cb_step_completed({.job_id = job_id,
                                 .step_id = step_id,
@@ -1288,118 +1332,91 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                 .cfored_name = meta.cfored_name});
       }
     }
-    this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                     absl::Nanoseconds(timestamp.nanos()));
-    if (this->Status() == crane::grpc::JobStatus::Configuring) {
-      CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", job_id, step_id);
-      // CONFIGURE_FAILED
-      this->SetStatus(this->PrevErrorStatus().value());
-      this->SetExitCode(this->PrevErrorExitCode());
-      // Step failed to configure, terminate this step
-      for (const auto& node : this->ExecutionNodes()) {
-        if (node != craned_id)
-          context->craned_orphaned_steps[node][job->JobId()].emplace(step_id);
-      }
 
-      if (this->IsPrimaryStep()) {
-        job->DaemonStep()->SetStatus(crane::grpc::Completing);
-        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
-        // Primary step CONFIGURE_FAILED, free daemon step, will send status
-        // change.
-        for (const auto& node : job->DaemonStep()->CranedIds()) {
-          context->craned_jobs_to_free[node].emplace_back(job->JobId());
-        }
-      } else {
-        for (const auto& node : this->CranedIds()) {
-          context->craned_step_free_map[node][job_id].insert(step_id);
-        }
-      }
-    } else {
-      // Step COMPLETED
-      if (this->IsPrimaryStep()) {
-        job->DaemonStep()->SetStatus(crane::grpc::Completing);
-        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
-        // Primary step finish, free daemon step, will send status change.
-        for (const auto& node : job->DaemonStep()->CranedIds()) {
-          context->craned_jobs_to_free[node].emplace_back(job->JobId());
-        }
-
-        std::unordered_set<step_id_t> pd_steps;
-        CRANE_DEBUG("[Job #{}] primary step exited, terminating other steps.",
-                    job_id);
-
-        // Cancel all other step with CANCELED status
-        const absl::Time& cancel_time = this->EndTime();
-        for (const auto& comm_step : job->Steps() | std::views::values) {
-          // All pending steps are crun steps, just set status to cancelled
-          if (comm_step->Status() == crane::grpc::JobStatus::Pending) {
-            comm_step->SetStatus(crane::grpc::Cancelled);
-            comm_step->SetStartTime(cancel_time);
-            comm_step->SetEndTime(cancel_time);
-
-            // Crun needs this, ccon do not.
-            if (comm_step->ia_meta.has_value()) {
-              auto& meta = comm_step->ia_meta.value();
-              if (!meta.has_been_cancelled_on_front_end) {
-                meta.has_been_cancelled_on_front_end = true;
-                meta.cb_step_cancel({.job_id = comm_step->job_id,
-                                     .step_id = comm_step->StepId()});
-              }
-
-              // Send Completion Ack to frontend now.
-              meta.cb_step_completed({.job_id = comm_step->job_id,
-                                      .step_id = comm_step->StepId(),
-                                      .send_completion_ack = true,
-                                      .cfored_name = meta.cfored_name});
-            }
-
-            pd_steps.insert(comm_step->StepId());
-            CRANE_TRACE(
-                "[Step #{}.{}] Cancelled pending step due to primary step "
-                "exit.",
-                comm_step->job_id, comm_step->StepId());
-          } else {
-            CRANE_TRACE(
-                "[Step #{}.{}] Sending cancel due to primary step exit.",
-                comm_step->job_id, comm_step->StepId());
-            for (const auto& node : comm_step->ExecutionNodes()) {
-              context->craned_cancel_steps[node][comm_step->job_id].emplace(
-                  comm_step->StepId());
-            }
-          }
-        }
-        for (const auto& pd_step_id : pd_steps) {
-          auto pd_step = job->EraseStep(pd_step_id);
-          context->step_raw_ptrs.insert(pd_step.get());
-          context->step_ptrs.insert(std::move(pd_step));
-        }
-      } else {
-        for (const auto& node : this->ExecutionNodes()) {
-          context->craned_step_free_map[node][job_id].insert(step_id);
-        }
-      }
-      if (this->PrevErrorStatus().has_value()) {
-        this->SetStatus(this->PrevErrorStatus().value());
-        this->SetExitCode(this->PrevErrorExitCode());
-      } else {
-        this->SetStatus(crane::grpc::JobStatus::Completed);
-        this->SetExitCode(exit_code);
-      }
-
-      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id, step_id,
-                 this->Status());
+    // FreeSteps for ALL execution nodes (step-level cleanup)
+    for (const auto& node : this->ExecutionNodes()) {
+      context->craned_step_free_map[node][job_id].insert(step_id);
     }
 
+    // Primary step: also cancel other running common steps
+    if (this->IsPrimaryStep()) {
+      std::unordered_set<step_id_t> pd_steps;
+      CRANE_DEBUG("[Job #{}] primary step completing, terminating other steps.",
+                  job_id);
+      const absl::Time cancel_time =
+          absl::FromUnixSeconds(timestamp.seconds()) +
+          absl::Nanoseconds(timestamp.nanos());
+      for (const auto& comm_step : job->Steps() | std::views::values) {
+        if (comm_step->Status() == crane::grpc::JobStatus::Pending) {
+          comm_step->SetStatus(crane::grpc::Cancelled);
+          comm_step->SetStartTime(cancel_time);
+          comm_step->SetEndTime(cancel_time);
+          if (comm_step->ia_meta.has_value()) {
+            auto& meta = comm_step->ia_meta.value();
+            if (!meta.has_been_cancelled_on_front_end) {
+              meta.has_been_cancelled_on_front_end = true;
+              meta.cb_step_cancel({.job_id = comm_step->job_id,
+                                   .step_id = comm_step->StepId()});
+            }
+            meta.cb_step_completed({.job_id = comm_step->job_id,
+                                    .step_id = comm_step->StepId(),
+                                    .send_completion_ack = true,
+                                    .cfored_name = meta.cfored_name});
+          }
+          pd_steps.insert(comm_step->StepId());
+        } else {
+          for (const auto& node : comm_step->ExecutionNodes()) {
+            context->craned_cancel_steps[node][comm_step->job_id].emplace(
+                comm_step->StepId());
+          }
+        }
+      }
+      for (const auto& pd_step_id : pd_steps) {
+        auto pd_step = job->EraseStep(pd_step_id);
+        context->step_raw_ptrs.insert(pd_step.get());
+        context->step_ptrs.insert(std::move(pd_step));
+      }
+    }
+    context->rn_step_raw_ptrs.insert(this);
+  }
+
+  // AllNodesFinished (terminal from all nodes = step-level cleanup done).
+  // Release step. Primary additionally triggers FreeJobs for job-level cleanup.
+  if (step_finished) {
+    this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
+                     absl::Nanoseconds(timestamp.nanos()));
+    if (this->PrevErrorStatus().has_value()) {
+      this->SetStatus(this->PrevErrorStatus().value());
+      this->SetExitCode(this->PrevErrorExitCode());
+    } else {
+      this->SetStatus(crane::grpc::JobStatus::Completed);
+      this->SetExitCode(exit_code);
+    }
+    CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id, step_id,
+               this->Status());
+
+    // Primary step: trigger FreeJobs for daemon step (job-level cleanup).
+    // Don't manually set daemon step to Completing — FreeJobs sends
+    // ShutdownSupervisor to daemon supervisor, which will send Completing
+    // on its own via the normal two-phase flow.
+    if (this->IsPrimaryStep()) {
+      for (const auto& node : job->DaemonStep()->CranedIds()) {
+        context->craned_jobs_to_free[node].emplace_back(job->JobId());
+      }
+    }
+
+    // Release step
     context->step_raw_ptrs.insert(this);
     if (this->IsPrimaryStep()) {
       job->SetPrimaryStepStatus(this->Status());
-      job->SetPrimaryStepExitCode(exit_code);
+      job->SetPrimaryStepExitCode(this->ExitCode());
       context->rn_job_raw_ptrs.insert(job);
       context->step_ptrs.emplace(job->ReleasePrimaryStep());
     } else {
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
+
   if (job->AllStepsFinished())
     return std::make_pair(job->PrimaryStepStatus(), job->PrimaryStepExitCode());
   else

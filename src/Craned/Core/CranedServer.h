@@ -63,11 +63,6 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::TerminateStepsRequest *request,
       crane::grpc::TerminateStepsReply *response) override;
 
-  grpc::Status TerminateOrphanedStep(
-      grpc::ServerContext *context,
-      const crane::grpc::TerminateOrphanedStepRequest *request,
-      crane::grpc::TerminateOrphanedStepReply *response) override;
-
   grpc::Status QueryStepFromPort(
       grpc::ServerContext *context,
       const crane::grpc::QueryStepFromPortRequest *request,

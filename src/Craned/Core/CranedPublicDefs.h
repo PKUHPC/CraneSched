@@ -58,6 +58,7 @@ struct StepStatusChangeQueueElem {
   crane::grpc::JobStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
+  std::optional<crane::grpc::JobStatus> final_status;
   google::protobuf::Timestamp timestamp;
 };
 

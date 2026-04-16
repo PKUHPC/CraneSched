@@ -837,7 +837,7 @@ class JobScheduler {
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
-  void TerminateOrphanedSteps(
+  void TerminateStepsOnOtherNodes(
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
 
@@ -878,6 +878,7 @@ class JobScheduler {
     CommonStepInCtld* step;
     auto& job = rn_it->second;
     step = job->GetStep(step_id);
+    auto terminate_source = crane::grpc::TERMINATE_SOURCE_USER_CANCEL;
     if (step) {
       if (step->type == crane::grpc::Interactive) {
         auto& meta = step->ia_meta.value();
@@ -890,11 +891,15 @@ class JobScheduler {
           m_cancel_job_async_handle_->send();
           return CraneErrCode::SUCCESS;
         }
-        auto terminate_source =
+        terminate_source =
             cancelled_on_front_end
                 ? crane::grpc::TERMINATE_SOURCE_USER_CANCEL
                 : crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION;
-        return TerminateRunningStepNoLock_(step, terminate_source);
+
+        if (step->Status() == crane::grpc::JobStatus::Running)
+          return TerminateRunningStepNoLock_(step, terminate_source);
+        else
+          return CraneErrCode::ERR_INVALID_PARAM;
       } else {
         return CraneErrCode::ERR_INVALID_PARAM;
       }

@@ -30,9 +30,10 @@ class CranedClient {
   ~CranedClient();
   void Shutdown();
   void InitChannelAndStub(const std::string& endpoint);
-  void StepStatusChangeAsync(crane::grpc::JobStatus new_status,
-                             uint32_t exit_code,
-                             std::optional<std::string> reason);
+  void StepStatusChangeAsync(
+      crane::grpc::JobStatus new_status, uint32_t exit_code,
+      std::optional<std::string> reason,
+      std::optional<crane::grpc::JobStatus> final_status = std::nullopt);
 
  private:
   void AsyncSendThread_();
@@ -40,6 +41,7 @@ class CranedClient {
     crane::grpc::JobStatus new_status{};
     uint32_t exit_code{};
     std::optional<std::string> reason;
+    std::optional<crane::grpc::JobStatus> final_status;
     google::protobuf::Timestamp timestamp{};
   };
   absl::Mutex m_mutex_;

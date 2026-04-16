@@ -86,30 +86,7 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::TerminateOrphanedStep(
-    grpc::ServerContext *context,
-    const crane::grpc::TerminateOrphanedStepRequest *request,
-    crane::grpc::TerminateOrphanedStepReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
-    CRANE_ERROR("CranedServer is not ready.");
-    response->set_reason("CranedServer is not ready");
-    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
-  }
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
-  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
-    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
-  }
-  CRANE_TRACE("Receive TerminateOrphanedStep for steps [{}]",
-              util::JobStepsToString(job_steps_map));
-
-  for (const auto [job_id, steps] : job_steps_map)
-    for (const auto step_id : steps)
-      g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
-
-  response->set_ok(true);
-
-  return Status::OK;
-}
+// TerminateOrphanedStep removed: all cleanup goes through FreeJobs.
 
 grpc::Status CranedServiceImpl::QueryStepFromPort(
     grpc::ServerContext *context,
@@ -572,9 +549,12 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     response->set_ok(false);
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
+  std::optional<crane::grpc::JobStatus> final_status;
+  if (request->has_final_status()) final_status = request->final_status();
   g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
                                    request->new_status(), request->exit_code(),
-                                   request->reason(), request->timestamp());
+                                   request->reason(), final_status,
+                                   request->timestamp());
   response->set_ok(true);
   return Status::OK;
 }

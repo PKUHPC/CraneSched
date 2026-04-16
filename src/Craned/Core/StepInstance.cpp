@@ -23,6 +23,7 @@
 
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "JobManager.h"
 #include "crane/CriClient.h"
 
 namespace Craned {
@@ -574,13 +575,9 @@ void StepInstance::ExecuteStepAsync() {
     if (code != CraneErrCode::SUCCESS) {
       CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute step, code:{}.",
                   job_id, step_id, static_cast<int>(code));
-      g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
-          .job_id = job_id,
-          .step_id = step_id,
-          .new_status = StepStatus::Failed,
-          .exit_code = ExitCode::EC_RPC_ERR,
-          .reason = "Supervisor not responding when execute step",
-          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
+      g_job_mgr->SendCompletingAndTerminal_(
+          job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+          "Supervisor not responding when execute step");
       // Ctld will send ShutdownSupervisor after status change from
       // daemon supervisor, for common step, will shut down itself when all
       // steps finished locally.
