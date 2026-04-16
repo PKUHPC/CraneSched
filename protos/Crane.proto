@@ -147,30 +147,9 @@ message ExecuteStepsReply {
 
 message TerminateStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
-  TerminateSource terminate_source = 2;
 }
 
 message TerminateStepsReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message SuspendJobsRequest {
-  // Suspend operations are applied on job granularity.
-  repeated uint32 job_id_list = 1;
-}
-
-message SuspendJobsReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message ResumeJobsRequest {
-  // Resume operations are applied on job granularity.
-  repeated uint32 job_id_list = 1;
-}
-
-message ResumeJobsReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -184,7 +163,7 @@ message TerminateOrphanedStepReply {
   string reason = 2;
 }
 
-message ChangeJobTimeConstraintRequest {
+message ChangeJobTimeConstraintRequest{
   uint32 job_id = 1;
   optional int64 time_limit_seconds = 2;
   optional int64 deadline_time = 3;
@@ -321,8 +300,8 @@ message ModifyJobsExtraAttrsReply {
 
 message ResetNextJobIdRequest {
   uint32 uid = 1;
-  uint32 next_job_id = 2;    // Reset to this value (0 = default to 1)
-  int64 next_job_db_id = 3;  // Reset to this value (0 = default to 1)
+  uint32 next_job_id = 2; // Reset to this value (0 = default to 1)
+  int64 next_job_db_id = 3; // Reset to this value (0 = default to 1)
 }
 
 message ResetNextJobIdReply {
@@ -448,8 +427,8 @@ message DeleteWckeyReply {
 }
 
 message ModifyFieldOperation {
-  ModifyField modify_field = 1;    // modify item field
-  repeated string value_list = 2;  // new value
+  ModifyField modify_field = 1; // modify item field
+  repeated string value_list = 2; // new value
   OperationType type = 3;
 }
 
@@ -458,6 +437,7 @@ message ModifyAccountRequest {
   string name = 2;
   repeated ModifyFieldOperation operations = 3;
   bool force = 4;
+  string partition = 5;
 }
 
 message ModifyAccountReply {
@@ -639,15 +619,15 @@ message QueryJobsInfoReply {
 
 message QueryJobEfficiencyRequest {
   repeated uint32 job_ids = 1;
-  uint32 uid = 2;  // User ID for authorization
+  uint32 uid = 2; // User ID for authorization
 }
 
 message JobEfficiencyInfo {
   uint32 job_id = 1;
   string hostname = 2;
-  uint64 cpu_usage = 3;     // CPU usage in nanoseconds
-  uint64 memory_usage = 4;  // Memory usage in bytes
-  uint64 proc_count = 5;    // Process count
+  uint64 cpu_usage = 3; // CPU usage in nanoseconds
+  uint64 memory_usage = 4; // Memory usage in bytes
+  uint64 proc_count = 5; // Process count
   google.protobuf.Timestamp timestamp = 6;
 }
 
@@ -658,16 +638,16 @@ message QueryJobEfficiencyReply {
 }
 
 message QueryNodeEventsRequest {
-  repeated string node_names = 1;  // Node names to query, empty means all nodes
-  uint32 uid = 2;                  // User ID for authorization
+  repeated string node_names = 1; // Node names to query, empty means all nodes
+  uint32 uid = 2; // User ID for authorization
 }
 
 message NodeEventInfo {
   string cluster_name = 1;
   string node_name = 2;
   uint64 uid = 3;
-  int64 start_time = 4;  // Unix timestamp in nanoseconds
-  int64 end_time = 5;    // Unix timestamp in nanoseconds
+  int64 start_time = 4; // Unix timestamp in nanoseconds
+  int64 end_time = 5; // Unix timestamp in nanoseconds
   string state = 6;
   string reason = 7;
 }
@@ -712,7 +692,7 @@ message DeleteReservationReply {
 
 message ResetPartitionAclRequest {
   uint32 uid = 1;
-  bool reload_from_config = 2;  // true: reload defaults from config, false: clear all
+  bool reload_from_config = 2; // true: reload defaults from config, false: clear all
 }
 
 message ResetPartitionAclReply {
@@ -1154,7 +1134,7 @@ message EnableAutoPowerControlReply {
 message SignUserCertificateRequest {
   uint32 uid = 1;
   string csr_content = 2;
-  string alt_names = 3;  // "localhost, *.domainSuffix"
+  string alt_names = 3; // "localhost, *.domainSuffix"
 }
 
 message SignUserCertificateResponse {
@@ -1444,8 +1424,6 @@ service Craned {
   If the job is a batch job, just kill it.
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
-  rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
-  rpc ResumeJobs(ResumeJobsRequest) returns (ResumeJobsReply);
   rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
   rpc ChangeJobTimeConstraint(ChangeJobTimeConstraintRequest) returns (ChangeJobTimeConstraintReply);
 

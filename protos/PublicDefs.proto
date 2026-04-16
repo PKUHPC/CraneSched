@@ -164,7 +164,7 @@ message DependencyStatus {
 
 message Signal {
   int32 signal_number = 1;
-  uint32 signal_time = 2;  // seconds_before_kill
+  uint32 signal_time = 2; // seconds_before_kill
   enum SignalFlag {
     NONE = 0;
     // (B) Send the signal only to the batch shell, not to other job steps.
@@ -194,7 +194,7 @@ message JobToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  uint32 gid = 14;  // egid
+  uint32 gid = 14; // egid
 
   Dependencies dependencies = 15;
 
@@ -209,12 +209,12 @@ message JobToCtld {
   optional PodJobAdditionalMeta pod_meta = 23;
   optional ContainerJobAdditionalMeta container_meta = 24;
   IoMeta io_meta = 25;
-  string sh_script = 26;  // Crun and cbatch script content
+  string sh_script = 26; // Crun and cbatch script content
 
   string extra_attr = 30;
 
   string cmd_line = 31;
-  string cwd = 32;  // Current working directory
+  string cwd = 32; // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
@@ -224,7 +224,8 @@ message JobToCtld {
   bool exclusive = 37;
 
   bool hold = 38;
-  google.protobuf.Timestamp begin_time = 39;
+  google.protobuf.Timestamp begin_time = 39; 
+
 
   message License {
     string key = 1;
@@ -241,6 +242,7 @@ message JobToCtld {
   string task_epilog = 47;
   repeated Signal signals = 48;
   google.protobuf.Timestamp deadline_time = 49;
+
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
@@ -274,11 +276,6 @@ message RuntimeAttrOfJob {
   JobStatus primary_step_status = 21;
   uint32 primary_step_exit_code = 22;
   map<string, uint32> actual_licenses = 23;
-
-  // Wall-clock time when the job was suspended.
-  // Used to extend end_time upon resume so that suspended time
-  // does not count toward the execution timeout.
-  google.protobuf.Timestamp suspend_time = 24;
 }
 
 message StepToCtld {
@@ -288,7 +285,7 @@ message StepToCtld {
   uint32 job_id = 2;
 
   JobType type = 5;
-  uint32 uid = 6;  // Only for authorization
+  uint32 uid = 6; // Only for authorization
   string name = 7;
 
   uint32 node_num = 8;
@@ -318,12 +315,11 @@ message StepToCtld {
   string extra_attr = 30;
 
   string cmd_line = 31;
-  string cwd = 32;  // Current working directory
+  string cwd = 32; // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
   string nodelist = 35;
-
   optional uint64 mem_per_cpu = 36;
   optional double cpus_per_task = 37;
   optional uint64 mem_per_node = 38;
@@ -407,8 +403,8 @@ message StepToD {
   // If this step is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this step is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
-  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 14; // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time = 15; // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
 
   map<string, string> env = 17;
@@ -492,7 +488,7 @@ message InteractiveJobAdditionalMeta {
 }
 
 message PodJobAdditionalMeta {
-  string name = 1;  // Pod name, will use to generate hostname
+  string name = 1; // Pod name, will use to generate hostname
 
   map<string, string> labels = 2;
   map<string, string> annotations = 3;
@@ -560,7 +556,7 @@ message ContainerJobAdditionalMeta {
   string command = 11;
   repeated string args = 12;
   string workdir = 13;
-  map<string, string> env = 14;  // env in container
+  map<string, string> env = 14; // env in container
 
   bool detached = 15;
   bool tty = 16;
@@ -761,54 +757,66 @@ message RichError {
 }
 
 enum ErrCode {
-  SUCCESS = 0;  // Success
+  SUCCESS = 0; // Success
 
-  ERR_INVALID_UID = 1;      // Invalid UID passed
-  ERR_INVALID_OP_USER = 2;  // Invalid operation user
-  ERR_INVALID_USER = 3;     // Invalid user
-  ERR_PERMISSION_USER = 4;  // User permissions too low, no permission to operate
+  ERR_INVALID_UID = 1; // Invalid UID passed
+  ERR_INVALID_OP_USER = 2; // Invalid operation user
+  ERR_INVALID_USER = 3; // Invalid user
+  ERR_PERMISSION_USER =
+      4;  // User permissions too low, no permission to operate
 
   ERR_BLOCKED_USER = 5;
-  ERR_USER_ALREADY_EXISTS = 6;            // User duplicate account insertion
-  ERR_USER_ACCESS_TO_ACCOUNT_DENIED = 7;  // User does not have permission for the account
-  ERR_INVALID_ADMIN_LEVEL = 8;            // Invalid permission level
-  ERR_USER_ACCOUNT_MISMATCH = 9;          // User does not belong to the account
+  ERR_USER_ALREADY_EXISTS = 6; // User duplicate account insertion
+  ERR_USER_ACCESS_TO_ACCOUNT_DENIED =
+      7;                        // User does not have permission for the account
+  ERR_INVALID_ADMIN_LEVEL = 8; // Invalid permission level
+  ERR_USER_ACCOUNT_MISMATCH = 9; // User does not belong to the account
 
   ERR_NO_ACCOUNT_SPECIFIED = 10;
-  ERR_INVALID_ACCOUNT = 11;         // Invalid account
-  ERR_ACCOUNT_ALREADY_EXISTS = 12;  // Duplicate account insertion
-  ERR_INVALID_PARENT_ACCOUNT = 13;  // Invalid parent account
-  ERR_ACCOUNT_HAS_CHILDREN = 14;    // Account has child nodes，cannot be deleted.
+  ERR_INVALID_ACCOUNT = 11; // Invalid account
+  ERR_ACCOUNT_ALREADY_EXISTS = 12; // Duplicate account insertion
+  ERR_INVALID_PARENT_ACCOUNT = 13; // Invalid parent account
+  ERR_ACCOUNT_HAS_CHILDREN = 14; // Account has child nodes，cannot be deleted.
 
   ERR_BLOCKED_ACCOUNT = 15;
-  ERR_INVALID_PARTITION = 16;                 // Invalid partition, partition does not exist
-  ERR_PARTITION_MISSING = 17;                 // Account/user does not include this partition
-  ERR_PARTITION_ALREADY_EXISTS = 18;          // Account/user duplicate insertion
-  ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19;  // Parent account does not include this partition
+  ERR_INVALID_PARTITION = 16; // Invalid partition, partition does not exist
+  ERR_PARTITION_MISSING = 17; // Account/user does not include this partition
+  ERR_PARTITION_ALREADY_EXISTS = 18; // Account/user duplicate insertion
+  ERR_PARENT_ACCOUNT_PARTITION_MISSING =
+      19;  // Parent account does not include this partition
 
-  ERR_USER_EMPTY_PARTITION = 20;  // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as child nodes contain this partition.
+  ERR_USER_EMPTY_PARTITION = 20; // Cannot add QoS when user has no partition
+  ERR_CHILD_HAS_PARTITION = 21; // Failed to delete the account partition as
+                                  // child nodes contain this partition.
   ERR_HAS_NO_QOS_IN_PARTITION = 22;
   ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
-  ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
+  ERR_INVALID_QOS = 24; // Invalid QoS, QoS does not exist
 
-  ERR_DB_QOS_ALREADY_EXISTS = 25;  // Duplicate QoS insertion in the database.
-  ERR_QOS_REFERENCES_EXIST = 26;   // QoS reference count is not zero.
-  ERR_CONVERT_TO_INTEGER = 27;     // String to integer conversion failed
-  ERR_TIME_LIMIT = 28;             // Invalid time value
-  ERR_QOS_MISSING = 29;            // Account/user does not include this QoS.
+  ERR_DB_QOS_ALREADY_EXISTS = 25; // Duplicate QoS insertion in the database.
+  ERR_QOS_REFERENCES_EXIST = 26; // QoS reference count is not zero.
+  ERR_CONVERT_TO_INTEGER = 27; // String to integer conversion failed
+  ERR_TIME_LIMIT = 28; // Invalid time value
+  ERR_QOS_MISSING = 29; // Account/user does not include this QoS.
 
-  ERR_QOS_ALREADY_EXISTS = 30;          // Account/user duplicate insertion.
-  ERR_PARENT_ACCOUNT_QOS_MISSING = 31;  // Parent account does not include this QoS.
-  ERR_SET_ALLOWED_QOS = 32;             // QoS is the default QoS, but not found in the new QoS list.
-  ERR_DEFAULT_QOS_NOT_INHERITED = 33;   // Default QoS is not in the allowed QoS list
-  ERR_DUPLICATE_DEFAULT_QOS = 34;       // Duplicate default QoS setting
+  ERR_QOS_ALREADY_EXISTS = 30; // Account/user duplicate insertion.
+  ERR_PARENT_ACCOUNT_QOS_MISSING =
+      31;  // Parent account does not include this QoS.
+  ERR_SET_ALLOWED_QOS =
+      32;  // QoS is the default QoS, but not found in the new QoS list.
+  ERR_DEFAULT_QOS_NOT_INHERITED =
+      33;                          // Default QoS is not in the allowed QoS list
+  ERR_DUPLICATE_DEFAULT_QOS = 34; // Duplicate default QoS setting
 
-  ERR_CHILD_HAS_DEFAULT_QOS = 35;  // Failed to delete the account QoS as child nodes have set it as the default QoS.
-  ERR_SET_ACCOUNT_QOS = 36;        // QoS is used by some descendant node or itself of the account.
-  ERR_SET_DEFAULT_QOS = 37;        // Qos not in allowed qos list or is already the default qos
-  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  //  // QoS cannot be directly deleted when it is set as the default QoS.
-  ERR_UPDATE_DATABASE = 39;                  // Database update failed
+  ERR_CHILD_HAS_DEFAULT_QOS = 35; // Failed to delete the account QoS as child
+                                   // nodes have set it as the default QoS.
+  ERR_SET_ACCOUNT_QOS =
+      36;  // QoS is used by some descendant node or itself of the account.
+  ERR_SET_DEFAULT_QOS =
+      37;  // Qos not in allowed qos list or is already the default qos
+  ERR_DEFAULT_QOS_MODIFICATION_DENIED =
+      38;  //  // QoS cannot be directly deleted when it is set as the default
+           //  QoS.
+  ERR_UPDATE_DATABASE = 39; // Database update failed
 
   ERR_GENERIC_FAILURE = 40;
   ERR_NO_RESOURCE = 41;
@@ -842,8 +850,10 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
-  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
-  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
+  ERR_NOT_IN_ALLOWED_LIST = 67; // The current account is not in the allowed
+                                 // account list for the partition.
+  ERR_IN_DENIED_LIST = 68; // The current account has been explicitly added to
+                            // the deny list for the partition.
   ERR_EBPF = 69;
 
   ERR_SUPERVISOR = 70;
@@ -858,13 +868,13 @@ enum ErrCode {
   ERR_LICENSE_LEGAL_FAILED = 78;
   ERR_INVALID_JOB_ID = 79;
 
-  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
-  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
-  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
-  ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
+  ERR_CRI_GENERIC = 80; // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81; // CRI support is disabled in the cluster.
+  ERR_CRI_CONTAINER_NOT_READY = 82; // Job/step is pending or container is not ready.
+  ERR_CRI_MULTIPLE_NODES = 83; // Requested CRI operation is not supported in multi-node steps.
 
-  ERR_INVALID_MEM_FORMAT = 84;  // Invalid mem format when parsing mem
-  ERR_STEP_RES_BEYOND = 85;     // Step resource request exceeds job resource.
+  ERR_INVALID_MEM_FORMAT = 84; // Invalid mem format when parsing mem
+  ERR_STEP_RES_BEYOND = 85; // Step resource request exceeds job resource.
 
   ERR_INVALID_WCKEY = 86;
   ERR_WCKEY_ALREADY_EXISTS = 87;
@@ -896,12 +906,6 @@ enum EntityType {
   User = 1;
 }
 
-enum TerminateSource {
-  TERMINATE_SOURCE_USER_CANCEL = 0;
-  TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
-  TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
-}
-
 enum OperationType {
   Overwrite = 0;
   Add = 1;
@@ -913,7 +917,7 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  Description = 3;  // account and qos
+  Description = 3; // account and qos
   // user
   AdminLevel = 4;
   DefaultAccount = 5;
@@ -933,8 +937,21 @@ enum ModifyField {
   MaxTresPerAccount = 18;
   Flags = 19;
 
+  //  account/user-partition
+  MaxTresPerJob = 20;
+  MaxWallDurationPerJob = 21;
+
   // wckey
   DefaultWckey = 40;
+}
+
+message PartitionResourceLimit {
+  ResourceView max_tres = 1;
+  ResourceView max_tres_per_job = 2;
+  uint32 max_jobs = 3;
+  uint32 max_submit_jobs = 4;
+  uint64 max_wall = 5;
+  uint64 max_wall_duration_per_job = 6;
 }
 
 message AccountInfo {
@@ -948,17 +965,20 @@ message AccountInfo {
   repeated string allowed_qos_list = 8;
   repeated string coordinators = 9;
   bool blocked = 10;
+  map<string, PartitionResourceLimit> partition_resource_limit = 11;
 }
 
-// Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
-//       and is ONLY used for communication between CraneCtld and cacctmgr command.
-//       If an user belongs to multiple accounts, There will be multiple `UserInfo`
-//       messages with `account` pointing to each account.
+// Note: UserInfo DIFFERS from the `User` struct in C++ code and database
+// representation
+//       and is ONLY used for communication between CraneCtld and cacctmgr
+//       command. If an user belongs to multiple accounts, There will be
+//       multiple `UserInfo` messages with `account` pointing to each account.
 //       For example, if a user (uid=1) belongs to accounts `1,2,3`,
-//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2),
-//       (uid=1, account=3).
-//       The c++ code and database representation use a Map<account name, AttrsInAccount> to contain
-//       in ONE UserInfo message all the information belonging to different accounts.
+//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1,
+//       account=2), (uid=1, account=3). The c++ code and database
+//       representation use a Map<account name, AttrsInAccount> to contain in
+//       ONE UserInfo message all the information belonging to different
+//       accounts.
 message UserInfo {
   enum AdminLevel {
     None = 0;
@@ -972,6 +992,10 @@ message UserInfo {
     string default_qos = 3;
   }
 
+  message PartitionToResourceLimit {
+    map<string, PartitionResourceLimit> partition_resource_limit = 1;
+  }
+
   uint32 uid = 1;
   string name = 2;
   string account = 3;
@@ -979,6 +1003,7 @@ message UserInfo {
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
   repeated string coordinator_accounts = 6;
   AdminLevel admin_level = 7;
+  map<string, PartitionToResourceLimit> account_to_partition_limit = 8;
 }
 
 message QosInfo {
