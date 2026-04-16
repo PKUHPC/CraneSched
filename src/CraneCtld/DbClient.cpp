@@ -772,20 +772,16 @@ bool MongodbClient::FetchJobRecords(
         mutable_req_total_res_view->set_cpu_count(static_cast<double>(
             cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
         auto mem_req = ViewGetArithmeticValue_<uint64_t>(view["mem_req"]);
-        mutable_req_total_res_view->set_memory_bytes(
-            mem_req);
-        mutable_req_total_res_view->set_memory_sw_bytes(
-            mem_req);
+        mutable_req_total_res_view->set_memory_bytes(mem_req);
+        mutable_req_total_res_view->set_memory_sw_bytes(mem_req);
 
         auto* mutable_allocated_res_view =
             job_info.mutable_allocated_res_view();
         mutable_allocated_res_view->set_cpu_count(static_cast<double>(
             cpu_t::from_raw_value(view["cpus_alloc"].get_int64().value)));
         auto mem_alloc = ViewGetArithmeticValue_<uint64_t>(view["mem_alloc"]);
-        mutable_allocated_res_view->set_memory_bytes(
-            mem_alloc);
-        mutable_allocated_res_view->set_memory_sw_bytes(
-            mem_alloc);
+        mutable_allocated_res_view->set_memory_bytes(mem_alloc);
+        mutable_allocated_res_view->set_memory_sw_bytes(mem_alloc);
         auto* gres_map_ptr = mutable_allocated_res_view->mutable_gres_map();
         *gres_map_ptr = ToGrpcGresMap(
             BsonToGresMap(view["device_map"].get_document().value));
