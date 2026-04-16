@@ -635,6 +635,8 @@ message JobInfo {
   string submit_hostname = 43;
   uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
+  int32 requeue_count = 46;
+  bool requeue_if_failed = 47;
 }
 
 message StepInfo {

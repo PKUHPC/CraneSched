@@ -464,9 +464,11 @@ bool MongodbClient::InsertRecoveredJob(
 bool MongodbClient::InsertJob(JobInCtld* job) {
   document job_doc = JobInCtldToDocument_(job);
 
-  // Create filter by job_id
+  // Create filter by (job_id, requeue_count) composite key
   document filter;
   filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
+  filter.append(
+      kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
@@ -534,9 +536,11 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
     for (const auto& job : jobs) {
       document job_doc = JobInCtldToDocument_(job);
 
-      // Create filter by job_id
+      // Create filter by (job_id, requeue_count) composite key
       document filter;
       filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
+      filter.append(
+          kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
 
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
@@ -585,6 +589,8 @@ bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
     size_t limit) {
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
   document filter;
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
@@ -726,16 +732,20 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  mongocxx::options::find option;
-  option = option.limit(limit);
-
-  document sort_doc;
-  sort_doc.append(kvp("job_db_id", -1));
-  option = option.sort(sort_doc.view());
+  // Use aggregation to deduplicate: for each job_id, only return the
+  // record with the highest requeue_count (the latest run).
+  mongocxx::pipeline pipeline;
+  pipeline.match(filter.view());
+  pipeline.sort(make_document(kvp("requeue_count", -1)));
+  pipeline.group(
+      make_document(kvp("_id", "$job_id"),
+                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
+  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
+  pipeline.limit(static_cast<int32_t>(limit));
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                               option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -881,6 +891,7 @@ bool MongodbClient::FetchJobRecords(
 bool MongodbClient::FetchJobStepRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
+  using bsoncxx::builder::basic::make_document;
   if (job_info_map->empty()) return true;
   document filter;
 
@@ -1008,15 +1019,19 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  mongocxx::options::find option;
-
-  document sort_doc;
-  sort_doc.append(kvp("job_db_id", -1));
-  option = option.sort(sort_doc.view());
+  // Use aggregation to deduplicate: for each job_id, only return the
+  // record with the highest requeue_count (the latest run).
+  mongocxx::pipeline pipeline;
+  pipeline.match(filter.view());
+  pipeline.sort(make_document(kvp("requeue_count", -1)));
+  pipeline.group(
+      make_document(kvp("_id", "$job_id"),
+                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
+  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                               option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1171,9 +1186,18 @@ bool MongodbClient::InsertRecoveredStep(
 bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   if (steps.empty()) return false;
 
-  std::unordered_map<job_id_t, std::vector<StepInCtld*>> steps_by_job;
+  // Group steps by (job_id, requeue_count) composite key
+  using JobRequeueKey = std::pair<job_id_t, int32_t>;
+  struct PairHash {
+    size_t operator()(const JobRequeueKey& p) const {
+      return std::hash<uint64_t>{}((static_cast<uint64_t>(p.first) << 32) |
+                                   p.second);
+    }
+  };
+  std::unordered_map<JobRequeueKey, std::vector<StepInCtld*>, PairHash>
+      steps_by_job;
   for (const auto& step : steps) {
-    steps_by_job[step->job_id].push_back(step);
+    steps_by_job[{step->job_id, step->RequeueCount()}].push_back(step);
   }
 
   mongocxx::options::bulk_write bulk_options;
@@ -1183,7 +1207,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         (*GetClient_())[m_db_name_][m_job_collection_name_].create_bulk_write(
             *GetSession_(), bulk_options);
 
-    for (const auto& [job_id, job_steps] : steps_by_job) {
+    for (const auto& [key, job_steps] : steps_by_job) {
+      auto [job_id, requeue_count] = key;
       // Build array of step documents
       array steps_array;
       for (const auto& step : job_steps) {
@@ -1191,9 +1216,10 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         steps_array.append(step_doc);
       }
 
-      // Filter by job_id
+      // Filter by (job_id, requeue_count) composite key
       document filter;
       filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
+      filter.append(kvp("requeue_count", static_cast<int32_t>(requeue_count)));
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document
@@ -1204,10 +1230,12 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
           each_doc.append(kvp("$each", steps_array));
         }));
       }));
-      update_doc.append(
-          kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-            set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
-          }));
+      update_doc.append(kvp("$setOnInsert", [&job_id, &requeue_count](
+                                                sub_document set_on_insert) {
+        set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
+        set_on_insert.append(
+            kvp("requeue_count", static_cast<int32_t>(requeue_count)));
+      }));
 
       mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
       update_op.upsert(true);
@@ -4285,8 +4313,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
   // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 requeue_count
   // clang-format off
-  std::array<std::string, 50> fields{
+  std::array<std::string, 51> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4306,7 +4335,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 49
-    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes", "deadline"
+    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes", "deadline",
+    // 50
+    "requeue_count"
   };
   // clang-format on
 
@@ -4322,7 +4353,8 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
-             std::vector<CranedId>, int64_t>                        /*48-49*/
+             std::vector<CranedId>, int64_t,                        /*48-49*/
+             int32_t>                                               /*50*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4362,7 +4394,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
           // 45-49
           job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
-          execution_nodes, job_to_ctld.deadline_time().seconds()};
+          execution_nodes, job_to_ctld.deadline_time().seconds(),
+          // 50
+          runtime_attr.requeue_count()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4440,9 +4474,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 requeue_count
 
   // clang-format off
-  std::array<std::string, 50> fields{
+  std::array<std::string, 51> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4462,7 +4497,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       // 40 - 44
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 49
-      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline"
+      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline",
+      // 50
+      "requeue_count"
   };
   // clang-format on
 
@@ -4479,7 +4516,8 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
              std::string, std::unordered_set<CranedId>,             /*45-46*/
              std::unordered_set<CranedId>, std::vector<CranedId>,
-             int64_t> /*47-49*/
+             int64_t, /*47-49*/
+             int32_t> /*50*/
       values{         // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
@@ -4512,8 +4550,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->using_default_wckey, g_config.CraneClusterName,
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids,
-             absl::ToUnixSeconds(job->deadline_time)};
+             job->executing_craned_ids, absl::ToUnixSeconds(job->deadline_time),
+             // 50
+             static_cast<int32_t>(job->RequeueCount())};
 
   return DocumentConstructor_(fields, values);
 }

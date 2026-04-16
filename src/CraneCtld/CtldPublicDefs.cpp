@@ -479,7 +479,7 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
 
   SetStepType(crane::grpc::StepType::DAEMON);
 
-  SetRequeueCount(0);
+  SetRequeueCount(job.RequeueCount());
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
@@ -880,7 +880,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   SetStepType(crane::grpc::StepType::PRIMARY);
 
-  SetRequeueCount(0);
+  SetRequeueCount(job.RequeueCount());
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
