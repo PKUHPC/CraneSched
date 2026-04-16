@@ -174,20 +174,6 @@ void ThawFrozenJobsWithPendingSigkill_(
   }
 }
 
-bool IsFinishedStepStatus_(StepStatus status) {
-  switch (status) {
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed:
-    return true;
-
-  default:
-    return false;
-  }
-}
-
 std::optional<std::pair<uint32_t, std::string>>
 BuildUnexpectedSupervisorExitInfo_(pid_t pid, int status) {
   if (WIFSIGNALED(status)) {
@@ -569,7 +555,7 @@ void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
 
       if (step->err_before_supv_start ||
           step->status == StepStatus::Completing ||
-          IsFinishedStepStatus_(step->status)) {
+          IsFinishedStepStatus(step->status)) {
         CRANE_TRACE(
             "[Step #{}.{}] Supervisor pid {} exited after step reached status "
             "{}, ignoring.",
@@ -647,7 +633,7 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
       } else {
         auto* step = step_it->second.get();
         resolved = step->status == StepStatus::Completing ||
-                   IsFinishedStepStatus_(step->status);
+                   IsFinishedStepStatus(step->status);
       }
     }
 
@@ -882,20 +868,45 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
     job_id_t job_id, step_id_t step_id,
     std::optional<int64_t> time_limit_seconds,
     std::optional<int64_t> deadline_time) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) {
-    CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
-    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  auto is_step_missing_or_finished = [this, job_id, step_id]() {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) return true;
+
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it == job->step_map.end()) return true;
+
+    auto status = step_it->second->status;
+    return status == StepStatus::Completing || IsFinishedStepStatus(status);
+  };
+
+  std::shared_ptr<SupervisorStub> stub;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id,
+                  step_id);
+      return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+    }
+
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it == job->step_map.end()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
+                  step_id);
+      return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+    }
+
+    auto status = step_it->second->status;
+    if (status == StepStatus::Completing || IsFinishedStepStatus(status))
+      return {};
+
+    stub = step_it->second->supervisor_stub;
   }
-  absl::MutexLock lock(job->step_map_mtx.get());
-  auto step_it = job->step_map.find(step_id);
-  if (step_it == job->step_map.end()) {
-    CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
-                step_id);
-    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
-  }
-  auto& stub = step_it->second->supervisor_stub;
+
   if (!stub) {
+    if (is_step_missing_or_finished()) return {};
+
     CRANE_ERROR(
         "[Step #{}.{}] Supervisor stub is null when changing time constraint",
         job_id, step_id);
@@ -905,9 +916,12 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
         google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
+
   auto err = stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
   int64_t sec = time_limit_seconds.value_or(deadline_time.value_or(0));
   if (err != CraneErrCode::SUCCESS) {
+    if (is_step_missing_or_finished()) return {};
+
     CRANE_ERROR(
         "[Step #{}.{}] Failed to change step time constraint to {} seconds via "
         "supervisor RPC, err={}",

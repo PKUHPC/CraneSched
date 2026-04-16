@@ -3434,17 +3434,27 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
   ChangeStepTimeConstraintQueueElem elem;
   std::vector<ChangeStepTimeConstraintQueueElem> not_ready_elems;
   while (m_step_time_constraint_change_queue_.try_dequeue(elem)) {
+    auto status = m_step_.GetStatus();
+    if (status == StepStatus::Completing || IsFinishedStepStatus(status)) {
+      CRANE_DEBUG(
+          "Change time constraint for a finished or completing step, ignored.");
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      continue;
+    }
+
     if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Step is not ready to change time constraint will check next time.");
       continue;
     }
+
     if (m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Change time constraint for a completing step, ignored.");
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
+
     // Delete the old timer.
     DelTerminationTimer_();
     DelSignalTimers_();
