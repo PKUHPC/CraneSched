@@ -94,6 +94,7 @@ struct StepInstance {
   void ExecuteStepAsync();
 
   // Not implemented yet.
-  CraneExpected<void> TerminateStep(crane::grpc::TerminateSource terminate_source);
+  CraneExpected<void> TerminateStep(
+      crane::grpc::TerminateSource terminate_source);
 };
 }  // namespace Craned

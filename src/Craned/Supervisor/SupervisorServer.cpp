@@ -106,7 +106,7 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     cause = TaskFinalizeCause::CANCELLED_BY_USER;
     break;
   }
-  g_task_mgr->TerminateStepAsync( cause);
+  g_task_mgr->TerminateStepAsync(cause);
   response->set_ok(true);
   return Status::OK;
 }
