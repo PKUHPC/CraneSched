@@ -635,6 +635,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
                   util::StepStatusToString(this->Status()),
                   util::StepStatusToString(new_status));
+      return std::nullopt;
     }
 
     if (this->AllNodesConfigured() && this->PrologComplete()) {
@@ -716,6 +717,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
                   util::StepStatusToString(this->Status()),
                   util::StepStatusToString(new_status));
+      return std::nullopt;
     }
 
     this->StepOnNodeFinish(craned_id);
