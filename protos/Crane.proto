@@ -148,6 +148,7 @@ message ExecuteStepsReply {
 
 message TerminateStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
+  TerminateSource terminate_source = 2;
 }
 
 message TerminateStepsReply {
@@ -155,7 +156,7 @@ message TerminateStepsReply {
   string reason = 2;
 }
 
-message ChangeJobTimeConstraintRequest{
+message ChangeJobTimeConstraintRequest {
   uint32 job_id = 1;
   optional int64 time_limit_seconds = 2;
   optional int64 deadline_time = 3;
@@ -429,7 +430,6 @@ message ModifyAccountRequest {
   string name = 2;
   repeated ModifyFieldOperation operations = 3;
   bool force = 4;
-  string partition = 5;
 }
 
 message ModifyAccountReply {
