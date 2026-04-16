@@ -3357,16 +3357,9 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
                 g_config.JobId, g_config.StepId);
 
     if (m_step_.IsDaemon()) {
-      if (elem.mark_as_orphaned) {
-        m_step_.orphaned = true;
-        CRANE_INFO("Orphaned daemon step is shutting down directly.");
-        SetAllowDaemonShutdown();
-        ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      } else {
-        CRANE_TRACE(
-            "Terminate request for daemon step is ignored. Use "
-            "ShutdownSupervisor to actively stop a daemon pod.");
-      }
+      CRANE_TRACE(
+          "Terminate request for daemon step is ignored. Use "
+          "ShutdownSupervisor to actively stop a daemon pod.");
       continue;
     }
 
@@ -3380,7 +3373,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       CRANE_DEBUG("[Step #{}.{}] Terminating a completing step, ignored.",
                   g_config.JobId, g_config.StepId);
       continue;
-    } else if (IsTerminalStatus(step_status)) {
+    } else if (IsFinishedStepStatus(step_status)) {
       CRANE_DEBUG("[Step #{}.{}] Terminating a finished step, ignored.",
                   g_config.JobId, g_config.StepId);
       continue;
@@ -3397,7 +3390,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
     CRANE_TRACE("Terminating all running tasks (reason: {})...",
-                static_cast<int>(elem.termination_reason));
+                static_cast<int>(elem.cause));
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);

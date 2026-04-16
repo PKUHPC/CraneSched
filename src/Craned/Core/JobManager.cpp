@@ -686,10 +686,9 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
         "[Step #{}.{}] Supervisor exited without reporting a final step "
         "status. Marking step Failed.",
         failure.job_id, failure.step_id);
-    ActivateStepStatusChangeAsync_(
-        failure.job_id, failure.step_id, StepStatus::Failed, failure.exit_code,
-        std::move(failure.reason),
-        google::protobuf::util::TimeUtil::GetCurrentTime());
+    SendCompletingAndTerminal_(failure.job_id, failure.step_id,
+                               StepStatus::Failed, failure.exit_code,
+                               std::move(failure.reason));
   }
 }
 
@@ -1608,7 +1607,8 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
     std::vector<JobInD> job_to_clean;
     {
       CRANE_INFO("[Step #{}.{}] Terminating step, terminate_source:{}.",
-                 elem.job_id, elem.step_id, static_cast<int>(elem.terminate_source));
+                 elem.job_id, elem.step_id,
+                 static_cast<int>(elem.terminate_source));
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
@@ -1748,7 +1748,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             "[Step #{}.{}] Terminating non-daemon supervisor for silent "
             "cleanup.",
             step->job_id, step->step_id);
-        err = stub->TerminateStep(/*terminated_by_user=*/false);
+        err = stub->TerminateStep(
+            crane::grpc::TerminateSource::TERMINATE_SOURCE_NORMAL_COMPLETION);
       }
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor.",

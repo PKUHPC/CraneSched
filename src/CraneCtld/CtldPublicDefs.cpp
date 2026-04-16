@@ -724,9 +724,11 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       break;
     }
 
+    if (!IsFinishedStepStatus(new_status))
+      CRANE_WARN("Node {} reported step status {} which is not a valid status.",
+                 craned_id, util::StepStatusToString(new_status));
     // Terminal report: cleanup done on this node.
     if (new_status != crane::grpc::JobStatus::Completed) {
-      if (Is)
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
@@ -1275,12 +1277,16 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                     this->ExecutionNodes().size() - m_completing_nodes_.size());
       }
     } else {
+      if (!IsFinishedStepStatus(new_status)) {
+        CRANE_WARN(
+            "Node {} reported step status {} which is not a valid status.",
+            craned_id, util::StepStatusToString(new_status));
+      }
       // Terminal report: cleanup done on this node.
       if (new_status != crane::grpc::JobStatus::Completed) {
         this->SetErrorStatus(new_status);
         this->SetErrorExitCode(exit_code);
       }
-      CRANE_ASSERT(IsTerminalStatus(new_status));
       this->StepOnNodeFinish(craned_id);
       step_finished = this->AllNodesFinished();
       if (!step_finished) {
