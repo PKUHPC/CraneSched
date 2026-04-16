@@ -755,8 +755,13 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       // FreeJobs() and TerminateOrphanedStep() could be called concurrently for
       // the same daemon step, both trying to free the supervisor, double-freed.
 
-      // FreeJobs() is enough to free the daemon step's supervisor.
-      context->craned_jobs_to_free[craned_id].emplace_back(job->JobId());
+      // FreeJobs() is enough to free the daemon step's supervisor. It must be
+      // sent to every node allocated to this daemon step; otherwise nodes that
+      // did not trigger the final Configuring status change would never receive
+      // ShutdownSupervisor.
+      for (const auto& node : this->CranedIds()) {
+        context->craned_jobs_to_free[node].emplace_back(job->JobId());
+      }
       if (job->IsInteractive()) {
         auto& meta = std::get<InteractiveMeta>(job->meta);
         if (!meta.has_been_cancelled_on_front_end) {

@@ -158,9 +158,6 @@ class StepInstance {
   [[nodiscard]] bool IsContainer() const noexcept;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
-  [[nodiscard]] bool IsRunning() const noexcept {
-    return m_status_ == StepStatus::Running;
-  }
 
   const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
   StepToSupv& GetMutableStep() { return m_step_to_supv_; }
@@ -261,10 +258,7 @@ class ITaskInstance {
   ITaskInstance& operator=(ITaskInstance&&) = delete;
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
-  [[nodiscard]] bool IsBatch() const { return m_parent_step_inst_->IsBatch(); }
-  [[nodiscard]] bool IsCrun() const { return m_parent_step_inst_->IsCrun(); }
   // Helper methods shared by all task instances
-  StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
     return m_parent_step_inst_->GetStep();
   }

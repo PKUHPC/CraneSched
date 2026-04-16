@@ -548,7 +548,7 @@ CgroupManager::AllocateAndGetCgroup(
       return cg_unique_ptr;
     }
     auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromResInNode(resource);
+    cg_v2_ptr->RecoverFromCgSpec(resource);
 #endif
 
     return cg_unique_ptr;
