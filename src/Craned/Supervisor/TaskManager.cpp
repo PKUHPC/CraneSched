@@ -3378,7 +3378,8 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
 
-    if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
+    auto status = m_step_.GetStatus();
+    if (!elem.mark_as_orphaned && status != StepStatus::Running) {
       not_ready_elems.emplace_back(elem);
       CRANE_DEBUG("Step is not ready to terminate, will check next time.");
       continue;
@@ -3442,16 +3443,10 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
       continue;
     }
 
-    if (!m_step_.IsRunning()) {
+    if (status != StepStatus::Running) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Step is not ready to change time constraint will check next time.");
-      continue;
-    }
-
-    if (m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Change time constraint for a completing step, ignored.");
-      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
 
@@ -3518,9 +3513,9 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
 
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_step_time_constraint_change_queue_.enqueue(std::move(not_ready_elem));
-  }
+
+  m_step_time_constraint_change_queue_.enqueue_bulk(
+      std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
 }
 
 void TaskManager::EvGrpcExecuteStepCb_() {

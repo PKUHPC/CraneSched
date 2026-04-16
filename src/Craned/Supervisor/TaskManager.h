@@ -158,9 +158,6 @@ class StepInstance {
   [[nodiscard]] bool IsContainer() const noexcept;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
-  [[nodiscard]] bool IsRunning() const noexcept {
-    return m_status_ == StepStatus::Running;
-  }
 
   const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
   StepToSupv& GetMutableStep() { return m_step_to_supv_; }
