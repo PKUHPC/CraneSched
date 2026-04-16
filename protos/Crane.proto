@@ -147,9 +147,30 @@ message ExecuteStepsReply {
 
 message TerminateStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
+  TerminateSource terminate_source = 2;
 }
 
 message TerminateStepsReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message SuspendJobsRequest {
+  // Suspend operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
+}
+
+message SuspendJobsReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ResumeJobsRequest {
+  // Resume operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
+}
+
+message ResumeJobsReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -163,7 +184,7 @@ message TerminateOrphanedStepReply {
   string reason = 2;
 }
 
-message ChangeJobTimeConstraintRequest{
+message ChangeJobTimeConstraintRequest {
   uint32 job_id = 1;
   optional int64 time_limit_seconds = 2;
   optional int64 deadline_time = 3;
@@ -437,7 +458,6 @@ message ModifyAccountRequest {
   string name = 2;
   repeated ModifyFieldOperation operations = 3;
   bool force = 4;
-  string partition = 5;
 }
 
 message ModifyAccountReply {
@@ -1424,6 +1444,8 @@ service Craned {
   If the job is a batch job, just kill it.
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
+  rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
+  rpc ResumeJobs(ResumeJobsRequest) returns (ResumeJobsReply);
   rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
   rpc ChangeJobTimeConstraint(ChangeJobTimeConstraintRequest) returns (ChangeJobTimeConstraintReply);
 

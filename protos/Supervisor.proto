@@ -55,9 +55,16 @@ message InitSupervisorRequest {
     BindFsConfig bindfs = 4;
 
     message SubIdConfig {
+      message Mapping {
+        uint64 id = 1;
+        uint64 id_count = 2;
+        uint64 subid_start = 3;
+        uint64 subid_size = 4;
+      }
+
       bool managed = 1;
-      uint64 range_size = 2;
-      uint64 base_offset = 3;
+      repeated Mapping uid_mappings = 2;
+      repeated Mapping gid_mappings = 3;
     }
     SubIdConfig subid = 5;
 
@@ -80,7 +87,9 @@ message InitSupervisorRequest {
   map<string, string> env = 22;
 
   string log_dir = 23;
-  string cgroup_path = 24;  // resolved cgroup path for OOM monitoring
+  string supv_cgroup_path = 24;
+  string job_cg_str = 9; // job cgroup name (w/o "crane/"), e.g. "job_1" (v1) or "overflow/job_1" (v2)
+  string cpuset_cg_str = 10; // cpuset cgroup for v1 migration, e.g. "overflow" or "" (v2/INT)
 
   message CforedListenConf {
     message TlsCertificates {
@@ -109,6 +118,8 @@ message InitSupervisorRequest {
     uint64 max_output_size = 8;
   };
   JobLifecycleHookConfig job_lifecycle_hook_config = 30;
+
+  bool enable_slurm_compatible_env = 31;
 }
 
 message SupervisorReady {
@@ -138,7 +149,7 @@ message CheckStatusReply {
   bool ok = 5;
 }
 
-message ChangeStepTimeConstraintRequest{
+message ChangeStepTimeConstraintRequest {
   optional int64 time_limit_seconds = 1;
   optional int64 deadline_time = 2;
 }
@@ -149,7 +160,7 @@ message ChangeStepTimeConstraintReply {
 
 message TerminateStepRequest {
   bool mark_orphaned = 1;
-  bool terminated_by_user = 2;
+  crane.grpc.TerminateSource terminate_source = 2;
 }
 
 message TerminateStepReply {
