@@ -1435,7 +1435,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   std::vector<crane::grpc::ModifyFieldOperation> operations(
       request->operations().begin(), request->operations().end());
   auto rich_error_list = g_account_manager->ModifyAccount(
-      request->uid(), request->name(), operations, request->force());
+      request->uid(), request->name(), request->partition(), operations, request->force());
 
   if (!rich_error_list.empty()) {
     for (const auto& rich_error : rich_error_list) {

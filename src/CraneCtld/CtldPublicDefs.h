@@ -1233,6 +1233,18 @@ struct Qos {
   bool operator<(Qos const& other) const { return name < other.name; }
 };
 
+struct PartitionResourceLimit {
+  ResourceView max_tres;
+  ResourceView max_tres_per_job;
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
+  absl::Duration max_wall;
+  absl::Duration max_wall_duration_per_job;
+};
+
+using PartitionToLimitMap = std::unordered_map<std::string, // partition
+  PartitionResourceLimit>;
+
 struct Account {
   bool deleted = false;
   bool blocked = false;
@@ -1245,6 +1257,7 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
+  PartitionToLimitMap partition_to_limit_map;
 
   std::string AccountToString() const {
     return fmt::format(
@@ -1281,6 +1294,7 @@ struct User {
 
   struct AttrsInAccount {
     PartToAllowedQosMap allowed_partition_qos_map;
+    PartitionToLimitMap partition_to_limit_map;
     bool blocked;
   };
 
