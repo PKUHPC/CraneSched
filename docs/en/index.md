@@ -116,7 +116,7 @@ CraneSched comprehensively benchmarks against Slurm in scheduling capabilities, 
 | Job Dependencies | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | Control dependency relationships between jobs |
 | Job Arrays | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | Batch submission of parameterized jobs |
 | QOS Management | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | Differentiated service level control |
-| Native Container Orchestration (CRI/CNI) | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Native container orchestration based on CRI/CNI standards |
+| Native Container Orchestration (CRI/CNI) | :material-check-circle:{ .success } | :material-check-circle:{ .success } | :material-check-circle:{ .success } | Native container orchestration based on CRI/CNI standards |
 | Multi-Tenant Container Network Isolation | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | CNI-based multi-tenant network isolation (Calico Underlay) |
 | Container RDMA Network Support | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Supports SR-IOV shared RNIC and direct passthrough |
 | Extended Hardware Compatibility | :material-check-circle:{ .success } | :material-close-circle:{ .danger } | :material-close-circle:{ .danger } | Supports diverse CPU architectures (x86, ARM, RISC-V) and accelerators from multiple vendors including Nvidia, AMD, Huawei Ascend, and more |
