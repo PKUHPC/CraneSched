@@ -551,6 +551,13 @@ class MongodbClient {
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const ResourceView& value);
 
+  void SubDocumentAppendItem_(
+      sub_document& doc, const std::string& key, const PartitionToLimitMap& value);
+
+
+  void SubDocumentAppendItem_(
+      sub_document& doc, const std::string& key, const ResourceView& value);
+
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
                               const GresMap& value);
 
@@ -676,7 +683,7 @@ class MongodbClient {
   PodMetaInJob BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
 
-  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view,
+  void BsonToResourceView(const bsoncxx::document::view& view,
                               const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
