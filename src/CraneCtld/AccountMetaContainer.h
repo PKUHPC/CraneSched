@@ -110,16 +110,8 @@ class AccountMetaContainer final {
   static std::expected<void, std::string> CheckTres_(
       const ResourceView& resource_req, const ResourceView& resource_total);
 
-  // =========================================================================
-  // Layer 2: Per-entity checks (User or Account)
-  //
-  // Each entity has two peer-level limit dimensions:
-  //   • QoS dimension   – tracked in MetaResourceStat::qos_to_resource_map
-  //   • Partition dimension – tracked in MetaResourceStat::partition_to_resource_map
-  //
-  // is_user == true  → use per-user QoS fields (max_jobs_per_user, etc.)
-  // is_user == false → use per-account QoS fields (max_jobs_per_account, etc.)
-  // =========================================================================
+  static bool IsUnlimitedTres_(const ResourceView& res);
+
 
   // Submit-time QoS dimension check for a single entity.
   CraneErrCode CheckQosSubmitLimitsForEntity_(
@@ -146,10 +138,6 @@ class AccountMetaContainer final {
       const Qos& qos, bool is_user, const ResourceView& allocated_res,
       absl::Duration time_limit) const;
 
-  // Schedule-time Partition dimension check for a single entity.
-  // Returns success when partition_limit is nullptr (no limit configured).
-  // The qos parameter is used to determine whether QoS already covers a limit
-  // (in which case the partition limit for that field is skipped).
   std::expected<void, std::string> CheckPartitionRunLimitsForEntity_(
       const MetaResourceStat& stat, const std::string& partition_id,
       const PartitionResourceLimit* partition_limit,
@@ -163,10 +151,6 @@ class AccountMetaContainer final {
       const PartitionResourceLimit* partition_limit, bool is_user,
       const ResourceView& allocated_res, absl::Duration time_limit) const;
 
-  // =========================================================================
-  // Layer 3: Aggregated checks (User → AccountChain → GlobalQoS)
-  // =========================================================================
-
   // Submit-time aggregated check across all entities.
   // Replaces the old CheckMetaSubmitResourceUsage_.
   CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const Qos& qos);
@@ -175,10 +159,6 @@ class AccountMetaContainer final {
   // Replaces the old CheckMetaResource_.
   std::expected<void, std::string> CheckRunLimits_(
       const PdJobInScheduler& job, const Qos& qos);
-
-  // =========================================================================
-  // Malloc / Free helpers
-  // =========================================================================
 
   // Atomically increments both QoS and partition counters for user, every
   // account in the chain, and the global QoS map.

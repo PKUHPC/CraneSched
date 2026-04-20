@@ -289,6 +289,12 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
   return {};
 }
 
+bool AccountMetaContainer::IsUnlimitedTres_(const ResourceView& res) {
+  return res.GetCpuCount() == kUnlimitedCpu &&
+         res.GetMemoryBytes() == kMaxJobMemoryBytes &&
+         res.GetGresMap().empty();
+}
+
 /* ---------------------------------------------------------------------------
  * Per-entity checks (User or Account)
  *
@@ -447,10 +453,9 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     }
   }
 
-  // max_tres: only enforced when QoS does not already cap resources.
   const ResourceView& qos_max_tres =
       is_user ? qos.max_tres_per_user : qos.max_tres_per_account;
-  if (qos_max_tres.IsZero() && !partition_limit->max_tres.IsZero()) {
+  if (IsUnlimitedTres_(qos.max_tres) && IsUnlimitedTres_(qos_max_tres)) {
     ResourceView resource_use{allocated_res};
     resource_use += val.resource;
     auto tres_result = CheckTres_(resource_use, partition_limit->max_tres);
