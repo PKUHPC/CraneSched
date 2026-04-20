@@ -657,11 +657,10 @@ message JobInfo {
     string craned_list = 36;
   }
 
-  // The time of different nodes across the whole cluster might not always be
-  // synchronized. If the time on the front end node is more than several
-  // seconds ahead of the CraneCtld node, a negative elapsed time might occur.
-  // To avoid this, the elapsed time of a job is calculated on the CraneCtld
-  // side.
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a job is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   bool exclusive = 39;
@@ -714,11 +713,10 @@ message StepInfo {
   uint32 exit_code = 33;
   string craned_list = 36;
 
-  // The time of different nodes across the whole cluster might not always be
-  // synchronized. If the time on the front end node is more than several
-  // seconds ahead of the CraneCtld node, a negative elapsed time might occur.
-  // To avoid this, the elapsed time of a step is calculated on the CraneCtld
-  // side.
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a step is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
