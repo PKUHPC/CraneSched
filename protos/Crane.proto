@@ -205,9 +205,6 @@ message CancelJobRequest {
   string filter_job_name = 6;
   repeated string filter_nodes = 7;
   string filter_username = 8;
-
-  // Per-array-job task ID filters. Key is array_job_id, value is list of
-  // array_task_ids to cancel.
   map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
 }
 
@@ -305,8 +302,6 @@ message ModifyJobRequest {
     google.protobuf.Timestamp deadline_time = 9;
   }
 
-  // Per-array-job task ID filter for modifying specific array tasks.
-  // Key is array_job_id, value is list of array_task_ids to modify.
   map<uint32, ArrayTaskIds> filter_array_task_ids = 8;
 }
 
@@ -638,9 +633,6 @@ message QueryJobsInfoRequest {
   repeated string filter_nodename_list = 14;
 
   bool option_include_completed_jobs = 15;
-
-  // Per-array-job task ID filters for array job queries.
-  // Key is array_job_id, value is list of array_task_ids to return.
   map<uint32, ArrayTaskIds> filter_array_task_ids = 16;
 }
 
@@ -1441,8 +1433,7 @@ service CraneCtldForInternal {
 }
 
 service Craned {
-  /* ----------------------------------- Called from CraneCtld
-   * ---------------------------------------------------- */
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
@@ -1452,9 +1443,9 @@ service Craned {
   rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
   /*
   If the job is an interactive job, the resource uuid is also revoked.
-   If there's no process in this interactive job, just deallocate all the
-  resources. If there are processes in this interactive job, kill all the
-  processes and deallocate resources. If the job is a batch job, just kill it.
+   If there's no process in this interactive job, just deallocate all the resources.
+   If there are processes in this interactive job, kill all the processes and deallocate resources.
+  If the job is a batch job, just kill it.
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
   rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
@@ -1468,18 +1459,15 @@ service Craned {
   rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
   rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 
-  /* ----------------------------------- Called from Craned
-   * ------------------------------------------------------ */
+  /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
   rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
-  /* ----------------------------------- Called from Supervisor
-   * --------------------------------------------------- */
+  /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
 }
 
 service CranedForPam {
-  /* ----------------------------------- Called from Pam Module
-   * --------------------------------------------------- */
+  /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryStepFromPortForward(QueryStepFromPortForwardRequest) returns (QueryStepFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QuerySshStepEnvVariablesForward(QuerySshStepEnvVariablesForwardRequest)
