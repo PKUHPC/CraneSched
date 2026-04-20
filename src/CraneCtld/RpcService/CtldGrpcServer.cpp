@@ -904,13 +904,31 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
       // Resolve parent to specific children via scheduler.
       auto child_ids = g_job_scheduler->ResolveArrayTaskIdsToChildJobs(
           job_id, it->second.array_task_ids());
+      bool placeholder_requested = false;
+      if (auto placeholder_task_id =
+              g_job_scheduler->GetArrayPlaceholderTaskId(job_id);
+          placeholder_task_id.has_value()) {
+        placeholder_requested =
+            std::ranges::find(it->second.array_task_ids(),
+                              placeholder_task_id.value()) !=
+            it->second.array_task_ids().end();
+        if (placeholder_requested) {
+          response->add_not_modified_jobs(job_id);
+          response->add_not_modified_reasons(
+              fmt::format("Array placeholder task {} of job #{} cannot be "
+                          "modified independently.",
+                          placeholder_task_id.value(), job_id));
+        }
+      }
       if (child_ids.empty()) {
-        // No matching children found - report back to user.
+        if (placeholder_requested) {
+          continue;
+        }
         response->add_not_modified_jobs(job_id);
-        response->add_not_modified_reasons(
-            fmt::format("Job #{} is not an array parent or no matching array "
-                        "tasks found.",
-                        job_id));
+        response->add_not_modified_reasons(fmt::format(
+            "Job #{} is not an array parent or no matching array tasks "
+            "found.",
+            job_id));
         continue;
       }
       for (auto child_id : child_ids) {

@@ -1735,7 +1735,6 @@ std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
     }
 
     if (OwnsPlaceholderArrayTask(task_id)) {
-      result.push_back(JobId());
       continue;
     }
 

@@ -152,17 +152,28 @@ crane::grpc::JobStatus BuildArrayAggregateStatus(bool any_cancelled,
 }
 
 std::pair<crane::grpc::JobStatus, uint32_t> BuildArrayParentTerminalResult(
-    JobInCtld* parent, crane::grpc::JobStatus placeholder_status,
-    uint32_t placeholder_exit_code) {
+    JobInCtld* parent,
+    const std::unordered_set<JobInCtld*>& final_jobs_in_batch) {
   bool any_cancelled = false;
   bool any_exceed_time_limit = false;
   bool any_out_of_memory = false;
   bool any_failed = false;
   uint32_t max_exit_code = 0;
 
-  MergeArrayTaskTerminalStatus(placeholder_status, placeholder_exit_code,
+  MergeArrayTaskTerminalStatus(parent->Status(), parent->ExitCode(),
                                &any_cancelled, &any_exceed_time_limit,
                                &any_out_of_memory, &any_failed, &max_exit_code);
+
+  for (JobInCtld* job : final_jobs_in_batch) {
+    if (job == nullptr || !job->ArrayJobId().has_value() ||
+        job->ArrayJobId().value() != parent->JobId()) {
+      continue;
+    }
+
+    MergeArrayTaskTerminalStatus(job->Status(), job->ExitCode(), &any_cancelled,
+                                 &any_exceed_time_limit, &any_out_of_memory,
+                                 &any_failed, &max_exit_code);
+  }
 
   auto aggregate_info = g_db_client->FetchArrayTaskAggregateInfo(
       parent->JobId(), parent->JobId());
@@ -182,6 +193,18 @@ std::pair<crane::grpc::JobStatus, uint32_t> BuildArrayParentTerminalResult(
   return {BuildArrayAggregateStatus(any_cancelled, any_exceed_time_limit,
                                     any_out_of_memory, any_failed),
           max_exit_code};
+}
+
+void TriggerTerminalDependencyEvents(JobInCtld* job, absl::Time end_time) {
+  uint32_t exit_code = job->ExitCode();
+  job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                               end_time);
+  job->TriggerDependencyEvents(
+      crane::grpc::DependencyType::AFTER_OK,
+      exit_code == 0 ? end_time : absl::InfiniteFuture());
+  job->TriggerDependencyEvents(
+      crane::grpc::DependencyType::AFTER_NOT_OK,
+      exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
 }  // namespace
@@ -3400,11 +3423,19 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
         filter_ids.try_emplace(child_id);
       }
 
-      // Remove the raw parent selector unless the placeholder task itself was
-      // explicitly requested and therefore resolved back to the parent job id.
-      if (!task_ids.contains(parent->GetPlaceholderArrayTaskId().value_or(0))) {
-        filter_ids.erase(parent_id);
+      if (auto placeholder_task_id = parent->GetPlaceholderArrayTaskId();
+          placeholder_task_id.has_value() &&
+          task_ids.contains(placeholder_task_id.value())) {
+        auto& not_cancelled_job =
+            (*reply.mutable_not_cancelled_job_steps())[parent_id];
+        if (not_cancelled_job.reason().empty()) {
+          not_cancelled_job.set_reason(
+              "Array placeholder task cannot be cancelled independently.");
+        }
       }
+
+      // Array-task filters only target concrete child jobs on mutate paths.
+      filter_ids.erase(parent_id);
     }
   }
 
@@ -4713,6 +4744,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   context.job_ptrs.reserve(actual_size);
   context.job_raw_ptrs.reserve(actual_size);
   context.rn_job_raw_ptrs.reserve(actual_size);
+  std::unordered_set<JobInCtld*> array_parents_pending_finalize;
+  array_parents_pending_finalize.reserve(actual_size);
 
   LockGuard running_guard(&m_running_job_map_mtx_);
   LockGuard indexes_guard(&m_job_indexes_mtx_);
@@ -4757,16 +4790,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     if (job_finished_status.has_value()) {
       CRANE_TRACE("[Job #{}] Completed with status {}.", job_id,
                   job_finished_status.value());
-      crane::grpc::JobStatus final_job_status =
-          job_finished_status.value().first;
-      uint32_t final_job_exit_code = job_finished_status.value().second;
-      if (job->IsArrayParent()) {
-        std::tie(final_job_status, final_job_exit_code) =
-            BuildArrayParentTerminalResult(job.get(), final_job_status,
-                                           final_job_exit_code);
-      }
-      job->SetStatus(final_job_status);
-      job->SetExitCode(final_job_exit_code);
+      job->SetStatus(job_finished_status.value().first);
+      job->SetExitCode(job_finished_status.value().second);
 
       // Validate and adjust end_time to prevent it from exceeding time_limit
       // by too much. Allow 5 seconds of floating tolerance.
@@ -4784,15 +4809,11 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
       job->SetEndTime(end_time);
 
-      uint32_t job_exit_code = final_job_exit_code;
-      job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
-                                   end_time);
-      job->TriggerDependencyEvents(
-          crane::grpc::DependencyType::AFTER_OK,
-          job_exit_code == 0 ? end_time : absl::InfiniteFuture());
-      job->TriggerDependencyEvents(
-          crane::grpc::DependencyType::AFTER_NOT_OK,
-          job_exit_code != 0 ? end_time : absl::InfiniteFuture());
+      if (job->IsArrayParent()) {
+        array_parents_pending_finalize.insert(job.get());
+      } else {
+        TriggerTerminalDependencyEvents(job.get(), end_time);
+      }
 
       for (CranedId const& craned_id : job->CranedIds()) {
         auto node_to_job_map_it = m_node_to_jobs_map_.find(craned_id);
@@ -4854,6 +4875,14 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       // so we don't have any branch code here and just put it into mongodb.
       m_running_job_map_.erase(iter);
     }
+  }
+
+  for (JobInCtld* parent : array_parents_pending_finalize) {
+    auto [final_job_status, final_job_exit_code] =
+        BuildArrayParentTerminalResult(parent, context.job_raw_ptrs);
+    parent->SetStatus(final_job_status);
+    parent->SetExitCode(final_job_exit_code);
+    TriggerTerminalDependencyEvents(parent, parent->EndTime());
   }
 
   std::latch alloc_step_latch{
@@ -5407,10 +5436,14 @@ void JobScheduler::QueryJobsInRam(
         }
       }
 
-      // Remove the raw parent selector unless the placeholder task itself was
-      // explicitly requested and therefore resolved back to the parent job id.
-      if (!requested_task_ids.contains(
-              parent->GetPlaceholderArrayTaskId().value_or(0))) {
+      bool placeholder_requested = false;
+      if (auto placeholder_task_id = parent->GetPlaceholderArrayTaskId();
+          placeholder_task_id.has_value()) {
+        placeholder_requested =
+            requested_task_ids.contains(placeholder_task_id.value());
+      }
+
+      if (!placeholder_requested) {
         req_steps.erase(parent_id);
       }
     }
@@ -7142,5 +7175,25 @@ std::vector<job_id_t> JobScheduler::ResolveArrayTaskIdsToChildJobs(
   }
 
   return ResolveArrayTaskIdsToChildJobsNoLock_(parent, array_task_ids);
+}
+
+std::optional<uint32_t> JobScheduler::GetArrayPlaceholderTaskId(
+    job_id_t array_job_id) {
+  LockGuard pending_guard(&m_pending_job_map_mtx_);
+  LockGuard running_guard(&m_running_job_map_mtx_);
+
+  JobInCtld* parent = nullptr;
+  auto pd_it = m_pending_job_map_.find(array_job_id);
+  if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
+    parent = pd_it->second.get();
+  } else {
+    auto rn_it = m_running_job_map_.find(array_job_id);
+    if (rn_it == m_running_job_map_.end() || !rn_it->second->IsArrayParent()) {
+      return std::nullopt;
+    }
+    parent = rn_it->second.get();
+  }
+
+  return parent->GetPlaceholderArrayTaskId();
 }
 }  // namespace Ctld

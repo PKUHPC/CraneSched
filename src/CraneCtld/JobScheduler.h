@@ -810,10 +810,11 @@ class JobScheduler {
       std::unique_ptr<JobInCtld> job);
 
   // Resolve an array_job_id + array_task_ids to the actual in-memory jobs.
-  // The final placeholder task may resolve to the parent job itself.
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
       job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
+
+  std::optional<uint32_t> GetArrayPlaceholderTaskId(job_id_t array_job_id);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
