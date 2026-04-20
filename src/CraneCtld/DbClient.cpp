@@ -4354,8 +4354,8 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-  // 45 array_job_id submit_hostname array_task_id deadline
-  // 49 req_nodes exclude_nodes execution_nodes
+  // 45 array_job_id   submit_hostname array_task_id   deadline
+  // 49 req_nodes      exclude_nodes   execution_nodes
   // clang-format off
   std::array<std::string, 52> fields{
     // 0 - 4
@@ -4523,8 +4523,8 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
-  // 45 array_job_id submit_hostname array_task_id deadline
-  // 49 req_nodes exclude_nodes execution_nodes
+  // 45 array_job_id   submit_hostname array_task_id   deadline
+  // 49 req_nodes      exclude_nodes   execution_nodes
 
   // clang-format off
   std::array<std::string, 52> fields{
