@@ -605,11 +605,6 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
 
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    step_to_d.set_array_job_id(array_meta->array_job_id);
-    step_to_d.set_array_task_id(array_meta->task_id);
-  }
-
   return step_to_d;
 }
 
@@ -1198,11 +1193,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_sh_script(StepToCtld().sh_script());
   if (StepToCtld().has_array_task_id()) {
     step_to_d.set_array_task_id(StepToCtld().array_task_id());
-  }
-
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    step_to_d.set_array_job_id(array_meta->array_job_id);
-    step_to_d.set_array_task_id(array_meta->task_id);
   }
 
   return step_to_d;
