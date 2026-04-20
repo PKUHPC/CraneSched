@@ -110,13 +110,6 @@ class AccountMetaContainer final {
   static std::expected<void, std::string> CheckTres_(
       const ResourceView& resource_req, const ResourceView& resource_total);
 
-  // Checks the static (per-job, non-cumulative) fields of a PartitionLimit:
-  //   max_tres_per_job and max_wall_duration_per_job.
-  // Returns SUCCESS when the limit is unset (max value) or satisfied.
-  static CraneErrCode CheckPartitionStaticLimits_(
-      const ResourceView& req_res, absl::Duration time_limit,
-      const PartitionResourceLimit& limit);
-
   // =========================================================================
   // Layer 2: Per-entity checks (User or Account)
   //
