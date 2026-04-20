@@ -1376,8 +1376,9 @@ void JobScheduler::ScheduleThread_() {
             continue;
           }
 
-          // Lazy expansion: array children are materialized on demand while
-          // the parent keeps the placeholder task and runs last.
+          // Lazy expansion: the array parent is the real executor of the
+          // final task in the range; children are materialized on demand
+          // for the earlier tasks, so the parent effectively runs last.
           if (job->IsArrayParent()) {
             std::optional<job_id_t> child_to_schedule_id =
                 job->GetNextPendingArrayChildJobId();
@@ -1456,8 +1457,9 @@ void JobScheduler::ScheduleThread_() {
               jobs_to_run.push_back(std::move(child_it->second));
               m_pending_job_map_.erase(child_it);
 
-              // Parent stays in pending map until it becomes the final
-              // placeholder task to run.
+              // Parent stays in pending map until every earlier task has
+              // finished; the parent itself then runs the final task it
+              // owns.
               continue;
             }
 
@@ -3423,14 +3425,20 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
         filter_ids.try_emplace(child_id);
       }
 
-      if (auto placeholder_task_id = parent->GetPlaceholderArrayTaskId();
-          placeholder_task_id.has_value() &&
-          task_ids.contains(placeholder_task_id.value())) {
+      // The parent-owned final task of an array is executed by the parent
+      // job itself (see JobInCtld::IsArrayParent doc); it cannot be
+      // cancelled as a standalone task — the caller must cancel the parent
+      // job instead.
+      if (auto parent_owned_task_id = parent->GetFinalArrayTaskId();
+          parent_owned_task_id.has_value() &&
+          task_ids.contains(parent_owned_task_id.value())) {
         auto& not_cancelled_job =
             (*reply.mutable_not_cancelled_job_steps())[parent_id];
         if (not_cancelled_job.reason().empty()) {
           not_cancelled_job.set_reason(
-              "Array placeholder task cannot be cancelled independently.");
+              "The final task of this array is owned by the parent job and "
+              "cannot be cancelled independently; cancel the parent job "
+              "instead.");
         }
       }
 
@@ -5396,7 +5404,18 @@ void JobScheduler::QueryJobsInRam(
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
 
+  // Synthetic key for virtual (unmaterialized) array-task entries emplaced
+  // into `job_info_map`. Real job ids are handed out from a small starting
+  // value and grow upward; we grow downward from UINT32_MAX so keys cannot
+  // collide with any real job id or with each other. The key is opaque —
+  // downstream consumers move values out of the map without inspecting it.
+  job_id_t virtual_entry_key = std::numeric_limits<job_id_t>::max();
+
   // Resolve parent→children for array_task query filter under lock.
+  // Unlike cancel/modify, queries must NOT materialize: a read must not
+  // mutate pending-map state or embedded-db state. Tasks that are already
+  // materialized flow through the ID path; unmaterialized valid tasks are
+  // synthesized as virtual JobInfo entries from the parent's template.
   if (!no_array_task_constraint) {
     for (auto& [parent_id, task_ids] : query_array_task_ids) {
       JobInCtld* parent = nullptr;
@@ -5420,30 +5439,44 @@ void JobScheduler::QueryJobsInRam(
         continue;
       }
 
-      std::unordered_set<uint32_t> requested_task_ids(task_ids.begin(),
-                                                      task_ids.end());
-      if (pd_it != m_pending_job_map_.end()) {
-        MaterializeSpecificArrayTasksToPendingMap_(parent, requested_task_ids);
-      }
+      // The array parent directly executes the final task in the range;
+      // any query for that task is served by the parent's own JobInfo.
+      auto parent_owned_task_id_opt = parent->GetFinalArrayTaskId();
 
-      google::protobuf::RepeatedField<uint32_t> task_ids_repeated(
-          task_ids.begin(), task_ids.end());
-      for (job_id_t child_id :
-           ResolveArrayTaskIdsToChildJobsNoLock_(parent, task_ids_repeated)) {
-        // Add child to filter set so it's picked up by the ID path.
-        if (req_steps.find(child_id) == req_steps.end()) {
-          req_steps[child_id];
+      for (uint32_t task_id : task_ids) {
+        if (parent_owned_task_id_opt.has_value() &&
+            parent_owned_task_id_opt.value() == task_id) {
+          // Final task is represented by the parent itself; handled below
+          // by keeping parent_id in req_steps.
+          continue;
         }
+
+        if (!parent->IsValidArrayTaskId(task_id)) {
+          continue;
+        }
+
+        if (auto child_job_id = parent->GetActiveArrayChildJobId(task_id);
+            child_job_id.has_value()) {
+          // Already materialized: route through the ID-filter path so
+          // append_fn renders the real child with its steps.
+          req_steps.try_emplace(child_job_id.value());
+          continue;
+        }
+
+        // Valid but not yet materialized: synthesize a virtual JobInfo
+        // from the parent's template without touching any state.
+        crane::grpc::JobInfo virtual_info;
+        if (!parent->SetFieldsOfJobInfoAsVirtualArrayChild(task_id,
+                                                           &virtual_info)) {
+          continue;
+        }
+        job_info_map->emplace(virtual_entry_key--, std::move(virtual_info));
       }
 
-      bool placeholder_requested = false;
-      if (auto placeholder_task_id = parent->GetPlaceholderArrayTaskId();
-          placeholder_task_id.has_value()) {
-        placeholder_requested =
-            requested_task_ids.contains(placeholder_task_id.value());
-      }
-
-      if (!placeholder_requested) {
+      bool parent_owned_task_requested =
+          parent_owned_task_id_opt.has_value() &&
+          task_ids.contains(parent_owned_task_id_opt.value());
+      if (!parent_owned_task_requested) {
         req_steps.erase(parent_id);
       }
     }
@@ -7177,7 +7210,7 @@ std::vector<job_id_t> JobScheduler::ResolveArrayTaskIdsToChildJobs(
   return ResolveArrayTaskIdsToChildJobsNoLock_(parent, array_task_ids);
 }
 
-std::optional<uint32_t> JobScheduler::GetArrayPlaceholderTaskId(
+std::optional<uint32_t> JobScheduler::GetFinalArrayTaskId(
     job_id_t array_job_id) {
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
@@ -7194,6 +7227,6 @@ std::optional<uint32_t> JobScheduler::GetArrayPlaceholderTaskId(
     parent = rn_it->second.get();
   }
 
-  return parent->GetPlaceholderArrayTaskId();
+  return parent->GetFinalArrayTaskId();
 }
 }  // namespace Ctld

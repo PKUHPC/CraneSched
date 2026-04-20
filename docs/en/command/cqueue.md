@@ -59,9 +59,9 @@ Output command execution results in JSON format instead of table format.
 **-s, --step[=&lt;stepid1,stepid2,...&gt;]**
 
 :   **Applies to:** `step`  
-Query step information instead of job information. Accepts optional comma-separated list of step IDs in format
-`jobid.stepid` (e.g., `123.1,123.2,456.3`). If no argument is provided, shows all steps. This option switches the query
-mode from jobs to steps.
+Query step information instead of job information. Accepts optional comma-separated list of step IDs: regular jobs use
+`jobid.stepid`, array jobs use `jobid_arraytaskid.stepid` (e.g., `123.1,123.2,456.3,229_0.1`). If no argument is
+provided, shows all steps. This option switches the query mode from jobs to steps.
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
@@ -257,8 +257,8 @@ Flags:
                                 %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
                                 %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
-                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
-                                %j/%JobID              - Display the ID of the job (or parent job ID for steps).
+                                %i/%StepId             - Display the ID of the step (format: jobId_arrayTaskId.stepId for array jobs, jobId.stepId otherwise). (For steps only)
+                                %j/%JobID              - Display the ID of the job (array jobs use jobId_arrayTaskId).
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
                                 %L/%NodeList           - Display the list of nodes the job/step is running on.
@@ -294,7 +294,7 @@ Flags:
   -F, --full                  Display full information (If not set, only display 30 characters per cell)
   -h, --help                  help for cqueue
   -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
-  -j, --job string            Specify job ids to view (comma separated list), default is all
+  -j, --job string            Specify job ids to view (comma separated list, supports jobid or jobid_arraytaskid), default is all
       --json                  Output in JSON format
   -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
   -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 1000)

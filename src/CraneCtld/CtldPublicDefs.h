@@ -866,6 +866,12 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
+  // Array parent / array child model:
+  //
+  //   The array parent is a real executable job and owns the final task in
+  //   the array range; it runs that task directly. Children are materialized
+  //   on demand for the earlier tasks in the range.
+  //
   // Returns true if this is an array parent (has array range but no concrete
   // child task index).
   bool IsArrayParent() const {
@@ -882,13 +888,16 @@ struct JobInCtld {
         !job_to_ctld.has_array_index_end()) {
       return 0;
     }
+    uint32_t start = job_to_ctld.array_index_start();
+    uint32_t end = job_to_ctld.array_index_end();
+    // Guard the unsigned subtraction. CheckJobValidity should reject
+    // end < start upstream, but recovery / other call sites may bypass it.
+    if (end < start) return 0;
     uint32_t stride = job_to_ctld.has_array_index_stride()
                           ? job_to_ctld.array_index_stride()
                           : 1;
     if (stride == 0) stride = 1;  // Avoid division by zero
-    uint32_t range =
-        job_to_ctld.array_index_end() - job_to_ctld.array_index_start();
-    return range / stride + 1;
+    return (end - start) / stride + 1;
   }
 
   uint32_t ArrayJobCount() const {
@@ -906,15 +915,33 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
-  std::optional<uint32_t> GetPlaceholderArrayTaskId() const;
-  bool OwnsPlaceholderArrayTask(uint32_t task_id) const;
+  // Returns the task_id of the final task in the array range — the task
+  // the array parent itself owns and executes directly. Returns nullopt
+  // if this is not an array parent or the range is empty.
+  std::optional<uint32_t> GetFinalArrayTaskId() const;
+  // True iff `task_id` is the parent-owned final task of this array.
+  bool OwnsFinalArrayTask(uint32_t task_id) const;
   uint32_t MaterializableArrayTaskCount() const;
   std::optional<job_id_t> GetNextPendingArrayChildJobId() const;
   bool HasActiveArrayChildren() const;
   size_t MaterializedArrayTaskCount() const;
   bool HasMaterializedArrayTask(uint32_t task_id) const;
+  bool IsValidArrayTaskId(uint32_t task_id) const {
+    return IsValidArrayTaskId_(task_id);
+  }
+  // Returns the job id of a currently-active materialized child that owns
+  // `task_id`, or nullopt if the task is not materialized / not active.
+  // Read-only; never materializes.
+  std::optional<job_id_t> GetActiveArrayChildJobId(uint32_t task_id) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
+  // Populate `job_info` as if array task `task_id` had been materialized —
+  // without touching any parent state or persistence. Used by the query
+  // path to produce a virtual view of an unmaterialized array task.
+  // Returns false if task_id is invalid or is the parent-owned final task
+  // (which is represented by the parent's own JobInfo, not a virtual one).
+  bool SetFieldsOfJobInfoAsVirtualArrayChild(uint32_t task_id,
+                                             crane::grpc::JobInfo* job_info);
   std::unique_ptr<JobInCtld> CreateArrayChildForTask(uint32_t task_id);
   std::unique_ptr<JobInCtld> CreateNextArrayChild();
   void TrackArrayChild(JobInCtld* child, bool pending);

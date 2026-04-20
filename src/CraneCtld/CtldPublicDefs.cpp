@@ -1628,7 +1628,7 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
     task_id = GetArrayTaskId_();
   } else if (IsArrayParent()) {
     array_parent_job_id = JobId();
-    task_id = GetPlaceholderArrayTaskId();
+    task_id = GetFinalArrayTaskId();
   }
 
   if (!array_parent_job_id.has_value() || !task_id.has_value()) {
@@ -1648,7 +1648,7 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
                        task_step};
 }
 
-std::optional<uint32_t> JobInCtld::GetPlaceholderArrayTaskId() const {
+std::optional<uint32_t> JobInCtld::GetFinalArrayTaskId() const {
   if (!IsArrayParent()) {
     return std::nullopt;
   }
@@ -1661,10 +1661,10 @@ std::optional<uint32_t> JobInCtld::GetPlaceholderArrayTaskId() const {
   return GetArrayTaskIdByIndex_(task_count - 1);
 }
 
-bool JobInCtld::OwnsPlaceholderArrayTask(uint32_t task_id) const {
-  if (auto placeholder_task_id = GetPlaceholderArrayTaskId();
-      placeholder_task_id.has_value()) {
-    return placeholder_task_id.value() == task_id;
+bool JobInCtld::OwnsFinalArrayTask(uint32_t task_id) const {
+  if (auto final_task_id = GetFinalArrayTaskId();
+      final_task_id.has_value()) {
+    return final_task_id.value() == task_id;
   }
 
   return false;
@@ -1721,6 +1721,21 @@ bool JobInCtld::HasMaterializedArrayTask(uint32_t task_id) const {
   return array_parent_state_->materialized_task_ids.contains(task_id);
 }
 
+std::optional<job_id_t> JobInCtld::GetActiveArrayChildJobId(
+    uint32_t task_id) const {
+  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
+      OwnsFinalArrayTask(task_id) || !array_parent_state_) {
+    return std::nullopt;
+  }
+
+  absl::MutexLock array_guard(&array_parent_state_->mutex);
+  auto it = array_parent_state_->active_child_job_id_by_task_id.find(task_id);
+  if (it == array_parent_state_->active_child_job_id_by_task_id.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
 std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
     const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const {
   std::vector<job_id_t> result;
@@ -1734,7 +1749,7 @@ std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
       continue;
     }
 
-    if (OwnsPlaceholderArrayTask(task_id)) {
+    if (OwnsFinalArrayTask(task_id)) {
       continue;
     }
 
@@ -1753,10 +1768,41 @@ std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
   return result;
 }
 
+bool JobInCtld::SetFieldsOfJobInfoAsVirtualArrayChild(
+    uint32_t task_id, crane::grpc::JobInfo* job_info) {
+  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
+      OwnsFinalArrayTask(task_id)) {
+    return false;
+  }
+
+  // Start from the parent's fields. SetFieldsOfJobInfo uses
+  // GetArrayTaskMeta() which for an array parent populates array_task_id
+  // with the parent-owned final task; we overwrite the array / status /
+  // runtime fields below so the caller sees the requested task as a
+  // pending virtual child.
+  SetFieldsOfJobInfo(job_info);
+
+  job_info->set_job_id(0);
+  job_info->set_array_job_id(JobId());
+  job_info->set_array_task_id(task_id);
+
+  job_info->set_status(crane::grpc::Pending);
+  job_info->mutable_start_time()->Clear();
+  job_info->mutable_end_time()->Clear();
+  job_info->mutable_elapsed_time()->Clear();
+  job_info->set_craned_list("");
+  job_info->mutable_execution_node()->Clear();
+  job_info->set_exit_code(0);
+  *job_info->mutable_allocated_res_view() = crane::grpc::ResourceView{};
+  job_info->clear_step_info_list();
+
+  return true;
+}
+
 std::unique_ptr<JobInCtld> JobInCtld::CreateArrayChildForTask(
     uint32_t task_id) {
   if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      OwnsPlaceholderArrayTask(task_id) || HasMaterializedArrayTask(task_id)) {
+      OwnsFinalArrayTask(task_id) || HasMaterializedArrayTask(task_id)) {
     return nullptr;
   }
 

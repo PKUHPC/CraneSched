@@ -57,8 +57,7 @@ cqueue
 **-s, --step[=&lt;stepid1,stepid2,...&gt;]**
 
 :   **适用于：** `作业步`    
-查询作业步信息而非作业信息。接受可选的逗号分隔的作业步ID列表，格式为`jobid.stepid`（如`123.1,123.2,456.3`
-）。如果不提供参数，则显示所有作业步。此选项将查询模式从作业切换到作业步。
+查询作业步信息而非作业信息。接受可选的逗号分隔的作业步ID列表：普通作业格式为 `jobid.stepid`，数组作业格式为 `jobid_arraytaskid.stepid`（如 `123.1,123.2,456.3,229_0.1`）。如果不提供参数，则显示所有作业步。此选项将查询模式从作业切换到作业步。
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
@@ -246,8 +245,8 @@ Flags:
                                 %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
                                 %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
-                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
-                                %j/%JobID              - Display the ID of the job (or parent job ID for steps).
+                                %i/%StepId             - Display the ID of the step (format: jobId_arrayTaskId.stepId for array jobs, jobId.stepId otherwise). (For steps only)
+                                %j/%JobID              - Display the ID of the job (array jobs use jobId_arrayTaskId).
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
                                 %L/%NodeList           - Display the list of nodes the job/step is running on.
@@ -283,7 +282,7 @@ Flags:
   -F, --full                  Display full information (If not set, only display 30 characters per cell)
   -h, --help                  help for cqueue
   -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
-  -j, --job string            Specify job ids to view (comma separated list), default is all
+  -j, --job string            Specify job ids to view (comma separated list, supports jobid or jobid_arraytaskid), default is all
       --json                  Output in JSON format
   -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
   -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 1000)

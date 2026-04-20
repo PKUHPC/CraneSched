@@ -814,7 +814,7 @@ class JobScheduler {
       job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
 
-  std::optional<uint32_t> GetArrayPlaceholderTaskId(job_id_t array_job_id);
+  std::optional<uint32_t> GetFinalArrayTaskId(job_id_t array_job_id);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
