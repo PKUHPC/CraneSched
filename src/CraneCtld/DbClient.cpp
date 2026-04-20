@@ -3490,6 +3490,21 @@ void MongodbClient::SubDocumentAppendItem_(
   }));
 }
 
+void MongodbClient::DocumentAppendItem_(
+    document& doc, const std::string& key, const PartitionToLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [partition, partition_resource] : value) {
+      mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
+        subDoc.append(kvp("max_jobs", static_cast<int64_t>(partition_resource.max_jobs)));
+        subDoc.append(kvp("max_submit_jobs", static_cast<int64_t>(partition_resource.max_submit_jobs)));
+        SubDocumentAppendItem_(subDoc, "max_tres", partition_resource.max_tres);
+        SubDocumentAppendItem_(subDoc, "max_tres_per_job", partition_resource.max_tres_per_job);
+        subDoc.append(kvp("max_wall", absl::ToInt64Seconds(partition_resource.max_wall)));
+        subDoc.append(kvp("max_wall_duration_per_job", absl::ToInt64Seconds(partition_resource.max_wall_duration_per_job)));
+      }));
+    }
+  }));
+}
 
 void MongodbClient::DocumentAppendItem_(
     document& doc, const std::string& key,
@@ -3684,7 +3699,7 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
     for (auto&& user : account_view["coordinators"].get_array().value) {
       account->coordinators.emplace_back(user.get_string().value);
     }
-    for (const auto& partition_resource_item : ViewValueOr_(account_view["partition_to_resource_limit_map"], bsoncxx::document::view{})) {
+    for (const auto& partition_resource_item : ViewValueOr_(account_view["partition_to_limit_map"], bsoncxx::document::view{})) {
       auto partition_resource = partition_resource_item.get_document().value;
       PartitionResourceLimit resource;
       resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
@@ -3702,13 +3717,13 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 11> fields{
+  std::array<std::string, 12> fields{
       "deleted",     "blocked",          "name",           "description",
       "users",       "child_accounts",   "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list", "coordinators"};
+      "default_qos", "allowed_qos_list", "coordinators", "partition_to_limit_map"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>, std::list<std::string>>
+             std::string, std::list<std::string>, std::list<std::string>, PartitionToLimitMap>
       values{false,
              account.blocked,
              account.name,
@@ -3719,7 +3734,8 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
              account.allowed_partition,
              account.default_qos,
              account.allowed_qos_list,
-             account.coordinators};
+             account.coordinators, 
+             account.partition_to_limit_map};
 
   return DocumentConstructor_(fields, values);
 }

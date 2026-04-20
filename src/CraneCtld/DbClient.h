@@ -549,6 +549,9 @@ class MongodbClient {
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
                               const GresMap& value);
 
+  void DocumentAppendItem_(
+    document& doc, const std::string& key, const PartitionToLimitMap& value);
+
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
