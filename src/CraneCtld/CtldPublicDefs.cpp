@@ -604,6 +604,10 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    step_to_d.set_array_job_id(array_meta->array_job_id);
+    step_to_d.set_array_task_id(array_meta->task_id);
+  }
 
   return step_to_d;
 }
@@ -1191,8 +1195,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
-  if (StepToCtld().has_array_task_id()) {
-    step_to_d.set_array_task_id(StepToCtld().array_task_id());
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    step_to_d.set_array_job_id(array_meta->array_job_id);
+    step_to_d.set_array_task_id(array_meta->task_id);
   }
 
   return step_to_d;
@@ -1599,7 +1604,7 @@ void JobInCtld::SetArrayChildrenExpanded(bool val) {
   array_children_expanded = val;
   runtime_attr.set_array_children_expanded(val);
   if (val) {
-    next_array_task_index = ArrayTaskCount();
+    next_array_task_index = MaterializableArrayTaskCount();
   }
 }
 
@@ -1610,10 +1615,23 @@ void JobInCtld::SetNextArrayTaskIndex(uint32_t val) {
 }
 
 std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
-  if (!IsArrayChild() || !array_job_id.has_value() ||
-      !job_to_ctld.has_array_task_id() ||
-      !job_to_ctld.has_array_index_start() ||
+  if (!job_to_ctld.has_array_index_start() ||
       !job_to_ctld.has_array_index_end()) {
+    return std::nullopt;
+  }
+
+  std::optional<job_id_t> array_parent_job_id;
+  std::optional<uint32_t> task_id;
+
+  if (IsArrayChild() && array_job_id.has_value()) {
+    array_parent_job_id = array_job_id.value();
+    task_id = GetArrayTaskId_();
+  } else if (IsArrayParent()) {
+    array_parent_job_id = JobId();
+    task_id = GetPlaceholderArrayTaskId();
+  }
+
+  if (!array_parent_job_id.has_value() || !task_id.has_value()) {
     return std::nullopt;
   }
 
@@ -1622,12 +1640,43 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
                            : 1;
   if (task_step == 0) task_step = 1;
 
-  return ArrayTaskMeta{array_job_id.value(),
-                       job_to_ctld.array_task_id(),
+  return ArrayTaskMeta{array_parent_job_id.value(),
+                       task_id.value(),
                        ArrayTaskCount(),
                        job_to_ctld.array_index_start(),
                        job_to_ctld.array_index_end(),
                        task_step};
+}
+
+std::optional<uint32_t> JobInCtld::GetPlaceholderArrayTaskId() const {
+  if (!IsArrayParent()) {
+    return std::nullopt;
+  }
+
+  uint32_t task_count = ArrayTaskCount();
+  if (task_count == 0) {
+    return std::nullopt;
+  }
+
+  return GetArrayTaskIdByIndex_(task_count - 1);
+}
+
+bool JobInCtld::OwnsPlaceholderArrayTask(uint32_t task_id) const {
+  if (auto placeholder_task_id = GetPlaceholderArrayTaskId();
+      placeholder_task_id.has_value()) {
+    return placeholder_task_id.value() == task_id;
+  }
+
+  return false;
+}
+
+uint32_t JobInCtld::MaterializableArrayTaskCount() const {
+  if (!IsArrayParent()) {
+    return 0;
+  }
+
+  uint32_t task_count = ArrayTaskCount();
+  return task_count == 0 ? 0 : task_count - 1;
 }
 
 std::optional<job_id_t> JobInCtld::GetNextPendingArrayChildJobId() const {
@@ -1675,17 +1724,26 @@ bool JobInCtld::HasMaterializedArrayTask(uint32_t task_id) const {
 std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
     const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const {
   std::vector<job_id_t> result;
-  if (!IsArrayParent() || !array_parent_state_) {
+  if (!IsArrayParent()) {
     return result;
   }
 
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
   std::unordered_set<uint32_t> seen;
   for (uint32_t task_id : array_task_ids) {
     if (!IsValidArrayTaskId_(task_id) || !seen.insert(task_id).second) {
       continue;
     }
 
+    if (OwnsPlaceholderArrayTask(task_id)) {
+      result.push_back(JobId());
+      continue;
+    }
+
+    if (!array_parent_state_) {
+      continue;
+    }
+
+    absl::MutexLock array_guard(&array_parent_state_->mutex);
     auto child_it =
         array_parent_state_->active_child_job_id_by_task_id.find(task_id);
     if (child_it != array_parent_state_->active_child_job_id_by_task_id.end()) {
@@ -1699,7 +1757,7 @@ std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
 std::unique_ptr<JobInCtld> JobInCtld::CreateArrayChildForTask(
     uint32_t task_id) {
   if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      HasMaterializedArrayTask(task_id)) {
+      OwnsPlaceholderArrayTask(task_id) || HasMaterializedArrayTask(task_id)) {
     return nullptr;
   }
 
@@ -1718,8 +1776,8 @@ std::unique_ptr<JobInCtld> JobInCtld::CreateNextArrayChild() {
     return nullptr;
   }
 
-  uint32_t array_task_count = ArrayTaskCount();
-  while (next_array_task_index < array_task_count) {
+  uint32_t materializable_task_count = MaterializableArrayTaskCount();
+  while (next_array_task_index < materializable_task_count) {
     uint32_t task_index = next_array_task_index;
     uint32_t task_id = GetArrayTaskIdByIndex_(task_index);
     SetNextArrayTaskIndex(task_index + 1);
@@ -1829,16 +1887,16 @@ void JobInCtld::RebuildArraySchedulingCursor() {
     return;
   }
 
-  uint32_t array_task_count = ArrayTaskCount();
+  uint32_t materializable_task_count = MaterializableArrayTaskCount();
   if (ArrayChildrenExpanded()) {
-    SetNextArrayTaskIndex(array_task_count);
+    SetNextArrayTaskIndex(materializable_task_count);
     return;
   }
 
   uint32_t next_task_index = 0;
   if (array_parent_state_) {
     absl::MutexLock array_guard(&array_parent_state_->mutex);
-    while (next_task_index < array_task_count &&
+    while (next_task_index < materializable_task_count &&
            array_parent_state_->materialized_task_ids.contains(
                GetArrayTaskIdByIndex_(next_task_index))) {
       ++next_task_index;
@@ -2158,11 +2216,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
 
   job_info->set_submit_hostname(submit_hostname);
 
-  if (job_to_ctld.has_array_task_id()) {
-    job_info->set_array_task_id(job_to_ctld.array_task_id());
-  }
-  if (array_job_id.has_value()) {
-    job_info->set_array_job_id(array_job_id.value());
+  if (auto array_meta = GetArrayTaskMeta(); array_meta.has_value()) {
+    job_info->set_array_job_id(array_meta->array_job_id);
+    job_info->set_array_task_id(array_meta->task_id);
   }
 
   // Only pass container meta if it's a container step

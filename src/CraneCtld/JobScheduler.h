@@ -809,7 +809,8 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
-  // Resolve an array_job_id + array_task_ids to the actual child job_ids.
+  // Resolve an array_job_id + array_task_ids to the actual in-memory jobs.
+  // The final placeholder task may resolve to the parent job itself.
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
       job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids);

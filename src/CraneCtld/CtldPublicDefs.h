@@ -906,6 +906,9 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
+  std::optional<uint32_t> GetPlaceholderArrayTaskId() const;
+  bool OwnsPlaceholderArrayTask(uint32_t task_id) const;
+  uint32_t MaterializableArrayTaskCount() const;
   std::optional<job_id_t> GetNextPendingArrayChildJobId() const;
   bool HasActiveArrayChildren() const;
   size_t MaterializedArrayTaskCount() const;

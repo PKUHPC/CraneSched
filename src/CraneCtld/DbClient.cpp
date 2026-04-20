@@ -147,6 +147,49 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
   return result;
 }
 
+uint32_t GetArrayTaskIdByIndex_(const crane::grpc::JobToCtld& job_to_ctld,
+                                uint32_t task_index) {
+  uint32_t array_start = job_to_ctld.array_index_start();
+  uint32_t array_stride = job_to_ctld.has_array_index_stride()
+                              ? job_to_ctld.array_index_stride()
+                              : 1;
+  if (array_stride == 0) {
+    array_stride = 1;
+  }
+
+  return array_start + task_index * array_stride;
+}
+
+std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
+    const crane::grpc::RuntimeAttrOfJob& runtime_attr,
+    const crane::grpc::JobToCtld& job_to_ctld) {
+  if (runtime_attr.has_array_job_id() && job_to_ctld.has_array_task_id()) {
+    return std::pair{runtime_attr.array_job_id(), job_to_ctld.array_task_id()};
+  }
+
+  if (!job_to_ctld.has_array_index_start() ||
+      !job_to_ctld.has_array_index_end() || job_to_ctld.has_array_task_id()) {
+    return std::nullopt;
+  }
+
+  uint32_t array_stride = job_to_ctld.has_array_index_stride()
+                              ? job_to_ctld.array_index_stride()
+                              : 1;
+  if (array_stride == 0) {
+    array_stride = 1;
+  }
+
+  uint32_t array_range =
+      job_to_ctld.array_index_end() - job_to_ctld.array_index_start();
+  uint32_t array_task_count = array_range / array_stride + 1;
+  if (array_task_count == 0) {
+    return std::nullopt;
+  }
+
+  return std::pair{runtime_attr.job_id(),
+                   GetArrayTaskIdByIndex_(job_to_ctld, array_task_count - 1)};
+}
+
 void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
                            const std::string& coll,
                            const bsoncxx::document::view& match_bson,
@@ -694,7 +737,8 @@ bool MongodbClient::FetchJobRecords(
       }
 
       // Build $or with two branches:
-      // 1. job_id in requested job_ids (excluding those with array task filters)
+      // 1. job_id in requested job_ids (excluding those with array task
+      // filters)
       // 2. (array_job_id, array_task_id) pairs match requested array tasks
       filter.append(kvp("$or", [&](sub_array or_array) {
         // Branch 1: Match by job_id (exclude array jobs with task filters)
@@ -719,8 +763,8 @@ bool MongodbClient::FetchJobRecords(
              request->filter_array_task_ids()) {
           for (const auto& array_task_id : array_task_ids.array_task_ids()) {
             or_array.append([&](sub_document match_doc) {
-              match_doc.append(kvp("array_job_id",
-                                   static_cast<std::int32_t>(array_job_id)));
+              match_doc.append(
+                  kvp("array_job_id", static_cast<std::int32_t>(array_job_id)));
               match_doc.append(kvp("array_task_id",
                                    static_cast<std::int32_t>(array_task_id)));
             });
@@ -1192,6 +1236,67 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
     }
   } catch (const std::exception& e) {
     CRANE_ERROR("Failed to fetch job status by IDs: {}", e.what());
+  }
+
+  return result;
+}
+
+std::optional<MongodbClient::ArrayTaskAggregateInfo>
+MongodbClient::FetchArrayTaskAggregateInfo(
+    job_id_t array_job_id, std::optional<job_id_t> excluded_job_id) {
+  ArrayTaskAggregateInfo result;
+
+  try {
+    document filter;
+    filter.append(kvp("array_job_id", static_cast<std::int32_t>(array_job_id)));
+    if (excluded_job_id.has_value()) {
+      filter.append(
+          kvp("job_id",
+              bsoncxx::builder::basic::make_document(kvp(
+                  "$ne", static_cast<std::int32_t>(excluded_job_id.value())))));
+    }
+
+    mongocxx::options::find options;
+    document projection;
+    projection.append(kvp("state", 1));
+    projection.append(kvp("exit_code", 1));
+    options.projection(projection.view());
+
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
+                                                                 options);
+
+    for (auto view : cursor) {
+      result.has_records = true;
+
+      crane::grpc::JobStatus status =
+          static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value);
+      uint32_t exit_code = view["exit_code"].get_int32().value;
+      result.max_exit_code = std::max(result.max_exit_code, exit_code);
+
+      if (status == crane::grpc::JobStatus::Completed && exit_code == 0) {
+        continue;
+      }
+
+      switch (status) {
+      case crane::grpc::JobStatus::Cancelled:
+        result.any_cancelled = true;
+        break;
+      case crane::grpc::JobStatus::ExceedTimeLimit:
+        result.any_exceed_time_limit = true;
+        break;
+      case crane::grpc::JobStatus::OutOfMemory:
+        result.any_out_of_memory = true;
+        break;
+      default:
+        result.any_failed = true;
+        break;
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to fetch array task aggregate for job #{}: {}",
+                array_job_id, e.what());
+    return std::nullopt;
   }
 
   return result;
@@ -4306,13 +4411,14 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  int32_t array_job_id = runtime_attr.has_array_job_id()
-                             ? static_cast<int32_t>(runtime_attr.array_job_id())
-                             : -1;
-  int32_t array_task_id =
-      job_to_ctld.has_array_task_id()
-          ? static_cast<int32_t>(job_to_ctld.array_task_id())
-          : -1;
+  int32_t array_job_id = -1;
+  int32_t array_task_id = -1;
+  if (auto array_identity =
+          GetPersistedArrayIdentity_(runtime_attr, job_to_ctld);
+      array_identity.has_value()) {
+    array_job_id = static_cast<int32_t>(array_identity->first);
+    array_task_id = static_cast<int32_t>(array_identity->second);
+  }
 
   bsoncxx::builder::basic::array nodename_list_array;
   for (const auto& nodename : runtime_attr.craned_ids()) {
@@ -4506,13 +4612,12 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  int32_t array_job_id = job->ArrayJobId().has_value()
-                             ? static_cast<int32_t>(job->ArrayJobId().value())
-                             : -1;
-  int32_t array_task_id =
-      job->JobToCtld().has_array_task_id()
-          ? static_cast<int32_t>(job->JobToCtld().array_task_id())
-          : -1;
+  int32_t array_job_id = -1;
+  int32_t array_task_id = -1;
+  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+    array_job_id = static_cast<int32_t>(array_meta->array_job_id);
+    array_task_id = static_cast<int32_t>(array_meta->task_id);
+  }
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
