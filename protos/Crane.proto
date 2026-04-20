@@ -35,7 +35,9 @@ message StepStatusChangeRequest {
   google.protobuf.Timestamp timestamp = 7;
 }
 
-message StepStatusChangeReply { bool ok = 1; }
+message StepStatusChangeReply {
+  bool ok = 1;
+}
 
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
@@ -54,20 +56,30 @@ message CranedRegisterRequest {
   google.protobuf.Timestamp token = 3;
 }
 
-message CranedRegisterReply { bool ok = 1; }
+message CranedRegisterReply {
+  bool ok = 1;
+}
 
-message CranedPingRequest { string craned_id = 1; }
+message CranedPingRequest {
+  string craned_id = 1;
+}
 
-message CranedPingReply { bool ok = 1; }
+message CranedPingReply {
+  bool ok = 1;
+}
 
-message QueryCranedListFromJobIdRequest { uint32 job_id = 1; }
+message QueryCranedListFromJobIdRequest {
+  uint32 job_id = 1;
+}
 
 message QueryCranedListFromJobIdReply {
   bool ok = 1;
   string craned_list = 2;
 }
 
-message SubmitBatchJobRequest { JobToCtld job = 1; }
+message SubmitBatchJobRequest {
+  JobToCtld job = 1;
+}
 
 message SubmitBatchJobReply {
   bool ok = 1;
@@ -88,7 +100,9 @@ message SubmitBatchJobsReply {
   repeated ErrCode code_list = 2;
 }
 
-message SubmitContainerStepRequest { StepToCtld step = 1; }
+message SubmitContainerStepRequest {
+  StepToCtld step = 1;
+}
 
 message SubmitContainerStepReply {
   bool ok = 1;
@@ -99,23 +113,33 @@ message SubmitContainerStepReply {
   }
 }
 
-message AllocJobsRequest { repeated JobToD jobs = 1; }
+message AllocJobsRequest {
+  repeated JobToD jobs = 1;
+}
 
 message AllocJobsReply {}
 
-message AllocStepsRequest { repeated StepToD steps = 1; }
+message AllocStepsRequest {
+  repeated StepToD steps = 1;
+}
 
 message AllocStepsReply {}
 
-message FreeStepsRequest { map<uint32, JobStepIds> job_step_ids_map = 1; }
+message FreeStepsRequest {
+  map<uint32, JobStepIds> job_step_ids_map = 1;
+}
 
 message FreeStepsReply {}
 
-message FreeJobsRequest { repeated uint32 job_id_list = 1; }
+message FreeJobsRequest {
+  repeated uint32 job_id_list = 1;
+}
 
 message FreeJobsReply {}
 
-message ExecuteStepsRequest { map<uint32, JobStepIds> job_step_ids_map = 1; }
+message ExecuteStepsRequest {
+  map<uint32, JobStepIds> job_step_ids_map = 1;
+}
 
 message ExecuteStepsReply {
   map<uint32, JobStepIds> failed_job_step_ids_map = 1;
@@ -197,7 +221,9 @@ message CancelJobReply {
   map<uint32, NotCancelledJobSteps> not_cancelled_job_steps = 2;
 }
 
-message QueryStepFromPortRequest { uint32 port = 1; }
+message QueryStepFromPortRequest {
+  uint32 port = 1;
+}
 
 message QueryStepFromPortReply {
   bool ok = 1;
@@ -217,11 +243,17 @@ message QueryStepFromPortForwardReply {
   string cgroup_path = 4;
 }
 
-message QueryCranedInfoRequest { string craned_name = 1; }
+message QueryCranedInfoRequest {
+  string craned_name = 1;
+}
 
-message QueryCranedInfoReply { repeated CranedInfo craned_info_list = 1; }
+message QueryCranedInfoReply {
+  repeated CranedInfo craned_info_list = 1;
+}
 
-message QueryPartitionInfoRequest { string partition_name = 1; }
+message QueryPartitionInfoRequest {
+  string partition_name = 1;
+}
 
 message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info_list = 1;
@@ -238,7 +270,9 @@ message QueryReservationInfoReply {
   repeated ReservationInfo reservation_info_list = 3;
 }
 
-message QueryLicensesInfoRequest { repeated string license_name_list = 1; }
+message QueryLicensesInfoRequest {
+  repeated string license_name_list = 1;
+}
 
 message QueryLicensesInfoReply {
   bool ok = 1;
@@ -304,14 +338,18 @@ message ResetNextJobIdReply {
   string reason = 2;
 }
 
-message ResetNextStepDbIdRequest { uint32 uid = 1; }
+message ResetNextStepDbIdRequest {
+  uint32 uid = 1;
+}
 
 message ResetNextStepDbIdReply {
   bool ok = 1;
   string reason = 2;
 }
 
-message PurgeJobHistoryRequest { uint32 uid = 1; }
+message PurgeJobHistoryRequest {
+  uint32 uid = 1;
+}
 
 message PurgeJobHistoryReply {
   bool ok = 1;
@@ -546,9 +584,13 @@ message MigrateSshProcToCgroupRequest {
   uint32 job_id = 2;
 }
 
-message MigrateSshProcToCgroupReply { bool ok = 1; }
+message MigrateSshProcToCgroupReply {
+  bool ok = 1;
+}
 
-message QuerySshStepEnvVariablesRequest { uint32 job_id = 1; }
+message QuerySshStepEnvVariablesRequest {
+  uint32 job_id = 1;
+}
 
 message QuerySshStepEnvVariablesReply {
   bool ok = 1;
@@ -682,11 +724,12 @@ message DeleteReservationReply {
 
 message ResetPartitionAclRequest {
   uint32 uid = 1;
-  bool reload_from_config =
-      2;  // true: reload defaults from config, false: clear all
+  bool reload_from_config = 2;  // true: reload defaults from config, false: clear all
 }
 
-message ResetPartitionAclReply { bool ok = 1; }
+message ResetPartitionAclReply {
+  bool ok = 1;
+}
 
 message StreamCallocRequest {
   enum CallocRequestType {
@@ -735,7 +778,9 @@ message StreamCallocReply {
 
   message JobCancelRequest {}
 
-  message JobCompletionAckReply { bool ok = 1; }
+  message JobCompletionAckReply {
+    bool ok = 1;
+  }
 
   CforedReplyType type = 1;
 
@@ -757,7 +802,9 @@ message StreamCforedRequest {
   }
   CforedRequestType type = 1;
 
-  message CforedReg { string cfored_name = 1; }
+  message CforedReg {
+    string cfored_name = 1;
+  }
 
   message JobReq {
     string cfored_name = 1;
@@ -779,7 +826,9 @@ message StreamCforedRequest {
     InteractiveJobType interactive_type = 5;
   }
 
-  message GracefulExitReq { string cfored_name = 1; }
+  message GracefulExitReq {
+    string cfored_name = 1;
+  }
 
   oneof payload {
     CforedReg payload_cfored_reg = 2;
@@ -837,7 +886,9 @@ message StreamCtldReply {
     string failure_reason = 2;
   }
 
-  message CforedGracefulExitAck { bool ok = 1; }
+  message CforedGracefulExitAck {
+    bool ok = 1;
+  }
 
   CtldReplyType type = 1;
 
@@ -870,7 +921,9 @@ message StreamCrunRequest {
     StepToCtld step = 2;
   }
 
-  message StepCompleteReq { JobStatus status = 1; }
+  message StepCompleteReq {
+    JobStatus status = 1;
+  }
 
   message TaskIOForwardReq {
     bytes msg = 1;
@@ -931,11 +984,17 @@ message StreamCrunReply {
 
   message StepCancelRequest {}
 
-  message StepCompletionAckReply { bool ok = 1; }
+  message StepCompletionAckReply {
+    bool ok = 1;
+  }
 
-  message TaskIOForwardReadyReply { bool ok = 1; }
+  message TaskIOForwardReadyReply {
+    bool ok = 1;
+  }
 
-  message TaskIOForwardReply { bytes msg = 1; }
+  message TaskIOForwardReply {
+    bytes msg = 1;
+  }
 
   message TaskIOErrOutputForwardReply {
     bytes msg = 1;
@@ -998,7 +1057,9 @@ message StreamStepIORequest {
     uint32 step_id = 3;
   }
 
-  message TaskOutputReq { bytes msg = 1; }
+  message TaskOutputReq {
+    bytes msg = 1;
+  }
 
   message TaskErrOutputReq {
     bytes msg = 1;
@@ -1050,7 +1111,9 @@ message StreamStepIOReply {
     STEP_X11_INPUT = 3;
   }
 
-  message SupervisorRegisterReply { bool ok = 1; }
+  message SupervisorRegisterReply {
+    bool ok = 1;
+  }
 
   message TaskInputReq {
     bytes msg = 1;
@@ -1058,7 +1121,9 @@ message StreamStepIOReply {
     optional uint32 task_id = 3;
   }
 
-  message SupervisorUnregisterReply { bool ok = 1; }
+  message SupervisorUnregisterReply {
+    bool ok = 1;
+  }
 
   message StepX11InputReq {
     bytes msg = 1;
@@ -1082,7 +1147,9 @@ message PowerStateChangeRequest {
   string reason = 3;
 }
 
-message PowerStateChangeReply { bool ok = 1; }
+message PowerStateChangeReply {
+  bool ok = 1;
+}
 
 message EnableAutoPowerControlRequest {
   uint32 uid = 1;
@@ -1228,7 +1295,9 @@ message UpdateNodeDrainStateRequest {
   string reason = 3;
 }
 
-message UpdateNodeDrainStateReply { bool ok = 1; }
+message UpdateNodeDrainStateReply {
+  bool ok = 1;
+}
 
 message QueryJobSummaryRequest {
   enum JobSummaryReportType {
@@ -1250,7 +1319,9 @@ message QueryJobSummaryRequest {
   JobSummaryReportType report_type = 9;
 }
 
-message QueryJobSummaryReply { repeated JobSummaryItem item_list = 1; }
+message QueryJobSummaryReply {
+  repeated JobSummaryItem item_list = 1;
+}
 
 message QueryJobSizeSummaryRequest {
   repeated string filter_accounts = 1;
@@ -1266,7 +1337,9 @@ message QueryJobSizeSummaryRequest {
   repeated uint32 filter_gids = 11;
 }
 
-message QueryJobSizeSummaryReply { repeated JobSizeSummaryItem item_list = 1; }
+message QueryJobSizeSummaryReply {
+  repeated JobSizeSummaryItem item_list = 1;
+}
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
@@ -1278,28 +1351,20 @@ service CraneCtld {
   /* RPCs called from cbatch */
   rpc SubmitBatchJob(SubmitBatchJobRequest) returns (SubmitBatchJobReply);
   rpc SubmitBatchJobs(SubmitBatchJobsRequest) returns (SubmitBatchJobsReply);
-  rpc SubmitContainerStep(SubmitContainerStepRequest)
-      returns (SubmitContainerStepReply);
+  rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-  rpc QueryPartitionInfo(QueryPartitionInfoRequest)
-      returns (QueryPartitionInfoReply);
-  rpc QueryReservationInfo(QueryReservationInfoRequest)
-      returns (QueryReservationInfoReply);
-  rpc QueryLicensesInfo(QueryLicensesInfoRequest)
-      returns (QueryLicensesInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
+  rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
   rpc ModifyJob(ModifyJobRequest) returns (ModifyJobReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
-  rpc ModifyPartitionAcl(ModifyPartitionAclRequest)
-      returns (ModifyPartitionAclReply);
-  rpc EnableAutoPowerControl(EnableAutoPowerControlRequest)
-      returns (EnableAutoPowerControlReply);
-  rpc ModifyJobsExtraAttrs(ModifyJobsExtraAttrsRequest)
-      returns (ModifyJobsExtraAttrsReply);
+  rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
+  rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
+  rpc ModifyJobsExtraAttrs(ModifyJobsExtraAttrsRequest) returns (ModifyJobsExtraAttrsReply);
   rpc ResetNextJobId(ResetNextJobIdRequest) returns (ResetNextJobIdReply);
-  rpc ResetNextStepDbId(ResetNextStepDbIdRequest)
-      returns (ResetNextStepDbIdReply);
+  rpc ResetNextStepDbId(ResetNextStepDbIdRequest) returns (ResetNextStepDbIdReply);
   rpc PurgeJobHistory(PurgeJobHistoryRequest) returns (PurgeJobHistoryReply);
 
   /* RPCs called from cacctmgr */
@@ -1321,71 +1386,54 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  rpc ModifyDefaultWckey(ModifyDefaultWckeyRequest)
-      returns (ModifyDefaultWckeyReply);
+  rpc ModifyDefaultWckey(ModifyDefaultWckeyRequest) returns (ModifyDefaultWckeyReply);
 
-  rpc BlockAccountOrUser(BlockAccountOrUserRequest)
-      returns (BlockAccountOrUserReply);
+  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
-  rpc ResetUserCredential(ResetUserCredentialRequest)
-      returns (ResetUserCredentialReply);
+  rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
 
   rpc QueryTxnLog(QueryTxnLogRequest) returns (QueryTxnLogReply);
 
-  rpc DeleteLicenseResource(DeleteLicenseResourceRequest)
-      returns (DeleteLicenseResourceReply);
-  rpc AddOrModifyLicenseResource(AddOrModifyLicenseResourceRequest)
-      returns (AddOrModifyLicenseResourceReply);
-  rpc QueryLicenseResource(QueryLicenseResourceRequest)
-      returns (QueryLicenseResourceReply);
+  rpc DeleteLicenseResource(DeleteLicenseResourceRequest) returns (DeleteLicenseResourceReply);
+  rpc AddOrModifyLicenseResource(AddOrModifyLicenseResourceRequest) returns (AddOrModifyLicenseResourceReply);
+  rpc QueryLicenseResource(QueryLicenseResourceRequest) returns (QueryLicenseResourceReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
   /* common RPCs */
   rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
-  rpc CreateReservation(CreateReservationRequest)
-      returns (CreateReservationReply);
-  rpc DeleteReservation(DeleteReservationRequest)
-      returns (DeleteReservationReply);
-  rpc ResetPartitionAcl(ResetPartitionAclRequest)
-      returns (ResetPartitionAclReply);
+  rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
+  rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc ResetPartitionAcl(ResetPartitionAclRequest) returns (ResetPartitionAclReply);
 
-  rpc QueryJobSummary(QueryJobSummaryRequest)
-      returns (stream QueryJobSummaryReply);
-  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest)
-      returns (stream QueryJobSizeSummaryReply);
+  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
 
   /* RPCS called from PKI request */
-  rpc SignUserCertificate(SignUserCertificateRequest)
-      returns (SignUserCertificateResponse);
+  rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
-  rpc AttachContainerStep(AttachContainerStepRequest)
-      returns (AttachContainerStepReply);
-  rpc ExecInContainerStep(ExecInContainerStepRequest)
-      returns (ExecInContainerStepReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
 service PluginQueryService {
-  rpc QueryJobEfficiency(QueryJobEfficiencyRequest)
-      returns (QueryJobEfficiencyReply);
+  rpc QueryJobEfficiency(QueryJobEfficiencyRequest) returns (QueryJobEfficiencyReply);
   rpc QueryNodeEvents(QueryNodeEventsRequest) returns (QueryNodeEventsReply);
 }
 
 service CraneCtldForInternal {
   /* RPCs called from Craned */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest)
-      returns (google.protobuf.Empty);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
 
-  rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest)
-      returns (UpdateNodeDrainStateReply);
+  rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
 
   /* RPCs called from Cfored */
@@ -1417,17 +1465,13 @@ service Craned {
   /*
   Craned will proxy the following container-related RPCs to CRI Service.
   */
-  rpc AttachContainerStep(AttachContainerStepRequest)
-      returns (AttachContainerStepReply);
-  rpc ExecInContainerStep(ExecInContainerStepRequest)
-      returns (ExecInContainerStepReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 
   /* ----------------------------------- Called from Craned
    * ------------------------------------------------------ */
-  rpc QueryStepFromPort(QueryStepFromPortRequest)
-      returns (QueryStepFromPortReply);
-  rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest)
-      returns (QuerySshStepEnvVariablesReply);
+  rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
+  rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor
    * --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
@@ -1436,20 +1480,15 @@ service Craned {
 service CranedForPam {
   /* ----------------------------------- Called from Pam Module
    * --------------------------------------------------- */
-  rpc QueryStepFromPortForward(QueryStepFromPortForwardRequest)
-      returns (QueryStepFromPortForwardReply);
-  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest)
-      returns (MigrateSshProcToCgroupReply);
+  rpc QueryStepFromPortForward(QueryStepFromPortForwardRequest) returns (QueryStepFromPortForwardReply);
+  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QuerySshStepEnvVariablesForward(QuerySshStepEnvVariablesForwardRequest)
       returns (QuerySshStepEnvVariablesForwardReply);
 }
 
 service CraneForeD {
-  rpc CallocStream(stream StreamCallocRequest)
-      returns (stream StreamCallocReply);
+  rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
-  rpc StepIOStream(stream StreamStepIORequest)
-      returns (stream StreamStepIOReply);
-  rpc QueryStepFromPort(QueryStepFromPortRequest)
-      returns (QueryStepFromPortReply);
+  rpc StepIOStream(stream StreamStepIORequest) returns (stream StreamStepIOReply);
+  rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }
