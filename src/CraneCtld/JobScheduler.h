@@ -961,9 +961,6 @@ class JobScheduler {
   }
 
  private:
-  bool HasMaterializedArrayChildrenNoLock_(JobInCtld* parent);
-  bool HasActiveArrayChildrenNoLock_(job_id_t array_job_id) const;
-  JobInCtld* FindNextPendingArrayChildNoLock_(job_id_t array_job_id) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
       JobInCtld* parent,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
@@ -1052,8 +1049,7 @@ class JobScheduler {
   // Only creates the tasks that don't already exist.
   // Returns the job IDs of the materialized children.
   std::vector<job_id_t> MaterializeSpecificArrayTasksToPendingMap_(
-      JobInCtld* parent,
-      const std::unordered_set<uint32_t>& task_ids);
+      JobInCtld* parent, const std::unordered_set<uint32_t>& task_ids);
 
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();

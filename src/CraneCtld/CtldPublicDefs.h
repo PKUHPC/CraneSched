@@ -906,9 +906,39 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
+  std::optional<job_id_t> GetNextPendingArrayChildJobId() const;
+  bool HasActiveArrayChildren() const;
+  size_t MaterializedArrayTaskCount() const;
+  bool HasMaterializedArrayTask(uint32_t task_id) const;
+  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
+  std::unique_ptr<JobInCtld> CreateArrayChildForTask(uint32_t task_id);
   std::unique_ptr<JobInCtld> CreateNextArrayChild();
+  void TrackArrayChild(JobInCtld* child, bool pending);
+  void MarkArrayChildRunning();
+  void SetTrackedArrayChildHeld(bool held);
+  void UntrackArrayChild();
+  void RebuildArraySchedulingCursor();
 
  private:
+  struct ArrayParentState {
+    absl::Mutex mutex;
+    std::unordered_set<uint32_t> materialized_task_ids ABSL_GUARDED_BY(mutex);
+    std::unordered_map<uint32_t, job_id_t> active_child_job_id_by_task_id
+        ABSL_GUARDED_BY(mutex);
+    std::unordered_map<job_id_t, uint32_t> active_child_task_id_by_job_id
+        ABSL_GUARDED_BY(mutex);
+    std::unordered_set<job_id_t> pending_child_job_ids ABSL_GUARDED_BY(mutex);
+    std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id
+        ABSL_GUARDED_BY(mutex);
+  };
+
+  std::shared_ptr<ArrayParentState> EnsureArrayParentState_();
+  std::optional<uint32_t> GetArrayTaskId_() const;
+  bool IsValidArrayTaskId_(uint32_t task_id) const;
+  uint32_t GetArrayTaskIdByIndex_(uint32_t task_index) const;
+  void RegisterTrackedArrayChild_(bool pending);
+
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
    * Also, these fields are persisted on the disk.
@@ -959,8 +989,11 @@ struct JobInCtld {
   std::optional<job_id_t> array_job_id;
   // For array parents: whether all child jobs have been materialized.
   bool array_children_expanded{false};
-  // For array parents: the next array task index to expand (offset, not task_id).
+  // For array parents: the next array task index to expand (offset, not
+  // task_id).
   uint32_t next_array_task_index{0};
+  // Runtime-only tracker shared by an array parent and its live children.
+  std::shared_ptr<ArrayParentState> array_parent_state_;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
