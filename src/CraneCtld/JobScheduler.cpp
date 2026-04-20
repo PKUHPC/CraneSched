@@ -814,7 +814,7 @@ void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
     std::unique_ptr<JobInCtld> job) {
   // The newly modified QoS resource limits do not apply to jobs that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosSubmitResource(*job);
+  g_account_meta_container->MallocMetaSubmitResource(*job);
 
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -825,7 +825,7 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
     std::unique_ptr<JobInCtld> job) {
   // The newly modified QoS resource limits do not apply to jobs that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosResourceToRecoveredRunningJob(*job);
+  g_account_meta_container->MallocMetaResourceToRecoveredRunningJob(*job);
 
   for (const CranedId& craned_id : job->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, job->JobId(),
@@ -1203,7 +1203,7 @@ void JobScheduler::ScheduleThread_() {
             }
           }
 
-          if (auto result = g_account_meta_container->CheckAndMallocQosResource(
+          if (auto result = g_account_meta_container->CheckAndMallocMetaResource(
                   *job_in_scheduler);
               !result) {
             // free licenses
@@ -1536,7 +1536,7 @@ void JobScheduler::ScheduleThread_() {
           if (job->reservation != "")
             g_meta_container->FreeResourceFromResv(job->reservation,
                                                    job->JobId());
-          g_account_meta_container->FreeQosResource(*job);
+          g_account_meta_container->FreeMetaResource(*job);
           if (!job->licenses_count.empty())
             g_licenses_manager->FreeLicense(job->licenses_count);
           LockGuard indexes_guard(&m_job_indexes_mtx_);
@@ -2811,7 +2811,7 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
           g_account_manager->GetExistedUserInfo(job->Username());
       if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-      auto res = g_account_meta_container->TryMallocQosSubmitResource(*job);
+      auto res = g_account_meta_container->TryMallocMetaSubmitResource(*job);
       if (res != CraneErrCode::SUCCESS) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
         return std::unexpected(res);
@@ -3990,7 +3990,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
     for (auto& job : pending_job_ptr_vec) {
       job->SetStartTime(cancel_time);
       job->SetEndTime(cancel_time);
-      g_account_meta_container->FreeQosSubmitResource(*job);
+      g_account_meta_container->FreeMetaSubmitResource(*job);
 
       job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                    cancel_time);
@@ -4124,7 +4124,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
             accepted_job_ptrs)) {
       CRANE_ERROR("Failed to append a batch of jobs to embedded db queue.");
       for (auto& pair : accepted_jobs) {
-        g_account_meta_container->FreeQosSubmitResource(*pair.first);
+        g_account_meta_container->FreeMetaSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(
             std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
@@ -4167,7 +4167,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
         }
         if (missing_deps) {
           CRANE_WARN("Job #{} rejected: missing dependencies.", id);
-          g_account_meta_container->FreeQosSubmitResource(*job);
+          g_account_meta_container->FreeMetaSubmitResource(*job);
           job_id_promise.set_value(
               std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
           jobs_to_purge[id] = job->JobDbId();
@@ -4213,7 +4213,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
 
     CRANE_TRACE("Rejecting {} jobs...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosSubmitResource(*rejected_jobs[i].first);
+      g_account_meta_container->FreeMetaSubmitResource(*rejected_jobs[i].first);
       rejected_jobs[i].second.set_value(
           std::unexpected(CraneErrCode::ERR_BEYOND_JOB_ID));
     }
@@ -4482,7 +4482,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
       if (job->reservation != "")
         g_meta_container->FreeResourceFromResv(job->reservation, job->JobId());
-      g_account_meta_container->FreeQosResource(*job);
+      g_account_meta_container->FreeMetaResource(*job);
       if (!job->licenses_count.empty())
         g_licenses_manager->FreeLicense(job->licenses_count);
 
