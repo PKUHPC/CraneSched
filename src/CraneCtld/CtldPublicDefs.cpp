@@ -1659,30 +1659,6 @@ std::unique_ptr<JobInCtld> JobInCtld::CreateNextArrayChild() {
   return child;
 }
 
-std::vector<std::unique_ptr<JobInCtld>>
-JobInCtld::CreateAllRemainingArrayChildren() {
-  std::vector<std::unique_ptr<JobInCtld>> children;
-  if (!IsArrayParent()) {
-    return children;
-  }
-
-  uint32_t array_task_count = ArrayTaskCount();
-  if (next_array_task_index >= array_task_count) {
-    // All children have been created.
-    return children;
-  }
-
-  uint32_t remaining_count = array_task_count - next_array_task_index;
-  children.reserve(remaining_count);
-
-  // Create all remaining children.
-  while (auto child = CreateNextArrayChild()) {
-    children.push_back(std::move(child));
-  }
-
-  return children;
-}
-
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);

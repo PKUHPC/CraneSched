@@ -957,9 +957,8 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
   return true;
 }
 
-bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
-    const std::vector<JobInCtld*>& jobs,
-    JobInCtld* array_parent_to_mark_expanded) {
+std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
+    const std::vector<JobInCtld*>& jobs) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -972,7 +971,7 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
   uint32_t job_id{s_next_job_id_};
   db_id_t job_db_id{s_next_job_db_id_};
 
-  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
+  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return std::nullopt;
 
   for (const auto& job : jobs) {
     job->SetJobId(job_id++);
@@ -987,25 +986,14 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
           job->JobId(), job->JobDbId());
 
       // Just drop this batch if any of them failed.
-      return false;
+      return std::nullopt;
     }
   }
 
-  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
-
-  bool old_array_children_expanded = false;
-  if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-    old_array_children_expanded =
-        array_parent_to_mark_expanded->ArrayChildrenExpanded();
-    array_parent_to_mark_expanded->SetArrayChildrenExpanded(true);
-  }
+  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return std::nullopt;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) {
-    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-          old_array_children_expanded);
-    }
-    return false;
+    return std::nullopt;
   }
 
   for (const auto& job : jobs) {
@@ -1017,25 +1005,7 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
           "Failed to store the variable data of "
           "job id: {} / job db id: {}.",
           job->JobId(), job->JobDbId());
-      if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-        array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-            old_array_children_expanded);
-      }
-      return false;
-    }
-  }
-
-  if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-    result = StoreTypeIntoDb_(
-        m_variable_db_.get(), txn_id,
-        GetVariableDbEntryName_(array_parent_to_mark_expanded->JobDbId()),
-        &array_parent_to_mark_expanded->RuntimeAttr());
-    if (!result) {
-      CRANE_ERROR("Failed to update runtime attr of job #{}.",
-                  array_parent_to_mark_expanded->JobId());
-      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-          old_array_children_expanded);
-      return false;
+      return std::nullopt;
     }
   }
 
@@ -1043,33 +1013,41 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_id.");
-    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-          old_array_children_expanded);
-    }
-    return false;
+    return std::nullopt;
   }
 
   result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_db_id_str_,
                             &job_db_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_db_id.");
-    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-          old_array_children_expanded);
-    }
-    return false;
+    return std::nullopt;
   }
-  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) {
-    if (array_parent_to_mark_expanded != nullptr && !jobs.empty()) {
-      array_parent_to_mark_expanded->SetArrayChildrenExpanded(
-          old_array_children_expanded);
-    }
+
+  // Update the global counters before returning
+  s_next_job_id_ = job_id;
+  s_next_job_db_id_ = job_db_id;
+
+  return txn_id;
+}
+
+bool EmbeddedDbClient::MarkArrayParentExpanded(txn_id_t txn_id,
+                                                JobInCtld* array_parent) {
+  if (array_parent == nullptr) {
+    CRANE_ERROR("array_parent is nullptr in MarkArrayParentExpanded");
     return false;
   }
 
-  s_next_job_id_ = job_id;
-  s_next_job_db_id_ = job_db_id;
+  array_parent->SetArrayChildrenExpanded(true);
+
+  auto result = StoreTypeIntoDb_(
+      m_variable_db_.get(), txn_id,
+      GetVariableDbEntryName_(array_parent->JobDbId()),
+      &array_parent->RuntimeAttr());
+  if (!result) {
+    CRANE_ERROR("Failed to update runtime attr of array parent job #{}.",
+                array_parent->JobId());
+    return false;
+  }
 
   return true;
 }

@@ -240,13 +240,15 @@ class EmbeddedDbClient {
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
-  // Assign fresh IDs to jobs, persist them into embedded DB, and advance the
-  // global job counters. When `array_parent_to_mark_expanded` is provided, its
-  // runtime attr is updated in the same variable-db transaction after the new
-  // child jobs are assigned.
-  bool AppendJobsToPendingAndAdvanceJobIds(
-      const std::vector<JobInCtld*>& jobs,
-      JobInCtld* array_parent_to_mark_expanded = nullptr);
+  // Assign fresh IDs to jobs and persist them into embedded DB.
+  // Returns the transaction ID for the variable-db transaction on success.
+  // Caller must commit the transaction using CommitVariableDbTransaction.
+  std::optional<txn_id_t> AppendJobsToPendingAndAdvanceJobIds(
+      const std::vector<JobInCtld*>& jobs);
+
+  // Mark an array parent job as having its children expanded.
+  // Must be called within an active variable-db transaction.
+  bool MarkArrayParentExpanded(txn_id_t txn_id, JobInCtld* array_parent);
 
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 

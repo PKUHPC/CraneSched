@@ -907,7 +907,6 @@ struct JobInCtld {
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
   std::unique_ptr<JobInCtld> CreateNextArrayChild();
-  std::vector<std::unique_ptr<JobInCtld>> CreateAllRemainingArrayChildren();
 
  private:
   /* ------------- [2] -------------
