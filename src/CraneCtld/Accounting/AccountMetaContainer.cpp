@@ -289,22 +289,6 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
   return {};
 }
 
-CraneErrCode AccountMetaContainer::CheckPartitionStaticLimits_(
-    const ResourceView& req_res, absl::Duration time_limit,
-    const PartitionResourceLimit& limit) {
-  // max_tres_per_job: per-job resource cap (non-cumulative).
-  if (!limit.max_tres_per_job.IsZero() &&
-      !(req_res <= limit.max_tres_per_job)) {
-    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
-  }
-  // max_wall_duration_per_job: per-job wall-time cap (non-cumulative).
-  if (limit.max_wall_duration_per_job > absl::ZeroDuration() &&
-      time_limit > limit.max_wall_duration_per_job) {
-    return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
-  }
-  return CraneErrCode::SUCCESS;
-}
-
 /* ---------------------------------------------------------------------------
  * Per-entity checks (User or Account)
  *
@@ -358,19 +342,18 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
 
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
-  // Static (per-job) checks first — no counter lookup needed.
-  CraneErrCode static_result =
-      CheckPartitionStaticLimits_(req_res, time_limit, *partition_limit);
-  if (static_result != CraneErrCode::SUCCESS) return static_result;
+  if (!CheckTres_(req_res, partition_limit->max_tres_per_job)) {
+    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
+  }
 
-  // Cumulative submit-count check.
-  if (partition_limit->max_submit_jobs !=
-      std::numeric_limits<uint32_t>::max()) {
-    auto pit = stat.partition_to_resource_map.find(partition_id);
-    if (pit != stat.partition_to_resource_map.end()) {
-      if (pit->second.submit_jobs_count + 1 > partition_limit->max_submit_jobs)
-        return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
-    }
+  if (time_limit > partition_limit->max_wall_duration_per_job) {
+    return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+  }
+
+  auto pit = stat.partition_to_resource_map.find(partition_id);
+  if (pit != stat.partition_to_resource_map.end()) {
+    if (pit->second.submit_jobs_count + 1 > partition_limit->max_submit_jobs)
+      return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
   }
 
   return CraneErrCode::SUCCESS;
@@ -435,10 +418,13 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     const PartitionResourceLimit* partition_limit,
     const ResourceView& allocated_res, absl::Duration time_limit,
     const Qos& qos, bool is_user) const {
+
   if (!partition_limit) return {};
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
-  if (pit == stat.partition_to_resource_map.end()) return {};
+  if (pit == stat.partition_to_resource_map.end())  
+    return std::unexpected("PartitionResourceLimit");
+    
   const MetaResource& val = pit->second;
 
   // max_jobs: only enforced when QoS does not already cap running jobs.
@@ -503,14 +489,17 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
   {
     const PartitionResourceLimit* user_part_limit = nullptr;
     auto user_ptr = g_account_manager->GetExistedUserInfo(job.Username());
-    if (user_ptr) {
-      auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
-      if (acct_it != user_ptr->account_to_attrs_map.end()) {
-        auto part_it =
-            acct_it->second.partition_to_limit_map.find(job.partition_id);
-        if (part_it != acct_it->second.partition_to_limit_map.end())
-          user_part_limit = &part_it->second;
-      }
+    if (!user_ptr) {
+      CRANE_ERROR("User '{}' not found in AccountManager during submit check.",
+                  job.Username());
+      return CraneErrCode::ERR_INVALID_USER;
+    }
+    auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
+    if (acct_it != user_ptr->account_to_attrs_map.end()) {
+      auto part_it =
+          acct_it->second.partition_to_limit_map.find(job.partition_id);
+      if (part_it != acct_it->second.partition_to_limit_map.end())
+        user_part_limit = &part_it->second;
     }
 
     m_user_meta_map_.if_contains(
@@ -527,12 +516,15 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
   for (const auto& account_name : job.account_chain) {
     const PartitionResourceLimit* acct_part_limit = nullptr;
     auto acct_ptr = g_account_manager->GetExistedAccountInfo(account_name);
-    if (acct_ptr) {
-      auto part_it =
-          acct_ptr->partition_to_limit_map.find(job.partition_id);
-      if (part_it != acct_ptr->partition_to_limit_map.end())
-        acct_part_limit = &part_it->second;
+    if (!acct_ptr) {
+      CRANE_ERROR(
+          "Account '{}' not found in AccountManager during submit check.",
+          account_name);
+      return CraneErrCode::ERR_INVALID_ACCOUNT;
     }
+    auto part_it = acct_ptr->partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_ptr->partition_to_limit_map.end())
+      acct_part_limit = &part_it->second;
 
     m_account_meta_map_.if_contains(
         account_name,
@@ -604,14 +596,18 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   {
     const PartitionResourceLimit* user_part_limit = nullptr;
     auto user_ptr = g_account_manager->GetExistedUserInfo(job.username);
-    if (user_ptr) {
-      auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
-      if (acct_it != user_ptr->account_to_attrs_map.end()) {
-        auto part_it =
-            acct_it->second.partition_to_limit_map.find(job.partition_id);
-        if (part_it != acct_it->second.partition_to_limit_map.end())
-          user_part_limit = &part_it->second;
-      }
+    if (!user_ptr) {
+      CRANE_ERROR("[job #{}]: User '{}' not found in AccountManager during "
+                  "run check.",
+                  job.job_id, job.username);
+      return std::unexpected("InvalidUser");
+    }
+    auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
+    if (acct_it != user_ptr->account_to_attrs_map.end()) {
+      auto part_it =
+          acct_it->second.partition_to_limit_map.find(job.partition_id);
+      if (part_it != acct_it->second.partition_to_limit_map.end())
+        user_part_limit = &part_it->second;
     }
 
     m_user_meta_map_.if_contains(
@@ -629,12 +625,15 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   for (const auto& account_name : job.account_chain) {
     const PartitionResourceLimit* acct_part_limit = nullptr;
     auto acct_ptr = g_account_manager->GetExistedAccountInfo(account_name);
-    if (acct_ptr) {
-      auto part_it =
-          acct_ptr->partition_to_limit_map.find(job.partition_id);
-      if (part_it != acct_ptr->partition_to_limit_map.end())
-        acct_part_limit = &part_it->second;
+    if (!acct_ptr) {
+      CRANE_ERROR("[job #{}]: Account '{}' not found in AccountManager during "
+                  "run check.",
+                  job.job_id, account_name);
+      return std::unexpected("InvalidAccount");
     }
+    auto part_it = acct_ptr->partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_ptr->partition_to_limit_map.end())
+      acct_part_limit = &part_it->second;
 
     m_account_meta_map_.if_contains(
         account_name,
