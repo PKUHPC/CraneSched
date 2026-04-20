@@ -102,16 +102,11 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  // =========================================================================
-  // Layer 1: Stateless primitive checks
-  // =========================================================================
-
   // Checks that resource_req does not exceed resource_total in any dimension.
   static std::expected<void, std::string> CheckTres_(
       const ResourceView& resource_req, const ResourceView& resource_total);
 
   static bool IsUnlimitedTres_(const ResourceView& res);
-
 
   // Submit-time QoS dimension check for a single entity.
   CraneErrCode CheckQosSubmitLimitsForEntity_(
