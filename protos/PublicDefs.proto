@@ -828,8 +828,7 @@ enum ErrCode {
   ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19;  // Parent account does not include this partition
 
   ERR_USER_EMPTY_PARTITION = 20;  // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as
-                                  // child nodes contain this partition.
+  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as child nodes contain this partition.
   ERR_HAS_NO_QOS_IN_PARTITION = 22;
   ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
   ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
@@ -846,12 +845,11 @@ enum ErrCode {
   ERR_DEFAULT_QOS_NOT_INHERITED = 33;   // Default QoS is not in the allowed QoS list
   ERR_DUPLICATE_DEFAULT_QOS = 34;       // Duplicate default QoS setting
 
-  ERR_CHILD_HAS_DEFAULT_QOS = 35;            // Failed to delete the account QoS as child
-                                             // nodes have set it as the default QoS.
+  ERR_CHILD_HAS_DEFAULT_QOS = 35;            // Failed to delete the account QoS as child nodes have set it as the
+                                             // default QoS.
   ERR_SET_ACCOUNT_QOS = 36;                  // QoS is used by some descendant node or itself of the account.
-  ERR_SET_DEFAULT_QOS = 37;                  // Qos not in allowed qos list or is already the default qos
-  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  //  // QoS cannot be directly deleted when it is set as the default
-                                             //  QoS.
+  ERR_SET_DEFAULT_QOS = 37;                  // QoS is not in allowed QoS list or is already the default QoS
+  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  // QoS cannot be directly deleted when it is set as the default QoS.
   ERR_UPDATE_DATABASE = 39;                  // Database update failed
 
   ERR_GENERIC_FAILURE = 40;
@@ -886,10 +884,8 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
-  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed
-                                 // account list for the partition.
-  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to
-                                 // the deny list for the partition.
+  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
+  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
   ERR_EBPF = 69;
 
   ERR_SUPERVISOR = 70;
@@ -904,8 +900,7 @@ enum ErrCode {
   ERR_LICENSE_LEGAL_FAILED = 78;
   ERR_INVALID_JOB_ID = 79;
 
-  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in
-                                     // Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
   ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
@@ -997,17 +992,15 @@ message AccountInfo {
   bool blocked = 10;
 }
 
-// Note: UserInfo DIFFERS from the `User` struct in C++ code and database
-// representation
-//       and is ONLY used for communication between CraneCtld and cacctmgr
-//       command. If an user belongs to multiple accounts, There will be
-//       multiple `UserInfo` messages with `account` pointing to each account.
-//       For example, if a user (uid=1) belongs to accounts `1,2,3`,
-//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1,
-//       account=2), (uid=1, account=3). The c++ code and database
-//       representation use a Map<account name, AttrsInAccount> to contain in
-//       ONE UserInfo message all the information belonging to different
-//       accounts.
+// Note: UserInfo differs from the `User` struct in C++ code and database
+// representation and is only used for communication between CraneCtld and
+// cacctmgr command. If a user belongs to multiple accounts, there will be
+// multiple `UserInfo` messages with `account` pointing to each account.
+// For example, if a user (uid=1) belongs to accounts `1,2,3`, there will be
+// three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2), and
+// (uid=1, account=3). The C++ code and database representation use a
+// Map<account name, AttrsInAccount> to contain all account information in one
+// `UserInfo` message.
 message UserInfo {
   enum AdminLevel {
     None = 0;
