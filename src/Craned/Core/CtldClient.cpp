@@ -804,7 +804,7 @@ void CtldClient::BroadcastPmixPort(
     crane::grpc::BroadcastPmixPortReply* response) {
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
 
   grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
   if (!status.ok()) {

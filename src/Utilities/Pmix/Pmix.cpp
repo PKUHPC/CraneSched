@@ -586,9 +586,13 @@ bool PmixServer::JobSet_() {
     PMIX_INFO_LOAD(&proc_data_arr[8], PMIX_NODEID, &rank_node_id, PMIX_UINT32);
 
     pmix_info_t info;
-    PMIX_INFO_LOAD(&info, PMIX_PROC_DATA, proc_data, PMIX_DATA_ARRAY);
+    PMIX_INFO_CONSTRUCT(&info);
+    PMIX_LOAD_KEY(info.key, PMIX_PROC_DATA);
+    info.value.type = PMIX_DATA_ARRAY;
+    info.value.data.darray = proc_data;
     info_list.emplace_back(info);
-    PMIX_DATA_ARRAY_DESTRUCT(proc_data);
+    // Ownership of proc_data is transferred to info; do NOT call
+    // PMIX_DATA_ARRAY_DESTRUCT here — it will be freed by PMIX_INFO_FREE.
   }
 
   // Job Size
