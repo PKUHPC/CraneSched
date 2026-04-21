@@ -95,14 +95,6 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
-  if (resource_use.GetCpuCount() > qos->max_cpus_per_user)
-    return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
-
-  if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
-      !CheckTres_(resource_use, qos->max_tres_per_account) ||
-      !CheckTres_(resource_use, qos->max_tres))
-    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
-
   job.qos_priority = qos->priority;
 
   if (job.time_limit >= absl::Seconds(kJobMaxTimeLimitSec)) {
@@ -344,7 +336,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, const ResourceView& req_res,
-    absl::Duration time_limit) const {
+    absl::Duration time_limit, bool is_user) const {
 
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
@@ -359,7 +351,8 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit != stat.partition_to_resource_map.end()) {
     if (pit->second.submit_jobs_count + 1 > partition_limit->max_submit_jobs)
-      return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+      return is_user ? CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER
+                     : CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
   }
 
   return CraneErrCode::SUCCESS;
@@ -380,7 +373,7 @@ CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
   // Partition dimension (peer-level with QoS).
   return CheckPartitionSubmitLimitsForEntity_(stat, partition_id,
                                               partition_limit, req_res,
-                                              time_limit);
+                                              time_limit, is_user);
 }
 
 std::expected<void, std::string>
