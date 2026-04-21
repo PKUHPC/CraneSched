@@ -29,6 +29,7 @@
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
+#include "crane/Tracing.h"
 #include "cri/api.pb.h"
 
 namespace Craned::Supervisor {
@@ -88,6 +89,9 @@ class StepInstance {
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
+
+  crane::ManualSpan execute_span_;
+  crane::ManualSpan& ExecuteSpan() { return execute_span_; }
 
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),

@@ -8,9 +8,16 @@ Tracing 系统提供三个独立的追踪维度：
 
 | 维度 | 说明 | 典型场景 |
 |------|------|----------|
-| **提交链路** (`submit/*`) | 覆盖任务从 gRPC 到达 → 认证 → 校验 → 入队 → ID 分配的全过程 | 排查提交失败原因、评估校验环节耗时 |
+| **提交链路** (`submit/*`) | 覆盖任务从 gRPC 到达 → 认证 → 校验 → 入队 → 调度等待的全过程 | 排查提交失败原因、评估校验环节耗时 |
 | **调度周期** (`scheduling/*`) | 覆盖每次调度循环的 NodeSelect、资源验证、DB 持久化、RPC 扇出 | 分析调度算法性能瓶颈 |
-| **执行生命周期** (`job/*`, `step/*`) | 跨 CraneCtld → Craned → Supervisor 三个服务，覆盖 alloc → prolog → 执行 → epilog → 释放 → 提交的全链路 | 端到端故障回溯、定位慢节点 |
+| **执行生命周期** (`job/*`, `step/*`) | 跨 CraneCtld → Craned → Supervisor 三个服务，覆盖 alloc → prolog → spawn → 执行 → finish → epilog → 释放的全链路 | 端到端故障回溯、定位慢节点 |
+
+支持两种分析模式：
+
+| 模式 | 说明 |
+|------|------|
+| **单任务分析** (`--job-id`) | 查看单个 job 的完整时间线，精确定位某个任务在哪个阶段慢 |
+| **系统级分析** (`--system`) | 聚合统计所有任务的性能指标（P50/P95/P99），定位系统瓶颈 |
 
 ## 前置条件
 
@@ -184,6 +191,166 @@ python3 query_trace.py --minutes 30
 ```
 
 依赖安装：`pip install influxdb-client`
+
+## 可视化
+
+### 文本火焰图
+
+使用 `--tree` 选项以树形层级展示 trace，直观查看各阶段耗时和 parent-child 关系：
+
+```bash
+python3 query_trace.py --job-id 12345 --tree -v
+```
+
+输出示例：
+
+```
+Trace c6630cb7b9f3b2d8  (Job #12345)
+==========================================================================================
+[CraneCtld] job/lifecycle                ████████████████████       10.36s
+    ├── [Craned@wrl04] job/alloc                 █                            65us
+    ├── [Craned@wrl04] step/supervisor_spawn     █                        262.70ms
+    │     step_type: 1
+    │   ├── [Supervisor@wrl04] step/execute          █████████████████           9.09s
+    │   │     step_type: 2
+    │   │     task_count: 1
+    │   └── [Supervisor@wrl04] step/finish           █                           130us
+    │         exit_code: 0
+    ├── [CraneCtld] job/rpc_execute              █                          4.85ms
+    ├── [Craned@wrl04] step/rpc_receive          █                            35us
+    └── [CraneCtld] job/end                      █                           271us
+```
+
+树中每一行表示一个 span，缩进表示 parent-child 关系。`-v` 选项显示 span 属性。`step_type` 取值：1=daemon, 2=primary, 3=common。
+
+### Chrome Trace / Perfetto UI
+
+导出为 [Chrome Trace Event Format](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/) JSON 文件，可在 [Perfetto UI](https://ui.perfetto.dev) 或 `chrome://tracing` 中查看交互式火焰图：
+
+```bash
+# 导出单任务 trace
+python3 query_trace.py --job-id 12345 --chrome /tmp/trace.json
+
+# 打开可视化
+# 方式1: 浏览器访问 https://ui.perfetto.dev，拖入 JSON 文件
+# 方式2: Chrome 浏览器访问 chrome://tracing，点击 Load 按钮
+```
+
+Perfetto 视图特性：
+
+- **按服务分行**：每个服务（CraneCtld, Craned@wrl02, Supervisor@wrl02）显示为独立的 Process 行
+- **按 Step 分 Lane**：同一个 Step 的所有 span 在同一行，标注 "Step 0 (daemon)"、"Step 1 (primary)"、"Step 2 (common)"
+- **颜色区分**：不同 step_type 使用不同色系（daemon / primary / common）
+- **因果箭头**：`step/supervisor_spawn` → `step/execute` 之间有 flow arrow 标注因果关系
+- **点击查看详情**：点击任意 span 可查看 job_id、step_id、exit_code 等属性
+
+## 性能瓶颈定位
+
+Tracing 工具支持系统级聚合分析，用于在高负载场景下定位调度瓶颈。
+
+### 系统级分析
+
+使用 `--system` 模式对时间窗口内的所有 span 进行统计分析：
+
+```bash
+# 分析过去 10 分钟的系统性能
+python3 query_trace.py --system --minutes 10 --limit 10000
+```
+
+输出示例：
+
+```
+======================================================================
+ CraneSched System Performance (1060 spans)
+======================================================================
+
+Throughput:
+  Jobs seen:       30
+  Completed:       30 (100.0%)
+  Failed:          0 (0.0%)
+
+Scheduling Cycle (scheduling/cycle):  n=1
+  avg=61.37ms  P50=61.37ms  P95=61.37ms  P99=61.37ms  max=61.37ms
+  |-- node_select               avg=    1.71ms  P99=    1.71ms  (n=1)
+  |-- resource_validate         avg=    6.22ms  P99=    6.22ms  (n=1)
+  |-- db_persist                avg=   25.81ms  P99=   25.81ms  (n=1)  <--
+  |-- rpc_alloc_jobs            avg=    6.76ms  P99=    6.76ms  (n=1)
+  |-- rpc_alloc_steps           avg=   19.04ms  P99=   19.04ms  (n=1)
+
+Submit-to-Running (job/pending):
+  avg=934ms  P50=935ms  P95=936ms  P99=936ms
+
+RPC Latency by Node (job/rpc_execute):
+  wrl02  avg=3.21ms  P99=3.21ms  (n=1)
+  wrl03  avg=4.17ms  P99=4.17ms  (n=1)
+  wrl04  avg=3.64ms  P99=3.64ms  (n=1)
+
+Step Execute by Type:
+  primary  avg=2.17s  P99=2.19s  (n=30)
+```
+
+报告包含：
+
+| 指标 | 说明 |
+|------|------|
+| **Scheduling Cycle** | 调度周期耗时分解（node_select / resource_validate / db_persist / rpc_alloc），`<--` 标记潜在瓶颈 |
+| **Submit-to-Running** | 从提交到开始执行的等待时间分布 |
+| **RPC Latency by Node** | 各计算节点的 RPC 延迟，可发现慢节点 |
+| **Step Execute by Type** | 按 step 类型（daemon/primary/common）分组的执行时间 |
+
+### 系统级 Chrome Trace
+
+将所有任务叠加在同一时间轴上，查看系统整体行为：
+
+```bash
+python3 query_trace.py --system --minutes 10 --limit 10000 --chrome /tmp/system.json
+```
+
+与单任务模式不同，系统级视图按**功能模块**组织 Lane（而非按 step）：
+
+```
+CraneCtld:
+  scheduling/cycle:    [====cycle====][====cycle====]   ← 调度器是否饱和？
+  job/rpc_execute:     [rpc][rpc][rpc][rpc]...          ← RPC 扇出并行度？
+  job/status_change:   [sc][sc][sc]...                  ← 状态变更处理耗时？
+
+Craned@wrl02:
+  step/supervisor_spawn: [spawn][spawn][spawn]...       ← Supervisor 启动并行度？
+  step/execute:          [=====execute=====][=====]...  ← 执行阶段利用率？
+
+Craned@wrl03:
+  ...                                                    ← 节点间负载均衡？
+```
+
+典型分析场景：
+
+- **调度器饱和**：`scheduling/cycle` 之间无间隙，说明调度器满负载运行
+- **RPC 瓶颈**：`job/rpc_execute` 排队严重（串行而非并行）
+- **节点不均衡**：某节点的 `step/execute` 密度明显高于其他节点
+- **状态变更阻塞**：`job/status_change` 占据大量时间，阻塞后续 step 调度
+
+### 压力测试
+
+使用内置压测脚本生成高负载数据并自动分析：
+
+```bash
+# 提交 30 个单节点短任务
+bash test/Trace/stress_test.sh 30 1
+
+# 提交 20 个双节点任务
+bash test/Trace/stress_test.sh 20 2
+```
+
+脚本自动完成：并行提交 → 等待完成 → 等待 span flush → `--system` 统计分析 → 导出 Chrome Trace。
+
+### 排查流程示例
+
+1. **发现问题**：用户反馈"任务排队时间变长"
+2. **系统级分析**：`--system --minutes 30` 查看 `job/pending` P99 是否升高
+3. **定位瓶颈**：如果 `scheduling/cycle` 的 `db_persist` P99 明显偏高 → DB 是瓶颈
+4. **节点排查**：`RPC Latency by Node` 显示某节点 P99 偏高 → 检查该节点
+5. **单任务深入**：`--job-id <慢任务ID> --tree -v` 精确查看哪个阶段异常
+6. **可视化确认**：`--chrome` 导出到 Perfetto，在时间轴上直观确认
 
 ## 数据管道架构
 

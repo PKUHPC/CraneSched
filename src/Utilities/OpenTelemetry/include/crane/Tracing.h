@@ -291,6 +291,8 @@ class ScopedSpan {
   }
 
  private:
+  friend class ManualSpan;
+
   /// No-op constructor (for when tracing is disabled at runtime).
   ScopedSpan() : ended_(true) {}
 
@@ -361,6 +363,12 @@ class ManualSpan {
 
   void SetStatus(StatusCode code, std::string_view desc = {}) {
     if (span_) span_->SetStatus(code, std::string(desc));
+  }
+
+  [[nodiscard]] ScopedSpan CreateChild(std::string_view child_name) const {
+    if (span_)
+      return ScopedSpan(child_name, tracer_, span_->GetContext());
+    return ScopedSpan();
   }
 
   [[nodiscard]] bool IsActive() const { return span_ != nullptr; }
@@ -535,6 +543,7 @@ class ManualSpan {
   void SetAttribute(std::string_view, const T&) {}
   void AddEvent(std::string_view) {}
   void SetStatus(StatusCode, std::string_view = {}) {}
+  [[nodiscard]] ScopedSpan CreateChild(std::string_view) const { return {}; }
   [[nodiscard]] bool IsActive() const { return false; }
 };
 

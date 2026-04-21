@@ -139,6 +139,7 @@ message FreeJobsReply {}
 
 message ExecuteStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
+  map<uint32, string> job_traceparents = 2;  // job_id → W3C traceparent
 }
 
 message ExecuteStepsReply {

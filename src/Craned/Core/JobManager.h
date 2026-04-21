@@ -98,7 +98,8 @@ class JobManager {
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
   CraneErrCode ExecuteStepAsync(
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
+      std::unordered_map<job_id_t, std::string> traceparents = {});
 
   CraneExpected<void> ChangeStepTimelimit(job_id_t job_id, step_id_t step_id,
                                           int64_t new_timelimit_sec);
@@ -176,6 +177,7 @@ class JobManager {
   struct EvQueueExecuteStepElem {
     job_id_t job_id;
     step_id_t step_id;
+    std::string traceparent;
     std::promise<CraneErrCode> ok_prom;
   };
 

@@ -509,6 +509,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
   submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
   submit_span.SetAttribute("partition",
                            std::string(request->job().partition_name()));
+  submit_span.SetAttribute(
+      "queue_depth",
+      static_cast<int64_t>(g_job_scheduler->PendingQueueSize()));
 
   {
     CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");

@@ -209,7 +209,8 @@ CraneErrCode CranedStub::AllocSteps(
 
 CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>>
 CranedStub::ExecuteSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+    const std::unordered_map<job_id_t, std::string> &traceparents) {
   using crane::grpc::ExecuteStepsReply;
   using crane::grpc::ExecuteStepsRequest;
   ExecuteStepsRequest request;
@@ -223,6 +224,12 @@ CranedStub::ExecuteSteps(
   for (const auto &[job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
+  }
+
+  // Pass traceparents for cross-process trace correlation
+  auto &tp_map = *request.mutable_job_traceparents();
+  for (const auto &[job_id, tp] : traceparents) {
+    tp_map[job_id] = tp;
   }
 
   auto status = m_stub_->ExecuteSteps(&context, request, &reply);

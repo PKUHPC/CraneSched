@@ -25,6 +25,7 @@
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "SupervisorStub.h"
+#include "crane/Tracing.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
 
@@ -54,9 +55,22 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
 
+  // Mark RPC receive for latency measurement
+  for (const auto &[job_id, tp] : request->job_traceparents()) {
+    CRANE_TRACE_SCOPE_FROM_REMOTE(recv_span, "step/rpc_receive", tp);
+    recv_span.SetAttribute("job_id", job_id);
+  }
+
+  // Build traceparent map for downstream tracing
+  std::unordered_map<job_id_t, std::string> traceparents;
+  for (const auto &[job_id, tp] : request->job_traceparents()) {
+    traceparents[job_id] = tp;
+  }
+
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
-  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map));
+  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
+                               std::move(traceparents));
 
   return Status::OK;
 }

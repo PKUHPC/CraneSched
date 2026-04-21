@@ -540,7 +540,8 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
 }
 
 CraneErrCode JobManager::ExecuteStepAsync(
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
+    std::unordered_map<job_id_t, std::string> traceparents) {
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
@@ -554,9 +555,11 @@ CraneErrCode JobManager::ExecuteStepAsync(
         return CraneErrCode::ERR_CGROUP;
       }
 
-      EvQueueExecuteStepElem elem{.job_id = job_id,
-                                  .step_id = step_id,
-                                  .ok_prom = std::promise<CraneErrCode>{}};
+      EvQueueExecuteStepElem elem{
+          .job_id = job_id,
+          .step_id = step_id,
+          .traceparent = traceparents.count(job_id) ? traceparents[job_id] : "",
+          .ok_prom = std::promise<CraneErrCode>{}};
 
       m_grpc_execute_step_queue_.enqueue(std::move(elem));
     }
@@ -634,7 +637,13 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
-    auto& [job_id, step_id, ok_prom] = elem;
+    auto& [job_id, step_id, traceparent, ok_prom] = elem;
+
+    CRANE_TRACE_SCOPE_FROM_REMOTE(dispatch_span, "step/queue_dispatch",
+                                  traceparent);
+    dispatch_span.SetAttribute("job_id", job_id);
+    dispatch_span.SetAttribute("step_id", step_id);
+
     auto job = m_job_map_.GetValueExclusivePtr(job_id);
 
     if (!job) {

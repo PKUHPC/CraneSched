@@ -133,6 +133,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
                                 this->traceparent);
   spawn_span.SetAttribute("job_id", job_id);
   spawn_span.SetAttribute("step_id", step_id);
+  spawn_span.SetAttribute("step_type",
+                           static_cast<int64_t>(step_to_d.step_type()));
 
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
@@ -351,7 +353,13 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
-    if (!this->traceparent.empty()) init_req.set_traceparent(this->traceparent);
+    // Pass spawn span's context so step/execute becomes child of
+    // step/supervisor_spawn, not just child of job/lifecycle.
+    auto spawn_tp = crane::SerializeTraceParent(spawn_span.GetContext());
+    if (!spawn_tp.empty())
+      init_req.set_traceparent(spawn_tp);
+    else if (!this->traceparent.empty())
+      init_req.set_traceparent(this->traceparent);
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {

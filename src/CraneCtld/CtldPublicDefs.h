@@ -921,6 +921,10 @@ struct JobInCtld {
   // Created at alloc time, End() called when job completes.
   crane::ManualSpan lifecycle_span_;
 
+  // Non-RAII pending span covering scheduling wait time.
+  // Created at submit, End() called when scheduler allocates the job.
+  crane::ManualSpan pending_span_;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
 
@@ -1102,6 +1106,7 @@ struct JobInCtld {
   const std::string& SubmitId() const { return submit_id_; }
 
   crane::ManualSpan& LifecycleSpan() { return lifecycle_span_; }
+  crane::ManualSpan& PendingSpan() { return pending_span_; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);

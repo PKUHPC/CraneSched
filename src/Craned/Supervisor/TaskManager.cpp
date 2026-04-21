@@ -2307,6 +2307,15 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     DelSignalTimers_();
+
+    // End the execute span now that all tasks have finished
+    if (m_step_.ExecuteSpan().IsActive()) {
+      if (status.max_exit_code != 0)
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "nonzero_exit");
+      m_step_.ExecuteSpan().End();
+    }
+
     if (!m_step_.orphaned) {
       CRANE_TRACE_SCOPE_FROM_REMOTE(finish_span, "step/finish",
                                     g_config.Tracing.Traceparent);
@@ -2853,12 +2862,16 @@ void TaskManager::EvGrpcExecuteStepCb_() {
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     m_step_.GotNewStatus(StepStatus::Running);
 
-    CRANE_TRACE_SCOPE_FROM_REMOTE(exec_span, "step/execute",
-                                  g_config.Tracing.Traceparent);
+    CRANE_TRACE_MANUAL_FROM_REMOTE(exec_span, "step/execute",
+                                   g_config.Tracing.Traceparent);
     exec_span.SetAttribute("job_id", m_step_.job_id);
     exec_span.SetAttribute("step_id", m_step_.step_id);
     exec_span.SetAttribute("task_count",
                            static_cast<int64_t>(m_step_.task_ids.size()));
+    exec_span.SetAttribute(
+        "step_type",
+        static_cast<int64_t>(m_step_.GetStep().step_type()));
+    m_step_.ExecuteSpan() = std::move(exec_span);
 
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
@@ -2878,7 +2891,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      exec_span.SetStatus(crane::StatusCode::kError, "uid_lookup_failed");
+      m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "uid_lookup_failed");
       for (auto task_id : m_step_.task_ids)
         TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                     ExitCode::EC_PERMISSION_DENIED,
@@ -2889,13 +2902,13 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     }
 
     {
-      CRANE_TRACE_CHILD_NAMED(prep_span, exec_span, "step/prepare");
+      CRANE_TRACE_CHILD_NAMED(prep_span, m_step_.ExecuteSpan(), "step/prepare");
       auto err = m_step_.Prepare();
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
                     m_step_.step_id, static_cast<int>(err));
         prep_span.SetStatus(crane::StatusCode::kError, "prepare_failed");
-        exec_span.SetStatus(crane::StatusCode::kError, "prepare_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "prepare_failed");
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->TaskFinish_(
               task_id, crane::grpc::JobStatus::Failed,
@@ -2942,7 +2955,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
     {
-      CRANE_TRACE_CHILD_NAMED(cg_span, exec_span, "step/cgroup_alloc");
+      CRANE_TRACE_CHILD_NAMED(cg_span, m_step_.ExecuteSpan(), "step/cgroup_alloc");
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
           CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
                                            false),
@@ -2951,7 +2964,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
                     m_step_.step_id);
         cg_span.SetStatus(crane::StatusCode::kError, "cgroup_alloc_failed");
-        exec_span.SetStatus(crane::StatusCode::kError, "cgroup_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "cgroup_failed");
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->TaskFinish_(task_id, crane::grpc::JobStatus::Failed,
                                   ExitCode::EC_CGROUP_ERR,
@@ -2968,7 +2981,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    CRANE_TRACE_CHILD_NAMED(launch_span, exec_span, "step/task_launch");
+    CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(), "step/task_launch");
     launch_span.SetAttribute("task_count",
                              static_cast<int64_t>(m_step_.task_ids.size()));
 
