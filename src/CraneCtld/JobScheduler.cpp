@@ -1412,6 +1412,17 @@ void JobScheduler::ScheduleThread_() {
               }
               JobInCtld* child_to_schedule = child_it->second.get();
 
+              // Skip held children — they should not be dispatched.
+              if (child_to_schedule->Held()) {
+                job->pending_reason = "ChildHeld";
+                if (!job_in_scheduler->actual_licenses.empty()) {
+                  g_licenses_manager->FreeLicense(
+                      job_in_scheduler->actual_licenses);
+                }
+                g_account_meta_container->FreeQosResource(*job);
+                continue;
+              }
+
               // Transfer scheduling result to the child.
               child_to_schedule->SetCachedPriority(job_in_scheduler->priority);
               child_to_schedule->SetStartTime(job_in_scheduler->start_time);
@@ -3100,6 +3111,33 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
 
   JobInCtld* job = pd_iter->second.get();
   job->SetHeld(hold);
+
+  // If this job is an array parent, propagate hold/release to all
+  // tracked children that are currently in the pending map.
+  if (job->IsArrayParent()) {
+    auto parent_state = job->GetArrayParentState();
+    if (parent_state) {
+      absl::MutexLock array_guard(&parent_state->mutex);
+      for (auto child_job_id : parent_state->pending_child_job_ids) {
+        auto child_it = m_pending_job_map_.find(child_job_id);
+        if (child_it != m_pending_job_map_.end()) {
+          child_it->second->SetHeld(hold);
+        }
+      }
+      if (hold) {
+        parent_state->runnable_pending_child_job_id_by_task_id.clear();
+      } else {
+        for (auto& [task_id, child_id] :
+             parent_state->active_child_job_id_by_task_id) {
+          if (parent_state->pending_child_job_ids.contains(child_id)) {
+            parent_state->runnable_pending_child_job_id_by_task_id[task_id] =
+                child_id;
+          }
+        }
+      }
+    }
+  }
+
   job->SetTrackedArrayChildHeld(hold);
 
   // Copy persisted data to prevent inconsistency.
@@ -6428,6 +6466,11 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
                 job_to_ctld.array_index_start(), job_to_ctld.array_index_end());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
+  if (has_array_start && job_to_ctld.has_array_index_stride() &&
+      job_to_ctld.array_index_stride() == 0) {
+    CRANE_DEBUG("Job #{} has invalid array stride 0.", job->JobId());
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
 
   // Check res req valid
   if (job->req_total_res_view.GetMemoryBytes() == 0) {
@@ -7013,7 +7056,6 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
   uint32_t array_stride = parent->JobToCtld().has_array_index_stride()
                               ? parent->JobToCtld().array_index_stride()
                               : 1;
-  if (array_stride == 0) array_stride = 1;  // Avoid infinite loop
 
   // Create only the next child task.
   auto child = parent->CreateNextArrayChild();
@@ -7096,7 +7138,6 @@ std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
   uint32_t array_stride = parent->JobToCtld().has_array_index_stride()
                               ? parent->JobToCtld().array_index_stride()
                               : 1;
-  if (array_stride == 0) array_stride = 1;
 
   // Create only the tasks that don't exist yet.
   std::vector<std::unique_ptr<JobInCtld>> children_to_create;

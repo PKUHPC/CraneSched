@@ -950,7 +950,6 @@ struct JobInCtld {
   void UntrackArrayChild();
   void RebuildArraySchedulingCursor();
 
- private:
   struct ArrayParentState {
     absl::Mutex mutex;
     std::unordered_set<uint32_t> materialized_task_ids ABSL_GUARDED_BY(mutex);
@@ -963,6 +962,11 @@ struct JobInCtld {
         ABSL_GUARDED_BY(mutex);
   };
 
+  std::shared_ptr<ArrayParentState> GetArrayParentState() const {
+    return array_parent_state_;
+  }
+
+ private:
   std::shared_ptr<ArrayParentState> EnsureArrayParentState_();
   std::optional<uint32_t> GetArrayTaskId_() const;
   bool IsValidArrayTaskId_(uint32_t task_id) const;
