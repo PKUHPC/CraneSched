@@ -260,17 +260,18 @@ void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
  */
 
 std::expected<void, std::string> AccountMetaContainer::CheckTres_(
-    const ResourceView& resource_req, const ResourceView& resource_total) {
+    const ResourceView& resource_req, const ResourceView& resource_total,
+    const std::string& prefix) {
   if (resource_req.GetCpuCount() > resource_total.GetCpuCount()) {
-    return std::unexpected("QosCpuResourceLimit");
+    return std::unexpected(prefix + "CpuResourceLimit");
   }
 
   if (resource_req.GetMemoryBytes() > resource_total.GetMemoryBytes()) {
-    return std::unexpected("QosMemResourceLimit");
+    return std::unexpected(prefix + "MemResourceLimit");
   }
 
   if (!(resource_req <= resource_total))
-    return std::unexpected("QosGresResourceLimit");
+    return std::unexpected(prefix + "GresResourceLimit");
 
   return {};
 }
@@ -373,7 +374,7 @@ AccountMetaContainer::CheckQosRunLimitsForEntity_(
   auto it = stat.qos_to_resource_map.find(qos_name);
   if (it == stat.qos_to_resource_map.end()) {
     // Entry must exist at schedule time (created at submit time).
-    return std::unexpected("QosResourceLimit");
+    return std::unexpected("QosEntryNotFound");
   }
   const MetaResource& val = it->second;
 
@@ -438,7 +439,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
   if (IsUnlimitedTres_(qos.max_tres) && IsUnlimitedTres_(qos_max_tres)) {
     ResourceView resource_use{allocated_res};
     resource_use += val.resource;
-    auto tres_result = CheckTres_(resource_use, partition_limit->max_tres);
+    auto tres_result = CheckTres_(resource_use, partition_limit->max_tres, "Partition");
     if (!tres_result) return tres_result;
   }
 
@@ -556,21 +557,21 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   if (!m_user_meta_map_.contains(job.username)) {
     CRANE_ERROR("[job #{}]: User '{}' not found in m_user_meta_map_.",
                 job.job_id, job.username);
-    return std::unexpected("QosResourceLimit");
+    return std::unexpected("UserMetaNotFound");
   }
 
   for (const auto& account_name : job.account_chain) {
     if (!m_account_meta_map_.contains(account_name)) {
       CRANE_ERROR("[job #{}]: Account '{}' not found in m_account_meta_map_.",
                   job.job_id, account_name);
-      return std::unexpected("QosResourceLimit");
+      return std::unexpected("AccountMetaNotFound");
     }
   }
 
   if (!m_qos_meta_map_.contains(job.qos)) {
     CRANE_ERROR("[job #{}]: qos '{}' not found in m_qos_meta_map_.", job.job_id,
                 job.qos);
-    return std::unexpected("QosResourceLimit");
+    return std::unexpected("QosMetaNotFound");
   }
 
   const ResourceView allocated_res = job.allocated_res.View();
