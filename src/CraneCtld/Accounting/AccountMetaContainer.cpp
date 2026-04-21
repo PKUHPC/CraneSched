@@ -94,6 +94,14 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job) {
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
+  if (resource_use.GetCpuCount() > qos->max_cpus_per_user)
+    return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+
+  if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
+      !CheckTres_(resource_use, qos->max_tres_per_account) ||
+      !CheckTres_(resource_use, qos->max_tres))
+    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
+
   job.qos_priority = qos->priority;
 
   if (job.time_limit >= absl::Seconds(kJobMaxTimeLimitSec)) {
