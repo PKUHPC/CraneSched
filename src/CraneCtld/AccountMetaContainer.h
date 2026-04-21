@@ -103,8 +103,10 @@ class AccountMetaContainer final {
   }
 
   // Checks that resource_req does not exceed resource_total in any dimension.
+  // prefix is used to distinguish QoS vs Partition in the error message.
   static std::expected<void, std::string> CheckTres_(
-      const ResourceView& resource_req, const ResourceView& resource_total);
+      const ResourceView& resource_req, const ResourceView& resource_total,
+      const std::string& prefix = "Qos");
 
   static bool IsUnlimitedTres_(const ResourceView& res);
 
