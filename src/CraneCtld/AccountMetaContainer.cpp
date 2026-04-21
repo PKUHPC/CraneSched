@@ -342,18 +342,18 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
   if (!CheckTres_(req_res, partition_limit->max_tres_per_job)) {
-    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
+    return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
   }
 
   if (time_limit > partition_limit->max_wall_duration_per_job) {
-    return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+    return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
   }
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit != stat.partition_to_resource_map.end()) {
     if (pit->second.submit_jobs_count + 1 > partition_limit->max_submit_jobs)
-      return is_user ? CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER
-                     : CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+      return is_user ? CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER
+                     : CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
   }
 
   return CraneErrCode::SUCCESS;

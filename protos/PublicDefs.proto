@@ -889,6 +889,11 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
+
+  ERR_PARTITION_TRES_PER_JOB_BEYOND = 106;          // Partition max_tres_per_job exceeded
+  ERR_PARTITION_TIME_BEYOND = 107;                   // Partition max_wall_duration_per_job exceeded
+  ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 108;      // Partition max_submit_jobs exceeded (user dimension)
+  ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT = 109;   // Partition max_submit_jobs exceeded (account dimension)
 }
 
 enum EntityType {
