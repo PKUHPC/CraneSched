@@ -420,7 +420,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit == stat.partition_to_resource_map.end())
-    return std::unexpected("PartitionResourceLimit");
+    return std::unexpected("PartitionEntryNotFound");
 
   const MetaResource& val = pit->second;
 
