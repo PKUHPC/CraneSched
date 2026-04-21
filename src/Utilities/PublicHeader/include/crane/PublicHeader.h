@@ -204,7 +204,7 @@ enum ExitCodeEnum : uint16_t {
 
 namespace Internal {
 // clang-format off
-constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
+constexpr std::array<std::string_view, 110>
     kCraneErrStrArr = {
         // 0 - 4
         "Success",
@@ -354,9 +354,15 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "The current submitted job exceeds the QoS limit (MaxTresPerAccount)",
         "The current submitted job exceeds the QoS limit (MaxTresPerJob)",
 
-        // 105 - 106
+        // 105 - 109
         "Invalid deadline",
         "PMIx error",
+        "Resource (TRES) per job exceeds the partition limit",
+        "Time limit exceeds the partition's per-job wall time limit",
+        "Partition max submit jobs per user exceeded",
+        
+        // 110
+        "Partition max submit jobs per account exceeded"
     };
 // clang-format on
 }  // namespace Internal
