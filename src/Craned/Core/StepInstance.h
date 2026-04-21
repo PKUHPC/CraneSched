@@ -41,8 +41,16 @@ struct StepInstance {
 
   StepStatus status{StepStatus::Invalid};
   std::shared_ptr<SupervisorStub> supervisor_stub{nullptr};
+
   // job_id/step_id/system group
   std::unique_ptr<CgroupInterface> crane_cgroup{nullptr};
+
+  // Cgroup str for this step's system cgroup (w/o "crane/" prefix).
+  // e.g. "job_1/step_0/system" (v1) or "overflow/job_1/step_0/system" (v2).
+  std::string cg_str;
+
+  // Job's cgroup path info (for constructing child paths and cpuset migration).
+  Common::CgroupPathInfo job_path_info;
 
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
@@ -68,7 +76,7 @@ struct StepInstance {
     return std::format("{}.{}", job_id, step_id);
   }
 
-  CraneErrCode Prepare();
+  CraneErrCode Prepare(const Common::CgroupPathInfo& job_path_info);
 
   CraneErrCode SpawnSupervisor(const EnvMap& job_env_map);
 
@@ -77,7 +85,7 @@ struct StepInstance {
   void ExecuteStepAsync();
 
   // Not implemented yet.
-  CraneExpected<void> TerminateStep(bool mark_as_orphaned,
-                                    bool terminated_by_user);
+  CraneExpected<void> TerminateStep(
+      bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source);
 };
 }  // namespace Craned

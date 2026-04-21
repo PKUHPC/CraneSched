@@ -85,12 +85,20 @@ class CranedStub {
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
   CraneErrCode TerminateSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+      crane::grpc::TerminateSource terminate_source =
+          crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode TerminateOrphanedSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds);
+  CraneErrCode ChangeJobTimeConstraint(
+      uint32_t job_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
+
+  CraneErrCode SuspendJobs(const std::vector<task_id_t> &job_ids);
+
+  CraneErrCode ResumeJobs(const std::vector<task_id_t> &job_ids);
 
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest &request);

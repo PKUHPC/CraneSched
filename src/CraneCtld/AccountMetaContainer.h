@@ -118,11 +118,40 @@ class AccountMetaContainer final {
   std::expected<void, std::string> CheckQosResource_(
       const Qos& qos, const PdJobInScheduler& job);
 
+  template <typename T>
+  static void CheckAndSubResource_(T& current, const T& need,
+                                   const std::string& resource_name,
+                                   const std::string& username,
+                                   const std::string& qos, job_id_t job_id) {
+    if constexpr (std::is_same_v<T, ResourceView>) {
+      if (!(need <= current)) {
+        CRANE_ERROR(
+            "Insufficient {} when freeing for user/account '{}', qos '{}', "
+            "job {}.",
+            resource_name, username, qos, job_id);
+        current.SetToZero();
+        return;
+      }
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      if (current < need) {
+        CRANE_ERROR(
+            "Insufficient {} when freeing for user/account '{}', qos '{}', "
+            "job {}. cur={}, need={}",
+            resource_name, username, qos, job_id, current, need);
+        current = 0;
+        return;
+      }
+    } else {
+      if (current < need) {
+        CRANE_ERROR("Unknown type: insufficient resource");
+        return;
+      }
+    }
+    current -= need;
+  }
+
   static std::expected<void, std::string> CheckTres_(
       const ResourceView& resource_req, const ResourceView& resource_total);
-
-  static bool CheckGres_(const DeviceMap& device_req,
-                         const DeviceMap& device_total);
 
   void DoMallocResource_(job_id_t job_id, const std::string& username,
                          const std::list<std::string>& account_chain,

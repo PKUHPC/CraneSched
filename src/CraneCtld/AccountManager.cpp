@@ -1304,9 +1304,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       break;
     }
     case crane::grpc::ModifyField::MaxCpusPerUser: {
-      int64_t value_number;
-      util::ConvertStringToInt64(value, &value_number);
-      res_qos.max_cpus_per_user = value_number;
+      res_qos.max_cpus_per_user = cpu_t(std::stod(value));
       log += fmt::format("max_cpus_per_user: {}\n", value);
       break;
     }

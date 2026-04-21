@@ -533,11 +533,11 @@ void CtldClient::Init() {
               std::inserter(valid_job_steps[job_id],
                             valid_job_steps[job_id].end()));
         }
-        std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
         std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
             steps_to_sync{};
+        std::unordered_set<job_id_t> refrozen_jobs{};
 
         // Define status priority for intelligent merging
         // Ctld valid status:
@@ -546,22 +546,17 @@ void CtldClient::Init() {
         //   - Starting
         //   - Configuring
         // Craned valid status:
-        //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
-        //     OutOfMemory)
+        //   - Finished states (see IsFinishedStepStatus())
         //   - Completing (All steps finished on CommonStep / Asked to exit on
         //     DaemonStep, during Epilog)
         //   - Running
         //   - Starting (Only for CommonStep)
         //   - Configuring
         auto GetStatusPriority = [](StepStatus status) -> int {
-          switch (status) {
-          case StepStatus::Completed:
-          case StepStatus::Failed:
-          case StepStatus::ExceedTimeLimit:
-          case StepStatus::Cancelled:
-          case StepStatus::OutOfMemory:
+          if (IsFinishedStepStatus(status))
             return 100;  // Terminal states - highest priority
 
+          switch (status) {
           case StepStatus::Completing:
             return 90;  // Almost terminal
 
@@ -619,6 +614,25 @@ void CtldClient::Init() {
             if (ctld_status == StepStatus::Completing) {
               CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
               completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            // Handle Suspended status from Ctld: re-freeze cgroup to ensure
+            // consistency after Craned restart
+            if (ctld_status == StepStatus::Suspended) {
+              if (refrozen_jobs.insert(job_id).second) {
+                CRANE_INFO(
+                    "[Job #{}] Ctld reports Suspended, re-freezing by "
+                    "job cgroup during recovery.",
+                    job_id);
+                auto err = g_job_mgr->SuspendJobByCgroup(job_id);
+                if (err != CraneErrCode::SUCCESS) {
+                  CRANE_WARN(
+                      "[Job #{}] Failed to re-freeze job cgroup during "
+                      "recovery: {}",
+                      job_id, CraneErrStr(err));
+                }
+              }
               continue;
             }
 
@@ -702,11 +716,6 @@ void CtldClient::Init() {
           CRANE_INFO("Freeing invalid jobs: [{}].",
                      absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(std::move(invalid_jobs));
-        }
-        if (!completing_jobs.empty()) {
-          CRANE_INFO("Terminating completing jobs: [{}].",
-                     absl::StrJoin(completing_jobs, ","));
-          g_job_mgr->FreeJobs(std::move(completing_jobs));
         }
         if (!completing_steps.empty()) {
           CRANE_INFO("Terminating completing steps: [{}].",
@@ -856,7 +865,7 @@ bool CtldClient::CranedRegister_(
   *ready_request.mutable_token() = token;
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
-  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
+  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
@@ -1197,8 +1206,7 @@ void CtldClient::NodeHealthCheck_() {
   CRANE_DEBUG("Start node health checking....");
 
   std::string reason;
-  int64_t cpu_count =
-      static_cast<int64_t>(node_config->allocatable_res.cpu_count);
+  auto cpu_count = static_cast<int64_t>(node_config->GetCpuSet().cpu_count);
   if (node_real.cpu < cpu_count) {
     reason = fmt::format(
         "Node health check fail. config cpu_count: {}, real cpu_count: {}",
@@ -1208,7 +1216,7 @@ void CtldClient::NodeHealthCheck_() {
     return;
   }
 
-  uint64_t mem_bytes_config = node_config->allocatable_res.memory_bytes;
+  uint64_t mem_bytes_config = node_config->GetMemoryBytes();
   double mem_gb_config =
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 

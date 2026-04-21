@@ -124,7 +124,7 @@ jobs:
     steps:
       # Checkout backend repository
       - name: Checkout backend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: CraneSched
           ref: ${{ env.BACKEND_REF || github.ref }}
@@ -132,7 +132,7 @@ jobs:
 
       # Checkout frontend repository at unified ref
       - name: Checkout frontend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: PKUHPC/CraneSched-FrontEnd
           path: CraneSched-FrontEnd
@@ -347,7 +347,7 @@ jobs:
 
       # Upload large bundle artifact (note: artifact name != file name)
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-output
           path: build-output.tar.gz
@@ -356,7 +356,7 @@ jobs:
 
       # Upload lightweight meta artifact
       - name: Upload meta artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-meta
           path: meta.json
@@ -422,7 +422,7 @@ jobs:
 
       # Download lightweight meta first (small; fast)
       - name: Download meta
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.output_meta_artifact }}   # build-meta
           path: .
@@ -465,7 +465,7 @@ jobs:
       # Fallback: download large bundle artifact only if local cache missed
       - name: Download bundle (fallback)
         if: steps.local_first.outputs.hit != 'true'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.output_bundle_artifact }}  # build-output
           path: .
@@ -501,7 +501,7 @@ jobs:
 
       # Upload AutoTest results
       - name: Upload AutoTest Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: result.json
           path: output/result.json

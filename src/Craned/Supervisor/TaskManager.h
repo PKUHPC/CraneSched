@@ -34,12 +34,21 @@
 
 namespace Craned::Supervisor {
 
-enum class TerminatedBy : uint8_t {
-  NONE = 0,
+using TaskExecId = std::variant<std::string, pid_t>;
+
+enum class TaskFinalizeCause : uint8_t {
+  NORMAL = 0,
+  TASK_PREPARE_FAILED,
+  TASK_SPAWN_FAILED,
+  STEP_PWD_LOOKUP_FAILED,
+  STEP_PREPARE_FAILED,
+  STEP_CGROUP_FAILED,
   CANCELLED_BY_USER,
-  TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM,
-  TERMINATION_BY_CFORED_CONN_FAILURE
+  CFORED_DISCONNECTED,
+  DAEMON_POD_SHUTDOWN_REQUESTED,
+  INTERACTIVE_NO_PROCESS,
+  TIMEOUT,
+  DEADLINE
 };
 
 class ITaskInstance;
@@ -72,17 +81,18 @@ class StepInstance {
 
   std::optional<X11Meta> x11_meta;
 
-  std::string cgroup_path;  // resolved cgroup path
   std::optional<std::filesystem::path> script_path;
 
-  // Only daemon step may migrate ssh procs to cgroup
+  // Cgroup of this step
+  // For daemon step, this cgroup will be used for SSH user.
+  // For common step, this cgroup will be the parent of all task cgroups.
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
   struct TerminationStatus {
     // Will return to crun for interactive steps
     uint32_t max_exit_code{0};
     StepStatus final_status_on_termination{StepStatus::Completed};
-    std::string final_reason_on_termination{""};
+    std::string final_reason_on_termination;
   };
 
   TerminationStatus final_termination_status;
@@ -98,7 +108,7 @@ class StepInstance {
         job_id(step.job_id()),
         step_id(step.step_id()),
         task_ids(step.task_res_map() | std::views::keys |
-                 std::ranges::to<std::vector>()),
+                 std::ranges::to<std::vector<task_id_t>>()),
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
@@ -138,6 +148,7 @@ class StepInstance {
   */
 
   // Perspective 1: Interactivity
+  [[nodiscard]] bool IsBatch() const noexcept;
   [[nodiscard]] bool IsInteractive() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
@@ -151,11 +162,9 @@ class StepInstance {
   [[nodiscard]] bool IsContainer() const noexcept;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
-  [[nodiscard]] bool IsRunning() const noexcept {
-    return m_status_ == StepStatus::Running;
-  }
 
   const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
+  StepToSupv& GetMutableStep() { return m_step_to_supv_; }
 
   // Cfored client in step
   void InitCforedClient() {
@@ -222,13 +231,23 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
+// Task exiting info (after task is spawned)
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
   int value{0};
 };
 
-using TaskExecId = std::variant<std::string, pid_t>;
+struct TaskFinalInfo {
+  // Semantic cause that drives final status resolution.
+  TaskFinalizeCause cause{TaskFinalizeCause::NORMAL};
+
+  // Task exited after spawning. Raw exit info from waitpid/CRI events.
+  std::optional<TaskExitInfo> raw_exit{std::nullopt};
+
+  // Extra diagnostic information for status reporting.
+  std::optional<std::string> reason;
+};
 
 class ITaskInstance {
  public:
@@ -244,12 +263,11 @@ class ITaskInstance {
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
   // Helper methods shared by all task instances
-  StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
     return m_parent_step_inst_->GetStep();
   }
 
-  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
+  [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -263,16 +281,17 @@ class ITaskInstance {
   virtual void InitEnvMap();
 
   task_id_t task_id{0};
-  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
-  TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
+  // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   StepInstance* m_parent_step_inst_;
-  TaskExitInfo m_exit_info_{};
   EnvMap m_env_;
-  std::unique_ptr<Common::CgroupInterface> m_task_cg;
+  TaskFinalInfo m_final_info_{};
+  // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
+// NOTE: Pod instance is only used in daemon step.
+// Its creation and termination are DIFFERENT from other tasks.
 class PodInstance : public ITaskInstance {
  public:
   explicit PodInstance(StepInstance* step_spec, task_id_t task_id)
@@ -323,6 +342,7 @@ class PodInstance : public ITaskInstance {
   CraneErrCode SetPodSandboxConfig_(
       const crane::grpc::PodJobAdditionalMeta& pod_meta);
   CraneErrCode PersistPodSandboxInfo_();
+  CraneErrCode StopAndRemovePodSandbox_(std::string_view context);
 
   cri::api::PodSandboxConfig m_pod_config_;
   std::string m_pod_id_;
@@ -409,8 +429,11 @@ struct ProcInstanceMeta {
   ProcInstanceMeta& operator=(const ProcInstanceMeta&) = delete;
   ProcInstanceMeta& operator=(ProcInstanceMeta&&) = delete;
 
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
+  std::string parsed_sh_script_path{};
+  // Empty parsed pattern will redirect to /dev/null
+  std::string parsed_input_file_pattern{};
+  std::string parsed_output_file_pattern{};
+  std::string parsed_error_file_pattern{};
 };
 
 struct BatchInstanceMeta final : ProcInstanceMeta {
@@ -430,10 +453,16 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
   CrunInstanceMeta& operator=(const CrunInstanceMeta&) = delete;
   CrunInstanceMeta& operator=(CrunInstanceMeta&&) = delete;
 
-  int stdin_write{};
-  int stdout_write{};
-  int stdin_read{};
-  int stdout_read{};
+  int stdin_write;
+  int stdout_write;
+  int stderr_write;
+  int stdin_read;
+  int stdout_read;
+  int stderr_read;
+
+  bool fwd_stdin;
+  bool fwd_stdout;
+  bool fwd_stderr;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -470,8 +499,11 @@ class ProcInstance : public ITaskInstance {
   CrunInstanceMeta* GetCrunMeta_() const {
     return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
   };
+  // returns: pair of (parsed file path, true need forward to cfored)
+  std::pair<std::string, bool> CrunParseFilePattern_(
+      const std::string& pattern) const;
 
-  CraneExpected<pid_t> ForkCrunAndInitMeta_();
+  CraneExpected<pid_t> ForkCrunAndInitIOfd_();
 
   bool SetupCrunFwdAtParent_();
   void SetupCrunFwdAtChild_();
@@ -491,12 +523,15 @@ class ProcInstance : public ITaskInstance {
   std::vector<std::string> GetChildProcExecArgv_() const;
 
   /* Perform file name substitutions
-   * %j - Job ID
-   * %u - Username
-   * %x - Job name
+   * @return: pair of (parsed file path, true if file on local machine)
    */
   std::string ParseFilePathPattern_(const std::string& pattern,
-                                    const std::string& cwd) const;
+                                    const std::string& cwd,
+                                    bool is_batch_stdout,
+                                    bool* is_local_file) const;
+
+  // Process task has its own cgroup.
+  std::unique_ptr<Common::CgroupInterface> m_task_cg_;
 
   std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
@@ -527,11 +562,11 @@ class TaskManager {
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
-  void AddTerminationTimer_(Duration duration) {
+  void AddTerminationTimer_(Duration duration, bool is_deadline) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
-          EvStepTimerCb_();
+        [this, is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvStepTimerCb_(is_deadline);
         });
     termination_handle->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -539,11 +574,11 @@ class TaskManager {
     m_step_.termination_timer = termination_handle;
   }
 
-  void AddTerminationTimer_(int64_t secs) {
+  void AddTerminationTimer_(int64_t secs, bool is_deadline) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
-          EvStepTimerCb_();
+        [this, is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvStepTimerCb_(is_deadline);
         });
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -581,9 +616,6 @@ class TaskManager {
     m_step_.signal_timers.clear();
   }
 
-  // Should called in uvw thread, otherwise data race may happen.
-  void TaskFinish_(task_id_t task_id, crane::grpc::JobStatus new_status,
-                   uint32_t exit_code, std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
@@ -596,22 +628,33 @@ class TaskManager {
   }
 
   StepStatus GetStepStatus() const { return m_step_.GetStatus(); }
+  StepInstance::TerminationStatus GetFinalTerminationStatus() const {
+    return m_step_.final_termination_status;
+  }
 
-  void TaskStopAndDoStatusChange(task_id_t task_id);
+  void FinalizeTaskAsync(task_id_t task_id);
+  void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
+                         std::optional<std::string> reason = std::nullopt);
 
   std::future<CraneErrCode> ExecuteStepAsync();
 
+  std::future<CraneErrCode> ExecutePodInDaemonStepAsync();
+
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
-  std::future<CraneErrCode> ChangeStepTimeLimitAsync(absl::Duration time_limit);
+  std::future<CraneErrCode> ChangeStepTimeConstraintAsync(
+      std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time);
 
-  void TerminateStepAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
+  void TerminateStepAsync(bool mark_as_orphaned, TaskFinalizeCause cause);
+
+  // A dedicated termination path for pod in daemon step.
+  void TerminatePodInDaemonStepAsync();
 
   void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
 
   std::future<CraneErrCode> MigrateSshProcToCgroupAsync(pid_t pid);
 
-  void SetActivelyShutdown() { m_active_shutdown_ = true; }
+  void SetAllowDaemonShutdown() { m_allow_daemon_shutdown_ = true; }
 
   void Shutdown() { m_supervisor_exit_ = true; }
 
@@ -624,16 +667,23 @@ class TaskManager {
   };
 
   struct StepTerminateQueueElem {
-    TerminatedBy termination_reason{TerminatedBy::NONE};
+    TaskFinalizeCause cause{TaskFinalizeCause::NORMAL};
     bool mark_as_orphaned{false};
   };
 
-  struct ChangeStepTimeLimitQueueElem {
-    absl::Duration time_limit;
-    std::promise<CraneErrCode> ok_prom;
-  };
+  struct DaemonPodTerminateQueueElem {};
 
+  struct ChangeStepTimeConstraintQueueElem {
+    std::promise<CraneErrCode> ok_prom;
+    std::optional<int64_t> time_limit{std::nullopt};
+    std::optional<int64_t> deadline_time{std::nullopt};
+  };
   void EvShutdownSupervisorCb_();
+
+  // Handle pod creation for daemon step with container support.
+  void EvExecuteDaemonPodCb_();
+  // Handle daemon pod termination requests from ShutdownSupervisor.
+  void EvCleanTerminateDaemonPodQueueCb_();
 
   // Process exited
   void EvSigchldCb_();
@@ -644,20 +694,27 @@ class TaskManager {
   void EvCleanCriEventQueueCb_();
 
   // Handle stopped tasks
-  void EvCleanTaskStopQueueCb_();
+  void EvCleanFinalizingTaskQueueCb_();
 
   // Handle step termination requests
-  void EvStepTimerCb_();
+  void EvStepTimerCb_(bool is_deadline);
   void EvCleanTerminateStepQueueCb_();
-  void EvCleanChangeStepTimeLimitQueueCb_();
+  void EvCleanChangeStepTimeConstraintQueueCb_();
 
   void EvGrpcExecuteStepCb_();
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
 
+  // Task sink for finalized tasks. Task will be removed here.
+  // Should called in uvw thread, otherwise data race may happen.
+  void ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
+                            uint32_t exit_code,
+                            std::optional<std::string> reason);
+
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
+  std::shared_ptr<uvw::async_handle> m_supervisor_finish_init_handle_;
   ConcurrentQueue<std::tuple<crane::grpc::JobStatus, uint32_t, std::string>>
       m_shutdown_status_queue_;
   std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
@@ -672,18 +729,28 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_cri_event_handle_;
   ConcurrentQueue<cri::api::ContainerStatus> m_cri_event_queue_;
 
+  // Create pod for daemon step of container job.
+  std::shared_ptr<uvw::async_handle> m_execute_daemon_pod_async_handle_;
+
+  // Actively shutdown a running daemon pod.
+  std::shared_ptr<uvw::async_handle> m_terminate_daemon_pod_async_handle_;
+  ConcurrentQueue<DaemonPodTerminateQueueElem> m_daemon_pod_terminate_queue_;
+
   // Task is already terminated
-  std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_stopped_queue_;
+  std::shared_ptr<uvw::async_handle> m_task_finalizing_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_finalizing_queue_;
 
   // Step is requested to be terminated
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_change_step_time_limit_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_change_step_time_limit_timer_handle_;
-  ConcurrentQueue<ChangeStepTimeLimitQueueElem> m_step_time_limit_change_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_change_step_time_constraint_async_handle_;
+  std::shared_ptr<uvw::timer_handle>
+      m_change_step_time_constraint_timer_handle_;
+  ConcurrentQueue<ChangeStepTimeConstraintQueueElem>
+      m_step_time_constraint_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
   ConcurrentQueue<ExecuteStepElem> m_grpc_execute_step_queue_;
@@ -706,7 +773,7 @@ class TaskManager {
   // This is the gate for daemon step. Daemon step will not exit when all tasks
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
-  std::atomic_bool m_active_shutdown_{false};
+  std::atomic_bool m_allow_daemon_shutdown_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;

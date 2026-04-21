@@ -86,7 +86,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
-  if (resource_use.CpuCount() > qos->max_cpus_per_user)
+  if (resource_use.GetCpuCount() > qos->max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
@@ -294,7 +294,7 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
           ResourceView resource_use{job.req_total_res_view};
           resource_use += val.resource;
           // Compatible with the max_cpu_per_user parameter.
-          if (resource_use.CpuCount() > qos.max_cpus_per_user) {
+          if (resource_use.GetCpuCount() > qos.max_cpus_per_user) {
             result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
             return;
           }
@@ -417,7 +417,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
     auto& val = iter->second;
     auto resource_use = job.allocated_res.View();
     resource_use += val.resource;
-    if (resource_use.CpuCount() > qos.max_cpus_per_user) {
+    if (resource_use.GetCpuCount() > qos.max_cpus_per_user) {
       result = std::unexpected("QosCpuResourceLimit");
       return;
     }
@@ -492,41 +492,18 @@ std::expected<void, std::string> AccountMetaContainer::CheckQosResource_(
 
 std::expected<void, std::string> AccountMetaContainer::CheckTres_(
     const ResourceView& resource_req, const ResourceView& resource_total) {
-  if (resource_req.CpuCount() > resource_total.CpuCount()) {
+  if (resource_req.GetCpuCount() > resource_total.GetCpuCount()) {
     return std::unexpected("QosCpuResourceLimit");
   }
 
-  if (resource_req.MemoryBytes() > resource_total.MemoryBytes()) {
+  if (resource_req.GetMemoryBytes() > resource_total.GetMemoryBytes()) {
     return std::unexpected("QosMemResourceLimit");
   }
 
-  if (!CheckGres_(resource_req.GetDeviceMap(), resource_total.GetDeviceMap()))
+  if (!(resource_req <= resource_total))
     return std::unexpected("QosGresResourceLimit");
 
   return {};
-}
-
-bool AccountMetaContainer::CheckGres_(const DeviceMap& device_req,
-                                      const DeviceMap& device_total) {
-  for (const auto& [lhs_name, lhs_cnt] : device_req) {
-    auto rhs_it = device_total.find(lhs_name);
-    // Requests for unrecorded devices should not be restricted.
-    if (rhs_it == device_total.end()) continue;
-
-    const auto& [lhs_untyped_cnt, lhs_typed_cnt_map] = lhs_cnt;
-    const auto& [rhs_untyped_cnt, rhs_typed_cnt_map] = rhs_it->second;
-
-    if (lhs_untyped_cnt > rhs_untyped_cnt) return false;
-
-    for (const auto& [lhs_type, lhs_type_cnt] : lhs_typed_cnt_map) {
-      auto rhs_type_it = rhs_typed_cnt_map.find(lhs_type);
-      if (rhs_type_it == rhs_typed_cnt_map.end()) continue;
-
-      if (lhs_type_cnt > rhs_type_it->second) return false;
-    }
-  }
-
-  return true;
 }
 
 std::vector<std::unique_lock<std::mutex>>

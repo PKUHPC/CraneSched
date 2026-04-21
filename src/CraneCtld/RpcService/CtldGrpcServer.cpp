@@ -380,6 +380,16 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             }
           }
 
+          // Track in map before Write so kCleanData can always find
+          // and terminate the task even if the Write fails.
+          if (result.has_value()) {
+            auto [job_id, step_id] = result.value();
+            m_ctld_server_->m_mtx_.Lock();
+            m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id].insert(
+                step_id);
+            m_ctld_server_->m_mtx_.Unlock();
+          }
+
           ok = stream_writer->WriteJobIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -388,14 +398,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kCleanData;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
         case StreamCforedRequest::STEP_REQUEST: {
@@ -423,6 +425,16 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             result = std::unexpected(CraneErrStr(submit_expt.error()));
           }
 
+          // Track in map before Write so kCleanData can always find
+          // and terminate the step even if the Write fails.
+          if (result.has_value()) {
+            auto [job_id, step_id] = result.value();
+            m_ctld_server_->m_mtx_.Lock();
+            m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id].insert(
+                step_id);
+            m_ctld_server_->m_mtx_.Unlock();
+          }
+
           ok = stream_writer->WriteJobIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -431,14 +443,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kCleanData;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
 
@@ -488,7 +492,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       m_ctld_server_->m_cfored_running_jobs_.erase(cfored_name);
       m_ctld_server_->m_mtx_.Unlock();
 
-      g_job_scheduler->TerminateRunningStep(running_steps);
+      g_job_scheduler->TerminateRunningStep(
+          running_steps, crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
 
       return Status::OK;
     }
@@ -923,9 +928,13 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
 
   CraneErrCode err;
   if (request->attribute() == ModifyJobRequest::TimeLimit) {
-    for (auto job_id : job_ids) {
-      err = g_job_scheduler->ChangeJobTimeLimit(job_id,
-                                                request->time_limit_seconds());
+    std::optional<int64_t> time_limit_seconds =
+        request->has_time_limit_seconds()
+            ? std::optional<int64_t>(request->time_limit_seconds())
+            : std::nullopt;
+    for (auto job_id : request->job_ids()) {
+      err = g_job_scheduler->ChangeJobTimeConstraint(job_id, time_limit_seconds,
+                                                     std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(job_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -958,6 +967,30 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
             fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
       }
     }
+  } else if (request->attribute() == ModifyJobRequest::Deadline) {
+    std::optional<int64_t> deadline_time =
+        request->has_deadline_time()
+            ? std::optional<int64_t>(request->deadline_time().seconds())
+            : std::nullopt;
+    for (auto job_id : job_ids) {
+      err = g_job_scheduler->ChangeJobTimeConstraint(job_id, std::nullopt,
+                                                     deadline_time);
+      if (err == CraneErrCode::SUCCESS) {
+        response->add_modified_jobs(job_id);
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Job #{} was not found in running or pending queue.", job_id));
+      } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons("Invalid deadline_time value.");
+      } else {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the deadline of Job#{}: {}.", job_id,
+                        CraneErrStr(err)));
+      }
+    }
   } else if (request->attribute() == ModifyJobRequest::Hold) {
     int64_t secs = request->hold_seconds();
     std::vector<std::pair<job_id_t, std::future<CraneErrCode>>> results;
@@ -978,6 +1011,46 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+      }
+    }
+  } else if (request->attribute() == ModifyJobRequest::Suspend) {
+    std::vector<task_id_t> vec_ids(job_ids.begin(), job_ids.end());
+    auto results = g_job_scheduler->SuspendRunningJobs(vec_ids);
+    for (size_t i = 0; i < vec_ids.size(); i++) {
+      if (results[i] == CraneErrCode::SUCCESS) {
+        response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
+      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not in a suspendable state.", vec_ids[i]));
+      } else {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
+      }
+    }
+  } else if (request->attribute() == ModifyJobRequest::Resume) {
+    std::vector<task_id_t> vec_ids(job_ids.begin(), job_ids.end());
+    auto results = g_job_scheduler->ResumeSuspendedJobs(vec_ids);
+    for (size_t i = 0; i < vec_ids.size(); i++) {
+      if (results[i] == CraneErrCode::SUCCESS) {
+        response->add_modified_jobs(vec_ids[i]);
+      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} does not exist.", vec_ids[i]));
+      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} is not suspended.", vec_ids[i]));
+      } else {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
       }
     }
   } else {
@@ -1345,7 +1418,12 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.priority =
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
-  qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  if (qos_info->max_cpus_per_user() < 0) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+  qos.max_cpus_per_user = cpu_t(qos_info->max_cpus_per_user());
   qos.max_jobs_per_account = qos_info->max_jobs_per_account();
   qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
   qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
@@ -1751,7 +1829,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
     qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
-    qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+    qos_info->set_max_cpus_per_user(static_cast<double>(qos.max_cpus_per_user));
     qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
     qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_job(
@@ -1759,41 +1837,15 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_jobs(qos.max_jobs);
     qos_info->set_max_submit_jobs(qos.max_submit_jobs);
     qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
+    // ResourceView → proto conversion handles GRES via GresMap.
+    // CopyFrom uses the explicit operator crane::grpc::ResourceView() which
+    // properly serializes GresMap including zero-value entries.
     qos_info->mutable_max_tres()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres));
-    // When type_count.second is 0, you need to insert it manually; otherwise,
-    // it will not be recorded.
-    for (auto& [name, type_count] : qos.max_tres.GetDeviceMap()) {
-      auto* type_count_map = (*qos_info->mutable_max_tres()
-                                   ->mutable_device_map()
-                                   ->mutable_name_type_map())[name]
-                                 .mutable_type_count_map();
-      for (auto& [type, value] : type_count.second) {
-        (*type_count_map)[type] = value;
-      }
-    }
     qos_info->mutable_max_tres_per_user()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
-    for (auto& [name, type_count] : qos.max_tres_per_user.GetDeviceMap()) {
-      auto* type_count_map = (*qos_info->mutable_max_tres_per_user()
-                                   ->mutable_device_map()
-                                   ->mutable_name_type_map())[name]
-                                 .mutable_type_count_map();
-      for (auto& [type, value] : type_count.second) {
-        (*type_count_map)[type] = value;
-      }
-    }
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
-    for (auto& [name, type_count] : qos.max_tres_per_account.GetDeviceMap()) {
-      auto* type_count_map = (*qos_info->mutable_max_tres_per_account()
-                                   ->mutable_device_map()
-                                   ->mutable_name_type_map())[name]
-                                 .mutable_type_count_map();
-      for (auto& [type, value] : type_count.second) {
-        (*type_count_map)[type] = value;
-      }
-    }
     qos_info->set_flags(qos.flags.ToInt64());
   }
 

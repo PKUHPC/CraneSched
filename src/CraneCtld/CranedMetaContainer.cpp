@@ -166,7 +166,7 @@ CranedMetaContainer::GetResvMetaMapExclusivePtr() {
 
 void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
                                                  job_id_t job_id,
-                                                 const ResourceV2& resources) {
+                                                 const ResourceV3& resources) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
     return;
@@ -184,12 +184,21 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
 
-  const ResourceInNode& job_node_res = resources.at(node_id);
+  const ResourceInNodeV3& job_node_res = resources.at(node_id);
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
 
   node_meta->rn_job_res_map.emplace(job_id, job_node_res);
+
+  CRANE_TRACE(
+      "[RESTRACK] MallocNode: job={} node={} "
+      "before: avail_cpu={}, in_use_cpu={}, "
+      "alloc_cpu={}",
+      job_id, node_id,
+      static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
+      static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
+      static_cast<double>(job_node_res.GetCpuSet().cpu_count));
 
   node_meta->res_avail -= job_node_res;
   node_meta->res_in_use += job_node_res;
@@ -232,7 +241,16 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
     return;
   }
 
-  ResourceInNode const& resources = resource_iter->second;
+  ResourceInNodeV3 const& resources = resource_iter->second;
+
+  CRANE_TRACE(
+      "[RESTRACK] FreeNode: job={} node={} "
+      "before: avail_cpu={}, in_use_cpu={}, "
+      "free_cpu={}",
+      job_id, node_id,
+      static_cast<double>(node_meta->res_avail.GetCpuSet().cpu_count),
+      static_cast<double>(node_meta->res_in_use.GetCpuSet().cpu_count),
+      static_cast<double>(resources.GetCpuSet().cpu_count));
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
@@ -249,13 +267,18 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
 void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
                                                  job_id_t job_id,
-                                                 const ResourceV2& res) {
+                                                 const ResourceV3& res) {
   auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
   if (!resv_meta) {
     CRANE_ERROR("Try to malloc resource from an unknown reservation {}",
                 resv_id);
     return;
   }
+
+  CRANE_TRACE(
+      "[RESTRACK] MallocResv: resv={} job={} "
+      "resv_rn_jobs={}",
+      resv_id, job_id, resv_meta->rn_job_res_map.size());
 
   resv_meta->res_avail -= res;
 
@@ -277,10 +300,15 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
     return;
   }
 
+  CRANE_TRACE(
+      "[RESTRACK] FreeResv: resv={} job={} "
+      "resv_rn_jobs={}",
+      resv_id, job_id, resv_meta->rn_job_res_map.size());
+
   CRANE_DEBUG("[Job #{}] Freeing resource from reservation {}", job_id,
               resv_id);
 
-  ResourceV2 const& resources = iter->second;
+  ResourceV3 const& resources = iter->second;
 
   resv_meta->res_avail += resources;
 
@@ -299,13 +327,12 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     craned_meta.remote_meta.sys_rel_info.name = "unknown";
 
     auto& static_meta = craned_meta.static_meta;
-    static_meta.res.allocatable_res.cpu_count =
+    static_meta.res.GetCpuSet().cpu_count =
         cpu_t(config.Nodes.at(craned_name)->cpu);
-    static_meta.res.allocatable_res.memory_bytes =
-        config.Nodes.at(craned_name)->memory_bytes;
-    static_meta.res.allocatable_res.memory_sw_bytes =
-        config.Nodes.at(craned_name)->memory_bytes;
-    static_meta.res.dedicated_res =
+    static_meta.res.SetMemoryBytes(config.Nodes.at(craned_name)->memory_bytes);
+    static_meta.res.SetMemorySwBytes(
+        config.Nodes.at(craned_name)->memory_bytes);
+    static_meta.res.GetGres() =
         config.Nodes.at(craned_name)->dedicated_resource;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
@@ -337,10 +364,10 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       CRANE_DEBUG(
           "Add the resource of Craned {} (cpu: {}, mem: {}, gres: {}) to "
           "partition [{}]'s global resource.",
-          craned_name, craned_meta.static_meta.res.allocatable_res.cpu_count,
-          util::ReadableMemory(
-              craned_meta.static_meta.res.allocatable_res.memory_bytes),
-          util::ReadableDresInNode(craned_meta.static_meta.res), part_name);
+          craned_name, craned_meta.static_meta.res.GetCpuSet().cpu_count,
+          util::ReadableMemory(craned_meta.static_meta.res.GetMemoryBytes()),
+          util::ReadableDresInNode(craned_meta.static_meta.res.GetGres()),
+          part_name);
 
       part_res += craned_meta.static_meta.res;
     }
@@ -357,11 +384,11 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         "gres: {}). "
         "It has {} craneds.",
         part_name,
-        part_meta.partition_global_meta.res_total_inc_dead.CpuCount(),
-        util::ReadableMemory(
-            part_meta.partition_global_meta.res_total_inc_dead.MemoryBytes()),
-        util::ReadableTypedDeviceMap(
-            part_meta.partition_global_meta.res_total_inc_dead.GetDeviceMap()),
+        part_meta.partition_global_meta.res_total_inc_dead.CpuCountDouble(),
+        util::ReadableMemory(part_meta.partition_global_meta.res_total_inc_dead
+                                 .GetMemoryBytes()),
+        util::ReadableGresMap(
+            part_meta.partition_global_meta.res_total_inc_dead.GetGresMap()),
         part_meta.partition_global_meta.node_cnt);
   }
 
@@ -730,7 +757,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       if (craned_meta->alive) {
         if (res_in_use.IsZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
-        } else if (res_avail.allocatable_res.IsAnyZero()) {
+        } else if (res_avail.IsExhausted()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
         } else {
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
@@ -1020,12 +1047,12 @@ void CranedMetaContainer::AddDedicatedResource(
 
   // Find how many resource should add,
   // under the constraint of configured count
-  const auto& constraint = node_meta->static_meta.res.dedicated_res;
+  const auto& constraint = node_meta->static_meta.res.GetGres();
 
   DedicatedResourceInNode intersection = Intersection(constraint, resource);
 
-  node_meta->res_total.dedicated_res += intersection;
-  node_meta->res_avail.dedicated_res += intersection;
+  node_meta->res_total.GetGres() += intersection;
+  node_meta->res_avail.GetGres() += intersection;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -1040,11 +1067,11 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   const std::string& craned_index = craned_meta.static_meta.hostname;
 
   *craned_info->mutable_res_total() =
-      static_cast<crane::grpc::ResourceInNode>(craned_meta.res_total);
+      static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_total);
   *craned_info->mutable_res_avail() =
-      static_cast<crane::grpc::ResourceInNode>(craned_meta.res_avail);
+      static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_avail);
   *craned_info->mutable_res_alloc() =
-      static_cast<crane::grpc::ResourceInNode>(craned_meta.res_in_use);
+      static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_in_use);
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
   craned_info->set_craned_version(craned_meta.remote_meta.craned_version);
@@ -1077,7 +1104,7 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     if (craned_meta.res_in_use.IsZero())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
-    else if (craned_meta.res_avail.allocatable_res.IsAnyZero())
+    else if (craned_meta.res_avail.IsExhausted())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_ALLOC);
     else

@@ -5,7 +5,7 @@ set(BUILD_BENCHMARK OFF)
 set(BUILD_TESTS OFF)
 FetchContent_Declare(fpm
         GIT_REPOSITORY https://github.com/MikeLankamp/fpm
-        GIT_TAG aca475058b762e81a61495473a74fc8e48915fc6
+        GIT_TAG b46537fe9697e1a598ac8a26f8ae43d8b286ac3f
         GIT_SHALLOW TRUE
         SYSTEM
 )

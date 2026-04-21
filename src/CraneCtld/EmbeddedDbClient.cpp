@@ -841,6 +841,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
       snapshot->pending_queue.emplace(id, std::move(job_data));
       break;
     case crane::grpc::Running:
+    case crane::grpc::Suspended:
     case crane::grpc::Starting:
     case crane::grpc::Configuring:
     case crane::grpc::Completing:

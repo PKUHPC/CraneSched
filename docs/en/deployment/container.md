@@ -328,13 +328,13 @@ CraneSched container features include some advanced capabilities that require ad
 !!! note
     CraneSched supports automatic management of SubUID/SubGID ranges ("Managed" mode; see the "Container Configuration" section). If you want to manage SubID yourself, follow the instructions below.
 
-In "Managed" mode, CraneSched calculates each user's SubUID/SubGID range start with `BaseOffset + ID * RangeSize` and maintains system files such as `/etc/subuid`. If this mode does not meet your requirements, you can manage SubID directly or using external services.
+In "Managed" mode, CraneSched manages `/etc/subuid` and `/etc/subgid` according to explicit mapping tables. Each mapping describes a host UID/GID interval `[Id, Id + IdCount)` together with the subordinate range start `SubIdStart` and the per-account slice size `SubIdSize`. UID and GID mappings are configured separately, and ranges within each list must not overlap. Every UID and primary GID that may use user namespaces must be covered, or container startup will fail.
 
 In "Unmanaged" mode, CraneSched only reads SubID information from the system via the `shadow-utils` APIs. Therefore, administrators must ensure that users on all cluster nodes have consistent, non-overlapping SubID ranges. You can manually edit `/etc/subuid` and `/etc/subgid`, or use LDAP for centralized management.
 
 Some systems can obtain SubID information from an LDAP server via sssd. Refer to documentation for FreeIPA, OpenLDAP, and similar solutions for configuration guidance.
 
-To switch SubID management modes or adjust parameters for Managed mode, see the [Container Configuration](#container-configuration) section below.
+To switch SubID management modes or configure the explicit mappings used by Managed mode, see the [Container Configuration](#container-configuration) section below.
 
 #### BindFs
 
@@ -432,12 +432,11 @@ Container:
 
   # SubUID/SubGID configuration
   SubId:
-    # Whether to automatically manage SubID ranges
     Managed: true
-    # Size of SubUID/SubGID range per user
-    RangeSize: 65536
-    # Base offset for SubUID/SubGID ranges
-    BaseOffset: 100000
+    UidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
+    GidMappings:
+      - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
 
   # BindFs configuration (optional, for user namespace mapping)
   BindFs:
@@ -471,11 +470,27 @@ Container DNS is used to provide domain name resolution services for containers 
 
 SubID (subordinate user/group IDs) configuration is used for secure container user namespace isolation.
 
+!!! warning
+    If `Managed` is enabled, make sure `UidMappings` and `GidMappings` cover every UID and primary GID that may use user namespaces, and that ranges do not overlap. Any uncovered user will fail at container startup. In addition, every mapped subordinate range must stay below the 32-bit unsigned integer limit, or the runtime may enter undefined behavior.
+
 | Field | Type | Default | Description |
 |:-----|:-----|:-------|:-----|
-| `Managed` | bool | `true` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically adds and validates SubID ranges<br>- `false`: managed by the administrator |
-| `RangeSize` | int | `65536` | Size of SubUID/SubGID range per user. Must be greater than 0; recommended value is 65536 |
-| `BaseOffset` | int | `100000` | Base offset for SubID ranges. Used to calculate each user's range: `start = BaseOffset + uid * RangeSize` |
+| `Managed` | bool | `false` | Whether CraneSched automatically manages SubID ranges.<br>- `true`: automatically validates and fills `/etc/subuid` and `/etc/subgid` from `UidMappings`/`GidMappings`<br>- `false`: managed by the administrator; CraneSched only checks the SubID ranges already present on the system |
+| `UidMappings` | object[] | `[]` | Used only when `Managed=true`. Explicit mapping table from host UIDs to SubUID ranges. Must be a non-empty array and must cover every UID that may use user namespaces |
+| `GidMappings` | object[] | `[]` | Used only when `Managed=true`. Explicit mapping table from host primary GIDs to SubGID ranges. Must be a non-empty array and must cover every primary GID that may use user namespaces |
+
+Mapping entry fields:
+
+| Field | Type | Default | Description |
+|:-----|:-----|:-------|:-----|
+| `Id` | int | - | Start of the host UID/GID interval |
+| `IdCount` | int | - | Number of host UIDs/GIDs covered from `Id`; must be greater than 0 |
+| `SubIdStart` | int | - | SubID start assigned to the first account in this mapping block |
+| `SubIdSize` | int | - | Number of consecutive SubIDs reserved per account; must be greater than 0 |
+
+For a matched mapping entry, CraneSched assigns the following range to a UID/GID `target_id`:
+
+`[SubIdStart + (target_id - Id) * SubIdSize, SubIdStart + (target_id - Id + 1) * SubIdSize)`
 
 ### BindFs Configuration
 

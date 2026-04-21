@@ -21,6 +21,9 @@
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <filesystem>
+#include <fstream>
+#include <set>
 #include <utility>
 
 #include "CranedPublicDefs.h"
@@ -36,6 +39,165 @@ namespace Craned {
 using Common::kStepRequestCheckIntervalMs;
 using namespace std::chrono_literals;
 
+namespace {
+
+constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
+constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
+constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
+constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
+
+std::filesystem::path GetV1ControllerPath_(
+    const std::string& cg_path, Common::CgConstant::Controller ctrl) {
+  return Common::CgConstant::kSystemCgPathPrefix /
+         Common::CgConstant::GetControllerStringView(ctrl) /
+         std::filesystem::relative(cg_path,
+                                   Common::CgConstant::kSystemCgPathPrefix);
+}
+
+bool IsCgroupFrozenByPath_(const std::string& cg_path) {
+  std::error_code ec;
+  std::filesystem::path state_file;
+
+  if (CgroupManager::IsCgV2()) {
+    state_file = std::filesystem::path(cg_path) / "cgroup.freeze";
+  } else {
+    state_file =
+        GetV1ControllerPath_(
+            cg_path, Common::CgConstant::Controller::FREEZE_CONTROLLER) /
+        "freezer.state";
+  }
+
+  if (!std::filesystem::exists(state_file, ec)) return false;
+
+  std::ifstream ifs(state_file);
+  if (!ifs.is_open()) return false;
+
+  std::string state;
+  ifs >> state;
+  if (CgroupManager::IsCgV2()) return state == "1";
+  return state == "FROZEN" || state == "FREEZING";
+}
+
+bool ParseHexMask_(const std::string& line, uint64_t* mask) {
+  auto pos = line.find(':');
+  if (pos == std::string::npos) return false;
+
+  auto value_pos = line.find_first_not_of(" \t", pos + 1);
+  if (value_pos == std::string::npos) return false;
+
+  try {
+    *mask = std::stoull(line.substr(value_pos), nullptr, 16);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool ProcHasPendingSigkill_(pid_t pid) {
+  std::ifstream ifs(fmt::format("/proc/{}/status", pid));
+  if (!ifs.is_open()) return false;
+
+  std::string line;
+  uint64_t sig_pnd = 0;
+  uint64_t shd_pnd = 0;
+  while (std::getline(ifs, line)) {
+    if (line.rfind("SigPnd:", 0) == 0) {
+      ParseHexMask_(line, &sig_pnd);
+    } else if (line.rfind("ShdPnd:", 0) == 0) {
+      ParseHexMask_(line, &shd_pnd);
+    }
+  }
+
+  return ((sig_pnd | shd_pnd) & kPendingThawMask) != 0;
+}
+
+bool FindPendingSigkillInCgroupByPath_(const std::string& cg_path,
+                                       pid_t* pending_pid) {
+  std::filesystem::path root_path = cg_path;
+  if (!CgroupManager::IsCgV2()) {
+    root_path = GetV1ControllerPath_(
+        cg_path, Common::CgConstant::Controller::MEMORY_CONTROLLER);
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(root_path, ec)) return false;
+
+  std::set<pid_t> pids;
+  auto scan_dir = [&](const std::filesystem::path& dir_path) {
+    std::ifstream ifs(dir_path / "cgroup.procs");
+    if (!ifs.is_open()) return;
+
+    pid_t pid;
+    while (ifs >> pid) pids.insert(pid);
+  };
+
+  scan_dir(root_path);
+
+  std::filesystem::recursive_directory_iterator dir_it(root_path, ec);
+  if (!ec) {
+    for (auto& entry : dir_it) {
+      if (!entry.is_directory(ec)) continue;
+      scan_dir(entry.path());
+    }
+  }
+
+  for (pid_t pid : pids) {
+    if (ProcHasPendingSigkill_(pid)) {
+      *pending_pid = pid;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void ThawFrozenJobsWithPendingSigkill_(
+    const std::vector<std::pair<job_id_t, std::string>>& jobs) {
+  for (const auto& [job_id, cg_path] : jobs) {
+    if (!IsCgroupFrozenByPath_(cg_path)) continue;
+
+    pid_t pending_pid = 0;
+    if (!FindPendingSigkillInCgroupByPath_(cg_path, &pending_pid)) continue;
+
+    CRANE_WARN(
+        "[Job #{}] Detected pending SIGKILL/SIGCHLD on pid {} while frozen. "
+        "Thawing job cgroup.",
+        job_id, pending_pid);
+
+    bool root_ok = CgroupManager::ThawCgroupByPath(cg_path);
+    bool children_ok = CgroupManager::ThawChildCgroupsByPath(cg_path);
+    if (!root_ok || !children_ok) {
+      CRANE_ERROR(
+          "[Job #{}] Failed to thaw job cgroup {} after pending SIGKILL, "
+          "root_ok={}, children_ok={}",
+          job_id, cg_path, root_ok, children_ok);
+    }
+  }
+}
+
+std::optional<std::pair<uint32_t, std::string>>
+BuildUnexpectedSupervisorExitInfo_(pid_t pid, int status) {
+  if (WIFSIGNALED(status)) {
+    int signal = WTERMSIG(status);
+    return std::make_pair(
+        static_cast<uint32_t>(ExitCode::kTerminationSignalBase + signal),
+        fmt::format("Supervisor pid {} exited unexpectedly due to signal {}.",
+                    pid, signal));
+  }
+
+  if (WIFEXITED(status)) {
+    int exit_code = WEXITSTATUS(status);
+    return std::make_pair(
+        static_cast<uint32_t>(exit_code),
+        fmt::format("Supervisor pid {} exited unexpectedly with code {}.", pid,
+                    exit_code));
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace
+
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
@@ -50,14 +212,14 @@ EnvMap JobInD::GetJobEnvMap() {
   };
 
   auto alloc_node_num = daemon_step_to_d.nodelist().size();
+  ResourceInNodeV3 step_res_v3(daemon_step_to_d.res());
   auto mem_in_node =
-      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
-      (static_cast<uint64_t>(1024 * 1024));
+      step_res_v3.GetMemoryBytes() / (static_cast<uint64_t>(1024 * 1024));
 
-  auto cpus_on_node =
-      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
-  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
-                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
+  cpu_t cpus_on_node = step_res_v3.GetCpuSet().cpu_count;
+  auto mem_per_cpu = (cpus_on_node > cpu_t{0})
+                         ? (static_cast<double>(mem_in_node) /
+                            static_cast<double>(cpus_on_node))
                          : 0.0;
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
@@ -89,7 +251,8 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
   env_map.emplace("CRANE_NTASKS", std::to_string(daemon_step_to_d.ntasks()));
   env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
-  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  env_map.emplace("CRANE_CPUS_ON_NODE",
+                  std::format("{:.2f}", static_cast<double>(cpus_on_node)));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
 
@@ -388,11 +551,167 @@ void JobManager::FreeSteps(
   CleanUpJobAndStepsAsync({}, std::move(steps_to_free));
 }
 
+void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
+  auto exit_info = BuildUnexpectedSupervisorExitInfo_(pid, status);
+  if (!exit_info.has_value()) {
+    CRANE_TRACE("Ignoring non-terminal child status {} for pid {}", status,
+                pid);
+    return;
+  }
+
+  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  for (auto& [job_id, job] : *job_map_ptr) {
+    auto* job_ptr = job.RawPtr();
+    absl::MutexLock step_lock(job_ptr->step_map_mtx.get());
+    for (const auto& [step_id, step] : job_ptr->step_map) {
+      if (step == nullptr || step->supv_pid != pid) continue;
+
+      if (step->err_before_supv_start ||
+          step->status == StepStatus::Completing ||
+          IsFinishedStepStatus(step->status)) {
+        CRANE_TRACE(
+            "[Step #{}.{}] Supervisor pid {} exited after step reached status "
+            "{}, ignoring.",
+            job_id, step_id, pid, step->status);
+        return;
+      }
+
+      {
+        absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+        m_unexpected_supervisor_exit_map_[{job_id, step_id}] = {
+            .exit_code = exit_info->first,
+            .reason = exit_info->second,
+            .retry_count = 0};
+      }
+
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor pid {} exited unexpectedly; waiting "
+          "briefly for an in-flight final status update before forcing "
+          "Failed.",
+          job_id, step_id, pid);
+      return;
+    }
+  }
+
+  CRANE_TRACE("Child pid {} exited but is not a tracked supervisor.", pid);
+}
+
+void JobManager::HandleUnexpectedSupervisorExits_() {
+  using StepKey = std::pair<job_id_t, step_id_t>;
+
+  struct PendingFailure {
+    job_id_t job_id;
+    step_id_t step_id;
+    uint32_t exit_code;
+    std::string reason;
+  };
+
+  struct PendingSnapshot {
+    StepKey key;
+    uint32_t exit_code;
+    std::string reason;
+    int retry_count;
+  };
+
+  std::vector<PendingSnapshot> pending;
+  {
+    absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+    pending.reserve(m_unexpected_supervisor_exit_map_.size());
+    for (const auto& [key, info] : m_unexpected_supervisor_exit_map_) {
+      pending.emplace_back(PendingSnapshot{.key = key,
+                                           .exit_code = info.exit_code,
+                                           .reason = info.reason,
+                                           .retry_count = info.retry_count});
+    }
+  }
+
+  std::vector<PendingFailure> failures;
+  std::vector<StepKey> resolved_keys;
+  std::vector<StepKey> retry_keys;
+
+  for (const auto& entry : pending) {
+    const auto& [job_id, step_id] = entry.key;
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_ptr) {
+      resolved_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    bool resolved = false;
+    {
+      absl::MutexLock step_lock(job_ptr->step_map_mtx.get());
+      auto step_it = job_ptr->step_map.find(step_id);
+      if (step_it == job_ptr->step_map.end() || step_it->second == nullptr) {
+        resolved = true;
+      } else {
+        auto* step = step_it->second.get();
+        resolved = step->status == StepStatus::Completing ||
+                   IsFinishedStepStatus(step->status);
+      }
+    }
+
+    if (resolved) {
+      resolved_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    if (entry.retry_count + 1 < kUnexpectedSupervisorExitGraceRetryCount) {
+      retry_keys.emplace_back(entry.key);
+      continue;
+    }
+
+    failures.emplace_back(PendingFailure{.job_id = job_id,
+                                         .step_id = step_id,
+                                         .exit_code = entry.exit_code,
+                                         .reason = entry.reason});
+    resolved_keys.emplace_back(entry.key);
+  }
+
+  {
+    absl::MutexLock unexpected_lock(&m_unexpected_supervisor_exit_mtx_);
+    for (const auto& key : retry_keys) {
+      auto it = m_unexpected_supervisor_exit_map_.find(key);
+      if (it != m_unexpected_supervisor_exit_map_.end())
+        ++it->second.retry_count;
+    }
+    for (const auto& key : resolved_keys) {
+      m_unexpected_supervisor_exit_map_.erase(key);
+    }
+  }
+
+  for (auto& failure : failures) {
+    CRANE_WARN(
+        "[Step #{}.{}] Supervisor exited without reporting a final step "
+        "status. Marking step Failed.",
+        failure.job_id, failure.step_id);
+    ActivateStepStatusChangeAsync_(
+        failure.job_id, failure.step_id, StepStatus::Failed, failure.exit_code,
+        std::move(failure.reason),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+  }
+}
+
 bool JobManager::EvCheckSupervisorRunning_() {
+  std::vector<std::pair<job_id_t, std::string>> jobs_to_check_pending_sigkill;
   std::vector<JobInD> jobs_to_clean;
   // Step is completing, get ownership here.
   std::vector<std::unique_ptr<StepInstance>> steps_to_clean;
   {
+    {
+      auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+      jobs_to_check_pending_sigkill.reserve(job_map_ptr->size());
+      for (auto& [job_id, job] : *job_map_ptr) {
+        auto* job_ptr = job.RawPtr();
+        if (job_ptr->cgroup) {
+          jobs_to_check_pending_sigkill.emplace_back(
+              job_id, job_ptr->cgroup->CgroupPath().string());
+        }
+      }
+    }
+
+    ThawFrozenJobsWithPendingSigkill_(jobs_to_check_pending_sigkill);
+    HandleUnexpectedSupervisorExits_();
+
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto& [step, retry_count] : m_completing_step_retry_map_) {
@@ -471,6 +790,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
+  std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
   int status;
   pid_t pid;
   while (true) {
@@ -478,8 +798,9 @@ void JobManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      CRANE_TRACE("Child pid {} exit", pid);
-      // We do nothing now
+      if (!m_exit_watcher_.TryDeliver(pid, status)) {
+        RecordUnexpectedSupervisorExit_(pid, status);
+      }
     } else if (pid == 0) {
       // There's no child that needs reaping.
       break;
@@ -539,6 +860,9 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
+// NOTE: V3 changed dedicated_res_in_node() -> gres() in proto.
+// This change needs to be applied in StepInstance.cpp which now holds
+// the SpawnSupervisor logic (moved there by x11_task branch).
 CraneErrCode JobManager::ExecuteStepAsync(
     std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
     std::unordered_map<job_id_t, std::string> traceparents) {
@@ -569,39 +893,107 @@ CraneErrCode JobManager::ExecuteStepAsync(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
-                                                    step_id_t step_id,
-                                                    int64_t new_timelimit_sec) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) {
-    CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
-    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+CraneExpected<void> JobManager::ChangeStepTimeConstraint(
+    job_id_t job_id, step_id_t step_id,
+    std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  auto is_step_missing_or_finished = [this, job_id, step_id]() {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) return true;
+
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it == job->step_map.end()) return true;
+
+    auto status = step_it->second->status;
+    return status == StepStatus::Completing || IsFinishedStepStatus(status);
+  };
+
+  std::shared_ptr<SupervisorStub> stub;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id,
+                  step_id);
+      return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+    }
+
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it == job->step_map.end()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
+                  step_id);
+      return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+    }
+
+    auto status = step_it->second->status;
+    if (status == StepStatus::Completing || IsFinishedStepStatus(status))
+      return {};
+
+    stub = step_it->second->supervisor_stub;
   }
-  absl::MutexLock lock(job->step_map_mtx.get());
-  auto step_it = job->step_map.find(step_id);
-  if (step_it == job->step_map.end()) {
-    CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
-                step_id);
-    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
-  }
-  auto& stub = step_it->second->supervisor_stub;
+
   if (!stub) {
-    CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when changing timelimit",
-                job_id, step_id);
-    StepStatusChangeAsync(job_id, step_id, StepStatus::Failed,
-                          ExitCode::EC_RPC_ERR,
-                          "Supervisor stub is null when changing timelimit",
-                          google::protobuf::util::TimeUtil::GetCurrentTime());
+    if (is_step_missing_or_finished()) return {};
+
+    CRANE_ERROR(
+        "[Step #{}.{}] Supervisor stub is null when changing time constraint",
+        job_id, step_id);
+    StepStatusChangeAsync(
+        job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+        "Supervisor stub is null when changing time constraint",
+        google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
-  auto err = stub->ChangeStepTimeLimit(absl::Seconds(new_timelimit_sec));
+
+  auto err = stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
+  int64_t sec = time_limit_seconds.value_or(deadline_time.value_or(0));
   if (err != CraneErrCode::SUCCESS) {
+    if (is_step_missing_or_finished()) return {};
+
     CRANE_ERROR(
-        "[Step #{}.{}] Failed to change step timelimit to {} seconds via "
-        "supervisor RPC",
-        job_id, step_id, new_timelimit_sec);
+        "[Step #{}.{}] Failed to change step time constraint to {} seconds via "
+        "supervisor RPC, err={}",
+        job_id, step_id, sec, static_cast<int>(err));
     return std::unexpected{err};
   }
+  return {};
+}
+
+CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
+    job_id_t job_id, int64_t new_timelimit_sec) {
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job) {
+    CRANE_ERROR("[Job #{}] Failed to find job allocation", job_id);
+    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  }
+
+  absl::MutexLock lock(job->step_map_mtx.get());
+
+  // For resume operations, supervisor_stub being unavailable should not be
+  // a fatal error. After thaw, processes will naturally resume and the time
+  // limit will take effect on the next check.
+  for (auto& [step_id, step] : job->step_map) {
+    if (step->supervisor_stub) {
+      auto err = step->supervisor_stub->ChangeStepTimeConstraint(
+          new_timelimit_sec, std::nullopt);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_WARN(
+            "[Step #{}.{}] Failed to change step timelimit to {} seconds, "
+            "but continuing (step may have completed or supervisor "
+            "unavailable)",
+            job_id, step_id, new_timelimit_sec);
+      }
+    } else {
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor stub is null when changing timelimit, "
+          "but continuing (step may have completed or be in transition)",
+          job_id, step_id);
+    }
+  }
+
+  // Even if some steps failed, return success as this should not block
+  // resume operations
   return {};
 }
 
@@ -703,6 +1095,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
   std::vector<uid_t> uid_vec;
 
   for (auto& job : jobs) {
+    CgroupManager::ReleaseJobCpuPool(job.job_id, job.job_to_d.res());
     job_cg_map[job.job_id] = job.cgroup.release();
   }
 
@@ -767,6 +1160,15 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
         .run_gid = 0,
         .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
+    args.fork_and_watch_fn = [this](std::function<pid_t()> do_fork)
+        -> std::optional<std::pair<pid_t, std::future<int>>> {
+      std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+      pid_t pid = do_fork();
+      if (pid < 0) return std::nullopt;
+      if (pid == 0) return std::make_pair(pid, std::future<int>{});
+      return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+    };
+
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
       args.at_child_setup_cb = [this, job_id](pid_t pid) {
         return MigrateProcToCgroupOfJob(pid, job_id);
@@ -830,11 +1232,13 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // Create job cgroup first.
   // TODO: Create step cgroup later.
   if (!job->cgroup) {
-    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-        CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(),
-        false, Common::CgConstant::kCgMinMem);
+    auto cg_expt = CgroupManager::AllocateAndGetCgroupForJob(
+        job->job_id, job->job_to_d.res(), false, Common::CgConstant::kCgMinMem);
     if (cg_expt.has_value()) {
       job->cgroup = std::move(cg_expt.value());
+      ResourceInNodeV3 res_v3(job->job_to_d.res());
+      job->path_info =
+          CgroupManager::MakeCgroupPathInfo(job->job_id, res_v3.GetCpuSet());
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
       ActivateStepStatusChangeAsync_(
@@ -856,7 +1260,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this job, and
   // we should send StepStatusChange manually.
-  CraneErrCode err = step_ptr->Prepare();
+  CraneErrCode err = step_ptr->Prepare(job->path_info);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
@@ -980,6 +1384,105 @@ JobManager::GetAllocatedJobSteps() {
   return job_steps;
 }
 
+std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
+  std::vector<step_id_t> result;
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return result;
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  for (const auto& [step_id, step] : job_ptr->step_map) {
+    result.push_back(step_id);
+  }
+  return result;
+}
+
+CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) {
+    CRANE_WARN("[Job #{}] Failed to suspend: job allocation not found.",
+               job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  if (!job_ptr->cgroup) {
+    CRANE_WARN("[Job #{}] Failed to suspend: job cgroup not found.", job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  // Cancel the supervisor termination timer for the primary step BEFORE
+  // freezing the cgroup. The supervisor process lives inside the job's cgroup,
+  // so it must be contacted while still running. This prevents the timer from
+  // firing while the cgroup is frozen; otherwise pending signals
+  // (SIGTERM/SIGKILL) would be delivered when the cgroup is thawed on resume,
+  // killing the process before the time constraint can be updated.
+  // The resume flow will set a new timer with the updated time limit via
+  // ChangeStepTimeConstraint.
+  {
+    absl::MutexLock lock(job_ptr->step_map_mtx.get());
+    auto step_it = job_ptr->step_map.find(kPrimaryStepId);
+    if (step_it != job_ptr->step_map.end() &&
+        step_it->second->supervisor_stub) {
+      auto err = step_it->second->supervisor_stub->ChangeStepTimeConstraint(
+          kJobMaxTimeStampSec, std::nullopt);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_WARN(
+            "[Step #{}.{}] Failed to cancel timer during suspend, "
+            "but continuing (step may have completed)",
+            job_id, kPrimaryStepId);
+      }
+    }
+  }
+
+  auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
+  bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
+  if (!root_ok || !children_ok) {
+    CRANE_ERROR(
+        "[Job #{}] Failed to freeze job cgroup {}, root_ok={}, children_ok={}",
+        job_id, job_cg_abs_path, root_ok, children_ok);
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  CRANE_INFO("[Job #{}] Frozen job cgroup: {}", job_id, job_cg_abs_path);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode JobManager::ResumeJobByCgroup(job_id_t job_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) {
+    CRANE_WARN("[Job #{}] Failed to resume: job allocation not found.", job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  if (!job_ptr->cgroup) {
+    CRANE_WARN("[Job #{}] Failed to resume: job cgroup not found.", job_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
+  bool root_ok = CgroupManager::ThawCgroupByPath(job_cg_abs_path);
+  bool children_ok = CgroupManager::ThawChildCgroupsByPath(job_cg_abs_path);
+  if (!root_ok || !children_ok) {
+    CRANE_ERROR(
+        "[Job #{}] Failed to thaw job cgroup {}, root_ok={}, children_ok={}",
+        job_id, job_cg_abs_path, root_ok, children_ok);
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  CRANE_INFO("[Job #{}] Thawed job cgroup: {}", job_id, job_cg_abs_path);
+  return CraneErrCode::SUCCESS;
+}
+
+std::shared_ptr<SupervisorStub> JobManager::GetSupervisorStub(
+    job_id_t job_id, step_id_t step_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return nullptr;
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  auto it = job_ptr->step_map.find(step_id);
+  if (it == job_ptr->step_map.end()) return nullptr;
+  return it->second->supervisor_stub;
+}
+
 uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
@@ -1053,9 +1556,9 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
     std::vector<JobInD> job_to_clean;
     {
       CRANE_INFO(
-          "[Step #{}.{}] Terminating step, orphaned:{} terminated_by_user:{}.",
+          "[Step #{}.{}] Terminating step, orphaned:{} terminate_source:{}.",
           elem.job_id, elem.step_id, elem.mark_as_orphaned,
-          elem.terminated_by_user);
+          static_cast<int>(elem.terminate_source));
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
@@ -1108,6 +1611,17 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
         terminate_step_ids = {elem.step_id};
       }
 
+      // When a job is suspended, its cgroup may be frozen. In cgroup v1,
+      // frozen processes cannot respond to SIGKILL. Thaw the job cgroup
+      // before terminating steps to ensure cancel can take effect.
+      if (job_instance->cgroup) {
+        auto cg_path = job_instance->cgroup->CgroupPath().string();
+        CgroupManager::ThawCgroupByPath(cg_path);
+        CgroupManager::ThawChildCgroupsByPath(cg_path);
+        CRANE_DEBUG("[Job #{}] Thawed job cgroup before terminating steps.",
+                    elem.job_id);
+      }
+
       for (auto step_id : terminate_step_ids) {
         auto& step_instance = job_instance->step_map.at(step_id);
         auto stub = step_instance->supervisor_stub;
@@ -1121,7 +1635,7 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
           continue;
         }
         auto err =
-            stub->TerminateStep(elem.mark_as_orphaned, elem.terminated_by_user);
+            stub->TerminateStep(elem.mark_as_orphaned, elem.terminate_source);
         if (err != CraneErrCode::SUCCESS) {
           // Supervisor dead for some reason.
           CRANE_ERROR("[Step #{}.{}] Failed to terminate.", elem.job_id,
@@ -1172,19 +1686,23 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
   not_ready_elems.clear();
 }
 
-void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
+void JobManager::TerminateStepAsync(
+    job_id_t job_id, step_id_t step_id,
+    crane::grpc::TerminateSource terminate_source) {
   StepTerminateQueueElem elem{.job_id = job_id,
                               .step_id = step_id,
-                              .terminated_by_user = true};
+                              .terminate_source = terminate_source};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
 
 void JobManager::MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id,
                                                      step_id_t step_id) {
-  StepTerminateQueueElem elem{.job_id = job_id,
-                              .step_id = step_id,
-                              .mark_as_orphaned = true};
+  StepTerminateQueueElem elem{
+      .job_id = job_id,
+      .step_id = step_id,
+      .terminate_source = crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION,
+      .mark_as_orphaned = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
@@ -1278,6 +1796,17 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             .run_uid = 0,
             .run_gid = 0,
             .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+        run_epilog_args.fork_and_watch_fn =
+            [this](std::function<pid_t()> do_fork)
+            -> std::optional<std::pair<pid_t, std::future<int>>> {
+          std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+          pid_t pid = do_fork();
+          if (pid < 0) return std::nullopt;
+          if (pid == 0) return std::make_pair(pid, std::future<int>{});
+          return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+        };
+
         if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
           run_epilog_args.timeout_sec =
               g_config.JobLifecycleHook.PrologEpilogTimeout;
@@ -1307,7 +1836,7 @@ void JobManager::StepStatusChangeAsync(
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateStepStatusChangeAsync_(job_id, step_id, new_status, exit_code,
-                                 std::move(reason), timestamp);
+                                 std::move(reason), std::move(timestamp));
 }
 
 }  // namespace Craned

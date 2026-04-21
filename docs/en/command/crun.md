@@ -27,6 +27,9 @@ Display crun version information.
 :   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
+**--deadline string**
+
+:   Deadline time of the job
 **-d, --dependency=&lt;string&gt;**
 
 :   **Applies to:** `job`  

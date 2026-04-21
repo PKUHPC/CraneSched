@@ -20,12 +20,37 @@
 
 #include <grpcpp/client_context.h>
 
+#include <algorithm>
+
+#include "absl/strings/ascii.h"
 #include "crane/GrpcHelper.h"
 #include "crane/Lock.h"
 #include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 #include "cri/api.pb.h"
 #include "protos/PublicDefs.pb.h"
+
+namespace {
+
+std::optional<std::string> CanonicalizePullPolicy_(
+    const std::string& pull_policy) {
+  const std::string normalized_base =
+      absl::AsciiStrToLower(absl::StripAsciiWhitespace(pull_policy));
+  if (normalized_base.empty()) return std::string{};
+
+  std::string normalized = normalized_base;
+  std::ranges::replace(normalized, '_', '-');
+
+  if (normalized == "always") return std::string{"Always"};
+  if (normalized == "never") return std::string{"Never"};
+  if (normalized == "ifnotpresent" || normalized == "if-not-present") {
+    return std::string{"IfNotPresent"};
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace
 
 namespace cri {
 
@@ -130,15 +155,27 @@ std::optional<std::string> CriClient::PullImage(
   using api::PullImageRequest;
   using api::PullImageResponse;
 
-  // Determine the effective pull policy
-  std::string effective_policy = pull_policy;
+  // Determine and validate the effective pull policy
+  auto canonical_policy_opt = CanonicalizePullPolicy_(pull_policy);
+  if (!canonical_policy_opt.has_value()) {
+    CRANE_ERROR(
+        "Invalid pull policy '{}'. Supported values are Always, "
+        "IfNotPresent, and Never",
+        pull_policy);
+    return std::nullopt;
+  }
+
+  std::string effective_policy = std::move(*canonical_policy_opt);
   if (effective_policy.empty()) {
     // Smart default: Always for :latest or untagged, IfNotPresent for versioned
-    size_t colon_pos = image_name.find_last_of(':');
-    size_t at_pos = image_name.find_last_of('@');
+    const size_t slash_pos = image_name.find_last_of('/');
+    const size_t colon_pos = image_name.find_last_of(':');
+    const size_t at_pos = image_name.find_last_of('@');
 
-    bool has_digest = (at_pos != std::string::npos);
-    bool has_tag = (colon_pos != std::string::npos && !has_digest);
+    const bool has_digest = (at_pos != std::string::npos);
+    const bool has_tag =
+        !has_digest && (colon_pos != std::string::npos) &&
+        (slash_pos == std::string::npos || colon_pos > slash_pos);
 
     if (!has_tag || (has_tag && image_name.substr(colon_pos + 1) == "latest")) {
       effective_policy = "Always";
@@ -159,11 +196,11 @@ std::optional<std::string> CriClient::PullImage(
     if (image_id.has_value()) {
       CRANE_TRACE("Using local image {} (pull policy: Never)", image_name);
       return image_id;
-    } else {
-      CRANE_ERROR("Image {} not found locally and pull policy is Never",
-                  image_name);
-      return std::nullopt;
     }
+
+    CRANE_ERROR("Image {} not found locally and pull policy is Never",
+                image_name);
+    return std::nullopt;
   }
 
   // Handle "IfNotPresent" policy

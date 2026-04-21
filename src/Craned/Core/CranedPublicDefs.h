@@ -122,9 +122,16 @@ struct Config {
     };
     BindFsConfig BindFs;
     struct SubIdConfig {
-      bool Managed{true};
-      uint64_t RangeSize{65536};
-      uint64_t BaseOffset{100000};
+      struct Mapping {
+        uint64_t Id{0};
+        uint64_t IdCount{0};
+        uint64_t SubIdStart{0};
+        uint64_t SubIdSize{0};
+      };
+
+      bool Managed{false};
+      std::vector<Mapping> UidMappings;
+      std::vector<Mapping> GidMappings;
     };
     SubIdConfig SubId;
   };
@@ -190,7 +197,7 @@ struct Config {
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;
   std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
       Ipv6ToCranedHostname;
-  std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
+  std::unordered_map<std::string, std::shared_ptr<ResourceInNodeV3>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
 
   struct JobLifecycleHookConfig {

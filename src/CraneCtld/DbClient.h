@@ -101,7 +101,7 @@ class MongodbClient {
     std::string wckey;
     std::chrono::sys_seconds start_time;
     std::chrono::sys_seconds end_time;
-    double total_cpus;
+    cpu_t total_cpus;
   };
 
   struct MongoServerVersion {
@@ -190,6 +190,7 @@ class MongodbClient {
   bool UpdateJobSummaryLastSuccessTime_(JobSummary::Type summary_type,
                                         std::chrono::sys_seconds last_success);
   static std::string JobSummaryTypeToString_(JobSummary::Type summary_type);
+  static std::string SummaryMetadataIdFromType_(JobSummary::Type summary_type);
   std::optional<std::chrono::sys_seconds> GetJobSummaryLastSuccessTime_(
       JobSummary::Type summary_type);
 
@@ -228,6 +229,19 @@ class MongodbClient {
   void RecoverNewClusterAggregations_(bool hour_done, bool day_done,
                                       bool month_done);
   void RecoverExistingClusterAggregations_();
+
+  // Database schema migration
+  static constexpr int kCurrentDbSchemaVersion = 1;
+  static constexpr const char* kV0CollectionName = "task_table";
+  bool CheckAndMigrateDbSchema_();
+  bool RecoverInterruptedMigration_();
+  std::optional<int> GetDbSchemaVersion_();
+  bool SetDbSchemaVersion_(int version);
+  bool CopyJobTableForMigration_(const std::string& source_collection);
+  bool SwapMigratedJobTable_(const std::string& source_collection,
+                             int from_version, int to_version);
+  void CleanupMigrationTemp_();
+  bool MigrateV0ToV1_();
 
   /* ----- Method of operating the account table ----------- */
  public:
@@ -503,15 +517,15 @@ class MongodbClient {
       const std::unordered_map<std::string, User::AttrsInAccount>& value);
 
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const DeviceMap& value);
+                           const GresMap& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const std::vector<gid_t>& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const DedicatedResourceInNode& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const ResourceInNode& value);
+                           const ResourceInNodeV3& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
-                           const ResourceV2& value);
+                           const ResourceV3& value);
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const std::optional<ContainerMetaInJob>& value);
 
@@ -526,7 +540,7 @@ class MongodbClient {
                            const ResourceView& value);
 
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
-                              const DeviceMap& value);
+                              const GresMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -636,11 +650,11 @@ class MongodbClient {
   void ViewToStepInfo_(const bsoncxx::document::view& view,
                        crane::grpc::StepInfo* step_info);
 
-  DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
+  GresMap BsonToGresMap(const bsoncxx::document::view& doc);
   DedicatedResourceInNode BsonToDedicatedResourceInNode(
       const bsoncxx::document::view& doc);
-  ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
-  ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
+  ResourceInNodeV3 BsonToResourceInNodeV3(const bsoncxx::document::view& doc);
+  ResourceV3 BsonToResourceV3(const bsoncxx::document::view& doc);
   PodMetaInJob BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
 
@@ -648,10 +662,6 @@ class MongodbClient {
                               const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
-  // TODO: Renaming from "task_table" to "job_table" requires a database
-  // migration for existing deployments. A migration script should rename the
-  // MongoDB collection (db.task_table.renameCollection("job_table")) and be
-  // integrated into the upgrade procedure before this change is released.
   const std::string m_job_collection_name_{"job_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
@@ -661,7 +671,8 @@ class MongodbClient {
   const std::string m_license_resource_collection_name_{
       "license_resource_table"};
 
-  const std::string m_summary_time_collection_name_{"summary_time_table"};
+  const std::string m_migration_temp_collection_name_{"job_table_migrating"};
+  const std::string m_metadata_collection_name_{"metadata_table"};
   const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
   const std::string m_acc_usage_day_collection_name_{"acc_usage_day_table"};
   const std::string m_acc_usage_month_collection_name_{"acc_usage_month_table"};

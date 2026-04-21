@@ -37,6 +37,78 @@
 namespace Ctld {
 using namespace std::chrono_literals;
 
+namespace {
+
+bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
+                                   crane::grpc::JobStatus status,
+                                   absl::Time end_time, absl::Time suspend_time,
+                                   const char* failure_reason) {
+  auto prev_status = job->Status();
+  auto prev_end_time = job->EndTime();
+  auto prev_suspend_time = job->SuspendTime();
+
+  job->SetStatus(status);
+  job->SetEndTime(end_time);
+  job->SetSuspendTime(suspend_time);
+
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+          0, job->JobDbId(), job->RuntimeAttr())) {
+    job->SetStatus(prev_status);
+    job->SetEndTime(prev_end_time);
+    job->SetSuspendTime(prev_suspend_time);
+    CRANE_ERROR("Failed to persist runtime state for job #{} during {}", job_id,
+                failure_reason);
+    return false;
+  }
+
+  return true;
+}
+
+bool SuspendJobOnNodes_(const std::vector<CranedId>& craned_ids,
+                        const std::vector<job_id_t>& broadcast_job_ids,
+                        task_id_t job_id, const char* failure_reason) {
+  if (craned_ids.empty()) return true;
+
+  bool suspend_failed = false;
+  absl::Mutex suspend_result_mtx;
+  absl::BlockingCounter suspend_counter(craned_ids.size());
+
+  for (const auto& craned_id : craned_ids) {
+    g_thread_pool->detach_task([&, craned_id]() {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) {
+        CRANE_ERROR(
+            "{} for job #{} on craned {}: stub unavailable. "
+            "Node may remain running.",
+            failure_reason, job_id, craned_id);
+        {
+          absl::MutexLock lock(&suspend_result_mtx);
+          suspend_failed = true;
+        }
+        suspend_counter.DecrementCount();
+        return;
+      }
+
+      CraneErrCode err = stub->SuspendJobs(broadcast_job_ids);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("{} for job #{} on craned {}: {}. Node may remain running.",
+                    failure_reason, job_id, craned_id, CraneErrStr(err));
+        {
+          absl::MutexLock lock(&suspend_result_mtx);
+          suspend_failed = true;
+        }
+      }
+
+      suspend_counter.DecrementCount();
+    });
+  }
+
+  suspend_counter.Wait();
+  return !suspend_failed;
+}
+
+}  // namespace
+
 JobScheduler::JobScheduler() {
   if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
     CRANE_INFO("basic priority sorter is selected.");
@@ -64,6 +136,8 @@ JobScheduler::~JobScheduler() {
   if (m_job_status_change_thread_.joinable())
     m_job_status_change_thread_.join();
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
+  if (m_job_deadline_timer_thread_.joinable())
+    m_job_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
   m_rpc_worker_pool_.reset();
 }
@@ -73,6 +147,10 @@ bool JobScheduler::Init() {
 
   bool ok;
   CraneErrCode err;
+
+  uvw_deadline_loop = uvw::loop::create();
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
 
   EmbeddedDbClient::DbSnapshot snapshot;
   ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
@@ -98,6 +176,7 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
+        job->SetEndTime(absl::Now());
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
         if (!ok) {
@@ -141,9 +220,9 @@ bool JobScheduler::Init() {
       recovered_running_jobs.emplace(job_id, std::move(job));
     }
   }
-
-  // Process the pending jobs in the embedded pending queue.
+  //  Process the pending jobs in the embedded pending queue.
   auto& pending_queue = snapshot.pending_queue;
+  absl::Time infiniteFuture = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   if (!pending_queue.empty()) {
     CRANE_INFO("{} pending job(s) recovered.", pending_queue.size());
 
@@ -186,6 +265,11 @@ bool JobScheduler::Init() {
           mark_job_as_failed = true;
         } else
           g_account_meta_container->UserAddJob(job->Username());
+      }
+
+      if (!mark_job_as_failed && job->deadline_time != infiniteFuture) {
+        deadline_timer_vec.emplace_back(
+            job_id, absl::ToUnixSeconds(job->deadline_time));
       }
 
       if (!mark_job_as_failed) {
@@ -699,6 +783,28 @@ bool JobScheduler::Init() {
     }
   }
 
+  m_job_deadline_timer_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelDeadlineJobCb_();
+      });
+  m_job_deadline_timer_thread_ =
+      std::thread([this]() { DeadlineTimerThread_(); });
+
+  m_job_deadline_timer_create_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_create_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CreateDeadlineTimerCb_();
+      });
+
+  if (!deadline_timer_vec.empty()) {
+    m_job_deadline_timer_create_queue_.enqueue_bulk(deadline_timer_vec.data(),
+                                                    deadline_timer_vec.size());
+    m_job_deadline_timer_create_async_handle_->send();
+  }
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
   m_step_schedule_thread_ = std::thread([this] { StepScheduleThread_(); });
@@ -852,6 +958,27 @@ void JobScheduler::JobStatusChangeThread_(
   }
 
   uvw_loop->run();
+}
+
+void JobScheduler::DeadlineTimerThread_() {
+  util::SetCurrentThreadName("JobDeadlineThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_deadline_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in JobDeadlineTimer loop.");
+  }
+
+  uvw_deadline_loop->run();
 }
 
 void JobScheduler::CleanResvThread_(
@@ -1662,6 +1789,80 @@ std::future<CraneExpected<step_id_t>> JobScheduler::SubmitStepAsync(
   return std::move(future);
 }
 
+void JobScheduler::CreateDeadlineTimerCb_() {
+  absl::Time now = absl::Now();
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  DeadlineTimerQueueElem elem;
+  while (m_job_deadline_timer_create_queue_.try_dequeue(elem)) {
+    job_id_t job_id = elem.first;
+    int64_t deadline_time = elem.second;
+
+    auto it = m_deadline_timer_map_.find(job_id);
+    if (it != m_deadline_timer_map_.end()) {
+      it->second->close();
+      it->second.reset();
+      m_deadline_timer_map_.erase(it);
+    }
+
+    if (deadline_time <= absl::ToUnixSeconds(now)) {
+      CRANE_ERROR("Job #{}'s deadline is earlier than now", job_id);
+      {
+        LockGuard pending_guard(&m_pending_job_map_mtx_);
+        auto pd_it = m_pending_job_map_.find(job_id);
+        if (pd_it != m_pending_job_map_.end()) {
+          auto& job = pd_it->second;
+          m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+              .job = std::move(job),
+              .finish_status = crane::grpc::JobStatus::Deadline});
+          m_pending_job_map_.erase(pd_it);
+        }
+      }
+      return;
+    }
+
+    auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
+    deadline_timer->on<uvw::timer_event>(
+        [this, job_id](const uvw::timer_event&, uvw::timer_handle& h) {
+          CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
+          DelDeadlineTimer_(job_id);
+          m_job_deadline_timer_queue_.enqueue(job_id);
+          m_job_deadline_timer_async_handle_->send();
+        });
+
+    deadline_timer->start(
+        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
+        std::chrono::seconds(0));
+
+    m_deadline_timer_map_.emplace(job_id, deadline_timer);
+  }
+}
+
+void JobScheduler::DelDeadlineTimer_(job_id_t job_id) {
+  auto it = m_deadline_timer_map_.find(job_id);
+  if (it != m_deadline_timer_map_.end()) {
+    it->second->close();
+    it->second.reset();
+    m_deadline_timer_map_.erase(it);
+  }
+}
+
+void JobScheduler::CancelDeadlineJobCb_() {
+  job_id_t job_id;
+  m_pending_job_map_mtx_.Lock();
+  while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
+    auto pd_it = m_pending_job_map_.find(job_id);
+    if (pd_it != m_pending_job_map_.end()) {
+      auto& job = pd_it->second;
+      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+          .job = std::move(job),
+          .finish_status = crane::grpc::JobStatus::Deadline});
+      m_pending_job_map_.erase(pd_it);
+    }
+  }
+  m_pending_job_map_mtx_.Unlock();
+  m_cancel_job_async_handle_->send();
+}
+
 std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
                                                             int64_t secs) {
   std::promise<CraneErrCode> promise;
@@ -1674,8 +1875,20 @@ std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
   return std::move(future);
 }
 
-CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
-  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
+CraneErrCode JobScheduler::ChangeJobTimeConstraint(
+    job_id_t job_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  absl::Time now = absl::Now();
+  bool is_pending = false;
+  std::optional<absl::Time> absl_deadline_time =
+      deadline_time.transform(absl::FromUnixSeconds);
+
+  if (absl_deadline_time && absl_deadline_time <= now) {
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+  if (time_limit_seconds &&
+      !CheckIfTimeLimitSecIsValid(time_limit_seconds.value()))
+    return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
 
@@ -1688,13 +1901,20 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
 
     auto pd_iter = m_pending_job_map_.find(job_id);
     if (pd_iter != m_pending_job_map_.end()) {
-      found = true, job = pd_iter->second.get();
+      found = true, is_pending = true, job = pd_iter->second.get();
 
       if (job->reservation != "") {
         auto resv_end_time =
             g_meta_container->GetResvMetaPtr(job->reservation)->end_time;
-        if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
+        if (time_limit_seconds &&
+            resv_end_time <=
+                absl::Now() + absl::Seconds(time_limit_seconds.value())) {
           CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
+                      job_id);
+          return CraneErrCode::ERR_INVALID_PARAM;
+        }
+        if (absl_deadline_time && resv_end_time <= absl_deadline_time.value()) {
+          CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
                       job_id);
           return CraneErrCode::ERR_INVALID_PARAM;
         }
@@ -1710,10 +1930,33 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(job->reservation);
           auto resv_end_time = reservation_meta->end_time;
-          if (resv_end_time <= job->StartTime() + absl::Seconds(secs)) {
+
+          if (time_limit_seconds &&
+              resv_end_time <= job->StartTime() +
+                                   absl::Seconds(time_limit_seconds.value())) {
             CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
                         job_id);
             return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (absl_deadline_time &&
+              resv_end_time <= absl_deadline_time.value()) {
+            CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
+                        job_id);
+            return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (time_limit_seconds) {
+            g_meta_container->GetResvMetaPtr(job->reservation)->end_time =
+                std::min(job->StartTime() +
+                             absl::Seconds(time_limit_seconds.value()),
+                         job->deadline_time);
+          }
+
+          if (absl_deadline_time) {
+            g_meta_container->GetResvMetaPtr(job->reservation)->end_time =
+                std::min(job->StartTime() + job->time_limit,
+                         absl_deadline_time.value());
           }
         }
       }
@@ -1724,26 +1967,768 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
       return CraneErrCode::ERR_NON_EXISTENT;
     }
 
-    job->time_limit = absl::Seconds(secs);
-    job->MutableJobToCtld()->mutable_time_limit()->set_seconds(secs);
+    if (time_limit_seconds) {
+      job->time_limit = absl::Seconds(time_limit_seconds.value());
+      job->MutableJobToCtld()->mutable_time_limit()->set_seconds(
+          time_limit_seconds.value());
+    }
+
+    if (absl_deadline_time) {
+      job->deadline_time = absl_deadline_time.value();
+      job->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
+          absl::ToUnixSeconds(absl_deadline_time.value()));
+      if (is_pending &&
+          job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+        m_job_deadline_timer_create_queue_.enqueue(
+            {job_id, deadline_time.value()});
+        m_job_deadline_timer_create_async_handle_->send();
+      }
+    }
+
     g_embedded_db_client->UpdateJobToCtldIfExists(0, job->JobDbId(),
                                                   job->JobToCtld());
   }
 
   // Only send request to the executing node
-  for (const CranedId& craned_id : craned_ids) {
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeJobTimeLimit(job_id, secs);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change time limit of job #{} on Node {}", job_id,
-                    craned_id);
-        return err;
+  if (!is_pending) {
+    for (const CranedId& craned_id : craned_ids) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        CraneErrCode err = stub->ChangeJobTimeConstraint(
+            job_id, time_limit_seconds, deadline_time);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "Failed to change time limit or deadline of job #{} on Node {}",
+              job_id, craned_id);
+          return err;
+        }
       }
     }
   }
 
   return CraneErrCode::SUCCESS;
+}
+
+std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
+    const std::vector<task_id_t>& job_ids) {
+  std::vector<CraneErrCode> results;
+  results.reserve(job_ids.size());
+  for (task_id_t job_id : job_ids) {
+    std::vector<CranedId> executing_nodes;
+
+    auto persist_status = [&](crane::grpc::JobStatus status,
+                              const char* failure_reason) {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        CRANE_WARN("Job #{} disappeared while persisting status {} during {}",
+                   job_id, static_cast<int>(status), failure_reason);
+        return false;
+      }
+
+      JobInCtld* job = iter->second.get();
+      auto prev_status = job->Status();
+      if (prev_status == status) return true;
+
+      job->SetStatus(status);
+
+      // Manage suspend_time based on status transitions:
+      // - When transitioning to Suspended: record current time
+      // - When transitioning away from Suspended: clear suspend_time
+      absl::Time prev_suspend_time = job->SuspendTime();
+      if (status == crane::grpc::Suspended) {
+        job->SetSuspendTime(absl::Now());
+      } else if (prev_status == crane::grpc::Suspended) {
+        // Transitioning away from Suspended, clear suspend_time
+        job->SetSuspendTime(absl::InfinitePast());
+      }
+
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+              0, job->JobDbId(), job->RuntimeAttr())) {
+        job->SetStatus(prev_status);
+        job->SetSuspendTime(prev_suspend_time);
+        CRANE_ERROR("Failed to persist status {} for job #{} during {}",
+                    static_cast<int>(status), job_id, failure_reason);
+        return false;
+      }
+
+      return true;
+    };
+
+    auto persist_current_suspended_state = [&](absl::Time suspend_time,
+                                               const char* failure_reason) {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        CRANE_WARN(
+            "Job #{} disappeared while converging to Suspended during {}",
+            job_id, failure_reason);
+        return false;
+      }
+
+      JobInCtld* job = iter->second.get();
+      return PersistJobRuntimeStateNoLock_(job, job_id, crane::grpc::Suspended,
+                                           job->EndTime(), suspend_time,
+                                           failure_reason);
+    };
+
+    // Check if job is pending (cannot be suspended).
+    // Lock ordering: pending_guard before running_guard.
+    {
+      LockGuard pending_guard(&m_pending_job_map_mtx_);
+      if (m_pending_job_map_.contains(job_id)) {
+        CRANE_TRACE("Job #{} is pending, cannot suspend", job_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+    }
+
+    {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        CRANE_TRACE("Job #{} not in Rn queue for suspend", job_id);
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        continue;
+      }
+
+      JobInCtld* job = iter->second.get();
+      if (job->Status() == crane::grpc::Suspended) {
+        CRANE_TRACE("Job #{} already suspended", job_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+      if (job->Status() != crane::grpc::Running) {
+        CRANE_TRACE("Job #{} is not running (status {}) for suspend", job_id,
+                    static_cast<int>(job->Status()));
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      executing_nodes = job->executing_craned_ids;
+    }
+
+    if (executing_nodes.empty()) {
+      CRANE_WARN("Job #{} has no executing craned when suspending", job_id);
+      results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
+        offline_nodes.push_back(craned_id);
+      }
+    }
+
+    if (!offline_nodes.empty()) {
+      // Ensure suspension only proceeds when every craned involved is online.
+      CRANE_WARN("Job #{} suspend skipped because craned(s) {} are offline.",
+                 job_id, absl::StrJoin(offline_nodes, ","));
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
+      continue;
+    }
+
+    std::vector<job_id_t> broadcast_job_ids{job_id};
+    CraneErrCode failure_code = CraneErrCode::SUCCESS;
+    bool has_failure = false;
+    Mutex result_mtx;
+    std::vector<CranedId> suspended_nodes;
+    suspended_nodes.reserve(executing_nodes.size());
+
+    // Set status to Suspended BEFORE freezing cgroups to close the race window.
+    // This ensures the scheduling thread will skip this job immediately.
+    if (!persist_status(crane::grpc::Suspended, "pre-suspend status change")) {
+      CRANE_ERROR(
+          "Failed to persist Suspended status for job #{} before freezing",
+          job_id);
+      results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+      continue;
+    }
+
+    // Broadcast SuspendJobs via the thread pool and track successes/errors.
+    absl::BlockingCounter blocking_counter(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      g_thread_pool->detach_task([&, craned_id]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!stub || stub->Invalid()) {
+          CRANE_WARN("SuspendJobs stub for {} unavailable", craned_id);
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS)
+              failure_code = CraneErrCode::ERR_RPC_FAILURE;
+            has_failure = true;
+          }
+          blocking_counter.DecrementCount();
+          return;
+        }
+
+        CraneErrCode err = stub->SuspendJobs(broadcast_job_ids);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to suspend job #{} on craned {}: {}", job_id,
+                      craned_id, CraneErrStr(err));
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+            has_failure = true;
+          }
+        } else {
+          LockGuard lock(&result_mtx);
+          suspended_nodes.emplace_back(craned_id);
+        }
+
+        blocking_counter.DecrementCount();
+      });
+    }
+
+    blocking_counter.Wait();
+
+    if (has_failure) {
+      CRANE_ERROR(
+          "Job #{} suspend partially failed on node(s); rolling back by "
+          "resuming successfully suspended nodes and reverting status.",
+          job_id);
+
+      bool rollback_resume_failed = false;
+      if (!suspended_nodes.empty()) {
+        absl::BlockingCounter rollback_counter(suspended_nodes.size());
+        Mutex rollback_result_mtx;
+        for (const auto& craned_id : suspended_nodes) {
+          g_thread_pool->detach_task([&, craned_id]() {
+            auto stub = g_craned_keeper->GetCranedStub(craned_id);
+            if (!stub || stub->Invalid()) {
+              CRANE_ERROR(
+                  "Rollback resume failed for job #{} on craned {}: "
+                  "stub unavailable. Node may remain frozen.",
+                  job_id, craned_id);
+              {
+                LockGuard lock(&rollback_result_mtx);
+                rollback_resume_failed = true;
+              }
+              rollback_counter.DecrementCount();
+              return;
+            }
+
+            CraneErrCode rb_err = stub->ResumeJobs(broadcast_job_ids);
+            if (rb_err != CraneErrCode::SUCCESS) {
+              CRANE_ERROR(
+                  "Rollback resume failed for job #{} on craned {}: {}. "
+                  "Node may remain frozen.",
+                  job_id, craned_id, CraneErrStr(rb_err));
+              {
+                LockGuard lock(&rollback_result_mtx);
+                rollback_resume_failed = true;
+              }
+            }
+
+            rollback_counter.DecrementCount();
+          });
+        }
+        rollback_counter.Wait();
+      }
+
+      // Rollback status to Running only if all nodes were successfully resumed.
+      // If rollback resume failed, keep status as Suspended to reflect reality.
+      if (!rollback_resume_failed) {
+        if (!persist_status(crane::grpc::Running,
+                            "rollback after suspend failure")) {
+          CRANE_ERROR(
+              "Failed to rollback status to Running for job #{} after suspend "
+              "failure. Re-suspending all nodes to converge with ctld state.",
+              job_id);
+
+          if (SuspendJobOnNodes_(executing_nodes, broadcast_job_ids, job_id,
+                                 "Converge suspend failed")) {
+            const absl::Time converge_suspend_time = absl::Now();
+            if (!persist_current_suspended_state(
+                    converge_suspend_time,
+                    "converging after suspend rollback status persist "
+                    "failure")) {
+              CRANE_ERROR(
+                  "Job #{} was re-suspended to match ctld state, but failed "
+                  "to persist the refreshed suspend_time.",
+                  job_id);
+            }
+          } else {
+            CRANE_ERROR(
+                "Job #{} converge suspend incomplete after suspend rollback "
+                "status persist failure. Manual intervention may be required.",
+                job_id);
+          }
+        }
+      } else {
+        CRANE_ERROR(
+            "Job #{} rollback incomplete: some nodes may remain frozen while "
+            "status is Suspended. Manual intervention may be required.",
+            job_id);
+      }
+
+      results.emplace_back(failure_code == CraneErrCode::SUCCESS
+                               ? CraneErrCode::ERR_GENERIC_FAILURE
+                               : failure_code);
+      continue;
+    }
+
+    results.emplace_back(CraneErrCode::SUCCESS);
+  }
+  return results;
+}
+
+std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
+    const std::vector<task_id_t>& job_ids) {
+  std::vector<CraneErrCode> results;
+  results.reserve(job_ids.size());
+  for (task_id_t job_id : job_ids) {
+    std::vector<CranedId> executing_nodes;
+    int64_t new_time_limit_secs = 0;
+    std::optional<int64_t> new_deadline_secs;
+    absl::Time prev_end_time = absl::InfinitePast();
+    absl::Time prev_suspend_time = absl::InfinitePast();
+    bool resume_prep_applied = false;
+
+    auto rollback_resume_preparation = [&] {
+      if (!resume_prep_applied) return;
+
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        CRANE_WARN("Job #{} disappeared while rolling back resume preparation.",
+                   job_id);
+        return;
+      }
+
+      JobInCtld* job = iter->second.get();
+      job->SetEndTime(prev_end_time);
+      job->SetSuspendTime(prev_suspend_time);
+
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+              0, job->JobDbId(), job->RuntimeAttr())) {
+        CRANE_WARN(
+            "Failed to persist rollback of resume preparation for job #{}",
+            job_id);
+      }
+    };
+
+    auto persist_resuspended_state_after_failed_resume =
+        [&](absl::Time rollback_suspend_time, const char* failure_reason) {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          auto iter = m_running_job_map_.find(job_id);
+          if (iter == m_running_job_map_.end()) {
+            CRANE_WARN(
+                "Job #{} disappeared while persisting resuspended state during "
+                "{}.",
+                job_id, failure_reason);
+            return false;
+          }
+
+          JobInCtld* job = iter->second.get();
+          // Keep the already-extended end_time because the suspend interval
+          // before this resume attempt is real. Only time after the rollback
+          // re-freeze should count as newly suspended.
+          return PersistJobRuntimeStateNoLock_(
+              job, job_id, crane::grpc::Suspended, job->EndTime(),
+              rollback_suspend_time, failure_reason);
+        };
+
+    auto persist_running_after_incomplete_resume_rollback =
+        [&](const char* failure_reason) {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          auto iter = m_running_job_map_.find(job_id);
+          if (iter == m_running_job_map_.end()) {
+            CRANE_WARN(
+                "Job #{} disappeared while persisting Running state during {}.",
+                job_id, failure_reason);
+            return false;
+          }
+
+          JobInCtld* job = iter->second.get();
+          return PersistJobRuntimeStateNoLock_(
+              job, job_id, crane::grpc::Running, job->EndTime(),
+              absl::InfinitePast(), failure_reason);
+        };
+
+    {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        CRANE_TRACE("Job #{} not in Rn queue for resume", job_id);
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        continue;
+      }
+
+      JobInCtld* job = iter->second.get();
+      if (job->Status() != crane::grpc::Suspended) {
+        CRANE_TRACE("Job #{} is not suspended (status {}) for resume", job_id,
+                    static_cast<int>(job->Status()));
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      executing_nodes = job->executing_craned_ids;
+      if (executing_nodes.empty()) {
+        CRANE_WARN("Job #{} has no executing craned when resuming", job_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      prev_end_time = job->EndTime();
+      prev_suspend_time = job->SuspendTime();
+
+      // Extend end_time BEFORE sending resume RPC to avoid race condition
+      // with StepStatusChangeAsyncCb_. If the job completes immediately
+      // after SIGCONT (e.g. sleep timer expired during suspension),
+      // the completion handler will already see the extended end_time
+      // since both code paths contend on m_running_job_map_mtx_.
+      //
+      // IMPORTANT: When deadline is set, the effective end_time should be
+      // min(start_time + time_limit + suspended_time, deadline).
+      // This ensures the job respects both time_limit and deadline constraints.
+      if (job->SuspendTime() != absl::InfinitePast()) {
+        absl::Duration suspended_duration = absl::Now() - job->SuspendTime();
+        if (suspended_duration > absl::ZeroDuration()) {
+          absl::Time new_end_time = job->EndTime() + suspended_duration;
+
+          // If deadline is set, take the minimum of extended end_time and
+          // deadline
+          if (job->deadline_time !=
+              absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+            new_end_time = std::min(new_end_time, job->deadline_time);
+            CRANE_INFO(
+                "Job #{} pre-resume: extended end_time by {:.1f}s "
+                "(suspended duration), capped by deadline. New end_time: {}",
+                job_id, absl::ToDoubleSeconds(suspended_duration),
+                absl::FormatTime(new_end_time));
+          } else {
+            CRANE_INFO(
+                "Job #{} pre-resume: extended end_time by {:.1f}s "
+                "(suspended duration). New end_time: {}",
+                job_id, absl::ToDoubleSeconds(suspended_duration),
+                absl::FormatTime(new_end_time));
+          }
+
+          job->SetEndTime(new_end_time);
+        }
+        job->SetSuspendTime(absl::InfinitePast());
+      }
+
+      // Persist the updated end_time and reset suspend_time together.
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+              0, job->JobDbId(), job->RuntimeAttr())) {
+        job->SetEndTime(prev_end_time);
+        job->SetSuspendTime(prev_suspend_time);
+        CRANE_ERROR("Failed to persist pre-resume runtime attrs for job #{}",
+                    job_id);
+        results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+        continue;
+      }
+
+      resume_prep_applied = true;
+
+      // Effective time limit for craned = end_time - start_time
+      // (includes original time_limit + total suspended time, capped by
+      // deadline if set).
+      new_time_limit_secs =
+          absl::ToInt64Seconds(job->EndTime() - job->StartTime());
+
+      // Also send deadline to craned if it's set
+      if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+        new_deadline_secs = absl::ToUnixSeconds(job->deadline_time);
+      }
+    }
+
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
+        offline_nodes.push_back(craned_id);
+      }
+    }
+
+    if (!offline_nodes.empty()) {
+      CRANE_WARN("Job #{} resume skipped because craned(s) {} are offline.",
+                 job_id, absl::StrJoin(offline_nodes, ","));
+      rollback_resume_preparation();
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
+      continue;
+    }
+
+    std::vector<job_id_t> broadcast_job_ids{job_id};
+    CraneErrCode failure_code = CraneErrCode::SUCCESS;
+    bool has_failure = false;
+    Mutex result_mtx;
+    std::vector<CranedId> resumed_nodes;
+    resumed_nodes.reserve(executing_nodes.size());
+
+    // Broadcast ResumeJobs via the thread pool and track successes/errors.
+    absl::BlockingCounter blocking_counter(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      g_thread_pool->detach_task([&, craned_id]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!stub || stub->Invalid()) {
+          CRANE_WARN("ResumeJobs stub for {} unavailable", craned_id);
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS)
+              failure_code = CraneErrCode::ERR_RPC_FAILURE;
+            has_failure = true;
+          }
+          blocking_counter.DecrementCount();
+          return;
+        }
+
+        CraneErrCode err = stub->ResumeJobs(broadcast_job_ids);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to resume job #{} on craned {}: {}", job_id,
+                      craned_id, CraneErrStr(err));
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+            has_failure = true;
+          }
+        } else {
+          LockGuard lock(&result_mtx);
+          resumed_nodes.emplace_back(craned_id);
+        }
+
+        blocking_counter.DecrementCount();
+      });
+    }
+
+    blocking_counter.Wait();
+
+    if (has_failure) {
+      CRANE_ERROR(
+          "Job #{} resume partially failed on node(s); rolling back by "
+          "re-suspending successfully resumed nodes.",
+          job_id);
+
+      const bool rollback_suspend_succeeded = SuspendJobOnNodes_(
+          resumed_nodes, broadcast_job_ids, job_id, "Rollback suspend failed");
+
+      if (resumed_nodes.empty()) {
+        rollback_resume_preparation();
+      } else if (rollback_suspend_succeeded) {
+        if (!persist_resuspended_state_after_failed_resume(
+                absl::Now(), "partial resume rollback")) {
+          CRANE_WARN(
+              "Failed to persist resuspended state for job #{} after partial "
+              "resume rollback",
+              job_id);
+        }
+      } else {
+        if (!persist_running_after_incomplete_resume_rollback(
+                "partial resume rollback incomplete")) {
+          CRANE_ERROR(
+              "Job #{} rollback incomplete after partial resume failure and "
+              "failed to persist fallback Running state.",
+              job_id);
+        }
+        CRANE_ERROR(
+            "Job #{} rollback incomplete after partial resume failure: some "
+            "nodes may remain running. Manual intervention may be required.",
+            job_id);
+      }
+
+      results.emplace_back(failure_code == CraneErrCode::SUCCESS
+                               ? CraneErrCode::ERR_GENERIC_FAILURE
+                               : failure_code);
+      continue;
+    }
+
+    {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      auto iter = m_running_job_map_.find(job_id);
+      if (iter == m_running_job_map_.end()) {
+        // Job completed concurrently after resume RPC returned.
+        // end_time was already extended before the RPC (under the same
+        // lock), so the completion handler used the correct value.
+        CRANE_INFO(
+            "Job #{} completed concurrently after resume RPC; "
+            "end_time was pre-extended.",
+            job_id);
+        results.emplace_back(CraneErrCode::SUCCESS);
+        continue;
+      }
+
+      JobInCtld* job = iter->second.get();
+
+      if (job->Status() != crane::grpc::Running) {
+        auto prev_status = job->Status();
+        job->SetStatus(crane::grpc::Running);
+        if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+                0, job->JobDbId(), job->RuntimeAttr())) {
+          job->SetStatus(prev_status);
+          CRANE_ERROR("Failed to persist resumed status for job #{}", job_id);
+
+          if (SuspendJobOnNodes_(
+                  executing_nodes, broadcast_job_ids, job_id,
+                  "Rollback suspend failed after status persist failure")) {
+            const absl::Time rollback_suspend_time = absl::Now();
+
+            // Keep the extended end_time because the prior suspended interval
+            // has already been accounted for before sending ResumeJobs.
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Suspended, job->EndTime(),
+                    rollback_suspend_time,
+                    "resume status persist failure rollback")) {
+              CRANE_WARN(
+                  "Failed to persist rollback after resume status persist "
+                  "failure for job #{}",
+                  job_id);
+            }
+          } else {
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Running, job->EndTime(),
+                    absl::InfinitePast(),
+                    "resume status persist failure incomplete rollback")) {
+              CRANE_ERROR(
+                  "Job #{} rollback incomplete after resume status persist "
+                  "failure and failed to persist fallback Running state.",
+                  job_id);
+            }
+            CRANE_ERROR(
+                "Job #{} rollback incomplete after resume status persist "
+                "failure: some nodes may remain running. Manual intervention "
+                "may be required.",
+                job_id);
+          }
+          results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+          continue;
+        }
+      }
+    }
+
+    // Notify all executing craned nodes about the effective time limit and
+    // deadline so they can reset their termination timers correctly. The timer
+    // on craned side should be min(end_time, deadline) - now. If any node
+    // fails, rollback the entire resume operation. Check again if job still
+    // exists before updating time limits.
+    bool job_still_exists = false;
+    {
+      LockGuard running_guard(&m_running_job_map_mtx_);
+      job_still_exists = m_running_job_map_.contains(job_id);
+    }
+
+    if (!job_still_exists) {
+      // Job completed between status update and time limit update.
+      CRANE_INFO(
+          "Job #{} completed before time limit update; skipping time limit "
+          "update.",
+          job_id);
+      results.emplace_back(CraneErrCode::SUCCESS);
+      continue;
+    }
+
+    bool timelimit_update_failed = false;
+    CraneErrCode timelimit_failure_code = CraneErrCode::SUCCESS;
+    for (const CranedId& craned_id : executing_nodes) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        CraneErrCode err = stub->ChangeJobTimeConstraint(
+            job_id, new_time_limit_secs, new_deadline_secs);
+        if (err != CraneErrCode::SUCCESS) {
+          // Check if job completed concurrently before treating as failure
+          bool job_completed = false;
+          {
+            LockGuard running_guard(&m_running_job_map_mtx_);
+            job_completed = !m_running_job_map_.contains(job_id);
+          }
+
+          if (job_completed) {
+            CRANE_INFO(
+                "Job #{} completed concurrently during time limit update on "
+                "craned {}. Treating as success.",
+                job_id, craned_id);
+            // Job completed, no need to continue updating other nodes
+            break;
+          }
+
+          CRANE_ERROR(
+              "Failed to update time constraint of job #{} on craned {} "
+              "after resume: {}. Rolling back resume operation.",
+              job_id, craned_id, CraneErrStr(err));
+          timelimit_update_failed = true;
+          timelimit_failure_code = err;
+          break;
+        }
+      } else {
+        // Check if job completed concurrently before treating stub
+        // unavailability as failure
+        bool job_completed = false;
+        {
+          LockGuard running_guard(&m_running_job_map_mtx_);
+          job_completed = !m_running_job_map_.contains(job_id);
+        }
+
+        if (job_completed) {
+          CRANE_INFO(
+              "Job #{} completed concurrently; stub unavailable for craned {} "
+              "is acceptable. Treating as success.",
+              job_id, craned_id);
+          // Job completed, no need to continue updating other nodes
+          break;
+        }
+
+        CRANE_ERROR(
+            "Failed to get valid stub for craned {} when updating time limit "
+            "of job #{}. Rolling back resume operation.",
+            craned_id, job_id);
+        timelimit_update_failed = true;
+        timelimit_failure_code = CraneErrCode::ERR_RPC_FAILURE;
+        break;
+      }
+    }
+
+    if (timelimit_update_failed) {
+      // Rollback: re-suspend the job on all nodes
+      const bool rollback_suspend_succeeded = SuspendJobOnNodes_(
+          executing_nodes, broadcast_job_ids, job_id,
+          "Rollback suspend failed after timelimit update failure");
+
+      // Rollback status and time attributes only if all nodes were successfully
+      // suspended
+      {
+        LockGuard running_guard(&m_running_job_map_mtx_);
+        auto iter = m_running_job_map_.find(job_id);
+        if (iter != m_running_job_map_.end()) {
+          JobInCtld* job = iter->second.get();
+
+          if (rollback_suspend_succeeded) {
+            // Keep the extended end_time so the already-finished suspend
+            // interval before this resume attempt remains accounted for.
+            if (!PersistJobRuntimeStateNoLock_(
+                    job, job_id, crane::grpc::Suspended, job->EndTime(),
+                    absl::Now(), "timelimit update failure rollback")) {
+              CRANE_WARN(
+                  "Failed to persist rollback status for job #{} after "
+                  "timelimit update failure",
+                  job_id);
+            }
+          } else {
+            // Some nodes failed to suspend, keep status as Running and keep
+            // extended time to reflect reality (job is still running with
+            // extended time limit)
+            CRANE_ERROR(
+                "Job #{} rollback incomplete: some nodes may remain running "
+                "while "
+                "others are suspended. Status kept as Running with extended "
+                "time. "
+                "Manual intervention may be required.",
+                job_id);
+            // Do NOT rollback end_time/suspend_time because the job is still
+            // running and needs the extended time limit
+          }
+        }
+      }
+
+      results.emplace_back(timelimit_failure_code);
+      continue;
+    }
+
+    results.emplace_back(CraneErrCode::SUCCESS);
+  }
+  return results;
 }
 
 CraneErrCode JobScheduler::ChangeJobPriority(job_id_t job_id, double priority) {
@@ -1970,7 +2955,8 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode JobScheduler::TerminateRunningStepNoLock_(CommonStepInCtld* step) {
+CraneErrCode JobScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -1988,7 +2974,8 @@ CraneErrCode JobScheduler::TerminateRunningStepNoLock_(CommonStepInCtld* step) {
       m_cancel_job_queue_.enqueue(
           CancelRunningJobQueueElem{.job_id = step->job_id,
                                     .step_id = step->StepId(),
-                                    .craned_id = craned_id});
+                                    .craned_id = craned_id,
+                                    .terminate_source = terminate_source});
       m_cancel_job_async_handle_->send();
     }
   }
@@ -2109,8 +3096,9 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
       cancelled_job_steps[job_id] = crane::grpc::JobStepIds{};
 
-      m_cancel_job_queue_.enqueue(
-          CancelPendingJobQueueElem{std::move(it->second)});
+      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+          .job = std::move(it->second),
+          .finish_status = crane::grpc::JobStatus::Cancelled});
       m_cancel_job_async_handle_->send();
 
       m_pending_job_map_.erase(it);
@@ -2154,7 +3142,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
               meta.cb_step_cancel({step->job_id, step->StepId()});
             }
           } else {
-            TerminateRunningStepNoLock_(step);
+            TerminateRunningStepNoLock_(
+                step, crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
           }
           auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
           auto& job_steps = cancelled_job_steps[job_id];
@@ -2189,7 +3178,17 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
               job_id);
           return;
         }
-        TerminateRunningStepNoLock_(primary_step);
+        if (primary_step->type == crane::grpc::Interactive &&
+            primary_step->ia_meta.has_value()) {
+          auto& meta = primary_step->ia_meta.value();
+          if (!meta.has_been_cancelled_on_front_end) {
+            meta.has_been_cancelled_on_front_end = true;
+            meta.cb_step_cancel({primary_step->job_id, primary_step->StepId()});
+            return;
+          }
+        }
+        TerminateRunningStepNoLock_(primary_step,
+                                    crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
       }
     }
   };
@@ -2620,7 +3619,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
 
   g_meta_container->LockResReduceEvents();
   std::vector<CranedMetaContainer::CranedMetaPtr> craned_meta_vec;
-  ResourceV2 allocated_res;
+  ResourceV3 allocated_res;
   {
     LockGuard running_guard(&m_running_job_map_mtx_);
     std::vector<CranedId> nodes_not_found;
@@ -2998,7 +3997,10 @@ void JobScheduler::CleanCancelJobQueueCb_() {
   // Carry the ownership of JobInCtld for automatic destruction.
   std::vector<std::unique_ptr<JobInCtld>> pending_job_ptr_vec;
   std::vector<std::unique_ptr<CommonStepInCtld>> pending_step_ptr_vec;
-  HashMap<CranedId, std::unordered_map<job_id_t, std::set<step_id_t>>>
+  HashMap<CranedId,
+          std::unordered_map<crane::grpc::TerminateSource,
+                             std::unordered_map<job_id_t, std::set<step_id_t>>,
+                             absl::Hash<crane::grpc::TerminateSource>>>
       running_job_craned_id_map;
 
   size_t actual_size = m_cancel_job_queue_.try_dequeue_bulk(
@@ -3011,11 +4013,14 @@ void JobScheduler::CleanCancelJobQueueCb_() {
     std::visit(  //
         VariantVisitor{
             [&](CancelPendingJobQueueElem& pd_elem) {
+              pd_elem.job->SetStatus(pd_elem.finish_status);
               pending_job_ptr_vec.emplace_back(std::move(pd_elem.job));
             },
             [&](CancelRunningJobQueueElem& rn_elem) {
-              running_job_craned_id_map[rn_elem.craned_id][rn_elem.job_id]
-                  .insert(rn_elem.step_id);
+              running_job_craned_id_map[rn_elem.craned_id]
+                                       [rn_elem.terminate_source]
+                                       [rn_elem.job_id]
+                                           .insert(rn_elem.step_id);
             },
             [&](CancelPendingStepQueueElem& pd_step_elem) {
               pending_step_ptr_vec.emplace_back(std::move(pd_step_elem.step));
@@ -3029,55 +4034,62 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       absl::FromUnixSeconds(now.seconds()) + absl::Nanoseconds(now.nanos());
 
   // Process offline craned nodes with timeout check
-  for (auto&& [craned_id, steps] : running_job_craned_id_map) {
+  for (auto&& [craned_id, terminate_batches] : running_job_craned_id_map) {
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      for (auto [job_id, step_ids] : steps) {
-        // Check if the job has exceeded time limit
-        google::protobuf::Timestamp end_timestamp = now;
+      for (auto&& [terminate_source, steps] : terminate_batches) {
+        (void)terminate_source;
+        for (auto [job_id, step_ids] : steps) {
+          // Check if the job has exceeded time limit
+          google::protobuf::Timestamp end_timestamp = now;
 
-        {
-          LockGuard running_guard_for_cancel(&m_running_job_map_mtx_);
-          auto job_it = m_running_job_map_.find(job_id);
-          if (job_it != m_running_job_map_.end()) {
-            JobInCtld* job = job_it->second.get();
-            absl::Time timeout_time = job->StartTime() + job->time_limit;
+          {
+            LockGuard running_guard_for_cancel(&m_running_job_map_mtx_);
+            auto job_it = m_running_job_map_.find(job_id);
+            if (job_it != m_running_job_map_.end()) {
+              JobInCtld* job = job_it->second.get();
+              absl::Time timeout_time = job->StartTime() + job->time_limit;
 
-            // If job exceeded time limit, use timeout time as end_time
-            if (current_time > timeout_time) {
-              end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
-              end_timestamp.set_nanos(0);
-              CRANE_DEBUG(
-                  "[Job #{}] Job exceeded time limit during craned {} "
-                  "offline. "
-                  "Using timeout time {} as end_time instead of cancel time "
-                  "{}.",
-                  job_id, craned_id, absl::FormatTime(timeout_time),
-                  absl::FormatTime(current_time));
+              // If job exceeded time limit, use timeout time as end_time
+              if (current_time > timeout_time) {
+                end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
+                end_timestamp.set_nanos(0);
+                CRANE_DEBUG(
+                    "[Job #{}] Job exceeded time limit during craned {} "
+                    "offline. "
+                    "Using timeout time {} as end_time instead of cancel time "
+                    "{}.",
+                    job_id, craned_id, absl::FormatTime(timeout_time),
+                    absl::FormatTime(current_time));
+              }
             }
           }
+          for (auto step_id : step_ids)
+            StepStatusChangeAsync(job_id, step_id, craned_id,
+                                  crane::grpc::JobStatus::Cancelled,
+                                  ExitCode::EC_TERMINATED, "", end_timestamp);
         }
-
-        for (auto step_id : step_ids)
-          StepStatusChangeAsync(job_id, step_id, craned_id,
-                                crane::grpc::JobStatus::Cancelled,
-                                ExitCode::EC_TERMINATED, "", end_timestamp);
       }
       continue;
     }
-    g_thread_pool->detach_task([id = craned_id, steps_to_cancel = steps]() {
-      CRANE_TRACE("Craned {} is going to cancel [{}].", id,
-                  util::JobStepsToString(steps_to_cancel));
-      auto stub = g_craned_keeper->GetCranedStub(id);
+    for (auto&& [terminate_source, steps] : terminate_batches) {
+      g_thread_pool->detach_task(
+          [id = craned_id, steps_to_cancel = steps, terminate_source]() {
+            CRANE_TRACE("Craned {} is going to terminate [{}] with source {}.",
+                        id, util::JobStepsToString(steps_to_cancel),
+                        static_cast<int>(terminate_source));
+            auto stub = g_craned_keeper->GetCranedStub(id);
 
-      if (stub && !stub->Invalid()) stub->TerminateSteps(steps_to_cancel);
-    });
+            if (stub && !stub->Invalid()) {
+              stub->TerminateSteps(steps_to_cancel, terminate_source);
+            }
+          });
+    }
   }
 
   absl::Time cancel_time = absl::Now();
 
   if (!pending_job_ptr_vec.empty()) {
     for (auto& job : pending_job_ptr_vec) {
-      job->SetStatus(crane::grpc::Cancelled);
       job->SetStartTime(cancel_time);
       job->SetEndTime(cancel_time);
       g_account_meta_container->FreeQosSubmitResource(*job);
@@ -3166,14 +4178,14 @@ void JobScheduler::SubmitJobAsyncCb_() {
 void JobScheduler::CleanSubmitJobQueueCb_() {
   using SubmitQueueElem = std::pair<std::unique_ptr<JobInCtld>,
                                     std::promise<CraneExpected<job_id_t>>>;
-
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_job_queue_.size_approx();
 
   std::vector<SubmitQueueElem> accepted_jobs;
   std::vector<JobInCtld*> accepted_job_ptrs;
   std::vector<SubmitQueueElem> rejected_jobs;
-
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
   size_t accepted_size;
   size_t rejected_size;
@@ -3189,7 +4201,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
 
   size_t accepted_actual_size;
   size_t rejected_actual_size;
-
+  absl::Time infiniteFuture = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   // Accept jobs within queue capacity.
   do {
     if (accepted_size == 0) break;
@@ -3264,6 +4276,10 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
           continue;
         }
       }
+      absl::Time deadline_time = accepted_jobs[pos].first->deadline_time;
+      if (deadline_time != infiniteFuture) {
+        deadline_timer_vec.emplace_back(id, absl::ToUnixSeconds(deadline_time));
+      }
 
       // Start pending span to track scheduling wait time.
       // Independent trace (not child of submit) since it outlives submit/request.
@@ -3293,8 +4309,13 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
             jobs_to_purge.size());
       }
     }
-  } while (false);
 
+    if (!deadline_timer_vec.empty()) {
+      m_job_deadline_timer_create_queue_.enqueue_bulk(
+          deadline_timer_vec.data(), deadline_timer_vec.size());
+      m_job_deadline_timer_create_async_handle_->send();
+    }
+  } while (false);
   // Reject jobs beyond queue capacity
   do {
     if (rejected_size == 0) break;
@@ -3357,19 +4378,15 @@ void JobScheduler::CleanStepSubmitQueueCb_() {
     if (it != m_running_job_map_.end()) {
       step->job = it->second.get();
       step->SetSubmitTime(now);
-      auto err = AcquireStepAttributes(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
+      auto ok = HandleUnsetOptionalInStepToCtld(step.get());
+      if (ok) ok = AcquireStepAttributes(step.get());
+      if (ok) ok = CheckStepValidity(step.get());
+      if (ok) {
+        valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
+      } else {
+        elems[pos].second.set_value(std::unexpected{ok.error()});
         step.reset();
-        continue;
       }
-      err = CheckStepValidity(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
-        step.reset();
-        continue;
-      }
-      valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
     } else {
       elems[pos].second.set_value(
           std::unexpected(CraneErrCode::ERR_INVALID_JOB_ID));
@@ -4323,10 +5340,10 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
   const ResourceView min_res_view =
       job->req_node_res_view +
       job->req_task_res_view * job->ntasks_per_node_min;
-  ResourceV2 job_alloc_res;
+  ResourceV3 job_alloc_res;
   struct node_info {
     int ntasks_on_node;
-    ResourceInNode res;
+    ResourceInNodeV3 res;
     NodeState* node_state;
     bool operator<(const node_info& other) const {
       return ntasks_on_node > other.ntasks_on_node;
@@ -4338,12 +5355,12 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
   std::priority_queue<node_info> topk_nodes_avail;
   int topk_ntasks_sum_avail = 0;
 
-  auto get_max_tasks = [&](const ResourceInNode& res_on_node) {
-    ResourceInNode feasible_res;
+  auto get_max_tasks = [&](const ResourceInNodeV3& res_on_node) {
+    ResourceInNodeV3 feasible_res;
     if (!min_res_view.GetFeasibleResourceInNode(res_on_node, &feasible_res)) {
       return 0;
     }
-    ResourceInNode res_avail = res_on_node;
+    ResourceInNodeV3 res_avail = res_on_node;
     res_avail -= feasible_res;
     int ntasks_on_node = job->ntasks_per_node_min;
     while (ntasks_on_node < static_cast<int>(job->ntasks_per_node_max) &&
@@ -4440,12 +5457,12 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         break;
       }
     } else {
-      ResourceInNode feasible_res;
+      ResourceInNodeV3 feasible_res;
       if (!min_res_view.GetFeasibleResourceInNode(node_state->res_avail,
                                                   &feasible_res)) {
         continue;
       }
-      ResourceInNode min_res_on_node = node_state->res_avail;
+      ResourceInNodeV3 min_res_on_node = node_state->res_avail;
 
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
@@ -4479,7 +5496,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       if (job->exclusive) {
         job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
       } else {
-        ResourceInNode feasible_res;
+        ResourceInNodeV3 feasible_res;
         bool ok =
             (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
                 .GetFeasibleResourceInNode(res, &feasible_res);
@@ -4519,7 +5536,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
       if (job->exclusive) {
         job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
       } else {
-        ResourceInNode feasible_res;
+        ResourceInNodeV3 feasible_res;
         bool ok =
             (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
                 .GetFeasibleResourceInNode(res, &feasible_res);
@@ -4906,10 +5923,10 @@ void JobScheduler::PersistAndTransferJobsToMongodb_(
 
 CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
     JobInCtld* job) {
-  if (job->IsBatch()) {
-    auto* batch_meta = job->MutableJobToCtld()->mutable_batch_meta();
-    if (!batch_meta->has_open_mode_append())
-      batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  if (job->JobToCtld().has_io_meta()) {
+    auto* io_meta = job->MutableJobToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
   return {};
@@ -4945,25 +5962,23 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
   }
 
-  CRANE_ASSERT(job->req_node_res_view.CpuCount() == 0);
+  CRANE_ASSERT(job->req_node_res_view.GetCpuCount() == cpu_t{0});
 
   if (!user_set_mem_per_cpu && !user_set_mem_per_node) {
     if (part_meta.default_mem_per_node != 0) {
-      job->req_node_res_view.GetAllocatableRes().memory_bytes =
-          part_meta.default_mem_per_node;
-      job->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-          part_meta.default_mem_per_node;
+      job->req_node_res_view.SetMemoryBytes(part_meta.default_mem_per_node);
+      job->req_node_res_view.SetMemorySwBytes(part_meta.default_mem_per_node);
       user_set_mem_per_node = true;
       CRANE_TRACE("default_mem_per_node for job #{} is set to {}", job->JobId(),
                   part_meta.default_mem_per_node);
     } else if (part_meta.default_mem_per_cpu != 0) {
       auto job_mem_per_cpu = part_meta.default_mem_per_cpu;
-      job->req_task_res_view.GetAllocatableRes().memory_bytes =
-          static_cast<double>(job->req_task_res_view.CpuCount()) *
-          job_mem_per_cpu;
-      job->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
-          static_cast<double>(job->req_task_res_view.CpuCount()) *
-          job_mem_per_cpu;
+      job->req_task_res_view.SetMemoryBytes(
+          static_cast<double>(job->req_task_res_view.GetCpuCount()) *
+          job_mem_per_cpu);
+      job->req_task_res_view.SetMemorySwBytes(
+          static_cast<double>(job->req_task_res_view.GetCpuCount()) *
+          job_mem_per_cpu);
       user_set_mem_per_cpu = true;
       CRANE_TRACE("default_mem_per_cpu for job #{} is set to {}", job->JobId(),
                   job_mem_per_cpu);
@@ -4979,21 +5994,20 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   if (part_meta.max_mem_per_cpu != 0) {
     if (user_set_mem_per_cpu) {
       auto max_job_mem =
-          static_cast<double>(job->req_task_res_view.CpuCount()) *
+          static_cast<double>(job->req_task_res_view.CpuCountDouble()) *
           part_meta.max_mem_per_cpu;
-      if (job->req_task_res_view.MemoryBytes() > max_job_mem) {
-        job->req_task_res_view.GetAllocatableRes().memory_bytes = max_job_mem;
-        job->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
-            max_job_mem;
+      if (job->req_task_res_view.GetMemoryBytes() > max_job_mem) {
+        job->req_task_res_view.SetMemoryBytes(max_job_mem);
+        job->req_task_res_view.SetMemorySwBytes(max_job_mem);
       }
     } else {
       // mem_per_node / (ntasks_per_node * cpus_per_task) <= max_mem_per_cpu
       // ntasks_per_node >= ceil(mem_per_node / (max_mem_per_cpu *
       // cpus_per_task))
-      double cpus_per_task = job->req_task_res_view.CpuCount();
+      double cpus_per_task = job->req_task_res_view.CpuCountDouble();
       if (cpus_per_task > 0) {
         auto required_min = static_cast<uint32_t>(std::ceil(
-            static_cast<double>(job->req_node_res_view.MemoryBytes()) /
+            static_cast<double>(job->req_node_res_view.GetMemoryBytes()) /
             (part_meta.max_mem_per_cpu * cpus_per_task)));
         job->ntasks_per_node_min =
             std::max(job->ntasks_per_node_min, required_min);
@@ -5003,16 +6017,15 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 
   if (part_meta.max_mem_per_node != 0) {
     if (user_set_mem_per_node) {
-      if (job->req_node_res_view.MemoryBytes() > part_meta.max_mem_per_node) {
-        job->req_node_res_view.GetAllocatableRes().memory_bytes =
-            part_meta.max_mem_per_node;
-        job->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-            part_meta.max_mem_per_node;
+      if (job->req_node_res_view.GetMemoryBytes() >
+          part_meta.max_mem_per_node) {
+        job->req_node_res_view.SetMemoryBytes(part_meta.max_mem_per_node);
+        job->req_node_res_view.SetMemorySwBytes(part_meta.max_mem_per_node);
       }
     } else {
       // ntasks_per_node * task_memory <= max_mem_per_node
       // ntasks_per_node_max <= floor(max_mem_per_node / task_memory)
-      auto job_mem = job->req_task_res_view.MemoryBytes();
+      auto job_mem = job->req_task_res_view.GetMemoryBytes();
       if (job_mem > 0) {
         auto required_max = static_cast<uint32_t>(
             static_cast<double>(part_meta.max_mem_per_node) / job_mem);
@@ -5131,14 +6144,17 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
   // Check res req valid
-  if (job->req_total_res_view.MemoryBytes() == 0) {
+  if (job->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", job->JobId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
-  if (job->req_task_res_view.CpuCount() == 0) {
+  if (job->req_task_res_view.CpuCountDouble() == 0) {
     CRANE_DEBUG("Job #{} has zero cpu request.", job->JobId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
+
+  if (job->deadline_time <= job->SubmitTime())
+    return std::unexpected(CraneErrCode::ERR_INVALID_DEADLINE);
 
   // Check whether the selected partition is able to run this job.
   std::unordered_set<std::string> avail_nodes;
@@ -5155,19 +6171,13 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           "Resource not enough for job #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
           job->JobId(),
-          metas_ptr->partition_global_meta.res_total_inc_dead
-              .GetAllocatableRes()
-              .cpu_count,
-          util::ReadableMemory(
-              metas_ptr->partition_global_meta.res_total_inc_dead
-                  .GetAllocatableRes()
-                  .memory_bytes),
-          util::ReadableMemory(
-              metas_ptr->partition_global_meta.res_total_inc_dead
-                  .GetAllocatableRes()
-                  .memory_sw_bytes),
-          util::ReadableTypedDeviceMap(
-              metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
+          metas_ptr->partition_global_meta.res_total_inc_dead.GetCpuCount(),
+          util::ReadableMemory(metas_ptr->partition_global_meta
+                                   .res_total_inc_dead.GetMemoryBytes()),
+          util::ReadableMemory(metas_ptr->partition_global_meta
+                                   .res_total_inc_dead.GetMemorySwBytes()),
+          util::ReadableGresMap(
+              metas_ptr->partition_global_meta.res_total.GetGresMap()));
       return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);
     }
 
@@ -5251,6 +6261,16 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   return {};
 }
 
+CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
+    StepInCtld* step) {
+  if (step->StepToCtld().has_io_meta()) {
+    auto* io_meta = step->MutableStepToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  }
+  return {};
+}
+
 CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   if (!step->StepToCtld().nodelist().empty() && step->included_nodes.empty()) {
     std::list<std::string> nodes;
@@ -5283,24 +6303,23 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
       return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
     }
 
-    bool no_memory_set = (step->req_node_res_view.MemoryBytes() == 0 &&
-                          step->req_task_res_view.MemoryBytes() == 0);
+    bool no_memory_set = (step->req_node_res_view.GetMemoryBytes() == 0 &&
+                          step->req_task_res_view.GetMemoryBytes() == 0);
 
     if (no_memory_set) {
       if (part_meta.default_mem_per_node != 0) {
-        step->req_node_res_view.GetAllocatableRes().memory_bytes =
-            part_meta.default_mem_per_node;
-        step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-            part_meta.default_mem_per_node;
+        step->req_node_res_view.SetMemoryBytes(part_meta.default_mem_per_node);
+        step->req_node_res_view.SetMemorySwBytes(
+            part_meta.default_mem_per_node);
         user_set_mem_per_node = true;
       } else if (part_meta.default_mem_per_cpu != 0) {
         auto mem_per_cpu = part_meta.default_mem_per_cpu;
-        step->req_task_res_view.GetAllocatableRes().memory_bytes =
-            static_cast<double>(step->req_task_res_view.CpuCount()) *
-            mem_per_cpu;
-        step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
-            static_cast<double>(step->req_task_res_view.CpuCount()) *
-            mem_per_cpu;
+        step->req_task_res_view.SetMemoryBytes(
+            static_cast<double>(step->req_task_res_view.GetCpuCount()) *
+            mem_per_cpu);
+        step->req_task_res_view.SetMemorySwBytes(
+            static_cast<double>(step->req_task_res_view.GetCpuCount()) *
+            mem_per_cpu);
         user_set_mem_per_cpu = true;
       } else {
         CRANE_ERROR(
@@ -5314,19 +6333,17 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
     if (part_meta.max_mem_per_cpu != 0) {
       if (user_set_mem_per_cpu) {
         auto max_job_mem =
-            static_cast<double>(step->req_task_res_view.CpuCount()) *
+            static_cast<double>(step->req_task_res_view.CpuCountDouble()) *
             part_meta.max_mem_per_cpu;
-        if (step->req_task_res_view.MemoryBytes() > max_job_mem) {
-          step->req_task_res_view.GetAllocatableRes().memory_bytes =
-              max_job_mem;
-          step->req_task_res_view.GetAllocatableRes().memory_sw_bytes =
-              max_job_mem;
+        if (step->req_task_res_view.GetMemoryBytes() > max_job_mem) {
+          step->req_task_res_view.SetMemoryBytes(max_job_mem);
+          step->req_task_res_view.SetMemorySwBytes(max_job_mem);
         }
       } else if (user_set_mem_per_node) {
-        double cpus_per_task = step->req_task_res_view.CpuCount();
+        double cpus_per_task = step->req_task_res_view.CpuCountDouble();
         if (cpus_per_task > 0) {
           auto required_min = static_cast<uint32_t>(std::ceil(
-              static_cast<double>(step->req_node_res_view.MemoryBytes()) /
+              static_cast<double>(step->req_node_res_view.GetMemoryBytes()) /
               (part_meta.max_mem_per_cpu * cpus_per_task)));
           step->ntasks_per_node_min =
               std::max(step->ntasks_per_node_min, required_min);
@@ -5336,15 +6353,13 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
 
     if (part_meta.max_mem_per_node != 0) {
       if (user_set_mem_per_node) {
-        if (step->req_node_res_view.MemoryBytes() >
+        if (step->req_node_res_view.GetMemoryBytes() >
             part_meta.max_mem_per_node) {
-          step->req_node_res_view.GetAllocatableRes().memory_bytes =
-              part_meta.max_mem_per_node;
-          step->req_node_res_view.GetAllocatableRes().memory_sw_bytes =
-              part_meta.max_mem_per_node;
+          step->req_node_res_view.SetMemoryBytes(part_meta.max_mem_per_node);
+          step->req_node_res_view.SetMemorySwBytes(part_meta.max_mem_per_node);
         }
       } else if (user_set_mem_per_cpu) {
-        auto job_mem = step->req_task_res_view.MemoryBytes();
+        auto job_mem = step->req_task_res_view.GetMemoryBytes();
         if (job_mem > 0) {
           auto required_max = static_cast<uint32_t>(
               static_cast<double>(part_meta.max_mem_per_node) / job_mem);
@@ -5393,12 +6408,12 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
-  if (step->req_total_res_view.MemoryBytes() == 0) {
+  if (step->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Step #{}.{} has zero memory request.", step->job_id,
                 step->StepId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
-  if (step->req_task_res_view.CpuCount() == 0) {
+  if (step->req_task_res_view.GetCpuCount() == cpu_t{0}) {
     CRANE_DEBUG("Step #{}.{} has zero cpu request.", step->job_id,
                 step->StepId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
@@ -5441,6 +6456,9 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
+
+  if (!(step->req_total_res_view <= job->req_total_res_view))
+    return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
 
   return {};
 }
@@ -5540,12 +6558,11 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_req, bound.node_num_min);
     bound.node_num_max = std::max(nodes_req, bound.node_num_max);
 
-    uint64_t job_mem_req = job->req_total_res_view.MemoryBytes();
+    uint64_t job_mem_req = job->req_total_res_view.GetMemoryBytes();
     bound.mem_alloc_min = std::min(job_mem_req, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(job_mem_req, bound.mem_alloc_max);
 
-    double job_cpus_req =
-        static_cast<double>(job->req_total_res_view.CpuCount());
+    double job_cpus_req = job->req_total_res_view.CpuCountDouble();
     bound.cpus_alloc_min = std::min(job_cpus_req, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(job_cpus_req, bound.cpus_alloc_max);
 
@@ -5563,11 +6580,11 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_alloc, bound.node_num_min);
     bound.node_num_max = std::max(nodes_alloc, bound.node_num_max);
 
-    uint64_t mem_alloc = job->allocated_res_view.MemoryBytes();
+    uint64_t mem_alloc = job->allocated_res_view.GetMemoryBytes();
     bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
 
-    double cpus_alloc = job->allocated_res_view.CpuCount();
+    double cpus_alloc = job->allocated_res_view.CpuCountDouble();
     bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
 
@@ -5584,7 +6601,8 @@ void MultiFactorPriority::CalculateFactorBound_(
     double service_val = 0;
     if (bound.cpus_alloc_max > bound.cpus_alloc_min)
       service_val +=
-          1.0 * (job->allocated_res_view.CpuCount() - bound.cpus_alloc_min) /
+          1.0 *
+          (job->allocated_res_view.CpuCountDouble() - bound.cpus_alloc_min) /
           (bound.cpus_alloc_max - bound.cpus_alloc_min);
     else
       // += 1.0 here rather than 0.0 in case that the final service_val is 0.
@@ -5601,7 +6619,7 @@ void MultiFactorPriority::CalculateFactorBound_(
     if (bound.mem_alloc_max > bound.mem_alloc_min)
       service_val +=
           1.0 *
-          static_cast<double>(job->allocated_res_view.MemoryBytes() -
+          static_cast<double>(job->allocated_res_view.GetMemoryBytes() -
                               bound.mem_alloc_min) /
           static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
     else
@@ -5628,9 +6646,8 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
   uint32_t job_qos_priority = job->qos_priority;
   uint32_t job_part_priority = job->partition_priority;
   uint32_t job_nodes_alloc = job->node_num;
-  uint64_t job_mem_alloc = job->req_total_res_view.MemoryBytes();
-  double job_cpus_alloc =
-      static_cast<double>(job->req_total_res_view.CpuCount());
+  uint64_t job_mem_alloc = job->req_total_res_view.GetMemoryBytes();
+  double job_cpus_alloc = job->req_total_res_view.CpuCountDouble();
   double job_service_val = bound.acc_service_val_map.at(job->account);
 
   double qos_factor{0};

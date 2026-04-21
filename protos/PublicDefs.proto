@@ -32,21 +32,6 @@ message CranedId {
   uint32 craned_index = 2;
 }
 
-message AllocatableResource {
-  double cpu_core_limit = 1;
-  uint64 memory_limit_bytes = 2;
-  uint64 memory_sw_limit_bytes = 3;
-}
-
-message TypeCountMap {
-  map<string /*Type*/, uint64> type_count_map = 1;
-  uint64 total = 2;
-}
-
-message DeviceMap {
-  map<string /*name*/, TypeCountMap> name_type_map = 1;
-}
-
 message Slots {
   repeated string slots = 1;
 }
@@ -59,18 +44,32 @@ message DedicatedResourceInNode {
   map<string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
 }
 
-message ResourceInNode {
-  AllocatableResource allocatable_res_in_node = 1;
-  DedicatedResourceInNode dedicated_res_in_node = 2;
+message GresCount {
+  uint64 total = 1;
+  map<string, uint64> specified = 2;
 }
 
-message ResourceV2 {
-  map<string /*craned id*/, ResourceInNode> each_node_res = 1;
+message GresMap {
+  map<string, GresCount> name_gres_map = 1;
 }
 
 message ResourceView {
-  AllocatableResource allocatable_res = 1;
-  DeviceMap device_map = 2;
+  double cpu_count = 1;
+  uint64 memory_bytes = 2;
+  uint64 memory_sw_bytes = 3;
+  GresMap gres_map = 4;
+}
+
+message ResourceInNodeV3 {
+  repeated uint32 cpu_ids = 1;
+  double cpu_count = 2;
+  uint64 memory_bytes = 3;
+  uint64 memory_sw_bytes = 4;
+  DedicatedResourceInNode gres = 5;
+}
+
+message ResourceV3 {
+  map<string, ResourceInNodeV3> each_node_res_map = 1;
 }
 
 enum PartitionState {
@@ -117,6 +116,8 @@ enum JobStatus {
   Configuring = 7;
   Starting = 8;
   Completing = 9;
+  Suspended = 10;
+  Deadline = 11;
 
   Invalid = 15;
 }
@@ -207,6 +208,8 @@ message JobToCtld {
   // ccon (nested): Container (StepToCtld only)
   optional PodJobAdditionalMeta pod_meta = 23;
   optional ContainerJobAdditionalMeta container_meta = 24;
+  IoMeta io_meta = 25;
+  string sh_script = 26;  // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -237,9 +240,10 @@ message JobToCtld {
   string task_prolog = 46;
   string task_epilog = 47;
   repeated Signal signals = 48;
+  google.protobuf.Timestamp deadline_time = 49;
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
-  optional DeviceMap gres_per_node = 52;
+  optional GresMap gres_per_node = 52;
 }
 
 message JobInEmbeddedDb {
@@ -264,12 +268,17 @@ message RuntimeAttrOfJob {
   google.protobuf.Timestamp end_time = 17;
 
   bool held = 18;
-  ResourceV2 allocated_res = 19;
+  ResourceV3 allocated_res = 19;
   double cached_priority = 20;
 
   JobStatus primary_step_status = 21;
   uint32 primary_step_exit_code = 22;
   map<string, uint32> actual_licenses = 23;
+
+  // Wall-clock time when the job was suspended.
+  // Used to extend end_time upon resume so that suspended time
+  // does not count toward the execution timeout.
+  google.protobuf.Timestamp suspend_time = 24;
 }
 
 message StepToCtld {
@@ -300,6 +309,9 @@ message StepToCtld {
   // Step <-> Container
   optional ContainerJobAdditionalMeta container_meta = 24;
 
+  IoMeta io_meta = 25;
+  string sh_script = 26;
+
   string task_prolog = 27;
   string task_epilog = 28;
 
@@ -315,7 +327,8 @@ message StepToCtld {
   optional uint64 mem_per_cpu = 36;
   optional double cpus_per_task = 37;
   optional uint64 mem_per_node = 38;
-  optional DeviceMap gres_per_node = 39;
+  optional GresMap gres_per_node = 39;
+  google.protobuf.Timestamp deadline_time = 40;
 }
 
 message RuntimeAttrOfStep {
@@ -326,7 +339,7 @@ message RuntimeAttrOfStep {
 
   // Fields that will change after this step is accepted.
   int32 requeue_count = 11;
-  ResourceV2 allocated_res = 12;
+  ResourceV3 allocated_res = 12;
 
   repeated string craned_ids = 15;
   repeated string execution_nodes = 16;
@@ -357,7 +370,7 @@ message StepInEmbeddedDb {
 message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
-  ResourceInNode res = 4;
+  ResourceInNodeV3 res = 4;
 
   string partition = 5;
   string account = 6;
@@ -379,13 +392,13 @@ enum StepType {
 message StepToD {
   uint32 job_id = 1;
   uint32 step_id = 2;
-  ResourceInNode res = 3;
+  ResourceInNodeV3 res = 3;
   JobType type = 4;
   StepType step_type = 5;
 
   uint32 uid = 6;
   repeated uint32 gid = 7;
-  map<uint32 /*task id*/, ResourceInNode> task_res_map = 8;
+  map<uint32 /*task id*/, ResourceInNodeV3> task_res_map = 8;
 
   // For execution step
   optional BatchJobAdditionalMeta batch_meta = 9;
@@ -422,10 +435,14 @@ message StepToD {
   string task_prolog = 30;
   string task_epilog = 31;
   repeated Signal signals = 32;
+  google.protobuf.Timestamp deadline_time = 33;
 
   // task_node_list[task_id] = index of the node in nodelist that owns this task.
   // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
   repeated uint32 task_node_list = 34;
+
+  IoMeta io_meta = 35;
+  string sh_script = 36;
 }
 
 message JobStepsToD {
@@ -438,12 +455,20 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message BatchJobAdditionalMeta {
-  string sh_script = 1;
-  optional bool open_mode_append = 2;
+message IoMeta {
+  // Append mode for output and error files
+  optional bool open_mode_append = 1;
+  string input_file_pattern = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
-  string interpreter = 5;
+
+  // For crun only
+  optional uint32 input_task_id = 5;
+  optional uint32 output_task_id = 6;
+}
+
+message BatchJobAdditionalMeta {
+  string interpreter = 1;
 }
 
 message X11Meta {
@@ -456,7 +481,6 @@ message X11Meta {
 
 message InteractiveJobAdditionalMeta {
   string cfored_name = 1;
-  string sh_script = 2;
   string term_env = 3;
   InteractiveJobType interactive_type = 4;
 
@@ -611,6 +635,7 @@ message JobInfo {
   map<string, string> env = 42;
   string submit_hostname = 43;
   uint32 ntasks = 44;
+  google.protobuf.Timestamp deadline_time = 45;
 }
 
 message StepInfo {
@@ -656,6 +681,7 @@ message StepInfo {
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
+  google.protobuf.Timestamp deadline_time = 41;
 }
 
 message PartitionInfo {
@@ -685,9 +711,9 @@ message CranedInfo {
   CranedControlState control_state = 3;
   CranedPowerState power_state = 4;
 
-  ResourceInNode res_total = 5;
-  ResourceInNode res_avail = 6;
-  ResourceInNode res_alloc = 7;
+  ResourceInNodeV3 res_total = 5;
+  ResourceInNodeV3 res_avail = 6;
+  ResourceInNodeV3 res_alloc = 7;
 
   repeated string partition_names = 10;
   uint32 running_job_num = 11;
@@ -864,11 +890,18 @@ enum ErrCode {
   ERR_MAX_TRES_PER_USER_BEYOND = 102;
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
+  ERR_INVALID_DEADLINE = 105;
 }
 
 enum EntityType {
   Account = 0;
   User = 1;
+}
+
+enum TerminateSource {
+  TERMINATE_SOURCE_USER_CANCEL = 0;
+  TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
+  TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
 }
 
 enum OperationType {
@@ -955,7 +988,7 @@ message QosInfo {
   string description = 2;
   uint32 priority = 3;
   uint32 max_jobs_per_user = 4;
-  uint32 max_cpus_per_user = 5;
+  double max_cpus_per_user = 5;
   uint64 max_time_limit_per_job = 6;
   uint32 max_jobs_per_account = 7;
   uint32 max_submit_jobs_per_user = 8;

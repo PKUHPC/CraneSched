@@ -46,11 +46,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supervisor_stub(supervisor_stub) {}
 
 void StepInstance::CleanUp() {
-  if (this->status != StepStatus::Completed &&
-      this->status != StepStatus::Failed &&
-      this->status != StepStatus::Cancelled &&
-      this->status != StepStatus::OutOfMemory &&
-      this->status != StepStatus::ExceedTimeLimit) {
+  if (!IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
         "[Step #{}.{}] Cleaning up a step which is not in finished status, "
         "current status: {}.",
@@ -58,7 +54,8 @@ void StepInstance::CleanUp() {
   }
   if (this->crane_cgroup != nullptr) {
     g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
-                                cgroup = crane_cgroup.release()] {
+                                cgroup = crane_cgroup.release(),
+                                step_cg_str = this->cg_str] {
       // This is step_id/system cgroup
       int cnt = 0;
 
@@ -82,11 +79,12 @@ void StepInstance::CleanUp() {
 
       delete cgroup;
 
+      // step_cg_str is e.g. "overflow/job_1/step_0/system"
+      // We want to remove the step_N directory (parent of system/user).
       auto step_cg_path =
-          std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-          Common::CgConstant::kRootCgNamePrefix /
-          CgroupManager::CgroupStrByJobId(job_id) /
-          fmt::format("{}{}", Common::CgConstant::kStepCgNamePrefix, step_id);
+          (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+           Common::CgConstant::kRootCgNamePrefix / step_cg_str)
+              .parent_path();
 
       std::error_code ec;
       if (std::filesystem::exists(step_cg_path, ec)) {
@@ -115,16 +113,41 @@ void StepInstance::CleanUp() {
   }
 }
 
-CraneErrCode StepInstance::Prepare() {
-  auto cg_expt = CgroupManager::CreateOrOpenCgroup(
-      CgroupManager::CgroupStrByStepId(job_id, step_id, true), false);
+CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
+  job_path_info = path_info;
+  cg_str = CgroupManager::CgroupStrByStepId(path_info.cg_str, step_id, true);
+
+  // Diagnostic: dump cgroup memory state before allocating step cgroup
+  {
+    auto dump = [&](const std::string& label, const std::string& cg_path) {
+      auto read_file = [](const std::string& path) -> std::string {
+        FILE* f = fopen(path.c_str(), "r");
+        if (!f) return "N/A";
+        char buf[64]{};
+        if (fgets(buf, sizeof(buf), f)) {
+          buf[strcspn(buf, "\n")] = 0;
+        }
+        fclose(f);
+        return buf;
+      };
+      std::string base = "/sys/fs/cgroup/crane/" + cg_path;
+      CRANE_TRACE(
+          "[CGDIAG] [Step #{}.{}] {}: memory.max={} memory.current={} "
+          "memory.swap.max={}",
+          job_id, step_id, label, read_file(base + "/memory.max"),
+          read_file(base + "/memory.current"),
+          read_file(base + "/memory.swap.max"));
+    };
+    dump("overflow", "overflow");
+    dump("job", path_info.cg_str);
+  }
+
+  auto cg_expt =
+      CgroupManager::AllocateAndGetCgroup(cg_str, step_to_d.res(), false);
   if (!cg_expt) return cg_expt.error();
+
   this->crane_cgroup = std::move(cg_expt.value());
   auto* cg = this->crane_cgroup.get();
-  CraneErrCode err = CgroupManager::SetCgroupResource(cg, step_to_d.res());
-  if (err != CraneErrCode::SUCCESS) {
-    return err;
-  }
   return CraneErrCode::SUCCESS;
 }
 
@@ -229,9 +252,11 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.mutable_env()->insert(job_env_map.begin(), job_env_map.end());
 
     std::string cgroup_path_str = this->crane_cgroup->CgroupPath().string();
-    init_req.set_cgroup_path(cgroup_path_str);
-    CRANE_TRACE("[Step #{}.{}] Setting cgroup path: {}", job_id, step_id,
-                cgroup_path_str);
+    init_req.set_supv_cgroup_path(cgroup_path_str);
+    init_req.set_job_cg_str(this->job_path_info.cg_str);
+    init_req.set_cpuset_cg_str(this->job_path_info.cpuset_cg_str);
+    CRANE_TRACE("[Step #{}.{}] Setting cgroup path: {}, job_cg_str: {}", job_id,
+                step_id, cgroup_path_str, this->job_path_info.cg_str);
 
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
@@ -257,8 +282,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       }
       auto* subid_conf = container_conf->mutable_subid();
       subid_conf->set_managed(g_config.Container.SubId.Managed);
-      subid_conf->set_range_size(g_config.Container.SubId.RangeSize);
-      subid_conf->set_base_offset(g_config.Container.SubId.BaseOffset);
+      for (const auto& mapping : g_config.Container.SubId.UidMappings) {
+        auto* uid_mapping = subid_conf->add_uid_mappings();
+        uid_mapping->set_id(mapping.Id);
+        uid_mapping->set_id_count(mapping.IdCount);
+        uid_mapping->set_subid_start(mapping.SubIdStart);
+        uid_mapping->set_subid_size(mapping.SubIdSize);
+      }
+      for (const auto& mapping : g_config.Container.SubId.GidMappings) {
+        auto* gid_mapping = subid_conf->add_gid_mappings();
+        gid_mapping->set_id(mapping.Id);
+        gid_mapping->set_id_count(mapping.IdCount);
+        gid_mapping->set_subid_start(mapping.SubIdStart);
+        gid_mapping->set_subid_size(mapping.SubIdSize);
+      }
     }
 
     if (g_config.Plugin.Enabled) {
@@ -305,7 +342,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     if (this->IsContainer() &&
         init_req.mutable_step_spec()->has_container_meta()) {
       auto* cm = init_req.mutable_step_spec()->mutable_container_meta();
-      const auto& dedicated_res = this->step_to_d.res().dedicated_res_in_node();
+      const auto& dedicated_res = this->step_to_d.res().gres();
       for (const auto& [dev_name, type_slots_map] :
            dedicated_res.name_type_map()) {
         for (const auto& [dev_type, slots] : type_slots_map.type_slots_map()) {
@@ -326,7 +363,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // steps that carry pod metadata.
     if (this->IsContainer() && this->IsDaemonStep() &&
         init_req.mutable_step_spec()->has_pod_meta()) {
-      const auto& dedicated_res = this->step_to_d.res().dedicated_res_in_node();
+      const auto& dedicated_res = this->step_to_d.res().gres();
       auto cni_annos =
           Common::DeviceManager::GetCniGresAnnotations(dedicated_res);
       if (!cni_annos.has_value()) {
@@ -421,15 +458,25 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    // Before exec, we need to make sure that the cgroup is ready.
+    // Migrate into step's system cgroup (cpu/memory/devices).
     if (!this->crane_cgroup->MigrateProcIn(getpid())) {
       fmt::print(
           stderr,
           "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
           "migration.",
           job_id, step_id);
-
       std::abort();
+    }
+
+    // cgroupv1: additionally migrate into overflow cpuset (flat structure).
+    // In v1, cpuset is a separate hierarchy; the step cgroup above only
+    // covers cpu/memory/devices. Overflow processes share crane/overflow
+    // in cpuset hierarchy directly. See overflow_cg.md.
+    if (!CgroupManager::MigrateToCpuset(getpid(),
+                                        this->job_path_info.cpuset_cg_str)) {
+      fmt::print(stderr, "[Step #{}.{}] Failed to migrate to overflow cpuset.",
+                 job_id, step_id);
+      // Non-fatal for now: process will run without cpuset binding
     }
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
@@ -438,7 +485,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     util::os::CloseFdFromExcept(3,
                                 {craned_supervisor_fd, supervisor_craned_fd});
-
     // Prepare the command line arguments.
     std::vector<std::string> string_argv;
     std::vector<const char*> argv;
@@ -475,6 +521,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 }
 
 void StepInstance::GotNewStatus(const StepStatus& new_status) {
+  if (IsFinishedStepStatus(new_status)) {
+    if (status != StepStatus::Running && status != StepStatus::Completing &&
+        status != StepStatus::Starting && status != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, this->status);
+    }
+
+    status = new_status;
+    return;
+  }
+
   switch (new_status) {
   case StepStatus::Configuring:
   case StepStatus::Pending:
@@ -522,22 +582,6 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
           job_id, step_id, this->status);
-    break;
-  }
-  // Finished status
-  case StepStatus::ExceedTimeLimit:
-  case StepStatus::OutOfMemory:
-  case StepStatus::Cancelled:
-  case StepStatus::Failed:
-  case StepStatus::Completed: {
-    if (status != StepStatus::Running && status != StepStatus::Completing &&
-        status != StepStatus::Starting && status != StepStatus::Configuring) {
-      CRANE_WARN(
-          "[Step {}.{}] Step status is not "
-          "Running/Completing/Starting/Configuring when receiving new finished "
-          "status {}, current status: {}.",
-          job_id, step_id, new_status, this->status);
-    }
     break;
   }
   default: {

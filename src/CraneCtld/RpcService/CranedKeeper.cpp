@@ -68,7 +68,8 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
 }
 
 CraneErrCode CranedStub::TerminateSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+    crane::grpc::TerminateSource terminate_source) {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 
@@ -85,6 +86,7 @@ CraneErrCode CranedStub::TerminateSteps(
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
+  request.set_terminate_source(terminate_source);
   status = m_stub_->TerminateSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
@@ -276,23 +278,33 @@ CraneErrCode CranedStub::FreeSteps(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds) {
-  using crane::grpc::ChangeJobTimeLimitReply;
-  using crane::grpc::ChangeJobTimeLimitRequest;
+CraneErrCode CranedStub::ChangeJobTimeConstraint(
+    uint32_t job_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  using crane::grpc::ChangeJobTimeConstraintReply;
+  using crane::grpc::ChangeJobTimeConstraintRequest;
 
   ClientContext context;
   Status status;
-  ChangeJobTimeLimitRequest request;
-  ChangeJobTimeLimitReply reply;
+  ChangeJobTimeConstraintRequest request;
+  ChangeJobTimeConstraintReply reply;
 
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
   request.set_job_id(job_id);
-  request.set_time_limit_seconds(seconds);
-  status = m_stub_->ChangeJobTimeLimit(&context, request, &reply);
+
+  if (time_limit_seconds) {
+    request.set_time_limit_seconds(time_limit_seconds.value());
+  }
+
+  if (deadline_time) {
+    request.set_deadline_time(deadline_time.value());
+  }
+
+  status = m_stub_->ChangeJobTimeConstraint(&context, request, &reply);
 
   if (!status.ok()) {
-    CRANE_ERROR("ChangeJobTimeLimitAsync to Craned {} failed: {} ",
+    CRANE_ERROR("ChangeJobTimeConstraintAsync to Craned {} failed: {} ",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -301,6 +313,98 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t job_id, uint64_t seconds) {
   if (reply.ok()) return CraneErrCode::SUCCESS;
 
   return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+CraneErrCode CranedStub::SuspendJobs(const std::vector<task_id_t> &job_ids) {
+  using crane::grpc::SuspendJobsReply;
+  using crane::grpc::SuspendJobsRequest;
+
+  ClientContext context;
+  Status status;
+  SuspendJobsRequest request;
+  SuspendJobsReply reply;
+
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto id : job_ids) request.add_job_id_list(id);
+  status = m_stub_->SuspendJobs(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("SuspendJobs to Craned {} failed: {} ", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  // Log the detailed reason from Craned and parse error code
+  CraneErrCode err_code = CraneErrCode::ERR_GENERIC_FAILURE;
+  if (!reply.reason().empty()) {
+    CRANE_ERROR("SuspendJobs to Craned {} failed: {}", m_craned_id_,
+                reply.reason());
+
+    // Parse error code from reason string
+    const std::string &reason = reply.reason();
+    if (reason.find("CGroup error") != std::string::npos ||
+        reason.find("Failed to freeze") != std::string::npos) {
+      err_code = CraneErrCode::ERR_CGROUP;
+    } else if (reason.find("not found") != std::string::npos ||
+               reason.find("does not exist") != std::string::npos) {
+      err_code = CraneErrCode::ERR_NON_EXISTENT;
+    }
+  } else {
+    CRANE_ERROR("SuspendJobs to Craned {} failed with no reason provided",
+                m_craned_id_);
+  }
+
+  return err_code;
+}
+
+CraneErrCode CranedStub::ResumeJobs(const std::vector<task_id_t> &job_ids) {
+  using crane::grpc::ResumeJobsReply;
+  using crane::grpc::ResumeJobsRequest;
+
+  ClientContext context;
+  Status status;
+  ResumeJobsRequest request;
+  ResumeJobsReply reply;
+
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto id : job_ids) request.add_job_id_list(id);
+  status = m_stub_->ResumeJobs(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("ResumeJobs to Craned {} failed: {} ", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  // Log the detailed reason from Craned and parse error code
+  CraneErrCode err_code = CraneErrCode::ERR_GENERIC_FAILURE;
+  if (!reply.reason().empty()) {
+    CRANE_ERROR("ResumeJobs to Craned {} failed: {}", m_craned_id_,
+                reply.reason());
+
+    // Parse error code from reason string
+    const std::string &reason = reply.reason();
+    if (reason.find("CGroup error") != std::string::npos ||
+        reason.find("Failed to thaw") != std::string::npos) {
+      err_code = CraneErrCode::ERR_CGROUP;
+    } else if (reason.find("not found") != std::string::npos ||
+               reason.find("does not exist") != std::string::npos) {
+      err_code = CraneErrCode::ERR_NON_EXISTENT;
+    }
+  } else {
+    CRANE_ERROR("ResumeJobs to Craned {} failed with no reason provided",
+                m_craned_id_);
+  }
+
+  return err_code;
 }
 
 crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(

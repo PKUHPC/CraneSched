@@ -266,7 +266,7 @@ struct CranedStaticMeta {
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
-  ResourceInNode res;
+  ResourceInNodeV3 res;
 };
 
 struct CranedRemoteMeta {
@@ -295,16 +295,16 @@ struct CranedMeta {
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 
   // total = avail + in-use
-  ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
-  ResourceInNode res_avail;
-  ResourceInNode res_in_use;
+  ResourceInNodeV3 res_total;  // A copy of res in CranedStaticMeta,
+  ResourceInNodeV3 res_avail;
+  ResourceInNodeV3 res_in_use;
 
   bool drain{false};
   std::string state_reason{""};
   absl::Time last_busy_time;
   absl::Time craned_down_time;
 
-  absl::flat_hash_map<job_id_t, ResourceInNode> rn_job_res_map;
+  absl::flat_hash_map<job_id_t, ResourceInNodeV3> rn_job_res_map;
 
   absl::flat_hash_map<ResvId, std::pair<absl::Time, absl::Time>>
       resv_in_node_map;
@@ -322,9 +322,9 @@ struct ResvMeta {
   std::unordered_set<std::string> users;
 
   absl::flat_hash_set<CranedId> craned_ids;
-  ResourceV2 res_total;
-  ResourceV2 res_avail;
-  absl::flat_hash_map<job_id_t, ResourceV2> rn_job_res_map;
+  ResourceV3 res_total;
+  ResourceV3 res_avail;
+  absl::flat_hash_map<job_id_t, ResourceV3> rn_job_res_map;
   absl::flat_hash_set<job_id_t> pd_job_ids;
 };
 
@@ -381,9 +381,13 @@ struct InteractiveMeta {
   struct StepResAllocArgs {
     job_id_t job_id;
     step_id_t step_id;
-    std::expected<std::pair<std::string, std::unordered_set<CranedId>>,
-                  std::string>
-        allocated_nodes;
+    struct ResAllocInfo {
+      std::string allocated_craned_regex;
+      std::vector<CranedId> allocated_craned_ids;
+      std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
+      uint32_t ntasks_total;
+    };
+    std::expected<ResAllocInfo, std::string> res_allocate_expt;
   };
   std::function<void(StepResAllocArgs const&)> cb_step_res_allocated;
 
@@ -597,6 +601,7 @@ struct StepInCtld {
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
+  absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
 
   // In daemon step of container job, only use pod_meta.
   // In common step of container job, both are provided.
@@ -617,9 +622,10 @@ struct StepInCtld {
 
   /* Fields that may change at run time.*/
   std::int32_t m_requeue_count_{0};
-  ResourceV2 m_allocated_res_;
+  ResourceV3 m_allocated_res_;
 
-  std::unordered_set<CranedId> m_craned_ids_;
+  // craned_id must be ordered;
+  std::vector<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
 
   std::unordered_set<CranedId> m_configuring_nodes_;
@@ -648,6 +654,17 @@ struct StepInCtld {
 
  public:
   virtual ~StepInCtld() = default;
+  bool IsBatch() const { return type == crane::grpc::Batch; }
+  bool IsCalloc() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Calloc;
+  }
+  bool IsCrun() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -667,13 +684,11 @@ struct StepInCtld {
   void SetRequeueCount(std::int32_t count);
   std::int32_t RequeueCount() const { return m_requeue_count_; }
 
-  void SetAllocatedRes(const ResourceV2& res);
-  ResourceV2 AllocatedRes() const { return m_allocated_res_; }
+  void SetAllocatedRes(const ResourceV3& res);
+  ResourceV3 AllocatedRes() const { return m_allocated_res_; }
 
-  void SetCranedIds(const std::unordered_set<CranedId>& craned_list);
-  const std::unordered_set<CranedId>& CranedIds() const {
-    return m_craned_ids_;
-  }
+  void SetCranedIds(const std::vector<CranedId>& craned_list);
+  const std::vector<CranedId>& CranedIds() const { return m_craned_ids_; }
 
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
@@ -783,8 +798,8 @@ struct CommonStepInCtld : StepInCtld {
 
   std::string allocated_craneds_regex;
   // TODO: Schedule thread should fill in following job map
-  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
-  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
+  std::unordered_map<task_id_t, ResourceInNodeV3> task_res_map;
+  std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
@@ -848,6 +863,7 @@ struct JobInCtld {
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
+  absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
 
   bool exclusive{false};
 
@@ -891,7 +907,7 @@ struct JobInCtld {
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;
 
   std::queue<step_id_t> pending_step_ids_;
-  ResourceV2 step_res_avail_;
+  ResourceV3 step_res_avail_;
 
   // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -904,7 +920,7 @@ struct JobInCtld {
   double cached_priority{0.0};
 
   // Might change at each scheduling cycle.
-  ResourceV2 allocated_res;
+  ResourceV3 allocated_res;
 
   // W3C traceparent for distributed tracing. Set at Alloc time, read-only
   // thereafter. Propagated to Craned via JobToD and to Supervisor via
@@ -959,6 +975,12 @@ struct JobInCtld {
   std::string pending_reason;
 
   double mandated_priority{0.0};
+
+  // Wall-clock time when the job was suspended.
+  // Used to extend end_time upon resume so that suspended time
+  // does not count toward the execution timeout (matching Slurm behavior).
+  // Persisted to the database via RuntimeAttr.
+  absl::Time suspend_time{absl::InfinitePast()};
 
   // Helper function
  public:
@@ -1028,6 +1050,9 @@ struct JobInCtld {
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
+  void SetSuspendTime(absl::Time const& val);
+  absl::Time const& SuspendTime() const { return suspend_time; }
+
   void SetActualLicenses(
       std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
 
@@ -1085,15 +1110,15 @@ struct JobInCtld {
     return m_steps_;
   }
 
-  ResourceV2& StepResAvail() { return step_res_avail_; }
-  void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
+  ResourceV3& StepResAvail() { return step_res_avail_; }
+  void SetStepResAvail(const ResourceV3& val) { step_res_avail_ = val; }
 
   int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
   void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
-  void SetAllocatedRes(ResourceV2&& val);
-  ResourceV2 const& AllocatedRes() const { return allocated_res; }
+  void SetAllocatedRes(ResourceV3&& val);
+  ResourceV3 const& AllocatedRes() const { return allocated_res; }
 
   void SetTraceparent(std::string tp) { traceparent_ = std::move(tp); }
   const std::string& Traceparent() const { return traceparent_; }
@@ -1138,7 +1163,7 @@ struct Qos {
   uint32_t max_jobs_per_account;
   uint32_t max_running_jobs_per_user;
   absl::Duration max_time_limit_per_job;
-  uint32_t max_cpus_per_user;
+  cpu_t max_cpus_per_user;
   uint32_t max_submit_jobs_per_user;
   uint32_t max_submit_jobs_per_account;
   uint32_t max_jobs;

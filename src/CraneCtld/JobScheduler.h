@@ -31,18 +31,18 @@ class IUpdateNodeCostPolicy {
   virtual ~IUpdateNodeCostPolicy() = default;
   virtual void UpdateCost(double& cost, const absl::Time& start_time,
                           const absl::Time& end_time,
-                          const ResourceInNode& resources,
-                          const ResourceInNode& total_res) const = 0;
+                          const ResourceInNodeV3& resources,
+                          const ResourceInNodeV3& total_res) const = 0;
 };
 
 class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
  public:
   void UpdateCost(double& cost, const absl::Time& start_time,
-                  const absl::Time& end_time, const ResourceInNode& resources,
-                  const ResourceInNode& total_res) const override {
+                  const absl::Time& end_time, const ResourceInNodeV3& resources,
+                  const ResourceInNodeV3& total_res) const override {
     cost += absl::ToInt64Seconds(end_time - start_time) *
-            (static_cast<double>(resources.allocatable_res.cpu_count) /
-             static_cast<double>(total_res.allocatable_res.cpu_count));
+            (static_cast<double>(resources.GetCpuSet().cpu_count) /
+             static_cast<double>(total_res.GetCpuSet().cpu_count));
   }
 };
 
@@ -61,7 +61,7 @@ struct RnJobInScheduler {
   uint32_t node_num;
   absl::Time start_time;
   absl::Time end_time;
-  ResourceV2 allocated_res;
+  ResourceV3 allocated_res;
   ResourceView allocated_res_view;
 
   RnJobInScheduler(JobInCtld* job)
@@ -109,7 +109,7 @@ struct PdJobInScheduler {
   std::unordered_map<CranedId, uint32_t> craned_id_to_task_num;
 
   absl::Time start_time;
-  ResourceV2 allocated_res;
+  ResourceV3 allocated_res;
   std::vector<CranedId> craned_ids;
 
   google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
@@ -222,7 +222,7 @@ class SchedulerAlgo {
    * In time interval [y, z-1], the amount of available resources is b.
    * In time interval [z, ...], the amount of available resources is c.
    */
-  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+  using TimeAvailResMap = std::map<absl::Time, ResourceInNodeV3>;
 
   SchedulerAlgo(IPrioritySorter* priority_sorter)
       : m_priority_sorter_(priority_sorter) {}
@@ -253,29 +253,30 @@ class SchedulerAlgo {
     // Running jobs and active reservations
     struct AllocatedRes {
       absl::Time end_time;
-      ResourceInNode res;
+      ResourceInNodeV3 res;
     };
     // Pending reservations
     struct ReservedRes {
       absl::Time start_time;
       absl::Time end_time;
-      ResourceInNode res;
+      ResourceInNodeV3 res;
     };
 
     const CranedId craned_id;
-    const ResourceInNode res_total;
-    ResourceInNode res_avail;
+    const ResourceInNodeV3 res_total;
+    ResourceInNodeV3 res_avail;
     std::vector<AllocatedRes> allocated_res;
     std::vector<ReservedRes> reserved_res;
 
     TimeAvailResMap time_avail_res_map;
 
-    NodeState(const CranedId& craned_id, const ResourceInNode& res_total)
+    NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total)
         : craned_id(craned_id), res_total(res_total), res_avail(res_total) {}
 
     void InitTimeAvailResMap(const absl::Time& now,
                              const absl::Time& end = absl::InfiniteFuture()) {
-      std::vector<std::pair<absl::Time, std::pair<bool, const ResourceInNode*>>>
+      std::vector<
+          std::pair<absl::Time, std::pair<bool, const ResourceInNodeV3*>>>
           resource_changes;
       for (const auto& [start_time, end_time, res] : reserved_res) {
         resource_changes.emplace_back(start_time, std::make_pair(true, &res));
@@ -313,7 +314,7 @@ class SchedulerAlgo {
 
     void SubtractResourceInNode(const absl::Time& start_time,
                                 const absl::Time& end_time,
-                                const ResourceInNode& res) {
+                                const ResourceInNodeV3& res) {
       bool ok;
       auto job_duration_begin_it = time_avail_res_map.upper_bound(start_time);
       if (job_duration_begin_it == time_avail_res_map.end()) {
@@ -431,7 +432,7 @@ class SchedulerAlgo {
     virtual void UpdateCost(const CranedId& craned_id,
                             const absl::Time& start_time,
                             const absl::Time& end_time,
-                            const ResourceInNode& resources) = 0;
+                            const ResourceInNodeV3& resources) = 0;
 
     virtual NodeState* GetNodeState(const CranedId& craned_id) const = 0;
     virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
@@ -439,7 +440,7 @@ class SchedulerAlgo {
 
     virtual void SubtractResource(const absl::Time& start_time,
                                   const absl::Time& end_time,
-                                  const ResourceV2& res) = 0;
+                                  const ResourceV3& res) = 0;
   };
 
   class NodeSelector : public INodeSelector {
@@ -478,7 +479,7 @@ class SchedulerAlgo {
 
     void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
                     const absl::Time& end_time,
-                    const ResourceInNode& resources) override {
+                    const ResourceInNodeV3& resources) override {
       NodeRater& node_info = m_node_info_map_.at(craned_id);
       m_cost_node_info_set_.erase(node_info.cost_node_info_set_it);
       m_update_cost_policy_->UpdateCost(node_info.cost, start_time, end_time,
@@ -512,7 +513,7 @@ class SchedulerAlgo {
 
     void SubtractResource(const absl::Time& start_time,
                           const absl::Time& end_time,
-                          const ResourceV2& res) override {
+                          const ResourceV3& res) override {
       for (const auto& [craned_id, res_in_node] : res.EachNodeResMap()) {
         m_node_info_map_.at(craned_id).node_state->SubtractResourceInNode(
             start_time, end_time, res_in_node);
@@ -532,7 +533,7 @@ class SchedulerAlgo {
    public:
     using Mutex = absl::Mutex;
     using LockGuard = absl::MutexLock;
-    using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+    using TimeAvailResMap = std::map<absl::Time, ResourceInNodeV3>;
 
     template <typename Policy, typename... Args>
     void InitializeNodeSelector(const absl::Time& now,
@@ -625,7 +626,7 @@ class SchedulerAlgo {
                         const TimeAvailResMap::const_iterator& it,
                         const TimeAvailResMap::const_iterator& end,
                         ResMapIterList* tracker_list,
-                        const ResourceInNode* job_res)
+                        const ResourceInNodeV3* job_res)
         : m_craned_id_(craned_id),
           m_it_(it),
           m_end_(end),
@@ -663,7 +664,7 @@ class SchedulerAlgo {
     void MoveToNextUnsatisfied() { while (++m_it_ != m_end_ && Satisfied()); }
     void MoveToNextSatisfied() { while (++m_it_ != m_end_ && !Satisfied()); }
 
-    const ResourceInNode* job_res;
+    const ResourceInNodeV3* job_res;
 
     ResMapIterList::ListContainer::iterator m_tracker_list_it_;
 
@@ -785,7 +786,14 @@ class JobScheduler {
 
   std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs);
 
-  CraneErrCode ChangeJobTimeLimit(job_id_t job_id, int64_t secs);
+  CraneErrCode ChangeJobTimeConstraint(
+      job_id_t job_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
+
+  std::vector<CraneErrCode> SuspendRunningJobs(
+      const std::vector<task_id_t>& job_ids);
+  std::vector<CraneErrCode> ResumeSuspendedJobs(
+      const std::vector<task_id_t>& job_ids);
 
   CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
 
@@ -877,6 +885,8 @@ class JobScheduler {
     if (step) {
       if (step->type == crane::grpc::Interactive) {
         auto& meta = step->ia_meta.value();
+        bool cancelled_on_front_end =
+            meta.has_been_cancelled_on_front_end.load();
         meta.has_been_cancelled_on_front_end = true;
         if (step->Status() == crane::grpc::JobStatus::Pending) {
           m_cancel_job_queue_.enqueue(
@@ -884,18 +894,23 @@ class JobScheduler {
           m_cancel_job_async_handle_->send();
           return CraneErrCode::SUCCESS;
         }
+        auto terminate_source =
+            cancelled_on_front_end
+                ? crane::grpc::TERMINATE_SOURCE_USER_CANCEL
+                : crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION;
+        return TerminateRunningStepNoLock_(step, terminate_source);
       } else {
         return CraneErrCode::ERR_INVALID_PARAM;
       }
     } else {
       return CraneErrCode::ERR_NON_EXISTENT;
     }
-
-    return TerminateRunningStepNoLock_(step);
   }
 
   CraneErrCode TerminateRunningStep(
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps) {
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps,
+      crane::grpc::TerminateSource terminate_source =
+          crane::grpc::TERMINATE_SOURCE_USER_CANCEL) {
     LockGuard running_guard(&m_running_job_map_mtx_);
 
     std::vector<CommonStepInCtld*> steps;
@@ -912,7 +927,7 @@ class JobScheduler {
     }
 
     for (auto* step : steps) {
-      auto err = TerminateRunningStepNoLock_(step);
+      auto err = TerminateRunningStepNoLock_(step, terminate_source);
       if (err != CraneErrCode::SUCCESS) return err;
     }
     return CraneErrCode::SUCCESS;
@@ -922,6 +937,7 @@ class JobScheduler {
   static CraneExpected<void> AcquireJobAttributes(JobInCtld* job);
   static CraneExpected<void> CheckJobValidity(JobInCtld* job);
 
+  static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
@@ -961,7 +977,9 @@ class JobScheduler {
   static void PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
+  CraneErrCode TerminateRunningStepNoLock_(
+      CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
+                                  crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
@@ -1036,6 +1054,10 @@ class JobScheduler {
   std::thread m_job_status_change_thread_;
   void JobStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::shared_ptr<uvw::loop> uvw_deadline_loop;
+  std::thread m_job_deadline_timer_thread_;
+  void DeadlineTimerThread_();
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_job_timer_handle_;
   void CleanJobTimerCb_();
@@ -1059,6 +1081,8 @@ class JobScheduler {
 
   struct CancelPendingJobQueueElem {
     std::unique_ptr<JobInCtld> job;
+    std::string reason;
+    crane::grpc::JobStatus finish_status;
   };
 
   struct CancelPendingStepQueueElem {
@@ -1069,6 +1093,8 @@ class JobScheduler {
     job_id_t job_id;
     step_id_t step_id;
     CranedId craned_id;
+    crane::grpc::TerminateSource terminate_source{
+        crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
   using CancelJobQueueElem =
@@ -1147,6 +1173,21 @@ class JobScheduler {
   };
 
   ConcurrentQueue<DependencyEvent> m_dependency_event_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_queue_;
+
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
+  ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
+
+  TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
+
+  void CancelDeadlineJobCb_();
+
+  void CreateDeadlineTimerCb_();
+
+  void DelDeadlineTimer_(job_id_t job_id);
 };
 
 }  // namespace Ctld

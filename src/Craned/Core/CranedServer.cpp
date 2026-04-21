@@ -24,7 +24,6 @@
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "SupervisorStub.h"
 #include "crane/Tracing.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
@@ -91,10 +90,11 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   }
   CRANE_TRACE("Receive TerminateSteps for steps [{}]",
               util::JobStepsToString(job_steps_map));
+  auto terminate_source = request->terminate_source();
 
   for (const auto [job_id, steps] : job_steps_map)
     for (const auto step_id : steps)
-      g_job_mgr->TerminateStepAsync(job_id, step_id);
+      g_job_mgr->TerminateStepAsync(job_id, step_id, terminate_source);
   response->set_ok(true);
 
   return Status::OK;
@@ -203,7 +203,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   do {
     auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
     if (pid_to_ids_expt.has_value()) {
-      auto [job_id_opt, step_id_opt, system_flag, task_id_opt] =
+      auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] =
           pid_to_ids_expt.value();
 
       // FIXME: Use step_id_opt after multi-step is supported.
@@ -318,7 +318,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
 
   auto job_env_map =
       g_job_mgr->QuerySshStepEnvVariables(request->job_id(), kDaemonStepId);
-  if (job_env_map.error()) {
+  if (!job_env_map) {
     CRANE_ERROR("Failed to get step env of job #{}", request->job_id());
     return Status::OK;
   }
@@ -329,26 +329,93 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
+grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     grpc::ServerContext *context,
-    const crane::grpc::ChangeJobTimeLimitRequest *request,
-    crane::grpc::ChangeJobTimeLimitReply *response) {
+    const crane::grpc::ChangeJobTimeConstraintRequest *request,
+    crane::grpc::ChangeJobTimeConstraintReply *response) {
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto err = g_job_mgr->ChangeStepTimelimit(request->job_id(), kPrimaryStepId,
-                                            request->time_limit_seconds());
+  std::optional<int64_t> time_limit_seconds =
+      request->has_time_limit_seconds()
+          ? std::optional<int64_t>(request->time_limit_seconds())
+          : std::nullopt;
 
-  if (err.error()) {
-    CRANE_ERROR("[Step #{}.{}] Failed to change job time limit",
+  std::optional<int64_t> deadline_time =
+      request->has_deadline_time()
+          ? std::optional<int64_t>(request->deadline_time())
+          : std::nullopt;
+
+  auto err = g_job_mgr->ChangeStepTimeConstraint(
+      request->job_id(), kPrimaryStepId, time_limit_seconds, deadline_time);
+  if (!err) {
+    CRANE_ERROR("[Step #{}.{}] Failed to change job time constraint",
                 request->job_id(), kPrimaryStepId);
     return Status::OK;
   }
   response->set_ok(true);
+  return Status::OK;
+}
 
+grpc::Status CranedServiceImpl::SuspendJobs(
+    grpc::ServerContext *context,
+    const crane::grpc::SuspendJobsRequest *request,
+    crane::grpc::SuspendJobsReply *response) {
+  response->set_ok(false);
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> failure_reasons;
+  for (auto job_id : request->job_id_list()) {
+    auto err = g_job_mgr->SuspendJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      std::string reason = fmt::format("[Job #{}] Failed to suspend: {}",
+                                       job_id, CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
+      all_ok = false;
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ResumeJobs(
+    grpc::ServerContext *context, const crane::grpc::ResumeJobsRequest *request,
+    crane::grpc::ResumeJobsReply *response) {
+  response->set_ok(false);
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> failure_reasons;
+  for (auto job_id : request->job_id_list()) {
+    auto err = g_job_mgr->ResumeJobByCgroup(job_id);
+    if (err != CraneErrCode::SUCCESS) {
+      std::string reason = fmt::format("[Job #{}] Failed to resume: {}", job_id,
+                                       CraneErrStr(err));
+      CRANE_ERROR("{}", reason);
+      failure_reasons.push_back(reason);
+      all_ok = false;
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(absl::StrJoin(failure_reasons, "; "));
+  }
   return Status::OK;
 }
 
