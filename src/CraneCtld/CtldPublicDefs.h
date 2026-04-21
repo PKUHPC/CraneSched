@@ -1236,8 +1236,8 @@ struct Qos {
 struct PartitionResourceLimit {
   ResourceView max_tres;
   ResourceView max_tres_per_job;
-  uint32_t max_jobs;
-  uint32_t max_submit_jobs;
+  uint32_t max_jobs{std::numeric_limits<uint32_t>::max()};
+  uint32_t max_submit_jobs{std::numeric_limits<uint32_t>::max()};
   absl::Duration max_wall;
   absl::Duration max_wall_duration_per_job;
 };

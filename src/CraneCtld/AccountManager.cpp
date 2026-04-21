@@ -2282,7 +2282,7 @@ CraneExpected<void> AccountManager::CheckDeleteUserAllowedQosNoLock_(
 }
 
 CraneExpectedRich<int64_t> AccountManager::CheckSetUserJobsLimitNoLock_(
-    const std::string& account, const std::string& partition,
+const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
   auto& attrs_in_account = res_user->account_to_attrs_map.at(account);
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))
@@ -2292,7 +2292,8 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserJobsLimitNoLock_(
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
   if (!ok)
-    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition,
@@ -2312,7 +2313,8 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserWallLimitNoLock_(
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
   if (!ok)
-    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!CheckIfTimeLimitSecIsValid(value_number))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};
@@ -2471,7 +2473,8 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountJobsLimitNoLock_(
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
   if (!ok)
-    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!res_account->partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition,
@@ -2490,7 +2493,8 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountWallLimitNoLock_(
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
   if (!ok)
-    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!CheckIfTimeLimitSecIsValid(value_number))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};

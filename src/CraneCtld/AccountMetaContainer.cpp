@@ -341,13 +341,15 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     absl::Duration time_limit, bool is_user) const {
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
-  if (!CheckTres_(req_res, partition_limit->max_tres_per_job)) {
+  if (!CheckTres_(req_res, partition_limit->max_tres_per_job))
     return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
-  }
 
-  if (time_limit > partition_limit->max_wall_duration_per_job) {
+  if (time_limit > partition_limit->max_wall_duration_per_job)
     return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
-  }
+
+  if (partition_limit->max_submit_jobs == 0)
+    return is_user ? CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER
+                   : CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit != stat.partition_to_resource_map.end()) {
