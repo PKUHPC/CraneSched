@@ -2282,7 +2282,7 @@ CraneExpected<void> AccountManager::CheckDeleteUserAllowedQosNoLock_(
 }
 
 CraneExpectedRich<int64_t> AccountManager::CheckSetUserJobsLimitNoLock_(
-const std::string& account, const std::string& partition,
+    const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
   auto& attrs_in_account = res_user->account_to_attrs_map.at(account);
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))

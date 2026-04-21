@@ -449,7 +449,8 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
   if (IsUnlimitedTres_(qos.max_tres) && IsUnlimitedTres_(qos_max_tres)) {
     ResourceView resource_use{allocated_res};
     resource_use += val.resource;
-    auto tres_result = CheckTres_(resource_use, partition_limit->max_tres, "Partition");
+    auto tres_result =
+        CheckTres_(resource_use, partition_limit->max_tres, "Partition");
     if (!tres_result) return tres_result;
   }
 
