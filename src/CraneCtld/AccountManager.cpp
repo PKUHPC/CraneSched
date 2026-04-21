@@ -861,60 +861,69 @@ AccountManager::CheckModifyAccountOperations(
           break;
         }
         case ModifyField::MaxSubmitJobs: {
-          auto rich_result =
-            CheckSetAccountJobsLimitNoLock_(partition, operation.value_list()[0], account);
+          auto rich_result = CheckSetAccountJobsLimitNoLock_(
+              partition, operation.value_list()[0], account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_submit_jobs = rich_result.value();
-          *log += fmt::format("partition: {} max_submit_jobs: {}\n", partition, operation.value_list()[0]);
+          account->partition_to_limit_map[partition].max_submit_jobs =
+              rich_result.value();
+          *log += fmt::format("partition: {} max_submit_jobs: {}\n", partition,
+                              operation.value_list()[0]);
           break;
         }
         case ModifyField::MaxJobs: {
-          auto rich_result =
-            CheckSetAccountJobsLimitNoLock_(partition, operation.value_list()[0], account);
+          auto rich_result = CheckSetAccountJobsLimitNoLock_(
+              partition, operation.value_list()[0], account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_jobs = rich_result.value();
-          *log += fmt::format("partition: {} max_jobs: {}\n", partition, operation.value_list()[0]);
+          account->partition_to_limit_map[partition].max_jobs =
+              rich_result.value();
+          *log += fmt::format("partition: {} max_jobs: {}\n", partition,
+                              operation.value_list()[0]);
           break;
         }
         case ModifyField::MaxWall: {
-          auto rich_result =
-            CheckSetAccountWallLimitNoLock_(partition, operation.value_list()[0], account);
+          auto rich_result = CheckSetAccountWallLimitNoLock_(
+              partition, operation.value_list()[0], account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_wall = absl::Seconds(rich_result.value());
-          *log += fmt::format("partition: {} max_wall: {}\n", partition, operation.value_list()[0]);
+          account->partition_to_limit_map[partition].max_wall =
+              absl::Seconds(rich_result.value());
+          *log += fmt::format("partition: {} max_wall: {}\n", partition,
+                              operation.value_list()[0]);
           break;
         }
         case ModifyField::MaxWallDurationPerJob: {
-          auto rich_result =
-  CheckSetAccountWallLimitNoLock_(partition, operation.value_list()[0], account);
+          auto rich_result = CheckSetAccountWallLimitNoLock_(
+              partition, operation.value_list()[0], account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_wall_duration_per_job = absl::Seconds(rich_result.value());
-          *log += fmt::format("partition: {} max_wall_duration_per_job: {}\n", partition, operation.value_list()[0]);
+          account->partition_to_limit_map[partition].max_wall_duration_per_job =
+              absl::Seconds(rich_result.value());
+          *log += fmt::format("partition: {} max_wall_duration_per_job: {}\n",
+                              partition, operation.value_list()[0]);
           break;
         }
         case ModifyField::MaxTres: {
           const auto& val = operation.value_list()[0];
           auto rich_result =
-            CheckSetAccountTresLimitNoLock_(partition, val, account);
+              CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          if (!util::ConvertStringToResourceView(val, &account->partition_to_limit_map[partition].max_tres)) {
-            rich_error_list.emplace_back(std::unexpected{
-                FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+          if (!util::ConvertStringToResourceView(
+                  val, &account->partition_to_limit_map[partition].max_tres)) {
+            rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+                CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
             continue;
           }
           *log += fmt::format("partition: {} max_tres: {}\n", partition, val);
@@ -923,17 +932,20 @@ AccountManager::CheckModifyAccountOperations(
         case ModifyField::MaxTresPerJob: {
           const auto& val = operation.value_list()[0];
           auto rich_result =
-            CheckSetAccountTresLimitNoLock_(partition, val, account);
+              CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          if (!util::ConvertStringToResourceView(val, &account->partition_to_limit_map[partition].max_tres_per_job)) {
-            rich_error_list.emplace_back(std::unexpected{
-                FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+          if (!util::ConvertStringToResourceView(
+                  val, &account->partition_to_limit_map[partition]
+                            .max_tres_per_job)) {
+            rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+                CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
             continue;
           }
-          *log += fmt::format("partition: {} max_tres_per_job: {}\n", partition, val);
+          *log += fmt::format("partition: {} max_tres_per_job: {}\n", partition,
+                              val);
           break;
         }
 
@@ -1217,82 +1229,105 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
       }
       case ModifyField::MaxSubmitJobs: {
         auto rich_result = CheckSetUserJobsLimitNoLock_(
-          account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+            account_name, partition, operation.value_list()[0], res_user);
+        if (!rich_result)
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
         else {
-          res_user->account_to_attrs_map[account_name].partition_to_limit_map[partition].max_submit_jobs = rich_result.value();
-          *log += fmt::format("Set: account: {}, partition: {}, max_submit_jobs: {}\n",
-                            account_name, partition, operation.value_list()[0]);
+          res_user->account_to_attrs_map[account_name]
+              .partition_to_limit_map[partition]
+              .max_submit_jobs = rich_result.value();
+          *log += fmt::format(
+              "Set: account: {}, partition: {}, max_submit_jobs: {}\n",
+              account_name, partition, operation.value_list()[0]);
         }
         break;
       }
       case ModifyField::MaxJobs: {
         auto rich_result = CheckSetUserJobsLimitNoLock_(
-          account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+            account_name, partition, operation.value_list()[0], res_user);
+        if (!rich_result)
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
         else {
-          res_user->account_to_attrs_map[account_name].partition_to_limit_map[partition].max_jobs = rich_result.value();
-          *log += fmt::format("Set: account: {}, partition: {}, max_jobs: {}\n",
-                            account_name, partition, operation.value_list()[0]);
+          res_user->account_to_attrs_map[account_name]
+              .partition_to_limit_map[partition]
+              .max_jobs = rich_result.value();
+          *log +=
+              fmt::format("Set: account: {}, partition: {}, max_jobs: {}\n",
+                          account_name, partition, operation.value_list()[0]);
         }
         break;
       }
       case ModifyField::MaxWall: {
         auto rich_result = CheckSetUserWallLimitNoLock_(
             account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+        if (!rich_result)
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
         else {
-          res_user->account_to_attrs_map[account_name].partition_to_limit_map[partition].max_wall = absl::Seconds(rich_result.value());
-          *log += fmt::format("Set: account: {}, partition: {}, max_wall: {}\n",
-                              account_name, partition, operation.value_list()[0]);
+          res_user->account_to_attrs_map[account_name]
+              .partition_to_limit_map[partition]
+              .max_wall = absl::Seconds(rich_result.value());
+          *log +=
+              fmt::format("Set: account: {}, partition: {}, max_wall: {}\n",
+                          account_name, partition, operation.value_list()[0]);
         }
         break;
       }
       case ModifyField::MaxWallDurationPerJob: {
         auto rich_result = CheckSetUserWallLimitNoLock_(
             account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+        if (!rich_result)
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
         else {
           res_user->account_to_attrs_map[account_name]
-            .partition_to_limit_map[partition].max_wall_duration_per_job = absl::Seconds(rich_result.value());
-          *log += fmt::format("Set: account: {}, partition: {}, max_wall_duration_per_job: {}\n",
-                              account_name, partition, operation.value_list()[0]);
+              .partition_to_limit_map[partition]
+              .max_wall_duration_per_job = absl::Seconds(rich_result.value());
+          *log += fmt::format(
+              "Set: account: {}, partition: {}, max_wall_duration_per_job: "
+              "{}\n",
+              account_name, partition, operation.value_list()[0]);
         }
         break;
       }
       case ModifyField::MaxTres: {
         const auto& val = operation.value_list()[0];
-        auto rich_result = CheckSetUserTresLimitNoLock_(
-          account_name, partition, val, res_user);
+        auto rich_result = CheckSetUserTresLimitNoLock_(account_name, partition,
+                                                        val, res_user);
         if (!rich_result) {
           rich_error_list.emplace_back(std::unexpected{rich_result.error()});
           continue;
         }
 
-        if (!util::ConvertStringToResourceView(val, &res_user->account_to_attrs_map[account_name]
-            .partition_to_limit_map[partition].max_tres)) {
+        if (!util::ConvertStringToResourceView(
+                val, &res_user->account_to_attrs_map[account_name]
+                          .partition_to_limit_map[partition]
+                          .max_tres)) {
           rich_error_list.emplace_back(std::unexpected{
               FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
           continue;
         }
-        *log += fmt::format("Set: account: {}, partition: {}, max_tres: {}\n", account_name, partition, val);
+        *log += fmt::format("Set: account: {}, partition: {}, max_tres: {}\n",
+                            account_name, partition, val);
         break;
       }
       case ModifyField::MaxTresPerJob: {
         const auto& val = operation.value_list()[0];
-        auto rich_result = CheckSetUserTresLimitNoLock_(
-          account_name, partition, val, res_user);
+        auto rich_result = CheckSetUserTresLimitNoLock_(account_name, partition,
+                                                        val, res_user);
         if (!rich_result) {
           rich_error_list.emplace_back(std::unexpected{rich_result.error()});
           continue;
         }
-        if (!util::ConvertStringToResourceView(val, &res_user->account_to_attrs_map[account_name]
-            .partition_to_limit_map[partition].max_tres_per_job)) {
+        if (!util::ConvertStringToResourceView(
+                val, &res_user->account_to_attrs_map[account_name]
+                          .partition_to_limit_map[partition]
+                          .max_tres_per_job)) {
           rich_error_list.emplace_back(std::unexpected{
               FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
           continue;
         }
-        *log += fmt::format("Set: account: {}, partition: {}, max_tres_per_job: {}\n", account_name, partition, val);
+        *log += fmt::format(
+            "Set: account: {}, partition: {}, max_tres_per_job: {}\n",
+            account_name, partition, val);
         break;
       }
       default:
@@ -1927,7 +1962,6 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
         std::pair<std::string, std::list<std::string>>{
             account.default_qos,
             std::list<std::string>{account.allowed_qos_list}};
-
   }
 
   return rich_error_list;
@@ -1936,9 +1970,9 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
 CraneExpectedRich<void> AccountManager::CheckAndSetUserAllowedPartitionNoLock_(
     const Account& account,
     const std::unordered_set<std::string>& partition_list, User* user) {
-
   std::list<std::string> delete_partitions;
-  for (const auto& [partition, _] : user->account_to_attrs_map.at(account.name).allowed_partition_qos_map) {
+  for (const auto& [partition, _] :
+       user->account_to_attrs_map.at(account.name).allowed_partition_qos_map) {
     if (!partition_list.contains(partition)) {
       delete_partitions.emplace_back(partition);
     }
@@ -2250,17 +2284,19 @@ CraneExpected<void> AccountManager::CheckDeleteUserAllowedQosNoLock_(
 CraneExpectedRich<int64_t> AccountManager::CheckSetUserJobsLimitNoLock_(
     const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
-
   auto& attrs_in_account = res_user->account_to_attrs_map.at(account);
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
-  if (!ok) std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+  if (!ok)
+    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(attrs_in_account.partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(attrs_in_account.partition_to_limit_map));
 
   return value_number;
 }
@@ -2268,20 +2304,22 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserJobsLimitNoLock_(
 CraneExpectedRich<int64_t> AccountManager::CheckSetUserWallLimitNoLock_(
     const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
-
   auto& attrs_in_account = res_user->account_to_attrs_map.at(account);
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
-  if (!ok) std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+  if (!ok)
+    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!CheckIfTimeLimitSecIsValid(value_number))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};
 
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(attrs_in_account.partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(attrs_in_account.partition_to_limit_map));
 
   return value_number;
 }
@@ -2289,13 +2327,14 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserWallLimitNoLock_(
 CraneExpectedRich<void> AccountManager::CheckSetUserTresLimitNoLock_(
     const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
-
   auto& attrs_in_account = res_user->account_to_attrs_map.at(account);
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(attrs_in_account.partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(attrs_in_account.partition_to_limit_map));
 
   return {};
 }
@@ -2425,16 +2464,18 @@ CraneExpectedRich<void> AccountManager::CheckDeleteAccountAllowedQosNoLock_(
 CraneExpectedRich<int64_t> AccountManager::CheckSetAccountJobsLimitNoLock_(
     const std::string& partition, const std::string& value,
     Account* res_account) {
-
   if (!ranges::contains(res_account->allowed_partition, partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
-  if (!ok) std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+  if (!ok)
+    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!res_account->partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(res_account->partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(res_account->partition_to_limit_map));
 
   return value_number;
 }
@@ -2442,19 +2483,21 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountJobsLimitNoLock_(
 CraneExpectedRich<int64_t> AccountManager::CheckSetAccountWallLimitNoLock_(
     const std::string& partition, const std::string& value,
     Account* res_account) {
-
   if (!ranges::contains(res_account->allowed_partition, partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   int64_t value_number;
   bool ok = util::ConvertStringToInt64(value, &value_number);
-  if (!ok) std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
+  if (!ok)
+    std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
   if (!CheckIfTimeLimitSecIsValid(value_number))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};
 
   if (!res_account->partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(res_account->partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(res_account->partition_to_limit_map));
 
   return value_number;
 }
@@ -2462,12 +2505,13 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountWallLimitNoLock_(
 CraneExpectedRich<void> AccountManager::CheckSetAccountTresLimitNoLock_(
     const std::string& partition, const std::string& value,
     Account* res_account) {
-
   if (!ranges::contains(res_account->allowed_partition, partition))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
   if (!res_account->partition_to_limit_map.contains(partition))
-    EmplacePartitionResource_(partition, &(res_account->partition_to_limit_map));
+    EmplacePartitionResource_(partition,
+                              &(res_account->partition_to_limit_map));
 
   return {};
 }
@@ -3191,7 +3235,7 @@ CraneExpectedRich<void> AccountManager::DeleteWckey_(
                                              true);
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      user_name, "default_wckey", "");
-  };
+      };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(
@@ -3419,20 +3463,21 @@ CraneExpectedRich<void> AccountManager::BlockAccountNoLock_(
   return {};
 }
 
-
-void AccountManager::EmplacePartitionResource_(const std::string& partition, PartitionToLimitMap* partition_to_limit_map) {
+void AccountManager::EmplacePartitionResource_(
+    const std::string& partition, PartitionToLimitMap* partition_to_limit_map) {
   ResourceView resource;
   resource.SetCpuCount(kUnlimitedCpu);
   resource.SetMemoryBytes(kMaxJobMemoryBytes);
   resource.SetMemorySwBytes(kMaxJobMemoryBytes);
   partition_to_limit_map->emplace(
-      partition, PartitionResourceLimit{
-                     .max_tres = resource,
-                     .max_tres_per_job = resource,
-                     .max_jobs = std::numeric_limits<uint32_t>::max(),
-                     .max_submit_jobs = std::numeric_limits<uint32_t>::max(),
-                     .max_wall = absl::ZeroDuration(),
-                     .max_wall_duration_per_job = absl::Seconds(kJobMaxTimeLimitSec)});
+      partition,
+      PartitionResourceLimit{
+          .max_tres = resource,
+          .max_tres_per_job = resource,
+          .max_jobs = std::numeric_limits<uint32_t>::max(),
+          .max_submit_jobs = std::numeric_limits<uint32_t>::max(),
+          .max_wall = absl::ZeroDuration(),
+          .max_wall_duration_per_job = absl::Seconds(kJobMaxTimeLimitSec)});
 }
 
 /**
@@ -3668,11 +3713,10 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
                                  "account_to_attrs_map." + name +
                                      ".allowed_partition_qos_map." + partition,
                                  std::string(""));
-    g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER,
-                                 "$unset", user,
-                                 "account_to_attrs_map." + name +
-                                     ".partition_to_limit_map." + partition,
-                                 std::string(""));
+    g_db_client->UpdateEntityOne(
+        Ctld::MongodbClient::EntityType::USER, "$unset", user,
+        "account_to_attrs_map." + name + ".partition_to_limit_map." + partition,
+        std::string(""));
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
@@ -3715,8 +3759,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
         partition);
   }
   m_account_map_[account->name]->allowed_partition.remove(partition);
-  m_account_map_[account->name]->partition_to_limit_map.erase(
-      partition);
+  m_account_map_[account->name]->partition_to_limit_map.erase(partition);
 
   return true;
 }

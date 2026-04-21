@@ -72,8 +72,7 @@ std::string MetaResource::DebugString() const {
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
-    JobInCtld& job) {
+CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job) {
   CRANE_TRACE(
       "TryMallocMetaSubmitResource for job of user {} and account {}.....",
       job.Username(), job.account);
@@ -118,14 +117,13 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
 }
 
 void AccountMetaContainer::MallocMetaSubmitResource(const JobInCtld& job) {
-  CRANE_DEBUG(
-      "Malloc meta submit resource for job of user {} and account {}.",
-      job.Username(), job.account);
+  CRANE_DEBUG("Malloc meta submit resource for job of user {} and account {}.",
+              job.Username(), job.account);
 
   MetaResource meta_resource{.resource = ResourceView{},
-                              .jobs_count = 0,
-                              .submit_jobs_count = 1,
-                              .wall_time = absl::ZeroDuration()};
+                             .jobs_count = 0,
+                             .submit_jobs_count = 1,
+                             .wall_time = absl::ZeroDuration()};
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                     job.partition_id, meta_resource);
 }
@@ -146,20 +144,18 @@ void AccountMetaContainer::MallocMetaResourceToRecoveredRunningJob(
   g_account_meta_container->UserAddJob(job.Username());
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
-                              .jobs_count = 1,
-                              .submit_jobs_count = 1,
-                              .wall_time = job.time_limit};
+                             .jobs_count = 1,
+                             .submit_jobs_count = 1,
+                             .wall_time = job.time_limit};
 
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                     job.partition_id, meta_resource);
 }
 
 std::expected<void, std::string>
-AccountMetaContainer::CheckAndMallocMetaResource(
-    const PdJobInScheduler& job) {
-  CRANE_TRACE(
-      "Check meta resource for job {} of user {} and account {}.",
-      job.job_id, job.username, job.account);
+AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
+  CRANE_TRACE("Check meta resource for job {} of user {} and account {}.",
+              job.job_id, job.username, job.account);
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) return std::unexpected("InvalidQOS");
@@ -172,14 +168,13 @@ AccountMetaContainer::CheckAndMallocMetaResource(
   auto result = CheckRunLimits_(job, *qos);
   if (!result) return result;
 
-  CRANE_DEBUG(
-      "Malloc meta resource for job {} of user {} and account {}.",
-      job.job_id, job.username, job.account);
+  CRANE_DEBUG("Malloc meta resource for job {} of user {} and account {}.",
+              job.job_id, job.username, job.account);
 
   MetaResource meta_resource{.resource = job.allocated_res.View(),
-                              .jobs_count = 1,
-                              .submit_jobs_count = 0,
-                              .wall_time = job.time_limit};
+                             .jobs_count = 1,
+                             .submit_jobs_count = 0,
+                             .wall_time = job.time_limit};
 
   DoMallocResource_(job.job_id, job.username, job.account_chain, job.qos,
                     job.partition_id, meta_resource);
@@ -188,14 +183,13 @@ AccountMetaContainer::CheckAndMallocMetaResource(
 }
 
 void AccountMetaContainer::FreeMetaSubmitResource(const JobInCtld& job) {
-  CRANE_DEBUG(
-      "Free meta submit resource for job {} of user {} and account {}.",
-      job.JobId(), job.Username(), job.account);
+  CRANE_DEBUG("Free meta submit resource for job {} of user {} and account {}.",
+              job.JobId(), job.Username(), job.account);
 
   MetaResource meta_resource{.resource = ResourceView{},
-                              .jobs_count = 0,
-                              .submit_jobs_count = 1,
-                              .wall_time = absl::ZeroDuration()};
+                             .jobs_count = 0,
+                             .submit_jobs_count = 1,
+                             .wall_time = absl::ZeroDuration()};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   job.partition_id, meta_resource);
@@ -206,9 +200,9 @@ void AccountMetaContainer::FreeMetaResource(const JobInCtld& job) {
               job.JobId(), job.Username(), job.account);
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
-                              .jobs_count = 1,
-                              .submit_jobs_count = 1,
-                              .wall_time = job.time_limit};
+                             .jobs_count = 1,
+                             .submit_jobs_count = 1,
+                             .wall_time = job.time_limit};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   job.partition_id, meta_resource);
@@ -283,8 +277,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
 
 bool AccountMetaContainer::IsUnlimitedTres_(const ResourceView& res) {
   return res.GetCpuCount() == kUnlimitedCpu &&
-         res.GetMemoryBytes() == kMaxJobMemoryBytes &&
-         res.GetGresMap().empty();
+         res.GetMemoryBytes() == kMaxJobMemoryBytes && res.GetGresMap().empty();
 }
 
 /* ---------------------------------------------------------------------------
@@ -337,7 +330,6 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, const ResourceView& req_res,
     absl::Duration time_limit, bool is_user) const {
-
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
   if (!CheckTres_(req_res, partition_limit->max_tres_per_job)) {
@@ -363,17 +355,14 @@ CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
     const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, bool is_user,
     const ResourceView& req_res, absl::Duration time_limit) const {
-
-  
   // QoS dimension (peer-level with Partition).
   CraneErrCode result =
       CheckQosSubmitLimitsForEntity_(stat, qos_name, qos, is_user, req_res);
   if (result != CraneErrCode::SUCCESS) return result;
 
   // Partition dimension (peer-level with QoS).
-  return CheckPartitionSubmitLimitsForEntity_(stat, partition_id,
-                                              partition_limit, req_res,
-                                              time_limit, is_user);
+  return CheckPartitionSubmitLimitsForEntity_(
+      stat, partition_id, partition_limit, req_res, time_limit, is_user);
 }
 
 std::expected<void, std::string>
@@ -381,7 +370,6 @@ AccountMetaContainer::CheckQosRunLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
     bool is_user, const ResourceView& allocated_res,
     absl::Duration time_limit) const {
-
   auto it = stat.qos_to_resource_map.find(qos_name);
   if (it == stat.qos_to_resource_map.end()) {
     // Entry must exist at schedule time (created at submit time).
@@ -417,13 +405,12 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     const PartitionResourceLimit* partition_limit,
     const ResourceView& allocated_res, absl::Duration time_limit,
     const Qos& qos, bool is_user) const {
-
   if (!partition_limit) return {};
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
-  if (pit == stat.partition_to_resource_map.end())  
+  if (pit == stat.partition_to_resource_map.end())
     return std::unexpected("PartitionResourceLimit");
-    
+
   const MetaResource& val = pit->second;
 
   // max_jobs: only enforced when QoS does not already cap running jobs.
@@ -565,7 +552,6 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
 
 std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     const PdJobInScheduler& job, const Qos& qos) {
-
   // Verify that all required entries exist before checking limits.
   if (!m_user_meta_map_.contains(job.username)) {
     CRANE_ERROR("[job #{}]: User '{}' not found in m_user_meta_map_.",
@@ -595,9 +581,10 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     const PartitionResourceLimit* user_part_limit = nullptr;
     auto user_ptr = g_account_manager->GetExistedUserInfo(job.username);
     if (!user_ptr) {
-      CRANE_ERROR("[job #{}]: User '{}' not found in AccountManager during "
-                  "run check.",
-                  job.job_id, job.username);
+      CRANE_ERROR(
+          "[job #{}]: User '{}' not found in AccountManager during "
+          "run check.",
+          job.job_id, job.username);
       return std::unexpected("InvalidUser");
     }
     auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
@@ -611,10 +598,9 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     m_user_meta_map_.if_contains(
         job.username,
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
-          result = CheckEntityRunLimits_(pair.second, job.qos, qos,
-                                         job.partition_id, user_part_limit,
-                                         /*is_user=*/true, allocated_res,
-                                         job.time_limit);
+          result = CheckEntityRunLimits_(
+              pair.second, job.qos, qos, job.partition_id, user_part_limit,
+              /*is_user=*/true, allocated_res, job.time_limit);
         });
     if (!result) return result;
   }
@@ -624,9 +610,10 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     const PartitionResourceLimit* acct_part_limit = nullptr;
     auto acct_ptr = g_account_manager->GetExistedAccountInfo(account_name);
     if (!acct_ptr) {
-      CRANE_ERROR("[job #{}]: Account '{}' not found in AccountManager during "
-                  "run check.",
-                  job.job_id, account_name);
+      CRANE_ERROR(
+          "[job #{}]: Account '{}' not found in AccountManager during "
+          "run check.",
+          job.job_id, account_name);
       return std::unexpected("InvalidAccount");
     }
     auto part_it = acct_ptr->partition_to_limit_map.find(job.partition_id);
@@ -636,10 +623,9 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
-          result = CheckEntityRunLimits_(pair.second, job.qos, qos,
-                                         job.partition_id, acct_part_limit,
-                                         /*is_user=*/false, allocated_res,
-                                         job.time_limit);
+          result = CheckEntityRunLimits_(
+              pair.second, job.qos, qos, job.partition_id, acct_part_limit,
+              /*is_user=*/false, allocated_res, job.time_limit);
         });
     if (!result) return result;
   }
@@ -705,9 +691,9 @@ void AccountMetaContainer::DoMallocResource_(
         upsert(pair.second.qos_to_resource_map, qos);
         upsert(pair.second.partition_to_resource_map, partition_id);
       },
-      MetaResourceStat{.qos_to_resource_map = {{qos, meta_resource}},
-                       .partition_to_resource_map = {{partition_id,
-                                                      meta_resource}}});
+      MetaResourceStat{
+          .qos_to_resource_map = {{qos, meta_resource}},
+          .partition_to_resource_map = {{partition_id, meta_resource}}});
 
   for (const auto& account_name : account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -716,9 +702,9 @@ void AccountMetaContainer::DoMallocResource_(
           upsert(pair.second.qos_to_resource_map, qos);
           upsert(pair.second.partition_to_resource_map, partition_id);
         },
-        MetaResourceStat{.qos_to_resource_map = {{qos, meta_resource}},
-                         .partition_to_resource_map = {{partition_id,
-                                                        meta_resource}}});
+        MetaResourceStat{
+            .qos_to_resource_map = {{qos, meta_resource}},
+            .partition_to_resource_map = {{partition_id, meta_resource}}});
   }
 
   m_qos_meta_map_.try_emplace_l(
@@ -740,8 +726,8 @@ void AccountMetaContainer::DoFreeResource_(
     auto it = map.find(key);
     if (it == map.end()) {
       CRANE_ERROR(
-          "'{}' not found for {} '{}', cannot free resource for job {}.",
-          key, entity_type, entity_name, job_id);
+          "'{}' not found for {} '{}', cannot free resource for job {}.", key,
+          entity_type, entity_name, job_id);
       return;
     }
     auto& val = it->second;

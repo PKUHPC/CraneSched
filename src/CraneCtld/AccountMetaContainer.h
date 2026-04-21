@@ -110,8 +110,8 @@ class AccountMetaContainer final {
 
   // Submit-time QoS dimension check for a single entity.
   CraneErrCode CheckQosSubmitLimitsForEntity_(
-      const MetaResourceStat& stat, const std::string& qos_name,
-      const Qos& qos, bool is_user, const ResourceView& req_res) const;
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      bool is_user, const ResourceView& req_res) const;
 
   // Submit-time Partition dimension check for a single entity.
   // Returns SUCCESS when partition_limit is nullptr (no limit configured).
@@ -123,15 +123,15 @@ class AccountMetaContainer final {
 
   // Submit-time combined check for a single entity (QoS + Partition).
   CraneErrCode CheckEntitySubmitLimits_(
-      const MetaResourceStat& stat, const std::string& qos_name,
-      const Qos& qos, const std::string& partition_id,
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      const std::string& partition_id,
       const PartitionResourceLimit* partition_limit, bool is_user,
       const ResourceView& req_res, absl::Duration time_limit) const;
 
   // Schedule-time QoS dimension check for a single entity.
   std::expected<void, std::string> CheckQosRunLimitsForEntity_(
-      const MetaResourceStat& stat, const std::string& qos_name,
-      const Qos& qos, bool is_user, const ResourceView& allocated_res,
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      bool is_user, const ResourceView& allocated_res,
       absl::Duration time_limit) const;
 
   std::expected<void, std::string> CheckPartitionRunLimitsForEntity_(
@@ -142,8 +142,8 @@ class AccountMetaContainer final {
 
   // Schedule-time combined check for a single entity (QoS + Partition).
   std::expected<void, std::string> CheckEntityRunLimits_(
-      const MetaResourceStat& stat, const std::string& qos_name,
-      const Qos& qos, const std::string& partition_id,
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      const std::string& partition_id,
       const PartitionResourceLimit* partition_limit, bool is_user,
       const ResourceView& allocated_res, absl::Duration time_limit) const;
 
@@ -153,8 +153,8 @@ class AccountMetaContainer final {
 
   // Schedule-time aggregated check across all entities.
   // Replaces the old CheckMetaResource_.
-  std::expected<void, std::string> CheckRunLimits_(
-      const PdJobInScheduler& job, const Qos& qos);
+  std::expected<void, std::string> CheckRunLimits_(const PdJobInScheduler& job,
+                                                   const Qos& qos);
 
   // Atomically increments both QoS and partition counters for user, every
   // account in the chain, and the global QoS map.
@@ -168,8 +168,7 @@ class AccountMetaContainer final {
   // DoMallocResource_).
   void DoFreeResource_(job_id_t job_id, const std::string& username,
                        const std::list<std::string>& account_chain,
-                       const std::string& qos,
-                       const std::string& partition_id,
+                       const std::string& qos, const std::string& partition_id,
                        const MetaResource& meta_resource);
 
   // Lock acquisition order:

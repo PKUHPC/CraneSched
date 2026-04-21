@@ -1203,8 +1203,9 @@ void JobScheduler::ScheduleThread_() {
             }
           }
 
-          if (auto result = g_account_meta_container->CheckAndMallocMetaResource(
-                  *job_in_scheduler);
+          if (auto result =
+                  g_account_meta_container->CheckAndMallocMetaResource(
+                      *job_in_scheduler);
               !result) {
             // free licenses
             if (!job_in_scheduler->actual_licenses.empty()) {

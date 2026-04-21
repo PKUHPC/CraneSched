@@ -1242,8 +1242,8 @@ struct PartitionResourceLimit {
   absl::Duration max_wall_duration_per_job;
 };
 
-using PartitionToLimitMap = std::unordered_map<std::string, // partition
-  PartitionResourceLimit>;
+using PartitionToLimitMap = std::unordered_map<std::string,  // partition
+                                               PartitionResourceLimit>;
 
 struct Account {
   bool deleted = false;

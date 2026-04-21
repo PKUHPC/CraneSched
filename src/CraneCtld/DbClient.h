@@ -539,18 +539,17 @@ class MongodbClient {
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const ResourceView& value);
 
-  void SubDocumentAppendItem_(
-      sub_document& doc, const std::string& key, const PartitionToLimitMap& value);
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const PartitionToLimitMap& value);
 
-
-  void SubDocumentAppendItem_(
-      sub_document& doc, const std::string& key, const ResourceView& value);
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const ResourceView& value);
 
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
                               const GresMap& value);
 
-  void DocumentAppendItem_(
-    document& doc, const std::string& key, const PartitionToLimitMap& value);
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const PartitionToLimitMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -669,7 +668,7 @@ class MongodbClient {
   ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
 
   void BsonToResourceView(const bsoncxx::document::view& view,
-                              const std::string& field, ResourceView* resource);
+                          const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_job_collection_name_{"job_table"};
