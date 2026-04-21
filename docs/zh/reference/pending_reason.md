@@ -80,7 +80,7 @@ Reason=Priority
 | `AccPartitionJobsLimit` | 账号在该 Partition 的运行作业数超限 | Partition `max_jobs` 超限（账号维度） |
 | `UserPartitionWallTimeLimit` | 用户在该 Partition 的累计墙钟时间超限 | Partition `max_wall` 超限（用户维度） |
 | `AccPartitionWallTimeLimit` | 账号在该 Partition 的累计墙钟时间超限 | Partition `max_wall` 超限（账号维度） |
-| `PartitionResourceLimit` | Partition 统计条目未找到（内部错误） | 调度时 Partition 统计状态异常，联系管理员 |
+| `PartitionEntryNotFound` | Partition 统计条目未找到（内部错误） | 调度时 Partition 统计状态异常，联系管理员 |
 
 ### 内部状态错误
 
