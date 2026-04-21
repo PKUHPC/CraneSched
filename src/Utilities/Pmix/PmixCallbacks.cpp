@@ -219,8 +219,17 @@ void PmixServerCallbacks::ErrHandler(
     const pmix_proc_t* source, pmix_info_t[] /*info*/, size_t /*ninfo*/,
     pmix_info_t* /*results*/, size_t /*nresults*/,
     pmix_event_notification_cbfunc_fn_t cbfunc, void* cbdata) {
-  CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]", status,
-              source->nspace, source->rank);
+  // Per PMIx RFC0002, the resource manager passes a NULL source for
+  // system-wide events and internal PMIx server errors.  Guard before
+  // dereferencing to avoid a crash in those cases.
+  if (source != nullptr) {
+    CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]",
+                status, source->nspace, source->rank);
+  } else {
+    CRANE_ERROR(
+        "PMIx error handler invoked: status={}, source=[system/internal]",
+        status);
+  }
   PmixServer::GetInstance()->GetCranedClient()->TerminateSteps();
   // Signal PMIx that this event handler has completed.  Per the PMIx event
   // notification specification this call is mandatory: omitting it permanently

@@ -6,7 +6,11 @@ if(NOT DEFINED WITH_PMIX OR "${WITH_PMIX}" STREQUAL "")
 endif()
 
 find_path(PMIX_INCLUDE_DIR pmix.h PATHS "${WITH_PMIX}/include" NO_DEFAULT_PATH)
-find_library(PMIX_LIBRARY pmix PATHS "${WITH_PMIX}/lib" NO_DEFAULT_PATH)
+find_library(PMIX_LIBRARY pmix
+    PATHS "${WITH_PMIX}"
+    PATH_SUFFIXES lib lib64
+    NO_DEFAULT_PATH
+)
 
 set(PMIX_INCLUDE_DIRS ${PMIX_INCLUDE_DIR})
 set(PMIX_LIBRARIES ${PMIX_LIBRARY})
@@ -23,7 +27,7 @@ else()
 endif()
 
 if(PMIx_FOUND AND NOT TARGET PMIx::pmix)
-    add_library(PMIx::pmix SHARED IMPORTED)
+    add_library(PMIx::pmix UNKNOWN IMPORTED)
     set_target_properties(PMIx::pmix PROPERTIES
         IMPORTED_LOCATION "${PMIX_LIBRARY}"
         INTERFACE_INCLUDE_DIRECTORIES "${PMIX_INCLUDE_DIR}"
@@ -32,9 +36,11 @@ endif()
 
 add_definitions(-DHAVE_PMIX)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(UCX IMPORTED_TARGET ucx)
-if (UCX_FOUND)
-    message(STATUS "UCX found! include: ${UCX_INCLUDE_DIRS}, library: ${UCX_LIBRARIES}")
-    add_definitions(-DHAVE_UCX)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(UCX IMPORTED_TARGET ucx)
+    if(UCX_FOUND)
+        message(STATUS "UCX found! include: ${UCX_INCLUDE_DIRS}, library: ${UCX_LIBRARIES}")
+        add_definitions(-DHAVE_UCX)
+    endif()
 endif()
