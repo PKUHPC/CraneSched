@@ -118,7 +118,8 @@ class AccountMetaContainer final {
   CraneErrCode CheckPartitionSubmitLimitsForEntity_(
       const MetaResourceStat& stat, const std::string& partition_id,
       const PartitionResourceLimit* partition_limit,
-      const ResourceView& req_res, absl::Duration time_limit) const;
+      const ResourceView& req_res, absl::Duration time_limit,
+      bool is_user) const;
 
   // Submit-time combined check for a single entity (QoS + Partition).
   CraneErrCode CheckEntitySubmitLimits_(
