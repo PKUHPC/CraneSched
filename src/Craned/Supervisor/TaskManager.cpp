@@ -3698,7 +3698,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         continue;
       }
       m_step_.step_user_cg = std::move(cg_expt.value());
-        cg_span.SetAttribute("cgroup_path", m_step_.cgroup_path);
+      cg_span.SetAttribute("cgroup_path",
+                            m_step_.step_user_cg->CgroupPath().string());
     }
 
     m_step_.InitOomBaseline();
