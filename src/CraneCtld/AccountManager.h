@@ -234,7 +234,7 @@ class AccountManager {
   CraneExpectedRich<int64_t> CheckSetUserWallLimitNoLock_(
       const std::string& account, const std::string& partition,
       const std::string& value, User* res_user);
-  CraneExpectedRich<ResourceView> CheckSetUserTresLimitNoLock_(
+  CraneExpectedRich<void> CheckSetUserTresLimitNoLock_(
     const std::string& account, const std::string& partition,
     const std::string& value, User* res_user);
 
@@ -266,7 +266,7 @@ class AccountManager {
     const std::string& partition, const std::string& value, Account* res_account);
   CraneExpectedRich<int64_t> CheckSetAccountWallLimitNoLock_(
     const std::string& partition, const std::string& value, Account* res_account);
-  CraneExpectedRich<ResourceView> CheckSetAccountTresLimitNoLock_(
+  CraneExpectedRich<void> CheckSetAccountTresLimitNoLock_(
     const std::string& partition, const std::string& value, Account* res_account);
 
   // Compare the user's permission levels for operations.

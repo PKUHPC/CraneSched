@@ -3481,11 +3481,11 @@ void MongodbClient::SubDocumentAppendItem_(
   sub_document& doc, const std::string& key,
   const ResourceView& value) {
   doc.append(kvp(key, [&](sub_document valueDocument) {
-    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
-        allocDoc.append(kvp("cpu_count", value.GetCpuCount().raw_value()));
-        allocDoc.append(kvp("mem", std::to_string(value.GetMemoryBytes())));
-        allocDoc.append(kvp("mem_sw", std::to_string(value.GetMemorySwBytes())));
-    }));
+    valueDocument.append(kvp("cpu", value.GetCpuCount().raw_value()));
+    valueDocument.append(
+        kvp("mem", static_cast<int64_t>(value.GetMemoryBytes())));
+    valueDocument.append(
+        kvp("mem_sw", static_cast<int64_t>(value.GetMemorySwBytes())));
     SubDocumentAppendItem_(valueDocument, "gres", value.GetGresMap());
   }));
 }

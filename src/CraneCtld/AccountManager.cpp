@@ -905,25 +905,35 @@ AccountManager::CheckModifyAccountOperations(
           break;
         }
         case ModifyField::MaxTres: {
+          const auto& val = operation.value_list()[0];
           auto rich_result =
-            CheckSetAccountTresLimitNoLock_(partition, operation.value_list()[0], account);
+            CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_tres = rich_result.value();
-          *log += fmt::format("partition: {} max_tres: {}\n", partition, operation.value_list()[0]);
+          if (!util::ConvertStringToResourceView(val, &account->partition_to_limit_map[partition].max_tres)) {
+            rich_error_list.emplace_back(std::unexpected{
+                FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+            continue;
+          }
+          *log += fmt::format("partition: {} max_tres: {}\n", partition, val);
           break;
         }
         case ModifyField::MaxTresPerJob: {
+          const auto& val = operation.value_list()[0];
           auto rich_result =
-            CheckSetAccountTresLimitNoLock_(partition, operation.value_list()[0], account);
+            CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
             rich_error_list.emplace_back(std::unexpected{rich_result.error()});
             continue;
           }
-          account->partition_to_limit_map[partition].max_tres_per_job = rich_result.value();
-          *log += fmt::format("partition: {} max_tres_per_job: {}\n", partition, operation.value_list()[0]);
+          if (!util::ConvertStringToResourceView(val, &account->partition_to_limit_map[partition].max_tres_per_job)) {
+            rich_error_list.emplace_back(std::unexpected{
+                FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+            continue;
+          }
+          *log += fmt::format("partition: {} max_tres_per_job: {}\n", partition, val);
           break;
         }
 
@@ -1251,25 +1261,38 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
         break;
       }
       case ModifyField::MaxTres: {
+        const auto& val = operation.value_list()[0];
         auto rich_result = CheckSetUserTresLimitNoLock_(
-          account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
-        else {
-          res_user->account_to_attrs_map[account_name]
-            .partition_to_limit_map[partition].max_tres = std::move(rich_result.value());
-          *log += fmt::format("Set: account: {}, partition: {}, max_tres: {}\n", account_name, partition, operation.value_list()[0]);
+          account_name, partition, val, res_user);
+        if (!rich_result) {
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+          continue;
         }
+
+        if (!util::ConvertStringToResourceView(val, &res_user->account_to_attrs_map[account_name]
+            .partition_to_limit_map[partition].max_tres)) {
+          rich_error_list.emplace_back(std::unexpected{
+              FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+          continue;
+        }
+        *log += fmt::format("Set: account: {}, partition: {}, max_tres: {}\n", account_name, partition, val);
         break;
       }
       case ModifyField::MaxTresPerJob: {
+        const auto& val = operation.value_list()[0];
         auto rich_result = CheckSetUserTresLimitNoLock_(
-          account_name, partition, operation.value_list()[0], res_user);
-        if (!rich_result) rich_error_list.emplace_back(std::unexpected{rich_result.error()});
-        else {
-          res_user->account_to_attrs_map[account_name]
-            .partition_to_limit_map[partition].max_tres_per_job = std::move(rich_result.value());
-          *log += fmt::format("Set: account: {}, partition: {}, max_tres_per_job: {}\n", account_name, partition, operation.value_list()[0]);
+          account_name, partition, val, res_user);
+        if (!rich_result) {
+          rich_error_list.emplace_back(std::unexpected{rich_result.error()});
+          continue;
         }
+        if (!util::ConvertStringToResourceView(val, &res_user->account_to_attrs_map[account_name]
+            .partition_to_limit_map[partition].max_tres_per_job)) {
+          rich_error_list.emplace_back(std::unexpected{
+              FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, val)});
+          continue;
+        }
+        *log += fmt::format("Set: account: {}, partition: {}, max_tres_per_job: {}\n", account_name, partition, val);
         break;
       }
       default:
@@ -2263,7 +2286,7 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserWallLimitNoLock_(
   return value_number;
 }
 
-CraneExpectedRich<ResourceView> AccountManager::CheckSetUserTresLimitNoLock_(
+CraneExpectedRich<void> AccountManager::CheckSetUserTresLimitNoLock_(
     const std::string& account, const std::string& partition,
     const std::string& value, User* res_user) {
 
@@ -2271,14 +2294,10 @@ CraneExpectedRich<ResourceView> AccountManager::CheckSetUserTresLimitNoLock_(
   if (!attrs_in_account.allowed_partition_qos_map.contains(partition))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
-  ResourceView resource_view;
-  if (!util::ConvertStringToResourceView(value, &resource_view))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, value)};
-
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition, &(attrs_in_account.partition_to_limit_map));
 
-  return resource_view;
+  return {};
 }
 
 std::vector<CraneExpectedRich<void>>
@@ -2440,21 +2459,17 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountWallLimitNoLock_(
   return value_number;
 }
 
-CraneExpectedRich<ResourceView> AccountManager::CheckSetAccountTresLimitNoLock_(
+CraneExpectedRich<void> AccountManager::CheckSetAccountTresLimitNoLock_(
     const std::string& partition, const std::string& value,
     Account* res_account) {
 
   if (!ranges::contains(res_account->allowed_partition, partition))
     return std::unexpected{FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
 
-  ResourceView resource_view;
-  if (!util::ConvertStringToResourceView(value, &resource_view))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW, value)};
-
   if (!res_account->partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition, &(res_account->partition_to_limit_map));
 
-  return resource_view;
+  return {};
 }
 
 CraneExpectedRich<void> AccountManager::CheckIfUserHasHigherPrivThan_(
