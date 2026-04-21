@@ -4793,8 +4793,9 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   std::unordered_set<JobInCtld*> array_parents_pending_finalize;
   array_parents_pending_finalize.reserve(actual_size);
 
-  LockGuard running_guard(&m_running_job_map_mtx_);
-  LockGuard indexes_guard(&m_job_indexes_mtx_);
+  {
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    LockGuard indexes_guard(&m_job_indexes_mtx_);
 
   for (const auto& [job_id, step_id, exit_code, new_status, craned_index,
                     reason, timestamp] : args) {
@@ -4922,6 +4923,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       m_running_job_map_.erase(iter);
     }
   }
+
+  } // Release m_running_job_map_mtx_ and m_job_indexes_mtx_
 
   for (JobInCtld* parent : array_parents_pending_finalize) {
     auto [final_job_status, final_job_exit_code] =
