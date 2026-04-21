@@ -80,7 +80,7 @@ When a job cannot be scheduled due to QoS or Partition resource limits, the foll
 | `AccPartitionJobsLimit` | Account's running job count in this Partition exceeded | Partition `max_jobs` exceeded (account dimension) |
 | `UserPartitionWallTimeLimit` | User's cumulative wall time in this Partition exceeded | Partition `max_wall` exceeded (user dimension) |
 | `AccPartitionWallTimeLimit` | Account's cumulative wall time in this Partition exceeded | Partition `max_wall` exceeded (account dimension) |
-| `PartitionResourceLimit` | Partition statistics entry not found (internal error) | Partition statistics state anomaly during scheduling, contact administrator |
+| `PartitionEntryNotFound` | Partition statistics entry not found (internal error) | Partition statistics state anomaly during scheduling, contact administrator |
 
 ### Internal State Errors
 
