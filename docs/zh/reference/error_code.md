@@ -79,3 +79,35 @@
 | 75 | `ERR_IDENTITY_MISMATCH` | 用户身份信息不匹配 | 修改身份信息 | User information does not match, unable to submit the task. |
 | 76 | `ERR_NOT_FORCE` | 在删除全体用户时没有显式标注--force | 显式标注--force | You need to set --force for this operation. |
 | 77 | `ERR_INVALID_USERNAME` | 创建新用户时使用"ALL"作为名字 | 取消使用"ALL"作为新用户名字 | Invalid username |
+| 78 | `ERR_LICENSE_LEGAL_FAILED` | License 请求格式非法或无效 | 检查 License 请求格式 | License request format is illegal or invalid |
+| 79 | `ERR_INVALID_JOB_ID` | 无效的作业 ID | 检查作业 ID 是否正确 | Invalid job id |
+| 80 | `ERR_CRI_GENERIC` | CRI 运行时返回错误 | 查看日志了解具体错误 | CRI runtime returns error. Check logs for details. |
+| 81 | `ERR_CRI_DISABLED` | 集群中 CRI 支持被禁用 | 联系管理员启用 CRI 支持 | CRI support is disabled in the cluster. |
+| 82 | `ERR_CRI_CONTAINER_NOT_READY` | 作业等待中或容器未就绪 | 等待容器就绪或检查作业状态 | Job is pending or container is not ready. |
+| 83 | `ERR_CRI_MULTIPLE_NODES` | 请求的 CRI 操作不支持多节点 | 将作业限制在单节点上运行 | Requested CRI operation is not supported in multi-node steps. |
+| 84 | `ERR_INVALID_MEM_FORMAT` | 内存格式无效 | 使用正确的内存格式（如 1G、512M） | Invalid memory format |
+| 85 | `ERR_STEP_RES_BEYOND` | Step 资源请求超过作业资源 | 减少 Step 的资源请求或增加作业资源 | Step resource request exceeds the job's requested resources |
+| 86 | `ERR_INVALID_WCKEY` | 指定的 wckey 不存在 | 使用 cacctmgr 查看可用的 wckey 列表 | The specified wckey does not exist |
+| 87 | `ERR_WCKEY_ALREADY_EXISTS` | wckey 已存在 | | The wckey already exists in crane |
+| 88 | `ERR_INVALID_CLUSTER` | 指定的集群不存在 | 检查集群名称是否正确 | The entered cluster does not exist |
+| 89 | `ERR_DEL_DEFAULT_WCKEY` | 不能删除默认 wckey | 先设置其他 wckey 为默认，再删除 | Cannot delete the default wckey. Please set a different default wckey first |
+| 90 | `ERR_NO_DEFAULT_WCKEY` | 未设置默认 wckey | 指定 wckey 或设置默认 wckey | No default wckey is set. Please specify a wckey or set a default wckey |
+| 91 | `ERR_MISSING_DEPENDENCY` | 一个或多个依赖作业不存在或已结束 | 检查依赖作业的状态 | One or more dependency jobs may not exist or have ended |
+| 92 | `ERR_DB_INSERT_FAILED` | 数据库插入失败（内部错误） | 联系管理员查看日志 | Database insertion failed due to internal error |
+| 93 | `ERR_LUA_FAILED` | Lua 脚本验证失败 | 检查 Lua 脚本语法 | Lua script validation failed |
+| 94 | `ERR_RESOURCE_NOT_FOUND` | 资源未找到 | 检查资源名称是否正确 | The resource was not found in the crane |
+| 95 | `ERR_INVALID_ARGUMENT` | 提供了无效参数 | 检查参数格式和取值范围 | Invalid argument provided |
+| 96 | `ERR_RESOURCE_ALREADY_EXIST` | 资源已存在 | | The resource already exists in the crane |
+| 97 | `ERR_MAX_JOB_COUNT_PER_ACCOUNT` | 当前账号运行作业数量达到 QoS 限制 | 联系管理员提升限制或等待其中一个任务执行完毕 | The number of jobs for the current account has reached its limit |
+| 98 | `ERR_USER_HAS_JOB` | 用户有待运行或运行中的作业，无法删除 | 等待作业完成或先取消作业 | The user has jobs pending or running, cannot be deleted |
+| 99 | `ERR_INVALID_RESOURCE` | 分区的资源规格无效 | 检查资源规格格式 | Invalid resource specification for the partition |
+| 100 | `ERR_QOS_JOB_COUNT_EXCEEDED` | 全局 QoS 作业数量达到上限 | 联系管理员提升 QoS 全局作业数限制或等待作业完成 | The number of jobs has reached the limit of this QOS |
+| 101 | `ERR_CONVERT_TO_RESOURCE_VIEW` | 资源视图转换失败（内部错误） | 检查资源规格格式是否正确 | Not a valid resource string |
+| 102 | `ERR_MAX_TRES_PER_USER_BEYOND` | 当前用户的 TRES 使用量达到 QoS 限制 | 联系管理员提升 QoS 的用户 TRES 限制 | The tres of jobs for the current user has reached the limit of this QOS |
+| 103 | `ERR_MAX_TRES_PER_ACCOUNT_BEYOND` | 当前账号的 TRES 使用量达到 QoS 限制 | 联系管理员提升 QoS 的账号 TRES 限制 | The tres of jobs for the current account has reached the limit of this QOS |
+| 104 | `ERR_TRES_PER_JOB_BEYOND` | 单个作业的 TRES 超过 QoS 限制 | 减少作业资源请求或联系管理员提升 QoS 限制 | The tres of jobs has reached the limit of this QOS |
+| 105 | `ERR_INVALID_DEADLINE` | 截止时间无效（应晚于提交时间） | 设置一个晚于当前时间的截止时间 | Invalid deadline time(should be later than submit time) |
+| 106 | `ERR_PARTITION_TRES_PER_JOB_BEYOND` | 单个作业的 TRES 超过 Partition 的 `max_tres_per_job` 限制 | 减少作业资源请求或联系管理员提升 Partition 限制 | Resource (TRES) per job exceeds the partition limit |
+| 107 | `ERR_PARTITION_TIME_BEYOND` | 作业时间限制超过 Partition 的 `max_wall_duration_per_job` 限制 | 减少作业时间限制或联系管理员提升 Partition 时间限制 | Time limit exceeds the partition's per-job wall time limit |
+| 108 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` | 用户在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per user exceeded |
+| 109 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` | 账号在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per account exceeded |
