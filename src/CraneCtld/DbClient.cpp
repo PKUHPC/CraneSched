@@ -462,6 +462,20 @@ bool MongodbClient::InsertRecoveredJob(
 }
 
 bool MongodbClient::InsertJob(JobInCtld* job) {
+  if (job->EndTime() > job->StartTime() + job->time_limit ||
+      job->EndTime() < job->StartTime()) {
+    CRANE_ERROR(
+        "Job #{} end time {} is invalid, start time {}, max end time {} (start "
+        "time + time limit).",
+        job->JobId(), job->EndTime(), job->StartTime() + job->time_limit,
+        job->StartTime());
+    return false;
+  }
+  if (job->EndTimeInUnixSecond() == kJobMaxTimeStampSec) {
+    CRANE_ERROR("Job #{} end time {} is invalid default value", job->JobId(),
+                job->EndTime());
+    return false;
+  }
   document job_doc = JobInCtldToDocument_(job);
 
   // Create filter by (job_id, requeue_count) composite key
@@ -1188,14 +1202,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
 
   // Group steps by (job_id, requeue_count) composite key
   using JobRequeueKey = std::pair<job_id_t, int32_t>;
-  struct PairHash {
-    size_t operator()(const JobRequeueKey& p) const {
-      return std::hash<uint64_t>{}((static_cast<uint64_t>(p.first) << 32) |
-                                   p.second);
-    }
-  };
-  std::unordered_map<JobRequeueKey, std::vector<StepInCtld*>, PairHash>
-      steps_by_job;
+
+  absl::flat_hash_map<JobRequeueKey, std::vector<StepInCtld*>> steps_by_job;
   for (const auto& step : steps) {
     steps_by_job[{step->job_id, step->RequeueCount()}].push_back(step);
   }

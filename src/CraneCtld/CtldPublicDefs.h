@@ -1039,11 +1039,15 @@ struct JobInCtld {
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
 
-  void SetRequeueRequested(bool val) { requeue_requested = val; }
+  void SetRequeueRequested(bool val) {
+    requeue_requested = val;
+    runtime_attr.set_requeue_requested(val);
+  }
   bool RequeueRequested() const { return requeue_requested; }
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  bool ShouldRequeue() const;
   void ResetForRequeue();
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {

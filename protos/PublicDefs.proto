@@ -279,6 +279,8 @@ message RuntimeAttrOfJob {
   // Used to extend end_time upon resume so that suspended time
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
+
+  bool requeue_requested = 25;
 }
 
 message StepToCtld {
