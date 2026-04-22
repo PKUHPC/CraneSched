@@ -5075,17 +5075,22 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         continue;
       }
 
-      auto [final_job_status, final_job_exit_code] =
-          BuildArrayAggregateResult(array_job_id, context.job_raw_ptrs);
-      parent->SetStatus(final_job_status);
-      parent->SetExitCode(final_job_exit_code);
-      parent->SetEndTime(absl::Now());
-      meta->running_child_job_ids.clear();
       RefreshArrayRootSummaryStateNoLock_(array_job_id);
+
       if (meta->array_children_expanded &&
           meta->pending_child_job_ids.empty() &&
           meta->running_child_job_ids.empty()) {
+        auto [final_job_status, final_job_exit_code] =
+            BuildArrayAggregateResult(array_job_id, context.job_raw_ptrs);
+        parent->SetStatus(final_job_status);
+        parent->SetExitCode(final_job_exit_code);
+        parent->SetEndTime(absl::Now());
         TriggerTerminalDependencyEvents(parent, parent->EndTime());
+
+        auto node = m_array_root_job_map_.extract(array_job_id);
+        context.job_raw_ptrs.insert(node.mapped().get());
+        context.job_ptrs.emplace(std::move(node.mapped()));
+        m_array_metas_.erase(array_job_id);
       }
     }
   }  // Release m_pending_job_map_mtx_, m_running_job_map_mtx_ and
