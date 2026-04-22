@@ -84,7 +84,7 @@ class PmixServer {
 
   bool ConnInit_(const Config& config);
 
-  bool PmixInit_() const;
+  bool PmixInit_();
 
   bool JobSet_();
 
@@ -107,6 +107,10 @@ class PmixServer {
 
   std::unique_ptr<PmixDModexReqManager> m_dmodex_mgr_;
   std::unique_ptr<pmix::PmixState> m_pmix_state_;
+
+  // Set to true only after PMIx_server_init() succeeds; guards against
+  // double-finalize when Init() fails mid-way and the destructor also runs.
+  bool m_pmix_inited_{false};
 
   std::thread m_uvw_thread_;
   std::atomic_bool m_cq_closed_{false};

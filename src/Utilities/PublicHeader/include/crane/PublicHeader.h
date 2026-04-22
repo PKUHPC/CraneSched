@@ -339,10 +339,16 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Cannot delete user with active jobs.",
         "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
 
+        // 100 - 104
         "Not a valide resource string",
         "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
         "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
-        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)"
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)",
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)",
+
+        // 105 - 106
+        "Invalid deadline",
+        "PMIx error",
     };
 // clang-format on
 }  // namespace Internal
