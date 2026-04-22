@@ -523,7 +523,7 @@ bool PmixServer::PmixInit_() {
 
 bool PmixServer::JobSet_() {
   pmix_status_t rc;
-
+  
   {
     absl::BlockingCounter bc(1);
     rc = PMIx_server_setup_application(m_pmix_job_info_.nspace.c_str(), nullptr,
@@ -687,13 +687,14 @@ bool PmixServer::JobSet_() {
         m_pmix_job_info_.nspace.c_str(),
         static_cast<int>(m_pmix_job_info_.node_tasks), ns_info,
         info_list.size(), OpCbWrapper, &bc);
-    PMIX_INFO_FREE(ns_info, info_list.size());
     if (rc != PMIX_SUCCESS) {
+      PMIX_INFO_FREE(ns_info, info_list.size());
       CRANE_ERROR("Error: PMIx_server_register_nspace. {}",
                   PMIx_Error_string(rc));
       return false;
     }
     bc.Wait();
+    PMIX_INFO_FREE(ns_info, info_list.size());
   }
 
   {
