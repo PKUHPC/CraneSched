@@ -166,9 +166,14 @@ PmixServer::~PmixServer() {
   if (m_pmix_state_) m_pmix_state_->AbortAllColls();
   if (m_dmodex_mgr_) m_dmodex_mgr_->DrainAllRequests();
 
-  int rc = PMIx_server_finalize();
-  if (rc != PMIX_SUCCESS)
-    CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
+  // Guard against double-finalize: Init()'s err_conn path already called
+  // PMIx_server_finalize() and cleared m_pmix_inited_.
+  if (m_pmix_inited_) {
+    int rc = PMIx_server_finalize();
+    if (rc != PMIX_SUCCESS)
+      CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
+    m_pmix_inited_ = false;
+  }
 
   m_pmix_async_server_.reset();
   m_dmodex_mgr_.reset();
@@ -253,7 +258,12 @@ err_thread:
 err_conn:
   if (m_pmix_state_) m_pmix_state_->AbortAllColls();
   if (m_dmodex_mgr_) m_dmodex_mgr_->DrainAllRequests();
-  PMIx_server_finalize();
+  // Only finalize if PmixInit_() succeeded; clear the flag so ~PmixServer()
+  // does not attempt a second finalize on the same object.
+  if (m_pmix_inited_) {
+    PMIx_server_finalize();
+    m_pmix_inited_ = false;
+  }
   m_pmix_async_server_.reset();
   m_dmodex_mgr_.reset();
   m_pmix_state_.reset();
@@ -476,7 +486,7 @@ bool PmixServer::ConnInit_(const Config& config) {
   return true;
 }
 
-bool PmixServer::PmixInit_() const {
+bool PmixServer::PmixInit_() {
   if (!util::os::CreateFolders(m_pmix_job_info_.server_tmpdir)) return false;
 
   if (!m_pmix_job_info_.cli_tmpdir.empty()) {
@@ -502,6 +512,8 @@ bool PmixServer::PmixInit_() const {
     CRANE_ERROR("Pmix Server Init failed with error {}", PMIx_Error_string(rc));
     return false;
   }
+  // Mark PMIx as initialized so the destructor knows it must finalize.
+  m_pmix_inited_ = true;
 
   PMIx_Register_event_handler(NULL, 0, NULL, 0, ErrHandlerWrapper,
                               ErrHandlerRegCbWrapper, NULL);

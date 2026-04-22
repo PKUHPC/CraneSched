@@ -891,6 +891,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
+  ERR_PMIX_ERR = 106;                      // PMIx initialization or runtime error
 }
 
 enum EntityType {

@@ -116,7 +116,7 @@ CraneErrCode StepInstance::Prepare() {
       close(xauth_fd);
     }
     if (!IsDaemon() && IsPmix()) {
-      auto temp_pmix_server = std::make_unique<pmix::PmixServer>();
+      pmix_server = std::make_unique<pmix::PmixServer>();
       pmix::Config pmix_config{
           .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
           .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
@@ -125,11 +125,12 @@ CraneErrCode StepInstance::Prepare() {
           .CraneScriptDir = g_config.CraneScriptDir,
           .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
 
-    // Only publish the server after Init() succeeds; a non-null but
-    // un-initialized m_pmix_server_ would let SetupFork() run on a
-    // broken server and cause UB / abort in child processes.
-      if (!temp_pmix_server->Init(pmix_config, m_step_to_supv_)) return CraneErrCode::ERR_SYSTEM_ERR;
-      pmix_server = std::move(temp_pmix_server);
+      if (!pmix_server->Init(pmix_config, m_step_to_supv_)) {
+        // Init() already cleaned up PMIx internals on failure.
+        // Reset here so ~PmixServer() does not attempt a second finalize.
+        pmix_server.reset();
+        return CraneErrCode::ERR_PMIX_ERR;
+      }
     }
   }
   return CraneErrCode::SUCCESS;
