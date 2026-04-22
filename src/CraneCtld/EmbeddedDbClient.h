@@ -246,10 +246,6 @@ class EmbeddedDbClient {
   std::optional<txn_id_t> AppendJobsToPendingAndAdvanceJobIds(
       const std::vector<JobInCtld*>& jobs);
 
-  // Mark an array parent job as having its children expanded.
-  // Must be called within an active variable-db transaction.
-  bool MarkArrayParentExpanded(txn_id_t txn_id, JobInCtld* array_parent);
-
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 
   bool UpdateRuntimeAttrOfJob(

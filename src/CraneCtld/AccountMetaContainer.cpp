@@ -114,6 +114,12 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
+  auto qos = g_account_manager->GetExistedQosInfo(job.qos);
+  if (!qos) {
+    CRANE_ERROR("Unknown QOS '{}'", job.qos);
+    return CraneErrCode::ERR_INVALID_QOS;
+  }
+
   result = CheckUserQosSubmitResourceUsage_(job, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 

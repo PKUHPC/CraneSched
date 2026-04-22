@@ -1030,28 +1030,6 @@ std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
   return txn_id;
 }
 
-bool EmbeddedDbClient::MarkArrayParentExpanded(txn_id_t txn_id,
-                                                JobInCtld* array_parent) {
-  if (array_parent == nullptr) {
-    CRANE_ERROR("array_parent is nullptr in MarkArrayParentExpanded");
-    return false;
-  }
-
-  array_parent->MutableRuntimeAttr()->set_array_children_expanded(true);
-
-  auto result = StoreTypeIntoDb_(
-      m_variable_db_.get(), txn_id,
-      GetVariableDbEntryName_(array_parent->JobDbId()),
-      &array_parent->RuntimeAttr());
-  if (!result) {
-    CRANE_ERROR("Failed to update runtime attr of array parent job #{}.",
-                array_parent->JobId());
-    return false;
-  }
-
-  return true;
-}
-
 bool EmbeddedDbClient::PurgeEndedJobs(
     const std::unordered_map<job_id_t, job_db_id_t>& job_ids) {
   // To ensure consistency of both fixed data db and variable data db under

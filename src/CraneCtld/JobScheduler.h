@@ -769,11 +769,63 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+ public:
   struct ArrayMeta {
     job_id_t array_job_id{0};
+    job_db_id_t array_job_db_id{0};
     uint32_t array_index_start{0};
     uint32_t array_index_end{0};
     uint32_t array_index_stride{1};
+
+    crane::grpc::JobType type{crane::grpc::Batch};
+    uid_t uid{0};
+    gid_t gid{0};
+    std::string name;
+    std::string account;
+    std::string partition;
+    std::string qos;
+    std::string username;
+    uint32_t node_num{0};
+    std::string cmd_line;
+    std::string cwd;
+    std::unordered_map<std::string, std::string> env;
+    std::string extra_attr;
+    std::string reservation;
+    std::string submit_hostname;
+    std::list<std::string> account_chain;
+    std::unordered_map<std::string, uint32_t> licenses_count;
+    std::unordered_set<std::string> included_nodes;
+    std::unordered_set<std::string> excluded_nodes;
+    uint32_t ntasks{0};
+    uint32_t ntasks_per_node_min{1};
+    uint32_t ntasks_per_node_max{0};
+    uint32_t partition_priority{0};
+    uint32_t qos_priority{0};
+    absl::Duration time_limit{absl::ZeroDuration()};
+    absl::Time begin_time{absl::InfinitePast()};
+    absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
+    absl::Time submit_time{absl::InfinitePast()};
+    absl::Time start_time{absl::InfinitePast()};
+    absl::Time end_time{absl::InfinitePast()};
+    DependenciesInJob dependencies;
+    std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
+    bool held{false};
+    bool exclusive{false};
+    double cached_priority{0.0};
+    double mandated_priority{0.0};
+    bool using_default_wckey{false};
+    std::string wckey;
+    ResourceView req_node_res_view;
+    ResourceView req_task_res_view;
+    ResourceView req_total_res_view;
+    ResourceView allocated_res_view;
+    std::vector<CranedId> executing_craned_ids;
+    std::string allocated_craneds_regex;
+    std::string pending_reason;
+    crane::grpc::JobStatus status{crane::grpc::Pending};
+    uint32_t exit_code{0};
+    crane::grpc::JobToCtld job_template;
+    crane::grpc::RuntimeAttrOfJob runtime_attr;
 
     HashSet<uint32_t> materialized_task_ids;
     uint32_t next_array_task_index{0};
@@ -784,22 +836,6 @@ class JobScheduler {
     HashSet<job_id_t> pending_child_job_ids;
     HashSet<job_id_t> running_child_job_ids;
     std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
-    crane::grpc::JobToCtld job_template;
-    std::string username;
-    std::string qos;
-    std::list<std::string> account_chain;
-    ResourceView req_node_res_view;
-    ResourceView req_task_res_view;
-    ResourceView req_total_res_view;
-    std::unordered_set<std::string> included_nodes;
-    std::unordered_set<std::string> excluded_nodes;
-    uint32_t ntasks_per_node_min{1};
-    uint32_t ntasks_per_node_max{0};
-    uint32_t partition_priority{0};
-    uint32_t qos_priority{0};
-    absl::Duration time_limit{absl::ZeroDuration()};
-    bool using_default_wckey{false};
-    std::string wckey;
 
     [[nodiscard]] uint32_t TotalTaskCount() const {
       if (array_index_end < array_index_start) return 0;
@@ -819,6 +855,65 @@ class JobScheduler {
       uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
       return (task_id - array_index_start) % stride == 0;
     }
+
+    void SetStatus(crane::grpc::JobStatus val) {
+      status = val;
+      runtime_attr.set_status(val);
+    }
+
+    void SetExitCode(uint32_t val) {
+      exit_code = val;
+      runtime_attr.set_exit_code(val);
+    }
+
+    void SetHeld(bool val) {
+      held = val;
+      runtime_attr.set_held(val);
+    }
+
+    void SetSubmitTime(absl::Time val) {
+      submit_time = val;
+      runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(val));
+    }
+
+    void SetStartTime(absl::Time val) {
+      start_time = val;
+      runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(val));
+    }
+
+    void SetEndTime(absl::Time val) {
+      end_time = val;
+      runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(val));
+    }
+
+    void SetCachedPriority(double val) {
+      cached_priority = val;
+      runtime_attr.set_cached_priority(val);
+    }
+
+    void SetExpanded(bool val) {
+      array_children_expanded = val;
+      if (val) {
+        runtime_attr.set_array_children_expanded(true);
+      } else {
+        runtime_attr.clear_array_children_expanded();
+      }
+    }
+
+    void UpdateDependency(job_id_t dep_job_id, absl::Time event_time) {
+      dependencies.update(dep_job_id, event_time);
+    }
+
+    void AddDependent(crane::grpc::DependencyType dep_type,
+                      job_id_t dep_job_id);
+
+    void TriggerDependencyEvents(crane::grpc::DependencyType dep_type,
+                                 absl::Time event_time) const;
+
+    void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
+    bool SetFieldsOfVirtualArrayChildJobInfo(uint32_t task_id,
+                                             crane::grpc::JobInfo* job_info)
+        const;
   };
 
  public:
@@ -1015,8 +1110,6 @@ class JobScheduler {
  private:
   ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
   const ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id) const;
-  JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id);
-  const JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id) const;
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       JobInCtld& parent) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
@@ -1026,9 +1119,6 @@ class JobScheduler {
                                                uint32_t task_id) const;
   std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
-  bool SetFieldsOfJobInfoAsVirtualArrayChild_(
-      JobInCtld& parent, const ArrayMeta& meta, uint32_t task_id,
-      crane::grpc::JobInfo* job_info) const;
   void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
   void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);
@@ -1053,12 +1143,20 @@ class JobScheduler {
 
   static void PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
+  static JobInEmbeddedDb BuildFinalArrayRootRecord_(const ArrayMeta& meta);
+  static void ProcessFinalArrayRoots_(
+      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
+  static void CallPluginHookForFinalArrayRoots_(
+      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
+  static void PersistAndTransferArrayRootsToMongodb_(
+      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
                                   crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
+  bool CanMaterializeArrayRootNoLock_(ArrayMeta* meta, absl::Time now);
 
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
@@ -1075,8 +1173,6 @@ class JobScheduler {
 
   std::atomic_uint32_t m_pending_map_cached_size_;
 
-  HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_array_root_job_map_
-      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
   HashMap<job_id_t, std::shared_ptr<ArrayMeta>> m_array_metas_
       ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 

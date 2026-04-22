@@ -1164,6 +1164,10 @@ struct JobInCtld {
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
   DependenciesInJob const& Dependencies() const { return dependencies; }
+  std::span<const job_id_t> Dependents(
+      crane::grpc::DependencyType dep_type) const {
+    return dependents[dep_type];
+  }
   void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
   void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
                                absl::Time event_time);
