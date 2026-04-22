@@ -1109,7 +1109,6 @@ class JobScheduler {
 
  private:
   ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
-  const ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id) const;
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       JobInCtld& parent) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
@@ -1119,6 +1118,7 @@ class JobScheduler {
                                                uint32_t task_id) const;
   std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
+  void TrackArrayChildBookkeepingNoLock_(ArrayMeta* meta, JobInCtld* child);
   void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
   void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);
@@ -1213,6 +1213,12 @@ class JobScheduler {
 
   std::thread m_schedule_thread_;
   void ScheduleThread_();
+
+  // Shared helper: persist array children to embedded DB, handle expanded
+  // state, commit transaction, and track children into the pending map.
+  // Returns true on success, false on failure (with full rollback).
+  bool PersistAndTrackArrayChildrenNoLock_(
+      ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
 
   // Persist a parent's expanded array children and insert them into the
   // pending map. Must be called while holding both pending/running map locks.

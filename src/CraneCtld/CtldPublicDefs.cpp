@@ -1606,66 +1606,24 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
     return std::nullopt;
   }
 
-  if (!IsArrayChild() || !array_job_id.has_value()) {
+  if (!IsArrayChild() || !array_job_id.has_value() ||
+      !job_to_ctld.has_array_task_id()) {
     return std::nullopt;
   }
 
-  auto task_id = GetArrayTaskId_();
-  if (!task_id.has_value()) return std::nullopt;
-
-  uint32_t task_step = job_to_ctld.has_array_index_stride()
-                           ? job_to_ctld.array_index_stride()
-                           : 1;
-  if (task_step == 0) task_step = 1;
-
   return ArrayTaskMeta{array_job_id.value(),
-                       task_id.value(),
+                       job_to_ctld.array_task_id(),
                        ArrayTaskCount(),
                        job_to_ctld.array_index_start(),
                        job_to_ctld.array_index_end(),
-                       task_step};
+                       EffectiveStride_()};
 }
 
-std::optional<uint32_t> JobInCtld::GetArrayTaskId_() const {
-  if (!job_to_ctld.has_array_task_id()) {
-    return std::nullopt;
-  }
-
-  return job_to_ctld.array_task_id();
-}
-
-bool JobInCtld::IsValidArrayTaskId_(uint32_t task_id) const {
-  if (!job_to_ctld.has_array_index_start() ||
-      !job_to_ctld.has_array_index_end()) {
-    return false;
-  }
-
-  uint32_t array_start = job_to_ctld.array_index_start();
-  uint32_t array_end = job_to_ctld.array_index_end();
-  if (task_id < array_start || task_id > array_end) {
-    return false;
-  }
-
-  uint32_t array_stride = job_to_ctld.has_array_index_stride()
-                              ? job_to_ctld.array_index_stride()
-                              : 1;
-  if (array_stride == 0) {
-    array_stride = 1;
-  }
-
-  return (task_id - array_start) % array_stride == 0;
-}
-
-uint32_t JobInCtld::GetArrayTaskIdByIndex_(uint32_t task_index) const {
-  uint32_t array_start = job_to_ctld.array_index_start();
-  uint32_t array_stride = job_to_ctld.has_array_index_stride()
-                              ? job_to_ctld.array_index_stride()
-                              : 1;
-  if (array_stride == 0) {
-    array_stride = 1;
-  }
-
-  return array_start + task_index * array_stride;
+uint32_t JobInCtld::EffectiveStride_() const {
+  uint32_t stride = job_to_ctld.has_array_index_stride()
+                        ? job_to_ctld.array_index_stride()
+                        : 1;
+  return stride == 0 ? 1 : stride;
 }
 
 void JobInCtld::SetCachedPriority(double val) {

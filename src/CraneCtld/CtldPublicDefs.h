@@ -894,19 +894,8 @@ struct JobInCtld {
     }
     uint32_t start = job_to_ctld.array_index_start();
     uint32_t end = job_to_ctld.array_index_end();
-    // Guard the unsigned subtraction. CheckJobValidity should reject
-    // end < start upstream, but recovery / other call sites may bypass it.
     if (end < start) return 0;
-    uint32_t stride = job_to_ctld.has_array_index_stride()
-                          ? job_to_ctld.array_index_stride()
-                          : 1;
-    if (stride == 0) stride = 1;  // Avoid division by zero
-    return (end - start) / stride + 1;
-  }
-
-  uint32_t ArrayJobCount() const {
-    if (!IsArrayParent()) return 0;
-    return ArrayTaskCount();
+    return (end - start) / EffectiveStride_() + 1;
   }
 
   struct ArrayTaskMeta {
@@ -919,14 +908,9 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
-  bool IsValidArrayTaskId(uint32_t task_id) const {
-    return IsValidArrayTaskId_(task_id);
-  }
 
  private:
-  std::optional<uint32_t> GetArrayTaskId_() const;
-  bool IsValidArrayTaskId_(uint32_t task_id) const;
-  uint32_t GetArrayTaskIdByIndex_(uint32_t task_index) const;
+  uint32_t EffectiveStride_() const;
 
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.

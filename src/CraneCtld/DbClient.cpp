@@ -147,19 +147,6 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
   return result;
 }
 
-uint32_t GetArrayTaskIdByIndex_(const crane::grpc::JobToCtld& job_to_ctld,
-                                uint32_t task_index) {
-  uint32_t array_start = job_to_ctld.array_index_start();
-  uint32_t array_stride = job_to_ctld.has_array_index_stride()
-                              ? job_to_ctld.array_index_stride()
-                              : 1;
-  if (array_stride == 0) {
-    array_stride = 1;
-  }
-
-  return array_start + task_index * array_stride;
-}
-
 std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
     const crane::grpc::RuntimeAttrOfJob& runtime_attr,
     const crane::grpc::JobToCtld& job_to_ctld) {
