@@ -74,6 +74,7 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
+constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 

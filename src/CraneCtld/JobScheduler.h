@@ -785,6 +785,21 @@ class JobScheduler {
     HashSet<job_id_t> running_child_job_ids;
     std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
     crane::grpc::JobToCtld job_template;
+    std::string username;
+    std::string qos;
+    std::list<std::string> account_chain;
+    ResourceView req_node_res_view;
+    ResourceView req_task_res_view;
+    ResourceView req_total_res_view;
+    std::unordered_set<std::string> included_nodes;
+    std::unordered_set<std::string> excluded_nodes;
+    uint32_t ntasks_per_node_min{1};
+    uint32_t ntasks_per_node_max{0};
+    uint32_t partition_priority{0};
+    uint32_t qos_priority{0};
+    absl::Duration time_limit{absl::ZeroDuration()};
+    bool using_default_wckey{false};
+    std::string wckey;
 
     [[nodiscard]] uint32_t TotalTaskCount() const {
       if (array_index_end < array_index_start) return 0;
@@ -1002,21 +1017,25 @@ class JobScheduler {
   const ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id) const;
   JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id);
   const JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id) const;
+  std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
+      JobInCtld& parent) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
       const ArrayMeta* meta,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
   std::unique_ptr<JobInCtld> CreateArrayChild_(const ArrayMeta& meta,
                                                uint32_t task_id) const;
   std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
-  bool SetFieldsOfJobInfoAsVirtualArrayChild_(JobInCtld& parent,
-                                              const ArrayMeta& meta,
-                                              uint32_t task_id,
-                                              crane::grpc::JobInfo* job_info)
-      const;
+  static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
+  bool SetFieldsOfJobInfoAsVirtualArrayChild_(
+      JobInCtld& parent, const ArrayMeta& meta, uint32_t task_id,
+      crane::grpc::JobInfo* job_info) const;
   void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
   void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);
   void RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id);
+  CraneErrCode TryMallocArrayChildSubmitResource_(JobInCtld& child) const;
+  static void FreeArrayChildSubmitResources_(
+      const std::vector<JobInCtld*>& children);
 
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 

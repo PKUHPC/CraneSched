@@ -62,11 +62,9 @@ std::string MetaResource::DebugString() const {
       util::ReadableResourceView(resource));
 }
 
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
-  CraneErrCode result = CraneErrCode::SUCCESS;
-
+CraneErrCode AccountMetaContainer::CheckQosSubmitResourceLimit(JobInCtld& job) {
   CRANE_TRACE(
-      "TryMallocQosSubmitResource for job of user {} and account {}.....",
+      "CheckQosSubmitResourceLimit for job of user {} and account {}.....",
       job.Username(), job.account);
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
@@ -102,6 +100,13 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
     CRANE_TRACE("time-limit beyond the user's limit");
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
+  CraneErrCode result = CheckQosSubmitResourceLimit(job);
+  if (result != CraneErrCode::SUCCESS) return result;
 
   // Lock the specified user/account/qos to minimize the impact on other users
   // and accounts.
