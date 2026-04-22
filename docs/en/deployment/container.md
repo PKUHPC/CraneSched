@@ -311,7 +311,7 @@ corresponding Meta CNI configuration.
 
     - `name: rdma`: Must match `DeviceCniPipeline: rdma`.
     - `ifNamePrefix: rdma`: Generates container interface names such as `rdma0` and `rdma1`.
-    - `confFromArgs: {"deviceID": "$gres.device"}`: Passes the CDI device identifier for the GRES allocation to the `sriov` plugin.
+    - `conf.deviceID: "{{.Gres.Device}}"`: Inside the `sriov` delegate's `conf`, a Go `text/template` expression is embedded as a string value. Meta CNI renders it at runtime for each template-pipeline instance, substituting the CDI device identifier allocated to that instance before invoking the `sriov` plugin.
 
 If you only need to inject RDMA device files into the container and do not need
 independent RDMA network interfaces inside the container, you do not need to
