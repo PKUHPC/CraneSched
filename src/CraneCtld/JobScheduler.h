@@ -769,6 +769,43 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+  struct ArrayMeta {
+    job_id_t array_job_id{0};
+    uint32_t array_index_start{0};
+    uint32_t array_index_end{0};
+    uint32_t array_index_stride{1};
+
+    HashSet<uint32_t> materialized_task_ids;
+    uint32_t next_array_task_index{0};
+    bool array_children_expanded{false};
+
+    HashMap<uint32_t, job_id_t> child_job_id_by_task_id;
+    HashMap<job_id_t, uint32_t> child_task_id_by_job_id;
+    HashSet<job_id_t> pending_child_job_ids;
+    HashSet<job_id_t> running_child_job_ids;
+    std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
+    crane::grpc::JobToCtld job_template;
+
+    [[nodiscard]] uint32_t TotalTaskCount() const {
+      if (array_index_end < array_index_start) return 0;
+      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
+      return (array_index_end - array_index_start) / stride + 1;
+    }
+
+    [[nodiscard]] uint32_t GetTaskIdByIndex(uint32_t index) const {
+      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
+      return array_index_start + index * stride;
+    }
+
+    [[nodiscard]] bool IsValidTaskId(uint32_t task_id) const {
+      if (task_id < array_index_start || task_id > array_index_end) {
+        return false;
+      }
+      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
+      return (task_id - array_index_start) % stride == 0;
+    }
+  };
+
  public:
   JobScheduler();
 
@@ -813,8 +850,6 @@ class JobScheduler {
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
       job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
-
-  std::optional<uint32_t> GetFinalArrayTaskId(job_id_t array_job_id);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
@@ -963,9 +998,25 @@ class JobScheduler {
   }
 
  private:
+  ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
+  const ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id) const;
+  JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id);
+  const JobInCtld* GetArrayRootNoLock_(job_id_t array_job_id) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
-      JobInCtld* parent,
+      const ArrayMeta* meta,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
+  std::unique_ptr<JobInCtld> CreateArrayChild_(const ArrayMeta& meta,
+                                               uint32_t task_id) const;
+  std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
+  bool SetFieldsOfJobInfoAsVirtualArrayChild_(JobInCtld& parent,
+                                              const ArrayMeta& meta,
+                                              uint32_t task_id,
+                                              crane::grpc::JobInfo* job_info)
+      const;
+  void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void UntrackArrayChildNoLock_(JobInCtld* child);
+  void RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id);
 
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
@@ -1004,6 +1055,11 @@ class JobScheduler {
   Mutex m_pending_job_map_mtx_;
 
   std::atomic_uint32_t m_pending_map_cached_size_;
+
+  HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_array_root_job_map_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
+  HashMap<job_id_t, std::shared_ptr<ArrayMeta>> m_array_metas_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
@@ -1045,13 +1101,13 @@ class JobScheduler {
 
   // Persist a parent's expanded array children and insert them into the
   // pending map. Must be called while holding both pending/running map locks.
-  bool MaterializeArrayChildrenToPendingMap_(JobInCtld* parent);
+  bool MaterializeArrayChildrenToPendingMap_(job_id_t array_job_id);
 
   // Materialize specific array tasks by their task IDs.
   // Only creates the tasks that don't already exist.
   // Returns the job IDs of the materialized children.
   std::vector<job_id_t> MaterializeSpecificArrayTasksToPendingMap_(
-      JobInCtld* parent, const std::unordered_set<uint32_t>& task_ids);
+      job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids);
 
   std::thread m_step_schedule_thread_;
   void StepScheduleThread_();

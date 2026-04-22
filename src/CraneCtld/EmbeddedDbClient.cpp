@@ -1037,7 +1037,7 @@ bool EmbeddedDbClient::MarkArrayParentExpanded(txn_id_t txn_id,
     return false;
   }
 
-  array_parent->SetArrayChildrenExpanded(true);
+  array_parent->MutableRuntimeAttr()->set_array_children_expanded(true);
 
   auto result = StoreTypeIntoDb_(
       m_variable_db_.get(), txn_id,

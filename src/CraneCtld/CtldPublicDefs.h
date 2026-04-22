@@ -866,11 +866,12 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
-  // Array parent / array child model:
+  // Array job model:
   //
-  //   The array parent is a real executable job and owns the final task in
-  //   the array range; it runs that task directly. Children are materialized
-  //   on demand for the earlier tasks in the range.
+  //   The array parent is the root / placeholder record of the whole array.
+  //   It does not represent any concrete task. Concrete tasks are always
+  //   materialized as array children carrying both array_job_id and
+  //   array_task_id.
   //
   // Returns true if this is an array parent (has array range but no concrete
   // child task index).
@@ -881,7 +882,9 @@ struct JobInCtld {
   }
 
   // Returns true if this is an expanded array child.
-  bool IsArrayChild() const { return array_job_id.has_value(); }
+  bool IsArrayChild() const {
+    return array_job_id.has_value() && job_to_ctld.has_array_task_id();
+  }
 
   uint32_t ArrayTaskCount() const {
     if (!job_to_ctld.has_array_index_start() ||
@@ -915,63 +918,14 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
-  // Returns the task_id of the final task in the array range — the task
-  // the array parent itself owns and executes directly. Returns nullopt
-  // if this is not an array parent or the range is empty.
-  std::optional<uint32_t> GetFinalArrayTaskId() const;
-  // True iff `task_id` is the parent-owned final task of this array.
-  bool OwnsFinalArrayTask(uint32_t task_id) const;
-  uint32_t MaterializableArrayTaskCount() const;
-  std::optional<job_id_t> GetNextPendingArrayChildJobId() const;
-  bool HasActiveArrayChildren() const;
-  size_t MaterializedArrayTaskCount() const;
-  bool HasMaterializedArrayTask(uint32_t task_id) const;
   bool IsValidArrayTaskId(uint32_t task_id) const {
     return IsValidArrayTaskId_(task_id);
   }
-  // Returns the job id of a currently-active materialized child that owns
-  // `task_id`, or nullopt if the task is not materialized / not active.
-  // Read-only; never materializes.
-  std::optional<job_id_t> GetActiveArrayChildJobId(uint32_t task_id) const;
-  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
-  // Populate `job_info` as if array task `task_id` had been materialized —
-  // without touching any parent state or persistence. Used by the query
-  // path to produce a virtual view of an unmaterialized array task.
-  // Returns false if task_id is invalid or is the parent-owned final task
-  // (which is represented by the parent's own JobInfo, not a virtual one).
-  bool SetFieldsOfJobInfoAsVirtualArrayChild(uint32_t task_id,
-                                             crane::grpc::JobInfo* job_info);
-  std::unique_ptr<JobInCtld> CreateArrayChildForTask(uint32_t task_id);
-  std::unique_ptr<JobInCtld> CreateNextArrayChild();
-  void TrackArrayChild(JobInCtld* child, bool pending);
-  void MarkArrayChildRunning();
-  void SetTrackedArrayChildHeld(bool held);
-  void UntrackArrayChild();
-  void RebuildArraySchedulingCursor();
-
-  struct ArrayParentState {
-    absl::Mutex mutex;
-    std::unordered_set<uint32_t> materialized_task_ids ABSL_GUARDED_BY(mutex);
-    std::unordered_map<uint32_t, job_id_t> active_child_job_id_by_task_id
-        ABSL_GUARDED_BY(mutex);
-    std::unordered_map<job_id_t, uint32_t> active_child_task_id_by_job_id
-        ABSL_GUARDED_BY(mutex);
-    std::unordered_set<job_id_t> pending_child_job_ids ABSL_GUARDED_BY(mutex);
-    std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id
-        ABSL_GUARDED_BY(mutex);
-  };
-
-  std::shared_ptr<ArrayParentState> GetArrayParentState() const {
-    return array_parent_state_;
-  }
 
  private:
-  std::shared_ptr<ArrayParentState> EnsureArrayParentState_();
   std::optional<uint32_t> GetArrayTaskId_() const;
   bool IsValidArrayTaskId_(uint32_t task_id) const;
   uint32_t GetArrayTaskIdByIndex_(uint32_t task_index) const;
-  void RegisterTrackedArrayChild_(bool pending);
 
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -1021,13 +975,6 @@ struct JobInCtld {
   // Array job tracking fields.
   // For array children: the array parent/anchor job_id.
   std::optional<job_id_t> array_job_id;
-  // For array parents: whether all child jobs have been materialized.
-  bool array_children_expanded{false};
-  // For array parents: the next array task index to expand (offset, not
-  // task_id).
-  uint32_t next_array_task_index{0};
-  // Runtime-only tracker shared by an array parent and its live children.
-  std::shared_ptr<ArrayParentState> array_parent_state_;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
@@ -1094,6 +1041,7 @@ struct JobInCtld {
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
   crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob* MutableRuntimeAttr() { return &runtime_attr; }
 
   // =================== Setter/Getter ===================
 
@@ -1153,10 +1101,6 @@ struct JobInCtld {
   // Array job tracking accessors
   void SetArrayJobId(job_id_t val);
   std::optional<job_id_t> const& ArrayJobId() const { return array_job_id; }
-  void SetArrayChildrenExpanded(bool val);
-  bool ArrayChildrenExpanded() const { return array_children_expanded; }
-  void SetNextArrayTaskIndex(uint32_t val);
-  uint32_t NextArrayTaskIndex() const { return next_array_task_index; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

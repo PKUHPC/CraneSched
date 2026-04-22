@@ -167,27 +167,7 @@ std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
     return std::pair{runtime_attr.array_job_id(), job_to_ctld.array_task_id()};
   }
 
-  if (!job_to_ctld.has_array_index_start() ||
-      !job_to_ctld.has_array_index_end() || job_to_ctld.has_array_task_id()) {
-    return std::nullopt;
-  }
-
-  uint32_t array_stride = job_to_ctld.has_array_index_stride()
-                              ? job_to_ctld.array_index_stride()
-                              : 1;
-  if (array_stride == 0) {
-    array_stride = 1;
-  }
-
-  uint32_t array_range =
-      job_to_ctld.array_index_end() - job_to_ctld.array_index_start();
-  uint32_t array_task_count = array_range / array_stride + 1;
-  if (array_task_count == 0) {
-    return std::nullopt;
-  }
-
-  return std::pair{runtime_attr.job_id(),
-                   GetArrayTaskIdByIndex_(job_to_ctld, array_task_count - 1)};
+  return std::nullopt;
 }
 
 void AppendUnionWithRanges(mongocxx::pipeline& pipeline,

@@ -1600,364 +1600,30 @@ void JobInCtld::SetArrayJobId(job_id_t val) {
   runtime_attr.set_array_job_id(val);
 }
 
-void JobInCtld::SetArrayChildrenExpanded(bool val) {
-  array_children_expanded = val;
-  runtime_attr.set_array_children_expanded(val);
-  if (val) {
-    next_array_task_index = MaterializableArrayTaskCount();
-  }
-}
-
-void JobInCtld::SetNextArrayTaskIndex(uint32_t val) {
-  next_array_task_index = val;
-  // Note: next_array_task_index is NOT persisted to runtime_attr.
-  // It will be reconstructed during recovery by counting existing children.
-}
-
 std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
   if (!job_to_ctld.has_array_index_start() ||
       !job_to_ctld.has_array_index_end()) {
     return std::nullopt;
   }
 
-  std::optional<job_id_t> array_parent_job_id;
-  std::optional<uint32_t> task_id;
-
-  if (IsArrayChild() && array_job_id.has_value()) {
-    array_parent_job_id = array_job_id.value();
-    task_id = GetArrayTaskId_();
-  } else if (IsArrayParent()) {
-    array_parent_job_id = JobId();
-    task_id = GetFinalArrayTaskId();
-  }
-
-  if (!array_parent_job_id.has_value() || !task_id.has_value()) {
+  if (!IsArrayChild() || !array_job_id.has_value()) {
     return std::nullopt;
   }
+
+  auto task_id = GetArrayTaskId_();
+  if (!task_id.has_value()) return std::nullopt;
 
   uint32_t task_step = job_to_ctld.has_array_index_stride()
                            ? job_to_ctld.array_index_stride()
                            : 1;
   if (task_step == 0) task_step = 1;
 
-  return ArrayTaskMeta{array_parent_job_id.value(),
+  return ArrayTaskMeta{array_job_id.value(),
                        task_id.value(),
                        ArrayTaskCount(),
                        job_to_ctld.array_index_start(),
                        job_to_ctld.array_index_end(),
                        task_step};
-}
-
-std::optional<uint32_t> JobInCtld::GetFinalArrayTaskId() const {
-  if (!IsArrayParent()) {
-    return std::nullopt;
-  }
-
-  uint32_t task_count = ArrayTaskCount();
-  if (task_count == 0) {
-    return std::nullopt;
-  }
-
-  return GetArrayTaskIdByIndex_(task_count - 1);
-}
-
-bool JobInCtld::OwnsFinalArrayTask(uint32_t task_id) const {
-  if (auto final_task_id = GetFinalArrayTaskId();
-      final_task_id.has_value()) {
-    return final_task_id.value() == task_id;
-  }
-
-  return false;
-}
-
-uint32_t JobInCtld::MaterializableArrayTaskCount() const {
-  if (!IsArrayParent()) {
-    return 0;
-  }
-
-  uint32_t task_count = ArrayTaskCount();
-  return task_count == 0 ? 0 : task_count - 1;
-}
-
-std::optional<job_id_t> JobInCtld::GetNextPendingArrayChildJobId() const {
-  if (!IsArrayParent() || !array_parent_state_) {
-    return std::nullopt;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  if (array_parent_state_->runnable_pending_child_job_id_by_task_id.empty()) {
-    return std::nullopt;
-  }
-
-  return array_parent_state_->runnable_pending_child_job_id_by_task_id.begin()
-      ->second;
-}
-
-bool JobInCtld::HasActiveArrayChildren() const {
-  if (!IsArrayParent() || !array_parent_state_) {
-    return false;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  return !array_parent_state_->active_child_task_id_by_job_id.empty();
-}
-
-size_t JobInCtld::MaterializedArrayTaskCount() const {
-  if (!IsArrayParent() || !array_parent_state_) {
-    return 0;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  return array_parent_state_->materialized_task_ids.size();
-}
-
-bool JobInCtld::HasMaterializedArrayTask(uint32_t task_id) const {
-  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      !array_parent_state_) {
-    return false;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  return array_parent_state_->materialized_task_ids.contains(task_id);
-}
-
-std::optional<job_id_t> JobInCtld::GetActiveArrayChildJobId(
-    uint32_t task_id) const {
-  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      OwnsFinalArrayTask(task_id) || !array_parent_state_) {
-    return std::nullopt;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  auto it = array_parent_state_->active_child_job_id_by_task_id.find(task_id);
-  if (it == array_parent_state_->active_child_job_id_by_task_id.end()) {
-    return std::nullopt;
-  }
-  return it->second;
-}
-
-std::vector<job_id_t> JobInCtld::ResolveArrayTaskIdsToChildJobs(
-    const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const {
-  std::vector<job_id_t> result;
-  if (!IsArrayParent()) {
-    return result;
-  }
-
-  std::unordered_set<uint32_t> seen;
-  for (uint32_t task_id : array_task_ids) {
-    if (!IsValidArrayTaskId_(task_id) || !seen.insert(task_id).second) {
-      continue;
-    }
-
-    if (OwnsFinalArrayTask(task_id)) {
-      continue;
-    }
-
-    if (!array_parent_state_) {
-      continue;
-    }
-
-    absl::MutexLock array_guard(&array_parent_state_->mutex);
-    auto child_it =
-        array_parent_state_->active_child_job_id_by_task_id.find(task_id);
-    if (child_it != array_parent_state_->active_child_job_id_by_task_id.end()) {
-      result.push_back(child_it->second);
-    }
-  }
-
-  return result;
-}
-
-bool JobInCtld::SetFieldsOfJobInfoAsVirtualArrayChild(
-    uint32_t task_id, crane::grpc::JobInfo* job_info) {
-  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      OwnsFinalArrayTask(task_id)) {
-    return false;
-  }
-
-  // Start from the parent's fields. SetFieldsOfJobInfo uses
-  // GetArrayTaskMeta() which for an array parent populates array_task_id
-  // with the parent-owned final task; we overwrite the array / status /
-  // runtime fields below so the caller sees the requested task as a
-  // pending virtual child.
-  SetFieldsOfJobInfo(job_info);
-
-  job_info->set_job_id(0);
-  job_info->set_array_job_id(JobId());
-  job_info->set_array_task_id(task_id);
-
-  job_info->set_status(crane::grpc::Pending);
-  job_info->mutable_start_time()->Clear();
-  job_info->mutable_end_time()->Clear();
-  job_info->mutable_elapsed_time()->Clear();
-  job_info->set_craned_list("");
-  job_info->mutable_execution_node()->Clear();
-  job_info->set_exit_code(0);
-  *job_info->mutable_allocated_res_view() = crane::grpc::ResourceView{};
-  job_info->clear_step_info_list();
-
-  return true;
-}
-
-std::unique_ptr<JobInCtld> JobInCtld::CreateArrayChildForTask(
-    uint32_t task_id) {
-  if (!IsArrayParent() || !IsValidArrayTaskId_(task_id) ||
-      OwnsFinalArrayTask(task_id) || HasMaterializedArrayTask(task_id)) {
-    return nullptr;
-  }
-
-  auto child = std::make_unique<JobInCtld>();
-  child->SetFieldsByJobToCtld(job_to_ctld);
-  child->MutableJobToCtld()->set_array_task_id(task_id);
-  child->SetStatus(crane::grpc::Pending);
-  child->SetSubmitTime(SubmitTime());
-  child->SetArrayJobId(JobId());
-  child->array_parent_state_ = EnsureArrayParentState_();
-  return child;
-}
-
-std::unique_ptr<JobInCtld> JobInCtld::CreateNextArrayChild() {
-  if (!IsArrayParent() || ArrayChildrenExpanded()) {
-    return nullptr;
-  }
-
-  uint32_t materializable_task_count = MaterializableArrayTaskCount();
-  while (next_array_task_index < materializable_task_count) {
-    uint32_t task_index = next_array_task_index;
-    uint32_t task_id = GetArrayTaskIdByIndex_(task_index);
-    SetNextArrayTaskIndex(task_index + 1);
-
-    if (HasMaterializedArrayTask(task_id)) {
-      continue;
-    }
-
-    return CreateArrayChildForTask(task_id);
-  }
-
-  return nullptr;
-}
-
-void JobInCtld::TrackArrayChild(JobInCtld* child, bool pending) {
-  if (!IsArrayParent() || child == nullptr || !child->IsArrayChild() ||
-      !child->ArrayJobId().has_value() ||
-      child->ArrayJobId().value() != JobId()) {
-    return;
-  }
-
-  child->array_parent_state_ = EnsureArrayParentState_();
-  child->RegisterTrackedArrayChild_(pending);
-}
-
-void JobInCtld::MarkArrayChildRunning() {
-  if (!IsArrayChild() || !array_parent_state_) {
-    return;
-  }
-
-  auto task_id = GetArrayTaskId_();
-  if (!task_id.has_value()) {
-    return;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  array_parent_state_->materialized_task_ids.insert(task_id.value());
-  array_parent_state_->active_child_task_id_by_job_id[JobId()] =
-      task_id.value();
-  array_parent_state_->active_child_job_id_by_task_id[task_id.value()] =
-      JobId();
-  array_parent_state_->pending_child_job_ids.erase(JobId());
-  array_parent_state_->runnable_pending_child_job_id_by_task_id.erase(
-      task_id.value());
-}
-
-void JobInCtld::SetTrackedArrayChildHeld(bool held) {
-  if (!IsArrayChild() || !array_parent_state_) {
-    return;
-  }
-
-  auto task_id = GetArrayTaskId_();
-  if (!task_id.has_value()) {
-    return;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  if (!array_parent_state_->pending_child_job_ids.contains(JobId())) {
-    return;
-  }
-
-  if (held) {
-    array_parent_state_->runnable_pending_child_job_id_by_task_id.erase(
-        task_id.value());
-  } else {
-    array_parent_state_
-        ->runnable_pending_child_job_id_by_task_id[task_id.value()] = JobId();
-  }
-}
-
-void JobInCtld::UntrackArrayChild() {
-  if (!IsArrayChild() || !array_parent_state_) {
-    return;
-  }
-
-  auto task_id = GetArrayTaskId_();
-  if (!task_id.has_value()) {
-    array_parent_state_.reset();
-    return;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  array_parent_state_->active_child_task_id_by_job_id.erase(JobId());
-  auto active_child_it =
-      array_parent_state_->active_child_job_id_by_task_id.find(task_id.value());
-  if (active_child_it !=
-          array_parent_state_->active_child_job_id_by_task_id.end() &&
-      active_child_it->second == JobId()) {
-    array_parent_state_->active_child_job_id_by_task_id.erase(active_child_it);
-  }
-  array_parent_state_->pending_child_job_ids.erase(JobId());
-  auto pending_child_it =
-      array_parent_state_->runnable_pending_child_job_id_by_task_id.find(
-          task_id.value());
-  if (pending_child_it !=
-          array_parent_state_->runnable_pending_child_job_id_by_task_id.end() &&
-      pending_child_it->second == JobId()) {
-    array_parent_state_->runnable_pending_child_job_id_by_task_id.erase(
-        pending_child_it);
-  }
-
-  array_parent_state_.reset();
-}
-
-void JobInCtld::RebuildArraySchedulingCursor() {
-  if (!IsArrayParent()) {
-    return;
-  }
-
-  uint32_t materializable_task_count = MaterializableArrayTaskCount();
-  if (ArrayChildrenExpanded()) {
-    SetNextArrayTaskIndex(materializable_task_count);
-    return;
-  }
-
-  uint32_t next_task_index = 0;
-  if (array_parent_state_) {
-    absl::MutexLock array_guard(&array_parent_state_->mutex);
-    while (next_task_index < materializable_task_count &&
-           array_parent_state_->materialized_task_ids.contains(
-               GetArrayTaskIdByIndex_(next_task_index))) {
-      ++next_task_index;
-    }
-  }
-
-  SetNextArrayTaskIndex(next_task_index);
-}
-
-std::shared_ptr<JobInCtld::ArrayParentState>
-JobInCtld::EnsureArrayParentState_() {
-  if (!array_parent_state_) {
-    array_parent_state_ = std::make_shared<ArrayParentState>();
-  }
-
-  return array_parent_state_;
 }
 
 std::optional<uint32_t> JobInCtld::GetArrayTaskId_() const {
@@ -2000,40 +1666,6 @@ uint32_t JobInCtld::GetArrayTaskIdByIndex_(uint32_t task_index) const {
   }
 
   return array_start + task_index * array_stride;
-}
-
-void JobInCtld::RegisterTrackedArrayChild_(bool pending) {
-  if (!IsArrayChild() || !array_parent_state_) {
-    return;
-  }
-
-  auto task_id = GetArrayTaskId_();
-  if (!task_id.has_value()) {
-    return;
-  }
-
-  absl::MutexLock array_guard(&array_parent_state_->mutex);
-  array_parent_state_->materialized_task_ids.insert(task_id.value());
-  array_parent_state_->active_child_task_id_by_job_id[JobId()] =
-      task_id.value();
-  array_parent_state_->active_child_job_id_by_task_id[task_id.value()] =
-      JobId();
-
-  if (!pending) {
-    array_parent_state_->pending_child_job_ids.erase(JobId());
-    array_parent_state_->runnable_pending_child_job_id_by_task_id.erase(
-        task_id.value());
-    return;
-  }
-
-  array_parent_state_->pending_child_job_ids.insert(JobId());
-  if (Held()) {
-    array_parent_state_->runnable_pending_child_job_id_by_task_id.erase(
-        task_id.value());
-  } else {
-    array_parent_state_
-        ->runnable_pending_child_job_id_by_task_id[task_id.value()] = JobId();
-  }
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -2222,12 +1854,9 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
     suspend_time = absl::InfinitePast();
   }
 
-  // Restore array parent/child tracking fields from runtime attr.
+  // Restore array child tracking field from runtime attr.
   if (runtime_attr.has_array_job_id()) {
     array_job_id = runtime_attr.array_job_id();
-  }
-  if (runtime_attr.has_array_children_expanded()) {
-    array_children_expanded = runtime_attr.array_children_expanded();
   }
 }
 

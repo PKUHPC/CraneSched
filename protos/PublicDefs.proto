@@ -396,9 +396,8 @@ message JobToD {
 
   string name = 9;
 
-  // Array metadata propagated for expanded array children and the
-  // parent-owned final task. array_job_id is the parent/anchor job ID of
-  // the whole array.
+  // Array metadata propagated for expanded array children.
+  // array_job_id is the parent/root job ID of the whole array.
   optional uint32 array_job_id = 10;
   optional uint32 array_task_id = 11;
   optional uint32 array_task_count = 12;
@@ -471,8 +470,7 @@ message StepToD {
   string sh_script = 36;
 
   // Array metadata propagated for expanded array children and the
-  // parent-owned final task. array_job_id is the parent/anchor job ID of
-  // the whole array.
+  // array_job_id is the parent/root job ID of the whole array.
   optional uint32 array_job_id = 37;
   optional uint32 array_task_id = 38;
 }

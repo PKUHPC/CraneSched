@@ -904,31 +904,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
       // Resolve parent to specific children via scheduler.
       auto child_ids = g_job_scheduler->ResolveArrayTaskIdsToChildJobs(
           job_id, it->second.array_task_ids());
-      // The parent-owned final task of an array is executed by the parent
-      // job itself (see JobInCtld::IsArrayParent doc); it cannot be
-      // modified as a standalone task — the caller must modify the parent
-      // job instead.
-      bool parent_owned_task_requested = false;
-      if (auto parent_owned_task_id =
-              g_job_scheduler->GetFinalArrayTaskId(job_id);
-          parent_owned_task_id.has_value()) {
-        parent_owned_task_requested =
-            std::ranges::find(it->second.array_task_ids(),
-                              parent_owned_task_id.value()) !=
-            it->second.array_task_ids().end();
-        if (parent_owned_task_requested) {
-          response->add_not_modified_jobs(job_id);
-          response->add_not_modified_reasons(fmt::format(
-              "The final task {} of array job #{} is owned by the parent "
-              "job and cannot be modified independently; modify the parent "
-              "job instead.",
-              parent_owned_task_id.value(), job_id));
-        }
-      }
       if (child_ids.empty()) {
-        if (parent_owned_task_requested) {
-          continue;
-        }
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
             "Job #{} is not an array parent or no matching array tasks "

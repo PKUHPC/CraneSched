@@ -151,22 +151,17 @@ crane::grpc::JobStatus BuildArrayAggregateStatus(bool any_cancelled,
   return crane::grpc::JobStatus::Completed;
 }
 
-std::pair<crane::grpc::JobStatus, uint32_t> BuildArrayParentTerminalResult(
-    JobInCtld* parent,
-    const std::unordered_set<JobInCtld*>& final_jobs_in_batch) {
+std::pair<crane::grpc::JobStatus, uint32_t> BuildArrayAggregateResult(
+    job_id_t array_job_id, const std::unordered_set<JobInCtld*>& final_jobs) {
   bool any_cancelled = false;
   bool any_exceed_time_limit = false;
   bool any_out_of_memory = false;
   bool any_failed = false;
   uint32_t max_exit_code = 0;
 
-  MergeArrayTaskTerminalStatus(parent->Status(), parent->ExitCode(),
-                               &any_cancelled, &any_exceed_time_limit,
-                               &any_out_of_memory, &any_failed, &max_exit_code);
-
-  for (JobInCtld* job : final_jobs_in_batch) {
+  for (JobInCtld* job : final_jobs) {
     if (job == nullptr || !job->ArrayJobId().has_value() ||
-        job->ArrayJobId().value() != parent->JobId()) {
+        job->ArrayJobId().value() != array_job_id) {
       continue;
     }
 
@@ -175,8 +170,7 @@ std::pair<crane::grpc::JobStatus, uint32_t> BuildArrayParentTerminalResult(
                                  &any_failed, &max_exit_code);
   }
 
-  auto aggregate_info = g_db_client->FetchArrayTaskAggregateInfo(
-      parent->JobId(), parent->JobId());
+  auto aggregate_info = g_db_client->FetchArrayTaskAggregateInfo(array_job_id);
   if (!aggregate_info.has_value()) {
     return {BuildArrayAggregateStatus(any_cancelled, any_exceed_time_limit,
                                       any_out_of_memory, any_failed),
@@ -208,6 +202,154 @@ void TriggerTerminalDependencyEvents(JobInCtld* job, absl::Time end_time) {
 }
 
 }  // namespace
+
+JobScheduler::ArrayMeta* JobScheduler::GetArrayMetaNoLock_(
+    job_id_t array_job_id) {
+  auto it = m_array_metas_.find(array_job_id);
+  return it == m_array_metas_.end() ? nullptr : it->second.get();
+}
+
+const JobScheduler::ArrayMeta* JobScheduler::GetArrayMetaNoLock_(
+    job_id_t array_job_id) const {
+  auto it = m_array_metas_.find(array_job_id);
+  return it == m_array_metas_.end() ? nullptr : it->second.get();
+}
+
+JobInCtld* JobScheduler::GetArrayRootNoLock_(job_id_t array_job_id) {
+  auto it = m_array_root_job_map_.find(array_job_id);
+  return it == m_array_root_job_map_.end() ? nullptr : it->second.get();
+}
+
+const JobInCtld* JobScheduler::GetArrayRootNoLock_(job_id_t array_job_id) const {
+  auto it = m_array_root_job_map_.find(array_job_id);
+  return it == m_array_root_job_map_.end() ? nullptr : it->second.get();
+}
+
+std::unique_ptr<JobInCtld> JobScheduler::CreateArrayChild_(
+    const ArrayMeta& meta, uint32_t task_id) const {
+  if (!meta.IsValidTaskId(task_id) ||
+      meta.materialized_task_ids.contains(task_id)) {
+    return nullptr;
+  }
+
+  auto child = std::make_unique<JobInCtld>();
+  child->SetFieldsByJobToCtld(meta.job_template);
+  child->MutableJobToCtld()->set_array_task_id(task_id);
+  child->SetStatus(crane::grpc::Pending);
+  child->SetArrayJobId(meta.array_job_id);
+  return child;
+}
+
+std::unique_ptr<JobInCtld> JobScheduler::CreateNextArrayChild_(
+    ArrayMeta* meta) const {
+  if (meta == nullptr || meta->array_children_expanded) {
+    return nullptr;
+  }
+
+  uint32_t total = meta->TotalTaskCount();
+  while (meta->next_array_task_index < total) {
+    uint32_t task_id = meta->GetTaskIdByIndex(meta->next_array_task_index);
+    ++meta->next_array_task_index;
+    if (!meta->materialized_task_ids.contains(task_id)) {
+      return CreateArrayChild_(*meta, task_id);
+    }
+  }
+
+  return nullptr;
+}
+
+void JobScheduler::TrackArrayChildPendingNoLock_(ArrayMeta* meta,
+                                                 JobInCtld* child) {
+  if (meta == nullptr || child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  uint32_t task_id = child->JobToCtld().array_task_id();
+  meta->materialized_task_ids.insert(task_id);
+  meta->child_job_id_by_task_id[task_id] = child->JobId();
+  meta->child_task_id_by_job_id[child->JobId()] = task_id;
+  meta->pending_child_job_ids.insert(child->JobId());
+  if (!child->Held()) {
+    meta->runnable_pending_child_job_id_by_task_id[task_id] = child->JobId();
+  }
+}
+
+void JobScheduler::TrackArrayChildRunningNoLock_(ArrayMeta* meta,
+                                                 JobInCtld* child) {
+  if (meta == nullptr || child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  uint32_t task_id = child->JobToCtld().array_task_id();
+  meta->materialized_task_ids.insert(task_id);
+  meta->child_job_id_by_task_id[task_id] = child->JobId();
+  meta->child_task_id_by_job_id[child->JobId()] = task_id;
+  meta->pending_child_job_ids.erase(child->JobId());
+  meta->runnable_pending_child_job_id_by_task_id.erase(task_id);
+  meta->running_child_job_ids.insert(child->JobId());
+}
+
+void JobScheduler::UntrackArrayChildNoLock_(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild() || !child->ArrayJobId()) {
+    return;
+  }
+
+  auto* meta = GetArrayMetaNoLock_(child->ArrayJobId().value());
+  if (meta == nullptr) {
+    return;
+  }
+
+  uint32_t task_id = child->JobToCtld().array_task_id();
+  meta->pending_child_job_ids.erase(child->JobId());
+  meta->running_child_job_ids.erase(child->JobId());
+  meta->runnable_pending_child_job_id_by_task_id.erase(task_id);
+  auto by_task_it = meta->child_job_id_by_task_id.find(task_id);
+  if (by_task_it != meta->child_job_id_by_task_id.end() &&
+      by_task_it->second == child->JobId()) {
+    meta->child_job_id_by_task_id.erase(by_task_it);
+  }
+  meta->child_task_id_by_job_id.erase(child->JobId());
+}
+
+void JobScheduler::RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id) {
+  auto* root = GetArrayRootNoLock_(array_job_id);
+  auto* meta = GetArrayMetaNoLock_(array_job_id);
+  if (root == nullptr || meta == nullptr) {
+    return;
+  }
+
+  crane::grpc::JobStatus summary = crane::grpc::Pending;
+  if (!meta->running_child_job_ids.empty()) {
+    summary = crane::grpc::Running;
+  } else if (meta->array_children_expanded && meta->pending_child_job_ids.empty()) {
+    summary = crane::grpc::Completed;
+  }
+
+  root->SetStatus(summary);
+}
+
+bool JobScheduler::SetFieldsOfJobInfoAsVirtualArrayChild_(
+    JobInCtld& parent, const ArrayMeta& meta, uint32_t task_id,
+    crane::grpc::JobInfo* job_info) const {
+  if (!meta.IsValidTaskId(task_id)) {
+    return false;
+  }
+
+  parent.SetFieldsOfJobInfo(job_info);
+  job_info->set_job_id(0);
+  job_info->set_array_job_id(meta.array_job_id);
+  job_info->set_array_task_id(task_id);
+  job_info->set_status(crane::grpc::Pending);
+  job_info->mutable_start_time()->Clear();
+  job_info->mutable_end_time()->Clear();
+  job_info->mutable_elapsed_time()->Clear();
+  job_info->set_craned_list("");
+  job_info->mutable_execution_node()->Clear();
+  job_info->set_exit_code(0);
+  *job_info->mutable_allocated_res_view() = crane::grpc::ResourceView{};
+  job_info->clear_step_info_list();
+  return true;
+}
 
 JobScheduler::JobScheduler() {
   if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
@@ -414,7 +556,7 @@ bool JobScheduler::Init() {
     }
   }
 
-  // Rebuild parent-owned array child state after all jobs have been recovered.
+  // Rebuild array root metadata after all jobs have been recovered.
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     LockGuard running_guard(&m_running_job_map_mtx_);
@@ -426,17 +568,13 @@ bool JobScheduler::Init() {
       }
 
       job_id_t parent_id = child->ArrayJobId().value();
-      auto pending_parent_it = m_pending_job_map_.find(parent_id);
-      if (pending_parent_it != m_pending_job_map_.end() &&
-          pending_parent_it->second->IsArrayParent()) {
-        pending_parent_it->second->TrackArrayChild(child, pending);
-        return;
-      }
-
-      auto running_parent_it = m_running_job_map_.find(parent_id);
-      if (running_parent_it != m_running_job_map_.end() &&
-          running_parent_it->second->IsArrayParent()) {
-        running_parent_it->second->TrackArrayChild(child, pending);
+      auto* meta = GetArrayMetaNoLock_(parent_id);
+      if (meta != nullptr) {
+        if (pending) {
+          TrackArrayChildPendingNoLock_(meta, child);
+        } else {
+          TrackArrayChildRunningNoLock_(meta, child);
+        }
         return;
       }
 
@@ -452,22 +590,19 @@ bool JobScheduler::Init() {
       bind_recovered_child(child_job.get(), false);
     }
 
-    for (auto& [parent_id, parent_job] : m_pending_job_map_) {
-      if (!parent_job->IsArrayParent()) continue;
-      parent_job->RebuildArraySchedulingCursor();
+    for (auto& [array_job_id, meta] : m_array_metas_) {
+      if (!meta->array_children_expanded) {
+        while (meta->next_array_task_index < meta->TotalTaskCount() &&
+               meta->materialized_task_ids.contains(
+                   meta->GetTaskIdByIndex(meta->next_array_task_index))) {
+          ++meta->next_array_task_index;
+        }
+      }
+      RefreshArrayRootSummaryStateNoLock_(array_job_id);
       CRANE_DEBUG(
-          "Recovered array parent job #{}: reconstructed "
-          "next_array_task_index = {}.",
-          parent_id, parent_job->NextArrayTaskIndex());
-    }
-
-    for (auto& [parent_id, parent_job] : m_running_job_map_) {
-      if (!parent_job->IsArrayParent()) continue;
-      parent_job->RebuildArraySchedulingCursor();
-      CRANE_DEBUG(
-          "Recovered running array parent job #{}: reconstructed "
-          "next_array_task_index = {}.",
-          parent_id, parent_job->NextArrayTaskIndex());
+          "Recovered array root job #{}: reconstructed next_array_task_index = "
+          "{}.",
+          array_job_id, meta->next_array_task_index);
     }
   }
 
@@ -976,6 +1111,24 @@ void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
 
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_job_map_mtx_);
+  if (job->IsArrayParent()) {
+    auto meta = std::make_shared<ArrayMeta>();
+    meta->array_job_id = job->JobId();
+    meta->array_index_start = job->JobToCtld().array_index_start();
+    meta->array_index_end = job->JobToCtld().array_index_end();
+    meta->array_index_stride = job->JobToCtld().has_array_index_stride()
+                                   ? job->JobToCtld().array_index_stride()
+                                   : 1;
+    meta->job_template = job->JobToCtld();
+    meta->array_children_expanded = job->RuntimeAttr().has_array_children_expanded() &&
+                                    job->RuntimeAttr().array_children_expanded();
+    if (meta->array_children_expanded) {
+      meta->next_array_task_index = meta->TotalTaskCount();
+    }
+    m_array_metas_[meta->array_job_id] = meta;
+    m_array_root_job_map_.emplace(job->JobId(), std::move(job));
+    return;
+  }
   m_pending_job_map_.emplace(job->JobId(), std::move(job));
 }
 
@@ -1204,8 +1357,15 @@ void JobScheduler::ScheduleThread_() {
         }
       }
 
+      for (auto& [array_job_id, meta] : m_array_metas_) {
+        if (!meta->array_children_expanded &&
+            meta->runnable_pending_child_job_id_by_task_id.empty() &&
+            meta->running_child_job_ids.empty()) {
+          MaterializeArrayChildrenToPendingMap_(array_job_id);
+        }
+      }
+
       // Phase 1: Build pending_jobs list for scheduling.
-      // Include array parents - they will be checked for schedulability.
       std::vector<std::unique_ptr<PdJobInScheduler>> pending_jobs;
       pending_jobs.reserve(m_pending_job_map_.size());
       for (auto& it : m_pending_job_map_) {
@@ -1376,116 +1536,6 @@ void JobScheduler::ScheduleThread_() {
             continue;
           }
 
-          // Lazy expansion: the array parent is the real executor of the
-          // final task in the range; children are materialized on demand
-          // for the earlier tasks, so the parent effectively runs last.
-          if (job->IsArrayParent()) {
-            std::optional<job_id_t> child_to_schedule_id =
-                job->GetNextPendingArrayChildJobId();
-            if (!child_to_schedule_id.has_value() &&
-                !job->ArrayChildrenExpanded() &&
-                !MaterializeArrayChildrenToPendingMap_(job.get())) {
-              job->pending_reason = "ArrayExpandFailed";
-              if (!job_in_scheduler->actual_licenses.empty()) {
-                g_licenses_manager->FreeLicense(
-                    job_in_scheduler->actual_licenses);
-              }
-              g_account_meta_container->FreeQosResource(*job);
-              continue;
-            }
-
-            if (!child_to_schedule_id.has_value()) {
-              child_to_schedule_id = job->GetNextPendingArrayChildJobId();
-            }
-
-            if (child_to_schedule_id.has_value()) {
-              auto child_it =
-                  m_pending_job_map_.find(child_to_schedule_id.value());
-              if (child_it == m_pending_job_map_.end()) {
-                job->pending_reason = "NoSchedulableChild";
-                if (!job_in_scheduler->actual_licenses.empty()) {
-                  g_licenses_manager->FreeLicense(
-                      job_in_scheduler->actual_licenses);
-                }
-                g_account_meta_container->FreeQosResource(*job);
-                continue;
-              }
-              JobInCtld* child_to_schedule = child_it->second.get();
-
-              // Skip held children — they should not be dispatched.
-              if (child_to_schedule->Held()) {
-                job->pending_reason = "ChildHeld";
-                if (!job_in_scheduler->actual_licenses.empty()) {
-                  g_licenses_manager->FreeLicense(
-                      job_in_scheduler->actual_licenses);
-                }
-                g_account_meta_container->FreeQosResource(*job);
-                continue;
-              }
-
-              // Transfer scheduling result to the child.
-              child_to_schedule->SetCachedPriority(job_in_scheduler->priority);
-              child_to_schedule->SetStartTime(job_in_scheduler->start_time);
-              child_to_schedule->SetEndTime(end_time);
-              child_to_schedule->SetCranedIds(
-                  std::move(job_in_scheduler->craned_ids));
-              child_to_schedule->SetStepResAvail(
-                  job_in_scheduler->allocated_res);
-              child_to_schedule->SetAllocatedRes(
-                  std::move(job_in_scheduler->allocated_res));
-              child_to_schedule->SetActualLicenses(
-                  std::move(job_in_scheduler->actual_licenses));
-              child_to_schedule->allocated_res_view.SetToZero();
-              child_to_schedule->allocated_res_view +=
-                  child_to_schedule->AllocatedRes();
-              child_to_schedule->nodes_alloc =
-                  child_to_schedule->CranedIds().size();
-              child_to_schedule->SetStatus(crane::grpc::JobStatus::Configuring);
-              child_to_schedule->allocated_craneds_regex =
-                  util::HostNameListToStr(child_to_schedule->CranedIds());
-
-              for (CranedId const& craned_id : child_to_schedule->CranedIds())
-                g_meta_container->MallocResourceFromNode(
-                    craned_id, child_to_schedule->JobId(),
-                    child_to_schedule->AllocatedRes());
-              if (child_to_schedule->reservation != "") {
-                g_meta_container->MallocResourceFromResv(
-                    child_to_schedule->reservation, child_to_schedule->JobId(),
-                    child_to_schedule->AllocatedRes());
-              }
-
-              if (child_to_schedule->ShouldLaunchOnAllNodes()) {
-                for (auto const& craned_id : child_to_schedule->CranedIds())
-                  child_to_schedule->executing_craned_ids.emplace_back(
-                      craned_id);
-              } else {
-                child_to_schedule->executing_craned_ids.emplace_back(
-                    child_to_schedule->CranedIds().front());
-              }
-
-              // Move child to jobs_to_run.
-              child_to_schedule->MarkArrayChildRunning();
-              jobs_to_run.push_back(std::move(child_it->second));
-              m_pending_job_map_.erase(child_it);
-
-              // Parent stays in pending map until every earlier task has
-              // finished; the parent itself then runs the final task it
-              // owns.
-              continue;
-            }
-
-            if (!job->ArrayChildrenExpanded() ||
-                job->HasActiveArrayChildren()) {
-              job->pending_reason = "NoSchedulableChild";
-              if (!job_in_scheduler->actual_licenses.empty()) {
-                g_licenses_manager->FreeLicense(
-                    job_in_scheduler->actual_licenses);
-              }
-              g_account_meta_container->FreeQosResource(*job);
-              continue;
-            }
-          }
-
           PartitionId const& partition_id = job->partition_id;
 
           job->SetEndTime(end_time);
@@ -1515,6 +1565,12 @@ void JobScheduler::ScheduleThread_() {
               job->executing_craned_ids.emplace_back(craned_id);
           } else {
             job->executing_craned_ids.emplace_back(job->CranedIds().front());
+          }
+
+          if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
+            auto* meta = GetArrayMetaNoLock_(job->ArrayJobId().value());
+            TrackArrayChildRunningNoLock_(meta, job.get());
+            RefreshArrayRootSummaryStateNoLock_(job->ArrayJobId().value());
           }
 
           jobs_to_run.push_back(std::move(job));
@@ -1827,7 +1883,7 @@ void JobScheduler::ScheduleThread_() {
           job->SetStatus(crane::grpc::Failed);
           job->SetExitCode(ExitCode::EC_CGROUP_ERR);
           job->SetEndTime(absl::Now());
-          job->UntrackArrayChild();
+          UntrackArrayChildNoLock_(job.get());
         }
         ProcessFinalJobs_(failed_job_raw_ptrs);
 
@@ -3090,6 +3146,40 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
       }
       g_account_meta_container->UserAddJob(user_ptr->name);
     }
+
+    if (job->IsArrayParent()) {
+      job->SetStatus(crane::grpc::Pending);
+      std::vector<JobInCtld*> root_jobs{job.get()};
+      auto txn_id_opt =
+          g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(root_jobs);
+      if (!txn_id_opt.has_value() ||
+          !g_embedded_db_client->CommitVariableDbTransaction(
+              txn_id_opt.value())) {
+        g_account_meta_container->FreeQosSubmitResource(*job);
+        return std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED);
+      }
+
+      auto meta = std::make_shared<ArrayMeta>();
+      meta->array_job_id = job->JobId();
+      meta->array_index_start = job->JobToCtld().array_index_start();
+      meta->array_index_end = job->JobToCtld().array_index_end();
+      meta->array_index_stride = job->JobToCtld().has_array_index_stride()
+                                     ? job->JobToCtld().array_index_stride()
+                                     : 1;
+      meta->job_template = job->JobToCtld();
+
+      {
+        LockGuard pending_guard(&m_pending_job_map_mtx_);
+        m_array_metas_[meta->array_job_id] = meta;
+        m_array_root_job_map_.emplace(job->JobId(), std::move(job));
+      }
+
+      std::promise<CraneExpected<job_id_t>> promise;
+      auto future = promise.get_future();
+      promise.set_value(meta->array_job_id);
+      return {std::move(future)};
+    }
+
     std::future<CraneExpected<job_id_t>> future =
         g_job_scheduler->SubmitJobAsync(std::move(job));
     return {std::move(future)};
@@ -3111,34 +3201,6 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
 
   JobInCtld* job = pd_iter->second.get();
   job->SetHeld(hold);
-
-  // If this job is an array parent, propagate hold/release to all
-  // tracked children that are currently in the pending map.
-  if (job->IsArrayParent()) {
-    auto parent_state = job->GetArrayParentState();
-    if (parent_state) {
-      absl::MutexLock array_guard(&parent_state->mutex);
-      for (auto child_job_id : parent_state->pending_child_job_ids) {
-        auto child_it = m_pending_job_map_.find(child_job_id);
-        if (child_it != m_pending_job_map_.end()) {
-          child_it->second->SetHeld(hold);
-        }
-      }
-      if (hold) {
-        parent_state->runnable_pending_child_job_id_by_task_id.clear();
-      } else {
-        for (auto& [task_id, child_id] :
-             parent_state->active_child_job_id_by_task_id) {
-          if (parent_state->pending_child_job_ids.contains(child_id)) {
-            parent_state->runnable_pending_child_job_id_by_task_id[task_id] =
-                child_id;
-          }
-        }
-      }
-    }
-  }
-
-  job->SetTrackedArrayChildHeld(hold);
 
   // Copy persisted data to prevent inconsistency.
   job_db_id_t db_id = job->JobDbId();
@@ -3312,7 +3374,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
       cancelled_job_steps[job_id] = crane::grpc::JobStepIds{};
 
-      it->second->UntrackArrayChild();
+      UntrackArrayChildNoLock_(it->second.get());
       m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
           .job = std::move(it->second),
           .finish_status = crane::grpc::JobStatus::Cancelled});
@@ -3425,19 +3487,10 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   // Resolve parent→children for array_task filter under lock.
   if (!no_array_task_constraint) {
     for (auto& [parent_id, task_ids] : filter_array_task_ids) {
-      JobInCtld* parent = nullptr;
-      auto pd_it = m_pending_job_map_.find(parent_id);
-      if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
-        parent = pd_it->second.get();
-      } else {
-        auto rn_it = m_running_job_map_.find(parent_id);
-        if (rn_it != m_running_job_map_.end() &&
-            rn_it->second->IsArrayParent()) {
-          parent = rn_it->second.get();
-        }
-      }
+      JobInCtld* parent = GetArrayRootNoLock_(parent_id);
+      auto* meta = GetArrayMetaNoLock_(parent_id);
 
-      if (parent == nullptr) {
+      if (parent == nullptr || meta == nullptr) {
         // Not an array parent currently tracked in RAM — remove from filter
         // set.
         filter_ids.erase(parent_id);
@@ -3445,39 +3498,20 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       }
 
       // Materialize only the specific tasks that the user wants to cancel.
-      if (pd_it != m_pending_job_map_.end()) {
-        std::vector<job_id_t> materialized_ids =
-            MaterializeSpecificArrayTasksToPendingMap_(parent, task_ids);
+      std::vector<job_id_t> materialized_ids =
+          MaterializeSpecificArrayTasksToPendingMap_(parent_id, task_ids);
 
-        // Add materialized children to filter set.
-        for (job_id_t child_id : materialized_ids) {
-          filter_ids.try_emplace(child_id);
-        }
+      // Add materialized children to filter set.
+      for (job_id_t child_id : materialized_ids) {
+        filter_ids.try_emplace(child_id);
       }
 
       google::protobuf::RepeatedField<uint32_t> task_ids_repeated(
           task_ids.begin(), task_ids.end());
       for (job_id_t child_id :
-           ResolveArrayTaskIdsToChildJobsNoLock_(parent, task_ids_repeated)) {
+           ResolveArrayTaskIdsToChildJobsNoLock_(meta, task_ids_repeated)) {
         // Add child to filter set so it's picked up by the ID path.
         filter_ids.try_emplace(child_id);
-      }
-
-      // The parent-owned final task of an array is executed by the parent
-      // job itself (see JobInCtld::IsArrayParent doc); it cannot be
-      // cancelled as a standalone task — the caller must cancel the parent
-      // job instead.
-      if (auto parent_owned_task_id = parent->GetFinalArrayTaskId();
-          parent_owned_task_id.has_value() &&
-          task_ids.contains(parent_owned_task_id.value())) {
-        auto& not_cancelled_job =
-            (*reply.mutable_not_cancelled_job_steps())[parent_id];
-        if (not_cancelled_job.reason().empty()) {
-          not_cancelled_job.set_reason(
-              "The final task of this array is owned by the parent job and "
-              "cannot be cancelled independently; cancel the parent job "
-              "instead.");
-        }
       }
 
       // Array-task filters only target concrete child jobs on mutate paths.
@@ -4790,8 +4824,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   context.job_ptrs.reserve(actual_size);
   context.job_raw_ptrs.reserve(actual_size);
   context.rn_job_raw_ptrs.reserve(actual_size);
-  std::unordered_set<JobInCtld*> array_parents_pending_finalize;
-  array_parents_pending_finalize.reserve(actual_size);
+  std::unordered_set<job_id_t> array_roots_pending_finalize;
+  array_roots_pending_finalize.reserve(actual_size);
 
   {
     LockGuard running_guard(&m_running_job_map_mtx_);
@@ -4856,8 +4890,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
       job->SetEndTime(end_time);
 
-      if (job->IsArrayParent()) {
-        array_parents_pending_finalize.insert(job.get());
+      if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
+        array_roots_pending_finalize.insert(job->ArrayJobId().value());
       } else {
         TriggerTerminalDependencyEvents(job.get(), end_time);
       }
@@ -4914,7 +4948,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
       context.job_raw_ptrs.insert(job.get());
       auto [job_it, _] = context.job_ptrs.emplace(std::move(job));
-      (*job_it)->UntrackArrayChild();
+      UntrackArrayChildNoLock_(job_it->get());
 
       // As for now, job status change includes only
       // Pending / Running -> Completed / Failed / Cancelled.
@@ -4926,12 +4960,27 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   } // Release m_running_job_map_mtx_ and m_job_indexes_mtx_
 
-  for (JobInCtld* parent : array_parents_pending_finalize) {
-    auto [final_job_status, final_job_exit_code] =
-        BuildArrayParentTerminalResult(parent, context.job_raw_ptrs);
-    parent->SetStatus(final_job_status);
-    parent->SetExitCode(final_job_exit_code);
-    TriggerTerminalDependencyEvents(parent, parent->EndTime());
+  {
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    for (job_id_t array_job_id : array_roots_pending_finalize) {
+      auto* parent = GetArrayRootNoLock_(array_job_id);
+      auto* meta = GetArrayMetaNoLock_(array_job_id);
+      if (parent == nullptr || meta == nullptr) {
+        continue;
+      }
+
+      auto [final_job_status, final_job_exit_code] =
+          BuildArrayAggregateResult(array_job_id, context.job_raw_ptrs);
+      parent->SetStatus(final_job_status);
+      parent->SetExitCode(final_job_exit_code);
+      parent->SetEndTime(absl::Now());
+      meta->running_child_job_ids.clear();
+      RefreshArrayRootSummaryStateNoLock_(array_job_id);
+      if (meta->array_children_expanded && meta->pending_child_job_ids.empty() &&
+          meta->running_child_job_ids.empty()) {
+        TriggerTerminalDependencyEvents(parent, parent->EndTime());
+      }
+    }
   }
 
   std::latch alloc_step_latch{
@@ -5460,18 +5509,9 @@ void JobScheduler::QueryJobsInRam(
   if (!no_array_task_constraint) {
     for (auto& [parent_id, task_ids] : query_array_task_ids) {
       JobInCtld* parent = nullptr;
-      auto pd_it = m_pending_job_map_.find(parent_id);
-      if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
-        parent = pd_it->second.get();
-      } else {
-        auto rn_it = m_running_job_map_.find(parent_id);
-        if (rn_it != m_running_job_map_.end() &&
-            rn_it->second->IsArrayParent()) {
-          parent = rn_it->second.get();
-        }
-      }
-
-      if (parent == nullptr) {
+      parent = GetArrayRootNoLock_(parent_id);
+      auto* meta = GetArrayMetaNoLock_(parent_id);
+      if (parent == nullptr || meta == nullptr) {
         // Not an array parent — remove from filter set so the raw
         // job_id doesn't leak into results.  Matches DB-path
         // semantics where all filter_array_task_ids keys are
@@ -5480,46 +5520,30 @@ void JobScheduler::QueryJobsInRam(
         continue;
       }
 
-      // The array parent directly executes the final task in the range;
-      // any query for that task is served by the parent's own JobInfo.
-      auto parent_owned_task_id_opt = parent->GetFinalArrayTaskId();
-
       for (uint32_t task_id : task_ids) {
-        if (parent_owned_task_id_opt.has_value() &&
-            parent_owned_task_id_opt.value() == task_id) {
-          // Final task is represented by the parent itself; handled below
-          // by keeping parent_id in req_steps.
+        if (!meta->IsValidTaskId(task_id)) {
           continue;
         }
 
-        if (!parent->IsValidArrayTaskId(task_id)) {
-          continue;
-        }
-
-        if (auto child_job_id = parent->GetActiveArrayChildJobId(task_id);
-            child_job_id.has_value()) {
+        if (auto child_it = meta->child_job_id_by_task_id.find(task_id);
+            child_it != meta->child_job_id_by_task_id.end()) {
           // Already materialized: route through the ID-filter path so
           // append_fn renders the real child with its steps.
-          req_steps.try_emplace(child_job_id.value());
+          req_steps.try_emplace(child_it->second);
           continue;
         }
 
         // Valid but not yet materialized: synthesize a virtual JobInfo
         // from the parent's template without touching any state.
         crane::grpc::JobInfo virtual_info;
-        if (!parent->SetFieldsOfJobInfoAsVirtualArrayChild(task_id,
-                                                           &virtual_info)) {
+        if (!SetFieldsOfJobInfoAsVirtualArrayChild_(*parent, *meta, task_id,
+                                                    &virtual_info)) {
           continue;
         }
         job_info_map->emplace(virtual_entry_key--, std::move(virtual_info));
       }
 
-      bool parent_owned_task_requested =
-          parent_owned_task_id_opt.has_value() &&
-          task_ids.contains(parent_owned_task_id_opt.value());
-      if (!parent_owned_task_requested) {
-        req_steps.erase(parent_id);
-      }
+      req_steps.erase(parent_id);
     }
     no_ids_constraint = false;
   }
@@ -7036,35 +7060,42 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
 }
 
 std::vector<job_id_t> JobScheduler::ResolveArrayTaskIdsToChildJobsNoLock_(
-    JobInCtld* parent,
+    const ArrayMeta* meta,
     const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const {
-  if (parent == nullptr) {
+  if (meta == nullptr) {
     return {};
   }
 
-  return parent->ResolveArrayTaskIdsToChildJobs(array_task_ids);
+  std::vector<job_id_t> result;
+  std::unordered_set<uint32_t> seen;
+  for (uint32_t task_id : array_task_ids) {
+    if (!meta->IsValidTaskId(task_id) || !seen.insert(task_id).second) {
+      continue;
+    }
+    auto it = meta->child_job_id_by_task_id.find(task_id);
+    if (it != meta->child_job_id_by_task_id.end()) {
+      result.push_back(it->second);
+    }
+  }
+  return result;
 }
 
-bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
-  if (parent == nullptr || !parent->IsArrayParent()) {
+bool JobScheduler::MaterializeArrayChildrenToPendingMap_(job_id_t array_job_id) {
+  auto* parent = GetArrayRootNoLock_(array_job_id);
+  auto* meta = GetArrayMetaNoLock_(array_job_id);
+  if (parent == nullptr || meta == nullptr) {
     return false;
   }
 
-  if (parent->ArrayChildrenExpanded()) {
+  if (meta->array_children_expanded) {
     return true;
   }
 
-  uint32_t array_start = parent->JobToCtld().array_index_start();
-  uint32_t array_end = parent->JobToCtld().array_index_end();
-  uint32_t array_stride = parent->JobToCtld().has_array_index_stride()
-                              ? parent->JobToCtld().array_index_stride()
-                              : 1;
-
   // Create only the next child task.
-  auto child = parent->CreateNextArrayChild();
+  auto child = CreateNextArrayChild_(meta);
   if (child == nullptr) {
-    // All children have been created already.
-    parent->SetArrayChildrenExpanded(true);
+    meta->array_children_expanded = true;
+    parent->MutableRuntimeAttr()->set_array_children_expanded(true);
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
             0, parent->JobDbId(), parent->RuntimeAttr())) {
       CRANE_ERROR("Failed to persist expanded state for array parent job #{}.",
@@ -7075,18 +7106,18 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
   }
 
   uint32_t task_id = child->JobToCtld().array_task_id();
+  child->SetSubmitTime(parent->SubmitTime());
   CRANE_INFO(
       "Expanding array parent job #{} (range [{}-{}:{}]): creating child "
       "task_id {}.",
-      parent->JobId(), array_start, array_end, array_stride, task_id);
+      parent->JobId(), meta->array_index_start, meta->array_index_end,
+      meta->array_index_stride, task_id);
 
   std::vector<JobInCtld*> child_ptrs{child.get()};
 
-  // Check if all children have been created after this one.
-  uint32_t materializable_task_count = parent->MaterializableArrayTaskCount();
   bool all_children_created =
-      parent->MaterializedArrayTaskCount() + child_ptrs.size() ==
-      materializable_task_count;
+      meta->materialized_task_ids.size() + child_ptrs.size() ==
+      meta->TotalTaskCount();
 
   // Persist the single child to embedded DB and update parent's state.
   // Pass parent to mark it as expanded if all children are created.
@@ -7099,6 +7130,8 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
   }
 
   if (all_children_created) {
+    meta->array_children_expanded = true;
+    parent->MutableRuntimeAttr()->set_array_children_expanded(true);
     if (!g_embedded_db_client->MarkArrayParentExpanded(txn_id_opt.value(),
                                                        parent)) {
       CRANE_ERROR("Failed to mark array parent job #{} as expanded.",
@@ -7114,8 +7147,9 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
 
   // Insert the child into pending map.
   job_id_t child_id = child->JobId();
-  parent->TrackArrayChild(child.get(), true);
+  TrackArrayChildPendingNoLock_(meta, child.get());
   m_pending_job_map_.emplace(child_id, std::move(child));
+  RefreshArrayRootSummaryStateNoLock_(array_job_id);
 
   m_pending_map_cached_size_.store(m_pending_job_map_.size(),
                                    std::memory_order_release);
@@ -7124,39 +7158,31 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(JobInCtld* parent) {
 }
 
 std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
-    JobInCtld* parent, const std::unordered_set<uint32_t>& task_ids) {
+    job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids) {
   std::vector<job_id_t> materialized_child_ids;
 
-  if (parent == nullptr || !parent->IsArrayParent() || task_ids.empty()) {
+  auto* parent = GetArrayRootNoLock_(array_job_id);
+  auto* meta = GetArrayMetaNoLock_(array_job_id);
+  if (parent == nullptr || meta == nullptr || task_ids.empty()) {
     return materialized_child_ids;
   }
-
-  if (!parent->JobToCtld().has_array_index_start() ||
-      !parent->JobToCtld().has_array_index_end()) {
-    return materialized_child_ids;
-  }
-
-  uint32_t array_start = parent->JobToCtld().array_index_start();
-  uint32_t array_end = parent->JobToCtld().array_index_end();
-  uint32_t array_stride = parent->JobToCtld().has_array_index_stride()
-                              ? parent->JobToCtld().array_index_stride()
-                              : 1;
 
   // Create only the tasks that don't exist yet.
   std::vector<std::unique_ptr<JobInCtld>> children_to_create;
   for (uint32_t task_id : task_ids) {
-    auto child = parent->CreateArrayChildForTask(task_id);
+    auto child = CreateArrayChild_(*meta, task_id);
     if (child == nullptr) {
       continue;
     }
+    child->SetSubmitTime(parent->SubmitTime());
     children_to_create.push_back(std::move(child));
   }
 
   if (children_to_create.empty()) {
-    if (!parent->ArrayChildrenExpanded() &&
-        parent->MaterializedArrayTaskCount() ==
-            parent->MaterializableArrayTaskCount()) {
-      parent->SetArrayChildrenExpanded(true);
+    if (!meta->array_children_expanded &&
+        meta->materialized_task_ids.size() == meta->TotalTaskCount()) {
+      meta->array_children_expanded = true;
+      parent->MutableRuntimeAttr()->set_array_children_expanded(true);
       if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
               0, parent->JobDbId(), parent->RuntimeAttr())) {
         CRANE_ERROR(
@@ -7171,8 +7197,8 @@ std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
   CRANE_INFO(
       "Materializing {} specific array tasks for parent job #{} (range "
       "[{}-{}:{}]).",
-      children_to_create.size(), parent->JobId(), array_start, array_end,
-      array_stride);
+      children_to_create.size(), parent->JobId(), meta->array_index_start,
+      meta->array_index_end, meta->array_index_stride);
 
   // Prepare pointers for DB operation.
   std::vector<JobInCtld*> child_ptrs;
@@ -7191,13 +7217,17 @@ std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
   }
 
   bool all_children_created =
-      parent->MaterializedArrayTaskCount() + child_ptrs.size() ==
-      parent->MaterializableArrayTaskCount();
+      meta->materialized_task_ids.size() + child_ptrs.size() ==
+      meta->TotalTaskCount();
   if (all_children_created && !g_embedded_db_client->MarkArrayParentExpanded(
                                   txn_id_opt.value(), parent)) {
     CRANE_ERROR("Failed to mark array parent job #{} as expanded.",
                 parent->JobId());
     return materialized_child_ids;
+  }
+  if (all_children_created) {
+    meta->array_children_expanded = true;
+    parent->MutableRuntimeAttr()->set_array_children_expanded(true);
   }
 
   if (!g_embedded_db_client->CommitVariableDbTransaction(txn_id_opt.value())) {
@@ -7211,9 +7241,10 @@ std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
   for (auto& child : children_to_create) {
     job_id_t child_id = child->JobId();
     materialized_child_ids.push_back(child_id);
-    parent->TrackArrayChild(child.get(), true);
+    TrackArrayChildPendingNoLock_(meta, child.get());
     m_pending_job_map_.emplace(child_id, std::move(child));
   }
+  RefreshArrayRootSummaryStateNoLock_(array_job_id);
 
   m_pending_map_cached_size_.store(m_pending_job_map_.size(),
                                    std::memory_order_release);
@@ -7229,48 +7260,15 @@ std::vector<job_id_t> JobScheduler::ResolveArrayTaskIdsToChildJobs(
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
 
-  JobInCtld* parent = nullptr;
-  auto pd_it = m_pending_job_map_.find(array_job_id);
-  if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
-    parent = pd_it->second.get();
-  } else {
-    auto rn_it = m_running_job_map_.find(array_job_id);
-    if (rn_it == m_running_job_map_.end() || !rn_it->second->IsArrayParent()) {
-      return result;
-    }
-    parent = rn_it->second.get();
-  }
-
-  if (parent == nullptr) {
+  auto* meta = GetArrayMetaNoLock_(array_job_id);
+  if (meta == nullptr) {
     return result;
   }
 
   std::unordered_set<uint32_t> requested_task_ids(array_task_ids.begin(),
                                                   array_task_ids.end());
-  if (pd_it != m_pending_job_map_.end()) {
-    MaterializeSpecificArrayTasksToPendingMap_(parent, requested_task_ids);
-  }
+  MaterializeSpecificArrayTasksToPendingMap_(array_job_id, requested_task_ids);
 
-  return ResolveArrayTaskIdsToChildJobsNoLock_(parent, array_task_ids);
-}
-
-std::optional<uint32_t> JobScheduler::GetFinalArrayTaskId(
-    job_id_t array_job_id) {
-  LockGuard pending_guard(&m_pending_job_map_mtx_);
-  LockGuard running_guard(&m_running_job_map_mtx_);
-
-  JobInCtld* parent = nullptr;
-  auto pd_it = m_pending_job_map_.find(array_job_id);
-  if (pd_it != m_pending_job_map_.end() && pd_it->second->IsArrayParent()) {
-    parent = pd_it->second.get();
-  } else {
-    auto rn_it = m_running_job_map_.find(array_job_id);
-    if (rn_it == m_running_job_map_.end() || !rn_it->second->IsArrayParent()) {
-      return std::nullopt;
-    }
-    parent = rn_it->second.get();
-  }
-
-  return parent->GetFinalArrayTaskId();
+  return ResolveArrayTaskIdsToChildJobsNoLock_(meta, array_task_ids);
 }
 }  // namespace Ctld
