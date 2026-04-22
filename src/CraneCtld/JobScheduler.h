@@ -771,72 +771,72 @@ class JobScheduler {
 
  public:
   struct ArrayMeta {
+    // Array indexing
     job_id_t array_job_id{0};
     job_db_id_t array_job_db_id{0};
     uint32_t array_index_start{0};
     uint32_t array_index_end{0};
     uint32_t array_index_stride{1};
 
-    crane::grpc::JobType type{crane::grpc::Batch};
-    uid_t uid{0};
-    gid_t gid{0};
-    std::string name;
-    std::string account;
-    std::string partition;
-    std::string qos;
-    std::string username;
-    uint32_t node_num{0};
-    std::string cmd_line;
-    std::string cwd;
-    std::unordered_map<std::string, std::string> env;
-    std::string extra_attr;
-    std::string reservation;
-    std::string submit_hostname;
+    // Protobuf data sources — all static/runtime info is read from these
+    crane::grpc::JobToCtld job_template;
+    crane::grpc::RuntimeAttrOfJob runtime_attr;
+
+    // Pure memory state (not derivable from protobuf)
     std::list<std::string> account_chain;
-    std::unordered_map<std::string, uint32_t> licenses_count;
-    std::unordered_set<std::string> included_nodes;
-    std::unordered_set<std::string> excluded_nodes;
-    uint32_t ntasks{0};
     uint32_t ntasks_per_node_min{1};
     uint32_t ntasks_per_node_max{0};
     uint32_t partition_priority{0};
     uint32_t qos_priority{0};
-    absl::Duration time_limit{absl::ZeroDuration()};
-    absl::Time begin_time{absl::InfinitePast()};
-    absl::Time deadline_time{absl::FromUnixSeconds(kJobMaxTimeStampSec)};
-    absl::Time submit_time{absl::InfinitePast()};
-    absl::Time start_time{absl::InfinitePast()};
-    absl::Time end_time{absl::InfinitePast()};
-    DependenciesInJob dependencies;
-    std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
-    bool held{false};
-    bool exclusive{false};
-    double cached_priority{0.0};
     double mandated_priority{0.0};
     bool using_default_wckey{false};
     std::string wckey;
-    ResourceView req_node_res_view;
-    ResourceView req_task_res_view;
     ResourceView req_total_res_view;
-    ResourceView allocated_res_view;
     std::vector<CranedId> executing_craned_ids;
     std::string allocated_craneds_regex;
     std::string pending_reason;
-    crane::grpc::JobStatus status{crane::grpc::Pending};
-    uint32_t exit_code{0};
-    crane::grpc::JobToCtld job_template;
-    crane::grpc::RuntimeAttrOfJob runtime_attr;
+    DependenciesInJob dependencies;
+    std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
 
+    // Array task tracking
     HashSet<uint32_t> materialized_task_ids;
     uint32_t next_array_task_index{0};
     bool array_children_expanded{false};
-
     HashMap<uint32_t, job_id_t> child_job_id_by_task_id;
     HashMap<job_id_t, uint32_t> child_task_id_by_job_id;
     HashSet<job_id_t> pending_child_job_ids;
     HashSet<job_id_t> running_child_job_ids;
     std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
 
+    // Accessors for derived fields
+    [[nodiscard]] absl::Duration time_limit() const {
+      return absl::Seconds(job_template.time_limit().seconds());
+    }
+    [[nodiscard]] absl::Time begin_time() const {
+      return job_template.has_begin_time()
+                 ? absl::FromUnixSeconds(job_template.begin_time().seconds())
+                 : absl::InfinitePast();
+    }
+    [[nodiscard]] absl::Time deadline_time() const {
+      return job_template.has_deadline_time()
+                 ? absl::FromUnixSeconds(
+                       job_template.deadline_time().seconds())
+                 : absl::FromUnixSeconds(kJobMaxTimeStampSec);
+    }
+    [[nodiscard]] absl::Time submit_time() const {
+      return absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
+    }
+    [[nodiscard]] absl::Time start_time() const {
+      return absl::FromUnixSeconds(runtime_attr.start_time().seconds());
+    }
+    [[nodiscard]] absl::Time end_time() const {
+      return absl::FromUnixSeconds(runtime_attr.end_time().seconds());
+    }
+    [[nodiscard]] std::string username() const {
+      return runtime_attr.username();
+    }
+
+    // Array utility methods
     [[nodiscard]] uint32_t TotalTaskCount() const {
       if (array_index_end < array_index_start) return 0;
       uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
@@ -856,38 +856,32 @@ class JobScheduler {
       return (task_id - array_index_start) % stride == 0;
     }
 
+    // Mutators — write only to runtime_attr
     void SetStatus(crane::grpc::JobStatus val) {
-      status = val;
       runtime_attr.set_status(val);
     }
 
     void SetExitCode(uint32_t val) {
-      exit_code = val;
       runtime_attr.set_exit_code(val);
     }
 
     void SetHeld(bool val) {
-      held = val;
       runtime_attr.set_held(val);
     }
 
     void SetSubmitTime(absl::Time val) {
-      submit_time = val;
       runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(val));
     }
 
     void SetStartTime(absl::Time val) {
-      start_time = val;
       runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(val));
     }
 
     void SetEndTime(absl::Time val) {
-      end_time = val;
       runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(val));
     }
 
     void SetCachedPriority(double val) {
-      cached_priority = val;
       runtime_attr.set_cached_priority(val);
     }
 

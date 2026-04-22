@@ -209,7 +209,8 @@ void TriggerTerminalDependencyEvents(JobInCtld* job, absl::Time end_time) {
 void TriggerTerminalDependencyEvents(JobScheduler::ArrayMeta* root,
                                      absl::Time end_time) {
   if (root == nullptr) return;
-  TriggerTerminalDependencyEvents(root, root->exit_code, end_time);
+  TriggerTerminalDependencyEvents(root, root->runtime_attr.exit_code(),
+                                  end_time);
 }
 
 }  // namespace
@@ -223,8 +224,9 @@ JobScheduler::ArrayMeta* JobScheduler::GetArrayMetaNoLock_(
 void JobScheduler::ArrayMeta::AddDependent(
     crane::grpc::DependencyType dep_type, job_id_t dep_job_id) {
   if (dep_type == crane::grpc::DependencyType::AFTER &&
-      status != crane::grpc::JobStatus::Pending) {
-    g_job_scheduler->AddDependencyEvent(dep_job_id, array_job_id, start_time);
+      runtime_attr.status() != crane::grpc::JobStatus::Pending) {
+    g_job_scheduler->AddDependencyEvent(dep_job_id, array_job_id,
+                                        start_time());
     return;
   }
 
@@ -240,33 +242,42 @@ void JobScheduler::ArrayMeta::TriggerDependencyEvents(
 
 void JobScheduler::ArrayMeta::SetFieldsOfJobInfo(
     crane::grpc::JobInfo* job_info) const {
-  job_info->set_type(type);
+  job_info->set_type(job_template.type());
   job_info->set_job_id(array_job_id);
-  job_info->set_name(name);
+  job_info->set_name(job_template.name());
 
-  job_info->set_account(account);
-  job_info->set_partition(partition);
-  job_info->set_qos(qos);
+  job_info->set_account(job_template.account());
+  job_info->set_partition(job_template.partition_name());
+  job_info->set_qos(job_template.qos());
 
-  job_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
+  job_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit()));
   job_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
   job_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
   job_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
 
-  job_info->set_uid(uid);
-  job_info->set_gid(gid);
-  job_info->set_username(username);
-  job_info->set_node_num(node_num);
-  job_info->set_cmd_line(cmd_line);
-  job_info->set_cwd(cwd);
-  job_info->mutable_req_nodes()->Assign(included_nodes.begin(),
-                                        included_nodes.end());
-  job_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
-                                            excluded_nodes.end());
+  job_info->set_uid(job_template.uid());
+  job_info->set_gid(job_template.gid());
+  job_info->set_username(username());
+  job_info->set_node_num(job_template.node_num());
+  job_info->set_cmd_line(job_template.cmd_line());
+  job_info->set_cwd(job_template.cwd());
 
-  job_info->set_extra_attr(extra_attr);
-  job_info->set_reservation(reservation);
-  job_info->set_submit_hostname(submit_hostname);
+  {
+    std::list<std::string> included_list;
+    util::ParseHostList(job_template.nodelist(), &included_list);
+    job_info->mutable_req_nodes()->Assign(included_list.begin(),
+                                          included_list.end());
+  }
+  {
+    std::list<std::string> excluded_list;
+    util::ParseHostList(job_template.excludes(), &excluded_list);
+    job_info->mutable_exclude_nodes()->Assign(excluded_list.begin(),
+                                              excluded_list.end());
+  }
+
+  job_info->set_extra_attr(job_template.extra_attr());
+  job_info->set_reservation(job_template.reservation());
+  job_info->set_submit_hostname(job_template.submit_hostname());
 
   if (!dependencies.deps.empty() ||
       dependencies.ready_time != absl::InfinitePast()) {
@@ -291,37 +302,36 @@ void JobScheduler::ArrayMeta::SetFieldsOfJobInfo(
     }
   }
 
-  job_info->set_held(held);
+  job_info->set_held(runtime_attr.held());
   job_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                              executing_craned_ids.end());
 
   *job_info->mutable_req_total_res_view() =
       static_cast<crane::grpc::ResourceView>(req_total_res_view);
-  *job_info->mutable_allocated_res_view() =
-      static_cast<crane::grpc::ResourceView>(allocated_res_view);
 
-  job_info->set_exit_code(exit_code);
-  job_info->set_priority(cached_priority);
-  job_info->set_status(status);
-  if (status == crane::grpc::Pending) {
+  job_info->set_exit_code(runtime_attr.exit_code());
+  job_info->set_priority(runtime_attr.cached_priority());
+  job_info->set_status(runtime_attr.status());
+  if (runtime_attr.status() == crane::grpc::Pending) {
     job_info->set_pending_reason(pending_reason);
   } else {
     job_info->set_craned_list(allocated_craneds_regex);
   }
-  job_info->set_exclusive(exclusive);
+  job_info->set_exclusive(job_template.exclusive());
 
   std::string wckey_info;
   if (using_default_wckey) wckey_info += "*";
   if (!wckey.empty()) wckey_info += wckey;
   job_info->set_wckey(wckey_info);
 
-  job_info->mutable_licenses_count()->insert(licenses_count.begin(),
-                                             licenses_count.end());
-  auto* mutable_env = job_info->mutable_env();
-  for (const auto& [k, v] : env) {
-    (*mutable_env)[k] = v;
+  {
+    auto* mutable_lc = job_info->mutable_licenses_count();
+    for (const auto& license : job_template.licenses_count()) {
+      (*mutable_lc)[license.key()] = license.count();
+    }
   }
-  job_info->set_ntasks(ntasks);
+  *job_info->mutable_env() = job_template.env();
+  job_info->set_ntasks(job_template.ntasks());
 }
 
 bool JobScheduler::ArrayMeta::SetFieldsOfVirtualArrayChildJobInfo(
@@ -360,49 +370,25 @@ JobScheduler::BuildArrayMetaFromParentNoLock_(JobInCtld& parent) const {
                                  ? parent.JobToCtld().array_index_stride()
                                  : 1;
 
-  meta->type = parent.type;
-  meta->uid = parent.uid;
-  meta->gid = parent.gid;
-  meta->name = parent.name;
-  meta->account = parent.account;
-  meta->partition = parent.partition_id;
   meta->job_template = parent.JobToCtld();
-  meta->runtime_attr = parent.RuntimeAttr();
-  meta->SetStatus(parent.Status());
-  meta->SetExitCode(parent.ExitCode());
-  meta->SetSubmitTime(parent.SubmitTime());
-  meta->SetStartTime(parent.StartTime());
-  meta->SetEndTime(parent.EndTime());
-  meta->SetHeld(parent.Held());
-  meta->SetCachedPriority(parent.CachedPriority());
-  meta->username = parent.Username();
-  meta->qos = parent.qos;
-  meta->node_num = parent.node_num;
-  meta->cmd_line = parent.cmd_line;
-  meta->cwd = parent.cwd;
-  meta->env = parent.env;
-  meta->extra_attr = parent.extra_attr;
-  meta->reservation = parent.reservation;
-  meta->submit_hostname = parent.submit_hostname;
   meta->job_template.set_qos(parent.qos);
   meta->job_template.mutable_time_limit()->set_seconds(
       ToInt64Seconds(parent.time_limit));
+  meta->runtime_attr = parent.RuntimeAttr();
+
+  // Pure memory state
   meta->account_chain = parent.account_chain;
-  meta->licenses_count = parent.licenses_count;
-  meta->req_node_res_view = parent.req_node_res_view;
-  meta->req_task_res_view = parent.req_task_res_view;
-  meta->req_total_res_view = parent.req_total_res_view;
-  meta->allocated_res_view = parent.allocated_res_view;
-  meta->included_nodes = parent.included_nodes;
-  meta->excluded_nodes = parent.excluded_nodes;
-  meta->ntasks = parent.ntasks;
   meta->ntasks_per_node_min = parent.ntasks_per_node_min;
   meta->ntasks_per_node_max = parent.ntasks_per_node_max;
   meta->partition_priority = parent.partition_priority;
   meta->qos_priority = parent.qos_priority;
-  meta->time_limit = parent.time_limit;
-  meta->begin_time = parent.begin_time;
-  meta->deadline_time = parent.deadline_time;
+  meta->mandated_priority = parent.mandated_priority;
+  meta->using_default_wckey = parent.using_default_wckey;
+  meta->wckey = parent.wckey;
+  meta->req_total_res_view = parent.req_total_res_view;
+  meta->executing_craned_ids = parent.executing_craned_ids;
+  meta->allocated_craneds_regex = parent.allocated_craneds_regex;
+  meta->pending_reason = parent.pending_reason;
   meta->dependencies = parent.Dependencies();
   for (int dep_type = 0; dep_type < crane::grpc::DependencyType_ARRAYSIZE;
        ++dep_type) {
@@ -410,13 +396,7 @@ JobScheduler::BuildArrayMetaFromParentNoLock_(JobInCtld& parent) const {
     auto deps = parent.Dependents(dep_enum);
     meta->dependents[dep_type].assign(deps.begin(), deps.end());
   }
-  meta->exclusive = parent.exclusive;
-  meta->mandated_priority = parent.mandated_priority;
-  meta->using_default_wckey = parent.using_default_wckey;
-  meta->wckey = parent.wckey;
-  meta->executing_craned_ids = parent.executing_craned_ids;
-  meta->allocated_craneds_regex = parent.allocated_craneds_regex;
-  meta->pending_reason = parent.pending_reason;
+
   meta->array_children_expanded =
       parent.RuntimeAttr().has_array_children_expanded() &&
       parent.RuntimeAttr().array_children_expanded();
@@ -438,21 +418,30 @@ std::unique_ptr<JobInCtld> JobScheduler::CreateArrayChild_(
   child->MutableJobToCtld()->set_array_task_id(task_id);
   child->SetStatus(crane::grpc::Pending);
   child->SetArrayJobId(meta.array_job_id);
-  child->SetUsername(meta.username);
-  child->qos = meta.qos;
+  child->SetUsername(meta.username());
+  child->qos = meta.job_template.qos();
   child->account_chain = meta.account_chain;
-  child->req_node_res_view = meta.req_node_res_view;
-  child->req_task_res_view = meta.req_task_res_view;
   child->req_total_res_view = meta.req_total_res_view;
-  child->included_nodes = meta.included_nodes;
-  child->excluded_nodes = meta.excluded_nodes;
+
+  {
+    std::list<std::string> included_list;
+    util::ParseHostList(meta.job_template.nodelist(), &included_list);
+    for (auto&& node : included_list)
+      child->included_nodes.emplace(std::move(node));
+  }
+  {
+    std::list<std::string> excluded_list;
+    util::ParseHostList(meta.job_template.excludes(), &excluded_list);
+    for (auto&& node : excluded_list)
+      child->excluded_nodes.emplace(std::move(node));
+  }
+
   child->ntasks_per_node_min = meta.ntasks_per_node_min;
   child->ntasks_per_node_max = meta.ntasks_per_node_max;
   child->partition_priority = meta.partition_priority;
   child->qos_priority = meta.qos_priority;
-  child->time_limit = meta.time_limit;
   child->mandated_priority = meta.mandated_priority;
-  child->SetCachedPriority(meta.cached_priority);
+  child->SetCachedPriority(meta.runtime_attr.cached_priority());
   child->using_default_wckey = meta.using_default_wckey;
   child->wckey = meta.wckey;
   return child;
@@ -565,7 +554,7 @@ void JobScheduler::RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id) {
 
   // Array roots may already carry an aggregate terminal status derived from
   // finished children. Do not overwrite it with a synthetic summary state.
-  if (IsArrayRootTerminalStatus_(meta->status)) {
+  if (IsArrayRootTerminalStatus_(meta->runtime_attr.status())) {
     return;
   }
 
@@ -578,12 +567,12 @@ bool JobScheduler::CanMaterializeArrayRootNoLock_(ArrayMeta* meta,
     return false;
   }
 
-  if (meta->held) {
+  if (meta->runtime_attr.held()) {
     meta->pending_reason = "Held";
     return false;
   }
 
-  if (meta->begin_time > now) {
+  if (meta->begin_time() > now) {
     meta->pending_reason = "BeginTime";
     return false;
   }
@@ -597,7 +586,7 @@ bool JobScheduler::CanMaterializeArrayRootNoLock_(ArrayMeta* meta,
     return false;
   }
 
-  if (meta->deadline_time <= now) {
+  if (meta->deadline_time() <= now) {
     meta->pending_reason = "Deadline";
     return false;
   }
@@ -2459,7 +2448,7 @@ void JobScheduler::CancelDeadlineJobCb_() {
       meta->SetStatus(crane::grpc::JobStatus::Deadline);
       meta->SetExitCode(ExitCode::EC_REACHED_DEADLINE);
       meta->SetEndTime(absl::Now());
-      TriggerTerminalDependencyEvents(meta, meta->end_time);
+      TriggerTerminalDependencyEvents(meta, meta->end_time());
       continue;
     }
 
@@ -2583,9 +2572,10 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
         is_pending = true;
         is_array_root = true;
 
-        if (!meta->reservation.empty()) {
+        if (!meta->job_template.reservation().empty()) {
           auto resv_end_time =
-              g_meta_container->GetResvMetaPtr(meta->reservation)->end_time;
+              g_meta_container->GetResvMetaPtr(
+                  meta->job_template.reservation())->end_time;
           if (time_limit_seconds &&
               resv_end_time <=
                   absl::Now() + absl::Seconds(time_limit_seconds.value())) {
@@ -2612,16 +2602,14 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
 
     if (is_array_root) {
       if (time_limit_seconds) {
-        meta->time_limit = absl::Seconds(time_limit_seconds.value());
         meta->job_template.mutable_time_limit()->set_seconds(
             time_limit_seconds.value());
       }
 
       if (absl_deadline_time) {
-        meta->deadline_time = absl_deadline_time.value();
         meta->job_template.mutable_deadline_time()->set_seconds(
             absl::ToUnixSeconds(absl_deadline_time.value()));
-        if (meta->deadline_time !=
+        if (meta->deadline_time() !=
             absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
           m_job_deadline_timer_create_queue_.enqueue(
               {job_id, deadline_time.value()});
@@ -3446,7 +3434,6 @@ CraneErrCode JobScheduler::ChangeJobExtraAttrs(
   if (!found) {
     auto* meta = GetArrayMetaNoLock_(job_id);
     if (meta != nullptr) {
-      meta->extra_attr = new_extra_attr;
       meta->job_template.set_extra_attr(new_extra_attr);
       g_embedded_db_client->UpdateJobToCtldIfExists(0, meta->array_job_db_id,
                                                     meta->job_template);
@@ -3512,18 +3499,6 @@ void JobScheduler::JobModifyLuaCheck(
       auto root_job = std::make_shared<JobInCtld>();
       root_job->SetFieldsByJobToCtld(meta->job_template);
       root_job->SetFieldsByRuntimeAttrOfJob(meta->runtime_attr);
-      root_job->SetUsername(meta->username);
-      root_job->qos = meta->qos;
-      root_job->account = meta->account;
-      root_job->partition_id = meta->partition;
-      root_job->name = meta->name;
-      root_job->uid = meta->uid;
-      root_job->gid = meta->gid;
-      root_job->time_limit = meta->time_limit;
-      root_job->deadline_time = meta->deadline_time;
-      root_job->reservation = meta->reservation;
-      root_job->extra_attr = meta->extra_attr;
-      root_job->SetHeld(meta->held);
 
       auto fut = g_lua_pool->ExecuteLuaScript([root_job]() {
         return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript,
@@ -5460,7 +5435,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         meta->SetStatus(final_job_status);
         meta->SetExitCode(final_job_exit_code);
         meta->SetEndTime(absl::Now());
-        TriggerTerminalDependencyEvents(meta, meta->end_time);
+        TriggerTerminalDependencyEvents(meta, meta->end_time());
 
         auto meta_it = m_array_metas_.find(array_job_id);
         if (meta_it != m_array_metas_.end()) {
@@ -5994,15 +5969,15 @@ void JobScheduler::QueryJobsInRam(
     crane::grpc::JobInfo job_info;
     meta.SetFieldsOfJobInfo(&job_info);
 
-    if (meta.status == crane::grpc::Running ||
-        meta.status == crane::grpc::Configuring) {
+    if (meta.runtime_attr.status() == crane::grpc::Running ||
+        meta.runtime_attr.status() == crane::grpc::Configuring) {
       job_info.mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(now - meta.start_time));
-    } else if (meta.start_time != absl::InfinitePast()) {
-      absl::Time end_time =
-          meta.end_time == absl::InfinitePast() ? now : meta.end_time;
+          ToInt64Seconds(now - meta.start_time()));
+    } else if (meta.start_time() != absl::InfinitePast()) {
+      absl::Time et =
+          meta.end_time() == absl::InfinitePast() ? now : meta.end_time();
       job_info.mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(end_time - meta.start_time));
+          ToInt64Seconds(et - meta.start_time()));
     }
     job_info_map->emplace(meta.array_job_id, std::move(job_info));
   };
@@ -6101,18 +6076,22 @@ void JobScheduler::QueryJobsInRam(
       valid &= !interval.has_upper_bound() ||
                meta->runtime_attr.end_time() <= interval.upper_bound();
     }
-    valid &= no_accounts_constraint || req_accounts.contains(meta->account);
-    valid &= no_username_constraint || req_users.contains(meta->username);
-    valid &= no_qos_constraint || req_qos.contains(meta->qos);
-    valid &= no_job_names_constraint || req_job_names.contains(meta->name);
+    valid &= no_accounts_constraint ||
+             req_accounts.contains(meta->job_template.account());
+    valid &= no_username_constraint || req_users.contains(meta->username());
+    valid &= no_qos_constraint || req_qos.contains(meta->job_template.qos());
+    valid &= no_job_names_constraint ||
+             req_job_names.contains(meta->job_template.name());
     valid &= no_partitions_constraint ||
-             req_partitions.contains(meta->partition);
-    valid &= no_job_states_constraint || req_job_states.contains(meta->status);
-    valid &= no_job_types_constraint || req_job_types.contains(meta->type);
+             req_partitions.contains(meta->job_template.partition_name());
+    valid &= no_job_states_constraint ||
+             req_job_states.contains(meta->runtime_attr.status());
+    valid &= no_job_types_constraint ||
+             req_job_types.contains(meta->job_template.type());
     if (!no_licenses_constraint) {
       bool has_license = false;
-      for (const auto& [license, _] : meta->licenses_count) {
-        if (req_licenses.contains(license)) {
+      for (const auto& license : meta->job_template.licenses_count()) {
+        if (req_licenses.contains(license.key())) {
           has_license = true;
           break;
         }
@@ -7822,7 +7801,7 @@ bool JobScheduler::MaterializeArrayChildrenToPendingMap_(
     return true;
   }
 
-  child->SetSubmitTime(meta->submit_time);
+  child->SetSubmitTime(meta->submit_time());
   CRANE_INFO(
       "Expanding array parent job #{} (range [{}-{}:{}]): creating child "
       "task_id {}.",
@@ -7854,7 +7833,7 @@ std::vector<job_id_t> JobScheduler::MaterializeSpecificArrayTasksToPendingMap_(
     if (child == nullptr) {
       continue;
     }
-    child->SetSubmitTime(meta->submit_time);
+    child->SetSubmitTime(meta->submit_time());
     children.push_back(std::move(child));
   }
 
