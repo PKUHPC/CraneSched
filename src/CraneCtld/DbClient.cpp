@@ -888,6 +888,7 @@ bool MongodbClient::FetchJobRecords(
       } else {
         job_info_ptr = &in_mem_job_it->second;
       }
+      //TODO: Support fetch duplicate job re
       int32_t db_requeue_count = ViewValueOr_(view["requeue_count"], 0);
       if (db_requeue_count < job_info_ptr->requeue_count()) continue;
       auto steps_elem = view["steps"];
