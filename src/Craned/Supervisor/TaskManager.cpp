@@ -455,8 +455,6 @@ void ITaskInstance::InitEnvMap() {
     }
     m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
   }
-
-
 }
 
 ProcInstance::~ProcInstance() {
@@ -487,21 +485,23 @@ void ProcInstance::InitEnvMap() {
   m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
   m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
 
-  std::unordered_map<std::string, std::string> pmix_env;
   if (m_parent_step_inst_->IsCrun() &&
       m_parent_step_inst_->GetStep().interactive_meta().mpi() ==
-            kMpiTypePmix) {
+          kMpiTypePmix) {
+    // SetupFork() is called in the forked child process.  On failure use
+    // _exit() rather than abort() to avoid flushing stdio buffers or running
+    // parent-process destructors, and to prevent generating a core dump.
     auto result = m_parent_step_inst_->pmix_server->SetupFork(task_id);
     if (!result) {
       fmt::print(stderr,
-                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
-      std::abort();
+                 "[Craned Subprocess] Pmix Server SetupFork() failed for "
+                 "task_id={}. Terminating child process.\n",
+                 task_id);
+      _exit(EXIT_FAILURE);
     }
-    pmix_env = result.value();
-  }
-
-  for (const auto& [k, v] : pmix_env) {
+    for (const auto& [k, v] : result.value()) {
       m_env_.insert_or_assign(k, v);
+    }
   }
 }
 

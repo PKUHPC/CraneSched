@@ -36,6 +36,24 @@
 
 namespace Ctld {
 
+// Returns an error message string if the MPI type is unsupported for this
+// build, or std::nullopt if the type is valid (including empty).
+static std::optional<std::string> ValidateMpiType(const std::string& mpi) {
+#ifdef HAVE_PMIX
+  // PMIx is compiled in: only "pmix" is a valid non-empty MPI type.
+  if (!mpi.empty() && mpi != kMpiTypePmix)
+    return fmt::format("Unsupported MPI type: '{}'. Supported types: {}", mpi,
+                       kMpiTypePmix);
+#else
+  // PMIx is not compiled in: reject any non-empty MPI type.
+  if (!mpi.empty())
+    return fmt::format(
+        "Unsupported MPI type: '{}'. This build does not support any MPI type.",
+        mpi);
+#endif
+  return std::nullopt;
+}
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -353,22 +371,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           if (job->IsCrun()) {
             const auto& mpi = job->JobToCtld().interactive_meta().mpi();
-#ifdef HAVE_PMIX
-            // PMIx is compiled in: only "pmix" is a valid MPI type.
-            if (!mpi.empty() && mpi != kMpiTypePmix) {
-              result = std::unexpected(fmt::format(
-                  "Unsupported MPI type: '{}'. Supported types: {}", mpi,
-                  kMpiTypePmix));
-            }
-#else
-            // PMIx is not compiled in: reject any non-empty MPI type.
-            if (!mpi.empty()) {
-              result = std::unexpected(fmt::format(
-                  "Unsupported MPI type: '{}'. This build does not support "
-                  "any MPI type.",
-                  mpi));
-            }
-#endif
+            if (auto mpi_err = ValidateMpiType(mpi); mpi_err.has_value())
+              result = std::unexpected(std::move(*mpi_err));
           }
 
           if (result) {
@@ -437,24 +441,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          
           const auto& mpi = step->StepToCtld().interactive_meta().mpi();
-#ifdef HAVE_PMIX
-          // PMIx is compiled in: only "pmix" is a valid MPI type.
-          if (!mpi.empty() && mpi != kMpiTypePmix) {
-            result = std::unexpected(fmt::format(
-                "Unsupported MPI type: '{}'. Supported types: {}", mpi,
-                kMpiTypePmix));
-          }
-#else
-          // PMIx is not compiled in: reject any non-empty MPI type.
-          if (!mpi.empty()) {
-            result = std::unexpected(fmt::format(
-                "Unsupported MPI type: '{}'. This build does not support "
-                "any MPI type.",
-                mpi));
-          }
-#endif
+          if (auto mpi_err = ValidateMpiType(mpi); mpi_err.has_value())
+            result = std::unexpected(std::move(*mpi_err));
 
           if (result) {
             auto submit_result =
@@ -595,25 +584,25 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
     job_id_t job_id = request->job_id();
     step_id_t step_id = request->step_id();
 
-    for (const auto& craned_id : request->craned_ids()) {
-      std::thread([craned_id, ports_shared, job_id, step_id]() {
-        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (!craned_stub) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Craned {} stub not found when broadcasting "
-              "pmix port.",
-              job_id, step_id, craned_id);
-          return;
-        }
-        auto result =
-            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
-        if (result != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
-              job_id, step_id, craned_id);
-        }
-      }).detach();
-    }
+      for (const auto& craned_id : request->craned_ids()) {
+      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
+              auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+              if (!craned_stub) {
+                CRANE_ERROR(
+                    "[Step#{}.{}] Craned {} stub not found when broadcasting "
+                    "pmix port.",
+                    job_id, step_id, craned_id);
+                return;
+              }
+              auto result =
+                  craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
+              if (result != CraneErrCode::SUCCESS) {
+                CRANE_ERROR(
+                    "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+                    job_id, step_id, craned_id);
+              }
+      });
+      }
   }
 
   response->set_ok(true);

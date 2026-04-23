@@ -49,32 +49,25 @@ bool PmixCollRing::PmixCollInit(CollType type,
     }
   }
 
-  m_peers_cnt_ = hostname_set.size();
+  m_peers_cnt_ = static_cast<uint32_t>(hostname_set.size());
 
-  if (m_peers_cnt_ <= 0) {
+  if (m_peers_cnt_ == 0) {
     CRANE_ERROR("No peers found");
     return false;
   }
 
   auto it = hostname_set.find(m_pmix_job_info_.hostname);
-  if (it != hostname_set.end())
-    m_peerid_ = std::distance(hostname_set.begin(), it);
-  else {
-    CRANE_ERROR("unknown hostname");
+  if (it == hostname_set.end()) {
+    CRANE_ERROR("unknown hostname: {}", m_pmix_job_info_.hostname);
     return false;
   }
+  m_peerid_ = static_cast<int>(std::distance(hostname_set.begin(), it));
 
-  auto iter = hostname_set.find(m_pmix_job_info_.hostname);
-  if (iter != hostname_set.end()) {
-    auto next_iter = std::next(iter);
-    if (next_iter == hostname_set.end()) {
-      next_iter = hostname_set.begin();
-    }
-    m_next_craned_id_ = *next_iter;
-  } else {
-    CRANE_ERROR("cannot find hostname: {}", m_pmix_job_info_.hostname);
-    return false;
+  auto next_iter = std::next(it);
+  if (next_iter == hostname_set.end()) {
+    next_iter = hostname_set.begin();
   }
+  m_next_craned_id_ = *next_iter;
 
   for (int i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
     CollRingCtx& coll_ctx = m_ctx_array_[i];
