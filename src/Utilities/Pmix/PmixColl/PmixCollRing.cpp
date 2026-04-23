@@ -98,16 +98,16 @@ bool PmixCollRing::PmixCollContribLocal(const std::string& data,
                                         void* cbdata) {
   std::lock_guard lock_guard(this->m_lock_);
 
-  /* setup callback info */
-  this->m_cbfunc_ = cbfunc;
-  this->m_cbdata_ = cbdata;
-
   CollRingCtx* coll_ctx = this->CollRingCtxNew_();
   if (coll_ctx == nullptr) {
     CRANE_ERROR("{:p}: Can not get new ring collective context, seq= {}",
                 static_cast<void*>(this), this->m_seq_);
     return false;
   }
+
+  /* setup per-context callback info */
+  coll_ctx->cbfunc = cbfunc;
+  coll_ctx->cbdata = cbdata;
 
   CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}",
               static_cast<void*>(coll_ctx), coll_ctx->seq,
@@ -205,11 +205,12 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
             CRANE_ERROR("{:p}, Cannot forward ring data",
                         static_cast<void*>(&coll_ring_ctx));
             coll_ring_ctx.ring_buf.clear();
-            if (self->m_cbfunc_) {
-              PmixLibModexInvoke(self->m_cbfunc_, PMIX_ERR_TIMEOUT, nullptr, 0,
-                                 self->m_cbdata_, nullptr, nullptr);
-              self->m_cbfunc_ = nullptr;
-              self->m_cbdata_ = nullptr;
+            if (coll_ring_ctx.cbfunc) {
+              PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_ERR_TIMEOUT,
+                                 nullptr, 0, coll_ring_ctx.cbdata, nullptr,
+                                 nullptr);
+              coll_ring_ctx.cbfunc = nullptr;
+              coll_ring_ctx.cbdata = nullptr;
             }
             return;
           }
@@ -298,17 +299,16 @@ void PmixCollRing::AbortOnTimeout() {
   CRANE_ERROR("coll {:p}: ring collective timed out (seq={})",
               static_cast<void*>(this), m_seq_);
 
-  // Fire the pending callback with a timeout error so the MPI process is
-  // not left waiting forever.
-  if (m_cbfunc_) {
-    m_cbfunc_(PMIX_ERR_TIMEOUT, nullptr, 0, m_cbdata_, nullptr, nullptr);
-    m_cbfunc_ = nullptr;
-    m_cbdata_ = nullptr;
-  }
-
-  // Reset every in-use ring context.
+  // Fire each in-use context's own callback with a timeout error so every
+  // overlapping fence's MPI process is not left waiting forever.
   for (auto& ctx : m_ctx_array_) {
-    if (ctx.in_use) ResetCollRing_(ctx);
+    if (!ctx.in_use) continue;
+    if (ctx.cbfunc) {
+      ctx.cbfunc(PMIX_ERR_TIMEOUT, nullptr, 0, ctx.cbdata, nullptr, nullptr);
+      ctx.cbfunc = nullptr;
+      ctx.cbdata = nullptr;
+    }
+    ResetCollRing_(ctx);
   }
 
   // Clear the activity timestamp so IsTimedOut() returns false for the
@@ -328,18 +328,19 @@ void PmixCollRing::RingReleaseFn(void* rel_data) {
 void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
   CRANE_DEBUG("{:p}: InvokeCallBackRing_ is called, seq={}",
               static_cast<void*>(this), coll_ring_ctx.seq);
-  if (!m_cbfunc_) return;
+  if (!coll_ring_ctx.cbfunc) return;
 
   auto cb_data = std::make_unique<CbData>();
   cb_data->coll = shared_from_this();
   cb_data->coll_ring_ctx = &coll_ring_ctx;
 
-  PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, coll_ring_ctx.ring_buf.data(),
-                     coll_ring_ctx.ring_buf.size(), m_cbdata_,
+  PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS,
+                     coll_ring_ctx.ring_buf.data(),
+                     coll_ring_ctx.ring_buf.size(), coll_ring_ctx.cbdata,
                      reinterpret_cast<void*>(RingReleaseFn), cb_data.release());
 
-  m_cbfunc_ = nullptr;
-  m_cbdata_ = nullptr;
+  coll_ring_ctx.cbfunc = nullptr;
+  coll_ring_ctx.cbdata = nullptr;
 }
 
 void PmixCollRing::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
@@ -352,6 +353,8 @@ void PmixCollRing::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
   // all ring contexts are idle.  CollRingContrib_() refreshes it when
   // the next fence starts.
   m_ts_ = {};
+  coll_ring_ctx.cbfunc = nullptr;
+  coll_ring_ctx.cbdata = nullptr;
   coll_ring_ctx.contrib_map.assign(m_peers_cnt_, false);
   coll_ring_ctx.ring_buf.clear();
 }

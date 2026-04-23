@@ -59,7 +59,13 @@ struct CollRingCtx {
   std::vector<bool> contrib_map;
   CollRingState state;
   std::string ring_buf;
-};
+#ifdef HAVE_PMIX
+  // Per-context callback: each in-flight fence carries its own completion
+  // callback so that overlapping fences never overwrite each other's cbfunc.
+  pmix_modex_cbfunc_t cbfunc{};
+  void* cbdata{};
+#endif
+}; 
 
 class PmixCollRing : public Coll,
                      public std::enable_shared_from_this<PmixCollRing> {
