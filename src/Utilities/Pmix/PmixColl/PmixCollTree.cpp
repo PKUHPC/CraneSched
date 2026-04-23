@@ -435,7 +435,7 @@ bool PmixCollTree::ProgressUpFwd_() {
     cb_data->seq = m_seq_;
     m_downfwd_cb_wait_++;
     PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
-                       m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn,
+                       m_downfwd_buf_.size(), m_cbdata_, TreeReleaseFn,
                        cb_data.release());
 
     m_cbfunc_ = nullptr;
@@ -493,7 +493,7 @@ bool PmixCollTree::ProgressUpFwdWpc_() {
     cb_data->seq = m_seq_;
 
     PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
-                       m_downfwd_buf_.size(), m_cbdata_, (void*)TreeReleaseFn,
+                       m_downfwd_buf_.size(), m_cbdata_, TreeReleaseFn,
                        cb_data.release());
     m_downfwd_cb_wait_++;
     m_cbfunc_ = nullptr;
@@ -766,7 +766,7 @@ void PmixCollTree::ResetCollTreeDownFwd_() {
   m_contrib_prnt_ = false;
 }
 
-void PmixCollTree::PmixCollLocalCbNodata_(int status) {
+void PmixCollTree::PmixCollLocalCbNodata_(pmix_status_t status) {
   if (m_cbfunc_) {
     PmixLibModexInvoke(m_cbfunc_, status, nullptr, 0, m_cbdata_, nullptr,
                        nullptr);

@@ -130,7 +130,7 @@ class PmixCollTree : public Coll,
   void ResetCollTreeUpFwd_();
   void ResetCollTreeDownFwd_();
 
-  void PmixCollLocalCbNodata_(int status);
+  void PmixCollLocalCbNodata_(pmix_status_t status);
 
   struct CbData {
     std::shared_ptr<PmixCollTree> coll;

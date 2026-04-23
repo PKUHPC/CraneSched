@@ -346,7 +346,7 @@ void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
   PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS,
                      coll_ring_ctx.ring_buf.data(),
                      coll_ring_ctx.ring_buf.size(), coll_ring_ctx.cbdata,
-                     reinterpret_cast<void*>(RingReleaseFn), cb_data.release());
+                     RingReleaseFn, cb_data.release());
 
   coll_ring_ctx.cbfunc = nullptr;
   coll_ring_ctx.cbdata = nullptr;

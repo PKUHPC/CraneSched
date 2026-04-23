@@ -197,7 +197,7 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
 void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
                                                const CranedId &craned_id,
                                                const std::string &data,
-                                               int status) {
+                                               pmix_status_t status) {
   PmixDModexReq pmix_dmodex_req{};
 
   {
@@ -224,7 +224,7 @@ void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
 
 void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
                                               const std::string &craned_id,
-                                              int status) {
+                                              pmix_status_t status) {
   crane::grpc::pmix::PmixDModexResponseReq request{};
 
   request.set_status(status);

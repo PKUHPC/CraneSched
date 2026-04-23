@@ -63,7 +63,7 @@ class PmixDModexReqManager {
                           const std::string& send_nspace);
 
   void PmixProcessResponse(uint32_t seq_num, const CranedId& craned_id,
-                           const std::string& data, int status);
+                           const std::string& data, pmix_status_t status);
 
   void CleanupTimeoutRequests();
 
@@ -71,7 +71,7 @@ class PmixDModexReqManager {
 
  private:
   void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
-                          int status);
+                          pmix_status_t status);
 
   PmixJobInfo m_pmix_job_info_;
   PmixClient* m_pmix_client_{nullptr};  // injected, not owned
