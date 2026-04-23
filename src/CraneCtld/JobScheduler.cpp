@@ -4430,6 +4430,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                   job_id, step_id, new_status);
       job_finished_status = step->StepStatusChange(
           new_status, exit_code, reason, craned_index, timestamp, &context);
+
+      m_pmix_ports_meta_.erase({job_id, step_id});
     }
 
     if (job_finished_status.has_value()) {

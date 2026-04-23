@@ -556,8 +556,6 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
   auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
 
-  std::atomic<bool> broadcast_all_ok{true};
-
   using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
   using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
 
@@ -577,9 +575,6 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
               "[Step#{}.{}] All pmix ports have been collected, start "
               "broadcasting.",
               request->job_id(), request->step_id());
-          // Only take a snapshot under the lock; the actual RPC fanout is done
-          // after lazy_emplace_l() returns so the map lock is not held during
-          // potentially slow or failing network calls.
           ports_to_broadcast = pair.second;
         }
       },
@@ -594,45 +589,34 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
   // The map lock has been released at this point.  Perform the fanout now.
   if (ports_to_broadcast.has_value()) {
-    const auto& pmix_ports_snapshot = *ports_to_broadcast;
-    absl::BlockingCounter broadcast_bl(pmix_ports_snapshot.size());
+    auto ports_shared = std::make_shared<PmixPortsMetaMapValue>(
+        std::move(*ports_to_broadcast));
+
+    job_id_t job_id = request->job_id();
+    step_id_t step_id = request->step_id();
 
     for (const auto& craned_id : request->craned_ids()) {
-      std::thread([craned_id,  // by value: each thread owns its id
-                   &pmix_ports_snapshot,  // stable for the life of Wait()
-                   &broadcast_bl, &broadcast_all_ok, request]() {
+      std::thread([craned_id, ports_shared, job_id, step_id]() {
         auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
         if (!craned_stub) {
           CRANE_ERROR(
               "[Step#{}.{}] Craned {} stub not found when broadcasting "
               "pmix port.",
-              request->job_id(), request->step_id(), craned_id);
-          broadcast_all_ok.store(false, std::memory_order_relaxed);
-          broadcast_bl.DecrementCount();
+              job_id, step_id, craned_id);
           return;
         }
-        auto result = craned_stub->ReceivePmixPort(
-            request->job_id(), request->step_id(), pmix_ports_snapshot);
+        auto result =
+            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
         if (result != CraneErrCode::SUCCESS) {
           CRANE_ERROR(
               "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
-              request->job_id(), request->step_id(), craned_id);
-          broadcast_all_ok.store(false, std::memory_order_relaxed);
+              job_id, step_id, craned_id);
         }
-        broadcast_bl.DecrementCount();
       }).detach();
     }
-    
-    broadcast_bl.Wait();
-
-    CRANE_TRACE(
-        "[Step#{}.{}] Pmix port broadcast completed, erase the record in Ctld.",
-        request->job_id(), request->step_id());
-    pmix_ports_map.erase(map_key);
   }
 
-  // Return the actual fanout result so the caller can react on partial failure.
-  response->set_ok(broadcast_all_ok.load());
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 
