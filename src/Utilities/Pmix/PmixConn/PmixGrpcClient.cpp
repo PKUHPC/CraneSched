@@ -114,8 +114,14 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   // if (g_config.CompressedRpc)
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  craned->m_channel_ =
-      CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
+  if (m_config_.UseTls) {
+    craned->m_channel_ =
+        CreateTcpTlsCustomChannelByIp(ip_addr, port, m_config_.TlsCerts,
+                                      channel_args);
+  } else {
+    craned->m_channel_ =
+        CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
+  }
 
   craned->m_stub_ = crane::grpc::pmix::Pmix::NewStub(craned->m_channel_);
 
