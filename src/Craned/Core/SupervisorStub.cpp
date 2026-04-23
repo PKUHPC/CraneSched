@@ -21,6 +21,13 @@
 
 namespace Craned {
 using grpc::ClientContext;
+namespace {
+void SetSupervisorRpcContextOptions(grpc::ClientContext* context) {
+  context->set_wait_for_ready(true);
+  context->set_deadline(std::chrono::system_clock::now() +
+                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
+}
+}  // namespace
 
 SupervisorStub::SupervisorStub(job_id_t job_id, step_id_t step_id) {
   auto sock_path = fmt::format("unix://{}/step_{}.{}.sock",
@@ -98,6 +105,7 @@ SupervisorStub::InitAndGetRecoveredMap() {
 
 CraneErrCode SupervisorStub::ExecuteStep() {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::StepExecutionRequest request;
   crane::grpc::supervisor::StepExecutionReply reply;
 
@@ -112,6 +120,7 @@ CraneErrCode SupervisorStub::ExecuteStep() {
 
 CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::QueryStepEnvRequest request;
   crane::grpc::supervisor::QueryStepEnvReply reply;
 
@@ -128,6 +137,7 @@ CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {
 CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
 SupervisorStub::CheckStatus() {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::CheckStatusRequest request;
   crane::grpc::supervisor::CheckStatusReply reply;
 
@@ -144,6 +154,7 @@ SupervisorStub::CheckStatus() {
 CraneErrCode SupervisorStub::TerminateStep(
     bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source) {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::TerminateStepRequest request;
   crane::grpc::supervisor::TerminateStepReply reply;
 
@@ -166,6 +177,7 @@ CraneErrCode SupervisorStub::ChangeStepTimeConstraint(
     std::optional<int64_t> time_limit_seconds,
     std::optional<int64_t> deadline_time) {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::ChangeStepTimeConstraintRequest request;
   crane::grpc::supervisor::ChangeStepTimeConstraintReply reply;
 
@@ -187,6 +199,7 @@ CraneErrCode SupervisorStub::ChangeStepTimeConstraint(
 
 CraneErrCode SupervisorStub::MigrateSshProcToCg(pid_t pid) {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::MigrateSshProcToCgroupRequest request;
   crane::grpc::supervisor::MigrateSshProcToCgroupReply reply;
   request.set_pid(pid);
@@ -201,6 +214,7 @@ CraneErrCode SupervisorStub::MigrateSshProcToCg(pid_t pid) {
 
 CraneErrCode SupervisorStub::ShutdownSupervisor() {
   ClientContext context;
+  SetSupervisorRpcContextOptions(&context);
   crane::grpc::supervisor::ShutdownSupervisorRequest request;
   crane::grpc::supervisor::ShutdownSupervisorReply reply;
 
