@@ -114,10 +114,6 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   // if (g_config.CompressedRpc)
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  int cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}/{}", craned_id,
-              ip_addr, port, cur_count, m_node_num_ - 1);
-
   craned->m_channel_ =
       CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
 
@@ -125,7 +121,18 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   craned->m_craned_id_ = craned_id;
 
-  m_craned_id_stub_map_.emplace(craned_id, craned);
+  // Only count a stub as ready after a successful insert.  This prevents
+  // WaitAllStubReady() from returning before GetPmixStub() can find the entry,
+  // and stops duplicate craned_ids from inflating the counter.
+  auto [it, inserted] = m_craned_id_stub_map_.emplace(craned_id, craned);
+  if (!inserted) {
+    CRANE_WARN("Duplicate EmplacePmixStub for craned_id={}, ignored", craned_id);
+    return;
+  }
+
+  int cur_count = m_channel_count_.fetch_add(1) + 1;
+  CRANE_TRACE("Created stub for {} {}:{}. Channel count: {}/{}", craned_id,
+              ip_addr, port, cur_count, m_node_num_ - 1);
 
   {
     std::lock_guard<std::mutex> lock(m_mutex_);
