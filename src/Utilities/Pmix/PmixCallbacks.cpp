@@ -144,8 +144,11 @@ pmix_status_t PmixServerCallbacks::DModex(const pmix_proc_t* proc,
 pmix_status_t PmixServerCallbacks::JobControl(
     const pmix_proc_t* /*proct*/, const pmix_proc_t* /*targets*/,
     size_t /*ntargets*/, const pmix_info_t* /*directives*/, size_t /*ndirs*/,
-    pmix_info_cbfunc_t /*cbfunc*/, void* /*cbdata*/) {
+    pmix_info_cbfunc_t cbfunc, void* cbdata) {
   CRANE_DEBUG("JobControl called (not supported)");
+  // PMIx spec requires the completion callback to always be invoked, even when
+  // the operation is not supported, so the caller is not left waiting forever.
+  if (cbfunc) cbfunc(PMIX_ERR_NOT_SUPPORTED, nullptr, 0, cbdata, nullptr, nullptr);
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
