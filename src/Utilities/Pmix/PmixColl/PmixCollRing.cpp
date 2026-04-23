@@ -355,10 +355,14 @@ void PmixCollRing::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
   coll_ring_ctx.contrib_local = false;
   coll_ring_ctx.contrib_prev = 0;
   coll_ring_ctx.forward_cnt = 0;
-  // Clear the activity timestamp so IsTimedOut() returns false once
-  // all ring contexts are idle.  CollRingContrib_() refreshes it when
-  // the next fence starts.
-  m_ts_ = {};
+  // Only reset the shared activity timestamp when every context slot is
+  // now idle.  If another fence is still in progress, preserve m_ts_ so
+  // IsTimedOut() continues to track it.  CollRingContrib_() refreshes
+  // m_ts_ whenever a new contribution arrives.
+  if (std::ranges::none_of(m_ctx_array_,
+                           [](const CollRingCtx& c) { return c.in_use; })) {
+    m_ts_ = {};
+  }
   coll_ring_ctx.cbfunc = nullptr;
   coll_ring_ctx.cbdata = nullptr;
   coll_ring_ctx.contrib_map.assign(m_peers_cnt_, false);
