@@ -114,7 +114,10 @@ bool PmixCollRing::PmixCollContribLocal(const std::string& data,
               ToString(coll_ctx->state), data.size());
 
   // contrib peer node
-  if (!CollRingContrib_(*coll_ctx, m_peerid_, 0, data)) return false;
+  if (!CollRingContrib_(*coll_ctx, m_peerid_, 0, data)) {
+    ResetCollRing_(*coll_ctx);
+    return false;
+  }
 
   coll_ctx->contrib_local = true;
   this->ProgressCollectRing_(*coll_ctx);

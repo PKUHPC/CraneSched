@@ -286,6 +286,7 @@ bool PmixCollTree::ProgressCollect_() {
       CRANE_ERROR("Stub not found for host: {}", this->m_parent_host_);
       this->m_upfwd_buf_.clear();
       this->m_upfwd_status_ = CollTreeSndState::FAILED;
+      ProgressCollectTree_();
       return false;
     }
     auto self = shared_from_this();
@@ -297,6 +298,7 @@ bool PmixCollTree::ProgressCollect_() {
                         self->m_upfwd_buf_.size(), self->m_parent_host_, seq);
             self->m_upfwd_buf_.clear();
             self->m_upfwd_status_ = CollTreeSndState::FAILED;
+            self->ProgressCollectTree_();
             return;
           }
 
@@ -391,6 +393,7 @@ bool PmixCollTree::ProgressUpFwd_() {
                   this->m_downfwd_buf_.size(), host);
       this->m_downfwd_buf_.clear();
       this->m_downfwd_status_ = CollTreeSndState::FAILED;
+      ProgressCollectTree_();
       return false;
     }
     auto self = shared_from_this();
@@ -402,6 +405,7 @@ bool PmixCollTree::ProgressUpFwd_() {
                         self->m_downfwd_buf_.size(), self->m_parent_host_);
             self->m_downfwd_buf_.clear();
             self->m_downfwd_status_ = CollTreeSndState::FAILED;
+            self->ProgressCollectTree_();
             return;
           }
 
