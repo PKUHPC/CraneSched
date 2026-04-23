@@ -175,6 +175,7 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
+        job->SetExitCode(ExitCode::EC_CRANED_DOWN);
         auto now = absl::Now();
         auto max_end_time = job->StartTime() + job->time_limit;
         auto end_time = std::min(now, max_end_time);
@@ -197,6 +198,8 @@ bool JobScheduler::Init() {
                 0, job_db_id, job->RuntimeAttr());
           }
           if (requeue_ok) {
+            if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
+              job->SetHeld(true);
             RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
           } else {
             CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
@@ -354,6 +357,8 @@ bool JobScheduler::Init() {
               0, db_id, job->RuntimeAttr());
         }
         if (requeue_ok) {
+          if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
+            job->SetHeld(true);
           RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
         } else {
           CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
@@ -3196,14 +3201,6 @@ crane::grpc::RequeueJobReply JobScheduler::RequeueJob(
       continue;
     }
 
-    // Check requeue count limit
-    if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount) {
-      (*reply.mutable_not_requeued_jobs())[job_id] =
-          fmt::format("Requeue count {} exceeds max {}", job->RequeueCount(),
-                      g_config.CtldConf.MaxRequeueCount);
-      continue;
-    }
-
     // Mark for requeue and persist to EmbeddedDB before terminating
     job->SetRequeueRequested(true);
     g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
@@ -5857,8 +5854,14 @@ void JobScheduler::PersistAndRequeueJobs_(
                                                         job->RuntimeAttr());
     }
     if (ok) {
-      CRANE_INFO("[Job #{}] Requeued (count: {}).", job_id,
-                 job->RequeueCount());
+      if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount) {
+        job->SetHeld(true);
+        CRANE_INFO("[Job #{}] Requeued (count: {}), held (limit reached).",
+                   job_id, job->RequeueCount());
+      } else {
+        CRANE_INFO("[Job #{}] Requeued (count: {}).", job_id,
+                   job->RequeueCount());
+      }
       requeued.emplace_back(std::move(job));
     } else {
       CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);

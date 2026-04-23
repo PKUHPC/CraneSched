@@ -769,7 +769,8 @@ bool MongodbClient::FetchJobRecords(
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
   // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
-  // 40 nodename_list wckey          submit_hostname deadline
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 requeue_count
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
@@ -887,6 +888,8 @@ bool MongodbClient::FetchJobRecords(
       } else {
         job_info_ptr = &in_mem_job_it->second;
       }
+      int32_t db_requeue_count = ViewValueOr_(view["requeue_count"], 0);
+      if (db_requeue_count < job_info_ptr->requeue_count()) continue;
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
       for (const auto& elem : steps_elem.get_array().value) {
@@ -1068,6 +1071,9 @@ bool MongodbClient::FetchJobStepRecords(
         continue;
       }
       auto* job_info_ptr = &in_mem_job_it->second;
+
+      int32_t db_requeue_count = ViewValueOr_(view["requeue_count"], 0);
+      if (db_requeue_count < job_info_ptr->requeue_count()) continue;
 
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;

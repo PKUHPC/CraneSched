@@ -244,6 +244,7 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
+  bool no_requeue = 53;
 }
 
 message JobInEmbeddedDb {

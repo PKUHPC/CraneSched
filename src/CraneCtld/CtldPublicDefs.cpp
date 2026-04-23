@@ -1593,8 +1593,11 @@ void JobInCtld::SetHeld(bool val) {
 
 bool JobInCtld::ShouldRequeue() const {
   if (type != crane::grpc::Batch) return false;
-  if (requeue_count >= g_config.CtldConf.MaxRequeueCount) return false;
   if (requeue_requested) return true;
+  if (job_to_ctld.no_requeue()) return false;
+  if (exit_code == ExitCode::EC_CRANED_DOWN ||
+      exit_code == ExitCode::EC_RPC_ERR)
+    return true;
   return requeue_if_failed && status != crane::grpc::Completed &&
          status != crane::grpc::Cancelled;
 }
