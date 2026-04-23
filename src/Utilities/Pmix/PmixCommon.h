@@ -22,6 +22,7 @@
 #  include <pmix_common.h>
 #endif
 
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -92,31 +93,14 @@ static constexpr size_t kAmMaxMessageSize = 4ULL * 1024 * 1024;
 #endif  // HAVE_UCX
 
 #ifdef HAVE_PMIX
-inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
+// Thin wrapper around a pmix_modex_cbfunc_t invocation.  status is passed
+// through unchanged so that the full PMIx status code reaches the caller;
+// rel_fn is typed as pmix_release_cbfunc_t to avoid unsafe void* casts at
+// every call site.
+inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, pmix_status_t status,
                                const char* data, size_t ndata, void* cbdata,
-                               void* rel_fn, void* rel_data) {
-  pmix_status_t rc = PMIX_SUCCESS;
-  auto release_fn = reinterpret_cast<pmix_release_cbfunc_t>(rel_fn);
-
-  switch (status) {
-  case PMIX_SUCCESS:
-    rc = PMIX_SUCCESS;
-    break;
-  case PMIX_ERR_INVALID_NAMESPACE:
-    rc = PMIX_ERR_INVALID_NAMESPACE;
-    break;
-  case PMIX_ERR_BAD_PARAM:
-    rc = PMIX_ERR_BAD_PARAM;
-    break;
-  case PMIX_ERR_TIMEOUT:
-    rc = PMIX_ERR_TIMEOUT;
-    break;
-  default:
-    rc = PMIX_ERROR;
-    break;
-  }
-
-  cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
+                               pmix_release_cbfunc_t rel_fn, void* rel_data) {
+  cbfunc(status, data, ndata, cbdata, rel_fn, rel_data);
 }
 #endif
 
