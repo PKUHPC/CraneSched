@@ -361,15 +361,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           if (job->IsCrun()) {
             const auto& mpi = job->JobToCtld().interactive_meta().mpi();
+#ifdef HAVE_PMIX
+            // PMIx is compiled in: only "pmix" is a valid MPI type.
             if (!mpi.empty() && mpi != kMpiTypePmix) {
               result = std::unexpected(fmt::format(
                   "Unsupported MPI type: '{}'. Supported types: {}", mpi,
                   kMpiTypePmix));
-            } else if (mpi == kMpiTypePmix) {
-#ifndef HAVE_PMIX
-              result = std::unexpected("MPI type pmix is not supported.");
-#endif
             }
+#else
+            // PMIx is not compiled in: reject any non-empty MPI type.
+            if (!mpi.empty()) {
+              result = std::unexpected(fmt::format(
+                  "Unsupported MPI type: '{}'. This build does not support "
+                  "any MPI type.",
+                  mpi));
+            }
+#endif
           }
 
           if (result) {
@@ -440,15 +447,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           
           const auto& mpi = step->StepToCtld().interactive_meta().mpi();
+#ifdef HAVE_PMIX
+          // PMIx is compiled in: only "pmix" is a valid MPI type.
           if (!mpi.empty() && mpi != kMpiTypePmix) {
             result = std::unexpected(fmt::format(
                 "Unsupported MPI type: '{}'. Supported types: {}", mpi,
                 kMpiTypePmix));
-          } else if (mpi == kMpiTypePmix) {
-#ifndef HAVE_PMIX
-            result = std::unexpected("MPI type pmix is not supported.");
-#endif
           }
+#else
+          // PMIx is not compiled in: reject any non-empty MPI type.
+          if (!mpi.empty()) {
+            result = std::unexpected(fmt::format(
+                "Unsupported MPI type: '{}'. This build does not support "
+                "any MPI type.",
+                mpi));
+          }
+#endif
 
           if (result) {
             auto submit_result =
@@ -616,6 +630,7 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
         broadcast_bl.DecrementCount();
       }).detach();
     }
+    
     broadcast_bl.Wait();
 
     CRANE_TRACE(

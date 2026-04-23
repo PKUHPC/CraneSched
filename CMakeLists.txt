@@ -343,6 +343,10 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
+# Path to PMIx installation prefix (e.g. /opt/pmix). Leave empty to disable.
+# Example: cmake -DWITH_PMIX=/opt/pmix ...
+set(WITH_PMIX "" CACHE PATH "Path to PMIx installation prefix")
+
 find_package(PMIx)
 
 if (ENABLE_BERKELEY_DB)
