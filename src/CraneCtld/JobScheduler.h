@@ -831,8 +831,7 @@ class JobScheduler {
     }
     [[nodiscard]] absl::Time deadline_time() const {
       return job_template.has_deadline_time()
-                 ? absl::FromUnixSeconds(
-                       job_template.deadline_time().seconds())
+                 ? absl::FromUnixSeconds(job_template.deadline_time().seconds())
                  : absl::FromUnixSeconds(kJobMaxTimeStampSec);
     }
     [[nodiscard]] absl::Time submit_time() const {
@@ -856,9 +855,8 @@ class JobScheduler {
     }
 
     [[nodiscard]] uint32_t EffectiveConcurrencyLimit() const {
-      uint32_t limit = array_max_concurrent == 0
-                           ? kDefaultArrayConcurrent
-                           : array_max_concurrent;
+      uint32_t limit = array_max_concurrent == 0 ? kDefaultArrayConcurrent
+                                                 : array_max_concurrent;
       return std::min(limit, TotalTaskCount());
     }
 
@@ -876,17 +874,11 @@ class JobScheduler {
     }
 
     // Mutators — write only to runtime_attr
-    void SetStatus(crane::grpc::JobStatus val) {
-      runtime_attr.set_status(val);
-    }
+    void SetStatus(crane::grpc::JobStatus val) { runtime_attr.set_status(val); }
 
-    void SetExitCode(uint32_t val) {
-      runtime_attr.set_exit_code(val);
-    }
+    void SetExitCode(uint32_t val) { runtime_attr.set_exit_code(val); }
 
-    void SetHeld(bool val) {
-      runtime_attr.set_held(val);
-    }
+    void SetHeld(bool val) { runtime_attr.set_held(val); }
 
     void SetSubmitTime(absl::Time val) {
       runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(val));
@@ -924,9 +916,8 @@ class JobScheduler {
                                  absl::Time event_time) const;
 
     void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
-    bool SetFieldsOfVirtualArrayChildJobInfo(uint32_t task_id,
-                                             crane::grpc::JobInfo* job_info)
-        const;
+    bool SetFieldsOfVirtualArrayChildJobInfo(
+        uint32_t task_id, crane::grpc::JobInfo* job_info) const;
   };
 
  public:
