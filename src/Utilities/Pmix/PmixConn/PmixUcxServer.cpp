@@ -327,8 +327,9 @@ void PmixUcxServer::RegisterReceivesForType_(PmixUcxMsgType type, int count) {
     req->data.resize(kAmMaxMessageSize);
 
     ucp_request_param_t param{};
-    param.op_attr_mask =
-        UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+    param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+                         UCP_OP_ATTR_FIELD_USER_DATA |
+                         UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
     param.cb.recv = RecvHandle_;
     param.user_data = req;
 
