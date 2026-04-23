@@ -190,7 +190,7 @@ int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth,
   current = rank + 1;
   child_distance = max_rank_children / width;
   for (i = 0; i < width && current < num_nodes; i++) {
-    children->emplace_back(current);
+    (*children)[i] = current;
     current += child_distance;
   }
   return i;
