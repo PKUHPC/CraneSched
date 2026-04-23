@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -43,8 +43,6 @@ enum class CollType : std::uint8_t {
   FENCE_TREE,
   FENCE_RING,
   FENCE_MAX,
-  CONNECT,
-  DISCONNECT
 };
 
 inline std::string ToString(CollType type) {
@@ -55,10 +53,6 @@ inline std::string ToString(CollType type) {
     return "FENCE_RING";
   case CollType::FENCE_MAX:
     return "FENCE_MAX";
-  case CollType::CONNECT:
-    return "CONNECT";
-  case CollType::DISCONNECT:
-    return "DISCONNECT";
   default:
     return "UNKNOWN";
   }
@@ -67,9 +61,6 @@ inline std::string ToString(CollType type) {
 inline CollType StrToCollType(const std::string& str) {
   if (str == "FENCE_TREE") return CollType::FENCE_TREE;
   if (str == "FENCE_RING") return CollType::FENCE_RING;
-  if (str == "FENCE_MAX") return CollType::FENCE_MAX;
-  if (str == "CONNECT") return CollType::CONNECT;
-  if (str == "DISCONNECT") return CollType::DISCONNECT;
 
   return CollType::FENCE_MAX;
 }
