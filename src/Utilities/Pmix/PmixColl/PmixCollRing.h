@@ -50,14 +50,14 @@ inline std::string ToString(CollRingState state) {
 };
 
 struct CollRingCtx {
-  int peers_cnt;
-  bool in_use;
-  uint32_t seq;
-  bool contrib_local;
-  uint32_t contrib_prev;
-  uint32_t forward_cnt;
+  int peers_cnt{0};
+  bool in_use{false};
+  uint32_t seq{0};
+  bool contrib_local{false};
+  uint32_t contrib_prev{0};
+  uint32_t forward_cnt{0};
   std::vector<bool> contrib_map;
-  CollRingState state;
+  CollRingState state{CollRingState::SYNC};
   std::string ring_buf;
 #ifdef HAVE_PMIX
   // Per-context callback: each in-flight fence carries its own completion
@@ -65,7 +65,7 @@ struct CollRingCtx {
   pmix_modex_cbfunc_t cbfunc{};
   void* cbdata{};
 #endif
-}; 
+};
 
 class PmixCollRing : public Coll,
                      public std::enable_shared_from_this<PmixCollRing> {
