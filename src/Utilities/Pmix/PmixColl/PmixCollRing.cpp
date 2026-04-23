@@ -320,7 +320,12 @@ void PmixCollRing::RingReleaseFn(void* rel_data) {
   auto* cb_data = static_cast<CbData*>(rel_data);
 
   std::lock_guard lock_guard(cb_data->coll->m_lock_);
-  cb_data->coll_ring_ctx->ring_buf.clear();
+  // Guard against a recycled context: only clear ring_buf when the context
+  // slot still belongs to the same fence sequence.  If the slot has been
+  // reused by a newer collective, touching ring_buf would corrupt its data.
+  if (cb_data->coll_ring_ctx->seq == cb_data->seq) {
+    cb_data->coll_ring_ctx->ring_buf.clear();
+  }
 
   delete cb_data;
 }
@@ -333,6 +338,7 @@ void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
   auto cb_data = std::make_unique<CbData>();
   cb_data->coll = shared_from_this();
   cb_data->coll_ring_ctx = &coll_ring_ctx;
+  cb_data->seq = coll_ring_ctx.seq;
 
   PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS,
                      coll_ring_ctx.ring_buf.data(),
