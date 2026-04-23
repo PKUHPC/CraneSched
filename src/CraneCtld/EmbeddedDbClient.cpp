@@ -957,21 +957,19 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
   return true;
 }
 
-std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
-    const std::vector<JobInCtld*>& jobs) {
+bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
+    const std::vector<JobInCtld*>& jobs,
+    const std::vector<ExtraVariableWrite>& extra_variable_writes) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
-  // Note: In current implementation, this function is called by only
-  // one single thread and the lock here is actually useless.
-  // However, it costs little and prevents race condition,
-  // so we just leave it here.
   absl::MutexLock lock_ids(&s_job_id_and_db_id_mtx_);
 
   uint32_t job_id{s_next_job_id_};
   db_id_t job_db_id{s_next_job_db_id_};
 
-  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return std::nullopt;
+  // Phase 1: fixed DB — immutable job metadata.
+  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
 
   for (const auto& job : jobs) {
     job->SetJobId(job_id++);
@@ -984,17 +982,15 @@ std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
       CRANE_ERROR(
           "Failed to store the fixed data of job id: {} / job db id: {}.",
           job->JobId(), job->JobDbId());
-
-      // Just drop this batch if any of them failed.
-      return std::nullopt;
+      return false;
     }
   }
 
-  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return std::nullopt;
+  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
-  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) {
-    return std::nullopt;
-  }
+  // Phase 2: variable DB — mutable runtime state, id counters, and any
+  // caller-supplied extra writes (e.g. marking an array parent expanded).
+  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
   for (const auto& job : jobs) {
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
@@ -1005,7 +1001,18 @@ std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
           "Failed to store the variable data of "
           "job id: {} / job db id: {}.",
           job->JobId(), job->JobDbId());
-      return std::nullopt;
+      return false;
+    }
+  }
+
+  for (const auto& extra : extra_variable_writes) {
+    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
+                              GetVariableDbEntryName_(extra.db_id),
+                              extra.runtime_attr);
+    if (!result) {
+      CRANE_ERROR(
+          "Failed to store extra variable write for db id: {}.", extra.db_id);
+      return false;
     }
   }
 
@@ -1013,21 +1020,23 @@ std::optional<txn_id_t> EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                             &job_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_id.");
-    return std::nullopt;
+    return false;
   }
 
   result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_job_db_id_str_,
                             &job_db_id);
   if (!result) {
     CRANE_ERROR("Failed to store next_job_db_id.");
-    return std::nullopt;
+    return false;
   }
 
-  // Update the global counters before returning
+  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
+
+  // Only advance in-memory counters after both DBs are committed.
   s_next_job_id_ = job_id;
   s_next_job_db_id_ = job_db_id;
 
-  return txn_id;
+  return true;
 }
 
 bool EmbeddedDbClient::PurgeEndedJobs(

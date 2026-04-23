@@ -2507,6 +2507,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
     return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
+  std::vector<std::pair<job_id_t, std::vector<CranedId>>>
+      running_child_craneds;
 
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -2636,6 +2638,66 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
 
       g_embedded_db_client->UpdateJobToCtldIfExists(0, meta->array_job_db_id,
                                                     meta->job_template);
+
+      // Slurm semantics: time constraint change on array root propagates to
+      // ALL materialized children (pending + running).
+      std::vector<std::pair<job_db_id_t, crane::grpc::JobToCtld>>
+          child_persist;
+
+      // Propagate to pending children
+      for (job_id_t child_job_id : meta->pending_child_job_ids) {
+        auto child_iter = m_pending_job_map_.find(child_job_id);
+        if (child_iter == m_pending_job_map_.end()) continue;
+        JobInCtld* child = child_iter->second.get();
+
+        if (time_limit_seconds) {
+          child->time_limit = absl::Seconds(time_limit_seconds.value());
+          child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
+              time_limit_seconds.value());
+        }
+        if (absl_deadline_time) {
+          child->deadline_time = absl_deadline_time.value();
+          child->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
+              absl::ToUnixSeconds(absl_deadline_time.value()));
+          if (child->deadline_time !=
+              absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+            m_job_deadline_timer_create_queue_.enqueue(
+                {child_job_id, deadline_time.value()});
+            m_job_deadline_timer_create_async_handle_->send();
+          } else {
+            DelDeadlineTimer_(child_job_id);
+          }
+        }
+        child_persist.emplace_back(child->JobDbId(), child->JobToCtld());
+      }
+
+      // Propagate to running children
+      for (job_id_t child_job_id : meta->running_child_job_ids) {
+        auto child_iter = m_running_job_map_.find(child_job_id);
+        if (child_iter == m_running_job_map_.end()) continue;
+        JobInCtld* child = child_iter->second.get();
+
+        if (time_limit_seconds) {
+          child->time_limit = absl::Seconds(time_limit_seconds.value());
+          child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
+              time_limit_seconds.value());
+        }
+        if (absl_deadline_time) {
+          child->deadline_time = absl_deadline_time.value();
+          child->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
+              absl::ToUnixSeconds(absl_deadline_time.value()));
+        }
+        child_persist.emplace_back(child->JobDbId(), child->JobToCtld());
+        running_child_craneds.emplace_back(child_job_id,
+                                           child->executing_craned_ids);
+      }
+
+      // Persist all children to DB (done inside lock, matching existing
+      // pattern for the root)
+      for (auto& [child_db_id, child_proto] : child_persist) {
+        g_embedded_db_client->UpdateJobToCtldIfExists(0, child_db_id,
+                                                      child_proto);
+      }
     } else {
       if (time_limit_seconds) {
         job->time_limit = absl::Seconds(time_limit_seconds.value());
@@ -2674,6 +2736,25 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
               "Failed to change time limit or deadline of job #{} on Node {}",
               job_id, craned_id);
           return err;
+        }
+      }
+    }
+  }
+
+  // Send RPC to craned for running array children
+  if (is_array_root) {
+    for (auto& [child_job_id, child_craned_ids] : running_child_craneds) {
+      for (const CranedId& craned_id : child_craned_ids) {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (stub && !stub->Invalid()) {
+          CraneErrCode err = stub->ChangeJobTimeConstraint(
+              child_job_id, time_limit_seconds, deadline_time);
+          if (err != CraneErrCode::SUCCESS) {
+            CRANE_ERROR(
+                "Failed to change time limit or deadline of array child #{} "
+                "on Node {}",
+                child_job_id, craned_id);
+          }
         }
       }
     }
@@ -3418,6 +3499,16 @@ CraneErrCode JobScheduler::ChangeJobPriority(job_id_t job_id, double priority) {
   if (meta != nullptr) {
     meta->mandated_priority = priority;
     meta->SetCachedPriority(priority);
+
+    // Slurm semantics: priority change on array root propagates to all
+    // pending children. Running children keep their priority.
+    for (job_id_t child_job_id : meta->pending_child_job_ids) {
+      auto child_iter = m_pending_job_map_.find(child_job_id);
+      if (child_iter == m_pending_job_map_.end()) continue;
+      child_iter->second->mandated_priority = priority;
+      child_iter->second->SetCachedPriority(priority);
+    }
+
     m_pending_job_map_mtx_.Unlock();
     return CraneErrCode::SUCCESS;
   }
@@ -3452,6 +3543,27 @@ CraneErrCode JobScheduler::ChangeJobExtraAttrs(
       meta->job_template.set_extra_attr(new_extra_attr);
       g_embedded_db_client->UpdateJobToCtldIfExists(0, meta->array_job_db_id,
                                                     meta->job_template);
+
+      // Slurm semantics: extra attr change on array root propagates to ALL
+      // materialized children (pending + running).
+      for (job_id_t child_job_id : meta->pending_child_job_ids) {
+        auto child_iter = m_pending_job_map_.find(child_job_id);
+        if (child_iter == m_pending_job_map_.end()) continue;
+        JobInCtld* child = child_iter->second.get();
+        child->extra_attr = new_extra_attr;
+        child->MutableJobToCtld()->set_extra_attr(new_extra_attr);
+        g_embedded_db_client->UpdateJobToCtldIfExists(0, child->JobDbId(),
+                                                      child->JobToCtld());
+      }
+      for (job_id_t child_job_id : meta->running_child_job_ids) {
+        auto child_iter = m_running_job_map_.find(child_job_id);
+        if (child_iter == m_running_job_map_.end()) continue;
+        JobInCtld* child = child_iter->second.get();
+        child->extra_attr = new_extra_attr;
+        child->MutableJobToCtld()->set_extra_attr(new_extra_attr);
+        g_embedded_db_client->UpdateJobToCtldIfExists(0, child->JobDbId(),
+                                                      child->JobToCtld());
+      }
       return CraneErrCode::SUCCESS;
     }
 
@@ -3618,11 +3730,8 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     if (job->IsArrayParent()) {
       job->SetStatus(crane::grpc::Pending);
       std::vector<JobInCtld*> root_jobs{job.get()};
-      auto txn_id_opt =
-          g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(root_jobs);
-      if (!txn_id_opt.has_value() ||
-          !g_embedded_db_client->CommitVariableDbTransaction(
-              txn_id_opt.value())) {
+      if (!g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
+              root_jobs)) {
         return std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED);
       }
 
@@ -3675,11 +3784,38 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
     meta->SetHeld(hold);
     auto db_id = meta->array_job_db_id;
     auto runtime_attr = meta->runtime_attr;
+
+    // Slurm semantics: hold/release on array root propagates to all pending
+    // children. Running children are unaffected (hold only prevents
+    // scheduling).
+    std::vector<std::pair<job_db_id_t, crane::grpc::RuntimeAttrOfJob>>
+        child_persist;
+    for (job_id_t child_job_id : meta->pending_child_job_ids) {
+      auto child_iter = m_pending_job_map_.find(child_job_id);
+      if (child_iter == m_pending_job_map_.end()) continue;
+      JobInCtld* child = child_iter->second.get();
+      child->SetHeld(hold);
+      uint32_t task_id = child->JobToCtld().array_task_id();
+      if (hold) {
+        meta->runnable_pending_child_job_id_by_task_id.erase(task_id);
+      } else {
+        meta->runnable_pending_child_job_id_by_task_id[task_id] =
+            child_job_id;
+      }
+      child_persist.emplace_back(child->JobDbId(), child->RuntimeAttr());
+    }
+
     m_pending_job_map_mtx_.Unlock();
+
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(0, db_id,
                                                               runtime_attr))
       CRANE_ERROR("Failed to update runtime attr of array root #{} to DB",
                   job_id);
+    for (auto& [child_db_id, child_rt_attr] : child_persist) {
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+              0, child_db_id, child_rt_attr))
+        CRANE_ERROR("Failed to update runtime attr of array child to DB");
+    }
     return CraneErrCode::SUCCESS;
   }
 
@@ -5013,21 +5149,9 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
       accepted_job_ptrs.emplace_back(job);
     }
 
-    auto txn_id_opt = g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
-        accepted_job_ptrs);
-    if (!txn_id_opt.has_value()) {
+    if (!g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
+            accepted_job_ptrs)) {
       CRANE_ERROR("Failed to append a batch of jobs to embedded db queue.");
-      for (auto& pair : accepted_jobs) {
-        g_account_meta_container->FreeQosSubmitResource(*pair.first);
-        pair.second /*promise*/.set_value(
-            std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
-      }
-      break;
-    }
-
-    if (!g_embedded_db_client->CommitVariableDbTransaction(
-            txn_id_opt.value())) {
-      CRANE_ERROR("Failed to commit variable db transaction.");
       for (auto& pair : accepted_jobs) {
         g_account_meta_container->FreeQosSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(
@@ -7758,33 +7882,20 @@ JobScheduler::PersistAndTrackArrayChildrenNoLock_(
     malloced_ptrs.push_back(child);
   }
 
-  auto txn_id_opt =
-      g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(child_ptrs);
-  if (!txn_id_opt.has_value()) {
-    CRANE_ERROR("Failed to persist array children for parent job #{}.",
-                meta->array_job_id);
-    FreeArrayChildSubmitResources_(malloced_ptrs);
-    return {ArrayBatchPersistResult::kTransientFailure};
-  }
-
   bool all_children_created =
       meta->materialized_task_ids.size() + child_ptrs.size() ==
       meta->TotalTaskCount();
 
+  std::vector<EmbeddedDbClient::ExtraVariableWrite> extra_writes;
   if (all_children_created) {
     meta->SetExpanded(true);
-    if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
-            txn_id_opt.value(), meta->array_job_db_id, meta->runtime_attr)) {
-      CRANE_ERROR("Failed to mark array parent job #{} as expanded.",
-                  meta->array_job_id);
-      meta->SetExpanded(false);
-      FreeArrayChildSubmitResources_(malloced_ptrs);
-      return {ArrayBatchPersistResult::kTransientFailure};
-    }
+    extra_writes.push_back({meta->array_job_db_id, &meta->runtime_attr});
   }
 
-  if (!g_embedded_db_client->CommitVariableDbTransaction(txn_id_opt.value())) {
-    CRANE_ERROR("Failed to commit variable db transaction for array children.");
+  if (!g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
+          child_ptrs, extra_writes)) {
+    CRANE_ERROR("Failed to persist array children for parent job #{}.",
+                meta->array_job_id);
     if (all_children_created) {
       meta->SetExpanded(false);
     }
