@@ -252,6 +252,8 @@ message JobToCtld {
   optional uint32 array_index_stride = 56;
   // The concrete array task index of this job after expansion.
   optional uint32 array_task_id = 55;
+  // Max concurrent running array tasks. 0 = use scheduler default.
+  optional uint32 array_max_concurrent = 57;
 }
 
 message JobInEmbeddedDb {

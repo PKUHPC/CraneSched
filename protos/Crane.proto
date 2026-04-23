@@ -299,10 +299,10 @@ message ModifyJobRequest {
     // If hold_seconds > 0, add or overwrite a hold constraint timer;
     // If hold_seconds == MaxInt64, add a hold constraint without timer.
     int64 hold_seconds = 7;
-    google.protobuf.Timestamp deadline_time = 9;
+    google.protobuf.Timestamp deadline_time = 8;
   }
 
-  map<uint32, ArrayTaskIds> filter_array_task_ids = 8;
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
 }
 
 message ModifyJobReply {

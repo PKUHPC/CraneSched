@@ -75,6 +75,7 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
 constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
+constexpr uint32_t kDefaultArrayConcurrent = 32;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 

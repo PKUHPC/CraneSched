@@ -769,6 +769,17 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+  enum class ArrayBatchPersistResult {
+    kSuccess,
+    kQosLimitFailure,
+    kTransientFailure,
+  };
+
+  struct ArrayBatchPersistOutcome {
+    ArrayBatchPersistResult kind;
+    CraneErrCode qos_err = CraneErrCode::SUCCESS;
+  };
+
  public:
   struct ArrayMeta {
     // Array indexing
@@ -777,6 +788,7 @@ class JobScheduler {
     uint32_t array_index_start{0};
     uint32_t array_index_end{0};
     uint32_t array_index_stride{1};
+    uint32_t array_max_concurrent{0};  // 0 => kDefaultArrayConcurrent
 
     // Protobuf data sources — all static/runtime info is read from these
     crane::grpc::JobToCtld job_template;
@@ -841,6 +853,13 @@ class JobScheduler {
       if (array_index_end < array_index_start) return 0;
       uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
       return (array_index_end - array_index_start) / stride + 1;
+    }
+
+    [[nodiscard]] uint32_t EffectiveConcurrencyLimit() const {
+      uint32_t limit = array_max_concurrent == 0
+                           ? kDefaultArrayConcurrent
+                           : array_max_concurrent;
+      return std::min(limit, TotalTaskCount());
     }
 
     [[nodiscard]] uint32_t GetTaskIdByIndex(uint32_t index) const {
@@ -1170,6 +1189,9 @@ class JobScheduler {
   HashMap<job_id_t, std::shared_ptr<ArrayMeta>> m_array_metas_
       ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 
+  HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_array_root_job_map_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
+
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
   Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
@@ -1210,13 +1232,15 @@ class JobScheduler {
 
   // Shared helper: persist array children to embedded DB, handle expanded
   // state, commit transaction, and track children into the pending map.
-  // Returns true on success, false on failure (with full rollback).
-  bool PersistAndTrackArrayChildrenNoLock_(
+  ArrayBatchPersistOutcome PersistAndTrackArrayChildrenNoLock_(
       ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
+
+  void FailArrayParentOnQosLimitNoLock_(ArrayMeta* meta, CraneErrCode reason);
 
   // Persist a parent's expanded array children and insert them into the
   // pending map. Must be called while holding both pending/running map locks.
-  bool MaterializeArrayChildrenToPendingMap_(job_id_t array_job_id);
+  bool MaterializeArrayChildrenToPendingMap_(job_id_t array_job_id,
+                                             size_t max_count);
 
   // Materialize specific array tasks by their task IDs.
   // Only creates the tasks that don't already exist.
