@@ -70,6 +70,15 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(
 void ServerBuilderAddTcpInsecureListeningRandomPort(
     grpc::ServerBuilder* builder, const std::string& address, int* select_port);
 
+// TLS variant of ServerBuilderAddTcpInsecureListeningRandomPort.
+// Binds on a random port with mutual TLS; the actual port is written to
+// *selected_port.  Uses certs.CertContent as both the server certificate and
+// the trust anchor (self-signed peer-to-peer pattern).
+void ServerBuilderAddTcpTlsListeningRandomPort(grpc::ServerBuilder* builder,
+                                               const std::string& address,
+                                               const TlsCertificates& certs,
+                                               int* selected_port);
+
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,

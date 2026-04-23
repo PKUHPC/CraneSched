@@ -23,6 +23,7 @@
 #include <condition_variable>
 
 #include "PmixClient.h"
+#include "PmixCommon.h"
 #include "absl/container/node_hash_map.h"
 #include "crane/Lock.h"
 #include "crane/Network.h"
@@ -76,7 +77,8 @@ class PmixGrpcStub : public PmixStub {
 
 class PmixGrpcClient : public PmixClient {
  public:
-  explicit PmixGrpcClient(int node_num) : m_node_num_(node_num) {}
+  explicit PmixGrpcClient(int node_num, const Config& config)
+      : m_node_num_(node_num), m_config_(config) {}
 
   ~PmixGrpcClient() override = default;
 
@@ -118,6 +120,7 @@ class PmixGrpcClient : public PmixClient {
   std::condition_variable m_cv_;
 
   int m_node_num_;
+  Config m_config_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };

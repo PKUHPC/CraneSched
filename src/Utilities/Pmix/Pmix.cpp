@@ -448,7 +448,7 @@ bool PmixServer::ConnInit_(const Config& config) {
 #  endif
   } else {
     m_pmix_client_ =
-        std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num);
+        std::make_unique<PmixGrpcClient>(m_pmix_job_info_.node_num, config);
     CRANE_TRACE("Using gRPC for PMIx communication as default.");
   }
 
