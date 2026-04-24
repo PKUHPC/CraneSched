@@ -828,6 +828,7 @@ bool JobScheduler::Init() {
       if (meta->root_job == nullptr) {
         continue;
       }
+      const job_id_t array_job_id = meta->root_job->JobId();
       if (!ArrayChildrenExpanded(ArrayRoot(*meta))) {
         SyncNextArrayTaskIndexNoLock_(meta.get());
       }

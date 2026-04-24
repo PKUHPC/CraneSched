@@ -1010,8 +1010,8 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
                               GetVariableDbEntryName_(extra.db_id),
                               extra.runtime_attr);
     if (!result) {
-      CRANE_ERROR(
-          "Failed to store extra variable write for db id: {}.", extra.db_id);
+      CRANE_ERROR("Failed to store extra variable write for db id: {}.",
+                  extra.db_id);
       return false;
     }
   }
