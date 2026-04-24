@@ -902,6 +902,7 @@ struct JobInCtld {
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
 
+ private:
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
    * Also, these fields are persisted on the disk.
@@ -1159,6 +1160,12 @@ struct JobInCtld {
   void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
 };
 
+// ArrayMeta owns the array root JobInCtld and tracks scheduler-side
+// materialization state of its array children.
+//
+// The root_job represents the array parent/root job.
+// The remaining fields are runtime bookkeeping used by JobScheduler
+// to track materialized, pending and running array children.
 struct ArrayMeta {
   std::unique_ptr<JobInCtld> root_job;
 
