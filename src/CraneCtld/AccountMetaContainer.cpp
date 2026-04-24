@@ -62,9 +62,11 @@ std::string MetaResource::DebugString() const {
       util::ReadableResourceView(resource));
 }
 
-CraneErrCode AccountMetaContainer::CheckQosSubmitResourceLimit(JobInCtld& job) {
+CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
   CRANE_TRACE(
-      "CheckQosSubmitResourceLimit for job of user {} and account {}.....",
+      "TryMallocQosSubmitResource for job of user {} and account {}.....",
       job.Username(), job.account);
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
@@ -101,24 +103,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceLimit(JobInCtld& job) {
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
 
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
-  CraneErrCode result = CheckQosSubmitResourceLimit(job);
-  if (result != CraneErrCode::SUCCESS) return result;
-
   // Lock the specified user/account/qos to minimize the impact on other users
   // and accounts.
   std::scoped_lock user_lock(m_user_stripes_[StripeForKey_(job.Username())]);
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
-
-  auto qos = g_account_manager->GetExistedQosInfo(job.qos);
-  if (!qos) {
-    CRANE_ERROR("Unknown QOS '{}'", job.qos);
-    return CraneErrCode::ERR_INVALID_QOS;
-  }
 
   result = CheckUserQosSubmitResourceUsage_(job, *qos);
   if (result != CraneErrCode::SUCCESS) return result;

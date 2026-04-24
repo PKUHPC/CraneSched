@@ -1353,8 +1353,6 @@ void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
   // already been evaluated, which is the same as before the restart.
   if (!job->IsArrayParent()) {
     g_account_meta_container->MallocQosSubmitResource(*job);
-  } else {
-    g_account_meta_container->CheckQosSubmitResourceLimit(*job);
   }
 
   // The order of LockGuards matters.
@@ -3587,19 +3585,16 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (result) result = JobScheduler::CheckJobValidity(job.get());
   if (result) {
     {
-      const auto& user_ptr =
-          g_account_manager->GetExistedUserInfo(job->Username());
-      if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
-
-      auto res =
-          job->IsArrayParent()
-              ? g_account_meta_container->CheckQosSubmitResourceLimit(*job)
-              : g_account_meta_container->TryMallocQosSubmitResource(*job);
-      if (res != CraneErrCode::SUCCESS) {
-        CRANE_DEBUG("The requested QoS resources have reached the limit.");
-        return std::unexpected(res);
-      }
       if (!job->IsArrayParent()) {
+        const auto& user_ptr =
+            g_account_manager->GetExistedUserInfo(job->Username());
+        if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+        auto res = g_account_meta_container->TryMallocQosSubmitResource(*job);
+        if (res != CraneErrCode::SUCCESS) {
+          CRANE_DEBUG("The requested QoS resources have reached the limit.");
+          return std::unexpected(res);
+        }
         g_account_meta_container->UserAddJob(user_ptr->name);
       }
     }

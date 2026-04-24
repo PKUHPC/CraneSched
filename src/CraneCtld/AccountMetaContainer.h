@@ -73,8 +73,6 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode CheckQosSubmitResourceLimit(JobInCtld& job);
-
   CraneErrCode TryMallocQosSubmitResource(JobInCtld& job);
 
   void MallocQosSubmitResource(const JobInCtld& job);
