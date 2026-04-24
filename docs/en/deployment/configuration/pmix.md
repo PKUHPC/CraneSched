@@ -74,9 +74,13 @@ crun --nodes=2 --ntasks-per-node=4 --mpi=pmix ./my_mpi_program
 ```
 
 CraneSched will:
+
 1. Request resources for 2 nodes from the scheduler
+
 2. Directly launch 4 instances of `./my_mpi_program` on each node
+
 3. Assign ranks (0–7) and a namespace to all 8 processes via the built-in PMIx server
+
 4. When each MPI program calls `MPI_Init()`, it completes the handshake via PMIx and automatically obtains its rank
 
 No `mpirun` is required.
@@ -218,8 +222,11 @@ crun --nodes=1 --ntasks-per-node=4 --mpi=pmix ./hello_mpi
 Sample output:
 ```
 Hello from rank 0 of 4 on node cn01
+
 Hello from rank 1 of 4 on node cn01
+
 Hello from rank 2 of 4 on node cn01
+
 Hello from rank 3 of 4 on node cn01
 ```
 
