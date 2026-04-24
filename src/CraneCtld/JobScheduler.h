@@ -814,7 +814,7 @@ class JobScheduler {
 
   void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
                          crane::grpc::ModifyJobReply* response,
-                         std::list<job_id_t>* job_ids);
+                         std::vector<job_id_t>* job_ids);
 
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
@@ -978,8 +978,8 @@ class JobScheduler {
   ArrayTaskResolveResult ResolveArrayTaskIdsNoLock_(
       job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids,
       ArrayTaskResolveMode mode);
-  std::unique_ptr<JobInCtld> BuildArrayChildJob_(
-      const JobInCtld& array_parent, uint32_t task_id) const;
+  std::unique_ptr<JobInCtld> BuildArrayChildJob_(const JobInCtld& array_parent,
+                                                 uint32_t task_id) const;
   std::unique_ptr<JobInCtld> BuildNextArrayChildNoLock_(ArrayMeta* meta) const;
   void SyncNextArrayTaskIndexNoLock_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);

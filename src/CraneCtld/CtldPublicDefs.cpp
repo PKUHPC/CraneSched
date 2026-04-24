@@ -1686,6 +1686,14 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+void JobInCtld::SetArrayChildrenExpanded(bool expanded) {
+  if (expanded) {
+    runtime_attr.set_array_children_expanded(true);
+  } else {
+    runtime_attr.clear_array_children_expanded();
+  }
+}
+
 void JobInCtld::SetArrayTaskIdentity(job_id_t val, uint32_t task_id) {
   auto* array_task = runtime_attr.mutable_array_task();
   array_task->set_array_job_id(val);

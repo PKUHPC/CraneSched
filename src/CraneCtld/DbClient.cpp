@@ -901,8 +901,11 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit      time_submit   work_dir
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
-  // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
-  // 40 nodename_list wckey          submit_hostname deadline array_* fields
+  // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
+  // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
+  // 45 array_job_id   submit_hostname array_task_id   deadline
+  // 49 array_start    array_end       array_stride    array_max_concurrent
+  // 53 req_nodes      exclude_nodes   execution_nodes
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
@@ -989,19 +992,15 @@ bool MongodbClient::FetchJobRecords(
                                         job_info.mutable_array_summary());
         }
 
-        if (auto field = view["array_job_id"]; field) {
-          auto value = ViewGetArithmeticValue_<int64_t>(field);
-          if (value >= 0) {
-            job_info.mutable_array_task()->set_array_job_id(
-                static_cast<uint32_t>(value));
-          }
+        if (auto value = ViewValueOr_(view["array_job_id"], int64_t{-1});
+            value >= 0) {
+          job_info.mutable_array_task()->set_array_job_id(
+              static_cast<uint32_t>(value));
         }
-        if (auto field = view["array_task_id"]; field) {
-          auto value = ViewGetArithmeticValue_<int64_t>(field);
-          if (value >= 0) {
-            job_info.mutable_array_task()->set_task_id(
-                static_cast<uint32_t>(value));
-          }
+        if (auto value = ViewValueOr_(view["array_task_id"], int64_t{-1});
+            value >= 0) {
+          job_info.mutable_array_task()->set_task_id(
+              static_cast<uint32_t>(value));
         }
 
         if (view["req_nodes"])

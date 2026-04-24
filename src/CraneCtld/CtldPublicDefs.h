@@ -1024,7 +1024,6 @@ struct JobInCtld {
   crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
     return runtime_attr;
   }
-  crane::grpc::RuntimeAttrOfJob* MutableRuntimeAttr() { return &runtime_attr; }
 
   // =================== Setter/Getter ===================
 
@@ -1082,6 +1081,7 @@ struct JobInCtld {
   bool CancelRequested() const { return cancel_requested; }
 
   // Array job tracking accessors
+  void SetArrayChildrenExpanded(bool expanded);
   void SetArrayTaskIdentity(job_id_t array_job_id, uint32_t task_id);
   [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
     if (!runtime_attr.has_array_task()) {
