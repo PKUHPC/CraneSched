@@ -209,7 +209,7 @@ message JobToCtld {
   optional PodJobAdditionalMeta pod_meta = 23;
   optional ContainerJobAdditionalMeta container_meta = 24;
   IoMeta io_meta = 25;
-  string sh_script = 26; // Crun and cbatch script content
+  string sh_script = 26;  // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -288,7 +288,7 @@ message StepToCtld {
   uint32 job_id = 2;
 
   JobType type = 5;
-  uint32 uid = 6; // Only for authorization
+  uint32 uid = 6;  // Only for authorization
   string name = 7;
 
   uint32 node_num = 8;
@@ -407,8 +407,8 @@ message StepToD {
   // If this step is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this step is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 14; // Currently Only used in CraneCtld
-  google.protobuf.Timestamp submit_time = 15; // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
 
   map<string, string> env = 17;
@@ -494,7 +494,7 @@ message InteractiveJobAdditionalMeta {
 }
 
 message PodJobAdditionalMeta {
-  string name = 1; // Pod name, will use to generate hostname
+  string name = 1;  // Pod name, will use to generate hostname
 
   map<string, string> labels = 2;
   map<string, string> annotations = 3;
@@ -891,7 +891,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
-  ERR_PMIX_ERR = 106;                      // PMIx initialization or runtime error
+  ERR_PMIX_ERR = 106;  // PMIx initialization or runtime error
 }
 
 enum EntityType {

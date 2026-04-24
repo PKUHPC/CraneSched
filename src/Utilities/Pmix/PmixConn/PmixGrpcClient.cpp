@@ -115,9 +115,8 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (m_config_.UseTls) {
-    craned->m_channel_ =
-        CreateTcpTlsCustomChannelByIp(ip_addr, port, m_config_.TlsCerts,
-                                      channel_args);
+    craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
+        ip_addr, port, m_config_.TlsCerts, channel_args);
   } else {
     craned->m_channel_ =
         CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
@@ -132,7 +131,8 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   // and stops duplicate craned_ids from inflating the counter.
   auto [it, inserted] = m_craned_id_stub_map_.emplace(craned_id, craned);
   if (!inserted) {
-    CRANE_WARN("Duplicate EmplacePmixStub for craned_id={}, ignored", craned_id);
+    CRANE_WARN("Duplicate EmplacePmixStub for craned_id={}, ignored",
+               craned_id);
     return;
   }
 

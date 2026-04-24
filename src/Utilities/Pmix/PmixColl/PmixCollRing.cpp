@@ -194,36 +194,35 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
     }
 
     auto self = shared_from_this();
-    stub->SendPmixRingMsgNoBlock(
-        request, [seq = coll_ring_ctx.seq, &coll_ring_ctx, self](bool ok) {
-          std::lock_guard lock_guard(self->m_lock_);
-          if (!ok) {
-            CRANE_ERROR("{:p}, Cannot forward ring data",
-                        static_cast<void*>(&coll_ring_ctx));
-            coll_ring_ctx.ring_buf.clear();
-            if (coll_ring_ctx.cbfunc) {
-              PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_ERR_TIMEOUT,
-                                 nullptr, 0, coll_ring_ctx.cbdata, nullptr,
-                                 nullptr);
-              coll_ring_ctx.cbfunc = nullptr;
-              coll_ring_ctx.cbdata = nullptr;
-            }
-            return;
-          }
+    stub->SendPmixRingMsgNoBlock(request, [seq = coll_ring_ctx.seq,
+                                           &coll_ring_ctx, self](bool ok) {
+      std::lock_guard lock_guard(self->m_lock_);
+      if (!ok) {
+        CRANE_ERROR("{:p}, Cannot forward ring data",
+                    static_cast<void*>(&coll_ring_ctx));
+        coll_ring_ctx.ring_buf.clear();
+        if (coll_ring_ctx.cbfunc) {
+          PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_ERR_TIMEOUT, nullptr, 0,
+                             coll_ring_ctx.cbdata, nullptr, nullptr);
+          coll_ring_ctx.cbfunc = nullptr;
+          coll_ring_ctx.cbdata = nullptr;
+        }
+        return;
+      }
 
-          CRANE_DEBUG("{:p}: called {}", static_cast<void*>(&coll_ring_ctx),
-                      coll_ring_ctx.seq);
-          if (seq != coll_ring_ctx.seq) {
-            CRANE_DEBUG("{:p}: collective was reset!",
-                        static_cast<void*>(&coll_ring_ctx));
-            coll_ring_ctx.ring_buf.clear();
-            return;
-          }
+      CRANE_DEBUG("{:p}: called {}", static_cast<void*>(&coll_ring_ctx),
+                  coll_ring_ctx.seq);
+      if (seq != coll_ring_ctx.seq) {
+        CRANE_DEBUG("{:p}: collective was reset!",
+                    static_cast<void*>(&coll_ring_ctx));
+        coll_ring_ctx.ring_buf.clear();
+        return;
+      }
 
-          coll_ring_ctx.forward_cnt++;
-          self->ProgressCollectRing_(coll_ring_ctx);
-          coll_ring_ctx.ring_buf.clear();
-        });
+      coll_ring_ctx.forward_cnt++;
+      self->ProgressCollectRing_(coll_ring_ctx);
+      coll_ring_ctx.ring_buf.clear();
+    });
   }
 
   return true;

@@ -35,7 +35,7 @@
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
-  
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -352,9 +352,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
           if (job->IsPmix()) {
-            #ifndef HAVE_PMIX
-              result = std::unexpected("PMIx support is not compiled in.");
-            #endif
+#ifndef HAVE_PMIX
+            result = std::unexpected("PMIx support is not compiled in.");
+#endif
           }
 
           if (result) {
@@ -424,9 +424,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
           if (step->IsPmix()) {
-            #ifndef HAVE_PMIX
-              result = std::unexpected("PMIx support is not compiled in.");
-            #endif
+#ifndef HAVE_PMIX
+            result = std::unexpected("PMIx support is not compiled in.");
+#endif
           }
 
           if (result) {
@@ -562,31 +562,31 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
   // The map lock has been released at this point.  Perform the fanout now.
   if (ports_to_broadcast.has_value()) {
-    auto ports_shared = std::make_shared<PmixPortsMetaMapValue>(
-        std::move(*ports_to_broadcast));
+    auto ports_shared =
+        std::make_shared<PmixPortsMetaMapValue>(std::move(*ports_to_broadcast));
 
     job_id_t job_id = request->job_id();
     step_id_t step_id = request->step_id();
 
-      for (const auto& craned_id : request->craned_ids()) {
+    for (const auto& craned_id : request->craned_ids()) {
       g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
-              auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-              if (!craned_stub) {
-                CRANE_ERROR(
-                    "[Step#{}.{}] Craned {} stub not found when broadcasting "
-                    "pmix port.",
-                    job_id, step_id, craned_id);
-                return;
-              }
-              auto result =
-                  craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
-              if (result != CraneErrCode::SUCCESS) {
-                CRANE_ERROR(
-                    "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
-                    job_id, step_id, craned_id);
-              }
+        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!craned_stub) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Craned {} stub not found when broadcasting "
+              "pmix port.",
+              job_id, step_id, craned_id);
+          return;
+        }
+        auto result =
+            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
+        if (result != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+              job_id, step_id, craned_id);
+        }
       });
-      }
+    }
   }
 
   response->set_ok(true);
