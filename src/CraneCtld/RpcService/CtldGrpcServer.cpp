@@ -35,25 +35,7 @@
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
-
-// Returns an error message string if the MPI type is unsupported for this
-// build, or std::nullopt if the type is valid (including empty).
-static std::optional<std::string> ValidateMpiType(const std::string& mpi) {
-#ifdef HAVE_PMIX
-  // PMIx is compiled in: only "pmix" is a valid non-empty MPI type.
-  if (!mpi.empty() && mpi != kMpiTypePmix)
-    return fmt::format("Unsupported MPI type: '{}'. Supported types: {}", mpi,
-                       kMpiTypePmix);
-#else
-  // PMIx is not compiled in: reject any non-empty MPI type.
-  if (!mpi.empty())
-    return fmt::format(
-        "Unsupported MPI type: '{}'. This build does not support any MPI type.",
-        mpi);
-#endif
-  return std::nullopt;
-}
-
+  
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -369,10 +351,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (job->IsCrun()) {
-            const auto& mpi = job->JobToCtld().interactive_meta().mpi();
-            if (auto mpi_err = ValidateMpiType(mpi); mpi_err.has_value())
-              result = std::unexpected(std::move(*mpi_err));
+          if (job->IsPmix()) {
+            #ifndef HAVE_PMIX
+              result = std::unexpected("PMIx support is not compiled in.");
+            #endif
           }
 
           if (result) {
@@ -441,9 +423,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          const auto& mpi = step->StepToCtld().interactive_meta().mpi();
-          if (auto mpi_err = ValidateMpiType(mpi); mpi_err.has_value())
-            result = std::unexpected(std::move(*mpi_err));
+          if (step->IsPmix()) {
+            #ifndef HAVE_PMIX
+              result = std::unexpected("PMIx support is not compiled in.");
+            #endif
+          }
 
           if (result) {
             auto submit_result =

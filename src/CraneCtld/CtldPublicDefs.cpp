@@ -1404,6 +1404,12 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     } else {
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
+    if (this->IsPmix()) {
+      g_job_scheduler->GetPmixPortsMetaMap().erase({job_id, step_id});
+      CRANE_DEBUG("[Step #{}.{}] Erased PMIx port meta for this step.", job_id,
+                  step_id);
+      
+    }
   }
   if (job->AllStepsFinished())
     return std::make_pair(job->PrimaryStepStatus(), job->PrimaryStepExitCode());
