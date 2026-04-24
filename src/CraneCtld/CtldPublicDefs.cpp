@@ -1611,19 +1611,25 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
     return std::nullopt;
   }
 
-  return ArrayTaskMeta{array_job_id.value(),
-                       job_to_ctld.array_task_id(),
-                       ArrayTaskCount(),
-                       job_to_ctld.array_index_start(),
-                       job_to_ctld.array_index_end(),
-                       EffectiveStride_()};
-}
+  uint32_t start = job_to_ctld.array_index_start();
+  uint32_t end = job_to_ctld.array_index_end();
+  if (end < start) {
+    return std::nullopt;
+  }
 
-uint32_t JobInCtld::EffectiveStride_() const {
   uint32_t stride = job_to_ctld.has_array_index_stride()
                         ? job_to_ctld.array_index_stride()
                         : 1;
-  return stride == 0 ? 1 : stride;
+  if (stride == 0) {
+    stride = 1;
+  }
+
+  return ArrayTaskMeta{array_job_id.value(),
+                       job_to_ctld.array_task_id(),
+                       (end - start) / stride + 1,
+                       start,
+                       end,
+                       stride};
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -1818,7 +1824,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   }
 }
 
-void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
+void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_type(type);
   job_info->set_job_id(job_id);
   job_info->set_name(name);
@@ -1922,235 +1928,6 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
     (*mutable_env)[k] = v;
   }
   job_info->set_ntasks(ntasks);
-}
-
-absl::Duration ArrayMeta::time_limit() const {
-  return absl::Seconds(job_template.time_limit().seconds());
-}
-
-absl::Time ArrayMeta::begin_time() const {
-  return job_template.has_begin_time()
-             ? absl::FromUnixSeconds(job_template.begin_time().seconds())
-             : absl::InfinitePast();
-}
-
-absl::Time ArrayMeta::deadline_time() const {
-  return job_template.has_deadline_time()
-             ? absl::FromUnixSeconds(job_template.deadline_time().seconds())
-             : absl::FromUnixSeconds(kJobMaxTimeStampSec);
-}
-
-absl::Time ArrayMeta::submit_time() const {
-  return absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
-}
-
-absl::Time ArrayMeta::start_time() const {
-  return absl::FromUnixSeconds(runtime_attr.start_time().seconds());
-}
-
-absl::Time ArrayMeta::end_time() const {
-  return absl::FromUnixSeconds(runtime_attr.end_time().seconds());
-}
-
-std::string ArrayMeta::username() const { return runtime_attr.username(); }
-
-bool ArrayMeta::Expanded() const {
-  return runtime_attr.has_array_children_expanded() &&
-         runtime_attr.array_children_expanded();
-}
-
-uint32_t ArrayMeta::TotalTaskCount() const {
-  if (array_index_end < array_index_start) return 0;
-  uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-  return (array_index_end - array_index_start) / stride + 1;
-}
-
-uint32_t ArrayMeta::EffectiveConcurrencyLimit() const {
-  uint32_t limit =
-      array_max_concurrent == 0 ? kDefaultArrayConcurrent : array_max_concurrent;
-  return std::min(limit, TotalTaskCount());
-}
-
-uint32_t ArrayMeta::GetTaskIdByIndex(uint32_t index) const {
-  uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-  return array_index_start + index * stride;
-}
-
-bool ArrayMeta::IsValidTaskId(uint32_t task_id) const {
-  if (task_id < array_index_start || task_id > array_index_end) {
-    return false;
-  }
-  uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-  return (task_id - array_index_start) % stride == 0;
-}
-
-void ArrayMeta::SetStatus(crane::grpc::JobStatus val) {
-  runtime_attr.set_status(val);
-}
-
-void ArrayMeta::SetExitCode(uint32_t val) { runtime_attr.set_exit_code(val); }
-
-void ArrayMeta::SetHeld(bool val) { runtime_attr.set_held(val); }
-
-void ArrayMeta::SetSubmitTime(absl::Time val) {
-  runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(val));
-}
-
-void ArrayMeta::SetStartTime(absl::Time val) {
-  runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(val));
-}
-
-void ArrayMeta::SetEndTime(absl::Time val) {
-  runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(val));
-}
-
-void ArrayMeta::SetCachedPriority(double val) {
-  runtime_attr.set_cached_priority(val);
-}
-
-void ArrayMeta::SetExpanded(bool val) {
-  if (val) {
-    runtime_attr.set_array_children_expanded(true);
-  } else {
-    runtime_attr.clear_array_children_expanded();
-  }
-}
-
-void ArrayMeta::UpdateDependency(job_id_t dep_job_id, absl::Time event_time) {
-  dependencies.update(dep_job_id, event_time);
-}
-
-void ArrayMeta::AddDependent(crane::grpc::DependencyType dep_type,
-                             job_id_t dep_job_id) {
-  if (dep_type == crane::grpc::DependencyType::AFTER &&
-      runtime_attr.status() != crane::grpc::JobStatus::Pending) {
-    g_job_scheduler->AddDependencyEvent(dep_job_id, array_job_id, start_time());
-    return;
-  }
-
-  dependents[dep_type].push_back(dep_job_id);
-}
-
-void ArrayMeta::TriggerDependencyEvents(crane::grpc::DependencyType dep_type,
-                                        absl::Time event_time) const {
-  for (job_id_t dependent_id : dependents[dep_type]) {
-    g_job_scheduler->AddDependencyEvent(dependent_id, array_job_id, event_time);
-  }
-}
-
-void ArrayMeta::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
-  job_info->set_type(job_template.type());
-  job_info->set_job_id(array_job_id);
-  job_info->set_name(job_template.name());
-
-  job_info->set_account(job_template.account());
-  job_info->set_partition(job_template.partition_name());
-  job_info->set_qos(job_template.qos());
-
-  job_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit()));
-  job_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
-  job_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
-  job_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
-
-  job_info->set_uid(job_template.uid());
-  job_info->set_gid(job_template.gid());
-  job_info->set_username(username());
-  job_info->set_node_num(job_template.node_num());
-  job_info->set_cmd_line(job_template.cmd_line());
-  job_info->set_cwd(job_template.cwd());
-
-  {
-    std::list<std::string> included_list;
-    util::ParseHostList(job_template.nodelist(), &included_list);
-    job_info->mutable_req_nodes()->Assign(included_list.begin(),
-                                          included_list.end());
-  }
-  {
-    std::list<std::string> excluded_list;
-    util::ParseHostList(job_template.excludes(), &excluded_list);
-    job_info->mutable_exclude_nodes()->Assign(excluded_list.begin(),
-                                              excluded_list.end());
-  }
-
-  job_info->set_extra_attr(job_template.extra_attr());
-  job_info->set_reservation(job_template.reservation());
-  job_info->set_submit_hostname(job_template.submit_hostname());
-
-  if (!dependencies.deps.empty() ||
-      dependencies.ready_time != absl::InfinitePast()) {
-    auto* dep_status = job_info->mutable_dependency_status();
-    dep_status->set_is_or(dependencies.is_or);
-
-    for (const auto& [dep_job_id, dep_info] : dependencies.deps) {
-      const auto& [dep_type, delay_seconds] = dep_info;
-      auto* dep_cond = dep_status->add_pending();
-      dep_cond->set_job_id(dep_job_id);
-      dep_cond->set_type(dep_type);
-      dep_cond->set_delay_seconds(delay_seconds);
-    }
-
-    if (dependencies.ready_time == absl::InfiniteFuture()) {
-      dep_status->set_infinite_future(true);
-    } else if (dependencies.ready_time == absl::InfinitePast()) {
-      dep_status->set_infinite_past(true);
-    } else {
-      dep_status->mutable_ready_time()->set_seconds(
-          absl::ToUnixSeconds(dependencies.ready_time));
-    }
-  }
-
-  job_info->set_held(runtime_attr.held());
-  job_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
-                                             executing_craned_ids.end());
-
-  *job_info->mutable_req_total_res_view() =
-      static_cast<crane::grpc::ResourceView>(req_total_res_view);
-
-  job_info->set_exit_code(runtime_attr.exit_code());
-  job_info->set_priority(runtime_attr.cached_priority());
-  job_info->set_status(runtime_attr.status());
-  if (runtime_attr.status() == crane::grpc::Pending) {
-    job_info->set_pending_reason(pending_reason);
-  } else {
-    job_info->set_craned_list(allocated_craneds_regex);
-  }
-  job_info->set_exclusive(job_template.exclusive());
-
-  std::string wckey_info;
-  if (using_default_wckey) wckey_info += "*";
-  if (!wckey.empty()) wckey_info += wckey;
-  job_info->set_wckey(wckey_info);
-
-  {
-    auto* mutable_lc = job_info->mutable_licenses_count();
-    for (const auto& license : job_template.licenses_count()) {
-      (*mutable_lc)[license.key()] = license.count();
-    }
-  }
-  *job_info->mutable_env() = job_template.env();
-  job_info->set_ntasks(job_template.ntasks());
-}
-
-bool ArrayMeta::SetFieldsOfVirtualArrayChildJobInfo(
-    uint32_t task_id, crane::grpc::JobInfo* job_info) const {
-  if (!IsValidTaskId(task_id)) {
-    return false;
-  }
-
-  SetFieldsOfJobInfo(job_info);
-  job_info->set_job_id(0);
-  job_info->set_array_job_id(array_job_id);
-  job_info->set_array_task_id(task_id);
-  job_info->set_status(crane::grpc::Pending);
-  job_info->mutable_start_time()->Clear();
-  job_info->mutable_end_time()->Clear();
-  job_info->mutable_elapsed_time()->Clear();
-  job_info->set_craned_list("");
-  job_info->mutable_execution_node()->Clear();
-  job_info->set_exit_code(0);
-  *job_info->mutable_allocated_res_view() = crane::grpc::ResourceView{};
-  job_info->clear_step_info_list();
-  return true;
 }
 
 int JobInCtld::SchedulePendingSteps(

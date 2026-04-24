@@ -779,18 +779,6 @@ class JobScheduler {
     ArrayBatchPersistResult kind;
     CraneErrCode qos_err = CraneErrCode::SUCCESS;
   };
-  struct ArraySchedulingState {
-    absl::flat_hash_set<uint32_t> materialized_task_ids;
-    uint32_t next_array_task_index{0};
-
-    absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
-    absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
-
-    absl::flat_hash_set<job_id_t> pending_child_job_ids;
-    absl::flat_hash_set<job_id_t> running_child_job_ids;
-
-    std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
-  };
 
  public:
   JobScheduler();
@@ -985,19 +973,14 @@ class JobScheduler {
 
  private:
   ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
-  ArraySchedulingState* GetArraySchedulingStateNoLock_(job_id_t array_job_id);
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
-      JobInCtld& parent) const;
-  static ArraySchedulingState BuildArraySchedulingStateFromParentNoLock_(
-      JobInCtld& parent, const ArrayMeta& meta);
+      std::unique_ptr<JobInCtld> parent) const;
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
-      const ArrayMeta* meta, const ArraySchedulingState* state,
+      const ArrayMeta* meta,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
-  std::unique_ptr<JobInCtld> CreateArrayChild_(
-      const ArrayMeta& meta, const ArraySchedulingState& state,
-      uint32_t task_id) const;
-  std::unique_ptr<JobInCtld> CreateNextArrayChild_(
-      ArrayMeta* meta, ArraySchedulingState* state) const;
+  std::unique_ptr<JobInCtld> CreateArrayChild_(const JobInCtld& array_parent,
+                                               uint32_t task_id) const;
+  std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
   void TrackArrayChildBookkeepingNoLock_(job_id_t array_job_id,
                                          JobInCtld* child);
@@ -1025,7 +1008,8 @@ class JobScheduler {
 
   static void PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
-  static JobInEmbeddedDb BuildFinalArrayRootRecord_(const ArrayMeta& meta);
+  static JobInEmbeddedDb BuildFinalArrayRootRecord_(
+      const JobInCtld& array_root);
   static void ProcessFinalArrayRoots_(
       const std::vector<std::shared_ptr<ArrayMeta>>& roots);
   static void CallPluginHookForFinalArrayRoots_(
@@ -1056,11 +1040,6 @@ class JobScheduler {
   std::atomic_uint32_t m_pending_map_cached_size_;
 
   HashMap<job_id_t, std::shared_ptr<ArrayMeta>> m_array_metas_
-      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
-  HashMap<job_id_t, ArraySchedulingState> m_array_scheduling_states_
-      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
-
-  HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_array_root_job_map_
       ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
@@ -1104,8 +1083,7 @@ class JobScheduler {
   // Shared helper: persist array children to embedded DB, handle expanded
   // state, commit transaction, and track children into the pending map.
   ArrayBatchPersistOutcome PersistAndTrackArrayChildrenNoLock_(
-      ArrayMeta* meta, ArraySchedulingState* state,
-      std::vector<std::unique_ptr<JobInCtld>>& children);
+      ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
 
   void FailArrayParentOnQosLimitNoLock_(ArrayMeta* meta, CraneErrCode reason);
 

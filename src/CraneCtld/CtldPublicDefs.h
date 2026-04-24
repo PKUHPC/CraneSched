@@ -21,6 +21,9 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include <map>
+#include <memory>
+
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -888,17 +891,6 @@ struct JobInCtld {
     return array_job_id.has_value() && job_to_ctld.has_array_task_id();
   }
 
-  uint32_t ArrayTaskCount() const {
-    if (!job_to_ctld.has_array_index_start() ||
-        !job_to_ctld.has_array_index_end()) {
-      return 0;
-    }
-    uint32_t start = job_to_ctld.array_index_start();
-    uint32_t end = job_to_ctld.array_index_end();
-    if (end < start) return 0;
-    return (end - start) / EffectiveStride_() + 1;
-  }
-
   struct ArrayTaskMeta {
     job_id_t array_job_id;
     uint32_t task_id;
@@ -909,9 +901,6 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
-
- private:
-  uint32_t EffectiveStride_() const;
 
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -1026,7 +1015,9 @@ struct JobInCtld {
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
-  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
+    return runtime_attr;
+  }
   crane::grpc::RuntimeAttrOfJob* MutableRuntimeAttr() { return &runtime_attr; }
 
   // =================== Setter/Getter ===================
@@ -1165,71 +1156,22 @@ struct JobInCtld {
   // Helper function to set the fields of JobInfo using info in
   // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
 };
 
 struct ArrayMeta {
-  job_id_t array_job_id{0};
-  job_db_id_t array_job_db_id{0};
+  std::unique_ptr<JobInCtld> root_job;
 
-  uint32_t array_index_start{0};
-  uint32_t array_index_end{0};
-  uint32_t array_index_stride{1};
-  uint32_t array_max_concurrent{0};
+  absl::flat_hash_set<uint32_t> materialized_task_ids;
+  uint32_t next_array_task_index{0};
 
-  crane::grpc::JobToCtld job_template;
-  crane::grpc::RuntimeAttrOfJob runtime_attr;
+  absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
+  absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
 
-  std::list<std::string> account_chain;
-  uint32_t ntasks_per_node_min{1};
-  uint32_t ntasks_per_node_max{0};
-  uint32_t partition_priority{0};
-  uint32_t qos_priority{0};
-  double mandated_priority{0.0};
+  absl::flat_hash_set<job_id_t> pending_child_job_ids;
+  absl::flat_hash_set<job_id_t> running_child_job_ids;
 
-  bool using_default_wckey{false};
-  std::string wckey;
-
-  ResourceView req_total_res_view;
-
-  std::vector<CranedId> executing_craned_ids;
-  std::string allocated_craneds_regex;
-  std::string pending_reason;
-
-  DependenciesInJob dependencies;
-  std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
-
-  [[nodiscard]] absl::Duration time_limit() const;
-  [[nodiscard]] absl::Time begin_time() const;
-  [[nodiscard]] absl::Time deadline_time() const;
-  [[nodiscard]] absl::Time submit_time() const;
-  [[nodiscard]] absl::Time start_time() const;
-  [[nodiscard]] absl::Time end_time() const;
-  [[nodiscard]] std::string username() const;
-  [[nodiscard]] bool Expanded() const;
-
-  [[nodiscard]] uint32_t TotalTaskCount() const;
-  [[nodiscard]] uint32_t EffectiveConcurrencyLimit() const;
-  [[nodiscard]] uint32_t GetTaskIdByIndex(uint32_t index) const;
-  [[nodiscard]] bool IsValidTaskId(uint32_t task_id) const;
-
-  void SetStatus(crane::grpc::JobStatus val);
-  void SetExitCode(uint32_t val);
-  void SetHeld(bool val);
-  void SetSubmitTime(absl::Time val);
-  void SetStartTime(absl::Time val);
-  void SetEndTime(absl::Time val);
-  void SetCachedPriority(double val);
-  void SetExpanded(bool val);
-
-  void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
-  void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
-  void TriggerDependencyEvents(crane::grpc::DependencyType dep_type,
-                               absl::Time event_time) const;
-
-  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
-  bool SetFieldsOfVirtualArrayChildJobInfo(
-      uint32_t task_id, crane::grpc::JobInfo* job_info) const;
+  std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
 };
 
 enum class QosFlags { DenyOnLimit, _Count };
