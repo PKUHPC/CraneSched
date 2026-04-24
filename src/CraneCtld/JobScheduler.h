@@ -987,6 +987,9 @@ class JobScheduler {
   void TrackArrayChildRunningNoLock_(job_id_t array_job_id, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);
   void RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id);
+  void TryFinalizeArrayRootNoLock_(
+      job_id_t array_job_id, const std::unordered_set<JobInCtld*>& final_jobs,
+      std::vector<std::shared_ptr<ArrayMeta>>* final_roots);
   CraneErrCode TryMallocArrayChildSubmitResource_(JobInCtld& child) const;
   static void FreeArrayChildSubmitResources_(
       const std::vector<JobInCtld*>& children);
@@ -1079,6 +1082,8 @@ class JobScheduler {
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
+  CraneExpected<void> AdmitArrayChildPtrsNoLock_(
+      ArrayMeta* meta, const std::vector<JobInCtld*>& children);
   CraneExpected<void> AdmitArrayChildNoLock_(JobInCtld* child);
   CraneExpected<void> AdmitArrayChildrenNoLock_(
       ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);

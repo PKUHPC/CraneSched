@@ -71,7 +71,6 @@ void ArrayMeta::TrackBookkeeping_(JobInCtld* child) {
   CRANE_ASSERT(task_id.has_value());
   materialized_task_ids.insert(*task_id);
   child_job_id_by_task_id[*task_id] = child->JobId();
-  child_task_id_by_job_id[child->JobId()] = *task_id;
 }
 
 void ArrayMeta::TrackPending(JobInCtld* child) {
@@ -108,7 +107,6 @@ void ArrayMeta::Untrack(JobInCtld* child) {
       by_task_it->second == child->JobId()) {
     child_job_id_by_task_id.erase(by_task_it);
   }
-  child_task_id_by_job_id.erase(child->JobId());
 }
 
 CranedRemoteMeta::CranedRemoteMeta(

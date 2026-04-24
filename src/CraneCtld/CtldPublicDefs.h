@@ -21,7 +21,6 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
-#include <map>
 #include <memory>
 
 #include "protos/PublicDefs.pb.h"
@@ -78,7 +77,6 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
 constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
-constexpr uint32_t kArrayMaterializeBatchSize = 1;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -1211,7 +1209,6 @@ struct ArrayMeta {
   absl::flat_hash_set<uint32_t> materialized_task_ids;
   uint32_t next_array_task_index{0};
   absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
-  absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
   absl::flat_hash_set<job_id_t> pending_child_job_ids;
   absl::flat_hash_set<job_id_t> running_child_job_ids;
 
