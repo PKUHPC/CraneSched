@@ -73,9 +73,9 @@ class PmixCollRing : public Coll,
 #ifdef HAVE_PMIX
   // pmix_client and craned_client are injected so this class never needs to
   // call PmixServer::GetInstance().
-  PmixCollRing(const PmixJobInfo& job_info, PmixClient* pmix_client,
+  PmixCollRing(const PmixStepInfo& job_info, PmixClient* pmix_client,
                CranedClient* craned_client)
-      : m_pmix_job_info_(job_info),
+      : m_pmix_step_info_(job_info),
         m_pmix_client_(pmix_client),
         m_craned_client_(craned_client) {}
 
@@ -132,7 +132,7 @@ class PmixCollRing : public Coll,
     uint32_t seq;
   };
 
-  PmixJobInfo m_pmix_job_info_;
+  PmixStepInfo m_pmix_step_info_;
   PmixClient* m_pmix_client_{nullptr};      // injected, not owned
   CranedClient* m_craned_client_{nullptr};  // injected, not owned
 

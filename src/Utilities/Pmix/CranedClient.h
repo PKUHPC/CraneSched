@@ -29,7 +29,7 @@ namespace pmix {
 
 class CranedClient {
  public:
-  CranedClient(const PmixJobInfo& job_info) : m_pmix_job_info_(job_info) {};
+  CranedClient(const PmixStepInfo& job_info) : m_pmix_step_info_(job_info) {};
 
   ~CranedClient() = default;
 
@@ -40,7 +40,7 @@ class CranedClient {
   bool BroadcastPmixPort(const std::string& pmix_port);
 
  private:
-  PmixJobInfo m_pmix_job_info_;
+  PmixStepInfo m_pmix_step_info_;
 
   std::shared_ptr<grpc::Channel> m_channel_;
 

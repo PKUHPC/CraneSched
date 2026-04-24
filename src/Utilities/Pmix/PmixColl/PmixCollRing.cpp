@@ -33,19 +33,19 @@ bool PmixCollRing::PmixCollInit(CollType type,
   std::set<std::string> hostname_set;
 
   for (const auto& proc : procs) {
-    if (m_pmix_job_info_.nspace != proc.nspace) return false;
+    if (m_pmix_step_info_.nspace != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : m_pmix_job_info_.node_list) {
+      for (const auto& hostname : m_pmix_step_info_.node_list) {
         hostname_set.emplace(hostname);
       }
     } else {
-      if (proc.rank >= m_pmix_job_info_.task_map.size()) {
+      if (proc.rank >= m_pmix_step_info_.task_map.size()) {
         CRANE_ERROR("The rank is out of the task number range.");
         return false;
       }
-      uint32_t node_id = m_pmix_job_info_.task_map[proc.rank];
-      hostname_set.insert(m_pmix_job_info_.node_list[node_id]);
+      uint32_t node_id = m_pmix_step_info_.task_map[proc.rank];
+      hostname_set.insert(m_pmix_step_info_.node_list[node_id]);
     }
   }
 
@@ -56,9 +56,9 @@ bool PmixCollRing::PmixCollInit(CollType type,
     return false;
   }
 
-  auto it = hostname_set.find(m_pmix_job_info_.hostname);
+  auto it = hostname_set.find(m_pmix_step_info_.hostname);
   if (it == hostname_set.end()) {
-    CRANE_ERROR("unknown hostname: {}", m_pmix_job_info_.hostname);
+    CRANE_ERROR("unknown hostname: {}", m_pmix_step_info_.hostname);
     return false;
   }
   m_peerid_ = static_cast<int>(std::distance(hostname_set.begin(), it));
@@ -80,7 +80,7 @@ bool PmixCollRing::PmixCollInit(CollType type,
   }
 
   CRANE_TRACE("ring coll {:p}: crane_id = {}, m_next_craned_id_ = {}",
-              static_cast<void*>(this), m_pmix_job_info_.hostname,
+              static_cast<void*>(this), m_pmix_step_info_.hostname,
               m_next_craned_id_);
 
   return true;
@@ -166,7 +166,7 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(data.size());
-    pmix_ring_msg_hdr->set_craned_id(m_pmix_job_info_.hostname);
+    pmix_ring_msg_hdr->set_craned_id(m_pmix_step_info_.hostname);
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx.seq);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);

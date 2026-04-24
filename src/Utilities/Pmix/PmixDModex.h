@@ -49,9 +49,9 @@ class PmixDModexReqManager {
 #ifdef HAVE_PMIX
   // pmix_client and timeout are injected at construction time so this class
   // never needs to call PmixServer::GetInstance().
-  PmixDModexReqManager(const PmixJobInfo& job_info, PmixClient* pmix_client,
+  PmixDModexReqManager(const PmixStepInfo& job_info, PmixClient* pmix_client,
                        std::chrono::seconds timeout)
-      : m_pmix_job_info_(job_info),
+      : m_pmix_step_info_(job_info),
         m_pmix_client_(pmix_client),
         m_timeout_(timeout) {}
 
@@ -73,7 +73,7 @@ class PmixDModexReqManager {
   void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
                           pmix_status_t status);
 
-  PmixJobInfo m_pmix_job_info_;
+  PmixStepInfo m_pmix_step_info_;
   PmixClient* m_pmix_client_{nullptr};  // injected, not owned
   std::chrono::seconds m_timeout_{5};
 

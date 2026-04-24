@@ -87,19 +87,19 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
     return false;
   }
 
-  if (m_pmix_job_info_.nspace != pmix_namespace) {
+  if (m_pmix_step_info_.nspace != pmix_namespace) {
     CRANE_ERROR("Cannot find pmix namespace {}", pmix_namespace);
     return false;
   }
 
-  if (static_cast<size_t>(rank) >= m_pmix_job_info_.task_map.size()) {
+  if (static_cast<size_t>(rank) >= m_pmix_step_info_.task_map.size()) {
     CRANE_ERROR("The rank {} is out of the range of the task_map (size={}).",
-                rank, m_pmix_job_info_.task_map.size());
+                rank, m_pmix_step_info_.task_map.size());
     return false;
   }
 
   CranedId craned_id =
-      m_pmix_job_info_.node_list[m_pmix_job_info_.task_map[rank]];
+      m_pmix_step_info_.node_list[m_pmix_step_info_.task_map[rank]];
 
   crane::grpc::pmix::PmixDModexRequestReq request{};
 
@@ -130,7 +130,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   pmix_proc->set_rank(rank);
 
   request.set_local_namespace(pmix_namespace);
-  request.set_craned_id(m_pmix_job_info_.hostname);
+  request.set_craned_id(m_pmix_step_info_.hostname);
 
   auto stub = m_pmix_client_->GetPmixStub(craned_id);
   if (!stub) {
@@ -162,17 +162,17 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
                                               const CranedId &craned_id,
                                               const pmix_proc_t &pmix_proc,
                                               const std::string &send_nspace) {
-  if (pmix_proc.nspace != m_pmix_job_info_.nspace) {
+  if (pmix_proc.nspace != m_pmix_step_info_.nspace) {
     CRANE_ERROR("Bad request from {}: asked for nspace = {}", craned_id,
                 send_nspace);
     ResponseWithError_(seq_num, craned_id, PMIX_ERR_INVALID_NAMESPACE);
     return;
   }
 
-  if (m_pmix_job_info_.task_num <= pmix_proc.rank) {
+  if (m_pmix_step_info_.task_num <= pmix_proc.rank) {
     CRANE_ERROR(
         "Bad request from {}: nspace {} has only {} ranks, asked for {}",
-        craned_id, pmix_proc.nspace, m_pmix_job_info_.task_num, pmix_proc.rank);
+        craned_id, pmix_proc.nspace, m_pmix_step_info_.task_num, pmix_proc.rank);
     ResponseWithError_(seq_num, craned_id, PMIX_ERR_BAD_PARAM);
     return;
   }

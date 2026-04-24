@@ -45,8 +45,8 @@ void CranedClient::TerminateSteps() {
 
   auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  job_step_map[m_pmix_job_info_.job_id].mutable_steps()->Add(
-      m_pmix_job_info_.step_id);
+  job_step_map[m_pmix_step_info_.job_id].mutable_steps()->Add(
+      m_pmix_step_info_.step_id);
 
   if (m_stub_ == nullptr) {
     CRANE_ERROR("Failed to terminate tasks, stub is null");
@@ -68,7 +68,7 @@ void CranedClient::TerminateSteps() {
 }
 
 bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
-  if (m_pmix_job_info_.node_list.size() == 1) {
+  if (m_pmix_step_info_.node_list.size() == 1) {
     CRANE_TRACE("Only one node in job, no need to broadcast pmix port.");
     return true;
   }
@@ -82,12 +82,12 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   BroadcastPmixPortRequest request;
   BroadcastPmixPortReply reply;
 
-  request.set_job_id(m_pmix_job_info_.job_id);
-  request.set_step_id(m_pmix_job_info_.step_id);
+  request.set_job_id(m_pmix_step_info_.job_id);
+  request.set_step_id(m_pmix_step_info_.step_id);
   request.set_port(pmix_port);
-  request.set_craned_id(m_pmix_job_info_.hostname);
-  request.mutable_craned_ids()->Add(m_pmix_job_info_.node_list.begin(),
-                                    m_pmix_job_info_.node_list.end());
+  request.set_craned_id(m_pmix_step_info_.hostname);
+  request.mutable_craned_ids()->Add(m_pmix_step_info_.node_list.begin(),
+                                    m_pmix_step_info_.node_list.end());
 
   if (m_stub_ == nullptr) {
     CRANE_ERROR("Failed to broadcast PMIX port, stub is null");
