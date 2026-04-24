@@ -151,6 +151,25 @@ message Dependencies {
   bool is_or = 2;
 }
 
+message ArraySpec {
+  uint32 start = 1;
+  uint32 end = 2;
+  optional uint32 stride = 3;
+  optional uint32 max_concurrent = 4;
+}
+
+message ArrayTaskIdentity {
+  uint32 array_job_id = 1;
+  uint32 task_id = 2;
+}
+
+message ArrayTaskSummary {
+  uint32 task_count = 1;
+  uint32 task_min = 2;
+  uint32 task_max = 3;
+  uint32 task_step = 4;
+}
+
 message DependencyStatus {
   repeated DependencyCondition pending = 1;
   bool is_or = 2;
@@ -246,14 +265,8 @@ message JobToCtld {
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
 
-  // Job array spec for this submission: [start-end:stride].
-  optional uint32 array_index_start = 53;  // inclusive
-  optional uint32 array_index_end = 54;    // inclusive
-  optional uint32 array_index_stride = 56;
-  // The concrete array task index of this job after expansion.
-  optional uint32 array_task_id = 55;
-  // Max concurrent running array tasks. 0 = use scheduler default.
-  optional uint32 array_max_concurrent = 57;
+  // Array submission spec for this job. Child identity is runtime-only.
+  ArraySpec array_spec = 58;
 }
 
 message JobInEmbeddedDb {
@@ -290,9 +303,8 @@ message RuntimeAttrOfJob {
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
 
-  // For array children: the array parent/anchor job_id.
-  // If set, this job is an expanded array task.
-  optional uint32 array_job_id = 25;
+  // For array children: the materialized array-task identity.
+  ArrayTaskIdentity array_task = 26;
 
   // For array parents: whether child jobs have been materialized.
   optional bool array_children_expanded = 28;
@@ -347,7 +359,6 @@ message StepToCtld {
   optional GresMap gres_per_node = 39;
   google.protobuf.Timestamp deadline_time = 40;
 
-  optional uint32 array_task_id = 41;
 }
 
 message RuntimeAttrOfStep {
@@ -673,10 +684,9 @@ message JobInfo {
   uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
 
-  // Array metadata for query/display.
-  optional uint32 array_task_id = 48;
-  // For array children: the array parent/anchor job_id.
-  optional uint32 array_job_id = 49;
+  ArraySpec array_spec = 50;
+  ArrayTaskIdentity array_task = 51;
+  ArrayTaskSummary array_summary = 52;
 }
 
 message StepInfo {

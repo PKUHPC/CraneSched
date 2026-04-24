@@ -873,22 +873,25 @@ struct JobInCtld {
 
   // Array job model:
   //
-  //   The array parent is the root / placeholder record of the whole array.
-  //   It does not represent any concrete task. Concrete tasks are always
-  //   materialized as array children carrying both array_job_id and
-  //   array_task_id.
-  //
-  // Returns true if this is an array parent (has array range but no concrete
-  // child task index).
+  //   JobToCtld.array_spec carries only submission-time array spec.
+  //   RuntimeAttrOfJob.array_task carries only materialized child identity.
+  //   The array parent/root has array_spec but no array_task identity.
+  [[nodiscard]] bool HasArraySpec() const { return job_to_ctld.has_array_spec(); }
+  [[nodiscard]] const crane::grpc::ArraySpec* GetArraySpec() const {
+    return job_to_ctld.has_array_spec() ? &job_to_ctld.array_spec() : nullptr;
+  }
+
+  [[nodiscard]] bool IsArrayRoot() const {
+    return HasArraySpec() && !runtime_attr.has_array_task();
+  }
+
   bool IsArrayParent() const {
-    return job_to_ctld.has_array_index_start() &&
-           job_to_ctld.has_array_index_end() &&
-           !job_to_ctld.has_array_task_id();
+    return IsArrayRoot();
   }
 
   // Returns true if this is an expanded array child.
   bool IsArrayChild() const {
-    return array_job_id.has_value() && job_to_ctld.has_array_task_id();
+    return runtime_attr.has_array_task();
   }
 
   struct ArrayTaskMeta {
@@ -1078,7 +1081,14 @@ struct JobInCtld {
 
   // Array job tracking accessors
   void SetArrayJobId(job_id_t val);
+  void SetArrayTaskIdentity(job_id_t array_job_id, uint32_t task_id);
   std::optional<job_id_t> const& ArrayJobId() const { return array_job_id; }
+  [[nodiscard]] std::optional<uint32_t> ArrayTaskId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().task_id();
+  }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);

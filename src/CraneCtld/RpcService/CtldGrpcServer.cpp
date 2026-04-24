@@ -518,6 +518,10 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
     return grpc::Status::OK;
   }
 
+  if (request->job().has_array_spec()) {
+    // Array submission is accepted here as a single logical parent job.
+  }
+
   auto job = std::make_unique<JobInCtld>();
   job->SetFieldsByJobToCtld(request->job());
   auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
@@ -622,8 +626,13 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
 
-  const bool has_array_spec =
-      job_to_ctld.has_array_index_start() && job_to_ctld.has_array_index_end();
+  const bool has_array_spec = job_to_ctld.has_array_spec();
+
+  if (has_array_spec && job_count != 1) {
+    response->mutable_job_id_list()->Add(0);
+    response->mutable_code_list()->Add(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
 
   if (has_array_spec) {
     // Array job: submit ONE parent job. Expansion into individual tasks

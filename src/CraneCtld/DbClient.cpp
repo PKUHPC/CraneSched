@@ -150,8 +150,9 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
 std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
     const crane::grpc::RuntimeAttrOfJob& runtime_attr,
     const crane::grpc::JobToCtld& job_to_ctld) {
-  if (runtime_attr.has_array_job_id() && job_to_ctld.has_array_task_id()) {
-    return std::pair{runtime_attr.array_job_id(), job_to_ctld.array_task_id()};
+  if (runtime_attr.has_array_task()) {
+    return std::pair{runtime_attr.array_task().array_job_id(),
+                     runtime_attr.array_task().task_id()};
   }
 
   return std::nullopt;
@@ -886,13 +887,15 @@ bool MongodbClient::FetchJobRecords(
         if (auto field = view["array_job_id"]; field) {
           auto value = ViewGetArithmeticValue_<int64_t>(field);
           if (value >= 0) {
-            job_info.set_array_job_id(static_cast<uint32_t>(value));
+            job_info.mutable_array_task()->set_array_job_id(
+                static_cast<uint32_t>(value));
           }
         }
         if (auto field = view["array_task_id"]; field) {
           auto value = ViewGetArithmeticValue_<int64_t>(field);
           if (value >= 0) {
-            job_info.set_array_task_id(static_cast<uint32_t>(value));
+            job_info.mutable_array_task()->set_task_id(
+                static_cast<uint32_t>(value));
           }
         }
 

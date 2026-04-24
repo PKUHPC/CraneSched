@@ -1597,39 +1597,42 @@ void JobInCtld::SetHeld(bool val) {
 
 void JobInCtld::SetArrayJobId(job_id_t val) {
   array_job_id = val;
-  runtime_attr.set_array_job_id(val);
+  if (runtime_attr.has_array_task()) {
+    runtime_attr.mutable_array_task()->set_array_job_id(val);
+  }
+}
+
+void JobInCtld::SetArrayTaskIdentity(job_id_t val, uint32_t task_id) {
+  array_job_id = val;
+  auto* array_task = runtime_attr.mutable_array_task();
+  array_task->set_array_job_id(val);
+  array_task->set_task_id(task_id);
 }
 
 std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
-  if (!job_to_ctld.has_array_index_start() ||
-      !job_to_ctld.has_array_index_end()) {
+  if (!job_to_ctld.has_array_spec()) {
     return std::nullopt;
   }
 
-  if (!IsArrayChild() || !array_job_id.has_value() ||
-      !job_to_ctld.has_array_task_id()) {
+  if (!runtime_attr.has_array_task()) {
     return std::nullopt;
   }
 
-  uint32_t start = job_to_ctld.array_index_start();
-  uint32_t end = job_to_ctld.array_index_end();
+  const auto& array_spec = job_to_ctld.array_spec();
+  uint32_t start = array_spec.start();
+  uint32_t end = array_spec.end();
   if (end < start) {
     return std::nullopt;
   }
 
-  uint32_t stride = job_to_ctld.has_array_index_stride()
-                        ? job_to_ctld.array_index_stride()
-                        : 1;
+  uint32_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
   if (stride == 0) {
     stride = 1;
   }
 
-  return ArrayTaskMeta{array_job_id.value(),
-                       job_to_ctld.array_task_id(),
-                       (end - start) / stride + 1,
-                       start,
-                       end,
-                       stride};
+  return ArrayTaskMeta{runtime_attr.array_task().array_job_id(),
+                       runtime_attr.array_task().task_id(),
+                       (end - start) / stride + 1, start, end, stride};
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -1818,9 +1821,8 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
     suspend_time = absl::InfinitePast();
   }
 
-  // Restore array child tracking field from runtime attr.
-  if (runtime_attr.has_array_job_id()) {
-    array_job_id = runtime_attr.array_job_id();
+  if (runtime_attr.has_array_task()) {
+    array_job_id = runtime_attr.array_task().array_job_id();
   }
 }
 
@@ -1854,9 +1856,25 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
 
   job_info->set_submit_hostname(submit_hostname);
 
+  if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
+    job_info->mutable_array_spec()->CopyFrom(*array_spec);
+
+    auto* array_summary = job_info->mutable_array_summary();
+    uint32_t stride = array_spec->has_stride() ? array_spec->stride() : 1;
+    if (stride == 0) {
+      stride = 1;
+    }
+    array_summary->set_task_count((array_spec->end() - array_spec->start()) /
+                                  stride + 1);
+    array_summary->set_task_min(array_spec->start());
+    array_summary->set_task_max(array_spec->end());
+    array_summary->set_task_step(stride);
+  }
+
   if (auto array_meta = GetArrayTaskMeta(); array_meta.has_value()) {
-    job_info->set_array_job_id(array_meta->array_job_id);
-    job_info->set_array_task_id(array_meta->task_id);
+    auto* array_task = job_info->mutable_array_task();
+    array_task->set_array_job_id(array_meta->array_job_id);
+    array_task->set_task_id(array_meta->task_id);
   }
 
   // Only pass container meta if it's a container step
