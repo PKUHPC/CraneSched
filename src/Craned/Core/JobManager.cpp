@@ -254,19 +254,23 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::format("{:.2f}", static_cast<double>(cpus_on_node)));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
-  if (job_to_d.has_array_task_id()) {
+  if (job_to_d.has_array_task()) {
+    const auto& array_task = job_to_d.array_task();
     env_map.emplace("CRANE_ARRAY_JOB_ID",
-                    std::to_string(job_to_d.array_job_id()));
+                    std::to_string(array_task.array_job_id()));
     env_map.emplace("CRANE_ARRAY_TASK_ID",
-                    std::to_string(job_to_d.array_task_id()));
-    env_map.emplace("CRANE_ARRAY_TASK_COUNT",
-                    std::to_string(job_to_d.array_task_count()));
-    env_map.emplace("CRANE_ARRAY_TASK_MIN",
-                    std::to_string(job_to_d.array_task_min()));
-    env_map.emplace("CRANE_ARRAY_TASK_MAX",
-                    std::to_string(job_to_d.array_task_max()));
-    env_map.emplace("CRANE_ARRAY_TASK_STEP",
-                    std::to_string(job_to_d.array_task_step()));
+                    std::to_string(array_task.task_id()));
+    if (job_to_d.has_array_summary()) {
+      const auto& array_summary = job_to_d.array_summary();
+      env_map.emplace("CRANE_ARRAY_TASK_COUNT",
+                      std::to_string(array_summary.task_count()));
+      env_map.emplace("CRANE_ARRAY_TASK_MIN",
+                      std::to_string(array_summary.task_min()));
+      env_map.emplace("CRANE_ARRAY_TASK_MAX",
+                      std::to_string(array_summary.task_max()));
+      env_map.emplace("CRANE_ARRAY_TASK_STEP",
+                      std::to_string(array_summary.task_step()));
+    }
   }
 
   // SLURM
@@ -278,19 +282,23 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
     env_map.emplace("SLURM_NODELIST",
                     util::HostNameListToStr(daemon_step_to_d.nodelist()));
-    if (job_to_d.has_array_task_id()) {
+    if (job_to_d.has_array_task()) {
+      const auto& array_task = job_to_d.array_task();
       env_map.emplace("SLURM_ARRAY_JOB_ID",
-                      std::to_string(job_to_d.array_job_id()));
+                      std::to_string(array_task.array_job_id()));
       env_map.emplace("SLURM_ARRAY_TASK_ID",
-                      std::to_string(job_to_d.array_task_id()));
-      env_map.emplace("SLURM_ARRAY_TASK_COUNT",
-                      std::to_string(job_to_d.array_task_count()));
-      env_map.emplace("SLURM_ARRAY_TASK_MIN",
-                      std::to_string(job_to_d.array_task_min()));
-      env_map.emplace("SLURM_ARRAY_TASK_MAX",
-                      std::to_string(job_to_d.array_task_max()));
-      env_map.emplace("SLURM_ARRAY_TASK_STEP",
-                      std::to_string(job_to_d.array_task_step()));
+                      std::to_string(array_task.task_id()));
+      if (job_to_d.has_array_summary()) {
+        const auto& array_summary = job_to_d.array_summary();
+        env_map.emplace("SLURM_ARRAY_TASK_COUNT",
+                        std::to_string(array_summary.task_count()));
+        env_map.emplace("SLURM_ARRAY_TASK_MIN",
+                        std::to_string(array_summary.task_min()));
+        env_map.emplace("SLURM_ARRAY_TASK_MAX",
+                        std::to_string(array_summary.task_max()));
+        env_map.emplace("SLURM_ARRAY_TASK_STEP",
+                        std::to_string(array_summary.task_step()));
+      }
     }
   }
 

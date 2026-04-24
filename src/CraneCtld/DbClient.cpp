@@ -150,12 +150,110 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
 std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
     const crane::grpc::RuntimeAttrOfJob& runtime_attr,
     const crane::grpc::JobToCtld& job_to_ctld) {
+  static_cast<void>(job_to_ctld);
   if (runtime_attr.has_array_task()) {
     return std::pair{runtime_attr.array_task().array_job_id(),
                      runtime_attr.array_task().task_id()};
   }
 
   return std::nullopt;
+}
+
+struct PersistedArraySpecFields {
+  int64_t start{-1};
+  int64_t end{-1};
+  int64_t stride{-1};
+  int64_t max_concurrent{-1};
+};
+
+PersistedArraySpecFields GetPersistedArraySpecFields_(
+    const crane::grpc::JobToCtld& job_to_ctld) {
+  PersistedArraySpecFields fields;
+  if (!job_to_ctld.has_array_spec()) {
+    return fields;
+  }
+
+  const auto& array_spec = job_to_ctld.array_spec();
+  fields.start = array_spec.start();
+  fields.end = array_spec.end();
+  if (array_spec.has_stride()) {
+    fields.stride = array_spec.stride();
+  }
+  if (array_spec.has_max_concurrent()) {
+    fields.max_concurrent = array_spec.max_concurrent();
+  }
+  return fields;
+}
+
+void PopulateArraySummaryFromSpec_(
+    const crane::grpc::ArraySpec& array_spec,
+    crane::grpc::ArrayTaskSummary* array_summary) {
+  uint32_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
+  if (stride == 0) {
+    stride = 1;
+  }
+
+  array_summary->set_task_count(
+      (array_spec.end() - array_spec.start()) / stride + 1);
+  array_summary->set_task_min(array_spec.start());
+  array_summary->set_task_max(array_spec.end());
+  array_summary->set_task_step(stride);
+}
+
+template <typename T>
+  requires std::is_arithmetic_v<T>
+std::optional<T> GetArithmeticValueFromElement_(
+    const bsoncxx::document::element& value) {
+  switch (value.type()) {
+  case bsoncxx::type::k_bool:
+    return static_cast<T>(value.get_bool().value);
+  case bsoncxx::type::k_int32:
+    return static_cast<T>(value.get_int32().value);
+  case bsoncxx::type::k_int64:
+    return static_cast<T>(value.get_int64().value);
+  case bsoncxx::type::k_double:
+    return static_cast<T>(value.get_double().value);
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<crane::grpc::ArraySpec> GetPersistedArraySpec_(
+    const bsoncxx::document::view& view) {
+  auto start_field = view["array_start"];
+  auto end_field = view["array_end"];
+  if (!start_field || !end_field) {
+    return std::nullopt;
+  }
+
+  auto start = GetArithmeticValueFromElement_<int64_t>(start_field);
+  auto end = GetArithmeticValueFromElement_<int64_t>(end_field);
+  if (!start.has_value() || !end.has_value() || *start < 0 || *end < 0 ||
+      *end < *start) {
+    return std::nullopt;
+  }
+
+  crane::grpc::ArraySpec array_spec;
+  array_spec.set_start(static_cast<uint32_t>(*start));
+  array_spec.set_end(static_cast<uint32_t>(*end));
+
+  if (auto stride_field = view["array_stride"]; stride_field) {
+    if (auto stride = GetArithmeticValueFromElement_<int64_t>(stride_field);
+        stride.has_value() && *stride > 0) {
+      array_spec.set_stride(static_cast<uint32_t>(*stride));
+    }
+  }
+
+  if (auto max_concurrent_field = view["array_max_concurrent"];
+      max_concurrent_field) {
+    if (auto max_concurrent =
+            GetArithmeticValueFromElement_<int64_t>(max_concurrent_field);
+        max_concurrent.has_value() && *max_concurrent > 0) {
+      array_spec.set_max_concurrent(static_cast<uint32_t>(*max_concurrent));
+    }
+  }
+
+  return array_spec;
 }
 
 void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
@@ -883,6 +981,13 @@ bool MongodbClient::FetchJobRecords(
 
         job_info.set_submit_hostname(
             view["submit_hostname"].get_string().value);
+
+        if (auto array_spec = GetPersistedArraySpec_(view);
+            array_spec.has_value()) {
+          job_info.mutable_array_spec()->CopyFrom(*array_spec);
+          PopulateArraySummaryFromSpec_(*array_spec,
+                                        job_info.mutable_array_summary());
+        }
 
         if (auto field = view["array_job_id"]; field) {
           auto value = ViewGetArithmeticValue_<int64_t>(field);
@@ -4389,6 +4494,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     array_job_id = static_cast<int32_t>(array_identity->first);
     array_task_id = static_cast<int32_t>(array_identity->second);
   }
+  auto array_spec_fields = GetPersistedArraySpecFields_(job_to_ctld);
 
   bsoncxx::builder::basic::array nodename_list_array;
   for (const auto& nodename : runtime_attr.craned_ids()) {
@@ -4431,9 +4537,10 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
   // 45 array_job_id   submit_hostname array_task_id   deadline
-  // 49 req_nodes      exclude_nodes   execution_nodes
+  // 49 array_start    array_end       array_stride    array_max_concurrent
+  // 53 req_nodes      exclude_nodes   execution_nodes
   // clang-format off
-  std::array<std::string, 52> fields{
+  std::array<std::string, 56> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4454,7 +4561,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 48
     "array_job_id", "submit_hostname", "array_task_id", "deadline",
-    // 49 - 51
+    // 49 - 52
+    "array_start", "array_end", "array_stride", "array_max_concurrent",
+    // 53 - 55
     "req_nodes", "exclude_nodes", "execution_nodes"
   };
   // clang-format on
@@ -4471,8 +4580,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              int32_t, std::string, int32_t, int64_t,                /*45-48*/
-             std::list<CranedId>, std::list<CranedId>,              /*49-50*/
-             std::vector<CranedId>>                                 /*51*/
+             int64_t, int64_t, int64_t, int64_t,                    /*49-52*/
+             std::list<CranedId>, std::list<CranedId>,              /*53-54*/
+             std::vector<CranedId>>                                 /*55*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4513,7 +4623,10 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           // 45-48
           array_job_id, job_to_ctld.submit_hostname(), array_task_id,
           job_to_ctld.deadline_time().seconds(),
-          // 49-51
+          // 49-52
+          array_spec_fields.start, array_spec_fields.end,
+          array_spec_fields.stride, array_spec_fields.max_concurrent,
+          // 53-55
           req_node_list, exclude_node_list, execution_nodes};
 
   return DocumentConstructor_(fields, values);
@@ -4588,6 +4701,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
     array_job_id = static_cast<int32_t>(array_meta->array_job_id);
     array_task_id = static_cast<int32_t>(array_meta->task_id);
   }
+  auto array_spec_fields = GetPersistedArraySpecFields_(job->JobToCtld());
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -4599,10 +4713,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 array_job_id   submit_hostname array_task_id   deadline
-  // 49 req_nodes      exclude_nodes   execution_nodes
+  // 49 array_start    array_end       array_stride    array_max_concurrent
+  // 53 req_nodes      exclude_nodes   execution_nodes
 
   // clang-format off
-  std::array<std::string, 52> fields{
+  std::array<std::string, 56> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4623,7 +4738,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 48
       "array_job_id", "submit_hostname", "array_task_id", "deadline",
-      // 49 - 51
+      // 49 - 52
+      "array_start", "array_end", "array_stride", "array_max_concurrent",
+      // 53 - 55
       "req_nodes", "exclude_nodes", "execution_nodes",
   };
   // clang-format on
@@ -4640,8 +4757,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::unordered_map<std::string, uint32_t>,             /*40*/
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
              int32_t, std::string, int32_t, int64_t,                /*45-48*/
-             std::unordered_set<CranedId>,                          /*49*/
-             std::unordered_set<CranedId>, std::vector<CranedId>>   /*50-51*/
+             int64_t, int64_t, int64_t, int64_t,                    /*49-52*/
+             std::unordered_set<CranedId>,                          /*53*/
+             std::unordered_set<CranedId>, std::vector<CranedId>>   /*54-55*/
       values{                                                       // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
@@ -4675,7 +4793,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              // 45-48
              array_job_id, job->submit_hostname, array_task_id,
              absl::ToUnixSeconds(job->deadline_time),
-             // 49-51
+             // 49-52
+             array_spec_fields.start, array_spec_fields.end,
+             array_spec_fields.stride, array_spec_fields.max_concurrent,
+             // 53-55
              job->included_nodes, job->excluded_nodes,
              job->executing_craned_ids};
 

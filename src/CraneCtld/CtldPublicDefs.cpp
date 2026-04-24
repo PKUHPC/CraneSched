@@ -548,12 +548,15 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.at(craned_id));
   if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    job_to_d.set_array_job_id(array_meta->array_job_id);
-    job_to_d.set_array_task_id(array_meta->task_id);
-    job_to_d.set_array_task_count(array_meta->task_count);
-    job_to_d.set_array_task_min(array_meta->task_min);
-    job_to_d.set_array_task_max(array_meta->task_max);
-    job_to_d.set_array_task_step(array_meta->task_step);
+    auto* array_task = job_to_d.mutable_array_task();
+    array_task->set_array_job_id(array_meta->array_job_id);
+    array_task->set_task_id(array_meta->task_id);
+
+    auto* array_summary = job_to_d.mutable_array_summary();
+    array_summary->set_task_count(array_meta->task_count);
+    array_summary->set_task_min(array_meta->task_min);
+    array_summary->set_task_max(array_meta->task_max);
+    array_summary->set_task_step(array_meta->task_step);
   }
   return job_to_d;
 }
@@ -605,8 +608,9 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
   if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    step_to_d.set_array_job_id(array_meta->array_job_id);
-    step_to_d.set_array_task_id(array_meta->task_id);
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(array_meta->array_job_id);
+    array_task->set_task_id(array_meta->task_id);
   }
 
   return step_to_d;
@@ -1196,8 +1200,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
   if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    step_to_d.set_array_job_id(array_meta->array_job_id);
-    step_to_d.set_array_task_id(array_meta->task_id);
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(array_meta->array_job_id);
+    array_task->set_task_id(array_meta->task_id);
   }
 
   return step_to_d;
@@ -1595,15 +1600,7 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
-void JobInCtld::SetArrayJobId(job_id_t val) {
-  array_job_id = val;
-  if (runtime_attr.has_array_task()) {
-    runtime_attr.mutable_array_task()->set_array_job_id(val);
-  }
-}
-
 void JobInCtld::SetArrayTaskIdentity(job_id_t val, uint32_t task_id) {
-  array_job_id = val;
   auto* array_task = runtime_attr.mutable_array_task();
   array_task->set_array_job_id(val);
   array_task->set_task_id(task_id);
@@ -1819,10 +1816,6 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
     suspend_time = absl::FromUnixSeconds(suspend_sec);
   } else {
     suspend_time = absl::InfinitePast();
-  }
-
-  if (runtime_attr.has_array_task()) {
-    array_job_id = runtime_attr.array_task().array_job_id();
   }
 }
 

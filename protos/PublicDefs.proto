@@ -409,14 +409,8 @@ message JobToD {
 
   string name = 9;
 
-  // Array metadata propagated for expanded array children.
-  // array_job_id is the parent/root job ID of the whole array.
-  optional uint32 array_job_id = 10;
-  optional uint32 array_task_id = 11;
-  optional uint32 array_task_count = 12;
-  optional uint32 array_task_min = 13;
-  optional uint32 array_task_max = 14;
-  optional uint32 array_task_step = 15;
+  optional ArrayTaskIdentity array_task = 16;
+  optional ArrayTaskSummary array_summary = 17;
 }
 
 enum StepType {
@@ -482,10 +476,7 @@ message StepToD {
   IoMeta io_meta = 35;
   string sh_script = 36;
 
-  // Array metadata propagated for expanded array children and the
-  // array_job_id is the parent/root job ID of the whole array.
-  optional uint32 array_job_id = 37;
-  optional uint32 array_task_id = 38;
+  optional ArrayTaskIdentity array_task = 39;
 }
 
 message JobStepsToD {

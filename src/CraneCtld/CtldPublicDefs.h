@@ -951,10 +951,6 @@ struct JobInCtld {
   // Might change at each scheduling cycle.
   ResourceV3 allocated_res;
 
-  // Array job tracking fields.
-  // For array children: the array parent/anchor job_id.
-  std::optional<job_id_t> array_job_id;
-
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
 
@@ -1080,9 +1076,13 @@ struct JobInCtld {
   bool CancelRequested() const { return cancel_requested; }
 
   // Array job tracking accessors
-  void SetArrayJobId(job_id_t val);
   void SetArrayTaskIdentity(job_id_t array_job_id, uint32_t task_id);
-  std::optional<job_id_t> const& ArrayJobId() const { return array_job_id; }
+  [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().array_job_id();
+  }
   [[nodiscard]] std::optional<uint32_t> ArrayTaskId() const {
     if (!runtime_attr.has_array_task()) {
       return std::nullopt;

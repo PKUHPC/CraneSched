@@ -518,10 +518,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
     return grpc::Status::OK;
   }
 
-  if (request->job().has_array_spec()) {
-    // Array submission is accepted here as a single logical parent job.
-  }
-
   auto job = std::make_unique<JobInCtld>();
   job->SetFieldsByJobToCtld(request->job());
   auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());

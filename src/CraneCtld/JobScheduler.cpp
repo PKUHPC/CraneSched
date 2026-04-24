@@ -7203,6 +7203,12 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
 
   const auto& job_to_ctld = job->JobToCtld();
   if (job_to_ctld.has_array_spec()) {
+    if (job_to_ctld.type() != crane::grpc::JobType::Batch) {
+      CRANE_DEBUG("Job #{} uses array_spec on non-batch job type {}.",
+                  job->JobId(), static_cast<int>(job_to_ctld.type()));
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    }
+
     const auto& array_spec = job_to_ctld.array_spec();
     if (array_spec.end() < array_spec.start()) {
       CRANE_DEBUG("Job #{} has invalid array range [{}-{}].", job->JobId(),
