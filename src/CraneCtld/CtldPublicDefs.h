@@ -245,6 +245,16 @@ struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> db_logger;
 };
 
+namespace ArrayUtil {
+uint32_t Stride(const crane::grpc::ArraySpec& array_spec);
+uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec);
+bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec, uint32_t task_id);
+uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
+                       uint32_t index);
+crane::grpc::ArrayTaskSummary BuildSummary(
+    const crane::grpc::ArraySpec& array_spec);
+}  // namespace ArrayUtil
+
 }  // namespace Ctld
 
 inline Ctld::Config g_config{};
@@ -876,7 +886,9 @@ struct JobInCtld {
   //   JobToCtld.array_spec carries only submission-time array spec.
   //   RuntimeAttrOfJob.array_task carries only materialized child identity.
   //   The array parent/root has array_spec but no array_task identity.
-  [[nodiscard]] bool HasArraySpec() const { return job_to_ctld.has_array_spec(); }
+  [[nodiscard]] bool HasArraySpec() const {
+    return job_to_ctld.has_array_spec();
+  }
   [[nodiscard]] const crane::grpc::ArraySpec* GetArraySpec() const {
     return job_to_ctld.has_array_spec() ? &job_to_ctld.array_spec() : nullptr;
   }
@@ -885,14 +897,10 @@ struct JobInCtld {
     return HasArraySpec() && !runtime_attr.has_array_task();
   }
 
-  bool IsArrayParent() const {
-    return IsArrayRoot();
-  }
+  bool IsArrayParent() const { return IsArrayRoot(); }
 
   // Returns true if this is an expanded array child.
-  bool IsArrayChild() const {
-    return runtime_attr.has_array_task();
-  }
+  bool IsArrayChild() const { return runtime_attr.has_array_task(); }
 
   struct ArrayTaskMeta {
     job_id_t array_job_id;
@@ -1177,18 +1185,39 @@ struct JobInCtld {
 // The remaining fields are runtime bookkeeping used by JobScheduler
 // to track materialized, pending and running array children.
 struct ArrayMeta {
-  std::unique_ptr<JobInCtld> root_job;
+ public:
+  bool IsTaskMaterialized(uint32_t task_id) const {
+    return materialized_task_ids.contains(task_id);
+  }
+  size_t MaterializedTaskCount() const { return materialized_task_ids.size(); }
 
+  std::optional<job_id_t> ChildJobIdOfTask(uint32_t task_id) const {
+    auto it = child_job_id_by_task_id.find(task_id);
+    if (it == child_job_id_by_task_id.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  size_t ActiveChildCount() const {
+    return pending_child_job_ids.size() + running_child_job_ids.size();
+  }
+
+  void TrackPending(JobInCtld* child);
+  void TrackRunning(JobInCtld* child);
+  void Untrack(JobInCtld* child);
+
+  std::unique_ptr<JobInCtld> root_job;
   absl::flat_hash_set<uint32_t> materialized_task_ids;
   uint32_t next_array_task_index{0};
-
   absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
   absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
-
   absl::flat_hash_set<job_id_t> pending_child_job_ids;
   absl::flat_hash_set<job_id_t> running_child_job_ids;
-
   std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
+
+ private:
+  void TrackBookkeeping_(JobInCtld* child);
 };
 
 enum class QosFlags { DenyOnLimit, _Count };

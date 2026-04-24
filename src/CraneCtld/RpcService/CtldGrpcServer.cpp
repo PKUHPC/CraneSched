@@ -907,9 +907,10 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         continue;
       }
       // Resolve parent to specific children via scheduler.
-      auto child_ids = g_job_scheduler->ResolveArrayTaskIdsToChildJobs(
-          job_id, it->second.array_task_ids());
-      if (child_ids.empty()) {
+      auto resolved = g_job_scheduler->ResolveArrayTaskSelector(
+          job_id, it->second.array_task_ids(),
+          JobScheduler::ArrayResolveMode::MutateMaterialize);
+      if (resolved.child_job_ids.empty()) {
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
             "Job #{} is not an array parent or no matching array tasks "
@@ -917,7 +918,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
             job_id));
         continue;
       }
-      for (auto child_id : child_ids) {
+      for (auto child_id : resolved.child_job_ids) {
         resolved_ids.push_back(child_id);
       }
     }
@@ -930,7 +931,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         request->has_time_limit_seconds()
             ? std::optional<int64_t>(request->time_limit_seconds())
             : std::nullopt;
-    for (auto job_id : request->job_ids()) {
+    for (auto job_id : job_ids) {
       err = g_job_scheduler->ChangeJobTimeConstraint(job_id, time_limit_seconds,
                                                      std::nullopt);
       if (err == CraneErrCode::SUCCESS) {

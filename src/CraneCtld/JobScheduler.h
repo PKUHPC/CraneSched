@@ -769,10 +769,16 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+ public:
   enum class ArrayBatchPersistResult {
     kSuccess,
     kQosLimitFailure,
     kTransientFailure,
+  };
+
+  enum class ArrayResolveMode {
+    QueryNoMaterialize,
+    MutateMaterialize,
   };
 
   struct ArrayBatchPersistOutcome {
@@ -780,7 +786,11 @@ class JobScheduler {
     CraneErrCode qos_err = CraneErrCode::SUCCESS;
   };
 
- public:
+  struct ArrayTaskResolveResult {
+    std::vector<job_id_t> child_job_ids;
+    std::vector<crane::grpc::JobInfo> virtual_jobs;
+  };
+
   JobScheduler();
 
   ~JobScheduler();
@@ -820,10 +830,10 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
-  // Resolve an array_job_id + array_task_ids to the actual in-memory jobs.
-  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobs(
+  ArrayTaskResolveResult ResolveArrayTaskSelector(
       job_id_t array_job_id,
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids);
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids,
+      ArrayResolveMode mode);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
@@ -975,15 +985,13 @@ class JobScheduler {
   ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       std::unique_ptr<JobInCtld> parent) const;
-  std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
-      const ArrayMeta* meta,
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
+  ArrayTaskResolveResult ResolveArrayTaskSelectorNoLock_(
+      job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids,
+      ArrayResolveMode mode);
   std::unique_ptr<JobInCtld> CreateArrayChild_(const JobInCtld& array_parent,
                                                uint32_t task_id) const;
   std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
-  void TrackArrayChildBookkeepingNoLock_(job_id_t array_job_id,
-                                         JobInCtld* child);
   void TrackArrayChildPendingNoLock_(job_id_t array_job_id, JobInCtld* child);
   void TrackArrayChildRunningNoLock_(job_id_t array_job_id, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);

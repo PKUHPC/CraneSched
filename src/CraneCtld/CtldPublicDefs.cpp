@@ -23,6 +23,103 @@
 
 namespace Ctld {
 
+namespace ArrayUtil {
+
+uint32_t Stride(const crane::grpc::ArraySpec& array_spec) {
+  uint32_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
+  return stride == 0 ? 1 : stride;
+}
+
+uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec) {
+  if (array_spec.end() < array_spec.start()) {
+    return 0;
+  }
+  return (array_spec.end() - array_spec.start()) / Stride(array_spec) + 1;
+}
+
+bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
+                    uint32_t task_id) {
+  if (task_id < array_spec.start() || task_id > array_spec.end()) {
+    return false;
+  }
+  return (task_id - array_spec.start()) % Stride(array_spec) == 0;
+}
+
+uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
+                       uint32_t index) {
+  return array_spec.start() + index * Stride(array_spec);
+}
+
+crane::grpc::ArrayTaskSummary BuildSummary(
+    const crane::grpc::ArraySpec& array_spec) {
+  crane::grpc::ArrayTaskSummary summary;
+  summary.set_task_count(TaskCount(array_spec));
+  summary.set_task_min(array_spec.start());
+  summary.set_task_max(array_spec.end());
+  summary.set_task_step(Stride(array_spec));
+  return summary;
+}
+
+}  // namespace ArrayUtil
+
+void ArrayMeta::TrackBookkeeping_(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  auto task_id = child->ArrayTaskId();
+  CRANE_ASSERT(task_id.has_value());
+  materialized_task_ids.insert(*task_id);
+  child_job_id_by_task_id[*task_id] = child->JobId();
+  child_task_id_by_job_id[child->JobId()] = *task_id;
+}
+
+void ArrayMeta::TrackPending(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  TrackBookkeeping_(child);
+  auto task_id = *child->ArrayTaskId();
+  pending_child_job_ids.insert(child->JobId());
+  running_child_job_ids.erase(child->JobId());
+  if (child->Held()) {
+    runnable_pending_child_job_id_by_task_id.erase(task_id);
+  } else {
+    runnable_pending_child_job_id_by_task_id[task_id] = child->JobId();
+  }
+}
+
+void ArrayMeta::TrackRunning(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  TrackBookkeeping_(child);
+  uint32_t task_id = *child->ArrayTaskId();
+  pending_child_job_ids.erase(child->JobId());
+  runnable_pending_child_job_id_by_task_id.erase(task_id);
+  running_child_job_ids.insert(child->JobId());
+}
+
+void ArrayMeta::Untrack(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild()) {
+    return;
+  }
+
+  uint32_t task_id = *child->ArrayTaskId();
+  pending_child_job_ids.erase(child->JobId());
+  running_child_job_ids.erase(child->JobId());
+  runnable_pending_child_job_id_by_task_id.erase(task_id);
+
+  auto by_task_it = child_job_id_by_task_id.find(task_id);
+  if (by_task_it != child_job_id_by_task_id.end() &&
+      by_task_it->second == child->JobId()) {
+    child_job_id_by_task_id.erase(by_task_it);
+  }
+  child_task_id_by_job_id.erase(child->JobId());
+}
+
 CranedRemoteMeta::CranedRemoteMeta(
     const crane::grpc::CranedRemoteMeta& grpc_meta)
     : dres_in_node(grpc_meta.dres_in_node()) {
@@ -1616,20 +1713,18 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
   }
 
   const auto& array_spec = job_to_ctld.array_spec();
-  uint32_t start = array_spec.start();
-  uint32_t end = array_spec.end();
-  if (end < start) {
+  if (ArrayUtil::TaskCount(array_spec) == 0) {
     return std::nullopt;
   }
 
-  uint32_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
-  if (stride == 0) {
-    stride = 1;
-  }
+  auto summary = ArrayUtil::BuildSummary(array_spec);
 
   return ArrayTaskMeta{runtime_attr.array_task().array_job_id(),
                        runtime_attr.array_task().task_id(),
-                       (end - start) / stride + 1, start, end, stride};
+                       summary.task_count(),
+                       summary.task_min(),
+                       summary.task_max(),
+                       summary.task_step()};
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -1851,17 +1946,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
     job_info->mutable_array_spec()->CopyFrom(*array_spec);
-
-    auto* array_summary = job_info->mutable_array_summary();
-    uint32_t stride = array_spec->has_stride() ? array_spec->stride() : 1;
-    if (stride == 0) {
-      stride = 1;
-    }
-    array_summary->set_task_count((array_spec->end() - array_spec->start()) /
-                                  stride + 1);
-    array_summary->set_task_min(array_spec->start());
-    array_summary->set_task_max(array_spec->end());
-    array_summary->set_task_step(stride);
+    job_info->mutable_array_summary()->CopyFrom(
+        ArrayUtil::BuildSummary(*array_spec));
   }
 
   if (auto array_meta = GetArrayTaskMeta(); array_meta.has_value()) {
