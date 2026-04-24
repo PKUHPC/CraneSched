@@ -67,7 +67,7 @@ class PmixServer {
 
   std::chrono::seconds GetTimeout() const { return m_timeout_; }
 
-  std::string GetFenceType() const { return m_pmix_job_info_.fence_type; }
+  std::string GetFenceType() const { return m_pmix_step_info_.fence_type; }
 
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
   PmixClient* GetPmixClient() const { return m_pmix_client_.get(); }
@@ -97,7 +97,7 @@ class PmixServer {
   static PmixServer* s_instance_;
 #endif
 
-  PmixJobInfo m_pmix_job_info_;
+  PmixStepInfo m_pmix_step_info_;
 
   std::chrono::seconds m_timeout_{5};
 

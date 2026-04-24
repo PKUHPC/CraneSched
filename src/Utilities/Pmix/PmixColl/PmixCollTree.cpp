@@ -34,19 +34,19 @@ bool PmixCollTree::PmixCollInit(CollType type,
   std::set<std::string> hostname_set;
 
   for (const auto& proc : procs) {
-    if (m_pmix_job_info_.nspace != proc.nspace) return false;
+    if (m_pmix_step_info_.nspace != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : m_pmix_job_info_.node_list) {
+      for (const auto& hostname : m_pmix_step_info_.node_list) {
         hostname_set.emplace(hostname);
       }
     } else {
-      if (proc.rank >= m_pmix_job_info_.task_map.size()) {
+      if (proc.rank >= m_pmix_step_info_.task_map.size()) {
         CRANE_ERROR("The rank is out of the task number range.");
         return false;
       }
-      uint32_t node_id = m_pmix_job_info_.task_map[proc.rank];
-      hostname_set.insert(m_pmix_job_info_.node_list[node_id]);
+      uint32_t node_id = m_pmix_step_info_.task_map[proc.rank];
+      hostname_set.insert(m_pmix_step_info_.node_list[node_id]);
     }
   }
 
@@ -57,7 +57,7 @@ bool PmixCollTree::PmixCollInit(CollType type,
     return false;
   }
 
-  auto it = hostname_set.find(m_pmix_job_info_.hostname);
+  auto it = hostname_set.find(m_pmix_step_info_.hostname);
   if (it != hostname_set.end())
     m_peerid_ = std::distance(hostname_set.begin(), it);
   else {
@@ -90,7 +90,7 @@ bool PmixCollTree::PmixCollInit(CollType type,
      */
     m_parent_host_ = "";
     for (const auto& host : hostname_set) {
-      if (host == m_pmix_job_info_.hostname) continue;
+      if (host == m_pmix_step_info_.hostname) continue;
       m_all_chldrn_hl_.emplace_back(host);
     }
     // host[1-3]
@@ -277,7 +277,7 @@ bool PmixCollTree::ProgressCollect_() {
       pmix_procs->set_nspace(proc.nspace);
       pmix_procs->set_rank(proc.rank);
     }
-    request.set_peer_host(m_pmix_job_info_.hostname);
+    request.set_peer_host(m_pmix_step_info_.hostname);
     request.set_msg(m_upfwd_buf_);
     request.set_seq(this->m_seq_);
 
@@ -383,7 +383,7 @@ bool PmixCollTree::ProgressUpFwd_() {
       pmix_procs->set_rank(proc.rank);
     }
 
-    request.set_peer_host(m_pmix_job_info_.hostname);
+    request.set_peer_host(m_pmix_step_info_.hostname);
     request.set_msg(m_downfwd_buf_);
     request.set_seq(this->m_seq_);
 

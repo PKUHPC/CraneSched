@@ -35,9 +35,9 @@ class PmixState {
 #ifdef HAVE_PMIX
   // pmix_client and craned_client are injected so collective objects created
   // here never need to call PmixServer::GetInstance().
-  PmixState(const PmixJobInfo& job_info, PmixClient* pmix_client,
+  PmixState(const PmixStepInfo& job_info, PmixClient* pmix_client,
             CranedClient* craned_client)
-      : m_pmix_job_info_(job_info),
+      : m_pmix_step_info_(job_info),
         m_pmix_client_(pmix_client),
         m_craned_client_(craned_client) {}
 
@@ -51,7 +51,7 @@ class PmixState {
   void AbortAllColls();
 
  private:
-  PmixJobInfo m_pmix_job_info_;
+  PmixStepInfo m_pmix_step_info_;
   PmixClient* m_pmix_client_{nullptr};      // injected, not owned
   CranedClient* m_craned_client_{nullptr};  // injected, not owned
 

@@ -41,7 +41,7 @@ struct Config {
   std::filesystem::path CranedUnixSocketPath;
 };
 
-struct PmixJobInfo {
+struct PmixStepInfo {
   uint32_t uid{};
   uint32_t gid{};
   job_id_t job_id{};
