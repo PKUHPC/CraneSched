@@ -62,9 +62,13 @@ pkg-config --libs ucx
 crun --nodes=2 --ntasks-per-node=4 --mpi=pmix ./my_mpi_program
 ```
 CraneSched 会：
+
 1. 向调度器申请 2 个节点的资源
+
 2. 在每个节点上直接启动 4 个 ./my_mpi_program 进程
+
 3. 通过内置 PMIx 服务端为这 8 个进程分配 rank（0–7）及 namespace
+
 4. MPI 程序调用 MPI_Init() 时，通过 PMIx 协议完成握手，自动获取自己的 rank
 整个过程不需要 mpirun。
 
@@ -188,9 +192,13 @@ crun --nodes=1 --ntasks-per-node=4 --mpi=pmix ./hello_mpi
 ```
 输出示例：
 Hello from rank 0 of 4 on node cn01
+
 Hello from rank 1 of 4 on node cn01
+
 Hello from rank 2 of 4 on node cn01
+
 Hello from rank 3 of 4 on node cn01
+
 
 示例 2：多节点 CFD 模拟（批处理）
 ```sh
