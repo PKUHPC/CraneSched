@@ -78,7 +78,7 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
 constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
-constexpr uint32_t kDefaultArrayConcurrent = 32;
+constexpr uint32_t kArrayMaterializeBatchSize = 1;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -1214,7 +1214,6 @@ struct ArrayMeta {
   absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
   absl::flat_hash_set<job_id_t> pending_child_job_ids;
   absl::flat_hash_set<job_id_t> running_child_job_ids;
-  std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
 
  private:
   void TrackBookkeeping_(JobInCtld* child);

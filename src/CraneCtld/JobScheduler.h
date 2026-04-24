@@ -770,20 +770,9 @@ class JobScheduler {
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  enum class ArrayBatchPersistResult {
-    kSuccess,
-    kQosLimitFailure,
-    kTransientFailure,
-  };
-
-  enum class ArrayResolveMode {
-    QueryNoMaterialize,
-    MutateMaterialize,
-  };
-
-  struct ArrayBatchPersistOutcome {
-    ArrayBatchPersistResult kind;
-    CraneErrCode qos_err = CraneErrCode::SUCCESS;
+  enum class ArrayTaskResolveMode {
+    kQueryOnly,
+    kCreateIfMissing,
   };
 
   struct ArrayTaskResolveResult {
@@ -830,10 +819,10 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
-  ArrayTaskResolveResult ResolveArrayTaskSelector(
+  ArrayTaskResolveResult ResolveArrayTaskIds(
       job_id_t array_job_id,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids,
-      ArrayResolveMode mode);
+      ArrayTaskResolveMode mode);
 
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
@@ -982,15 +971,17 @@ class JobScheduler {
   }
 
  private:
-  ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
+  ArrayMeta* FindArrayRootNoLock_(job_id_t array_job_id);
+  JobInCtld* FindJobInPendingOrRunningNoLock_(job_id_t job_id);
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       std::unique_ptr<JobInCtld> parent) const;
-  ArrayTaskResolveResult ResolveArrayTaskSelectorNoLock_(
+  ArrayTaskResolveResult ResolveArrayTaskIdsNoLock_(
       job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids,
-      ArrayResolveMode mode);
-  std::unique_ptr<JobInCtld> CreateArrayChild_(const JobInCtld& array_parent,
-                                               uint32_t task_id) const;
-  std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
+      ArrayTaskResolveMode mode);
+  std::unique_ptr<JobInCtld> BuildArrayChildJob_(
+      const JobInCtld& array_parent, uint32_t task_id) const;
+  std::unique_ptr<JobInCtld> BuildNextArrayChildNoLock_(ArrayMeta* meta) const;
+  void SyncNextArrayTaskIndexNoLock_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
   void TrackArrayChildPendingNoLock_(job_id_t array_job_id, JobInCtld* child);
   void TrackArrayChildRunningNoLock_(job_id_t array_job_id, JobInCtld* child);
@@ -1088,22 +1079,16 @@ class JobScheduler {
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
-  // Shared helper: persist array children to embedded DB, handle expanded
-  // state, commit transaction, and track children into the pending map.
-  ArrayBatchPersistOutcome PersistAndTrackArrayChildrenNoLock_(
+  CraneExpected<void> AdmitArrayChildNoLock_(JobInCtld* child);
+  CraneExpected<void> AdmitArrayChildrenNoLock_(
       ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
-
-  void FailArrayParentOnQosLimitNoLock_(ArrayMeta* meta, CraneErrCode reason);
-
-  // Persist a parent's expanded array children and insert them into the
-  // pending map. Must be called while holding both pending/running map locks.
-  bool MaterializeArrayChildrenToPendingMap_(job_id_t array_job_id,
-                                             size_t max_count);
+  void EnqueuePendingJobNoLock_(std::unique_ptr<JobInCtld> job);
+  bool TryEnqueueNextArrayChildNoLock_(ArrayMeta* meta);
 
   // Materialize specific array tasks by their task IDs.
   // Only creates the tasks that don't already exist.
   // Returns the job IDs of the materialized children.
-  std::vector<job_id_t> MaterializeSpecificArrayTasksToPendingMap_(
+  std::vector<job_id_t> MaterializeSpecificArrayTasksNoLock_(
       job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids);
 
   std::thread m_step_schedule_thread_;

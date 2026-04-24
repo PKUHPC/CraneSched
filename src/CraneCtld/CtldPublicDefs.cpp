@@ -80,14 +80,8 @@ void ArrayMeta::TrackPending(JobInCtld* child) {
   }
 
   TrackBookkeeping_(child);
-  auto task_id = *child->ArrayTaskId();
   pending_child_job_ids.insert(child->JobId());
   running_child_job_ids.erase(child->JobId());
-  if (child->Held()) {
-    runnable_pending_child_job_id_by_task_id.erase(task_id);
-  } else {
-    runnable_pending_child_job_id_by_task_id[task_id] = child->JobId();
-  }
 }
 
 void ArrayMeta::TrackRunning(JobInCtld* child) {
@@ -96,9 +90,7 @@ void ArrayMeta::TrackRunning(JobInCtld* child) {
   }
 
   TrackBookkeeping_(child);
-  uint32_t task_id = *child->ArrayTaskId();
   pending_child_job_ids.erase(child->JobId());
-  runnable_pending_child_job_id_by_task_id.erase(task_id);
   running_child_job_ids.insert(child->JobId());
 }
 
@@ -110,7 +102,6 @@ void ArrayMeta::Untrack(JobInCtld* child) {
   uint32_t task_id = *child->ArrayTaskId();
   pending_child_job_ids.erase(child->JobId());
   running_child_job_ids.erase(child->JobId());
-  runnable_pending_child_job_id_by_task_id.erase(task_id);
 
   auto by_task_it = child_job_id_by_task_id.find(task_id);
   if (by_task_it != child_job_id_by_task_id.end() &&
