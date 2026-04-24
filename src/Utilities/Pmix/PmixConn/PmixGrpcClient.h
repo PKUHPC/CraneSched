@@ -77,7 +77,7 @@ class PmixGrpcStub : public PmixStub {
 
 class PmixGrpcClient : public PmixClient {
  public:
-  explicit PmixGrpcClient(int node_num, const Config& config)
+  explicit PmixGrpcClient(int node_num, const Config &config)
       : m_node_num_(node_num), m_config_(config) {}
 
   ~PmixGrpcClient() override = default;

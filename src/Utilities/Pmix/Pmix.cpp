@@ -361,8 +361,8 @@ bool PmixServer::InfoSet_(const Config& config,
   m_pmix_step_info_.node_list_str =
       absl::StrJoin(m_pmix_step_info_.node_list, ",");
 
-  auto it =
-      std::ranges::find(m_pmix_step_info_.node_list, m_pmix_step_info_.hostname);
+  auto it = std::ranges::find(m_pmix_step_info_.node_list,
+                              m_pmix_step_info_.hostname);
   if (it == m_pmix_step_info_.node_list.end()) {
     CRANE_ERROR(
         "[Step#{}.{}] Current hostname '{}' is not in the node list [{}] "
@@ -381,7 +381,7 @@ bool PmixServer::InfoSet_(const Config& config,
   // Build task_map: task_map[rank] = node_id (block order).
   // tasks_per_node_list[i] is the number of tasks on nodelist[i].
   m_pmix_step_info_.task_map.assign(step.task_node_list().begin(),
-                                   step.task_node_list().end());
+                                    step.task_node_list().end());
 
   // node_tasks: the actual number of tasks on THIS specific node.
   for (const auto& node_id : step.task_node_list()) {
@@ -441,7 +441,8 @@ bool PmixServer::ConnInit_(const Config& config) {
 
   if (m_pmix_step_info_.pmix_direct_conn_ucx == "true") {
 #  ifdef HAVE_UCX
-    m_pmix_client_ = std::make_unique<PmixUcxClient>(m_pmix_step_info_.node_num);
+    m_pmix_client_ =
+        std::make_unique<PmixUcxClient>(m_pmix_step_info_.node_num);
     CRANE_TRACE(
         "Using UCX for PMIx communication as CranePmixDirectConnUcx is set to "
         "true.");
@@ -528,11 +529,11 @@ bool PmixServer::PmixInit_() {
 
 bool PmixServer::JobSet_() {
   pmix_status_t rc;
-  
+
   {
     absl::BlockingCounter bc(1);
-    rc = PMIx_server_setup_application(m_pmix_step_info_.nspace.c_str(), nullptr,
-                                       0, AppCbWrapper, &bc);
+    rc = PMIx_server_setup_application(m_pmix_step_info_.nspace.c_str(),
+                                       nullptr, 0, AppCbWrapper, &bc);
     if (PMIX_SUCCESS != rc) {
       CRANE_ERROR("Failed to setup application: {}", PMIx_Error_string(rc));
       return false;
@@ -585,7 +586,8 @@ bool PmixServer::JobSet_() {
     // Use task_map to determine which node owns this rank, and set the
     // correct hostname/node_id for that rank.
     uint32_t rank_node_id = m_pmix_step_info_.task_map[rank];
-    const std::string& rank_hostname = m_pmix_step_info_.node_list[rank_node_id];
+    const std::string& rank_hostname =
+        m_pmix_step_info_.node_list[rank_node_id];
 
     /* this rank is local, store local info about it */
     if (rank_node_id == m_pmix_step_info_.node_id) {
@@ -617,8 +619,8 @@ bool PmixServer::JobSet_() {
       InfoLoad_(PMIX_UNIV_SIZE, m_pmix_step_info_.task_num, PMIX_UINT32));
   info_list.emplace_back(
       InfoLoad_(PMIX_JOB_SIZE, m_pmix_step_info_.task_num, PMIX_UINT32));
-  info_list.emplace_back(InfoLoad_(
-      PMIX_LOCAL_SIZE, m_pmix_step_info_.node_tasks, PMIX_UINT32));
+  info_list.emplace_back(
+      InfoLoad_(PMIX_LOCAL_SIZE, m_pmix_step_info_.node_tasks, PMIX_UINT32));
   info_list.emplace_back(
       InfoLoad_(PMIX_NODE_SIZE, m_pmix_step_info_.node_tasks, PMIX_UINT32));
   info_list.emplace_back(

@@ -148,7 +148,8 @@ pmix_status_t PmixServerCallbacks::JobControl(
   CRANE_DEBUG("JobControl called (not supported)");
   // PMIx spec requires the completion callback to always be invoked, even when
   // the operation is not supported, so the caller is not left waiting forever.
-  if (cbfunc) cbfunc(PMIX_ERR_NOT_SUPPORTED, nullptr, 0, cbdata, nullptr, nullptr);
+  if (cbfunc)
+    cbfunc(PMIX_ERR_NOT_SUPPORTED, nullptr, 0, cbdata, nullptr, nullptr);
   return PMIX_ERR_NOT_SUPPORTED;
 }
 
@@ -226,8 +227,8 @@ void PmixServerCallbacks::ErrHandler(
   // system-wide events and internal PMIx server errors.  Guard before
   // dereferencing to avoid a crash in those cases.
   if (source != nullptr) {
-    CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]",
-                status, source->nspace, source->rank);
+    CRANE_ERROR("PMIx error handler invoked: status={}, source=[{}:{}]", status,
+                source->nspace, source->rank);
   } else {
     CRANE_ERROR(
         "PMIx error handler invoked: status={}, source=[system/internal]",

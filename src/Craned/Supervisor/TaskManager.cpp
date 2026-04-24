@@ -486,8 +486,7 @@ void ProcInstance::InitEnvMap() {
   m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
 
   if (m_parent_step_inst_->IsCrun() &&
-      m_parent_step_inst_->GetStep().interactive_meta().mpi() ==
-          kMpiTypePmix) {
+      m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
     // SetupFork() is called in the forked child process.  On failure use
     // _exit() rather than abort() to avoid flushing stdio buffers or running
     // parent-process destructors, and to prevent generating a core dump.

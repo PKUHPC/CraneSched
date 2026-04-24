@@ -140,8 +140,8 @@ void ServerBuilderAddTcpTlsListeningRandomPort(grpc::ServerBuilder* builder,
   ssl_opts.client_certificate_request =
       GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
 
-  builder->AddListeningPort(listen_addr_port,
-                            grpc::SslServerCredentials(ssl_opts), selected_port);
+  builder->AddListeningPort(
+      listen_addr_port, grpc::SslServerCredentials(ssl_opts), selected_port);
 }
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
