@@ -1168,6 +1168,70 @@ struct JobInCtld {
   void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
 };
 
+struct ArrayMeta {
+  job_id_t array_job_id{0};
+  job_db_id_t array_job_db_id{0};
+
+  uint32_t array_index_start{0};
+  uint32_t array_index_end{0};
+  uint32_t array_index_stride{1};
+  uint32_t array_max_concurrent{0};
+
+  crane::grpc::JobToCtld job_template;
+  crane::grpc::RuntimeAttrOfJob runtime_attr;
+
+  std::list<std::string> account_chain;
+  uint32_t ntasks_per_node_min{1};
+  uint32_t ntasks_per_node_max{0};
+  uint32_t partition_priority{0};
+  uint32_t qos_priority{0};
+  double mandated_priority{0.0};
+
+  bool using_default_wckey{false};
+  std::string wckey;
+
+  ResourceView req_total_res_view;
+
+  std::vector<CranedId> executing_craned_ids;
+  std::string allocated_craneds_regex;
+  std::string pending_reason;
+
+  DependenciesInJob dependencies;
+  std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
+
+  [[nodiscard]] absl::Duration time_limit() const;
+  [[nodiscard]] absl::Time begin_time() const;
+  [[nodiscard]] absl::Time deadline_time() const;
+  [[nodiscard]] absl::Time submit_time() const;
+  [[nodiscard]] absl::Time start_time() const;
+  [[nodiscard]] absl::Time end_time() const;
+  [[nodiscard]] std::string username() const;
+  [[nodiscard]] bool Expanded() const;
+
+  [[nodiscard]] uint32_t TotalTaskCount() const;
+  [[nodiscard]] uint32_t EffectiveConcurrencyLimit() const;
+  [[nodiscard]] uint32_t GetTaskIdByIndex(uint32_t index) const;
+  [[nodiscard]] bool IsValidTaskId(uint32_t task_id) const;
+
+  void SetStatus(crane::grpc::JobStatus val);
+  void SetExitCode(uint32_t val);
+  void SetHeld(bool val);
+  void SetSubmitTime(absl::Time val);
+  void SetStartTime(absl::Time val);
+  void SetEndTime(absl::Time val);
+  void SetCachedPriority(double val);
+  void SetExpanded(bool val);
+
+  void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
+  void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
+  void TriggerDependencyEvents(crane::grpc::DependencyType dep_type,
+                               absl::Time event_time) const;
+
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
+  bool SetFieldsOfVirtualArrayChildJobInfo(
+      uint32_t task_id, crane::grpc::JobInfo* job_info) const;
+};
+
 enum class QosFlags { DenyOnLimit, _Count };
 
 struct Qos {

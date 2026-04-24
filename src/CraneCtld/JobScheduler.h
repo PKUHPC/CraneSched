@@ -779,145 +779,17 @@ class JobScheduler {
     ArrayBatchPersistResult kind;
     CraneErrCode qos_err = CraneErrCode::SUCCESS;
   };
-
- public:
-  struct ArrayMeta {
-    // Array indexing
-    job_id_t array_job_id{0};
-    job_db_id_t array_job_db_id{0};
-    uint32_t array_index_start{0};
-    uint32_t array_index_end{0};
-    uint32_t array_index_stride{1};
-    uint32_t array_max_concurrent{0};  // 0 => kDefaultArrayConcurrent
-
-    // Protobuf data sources — all static/runtime info is read from these
-    crane::grpc::JobToCtld job_template;
-    crane::grpc::RuntimeAttrOfJob runtime_attr;
-
-    // Pure memory state (not derivable from protobuf)
-    std::list<std::string> account_chain;
-    uint32_t ntasks_per_node_min{1};
-    uint32_t ntasks_per_node_max{0};
-    uint32_t partition_priority{0};
-    uint32_t qos_priority{0};
-    double mandated_priority{0.0};
-    bool using_default_wckey{false};
-    std::string wckey;
-    ResourceView req_total_res_view;
-    std::vector<CranedId> executing_craned_ids;
-    std::string allocated_craneds_regex;
-    std::string pending_reason;
-    DependenciesInJob dependencies;
-    std::vector<job_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
-
-    // Array task tracking
-    HashSet<uint32_t> materialized_task_ids;
+  struct ArraySchedulingState {
+    absl::flat_hash_set<uint32_t> materialized_task_ids;
     uint32_t next_array_task_index{0};
-    bool array_children_expanded{false};
-    HashMap<uint32_t, job_id_t> child_job_id_by_task_id;
-    HashMap<job_id_t, uint32_t> child_task_id_by_job_id;
-    HashSet<job_id_t> pending_child_job_ids;
-    HashSet<job_id_t> running_child_job_ids;
+
+    absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
+    absl::flat_hash_map<job_id_t, uint32_t> child_task_id_by_job_id;
+
+    absl::flat_hash_set<job_id_t> pending_child_job_ids;
+    absl::flat_hash_set<job_id_t> running_child_job_ids;
+
     std::map<uint32_t, job_id_t> runnable_pending_child_job_id_by_task_id;
-
-    // Accessors for derived fields
-    [[nodiscard]] absl::Duration time_limit() const {
-      return absl::Seconds(job_template.time_limit().seconds());
-    }
-    [[nodiscard]] absl::Time begin_time() const {
-      return job_template.has_begin_time()
-                 ? absl::FromUnixSeconds(job_template.begin_time().seconds())
-                 : absl::InfinitePast();
-    }
-    [[nodiscard]] absl::Time deadline_time() const {
-      return job_template.has_deadline_time()
-                 ? absl::FromUnixSeconds(job_template.deadline_time().seconds())
-                 : absl::FromUnixSeconds(kJobMaxTimeStampSec);
-    }
-    [[nodiscard]] absl::Time submit_time() const {
-      return absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
-    }
-    [[nodiscard]] absl::Time start_time() const {
-      return absl::FromUnixSeconds(runtime_attr.start_time().seconds());
-    }
-    [[nodiscard]] absl::Time end_time() const {
-      return absl::FromUnixSeconds(runtime_attr.end_time().seconds());
-    }
-    [[nodiscard]] std::string username() const {
-      return runtime_attr.username();
-    }
-
-    // Array utility methods
-    [[nodiscard]] uint32_t TotalTaskCount() const {
-      if (array_index_end < array_index_start) return 0;
-      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-      return (array_index_end - array_index_start) / stride + 1;
-    }
-
-    [[nodiscard]] uint32_t EffectiveConcurrencyLimit() const {
-      uint32_t limit = array_max_concurrent == 0 ? kDefaultArrayConcurrent
-                                                 : array_max_concurrent;
-      return std::min(limit, TotalTaskCount());
-    }
-
-    [[nodiscard]] uint32_t GetTaskIdByIndex(uint32_t index) const {
-      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-      return array_index_start + index * stride;
-    }
-
-    [[nodiscard]] bool IsValidTaskId(uint32_t task_id) const {
-      if (task_id < array_index_start || task_id > array_index_end) {
-        return false;
-      }
-      uint32_t stride = array_index_stride == 0 ? 1 : array_index_stride;
-      return (task_id - array_index_start) % stride == 0;
-    }
-
-    // Mutators — write only to runtime_attr
-    void SetStatus(crane::grpc::JobStatus val) { runtime_attr.set_status(val); }
-
-    void SetExitCode(uint32_t val) { runtime_attr.set_exit_code(val); }
-
-    void SetHeld(bool val) { runtime_attr.set_held(val); }
-
-    void SetSubmitTime(absl::Time val) {
-      runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(val));
-    }
-
-    void SetStartTime(absl::Time val) {
-      runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(val));
-    }
-
-    void SetEndTime(absl::Time val) {
-      runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(val));
-    }
-
-    void SetCachedPriority(double val) {
-      runtime_attr.set_cached_priority(val);
-    }
-
-    void SetExpanded(bool val) {
-      array_children_expanded = val;
-      if (val) {
-        runtime_attr.set_array_children_expanded(true);
-      } else {
-        runtime_attr.clear_array_children_expanded();
-      }
-    }
-
-    void UpdateDependency(job_id_t dep_job_id, absl::Time event_time) {
-      dependencies.update(dep_job_id, event_time);
-    }
-
-    void AddDependent(crane::grpc::DependencyType dep_type,
-                      job_id_t dep_job_id);
-
-    void TriggerDependencyEvents(crane::grpc::DependencyType dep_type,
-                                 absl::Time event_time) const;
-
-    void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
-    bool SetFieldsOfVirtualArrayChildJobInfo(
-        uint32_t task_id, crane::grpc::JobInfo* job_info) const;
   };
 
  public:
@@ -1113,18 +985,24 @@ class JobScheduler {
 
  private:
   ArrayMeta* GetArrayMetaNoLock_(job_id_t array_job_id);
+  ArraySchedulingState* GetArraySchedulingStateNoLock_(job_id_t array_job_id);
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       JobInCtld& parent) const;
+  static ArraySchedulingState BuildArraySchedulingStateFromParentNoLock_(
+      JobInCtld& parent, const ArrayMeta& meta);
   std::vector<job_id_t> ResolveArrayTaskIdsToChildJobsNoLock_(
-      const ArrayMeta* meta,
+      const ArrayMeta* meta, const ArraySchedulingState* state,
       const google::protobuf::RepeatedField<uint32_t>& array_task_ids) const;
-  std::unique_ptr<JobInCtld> CreateArrayChild_(const ArrayMeta& meta,
-                                               uint32_t task_id) const;
-  std::unique_ptr<JobInCtld> CreateNextArrayChild_(ArrayMeta* meta) const;
+  std::unique_ptr<JobInCtld> CreateArrayChild_(
+      const ArrayMeta& meta, const ArraySchedulingState& state,
+      uint32_t task_id) const;
+  std::unique_ptr<JobInCtld> CreateNextArrayChild_(
+      ArrayMeta* meta, ArraySchedulingState* state) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
-  void TrackArrayChildBookkeepingNoLock_(ArrayMeta* meta, JobInCtld* child);
-  void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
-  void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void TrackArrayChildBookkeepingNoLock_(job_id_t array_job_id,
+                                         JobInCtld* child);
+  void TrackArrayChildPendingNoLock_(job_id_t array_job_id, JobInCtld* child);
+  void TrackArrayChildRunningNoLock_(job_id_t array_job_id, JobInCtld* child);
   void UntrackArrayChildNoLock_(JobInCtld* child);
   void RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id);
   CraneErrCode TryMallocArrayChildSubmitResource_(JobInCtld& child) const;
@@ -1179,6 +1057,8 @@ class JobScheduler {
 
   HashMap<job_id_t, std::shared_ptr<ArrayMeta>> m_array_metas_
       ABSL_GUARDED_BY(m_pending_job_map_mtx_);
+  HashMap<job_id_t, ArraySchedulingState> m_array_scheduling_states_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_array_root_job_map_
       ABSL_GUARDED_BY(m_pending_job_map_mtx_);
@@ -1224,7 +1104,8 @@ class JobScheduler {
   // Shared helper: persist array children to embedded DB, handle expanded
   // state, commit transaction, and track children into the pending map.
   ArrayBatchPersistOutcome PersistAndTrackArrayChildrenNoLock_(
-      ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
+      ArrayMeta* meta, ArraySchedulingState* state,
+      std::vector<std::unique_ptr<JobInCtld>>& children);
 
   void FailArrayParentOnQosLimitNoLock_(ArrayMeta* meta, CraneErrCode reason);
 
