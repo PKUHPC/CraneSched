@@ -173,6 +173,14 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct PreemptConfig {
+    crane::grpc::PreemptType PreemptType{
+        crane::grpc::PreemptType::PREEMPT_NONE};
+    crane::grpc::PreemptMode PreemptMode{
+        crane::grpc::PreemptMode::PREEMPT_MODE_OFF};
+  };
+  PreemptConfig Preempt;
+
   struct JobLifecycleHookConfig {
     std::vector<std::string> CranectldPrologs;  // ctld prologs
     std::vector<std::string> CranectldEpilogs;  // ctld epilogs
