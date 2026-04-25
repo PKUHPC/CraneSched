@@ -57,6 +57,7 @@ struct RnJobInScheduler {
   uint32_t partition_priority;
   uint32_t qos_priority;
   std::string account;
+  std::string qos;
 
   uint32_t node_num;
   absl::Time start_time;
@@ -73,6 +74,7 @@ struct RnJobInScheduler {
         partition_priority(job->partition_priority),
         qos_priority(job->qos_priority),
         account(job->account),
+        qos(job->qos),
         start_time(job->StartTime()),
         end_time(job->EndTime()),
         allocated_res(job->AllocatedRes()),
@@ -109,8 +111,11 @@ struct PdJobInScheduler {
   std::unordered_map<CranedId, uint32_t> craned_id_to_task_num;
 
   absl::Time start_time;
+  absl::Time end_time;
   ResourceV3 allocated_res;
   std::vector<CranedId> craned_ids;
+  std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
+      preempted_jobs;
 
   google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
       req_licenses;
@@ -121,6 +126,8 @@ struct PdJobInScheduler {
   std::string qos;
   std::string username;
   std::list<std::string> account_chain;
+
+  bool is_scheduled() const { return reason.empty(); }
 
   PdJobInScheduler(JobInCtld* job)
       : job_id(job->JobId()),
@@ -269,6 +276,16 @@ class SchedulerAlgo {
     std::vector<ReservedRes> reserved_res;
 
     TimeAvailResMap time_avail_res_map;
+
+    // Per-QoS inverted index of jobs on this node. Used by TryPreempt_ to
+    // enumerate candidates whose QoS is in a preempter's preempt list.
+    // Running jobs that are being cancelled (in SchedulerAlgo::cancelling_set_)
+    // are still included here so that a new preempter can "claim" their slot
+    // without issuing a duplicate cancel RPC.
+    absl::flat_hash_map<
+        std::string,
+        absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>>
+        qos_job_map;
 
     NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total)
         : craned_id(craned_id), res_total(res_total), res_avail(res_total) {}
@@ -750,7 +767,138 @@ class SchedulerAlgo {
         m_time_priority_queue_;
   };
 
+  // Segment tree with lazy propagation used by TryPreempt_ to check whether a
+  // set of preempted job releases covers the preempter's target resource on
+  // every time point inside [now, now+time_limit). Leaves cache a boolean
+  // `satisfied = (target_res <= res)`; the root's bit tells us whether the
+  // whole interval satisfies the target.
+  //
+  // Lazy add_tag / sub_tag propagate to children on demand. Internal nodes are
+  // allocated lazily in push_down, so unused branches stay empty. The tree is
+  // constructed fresh per job, so no long-lived memory pressure.
+  class PreemptSegTree {
+   private:
+    struct Node {
+      absl::Time st, ed;
+      Node* ls;
+      Node* rs;
+      bool satisfied;
+      ResourceInNodeV3 res;
+      ResourceInNodeV3 add_tag;
+      ResourceInNodeV3 sub_tag;
+    };
+
+    void add_res_(Node* node, const ResourceInNodeV3& res) {
+      node->res += res;
+      node->satisfied = (m_target_res_ <= node->res);
+      if (node->ls) node->add_tag += res;
+    }
+
+    void sub_res_(Node* node, const ResourceInNodeV3& res) {
+      node->res -= res;
+      node->satisfied = (m_target_res_ <= node->res);
+      if (node->ls) node->sub_tag += res;
+    }
+
+    void push_down_(Node* node) {
+      if (node->ls == nullptr) {
+        absl::Time mid = node->st + (node->ed - node->st) / 2;
+        node->ls = new Node{node->st,        mid,      nullptr, nullptr,
+                            node->satisfied, node->res};
+        node->rs = new Node{mid,     node->ed,        nullptr,
+                            nullptr, node->satisfied, node->res};
+        return;
+      }
+      if (!node->add_tag.IsZero()) {
+        add_res_(node->ls, node->add_tag);
+        add_res_(node->rs, node->add_tag);
+        node->add_tag.SetToZero();
+      }
+      if (!node->sub_tag.IsZero()) {
+        sub_res_(node->ls, node->sub_tag);
+        sub_res_(node->rs, node->sub_tag);
+        node->sub_tag.SetToZero();
+      }
+    }
+
+    void push_up_(Node* node) {
+      node->satisfied = node->ls->satisfied && node->rs->satisfied;
+    }
+
+    void add_(Node* node, const absl::Time& st, const absl::Time& ed,
+              const ResourceInNodeV3& res) {
+      if (node->ed <= st || ed <= node->st) return;
+      if (st <= node->st && node->ed <= ed) {
+        add_res_(node, res);
+        return;
+      }
+      push_down_(node);
+      add_(node->ls, st, ed, res);
+      add_(node->rs, st, ed, res);
+      push_up_(node);
+    }
+
+    void sub_(Node* node, const absl::Time& st, const absl::Time& ed,
+              const ResourceInNodeV3& res) {
+      if (node->ed <= st || ed <= node->st) return;
+      if (st <= node->st && node->ed <= ed) {
+        sub_res_(node, res);
+        return;
+      }
+      push_down_(node);
+      sub_(node->ls, st, ed, res);
+      sub_(node->rs, st, ed, res);
+      push_up_(node);
+    }
+
+    void destroy_(Node* node) {
+      if (node == nullptr) return;
+      destroy_(node->ls);
+      destroy_(node->rs);
+      delete node;
+    }
+
+    const ResourceInNodeV3 m_target_res_;
+    Node* m_root_;
+
+   public:
+    PreemptSegTree(const absl::Time& st, const absl::Time& ed,
+                   const ResourceInNodeV3& target_res)
+        : m_target_res_(target_res) {
+      m_root_ = new Node{st, ed, nullptr, nullptr, false};
+    }
+    ~PreemptSegTree() { destroy_(m_root_); }
+
+    PreemptSegTree(const PreemptSegTree&) = delete;
+    PreemptSegTree& operator=(const PreemptSegTree&) = delete;
+    PreemptSegTree(PreemptSegTree&&) = default;
+
+    void Add(const absl::Time& st, const absl::Time& ed,
+             const ResourceInNodeV3& res) {
+      add_(m_root_, st, ed, res);
+    }
+
+    void Sub(const absl::Time& st, const absl::Time& ed,
+             const ResourceInNodeV3& res) {
+      sub_(m_root_, st, ed, res);
+    }
+
+    bool IsSatisfied() const { return m_root_->satisfied; }
+
+    const ResourceInNodeV3& TargetRes() const { return m_target_res_; }
+  };
+
   IPrioritySorter* m_priority_sorter_;
+
+  // Running jobs that have been cancelled as part of a preemption decision in
+  // this or a previous round but haven't been removed from the running map
+  // yet. Used for:
+  //  * cancel action de-duplication (don't re-send CancelJobAsync)
+  //  * Phase C end_time=now+1s mutation so the prediction layer sees them as
+  //    about to release
+  // Note: this set does NOT exclude cancelling jobs from qos_job_map — they
+  // remain preempt candidates so a new preempter can "inherit" their slot.
+  absl::flat_hash_set<job_id_t> cancelling_set_;
 };
 
 class JobScheduler {
