@@ -1385,6 +1385,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 
   qos.max_wall = absl::Seconds(qos_info->max_wall());
 
+  qos.preempt.assign(qos_info->preempt().begin(), qos_info->preempt().end());
+  qos.preempt_mode = qos_info->preempt_mode();
+
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
     response->set_ok(true);
@@ -1785,6 +1788,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
     qos_info->set_flags(qos.flags.ToInt64());
+    for (const auto& preempt_name : qos.preempt) {
+      qos_info->add_preempt(preempt_name);
+    }
+    qos_info->set_preempt_mode(qos.preempt_mode);
   }
 
   return grpc::Status::OK;

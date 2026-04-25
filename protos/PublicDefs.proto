@@ -908,6 +908,19 @@ enum OperationType {
   Delete = 2;
 }
 
+enum PreemptType {
+  PREEMPT_NONE = 0;
+  PREEMPT_QOS = 1;
+  PREEMPT_PARTITION = 2;
+}
+
+enum PreemptMode {
+  PREEMPT_MODE_OFF = 0;
+  PREEMPT_MODE_CANCEL = 1;
+  PREEMPT_MODE_REQUEUE = 2;
+  PREEMPT_MODE_SUSPEND = 3;
+}
+
 enum ModifyField {
   // user and account
   Partition = 0;
@@ -932,6 +945,8 @@ enum ModifyField {
   MaxTresPerUser = 17;
   MaxTresPerAccount = 18;
   Flags = 19;
+  Preempt = 20;
+  ModifyPreemptMode = 21;
 
   // wckey
   DefaultWckey = 40;
@@ -998,6 +1013,8 @@ message QosInfo {
   ResourceView max_tres_per_user = 14;
   ResourceView max_tres_per_account = 15;
   uint32 flags = 16;
+  repeated string preempt = 17;
+  PreemptMode preempt_mode = 18;
 }
 
 message QueryWckeyInfo {

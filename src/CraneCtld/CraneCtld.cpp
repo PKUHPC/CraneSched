@@ -771,6 +771,60 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Preempt"]) {
+        const auto& preempt_config = config["Preempt"];
+
+        if (preempt_config["PreemptType"]) {
+          const auto& preempt_type =
+              preempt_config["PreemptType"].as<std::string>();
+          if (preempt_type == "none")
+            g_config.Preempt.PreemptType =
+                crane::grpc::PreemptType::PREEMPT_NONE;
+          else if (preempt_type == "qos")
+            g_config.Preempt.PreemptType =
+                crane::grpc::PreemptType::PREEMPT_QOS;
+          else if (preempt_type == "partition")
+            g_config.Preempt.PreemptType =
+                crane::grpc::PreemptType::PREEMPT_PARTITION;
+          else {
+            CRANE_CRITICAL("Unknown PreemptType '{}'. Valid: none|qos|partition",
+                           preempt_type);
+            std::exit(1);
+          }
+        }
+
+        if (preempt_config["PreemptMode"]) {
+          const auto& preempt_mode =
+              preempt_config["PreemptMode"].as<std::string>();
+          // TODO(preempt): accept REQUEUE / SUSPEND once the scheduler knows
+          // how to honour them. The proto enum already reserves those values.
+          if (preempt_mode == "OFF")
+            g_config.Preempt.PreemptMode =
+                crane::grpc::PreemptMode::PREEMPT_MODE_OFF;
+          else if (preempt_mode == "CANCEL")
+            g_config.Preempt.PreemptMode =
+                crane::grpc::PreemptMode::PREEMPT_MODE_CANCEL;
+          else {
+            CRANE_CRITICAL("Unknown PreemptMode '{}'. Valid: OFF|CANCEL",
+                           preempt_mode);
+            std::exit(1);
+          }
+        }
+
+        const bool type_is_none = g_config.Preempt.PreemptType ==
+                                  crane::grpc::PreemptType::PREEMPT_NONE;
+        const bool mode_is_off = g_config.Preempt.PreemptMode ==
+                                 crane::grpc::PreemptMode::PREEMPT_MODE_OFF;
+        if (type_is_none != mode_is_off) {
+          CRANE_CRITICAL(
+              "Preempt config inconsistent: PreemptType={}, PreemptMode={}. "
+              "Both must be 'none'/'OFF' or both must be set.",
+              crane::grpc::PreemptType_Name(g_config.Preempt.PreemptType),
+              crane::grpc::PreemptMode_Name(g_config.Preempt.PreemptMode));
+          std::exit(1);
+        }
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
