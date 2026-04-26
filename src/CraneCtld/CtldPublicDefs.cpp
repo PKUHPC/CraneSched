@@ -1867,9 +1867,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   job_info->set_ntasks(ntasks);
 }
 
-int JobInCtld::SchedulePendingSteps(
+uint32_t JobInCtld::SchedulePendingSteps(
     std::vector<CommonStepInCtld*>* scheduled_steps) {
-  int popped_count = 0;
+  uint32_t popped_count = 0;
   auto now = absl::Now();
   while (!pending_step_ids_.empty()) {
     const step_id_t& step_id = pending_step_ids_.front();
@@ -1880,18 +1880,21 @@ int JobInCtld::SchedulePendingSteps(
       pending_step_ids_.pop();
       continue;
     }
-    int max_ntask_per_node = step->ntasks_per_node_max;
-    int min_ntask_per_node = step->ntasks_per_node_min;
+
+    auto max_ntask_per_node = step->ntasks_per_node_max;
+    auto min_ntask_per_node = step->ntasks_per_node_min;
     ResourceV3 step_alloc_res;
-    struct node_info {
-      int ntasks_on_node;
+
+    struct NodeInfo {
+      uint32_t ntasks_on_node;
       const CranedId* craned_id;
-      bool operator<(const node_info& other) const {
+      bool operator<(const NodeInfo& other) const {
         return ntasks_on_node > other.ntasks_on_node;
       }
     };
-    std::priority_queue<node_info> candidates;
-    int sum_ntasks = 0;
+    std::priority_queue<NodeInfo> candidates;
+
+    uint32_t sum_ntasks = 0;
     for (auto const& craned_id :
          step_res_avail_.EachNodeResMap() | std::views::keys) {
       if (step->excluded_nodes.contains(craned_id)) {
@@ -1908,7 +1911,7 @@ int JobInCtld::SchedulePendingSteps(
       }
       ResourceInNodeV3 res_avail = step_res_avail_.At(craned_id);
       res_avail -= feasible_res;
-      int ntasks_on_node = 0;
+      uint32_t ntasks_on_node = 0;
       while (ntasks_on_node < max_ntask_per_node &&
              step->req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                                &feasible_res)) {
@@ -1918,7 +1921,8 @@ int JobInCtld::SchedulePendingSteps(
       if (ntasks_on_node < min_ntask_per_node) {
         continue;
       }
-      candidates.push(node_info{ntasks_on_node, &craned_id});
+      candidates.push(
+          NodeInfo{.ntasks_on_node = ntasks_on_node, .craned_id = &craned_id});
       sum_ntasks += ntasks_on_node;
       if (candidates.size() > step->node_num) {
         sum_ntasks -= candidates.top().ntasks_on_node;
@@ -1931,7 +1935,7 @@ int JobInCtld::SchedulePendingSteps(
     if (candidates.size() < step->node_num || sum_ntasks < step->ntasks) {
       break;
     }
-    int rest_ntasks = step->ntasks - step->node_num;
+    uint32_t rest_ntasks = step->ntasks - step->node_num;
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
@@ -1941,8 +1945,9 @@ int JobInCtld::SchedulePendingSteps(
                                                         &feasible_res);
       res_avail -= feasible_res;
       step_alloc_res.AddResourceInNode(*info.craned_id, feasible_res);
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
-      for (int i = 0; i < ntasks_on_node; ++i) {
+      uint32_t ntasks_on_node =
+          std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      for (uint32_t i = 0; i < ntasks_on_node; ++i) {
         step->req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                           &feasible_res);
         res_avail -= feasible_res;

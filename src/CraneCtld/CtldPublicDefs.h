@@ -1084,8 +1084,9 @@ struct JobInCtld {
   ResourceV3& StepResAvail() { return step_res_avail_; }
   void SetStepResAvail(const ResourceV3& val) { step_res_avail_ = val; }
 
-  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
-  void SetCachedPriority(const double val);
+  uint32_t SchedulePendingSteps(
+      std::vector<CommonStepInCtld*>* scheduled_steps);
+  void SetCachedPriority(double val);
   double CachedPriority() const { return cached_priority; }
 
   void SetAllocatedRes(ResourceV3&& val);
