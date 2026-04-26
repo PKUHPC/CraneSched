@@ -184,7 +184,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
 
-  const ResourceInNodeV3& job_node_res = resources.at(node_id);
+  const ResourceInNodeV3& job_node_res = resources.At(node_id);
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];

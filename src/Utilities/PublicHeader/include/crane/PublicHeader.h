@@ -63,7 +63,7 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
-constexpr int MaxHealthCheckWaitTimeMs = 60000;
+constexpr int kMaxHealthCheckWaitTimeMs = 60000;
 
 inline const char* const kDefaultHost = "0.0.0.0";
 
@@ -361,35 +361,36 @@ inline std::string_view CraneErrStr(CraneErrCode err) {
 
 template <typename EnumType>
 class FlagSet {
-  static_assert(std::is_enum<EnumType>::value,
+ private:
+  static_assert(std::is_enum_v<EnumType>,
                 "FlagSet can only be used with enum types");
-  static constexpr size_t BitSize = std::to_underlying(EnumType::_Count);
-  std::bitset<BitSize> bits;
+  static constexpr size_t kBitSize = std::to_underlying(EnumType::_Count);
+  std::bitset<kBitSize> m_bits_;
 
  public:
   constexpr FlagSet() = default;
 
   decltype(auto) operator[](EnumType flag) {
-    return bits[std::to_underlying(flag)];
+    return m_bits_[std::to_underlying(flag)];
   }
 
   bool operator[](EnumType flag) const {
-    return bits[std::to_underlying(flag)];
+    return m_bits_[std::to_underlying(flag)];
   }
 
   void FromInt64(int64_t value) {
-    static_assert(BitSize <= 64,
+    static_assert(kBitSize <= 64,
                   "FlagSet: enum _Count > 64, cannot convert to int64");
-    bits = value;
+    m_bits_ = value;
   }
 
   int64_t ToInt64() const {
-    static_assert(BitSize <= 64,
+    static_assert(kBitSize <= 64,
                   "FlagSet: enum _Count > 64, cannot convert to int64");
-    return static_cast<int64_t>(bits.to_ullong());
+    return static_cast<int64_t>(m_bits_.to_ullong());
   }
 
-  std::string ToString() const { return bits.to_string(); }
+  std::string ToString() const { return m_bits_.to_string(); }
 };
 
 /* ----------- Public definitions for all components */
@@ -416,10 +417,10 @@ struct TypeSlotsMap {
   explicit operator crane::grpc::DeviceTypeSlotsMap() const;
 
   bool IsZero() const;
-  bool contains(const std::string& type) const;
+  bool Contains(const std::string& type) const;
 
   std::set<SlotId>& operator[](const std::string& type);
-  const std::set<SlotId>& at(const std::string& type) const;
+  const std::set<SlotId>& At(const std::string& type) const;
 
   TypeSlotsMap& operator+=(const TypeSlotsMap& rhs);
   TypeSlotsMap& operator-=(const TypeSlotsMap& rhs);
@@ -447,14 +448,14 @@ struct DedicatedResourceInNode {
 
   // Access operators
   TypeSlotsMap& operator[](const std::string& device_name);
-  TypeSlotsMap& at(const std::string& device_name);
-  const TypeSlotsMap& at(const std::string& device_name) const;
+  TypeSlotsMap& At(const std::string& device_name);
+  const TypeSlotsMap& At(const std::string& device_name) const;
 
   // Arithmetic operators
   DedicatedResourceInNode& operator+=(const DedicatedResourceInNode& rhs);
   DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
 
-  bool contains(const std::string& device_name) const;
+  bool Contains(const std::string& device_name) const;
 
   bool IsZero() const;
   void SetToZero();
@@ -481,7 +482,7 @@ struct GresCount {
   std::unordered_map<std::string /*type*/, uint64_t /*count*/> specified;
 
   GresCount() = default;
-  GresCount(uint64_t t) : total(t) {}
+  explicit GresCount(uint64_t t) : total(t) {}
   GresCount(uint64_t t, std::unordered_map<std::string, uint64_t> spec)
       : total(t), specified(std::move(spec)) {}
 
@@ -586,16 +587,16 @@ class ResourceInNodeV3 {
   // Deprecated: will be removed after TimeResMap migrates to ResourceView.
   // Use ResourceView::Min() for new code.
   [[deprecated("Use ResourceView::Min() after TimeResMap migration")]]
-  void ckmin(const ResourceInNodeV3& rhs);
+  void Ckmin(const ResourceInNodeV3& rhs);
 
   // Convert to ResourceView (aggregates to counts only)
   ResourceView ToResourceView() const;
 
  private:
-  CpuSet cpu_set_;
-  uint64_t memory_bytes_{0};
-  uint64_t memory_sw_bytes_{0};
-  DedicatedResourceInNode gres_;
+  CpuSet m_cpu_set_;
+  uint64_t m_memory_bytes_{0};
+  uint64_t m_memory_sw_bytes_{0};
+  DedicatedResourceInNode m_gres_;
 
   friend ResourceInNodeV3 operator+(const ResourceInNodeV3& lhs,
                                     const ResourceInNodeV3& rhs);
@@ -627,8 +628,8 @@ class ResourceV3 {
   ResourceV3& SubtractResourceInNode(const std::string& craned_id,
                                      const ResourceInNodeV3& rhs);
 
-  ResourceInNodeV3& at(const std::string& craned_id);
-  const ResourceInNodeV3& at(const std::string& craned_id) const;
+  ResourceInNodeV3& At(const std::string& craned_id);
+  const ResourceInNodeV3& At(const std::string& craned_id) const;
 
   bool IsZero() const;
   void SetToZero();
@@ -637,16 +638,16 @@ class ResourceV3 {
   ResourceView View() const noexcept;
 
   std::unordered_map<std::string, ResourceInNodeV3>& EachNodeResMap() {
-    return each_node_res_map_;
+    return m_each_node_res_map_;
   }
   const std::unordered_map<std::string, ResourceInNodeV3>& EachNodeResMap()
       const {
-    return each_node_res_map_;
+    return m_each_node_res_map_;
   }
 
  private:
   std::unordered_map<std::string /*craned id*/, ResourceInNodeV3>
-      each_node_res_map_;
+      m_each_node_res_map_;
 
   friend ResourceV3 operator+(const ResourceV3& lhs, const ResourceV3& rhs);
   friend ResourceV3 operator-(const ResourceV3& lhs, const ResourceV3& rhs);
@@ -710,10 +711,10 @@ class ResourceView {
   static ResourceView Min(const ResourceView& lhs, const ResourceView& rhs);
 
  private:
-  cpu_t cpu_count_{0};
-  uint64_t memory_bytes_{0};
-  uint64_t memory_sw_bytes_{0};
-  GresMap gres_map_;
+  cpu_t m_cpu_count_{0};
+  uint64_t m_memory_bytes_{0};
+  uint64_t m_memory_sw_bytes_{0};
+  GresMap m_gres_map_;
 
   friend ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
   friend ResourceView operator+(const ResourceView& lhs,
