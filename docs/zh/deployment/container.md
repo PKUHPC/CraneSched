@@ -238,7 +238,7 @@ RuntimeApiVersion:  v1
 
     - `name: rdma`：必须与 `DeviceCniPipeline: rdma` 一致
     - `ifNamePrefix: rdma`：生成的容器内接口名形如 `rdma0`、`rdma1`
-    - `confFromArgs: {"deviceID": "$gres.device"}`：把 GRES 对应的 CDI 设备标识传给 `sriov` 插件
+    - `conf.deviceID: "{{.Gres.Device}}"`：在 `sriov` 代理插件的 `conf` 中以字符串形式嵌入 Go `text/template` 表达式。Meta CNI 会在运行时针对每个模板管线实例渲染该字段，将当前实例分配到的 CDI 设备标识替换进去，再调用 `sriov` 插件。
 
 如果您只需要将 RDMA 设备文件注入容器，而不需要在容器内创建独立 RDMA 网络接口，
 则无需配置 `DeviceCniPipeline`。

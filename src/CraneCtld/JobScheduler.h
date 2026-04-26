@@ -690,7 +690,7 @@ class SchedulerAlgo {
         m_res_map_iters_.emplace_back(
             node->craned_id, time_avail_res_map.begin(),
             time_avail_res_map.end(), &m_satisfied_iters_,
-            &job->allocated_res.at(node->craned_id));
+            &job->allocated_res.At(node->craned_id));
         m_time_priority_queue_.emplace(&m_res_map_iters_.back());
       }
     }

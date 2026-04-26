@@ -546,7 +546,7 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_qos(job->qos);
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
   return job_to_d;
 }
 
@@ -555,7 +555,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   crane::grpc::StepToD step_to_d;
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
 
   step_to_d.set_type(this->type);
   step_to_d.set_step_type(this->step_type);
@@ -589,7 +589,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   step_to_d.set_submit_hostname(job->JobToCtld().submit_hostname());
   ResourceView res_view_in_node;
-  res_view_in_node += m_allocated_res_.at(craned_id);
+  res_view_in_node += m_allocated_res_.At(craned_id);
   step_to_d.set_total_gpus(res_view_in_node.GpuCount());
   step_to_d.set_cwd(this->job->cwd);
   step_to_d.set_ntasks(this->job->ntasks);
@@ -907,12 +907,12 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     // that appended container steps can reuse the job allocation.
     craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
     task_res_map[cur_task_id] =
-        job.AllocatedRes().at(job.executing_craned_ids.front());
+        job.AllocatedRes().At(job.executing_craned_ids.front());
   } else {
     ResourceV3 step_alloc_res;
     task_id_t cur_task_id = 0;
     for (const auto& craned_id : job.CranedIds()) {
-      ResourceInNodeV3& res_avail = job.StepResAvail().at(craned_id);
+      ResourceInNodeV3& res_avail = job.StepResAvail().At(craned_id);
       ResourceInNodeV3 feasible_res;
       req_node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
       res_avail -= feasible_res;
@@ -1086,7 +1086,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
 
   // Set type
   step_to_d.set_type(this->type);
@@ -1903,10 +1903,10 @@ int JobInCtld::SchedulePendingSteps(
       }
       ResourceInNodeV3 feasible_res;
       if (!step->req_node_res_view.GetFeasibleResourceInNode(
-              step_res_avail_.at(craned_id), &feasible_res)) {
+              step_res_avail_.At(craned_id), &feasible_res)) {
         continue;
       }
-      ResourceInNodeV3 res_avail = step_res_avail_.at(craned_id);
+      ResourceInNodeV3 res_avail = step_res_avail_.At(craned_id);
       res_avail -= feasible_res;
       int ntasks_on_node = 0;
       while (ntasks_on_node < max_ntask_per_node &&
@@ -1935,7 +1935,7 @@ int JobInCtld::SchedulePendingSteps(
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
-      ResourceInNodeV3& res_avail = step_res_avail_.at(*info.craned_id);
+      ResourceInNodeV3& res_avail = step_res_avail_.At(*info.craned_id);
       ResourceInNodeV3 feasible_res;
       step->req_node_res_view.GetFeasibleResourceInNode(res_avail,
                                                         &feasible_res);

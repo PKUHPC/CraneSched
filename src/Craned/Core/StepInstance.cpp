@@ -327,8 +327,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // Populate CDI devices into container_meta for container jobs.
     // CDI consistency (all-or-none per name/type) is validated at config
     // parse time in Craned.cpp, so here we only need to fill the list.
-    if (this->IsContainer() &&
-        init_req.mutable_step_spec()->has_container_meta()) {
+    if (init_req.step_spec().has_container_meta()) {
       auto* cm = init_req.mutable_step_spec()->mutable_container_meta();
       const auto& dedicated_res = this->step_to_d.res().gres();
       for (const auto& [dev_name, type_slots_map] :
@@ -347,10 +346,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       }
     }
 
-    // CNI is pod-level, so GRES annotations only apply to daemon container
-    // steps that carry pod metadata.
-    if (this->IsContainer() && this->IsDaemonStep() &&
-        init_req.mutable_step_spec()->has_pod_meta()) {
+    // CNI is pod-level, so GRES annotations apply to daemon pod steps even
+    // though they do not carry container_meta.
+    if (this->IsDaemonStep() && init_req.step_spec().has_pod_meta()) {
       const auto& dedicated_res = this->step_to_d.res().gres();
       auto cni_annos =
           Common::DeviceManager::GetCniGresAnnotations(dedicated_res);

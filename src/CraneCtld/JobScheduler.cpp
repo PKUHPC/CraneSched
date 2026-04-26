@@ -5264,7 +5264,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
 
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
-        min_res_on_node.ckmin(res);
+        min_res_on_node.Ckmin(res);
       }
 
       int ntasks_on_node_avail = get_max_tasks(min_res_on_node);
@@ -6233,7 +6233,7 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
   for (const auto& craned_id : job->CranedIds()) {
     const auto& job_res = job->AllocatedRes();
     if (step->req_node_res_view + step->req_task_res_view <=
-            job_res.at(craned_id) &&
+            job_res.At(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
         (step->excluded_nodes.empty() ||
