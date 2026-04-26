@@ -601,8 +601,52 @@ class SchedulerAlgo {
       }
     }
 
-    bool CalculateRunningNodesAndStartTime_(const absl::Time& now,
-                                            PdJobInScheduler* job);
+    // Three-stage scheduling driver. See docs/preempt/preempt-v2-on-master.md
+    // §5.6 for the overall flow: immediate start → preempt → backfill.
+    bool CalculateRunningNodesAndStartTime_(
+        const absl::Time& now, PdJobInScheduler* job,
+        const absl::flat_hash_map<std::string, std::vector<std::string>>&
+            qos_preempt_map,
+        const absl::flat_hash_set<job_id_t>& cancelling_set);
+
+    // Stage 1: pick N nodes that can run the job in
+    // [now, now+time_limit) against res_avail; also collect up to node_num
+    // candidate nodes whose res_total is enough (for stages 2 and 3).
+    //
+    // On success: fills job->craned_ids / allocated_res / craned_id_to_task_num
+    // and sets start_time = now. Returns true.
+    // On failure: leaves nodes_to_sched populated with up to node_num
+    // candidates (plus provisional allocated_res sized by res_total so the
+    // backfill stage has something to work with). Returns false.
+    bool GetNodesAndTrySchedule_(const absl::Time& now, PdJobInScheduler* job,
+                                 std::vector<NodeState*>* nodes_to_sched);
+
+    // Stage 2: try to run the job NOW by preempting lower-QoS jobs.
+    // Only called when stage 1 collected >= node_num candidates but couldn't
+    // satisfy them from current availability alone.
+    //
+    // Uses a per-node PreemptSegTree over [now, now+time_limit). Candidates
+    // are sourced from each node's qos_job_map (intersected with the
+    // preempter's preempt_qos_list) and sorted so cancelling entries are tried
+    // first (they don't incur a new cancel RPC), then pending, then running.
+    //
+    // On success: overwrites job->craned_ids / allocated_res /
+    // craned_id_to_task_num, populates job->preempted_jobs, sets
+    // start_time = now. Returns true.
+    bool TryPreempt_(
+        const absl::Time& now, PdJobInScheduler* job,
+        const std::vector<NodeState*>& nodes_to_sched,
+        const absl::flat_hash_map<std::string, std::vector<std::string>>&
+            qos_preempt_map,
+        const absl::flat_hash_set<job_id_t>& cancelling_set);
+
+    // Stage 3: backfill — find the earliest future start time at which the
+    // candidate subset collected by stage 1 satisfies the request.
+    //
+    // Consumes the provisional allocated_res populated by stage 1 and calls
+    // EarliestStartSubsetSelector to walk forward through time.
+    bool Backfill_(const absl::Time& now, PdJobInScheduler* job,
+                               const std::vector<NodeState*>& nodes_to_sched);
 
     // Apply a successful scheduling decision: subtract the job's allocation
     // from each target node's time_avail_res_map and register the job in the

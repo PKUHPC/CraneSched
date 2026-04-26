@@ -5130,15 +5130,34 @@ void JobScheduler::TerminateOrphanedSteps(
 }
 
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
-    const absl::Time& now, PdJobInScheduler* job) {
+    const absl::Time& now, PdJobInScheduler* job,
+    const absl::flat_hash_map<std::string, std::vector<std::string>>&
+        qos_preempt_map,
+    const absl::flat_hash_set<job_id_t>& cancelling_set) {
   std::vector<NodeState*> nodes_to_sched;
+  if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) return true;
+  if (nodes_to_sched.size() < job->node_num) {
+    CRANE_TRACE(
+        "Only {} nodes are available for job #{} but {} nodes are required.",
+        nodes_to_sched.size(), job->job_id, job->node_num);
+    return false;
+  }
+  if (g_config.Preempt.PreemptType !=
+          crane::grpc::PreemptType::PREEMPT_NONE &&
+      TryPreempt_(now, job, nodes_to_sched, qos_preempt_map, cancelling_set)) {
+    return true;
+  }
+  return Backfill_(now, job, nodes_to_sched);
+}
 
+bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
+    const absl::Time& now, PdJobInScheduler* job,
+    std::vector<NodeState*>* nodes_to_sched) {
   absl::Time earliest_end_time = now + job->time_limit;
 
   const ResourceView min_res_view =
       job->req_node_res_view +
       job->req_task_res_view * job->ntasks_per_node_min;
-  ResourceV3 job_alloc_res;
   struct node_info {
     int ntasks_on_node;
     ResourceInNodeV3 res;
@@ -5325,34 +5344,201 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         topk_nodes_total.size(), topk_ntasks_sum_total, job->job_id,
         job->node_num, job->ntasks);
     return false;
-  } else {
-    int rest_ntasks = job->ntasks - job->node_num;
-    while (!topk_nodes_total.empty()) {
-      const auto& info = topk_nodes_total.top();
-      const auto& res = info.res;
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
-      if (job->exclusive) {
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
-      } else {
-        ResourceInNodeV3 feasible_res;
-        bool ok =
-            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
-                .GetFeasibleResourceInNode(res, &feasible_res);
-        CRANE_ASSERT_MSG(
-            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                    info.node_state->craned_id, job->job_id));
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
-                                             feasible_res);
+  }
+
+  // Immediate start failed but enough nodes have total capacity. Populate the
+  // provisional allocation and hand the candidate node list to the caller so
+  // it can run stage 2 (TryPreempt_) and/or stage 3 (Backfill_).
+  int rest_ntasks = job->ntasks - job->node_num;
+  while (!topk_nodes_total.empty()) {
+    const auto& info = topk_nodes_total.top();
+    const auto& res = info.res;
+    int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+    if (job->exclusive) {
+      job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+    } else {
+      ResourceInNodeV3 feasible_res;
+      bool ok =
+          (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+              .GetFeasibleResourceInNode(res, &feasible_res);
+      CRANE_ASSERT_MSG(
+          ok, fmt("Failed to get feasible resource on craned {} for job #{}",
+                  info.node_state->craned_id, job->job_id));
+      job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                           feasible_res);
+    }
+    job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
+    nodes_to_sched->push_back(info.node_state);
+    rest_ntasks -= ntasks_on_node - 1;
+    topk_nodes_total.pop();
+  }
+  return false;
+}
+
+bool SchedulerAlgo::LocalScheduler::Backfill_(
+    const absl::Time& now, PdJobInScheduler* job,
+    const std::vector<NodeState*>& nodes_to_sched) {
+  // job->allocated_res / craned_id_to_task_num were populated by stage 1's
+  // failure-return path using res_total sizing; feed that directly into the
+  // earliest-start selector.
+  EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
+  return scheduler.CalcEarliestStartTime(now, job);
+}
+
+bool SchedulerAlgo::LocalScheduler::TryPreempt_(
+    const absl::Time& now, PdJobInScheduler* job,
+    const std::vector<NodeState*>& nodes_to_sched,
+    const absl::flat_hash_map<std::string, std::vector<std::string>>&
+        qos_preempt_map,
+    const absl::flat_hash_set<job_id_t>& cancelling_set) {
+  // PreemptType gating lives in the caller (CalculateRunningNodesAndStartTime_)
+  // so TryPreempt_ itself only deals with candidate selection.
+  auto qit = qos_preempt_map.find(job->qos);
+  if (qit == qos_preempt_map.end() || qit->second.empty()) return false;
+
+  // 1. Gather preemptable candidates from each candidate node's qos_job_map.
+  //    Cancelling jobs are intentionally kept in qos_job_map (see §4.5 of the
+  //    design doc) so a new preempter can inherit their slot; the
+  //    cancelling-first sort below ensures they are consumed first.
+  absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
+      preemptable_set;
+  for (const auto* node : nodes_to_sched) {
+    for (const auto& qos : qit->second) {
+      auto it = node->qos_job_map.find(qos);
+      if (it != node->qos_job_map.end()) {
+        preemptable_set.insert(it->second.begin(), it->second.end());
       }
-      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
-      nodes_to_sched.push_back(info.node_state);
-      rest_ntasks -= ntasks_on_node - 1;
-      topk_nodes_total.pop();
+    }
+  }
+  if (preemptable_set.empty()) return false;
+
+  // 2. Sort: cancelling > pending > running. Tie-break by QoS priority
+  //    (low first — "cheaper to sacrifice"), then by job priority (pending) or
+  //    start time (running, youngest first).
+  std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>> ordered(
+      preemptable_set.begin(), preemptable_set.end());
+  std::sort(
+      ordered.begin(), ordered.end(),
+      [&cancelling_set](const auto& a, const auto& b) {
+        auto is_cancelling =
+            [&cancelling_set](
+                const std::variant<PdJobInScheduler*, RnJobInScheduler*>& v) {
+              if (auto* rn = std::get_if<RnJobInScheduler*>(&v))
+                return cancelling_set.contains((*rn)->job_id);
+              return false;
+            };
+        bool ca = is_cancelling(a), cb = is_cancelling(b);
+        if (ca != cb) return ca;
+
+        bool pa = std::holds_alternative<PdJobInScheduler*>(a);
+        bool pb = std::holds_alternative<PdJobInScheduler*>(b);
+        if (pa != pb) return pa;
+
+        if (pa) {
+          auto* x = std::get<PdJobInScheduler*>(a);
+          auto* y = std::get<PdJobInScheduler*>(b);
+          if (x->qos_priority != y->qos_priority)
+            return x->qos_priority < y->qos_priority;
+          return x->priority < y->priority;
+        } else {
+          auto* x = std::get<RnJobInScheduler*>(a);
+          auto* y = std::get<RnJobInScheduler*>(b);
+          if (x->qos_priority != y->qos_priority)
+            return x->qos_priority < y->qos_priority;
+          return x->start_time > y->start_time;
+        }
+      });
+
+  // 3. Build a seg tree per candidate node over [now, now+time_limit).
+  //    Stage 1 already picked exactly node_num nodes and filled
+  //    allocated_res / craned_id_to_task_num for them; TryPreempt_ only
+  //    verifies whether those target allocations can be made available by
+  //    preempting candidates. No node / resource decisions happen here.
+  //    Target per node = stage 1's provisional allocation on that node.
+  //    Init each tree from time_avail_res_map to reflect "what's free given
+  //    running jobs".
+  absl::Time seg_start = now;
+  absl::Time seg_end = now + job->time_limit;
+  std::vector<PreemptSegTree> seg_trees;
+  seg_trees.reserve(nodes_to_sched.size());
+  absl::flat_hash_map<CranedId, size_t> node_index;
+  node_index.reserve(nodes_to_sched.size());
+  const auto& alloc_per_node = job->allocated_res.EachNodeResMap();
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    auto* node = nodes_to_sched[i];
+    node_index[node->craned_id] = i;
+    auto alloc_it = alloc_per_node.find(node->craned_id);
+    CRANE_ASSERT_MSG(alloc_it != alloc_per_node.end(),
+                     fmt("TryPreempt_: stage 1 didn't size craned {}",
+                         node->craned_id));
+    seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
+
+    auto& tree = seg_trees.back();
+    const auto& tmap = node->time_avail_res_map;
+    for (auto it = tmap.begin(); it != tmap.end();) {
+      absl::Time st = it->first;
+      auto nxt = std::next(it);
+      absl::Time ed = (nxt == tmap.end() ? seg_end : nxt->first);
+      tree.Add(st, ed, it->second);
+      if (ed >= seg_end) break;
+      it = nxt;
     }
   }
 
-  EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
-  return scheduler.CalcEarliestStartTime(now, job);
+  auto apply_to_trees = [&](const auto& preempted, bool add) {
+    std::visit(
+        [&](auto* pj) {
+          for (const auto& [cid, res] : pj->allocated_res.EachNodeResMap()) {
+            auto ni = node_index.find(cid);
+            if (ni == node_index.end()) continue;
+            if (add)
+              seg_trees[ni->second].Add(pj->start_time, pj->end_time, res);
+            else
+              seg_trees[ni->second].Sub(pj->start_time, pj->end_time, res);
+          }
+        },
+        preempted);
+  };
+  // All N nodes must be satisfied — we can't run on a subset, so success
+  // means every single seg tree reports satisfied.
+  auto all_satisfied = [&]() {
+    for (const auto& t : seg_trees)
+      if (!t.IsSatisfied()) return false;
+    return true;
+  };
+
+  // 4. Forward scan: Add preempt candidates in the sorted order until every
+  //    tree is satisfied. preempt_idx stops at the critical candidate.
+  int preempt_idx = -1;
+  for (size_t i = 0; !all_satisfied() && i < ordered.size(); ++i) {
+    apply_to_trees(ordered[i], /*add=*/true);
+    preempt_idx = static_cast<int>(i);
+  }
+  if (!all_satisfied()) {
+    return false;  // even preempting every candidate isn't enough
+  }
+
+  // 5. Reverse pruning: drop candidates not needed for full satisfaction,
+  //    keeping the minimum set. The critical one (preempt_idx) is kept by
+  //    default.
+  job->preempted_jobs.push_back(ordered[preempt_idx]);
+  for (int i = preempt_idx - 1; i >= 0; --i) {
+    apply_to_trees(ordered[i], /*add=*/false);
+    if (!all_satisfied()) {
+      apply_to_trees(ordered[i], /*add=*/true);  // still needed — put back
+      job->preempted_jobs.push_back(ordered[i]);
+    }
+  }
+
+  // 6. Finalize. Stage 1 already filled allocated_res / craned_id_to_task_num
+  //    for exactly these N nodes, and stage 1 does not populate craned_ids
+  //    on its failure path, so just seed it here.
+  job->craned_ids.clear();
+  job->craned_ids.reserve(nodes_to_sched.size());
+  for (const auto* node : nodes_to_sched)
+    job->craned_ids.emplace_back(node->craned_id);
+  job->start_time = now;
+  return true;
 }
 
 void SchedulerAlgo::NodeSelect(
@@ -5575,7 +5761,13 @@ void SchedulerAlgo::NodeSelect(
       scheduler = &resv_scheduler_map[job->reservation];
     }
 
-    bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
+    // Step 4.3: pass empty preempt inputs; Step 4.4 will wire up
+    // qos_preempt_map and cancelling_set_ so TryPreempt_ can actually fire.
+    static const absl::flat_hash_map<std::string, std::vector<std::string>>
+        kEmptyQosPreemptMap;
+    static const absl::flat_hash_set<job_id_t> kEmptyCancellingSet;
+    bool ok = scheduler->CalculateRunningNodesAndStartTime_(
+        now, job, kEmptyQosPreemptMap, kEmptyCancellingSet);
 
     if (!ok) {
       // Leave start_time unset
