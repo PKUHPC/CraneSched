@@ -1195,6 +1195,21 @@ void JobScheduler::ScheduleThread_() {
             continue;
           }
 
+          bool preempted_still_alive = false;
+          for (const auto& preempted : job_in_scheduler->preempted_jobs) {
+            auto* rn_ptr = std::get_if<RnJobInScheduler*>(&preempted);
+            if (!rn_ptr) continue;  // pending preempted, no physical state
+            if (m_running_job_map_.contains((*rn_ptr)->job_id)) {
+              preempted_still_alive = true;
+              break;
+            }
+          }
+          if (preempted_still_alive) {
+            job_in_scheduler->reason = "Waiting for Preemption";
+            job->pending_reason = job_in_scheduler->reason;
+            continue;
+          }
+
           if (!job_in_scheduler->actual_licenses.empty()) {
             if (!g_licenses_manager->MallocLicense(
                     job_in_scheduler->actual_licenses)) {
