@@ -7,7 +7,9 @@ hide:
 
 <p class="lead">A next-generation open-source compute scheduler for unified HPC and AI workloads.</p>
 
-<p>CraneSched is a distributed job scheduling system jointly developed by Peking University, the Changsha Institute of Computing and Digital Economy of Peking University, and Changsha Jianshan Tatu Technology Co., Ltd. Targeting HPC and AI workloads, it unifies supercomputing and AI computing resources, breaks down traditional compute barriers, and delivers efficient, stable, and reliable computing services across education, industry, meteorology, defense, and more.</p>
+<p>CraneSched is a distributed job scheduling system for HPC and AI workloads. It unifies supercomputing and AI compute resources on a single platform, delivering efficient, stable, and reliable scheduling for education, industry, meteorology, and more.</p>
+
+<p>It is jointly developed by Peking University, the Changsha Institute of Computing and Digital Economy of Peking University, and Changsha Jianshan Tatu Technology Co., Ltd.</p>
 
 [Get Started](deployment/index.md){ .md-button .md-button--primary } [Try the Demo](https://hpc.pku.edu.cn/demo/cranesched){ .md-button } [GitHub](https://github.com/PKUHPC/CraneSched){ .md-button }
 
