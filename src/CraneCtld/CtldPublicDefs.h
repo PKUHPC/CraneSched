@@ -21,6 +21,8 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include <memory>
+
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -74,6 +76,7 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
+constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -239,6 +242,16 @@ struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
   std::shared_ptr<spdlog::async_logger> db_logger;
 };
+
+namespace ArrayUtil {
+uint32_t Stride(const crane::grpc::ArraySpec& array_spec);
+uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec);
+bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec, uint32_t task_id);
+uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
+                       uint32_t index);
+crane::grpc::ArrayTaskSummary BuildSummary(
+    const crane::grpc::ArraySpec& array_spec);
+}  // namespace ArrayUtil
 
 }  // namespace Ctld
 
@@ -866,6 +879,38 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
+  // Array job model:
+  //
+  //   JobToCtld.array_spec carries only submission-time array spec.
+  //   RuntimeAttrOfJob.array_task carries only materialized child identity.
+  //   The array parent/root has array_spec but no array_task identity.
+  [[nodiscard]] bool HasArraySpec() const {
+    return job_to_ctld.has_array_spec();
+  }
+  [[nodiscard]] const crane::grpc::ArraySpec* GetArraySpec() const {
+    return job_to_ctld.has_array_spec() ? &job_to_ctld.array_spec() : nullptr;
+  }
+
+  [[nodiscard]] bool IsArrayRoot() const {
+    return HasArraySpec() && !runtime_attr.has_array_task();
+  }
+
+  bool IsArrayParent() const { return IsArrayRoot(); }
+
+  // Returns true if this is an expanded array child.
+  bool IsArrayChild() const { return runtime_attr.has_array_task(); }
+
+  struct ArrayTaskMeta {
+    job_id_t array_job_id;
+    uint32_t task_id;
+    uint32_t task_count;
+    uint32_t task_min;
+    uint32_t task_max;
+    uint32_t task_step;
+  };
+
+  std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -976,7 +1021,9 @@ struct JobInCtld {
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
-  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
+    return runtime_attr;
+  }
 
   // =================== Setter/Getter ===================
 
@@ -1032,6 +1079,22 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  // Array job tracking accessors
+  void SetArrayChildrenExpanded(bool expanded);
+  void SetArrayTaskIdentity(job_id_t array_job_id, uint32_t task_id);
+  [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().array_job_id();
+  }
+  [[nodiscard]] std::optional<uint32_t> ArrayTaskId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().task_id();
+  }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);
@@ -1094,6 +1157,10 @@ struct JobInCtld {
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
   DependenciesInJob const& Dependencies() const { return dependencies; }
+  std::span<const job_id_t> Dependents(
+      crane::grpc::DependencyType dep_type) const {
+    return dependents[dep_type];
+  }
   void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
   void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
                                absl::Time event_time);
@@ -1106,7 +1173,47 @@ struct JobInCtld {
   // Helper function to set the fields of JobInfo using info in
   // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
+};
+
+// ArrayMeta owns the array root JobInCtld and tracks scheduler-side
+// materialization state of its array children.
+//
+// The root_job represents the array parent/root job.
+// The remaining fields are runtime bookkeeping used by JobScheduler
+// to track materialized, pending and running array children.
+struct ArrayMeta {
+ public:
+  bool IsTaskMaterialized(uint32_t task_id) const {
+    return materialized_task_ids.contains(task_id);
+  }
+  size_t MaterializedTaskCount() const { return materialized_task_ids.size(); }
+
+  std::optional<job_id_t> ChildJobIdOfTask(uint32_t task_id) const {
+    auto it = child_job_id_by_task_id.find(task_id);
+    if (it == child_job_id_by_task_id.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  size_t ActiveChildCount() const {
+    return pending_child_job_ids.size() + running_child_job_ids.size();
+  }
+
+  void TrackPending(JobInCtld* child);
+  void TrackRunning(JobInCtld* child);
+  void Untrack(JobInCtld* child);
+
+  std::unique_ptr<JobInCtld> root_job;
+  absl::flat_hash_set<uint32_t> materialized_task_ids;
+  uint32_t next_array_task_index{0};
+  absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
+  absl::flat_hash_set<job_id_t> pending_child_job_ids;
+  absl::flat_hash_set<job_id_t> running_child_job_ids;
+
+ private:
+  void TrackBookkeeping_(JobInCtld* child);
 };
 
 enum class QosFlags { DenyOnLimit, _Count };

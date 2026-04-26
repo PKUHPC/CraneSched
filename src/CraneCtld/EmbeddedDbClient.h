@@ -240,7 +240,28 @@ class EmbeddedDbClient {
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
-  bool AppendJobsToPendingAndAdvanceJobIds(const std::vector<JobInCtld*>& jobs);
+  // Extra variable-db writes that should be committed atomically together
+  // with the new jobs' variable-db entries (e.g. updating the runtime attr
+  // of an array parent when materializing its children).
+  struct ExtraVariableWrite {
+    db_id_t db_id;
+    crane::grpc::RuntimeAttrOfJob const* runtime_attr;
+  };
+
+  // Assign fresh IDs to jobs and persist them into embedded DB atomically.
+  //
+  // On success, all fixed-db entries, all variable-db entries, the persisted
+  // next-id counters, and any `extra_variable_writes` are committed, and the
+  // in-memory next-id counters are advanced.
+  //
+  // On failure, the in-memory next-id counters are left untouched. Any
+  // fixed-db entries that were committed before a subsequent failure will be
+  // reclaimed on the next successful call (their db_ids are reused) or by
+  // crash-recovery cleanup (orphan fixed entries without a variable-db
+  // counterpart are deleted at startup).
+  bool AppendJobsToPendingAndAdvanceJobIds(
+      const std::vector<JobInCtld*>& jobs,
+      const std::vector<ExtraVariableWrite>& extra_variable_writes = {});
 
   bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
 

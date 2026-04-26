@@ -151,6 +151,25 @@ message Dependencies {
   bool is_or = 2;
 }
 
+message ArraySpec {
+  uint32 start = 1;
+  uint32 end = 2;
+  optional uint32 stride = 3;
+  optional uint32 max_concurrent = 4;
+}
+
+message ArrayTaskIdentity {
+  uint32 array_job_id = 1;
+  uint32 task_id = 2;
+}
+
+message ArrayTaskSummary {
+  uint32 task_count = 1;
+  uint32 task_min = 2;
+  uint32 task_max = 3;
+  uint32 task_step = 4;
+}
+
 message DependencyStatus {
   repeated DependencyCondition pending = 1;
   bool is_or = 2;
@@ -169,7 +188,8 @@ message Signal {
     NONE = 0;
     // (B) Send the signal only to the batch shell, not to other job steps.
     BATCH_ONLY = 1;
-    // (R) Allow this job to overlap with a reservation that has MaxStartDelay set
+    // (R) Allow this job to overlap with a reservation that has MaxStartDelay
+    // set
     RESERVATION_OVERLAP = 2;
   }
   SignalFlag signal_flag = 3;
@@ -244,6 +264,9 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
+
+  // Array submission spec for this job. Child identity is runtime-only.
+  ArraySpec array_spec = 58;
 }
 
 message JobInEmbeddedDb {
@@ -279,6 +302,12 @@ message RuntimeAttrOfJob {
   // Used to extend end_time upon resume so that suspended time
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
+
+  // For array children: the materialized array-task identity.
+  ArrayTaskIdentity array_task = 26;
+
+  // For array parents: whether child jobs have been materialized.
+  optional bool array_children_expanded = 28;
 }
 
 message StepToCtld {
@@ -378,6 +407,9 @@ message JobToD {
   StepToD daemon_step = 8;
 
   string name = 9;
+
+  optional ArrayTaskIdentity array_task = 16;
+  optional ArrayTaskSummary array_summary = 17;
 }
 
 enum StepType {
@@ -435,12 +467,15 @@ message StepToD {
   repeated Signal signals = 32;
   google.protobuf.Timestamp deadline_time = 33;
 
-  // task_node_list[task_id] = index of the node in nodelist that owns this task.
-  // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
+  // task_node_list[task_id] = index of the node in nodelist that owns this
+  // task. Size equals ntasks. Provides the authoritative task_id -> node_idx
+  // mapping.
   repeated uint32 task_node_list = 34;
 
   IoMeta io_meta = 35;
   string sh_script = 36;
+
+  optional ArrayTaskIdentity array_task = 39;
 }
 
 message JobStepsToD {
@@ -451,6 +486,10 @@ message JobStepsToD {
 
 message JobStepIds {
   repeated uint32 steps = 1;
+}
+
+message ArrayTaskIds {
+  repeated uint32 array_task_ids = 1;
 }
 
 message IoMeta {
@@ -634,6 +673,10 @@ message JobInfo {
   string submit_hostname = 43;
   uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
+
+  ArraySpec array_spec = 50;
+  ArrayTaskIdentity array_task = 51;
+  ArrayTaskSummary array_summary = 52;
 }
 
 message StepInfo {

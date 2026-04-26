@@ -205,6 +205,7 @@ message CancelJobRequest {
   string filter_job_name = 6;
   repeated string filter_nodes = 7;
   string filter_username = 8;
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
 }
 
 message CancelJobReply {
@@ -300,6 +301,8 @@ message ModifyJobRequest {
     int64 hold_seconds = 7;
     google.protobuf.Timestamp deadline_time = 8;
   }
+
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 9;
 }
 
 message ModifyJobReply {
@@ -630,6 +633,7 @@ message QueryJobsInfoRequest {
   repeated string filter_nodename_list = 14;
 
   bool option_include_completed_jobs = 15;
+  map<uint32, ArrayTaskIds> filter_array_task_ids = 16;
 }
 
 message QueryJobsInfoReply {

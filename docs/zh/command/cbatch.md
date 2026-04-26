@@ -111,6 +111,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE TIME    TIMELIMIT NODES 
 - **--interpreter string**: 指定脚本解释器（如 `/bin/bash`、`/usr/bin/python3`）
 - **-D, --chdir string**: 作业的工作目录
 - **--extra-attr string**: 作业的额外属性（JSON 格式）
+- **-a, --array string**: 提交数组作业，格式为 `start-end`（例如 `0-9`），与 `--repeat` 互斥
 - **--repeat uint32**: 多次提交作业（默认值：1）
 - **--wrap string**: 将命令字符串包装到 shell 脚本中并提交
 - **--json**: 以 JSON 格式输出
@@ -149,6 +150,7 @@ Usage:
 
 Flags:
   -A, --account string           Account used for the job
+  -a, --array string             Submit an array job using index range start-end
   -b, --begin string             Defer job until specified time.
   -D, --chdir string             Working directory of the job
       --comment string           Comment of the job
@@ -471,6 +473,21 @@ JOBID PARTITION NAME     USER ACCOUNT STATUS TYPE    TIME      TIMELIMIT NODES N
 174   CPU       Test_Job root ROOT    Running Batch 00:00:02 00:03:01   1     cranetest03
 ```
 
+### 数组提交（简化版）
+
+按区间一次性提交数组作业（仅支持 `start-end`，不支持并发门禁 `%`）：
+```bash
+cbatch --array 0-2 test.sh
+```
+```text
+[root@cranetest01 zhouhao]# cbatch --array 0-2 cbatch_test.sh
+Submitted array job 179, array range [0-2].
+```
+
+说明：
+- `--array` 与 `--repeat` 互斥。
+- 数组作业会分别暴露整个数组的父作业 ID 与当前任务索引。
+
 ## 环境变量
 
 批处理脚本中可用的常用环境变量：
@@ -478,7 +495,22 @@ JOBID PARTITION NAME     USER ACCOUNT STATUS TYPE    TIME      TIMELIMIT NODES N
 | 变量 | 说明 |
 |------|------|
 | **CRANE_JOB_NODELIST** | 作业分配的节点列表 |
-| **%j** | 作业号（用于文件模式） |
+| **CRANE_ARRAY_JOB_ID** | 整个数组的父/锚点作业 ID |
+| **CRANE_ARRAY_TASK_ID** | 当前数组任务索引 |
+| **CRANE_ARRAY_TASK_COUNT** | 数组任务总数 |
+| **CRANE_ARRAY_TASK_MIN** | 数组最小任务索引 |
+| **CRANE_ARRAY_TASK_MAX** | 数组最大任务索引 |
+| **CRANE_ARRAY_TASK_STEP** | 数组任务索引步长 |
+
+## 文件模式占位符
+
+下列占位符会在 `-o/--output` 与 `-e/--error` 文件模式中展开：
+
+| 占位符 | 说明 |
+|--------|------|
+| **%A** | 整个数组的父/锚点作业 ID。对于非数组作业，回退为当前作业 ID |
+| **%a** | 当前数组任务索引。对于非数组作业，展开为 `4294967294` |
+| **%j** | 当前作业 ID |
 
 ## 多节点并行作业
 
