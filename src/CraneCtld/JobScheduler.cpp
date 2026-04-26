@@ -5581,13 +5581,13 @@ void SchedulerAlgo::NodeSelect(
       // Leave start_time unset
       job->reason = "Resource";
     } else {
+      job->end_time = job->start_time + job->time_limit;
       if constexpr (kAlgoTraceOutput) {
-        CRANE_TRACE(
-            "\t job #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
-            job->job_id, absl::ToInt64Seconds(job->start_time - now),
-            absl::ToInt64Seconds(job->start_time + job->time_limit - now));
+        CRANE_TRACE("\t job #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
+                    job->job_id, absl::ToInt64Seconds(job->start_time - now),
+                    absl::ToInt64Seconds(job->end_time - now));
       }
-      scheduler->UpdateNodeSelector(job);
+      scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
       if (job->start_time != now) {
         if (job->reservation.empty()) {
