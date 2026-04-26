@@ -5551,11 +5551,53 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<ResvId, std::vector<PdJobInScheduler*>>
       resv_pd_job_ptr_map;
 
+  // qos → list of QoS names that this QoS's jobs are allowed to preempt.
+  // Keys are populated from pending_jobs so we only look up the QoS entries we
+  // actually need from AccountManager. Empty when PreemptType != QOS; callers
+  // (TryPreempt_) treat that as "no preemption relations known".
+  absl::flat_hash_map<std::string, std::vector<std::string>> qos_preempt_map;
+
   for (const auto& job : pending_jobs) {
     auto& pd_job_ptr_vec = job->reservation.empty()
                                ? part_pd_job_ptr_map[job->partition_id]
                                : resv_pd_job_ptr_map[job->reservation];
     pd_job_ptr_vec.emplace_back(job.get());
+    qos_preempt_map[job->qos];  // insert key, value filled below
+  }
+
+  if (g_config.Preempt.PreemptType == crane::grpc::PreemptType::PREEMPT_QOS) {
+    auto qos_meta_map = g_account_manager->GetAllQosInfo();
+    if (qos_meta_map) {
+      for (auto& [qos_name, preempt_list] : qos_preempt_map) {
+        auto it = qos_meta_map->find(qos_name);
+        if (it == qos_meta_map->end() || !it->second || it->second->deleted)
+          continue;
+        preempt_list.reserve(it->second->preempt.size());
+        for (const auto& p : it->second->preempt)
+          preempt_list.push_back(p);
+      }
+    }
+  }
+
+  // Phase C: refresh cancelling_set_ against the current round's running
+  // snapshot. Entries whose preempted job has already left the running map
+  // are dropped; surviving entries get their RnJob snapshot's end_time
+  // mutated to now+1s so the prediction layer sees them as releasing
+  // imminently.
+  {
+    absl::flat_hash_map<job_id_t, RnJobInScheduler*> rn_job_id_map;
+    rn_job_id_map.reserve(running_jobs.size());
+    for (const auto& rn : running_jobs) rn_job_id_map.emplace(rn->job_id, rn.get());
+    for (auto it = cancelling_set_.begin(); it != cancelling_set_.end();) {
+      auto rn_it = rn_job_id_map.find(*it);
+      if (rn_it == rn_job_id_map.end()) {
+        // absl::flat_hash_set::erase returns void; advance before erasing.
+        cancelling_set_.erase(it++);
+      } else {
+        rn_it->second->end_time = now + absl::Seconds(1);
+        ++it;
+      }
+    }
   }
 
   // For nodes in partition, reservations and running jobs on node are
@@ -5680,14 +5722,20 @@ void SchedulerAlgo::NodeSelect(
 
   {
     for (const auto& job : running_jobs) {
-      absl::Time end_time = std::max(
-          job->end_time,
-          now + absl::Seconds(1));  // In case StepStatusChange is delayed
+      // Phase C may have shortened end_time to now+1s for cancelling jobs;
+      // std::max clamps any stale past-now values from delayed
+      // StepStatusChange as well.
+      absl::Time end_time = std::max(job->end_time, now + absl::Seconds(1));
       if (job->reservation.empty()) {
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto it = node_state_map.find(craned_id);
           if (it != node_state_map.end()) {
             it->second.allocated_res.emplace_back(end_time, res);
+            // Cancelling jobs stay in qos_job_map so a new preempter can
+            // inherit their slot; the cancelling-first ordering in
+            // TryPreempt_ makes sure they're consumed before we kill
+            // additional running jobs.
+            it->second.qos_job_map[job->qos].emplace(job.get());
           }
         }
       } else {
@@ -5702,8 +5750,9 @@ void SchedulerAlgo::NodeSelect(
         }
         auto& craned_id_node_map = it->second.second;
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
-          craned_id_node_map.at(craned_id).allocated_res.emplace_back(end_time,
-                                                                      res);
+          auto& ns = craned_id_node_map.at(craned_id);
+          ns.allocated_res.emplace_back(end_time, res);
+          ns.qos_job_map[job->qos].emplace(job.get());
         }
       }
     }
@@ -5761,13 +5810,8 @@ void SchedulerAlgo::NodeSelect(
       scheduler = &resv_scheduler_map[job->reservation];
     }
 
-    // Step 4.3: pass empty preempt inputs; Step 4.4 will wire up
-    // qos_preempt_map and cancelling_set_ so TryPreempt_ can actually fire.
-    static const absl::flat_hash_map<std::string, std::vector<std::string>>
-        kEmptyQosPreemptMap;
-    static const absl::flat_hash_set<job_id_t> kEmptyCancellingSet;
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(
-        now, job, kEmptyQosPreemptMap, kEmptyCancellingSet);
+        now, job, qos_preempt_map, cancelling_set_);
 
     if (!ok) {
       // Leave start_time unset
@@ -5779,6 +5823,32 @@ void SchedulerAlgo::NodeSelect(
                     job->job_id, absl::ToInt64Seconds(job->start_time - now),
                     absl::ToInt64Seconds(job->end_time - now));
       }
+
+      // Apply preemption decisions produced by TryPreempt_.
+      // UpdateNodeSelectorWithPreemptedJob must fire BEFORE we mutate the
+      // pending preempted's reason — its qos_job_map erase is gated on
+      // is_scheduled() (see JobScheduler.h §4.2 / Step 4.2 commit).
+      // For each running preempted that hasn't been cancelled yet, push
+      // into the action queue (v2 only supports CANCEL; REQUEUE / SUSPEND
+      // would dispatch to their own queues here).
+      for (const auto& preempted : job->preempted_jobs) {
+        scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
+        if (std::holds_alternative<PdJobInScheduler*>(preempted)) {
+          std::get<PdJobInScheduler*>(preempted)->reason = "Preempted";
+          continue;
+        }
+        auto* rn = std::get<RnJobInScheduler*>(preempted);
+        if (!cancelling_set_.insert(rn->job_id).second) continue;
+        CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
+                   job->job_id);
+        // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when those
+        //                modes are supported.
+        crane::grpc::CancelJobRequest cancel_req;
+        cancel_req.set_operator_uid(0);  // system-initiated
+        (*cancel_req.mutable_filter_ids())[rn->job_id];  // empty → all steps
+        g_job_scheduler->CancelPendingOrRunningJob(cancel_req);
+      }
+
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
       if (job->start_time != now) {
