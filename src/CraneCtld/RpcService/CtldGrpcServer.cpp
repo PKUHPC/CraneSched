@@ -514,8 +514,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
               failure_reason = "permission denied";
             }
           }
-          stream_writer->WriteStepMetaReply(ok, failure_reason, step,
-                                            payload.cattach_pid());
+          if (!stream_writer->WriteStepMetaReply(ok, failure_reason, step,
+                                                 payload.cattach_pid())) {
+            CRANE_ERROR(
+                "Failed to send STEP_META_REPLY to cfored {}. "
+                "Connection is broken.",
+                cfored_name);
+            state = StreamState::kWaitReConnect;
+          }
         } break;
 
         case StreamCforedRequest::JOB_COMPLETION_REQUEST: {
@@ -555,8 +561,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     } break;
 
     case StreamState::kWaitReConnect: {
-      CRANE_INFO("Cfored {} unexpectedly disconnected. Wait for restart.....",
-                 cfored_name);
+      CRANE_INFO(
+          "Cfored {} unexpectedly disconnected. "
+          "Waiting for it to reconnect.",
+          cfored_name);
       stream_writer->Invalidate();
       return Status::OK;
     }

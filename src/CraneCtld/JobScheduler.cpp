@@ -5037,14 +5037,14 @@ bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
     }
 
     *step = primary_step->StepToCtld();
-    step->set_nodelist(iter->second->allocated_craneds_regex);
+    step->set_nodelist(primary_step->allocated_craneds_regex);
     return true;
   }
 
   auto step_iter = job->Steps().find(step_id);
   if (step_iter == job->Steps().end()) return false;
   *step = step_iter->second->StepToCtld();
-  step->set_nodelist(iter->second->allocated_craneds_regex);
+  step->set_nodelist(step_iter->second->allocated_craneds_regex);
   return true;
 }
 

@@ -834,7 +834,7 @@ class JobScheduler {
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
-  bool QueryStepAndNodeRegex(task_id_t job_id, step_id_t step_id,
+  bool QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
                              crane::grpc::StepToCtld* step);
 
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
