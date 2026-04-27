@@ -822,8 +822,8 @@ message StreamCforedRequest {
   message StepMetaReq {
     uint32 uid = 1;
     uint32 job_id = 2;
-    uint32 step_id = 4;
-    int32 cattach_pid = 3;
+    uint32 step_id = 3;
+    int32 cattach_pid = 4;
   }
 
   oneof payload {

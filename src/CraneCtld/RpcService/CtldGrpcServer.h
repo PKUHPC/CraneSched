@@ -166,6 +166,14 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
+  /*
+   * Write a STEP_META_REPLY to the cfored stream
+   * IN:  ok             - true if step metadata was found and permitted
+   * IN:  failure_reason - human-readable failure message when ok is false
+   * IN:  step           - step metadata to return (valid when ok is true)
+   * IN:  pid            - cattach client PID for reply routing
+   * RET: true on success, false if the stream write fails or is invalidated
+   */
   bool WriteStepMetaReply(bool ok, const std::string &failure_reason,
                           const crane::grpc::StepToCtld &step, int32_t pid) {
     LockGuard guard(&m_stream_mtx_);
@@ -197,27 +205,36 @@ class CforedStreamWriter {
       ABSL_GUARDED_BY(m_stream_mtx_);
 };
 
+/* Proxy that holds the current CforedStreamWriter for one cfored connection.
+ * When cfored reconnects, SetWriter() atomically replaces the writer so all
+ * pending callbacks continue to route through the new stream without needing
+ * to update every stored callback lambda. */
 class StreamWriterProxy {
  public:
+  /* Replace the underlying stream writer with a new one on cfored reconnect.
+   * IN: writer - new CforedStreamWriter for the reconnected cfored stream
+   * RET: none
+   */
   void SetWriter(std::shared_ptr<CforedStreamWriter> writer) {
-    std::lock_guard<std::mutex> lock(mtx_);
+    absl::MutexLock lock(&mtx_);
     writer_ = std::move(writer);
   }
 
-  std::shared_ptr<CforedStreamWriter> GetWriter() {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return writer_;
-  }
-
+  /* Execute a callback with the current writer if it is still valid.
+   * The lock is held for the duration of func to prevent concurrent
+   * replacement of the writer while the callback is running.
+   * IN: func - callable that receives a CforedStreamWriter reference
+   * RET: none
+   */
   template <typename Func>
   void WithWriter(Func &&func) {
-    std::shared_ptr<CforedStreamWriter> writer = GetWriter();
-    if (writer) func(*writer);
+    absl::MutexLock lock(&mtx_);
+    if (writer_) func(*writer_);
   }
 
  private:
-  std::mutex mtx_;
-  std::shared_ptr<CforedStreamWriter> writer_;
+  absl::Mutex mtx_;
+  std::shared_ptr<CforedStreamWriter> writer_ ABSL_GUARDED_BY(mtx_);
 };
 
 class CtldServer;

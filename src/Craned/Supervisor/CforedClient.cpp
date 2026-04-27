@@ -567,8 +567,12 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       // Wait for any pending write; detect reconnect mid-wait
       while (write_pending->load(std::memory_order::acquire)) {
         if (m_wait_reconn_.load(std::memory_order::acquire)) {
-          // Reconnect exit: do NOT mark output as drained; data is preserved in
-          // queue
+          // Reconnect exit: queue data is preserved for resend on the new
+          // stream.  We set m_output_drained_ = true here NOT because the
+          // queue is empty, but to unblock the AsyncSendRecvThread_ join()
+          // call that waits on this flag before switching to the reconnect
+          // path.  The reconnect path resets m_output_drained_ = false before
+          // starting a new CleanOutputQueueThread on the new connection.
           CRANE_TRACE(
               "CleanOutputQueueThread: reconnect exit, queue data preserved.");
           m_output_drained_.store(true, std::memory_order::release);

@@ -485,20 +485,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(),
                       payload.step_id());
           std::string failure_reason;
-          bool ok = true;
+          /* Use step_ok to avoid shadowing the outer bool ok used for
+           * stream-write results throughout the rest of this function. */
+          bool step_ok = true;
           crane::grpc::StepToCtld step;
           if (!g_job_scheduler->QueryStepAndNodeRegex(
                   payload.job_id(), payload.step_id(), &step)) {
-            ok = false;
+            step_ok = false;
             failure_reason = "Step not found";
           } else {
             if (payload.uid() != step.uid() &&
                 !g_account_manager->CheckUidIsAdmin(payload.uid())) {
-              ok = false;
+              step_ok = false;
               failure_reason = "permission denied";
             }
           }
-          if (!stream_writer->WriteStepMetaReply(ok, failure_reason, step,
+          if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
                                                  payload.cattach_pid())) {
             CRANE_ERROR(
                 "Failed to send STEP_META_REPLY to cfored {}. "
