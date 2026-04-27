@@ -947,6 +947,13 @@ class JobScheduler {
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
+  // Pre-submit checks (compile-time capability, feature flags, etc.).
+  // Return ok when allowed; otherwise return human-readable reason.
+  static std::expected<void, std::string> PreJobSubmitCheck(
+      const JobInCtld* job);
+  static std::expected<void, std::string> PreStepSubmitCheck(
+      const CommonStepInCtld* step);
+
   // TODO: Move to Reservation Mini-Scheduler.
   crane::grpc::CreateReservationReply CreateResv(
       const crane::grpc::CreateReservationRequest& request);

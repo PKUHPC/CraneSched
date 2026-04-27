@@ -810,6 +810,33 @@ bool JobScheduler::Init() {
   return true;
 }
 
+// Compile-time and feature-gate pre-submit checks
+std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
+    const JobInCtld* job) {
+  if (job == nullptr) return std::unexpected("null job pointer");
+
+#ifndef HAVE_PMIX
+  if (job->IsPmix()) {
+    return std::unexpected("PMIx support is not compiled in.");
+  }
+#endif
+
+  return {};
+}
+
+std::expected<void, std::string> JobScheduler::PreStepSubmitCheck(
+    const CommonStepInCtld* step) {
+  if (step == nullptr) return std::unexpected("null step pointer");
+
+#ifndef HAVE_PMIX
+  if (step->IsPmix()) {
+    return std::unexpected("PMIx support is not compiled in.");
+  }
+#endif
+
+  return {};
+}
+
 void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
     std::unique_ptr<JobInCtld> job) {
   // The newly modified QoS resource limits do not apply to jobs that have

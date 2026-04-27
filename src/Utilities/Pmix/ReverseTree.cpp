@@ -178,8 +178,20 @@ int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth,
   int max_depth, sub_depth, max_rank_children;
   int i;
 
-  /* no children if tree is disabled */
+  // Sanity checks to avoid undefined behavior and degenerate math cases.
+  // - num_nodes <= 0: empty tree
+  // - width <= 0: would cause infinite loop in Dep() / divide-by-zero below
+  // - rank out of range
+  if (num_nodes <= 0 || width <= 0 || rank < 0 || rank >= num_nodes) return 0;
+
+  // no children if tree is disabled or degenerate
   if (width > num_nodes) return 0;
+
+  // Guard against null pointer; caller is expected to provide a valid vector.
+  if (children == nullptr) return 0;
+
+  // Ensure the children buffer can accommodate up to `width` entries.
+  if (static_cast<int>(children->size()) < width) children->resize(width);
 
   max_depth = Dep(num_nodes, width);
   sub_depth = max_depth - depth;
