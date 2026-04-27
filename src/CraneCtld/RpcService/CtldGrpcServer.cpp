@@ -359,10 +359,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (job->IsPmix()) {
-#ifndef HAVE_PMIX
-            result = std::unexpected("PMIx support is not compiled in.");
-#endif
+          if (auto check = JobScheduler::PreJobSubmitCheck(job.get()); !check) {
+            result = std::unexpected(check.error());
           }
 
           if (result) {
@@ -431,10 +429,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
 
-          if (step->IsPmix()) {
-#ifndef HAVE_PMIX
-            result = std::unexpected("PMIx support is not compiled in.");
-#endif
+          if (auto check = JobScheduler::PreStepSubmitCheck(step.get());
+              !check) {
+            result = std::unexpected(check.error());
           }
 
           if (result) {
