@@ -170,6 +170,12 @@ MongoDB 存储作业历史记录、用户账户和资源使用数据。
 
 - **[插件指南](./frontend/plugins.md)** - 邮件通知、资源监控、能源跟踪
 
+### 资源限制管理
+
+为账户和用户配置 QoS 及分区级别的资源使用上限。
+
+- **[资源限制配置指南](./configuration/partition_resource_limit_guide.md)** - QoS 资源限制与分区资源限制的配置方法
+
 ### 访问控制
 
 限制仅授权作业可以通过 SSH 访问计算节点。
