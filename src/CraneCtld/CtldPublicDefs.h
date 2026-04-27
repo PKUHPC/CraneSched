@@ -245,17 +245,6 @@ struct RunTimeStatus {
 
 using array_task_id_t = uint32_t;  // Task index within a job array
 
-namespace ArrayUtil {
-uint32_t Stride(const crane::grpc::ArraySpec& array_spec);
-uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec);
-bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
-                    array_task_id_t task_id);
-uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
-                       uint32_t index);
-crane::grpc::ArrayTaskSummary BuildSummary(
-    const crane::grpc::ArraySpec& array_spec);
-}  // namespace ArrayUtil
-
 }  // namespace Ctld
 
 inline Ctld::Config g_config{};
@@ -1177,47 +1166,6 @@ struct JobInCtld {
   // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
   void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
-};
-
-// ArrayMeta owns the array root JobInCtld and tracks scheduler-side
-// materialization state of its array children.
-//
-// The root_job represents the array parent/root job.
-// The remaining fields are runtime bookkeeping used by JobScheduler
-// to track materialized, pending and running array children.
-struct ArrayMeta {
- public:
-  bool IsTaskMaterialized(array_task_id_t task_id) const {
-    return child_job_id_by_task_id.contains(task_id);
-  }
-  size_t MaterializedTaskCount() const {
-    return child_job_id_by_task_id.size();
-  }
-
-  std::optional<job_id_t> ChildJobIdOfTask(array_task_id_t task_id) const {
-    auto it = child_job_id_by_task_id.find(task_id);
-    if (it == child_job_id_by_task_id.end()) {
-      return std::nullopt;
-    }
-    return it->second;
-  }
-
-  size_t ActiveChildCount() const {
-    return pending_child_job_ids.size() + running_child_job_ids.size();
-  }
-
-  void TrackPending(JobInCtld* child);
-  void TrackRunning(JobInCtld* child);
-  void Untrack(JobInCtld* child);
-
-  std::unique_ptr<JobInCtld> root_job;
-  array_task_id_t next_array_task_index{0};
-  absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id;
-  absl::flat_hash_set<job_id_t> pending_child_job_ids;
-  absl::flat_hash_set<job_id_t> running_child_job_ids;
-
- private:
-  void TrackBookkeeping_(JobInCtld* child);
 };
 
 enum class QosFlags { DenyOnLimit, _Count };

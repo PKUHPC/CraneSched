@@ -5,6 +5,8 @@ add_executable(cranectld
         DbClient.cpp
         JobScheduler.h
         JobScheduler.cpp
+        Array.h
+        Array.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
         AccountManager.h

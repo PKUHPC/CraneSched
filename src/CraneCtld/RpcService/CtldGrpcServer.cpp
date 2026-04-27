@@ -909,7 +909,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
       // Resolve parent to specific children via scheduler.
       auto resolved = g_job_scheduler->ResolveArrayTaskIds(
           job_id, it->second.array_task_ids(),
-          JobScheduler::ArrayTaskResolveMode::kCreateIfMissing);
+          Ctld::ArrayTaskResolveMode::kCreateIfMissing);
       if (resolved.child_job_ids.empty()) {
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
