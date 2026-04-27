@@ -3119,13 +3119,14 @@ std::optional<std::future<CraneRichError>> JobScheduler::JobSubmitLuaCheck(
 
 void JobScheduler::JobModifyLuaCheck(
     const crane::grpc::ModifyJobRequest& request,
-    crane::grpc::ModifyJobReply* response, std::list<job_id_t>* job_ids) {
+    crane::grpc::ModifyJobReply* response, std::vector<job_id_t>* job_ids) {
 #ifdef HAVE_LUA
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
 
   std::vector<std::pair<job_id_t, std::future<CraneRichError>>> futures;
   futures.reserve(request.job_ids().size());
+  job_ids->reserve(request.job_ids().size());
   for (const auto job_id : request.job_ids()) {
     auto pd_iter = m_pending_job_map_.find(job_id);
     if (pd_iter != m_pending_job_map_.end()) {

@@ -888,7 +888,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     return grpc::Status::OK;
   }
 
-  std::list<job_id_t> job_ids;
+  std::vector<job_id_t> job_ids;
 
   if (g_config.JobSubmitLuaScript.empty()) {
     job_ids.assign(request->job_ids().begin(), request->job_ids().end());
@@ -898,7 +898,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
 
   // Resolve parent→children for array task filters.
   if (!request->filter_array_task_ids().empty()) {
-    std::list<job_id_t> resolved_ids;
+    std::vector<job_id_t> resolved_ids;
+    resolved_ids.reserve(job_ids.size());
     for (auto job_id : job_ids) {
       auto it = request->filter_array_task_ids().find(job_id);
       if (it == request->filter_array_task_ids().end()) {
