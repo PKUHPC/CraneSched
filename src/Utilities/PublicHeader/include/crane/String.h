@@ -41,12 +41,6 @@
 
 namespace util {
 
-enum class PartitionNodesResult : std::uint8_t {
-  SUCCESS = 0,
-  ILLEGAL_FORMAT,
-  UNKNOWN_NODE
-};
-
 using CertPair = std::pair<std::string,   // CN
                            std::string>;  // serial number
 

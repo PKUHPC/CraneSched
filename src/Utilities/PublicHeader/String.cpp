@@ -826,19 +826,13 @@ std::string ReadableResourceV3(const ResourceV3 &res) {
   return absl::StrJoin(node_parts, ";");
 }
 
-PartitionNodesResult PartitionNodesProcess(
-    const std::string &node_str, const std::list<std::string> &host_list,
-    const std::string &part_name,
-    std::unordered_set<std::string> &part_node_list, const bool is_cranectld,
-    std::unordered_set<std::string> *nodes_without_part) {
 bool PartitionNodesProcess(const std::string &node_str,
                            const std::list<std::string> &host_list,
                            const std::string &part_name,
                            bool disallow_unknown_node,
                            std::unordered_set<std::string> &part_node_list) {
   std::list<std::string> name_list;
-  std::unordered_set<std::string> node_name_set_list(host_list.begin(),
-                                                     host_list.end());
+  std::unordered_set<std::string> node_name_set_list(host_list.begin(), host_list.end());
 
   auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
   if (act_nodes_str == "ALL") {
