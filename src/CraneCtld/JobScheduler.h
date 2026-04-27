@@ -1127,6 +1127,26 @@ class JobScheduler {
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
 
+  // Enqueue preempt-cancel requests and trigger immediate processing.
+  // Uses m_clean_cancel_job_queue_handle_ (not m_cancel_job_async_handle_)
+  // to bypass the batch-threshold / 500ms-timer gate in CancelJobAsyncCb_,
+  // because preempt needs the cancel RPC dispatched ASAP so its latency
+  // overlaps with scheduling computation for subsequent jobs.
+  //
+  // TODO(preempt): Even with immediate dispatch the full cancel chain
+  // (TerminateJobs RPC → Craned kill → StepStatusChangeAsync → timer →
+  // CleanJobStatusChangeQueueCb_ → running_map erase) still has multiple
+  // async hops. A dedicated fast-path that bypasses the StatusChange queue
+  // for preempt-initiated cancels could further reduce the round-trip, but
+  // would risk duplicate RPCs and status-machine complexity. Profile first.
+  void EnqueuePreemptCancel(std::vector<job_id_t> job_ids) {
+    if (job_ids.empty()) return;
+    m_cancel_job_queue_.enqueue(CancelRunningJobByIdElem{
+        .job_ids = std::move(job_ids),
+        .terminate_source = crane::grpc::TERMINATE_SOURCE_USER_CANCEL});
+    m_clean_cancel_job_queue_handle_->send();
+  }
+
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest& request);
 
@@ -1376,9 +1396,15 @@ class JobScheduler {
         crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
+  struct CancelRunningJobByIdElem {
+    std::vector<job_id_t> job_ids;
+    crane::grpc::TerminateSource terminate_source{
+        crane::grpc::TERMINATE_SOURCE_PREEMPT};
+  };
+
   using CancelJobQueueElem =
       std::variant<CancelPendingJobQueueElem, CancelPendingStepQueueElem,
-                   CancelRunningJobQueueElem>;
+                   CancelRunningJobQueueElem, CancelRunningJobByIdElem>;
 
   std::shared_ptr<uvw::async_handle> m_cancel_job_async_handle_;
   ConcurrentQueue<CancelJobQueueElem> m_cancel_job_queue_;

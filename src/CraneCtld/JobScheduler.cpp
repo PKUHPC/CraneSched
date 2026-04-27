@@ -3938,6 +3938,25 @@ void JobScheduler::CleanCancelJobQueueCb_() {
             [&](CancelPendingStepQueueElem& pd_step_elem) {
               pending_step_ptr_vec.emplace_back(std::move(pd_step_elem.step));
             },
+            [&](CancelRunningJobByIdElem& id_elem) {
+              LockGuard running_guard_for_id(&m_running_job_map_mtx_);
+              for (job_id_t jid : id_elem.job_ids) {
+                auto job_it = m_running_job_map_.find(jid);
+                if (job_it == m_running_job_map_.end()) continue;
+                auto& job = job_it->second;
+                auto process_step = [&](CommonStepInCtld* step) {
+                  for (const CranedId& craned_id : step->ExecutionNodes()) {
+                    running_job_craned_id_map[craned_id]
+                                             [id_elem.terminate_source]
+                                             [jid]
+                                                 .insert(step->StepId());
+                  }
+                };
+                if (job->PrimaryStep()) process_step(job->PrimaryStep());
+                for (auto& [sid, step] : job->Steps())
+                  process_step(step.get());
+              }
+            },
         },
         elem);
   }
@@ -5846,6 +5865,7 @@ void SchedulerAlgo::NodeSelect(
       // For each running preempted that hasn't been cancelled yet, push
       // into the action queue (v2 only supports CANCEL; REQUEUE / SUSPEND
       // would dispatch to their own queues here).
+      std::vector<job_id_t> preempted_rn_jobs;
       for (const auto& preempted : job->preempted_jobs) {
         scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
         if (std::holds_alternative<PdJobInScheduler*>(preempted)) {
@@ -5856,13 +5876,13 @@ void SchedulerAlgo::NodeSelect(
         if (!cancelling_set_.insert(rn->job_id).second) continue;
         CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
                    job->job_id);
-        // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when those
-        //                modes are supported.
-        crane::grpc::CancelJobRequest cancel_req;
-        cancel_req.set_operator_uid(0);  // system-initiated
-        (*cancel_req.mutable_filter_ids())[rn->job_id];  // empty → all steps
-        g_job_scheduler->CancelPendingOrRunningJob(cancel_req);
+        preempted_rn_jobs.push_back(rn->job_id);
       }
+      // Enqueue immediately so the cancel RPC runs in parallel with
+      // scheduling of subsequent jobs in this round.
+      // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when those
+      //                modes are supported.
+      g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
 
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
