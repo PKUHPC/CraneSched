@@ -1435,7 +1435,8 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   std::vector<crane::grpc::ModifyFieldOperation> operations(
       request->operations().begin(), request->operations().end());
   auto rich_error_list = g_account_manager->ModifyAccount(
-      request->uid(), request->name(), operations, request->force());
+      request->uid(), request->name(), request->partition(), operations,
+      request->force());
 
   if (!rich_error_list.empty()) {
     for (const auto& rich_error : rich_error_list) {
@@ -1604,6 +1605,22 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     for (auto&& coord : account.coordinators) {
       coordinators->Add()->assign(coord);
     }
+
+    // Fill partition_resource_limit
+    auto* partition_resource_limit_map =
+        account_info->mutable_partition_resource_limit();
+    for (const auto& [partition, limit] : account.partition_to_limit_map) {
+      auto& proto_limit = (*partition_resource_limit_map)[partition];
+      proto_limit.mutable_max_tres()->CopyFrom(
+          static_cast<crane::grpc::ResourceView>(limit.max_tres));
+      proto_limit.mutable_max_tres_per_job()->CopyFrom(
+          static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+      proto_limit.set_max_jobs(limit.max_jobs);
+      proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
+      proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
+      proto_limit.set_max_wall_duration_per_job(
+          absl::ToInt64Seconds(limit.max_wall_duration_per_job));
+    }
   }
 
   return grpc::Status::OK;
@@ -1680,6 +1697,25 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
       auto* coordinated_accounts = user_info->mutable_coordinator_accounts();
       for (auto&& coord : user.coordinator_accounts) {
         coordinated_accounts->Add()->assign(coord);
+      }
+
+      // Fill account_to_partition_limit
+      auto* account_to_partition_limit =
+          user_info->mutable_account_to_partition_limit();
+      auto& proto_partition_to_limit = (*account_to_partition_limit)[account];
+      auto* partition_resource_limit_map =
+          proto_partition_to_limit.mutable_partition_resource_limit();
+      for (const auto& [partition, limit] : item.partition_to_limit_map) {
+        auto& proto_limit = (*partition_resource_limit_map)[partition];
+        proto_limit.mutable_max_tres()->CopyFrom(
+            static_cast<crane::grpc::ResourceView>(limit.max_tres));
+        proto_limit.mutable_max_tres_per_job()->CopyFrom(
+            static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+        proto_limit.set_max_jobs(limit.max_jobs);
+        proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
+        proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
+        proto_limit.set_max_wall_duration_per_job(
+            absl::ToInt64Seconds(limit.max_wall_duration_per_job));
       }
     }
   }

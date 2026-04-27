@@ -79,3 +79,35 @@
 | 75 | `ERR_IDENTITY_MISMATCH` | User identity information mismatch | Modify identity information | User information does not match, unable to submit the task. |
 | 76 | `ERR_NOT_FORCE` | Did not explicitly mark --force when deleting all users | Explicitly mark --force | You need to set --force for this operation. |
 | 77 | `ERR_INVALID_USERNAME` | Using "ALL" as name when creating new user | Cancel using "ALL" as new username | Invalid username |
+| 78 | `ERR_LICENSE_LEGAL_FAILED` | License request format is illegal or invalid | Check the license request format | License request format is illegal or invalid |
+| 79 | `ERR_INVALID_JOB_ID` | Invalid job ID | Check if the job ID is correct | Invalid job id |
+| 80 | `ERR_CRI_GENERIC` | CRI runtime returns error | Check logs for specific error details | CRI runtime returns error. Check logs for details. |
+| 81 | `ERR_CRI_DISABLED` | CRI support is disabled in the cluster | Contact administrator to enable CRI support | CRI support is disabled in the cluster. |
+| 82 | `ERR_CRI_CONTAINER_NOT_READY` | Job is pending or container is not ready | Wait for container to be ready or check job status | Job is pending or container is not ready. |
+| 83 | `ERR_CRI_MULTIPLE_NODES` | Requested CRI operation is not supported in multi-node steps | Limit the job to run on a single node | Requested CRI operation is not supported in multi-node steps. |
+| 84 | `ERR_INVALID_MEM_FORMAT` | Invalid memory format | Use correct memory format (e.g., 1G, 512M) | Invalid memory format |
+| 85 | `ERR_STEP_RES_BEYOND` | Step resource request exceeds job resource | Reduce step resource request or increase job resource | Step resource request exceeds the job's requested resources |
+| 86 | `ERR_INVALID_WCKEY` | The specified wckey does not exist | Use cacctmgr to view available wckey list | The specified wckey does not exist |
+| 87 | `ERR_WCKEY_ALREADY_EXISTS` | wckey already exists | | The wckey already exists in crane |
+| 88 | `ERR_INVALID_CLUSTER` | The specified cluster does not exist | Check if the cluster name is correct | The entered cluster does not exist |
+| 89 | `ERR_DEL_DEFAULT_WCKEY` | Cannot delete the default wckey | Set another wckey as default first, then delete | Cannot delete the default wckey. Please set a different default wckey first |
+| 90 | `ERR_NO_DEFAULT_WCKEY` | No default wckey is set | Specify a wckey or set a default wckey | No default wckey is set. Please specify a wckey or set a default wckey |
+| 91 | `ERR_MISSING_DEPENDENCY` | One or more dependency jobs may not exist or have ended | Check the status of dependency jobs | One or more dependency jobs may not exist or have ended |
+| 92 | `ERR_DB_INSERT_FAILED` | Database insertion failed (internal error) | Contact administrator to check logs | Database insertion failed due to internal error |
+| 93 | `ERR_LUA_FAILED` | Lua script validation failed | Check Lua script syntax | Lua script validation failed |
+| 94 | `ERR_RESOURCE_NOT_FOUND` | Resource not found | Check if the resource name is correct | The resource was not found in the crane |
+| 95 | `ERR_INVALID_ARGUMENT` | Invalid argument provided | Check parameter format and value range | Invalid argument provided |
+| 96 | `ERR_RESOURCE_ALREADY_EXIST` | Resource already exists | | The resource already exists in the crane |
+| 97 | `ERR_MAX_JOB_COUNT_PER_ACCOUNT` | Current account running job count reached QoS limit | Contact administrator to raise limit or wait for a task to complete | The number of jobs for the current account has reached its limit |
+| 98 | `ERR_USER_HAS_JOB` | User has pending or running jobs, cannot be deleted | Wait for jobs to complete or cancel jobs first | The user has jobs pending or running, cannot be deleted |
+| 99 | `ERR_INVALID_RESOURCE` | Invalid resource specification for the partition | Check resource specification format | Invalid resource specification for the partition |
+| 100 | `ERR_QOS_JOB_COUNT_EXCEEDED` | Global QoS job count reached the limit | Contact administrator to raise QoS global job limit or wait for jobs to complete | The number of jobs has reached the limit of this QOS |
+| 101 | `ERR_CONVERT_TO_RESOURCE_VIEW` | Resource view conversion failed (internal error) | Check if resource specification format is correct | Not a valid resource string |
+| 102 | `ERR_MAX_TRES_PER_USER_BEYOND` | Current user's TRES usage reached QoS limit | Contact administrator to raise QoS user TRES limit | The tres of jobs for the current user has reached the limit of this QOS |
+| 103 | `ERR_MAX_TRES_PER_ACCOUNT_BEYOND` | Current account's TRES usage reached QoS limit | Contact administrator to raise QoS account TRES limit | The tres of jobs for the current account has reached the limit of this QOS |
+| 104 | `ERR_TRES_PER_JOB_BEYOND` | Single job's TRES exceeds QoS limit | Reduce job resource request or contact administrator to raise QoS limit | The tres of jobs has reached the limit of this QOS |
+| 105 | `ERR_INVALID_DEADLINE` | Invalid deadline time (should be later than submit time) | Set a deadline time later than the current time | Invalid deadline time(should be later than submit time) |
+| 106 | `ERR_PARTITION_TRES_PER_JOB_BEYOND` | Single job's TRES exceeds Partition's `max_tres_per_job` limit | Reduce job resource request or contact administrator to raise Partition limit | Resource (TRES) per job exceeds the partition limit |
+| 107 | `ERR_PARTITION_TIME_BEYOND` | Job time limit exceeds Partition's `max_wall_duration_per_job` limit | Reduce job time limit or contact administrator to raise Partition time limit | Time limit exceeds the partition's per-job wall time limit |
+| 108 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` | User's submitted job count in this Partition exceeds `max_submit_jobs` limit | Wait for some jobs to complete or contact administrator to raise Partition submit job limit | Partition max submit jobs per user exceeded |
+| 109 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` | Account's submitted job count in this Partition exceeds `max_submit_jobs` limit | Wait for some jobs to complete or contact administrator to raise Partition submit job limit | Partition max submit jobs per account exceeded |
