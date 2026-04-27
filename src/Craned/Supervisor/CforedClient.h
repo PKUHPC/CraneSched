@@ -179,7 +179,7 @@ class CforedClient {
   std::shared_ptr<uvw::loop> m_loop_;
   std::thread m_ev_thread_;
 
-  std::atomic<uint32_t> m_reconnect_attempts_;
+  std::atomic<uint32_t> m_reconnect_attempts_{0};
 
   std::string m_cfored_name_;
   std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map
