@@ -432,14 +432,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kWaitReConnect;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
         case StreamCforedRequest::STEP_REQUEST: {
@@ -485,14 +477,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Exiting...",
                 cfored_name);
             state = StreamState::kWaitReConnect;
-          } else {
-            if (result.has_value()) {
-              auto [job_id, step_id] = result.value();
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_jobs_[cfored_name][job_id]
-                  .insert(step_id);
-              m_ctld_server_->m_mtx_.Unlock();
-            }
           }
         } break;
 
