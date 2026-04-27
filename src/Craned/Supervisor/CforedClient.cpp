@@ -523,20 +523,15 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
 
     if (ok) {
-      // Track bytes dequeued for TASK_OUTPUT to maintain m_output_queue_bytes_
-      size_t tracked_len = 0;
-      if (fwd_req.type == StreamStepIORequest::TASK_OUTPUT) {
-        tracked_len = std::get<IOFwdRequest>(fwd_req.data).len;
-        m_output_queue_bytes_.fetch_sub(tracked_len,
-                                        std::memory_order::relaxed);
-      }
-
       StreamStepIORequest request;
       request.set_type(fwd_req.type);
       std::visit(
           VariantVisitor{
-              [&request](IOFwdRequest& req) {
+              [&request, this](IOFwdRequest& req) {
                 if (req.is_stdout) {
+                  // Track bytes for TASK_OUTPUT (stdout only).
+                  m_output_queue_bytes_.fetch_sub(req.len,
+                                                  std::memory_order::relaxed);
                   auto* payload = request.mutable_payload_task_output_req();
                   payload->set_msg(req.data.get(), req.len);
                   payload->set_task_id(req.task_id);
@@ -584,7 +579,9 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
 
       // One more check before issuing the write
       if (m_wait_reconn_.load(std::memory_order::acquire)) {
-        CRANE_TRACE("CleanOutputQueueThread: reconnect exit");
+        CRANE_TRACE(
+            "CleanOutputQueueThread: exit on disconnection, queue data "
+            "preserved.");
         m_output_drained_.store(true, std::memory_order::release);
         return;
       }
