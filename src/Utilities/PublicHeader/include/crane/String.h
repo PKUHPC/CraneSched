@@ -258,8 +258,9 @@ bool ConvertStringToGresMap(const std::string& s, GresMap* gres_map);
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 
-bool PartitionNodesProcess(const std::string &node_str,
-                           const std::list<std::string> &host_list,
-                           const std::string &part_name, bool disallow_unknown_node,
-                           std::unordered_set<std::string> &part_node_list);
+bool PartitionNodesProcess(const std::string& node_str,
+                           const std::list<std::string>& host_list,
+                           const std::string& part_name,
+                           bool disallow_unknown_node,
+                           std::unordered_set<std::string>& part_node_list);
 }  // namespace util

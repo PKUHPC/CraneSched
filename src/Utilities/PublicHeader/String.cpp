@@ -832,7 +832,8 @@ bool PartitionNodesProcess(const std::string &node_str,
                            bool disallow_unknown_node,
                            std::unordered_set<std::string> &part_node_list) {
   std::list<std::string> name_list;
-  std::unordered_set<std::string> node_name_set_list(host_list.begin(), host_list.end());
+  std::unordered_set<std::string> node_name_set_list(host_list.begin(),
+                                                     host_list.end());
 
   auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
   if (act_nodes_str == "ALL") {
