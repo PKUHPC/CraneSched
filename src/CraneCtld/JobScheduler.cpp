@@ -3947,14 +3947,12 @@ void JobScheduler::CleanCancelJobQueueCb_() {
                 auto process_step = [&](CommonStepInCtld* step) {
                   for (const CranedId& craned_id : step->ExecutionNodes()) {
                     running_job_craned_id_map[craned_id]
-                                             [id_elem.terminate_source]
-                                             [jid]
+                                             [id_elem.terminate_source][jid]
                                                  .insert(step->StepId());
                   }
                 };
                 if (job->PrimaryStep()) process_step(job->PrimaryStep());
-                for (auto& [sid, step] : job->Steps())
-                  process_step(step.get());
+                for (auto& [sid, step] : job->Steps()) process_step(step.get());
               }
             },
         },
@@ -5167,7 +5165,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     const absl::Time& now, PdJobInScheduler* job,
     const absl::flat_hash_map<std::string, std::vector<std::string>>&
         qos_preempt_map,
-    const absl::flat_hash_set<job_id_t>& cancelling_set) {
+    const absl::flat_hash_set<job_id_t>& preempting_set) {
   std::vector<NodeState*> nodes_to_sched;
   if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) return true;
   if (nodes_to_sched.size() < job->node_num) {
@@ -5176,9 +5174,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         nodes_to_sched.size(), job->job_id, job->node_num);
     return false;
   }
-  if (g_config.Preempt.PreemptType !=
-          crane::grpc::PreemptType::PREEMPT_NONE &&
-      TryPreempt_(now, job, nodes_to_sched, qos_preempt_map, cancelling_set)) {
+  if (g_config.Preempt.PreemptType != crane::grpc::PreemptType::PREEMPT_NONE &&
+      TryPreempt_(now, job, nodes_to_sched, qos_preempt_map, preempting_set)) {
     return true;
   }
   return Backfill_(now, job, nodes_to_sched);
@@ -5380,9 +5377,6 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
     return false;
   }
 
-  // Immediate start failed but enough nodes have total capacity. Populate the
-  // provisional allocation and hand the candidate node list to the caller so
-  // it can run stage 2 (TryPreempt_) and/or stage 3 (Backfill_).
   int rest_ntasks = job->ntasks - job->node_num;
   while (!topk_nodes_total.empty()) {
     const auto& info = topk_nodes_total.top();
@@ -5412,9 +5406,6 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 bool SchedulerAlgo::LocalScheduler::Backfill_(
     const absl::Time& now, PdJobInScheduler* job,
     const std::vector<NodeState*>& nodes_to_sched) {
-  // job->allocated_res / craned_id_to_task_num were populated by stage 1's
-  // failure-return path using res_total sizing; feed that directly into the
-  // earliest-start selector.
   EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
   return scheduler.CalcEarliestStartTime(now, job);
 }
@@ -5424,16 +5415,10 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     const std::vector<NodeState*>& nodes_to_sched,
     const absl::flat_hash_map<std::string, std::vector<std::string>>&
         qos_preempt_map,
-    const absl::flat_hash_set<job_id_t>& cancelling_set) {
-  // PreemptType gating lives in the caller (CalculateRunningNodesAndStartTime_)
-  // so TryPreempt_ itself only deals with candidate selection.
+    const absl::flat_hash_set<job_id_t>& preempting_set) {
   auto qit = qos_preempt_map.find(job->qos);
   if (qit == qos_preempt_map.end() || qit->second.empty()) return false;
 
-  // 1. Gather preemptable candidates from each candidate node's qos_job_map.
-  //    Cancelling jobs are intentionally kept in qos_job_map (see §4.5 of the
-  //    design doc) so a new preempter can inherit their slot; the
-  //    cancelling-first sort below ensures they are consumed first.
   absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preemptable_set;
   for (const auto* node : nodes_to_sched) {
@@ -5446,22 +5431,19 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
   }
   if (preemptable_set.empty()) return false;
 
-  // 2. Sort: cancelling > pending > running. Tie-break by QoS priority
-  //    (low first — "cheaper to sacrifice"), then by job priority (pending) or
-  //    start time (running, youngest first).
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>> ordered(
       preemptable_set.begin(), preemptable_set.end());
   std::sort(
       ordered.begin(), ordered.end(),
-      [&cancelling_set](const auto& a, const auto& b) {
-        auto is_cancelling =
-            [&cancelling_set](
+      [&preempting_set](const auto& a, const auto& b) {
+        auto is_preempting =
+            [&preempting_set](
                 const std::variant<PdJobInScheduler*, RnJobInScheduler*>& v) {
               if (auto* rn = std::get_if<RnJobInScheduler*>(&v))
-                return cancelling_set.contains((*rn)->job_id);
+                return preempting_set.contains((*rn)->job_id);
               return false;
             };
-        bool ca = is_cancelling(a), cb = is_cancelling(b);
+        bool ca = is_preempting(a), cb = is_preempting(b);
         if (ca != cb) return ca;
 
         bool pa = std::holds_alternative<PdJobInScheduler*>(a);
@@ -5483,14 +5465,6 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
         }
       });
 
-  // 3. Build a seg tree per candidate node over [now, now+time_limit).
-  //    Stage 1 already picked exactly node_num nodes and filled
-  //    allocated_res / craned_id_to_task_num for them; TryPreempt_ only
-  //    verifies whether those target allocations can be made available by
-  //    preempting candidates. No node / resource decisions happen here.
-  //    Target per node = stage 1's provisional allocation on that node.
-  //    Init each tree from time_avail_res_map to reflect "what's free given
-  //    running jobs".
   absl::Time seg_start = now;
   absl::Time seg_end = now + job->time_limit;
   std::vector<PreemptSegTree> seg_trees;
@@ -5502,9 +5476,9 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     auto* node = nodes_to_sched[i];
     node_index[node->craned_id] = i;
     auto alloc_it = alloc_per_node.find(node->craned_id);
-    CRANE_ASSERT_MSG(alloc_it != alloc_per_node.end(),
-                     fmt("TryPreempt_: stage 1 didn't size craned {}",
-                         node->craned_id));
+    CRANE_ASSERT_MSG(
+        alloc_it != alloc_per_node.end(),
+        fmt("TryPreempt_: stage 1 didn't size craned {}", node->craned_id));
     seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
 
     auto& tree = seg_trees.back();
@@ -5533,16 +5507,12 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
         },
         preempted);
   };
-  // All N nodes must be satisfied — we can't run on a subset, so success
-  // means every single seg tree reports satisfied.
   auto all_satisfied = [&]() {
     for (const auto& t : seg_trees)
       if (!t.IsSatisfied()) return false;
     return true;
   };
 
-  // 4. Forward scan: Add preempt candidates in the sorted order until every
-  //    tree is satisfied. preempt_idx stops at the critical candidate.
   int preempt_idx = -1;
   for (size_t i = 0; !all_satisfied() && i < ordered.size(); ++i) {
     apply_to_trees(ordered[i], /*add=*/true);
@@ -5552,9 +5522,6 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     return false;  // even preempting every candidate isn't enough
   }
 
-  // 5. Reverse pruning: drop candidates not needed for full satisfaction,
-  //    keeping the minimum set. The critical one (preempt_idx) is kept by
-  //    default.
   job->preempted_jobs.push_back(ordered[preempt_idx]);
   for (int i = preempt_idx - 1; i >= 0; --i) {
     apply_to_trees(ordered[i], /*add=*/false);
@@ -5564,9 +5531,6 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     }
   }
 
-  // 6. Finalize. Stage 1 already filled allocated_res / craned_id_to_task_num
-  //    for exactly these N nodes, and stage 1 does not populate craned_ids
-  //    on its failure path, so just seed it here.
   job->craned_ids.clear();
   job->craned_ids.reserve(nodes_to_sched.size());
   for (const auto* node : nodes_to_sched)
@@ -5585,10 +5549,7 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<ResvId, std::vector<PdJobInScheduler*>>
       resv_pd_job_ptr_map;
 
-  // qos → list of QoS names that this QoS's jobs are allowed to preempt.
-  // Keys are populated from pending_jobs so we only look up the QoS entries we
-  // actually need from AccountManager. Empty when PreemptType != QOS; callers
-  // (TryPreempt_) treat that as "no preemption relations known".
+  // QoS → preemptable QoS names
   absl::flat_hash_map<std::string, std::vector<std::string>> qos_preempt_map;
 
   for (const auto& job : pending_jobs) {
@@ -5607,26 +5568,21 @@ void SchedulerAlgo::NodeSelect(
         if (it == qos_meta_map->end() || !it->second || it->second->deleted)
           continue;
         preempt_list.reserve(it->second->preempt.size());
-        for (const auto& p : it->second->preempt)
-          preempt_list.push_back(p);
+        for (const auto& p : it->second->preempt) preempt_list.push_back(p);
       }
     }
   }
 
-  // Phase C: refresh cancelling_set_ against the current round's running
-  // snapshot. Entries whose preempted job has already left the running map
-  // are dropped; surviving entries get their RnJob snapshot's end_time
-  // mutated to now+1s so the prediction layer sees them as releasing
-  // imminently.
   {
     absl::flat_hash_map<job_id_t, RnJobInScheduler*> rn_job_id_map;
     rn_job_id_map.reserve(running_jobs.size());
-    for (const auto& rn : running_jobs) rn_job_id_map.emplace(rn->job_id, rn.get());
-    for (auto it = cancelling_set_.begin(); it != cancelling_set_.end();) {
+    for (const auto& rn : running_jobs)
+      rn_job_id_map.emplace(rn->job_id, rn.get());
+    for (auto it = m_preempting_set_.begin(); it != m_preempting_set_.end();) {
       auto rn_it = rn_job_id_map.find(*it);
       if (rn_it == rn_job_id_map.end()) {
         // absl::flat_hash_set::erase returns void; advance before erasing.
-        cancelling_set_.erase(it++);
+        m_preempting_set_.erase(it++);
       } else {
         rn_it->second->end_time = now + absl::Seconds(1);
         ++it;
@@ -5756,19 +5712,12 @@ void SchedulerAlgo::NodeSelect(
 
   {
     for (const auto& job : running_jobs) {
-      // Phase C may have shortened end_time to now+1s for cancelling jobs;
-      // std::max clamps any stale past-now values from delayed
-      // StepStatusChange as well.
       absl::Time end_time = std::max(job->end_time, now + absl::Seconds(1));
       if (job->reservation.empty()) {
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto it = node_state_map.find(craned_id);
           if (it != node_state_map.end()) {
             it->second.allocated_res.emplace_back(end_time, res);
-            // Cancelling jobs stay in qos_job_map so a new preempter can
-            // inherit their slot; the cancelling-first ordering in
-            // TryPreempt_ makes sure they're consumed before we kill
-            // additional running jobs.
             it->second.qos_job_map[job->qos].emplace(job.get());
           }
         }
@@ -5845,7 +5794,7 @@ void SchedulerAlgo::NodeSelect(
     }
 
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(
-        now, job, qos_preempt_map, cancelling_set_);
+        now, job, qos_preempt_map, m_preempting_set_);
 
     if (!ok) {
       // Leave start_time unset
@@ -5858,13 +5807,6 @@ void SchedulerAlgo::NodeSelect(
                     absl::ToInt64Seconds(job->end_time - now));
       }
 
-      // Apply preemption decisions produced by TryPreempt_.
-      // UpdateNodeSelectorWithPreemptedJob must fire BEFORE we mutate the
-      // pending preempted's reason — its qos_job_map erase is gated on
-      // is_scheduled() (see JobScheduler.h §4.2 / Step 4.2 commit).
-      // For each running preempted that hasn't been cancelled yet, push
-      // into the action queue (v2 only supports CANCEL; REQUEUE / SUSPEND
-      // would dispatch to their own queues here).
       std::vector<job_id_t> preempted_rn_jobs;
       for (const auto& preempted : job->preempted_jobs) {
         scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
@@ -5873,15 +5815,12 @@ void SchedulerAlgo::NodeSelect(
           continue;
         }
         auto* rn = std::get<RnJobInScheduler*>(preempted);
-        if (!cancelling_set_.insert(rn->job_id).second) continue;
+        if (!m_preempting_set_.insert(rn->job_id).second) continue;
         CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
                    job->job_id);
         preempted_rn_jobs.push_back(rn->job_id);
       }
-      // Enqueue immediately so the cancel RPC runs in parallel with
-      // scheduling of subsequent jobs in this round.
-      // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when those
-      //                modes are supported.
+      // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when supported.
       g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
 
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);

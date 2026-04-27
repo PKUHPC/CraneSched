@@ -44,10 +44,9 @@ class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
                   const absl::Time& end_time, const ResourceInNodeV3& resources,
                   const ResourceInNodeV3& total_res,
                   bool is_release = false) const override {
-    double delta =
-        absl::ToInt64Seconds(end_time - start_time) *
-        (static_cast<double>(resources.GetCpuSet().cpu_count) /
-         static_cast<double>(total_res.GetCpuSet().cpu_count));
+    double delta = absl::ToInt64Seconds(end_time - start_time) *
+                   (static_cast<double>(resources.GetCpuSet().cpu_count) /
+                    static_cast<double>(total_res.GetCpuSet().cpu_count));
     if (is_release)
       cost -= delta;
     else
@@ -286,11 +285,6 @@ class SchedulerAlgo {
 
     TimeAvailResMap time_avail_res_map;
 
-    // Per-QoS inverted index of jobs on this node. Used by TryPreempt_ to
-    // enumerate candidates whose QoS is in a preempter's preempt list.
-    // Running jobs that are being cancelled (in SchedulerAlgo::cancelling_set_)
-    // are still included here so that a new preempter can "claim" their slot
-    // without issuing a duplicate cancel RPC.
     absl::flat_hash_map<
         std::string,
         absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>>
@@ -338,12 +332,6 @@ class SchedulerAlgo {
       time_avail_res_map[end].SetToZero();
     }
 
-    // Update time_avail_res_map for a job's time window.
-    // is_release=false (default): subtract res across [start_time, end_time)
-    //   — a newly scheduled job consumes capacity.
-    // is_release=true: add res back — a previously scheduled job is being
-    //   released (preempted, suspended, etc.). The time-map structure is
-    //   identical; only the arithmetic sign flips.
     void UpdateResourceInNode(const absl::Time& start_time,
                               const absl::Time& end_time,
                               const ResourceInNodeV3& res,
@@ -488,8 +476,6 @@ class SchedulerAlgo {
     virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
         const = 0;
 
-    // is_release=false: apply a new allocation on the affected nodes.
-    // is_release=true:  release a previous allocation (preempt, etc.).
     virtual void UpdateResource(const absl::Time& start_time,
                                 const absl::Time& end_time,
                                 const ResourceV3& res,
@@ -536,10 +522,9 @@ class SchedulerAlgo {
                     bool is_release = false) override {
       NodeRater& node_info = m_node_info_map_.at(craned_id);
       m_cost_node_info_set_.erase(node_info.cost_node_info_set_it);
-      m_update_cost_policy_->UpdateCost(node_info.cost, start_time, end_time,
-                                        resources,
-                                        node_info.node_state->res_total,
-                                        is_release);
+      m_update_cost_policy_->UpdateCost(
+          node_info.cost, start_time, end_time, resources,
+          node_info.node_state->res_total, is_release);
       node_info.cost_node_info_set_it =
           m_cost_node_info_set_.emplace(node_info.cost, node_info.node_state)
               .first;
@@ -601,57 +586,25 @@ class SchedulerAlgo {
       }
     }
 
-    // Three-stage scheduling driver. See docs/preempt/preempt-v2-on-master.md
-    // §5.6 for the overall flow: immediate start → preempt → backfill.
     bool CalculateRunningNodesAndStartTime_(
         const absl::Time& now, PdJobInScheduler* job,
         const absl::flat_hash_map<std::string, std::vector<std::string>>&
             qos_preempt_map,
-        const absl::flat_hash_set<job_id_t>& cancelling_set);
+        const absl::flat_hash_set<job_id_t>& preempting_set);
 
-    // Stage 1: pick N nodes that can run the job in
-    // [now, now+time_limit) against res_avail; also collect up to node_num
-    // candidate nodes whose res_total is enough (for stages 2 and 3).
-    //
-    // On success: fills job->craned_ids / allocated_res / craned_id_to_task_num
-    // and sets start_time = now. Returns true.
-    // On failure: leaves nodes_to_sched populated with up to node_num
-    // candidates (plus provisional allocated_res sized by res_total so the
-    // backfill stage has something to work with). Returns false.
     bool GetNodesAndTrySchedule_(const absl::Time& now, PdJobInScheduler* job,
                                  std::vector<NodeState*>* nodes_to_sched);
 
-    // Stage 2: try to run the job NOW by preempting lower-QoS jobs.
-    // Only called when stage 1 collected >= node_num candidates but couldn't
-    // satisfy them from current availability alone.
-    //
-    // Uses a per-node PreemptSegTree over [now, now+time_limit). Candidates
-    // are sourced from each node's qos_job_map (intersected with the
-    // preempter's preempt_qos_list) and sorted so cancelling entries are tried
-    // first (they don't incur a new cancel RPC), then pending, then running.
-    //
-    // On success: overwrites job->craned_ids / allocated_res /
-    // craned_id_to_task_num, populates job->preempted_jobs, sets
-    // start_time = now. Returns true.
     bool TryPreempt_(
         const absl::Time& now, PdJobInScheduler* job,
         const std::vector<NodeState*>& nodes_to_sched,
         const absl::flat_hash_map<std::string, std::vector<std::string>>&
             qos_preempt_map,
-        const absl::flat_hash_set<job_id_t>& cancelling_set);
+        const absl::flat_hash_set<job_id_t>& preempting_set);
 
-    // Stage 3: backfill — find the earliest future start time at which the
-    // candidate subset collected by stage 1 satisfies the request.
-    //
-    // Consumes the provisional allocated_res populated by stage 1 and calls
-    // EarliestStartSubsetSelector to walk forward through time.
     bool Backfill_(const absl::Time& now, PdJobInScheduler* job,
-                               const std::vector<NodeState*>& nodes_to_sched);
+                   const std::vector<NodeState*>& nodes_to_sched);
 
-    // Apply a successful scheduling decision: subtract the job's allocation
-    // from each target node's time_avail_res_map and register the job in the
-    // per-node qos_job_map so it can itself become a preempt candidate for
-    // later jobs processed in this round.
     void UpdateNodeSelectorWithScheduledJob(const absl::Time& now,
                                             PdJobInScheduler* job) {
       m_node_selector_->UpdateResource(job->start_time, job->end_time,
@@ -665,15 +618,6 @@ class SchedulerAlgo {
       }
     }
 
-    // Inverse of UpdateNodeSelectorWithScheduledJob for a preempted job. The
-    // released window is the preempted job's own allocation window:
-    //   * Running jobs: [rn->start_time, rn->end_time). We optimistically
-    //     assume the running job is gone immediately; physical correctness is
-    //     enforced later by post-validation in ScheduleThread_.
-    //   * Pending jobs (previously scheduled in this round): their
-    //     [start, end) window.
-    // Also removes the job from qos_job_map so it isn't reselected within the
-    // same round.
     void UpdateNodeSelectorWithPreemptedJob(
         const absl::Time& now,
         std::variant<PdJobInScheduler*, RnJobInScheduler*> preempted_job) {
@@ -682,11 +626,9 @@ class SchedulerAlgo {
         m_node_selector_->UpdateResource(rn->start_time, rn->end_time,
                                          rn->allocated_res,
                                          /*is_release=*/true);
-        for (const auto& [craned_id, _] :
-             rn->allocated_res.EachNodeResMap()) {
-          m_node_selector_->GetNodeState(craned_id)
-              ->qos_job_map[rn->qos]
-              .erase(rn);
+        for (const auto& [craned_id, _] : rn->allocated_res.EachNodeResMap()) {
+          m_node_selector_->GetNodeState(craned_id)->qos_job_map[rn->qos].erase(
+              rn);
         }
       } else {
         auto* pd = std::get<PdJobInScheduler*>(preempted_job);
@@ -902,15 +844,6 @@ class SchedulerAlgo {
         m_time_priority_queue_;
   };
 
-  // Segment tree with lazy propagation used by TryPreempt_ to check whether a
-  // set of preempted job releases covers the preempter's target resource on
-  // every time point inside [now, now+time_limit). Leaves cache a boolean
-  // `satisfied = (target_res <= res)`; the root's bit tells us whether the
-  // whole interval satisfies the target.
-  //
-  // Lazy add_tag / sub_tag propagate to children on demand. Internal nodes are
-  // allocated lazily in push_down, so unused branches stay empty. The tree is
-  // constructed fresh per job, so no long-lived memory pressure.
   class PreemptSegTree {
    private:
     struct Node {
@@ -1025,15 +958,7 @@ class SchedulerAlgo {
 
   IPrioritySorter* m_priority_sorter_;
 
-  // Running jobs that have been cancelled as part of a preemption decision in
-  // this or a previous round but haven't been removed from the running map
-  // yet. Used for:
-  //  * cancel action de-duplication (don't re-send CancelJobAsync)
-  //  * Phase C end_time=now+1s mutation so the prediction layer sees them as
-  //    about to release
-  // Note: this set does NOT exclude cancelling jobs from qos_job_map — they
-  // remain preempt candidates so a new preempter can "inherit" their slot.
-  absl::flat_hash_set<job_id_t> cancelling_set_;
+  absl::flat_hash_set<job_id_t> m_preempting_set_;
 };
 
 class JobScheduler {
@@ -1127,13 +1052,8 @@ class JobScheduler {
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
 
-  // Enqueue preempt-cancel requests and trigger immediate processing.
-  // Uses m_clean_cancel_job_queue_handle_ (not m_cancel_job_async_handle_)
-  // to bypass the batch-threshold / 500ms-timer gate in CancelJobAsyncCb_,
-  // because preempt needs the cancel RPC dispatched ASAP so its latency
-  // overlaps with scheduling computation for subsequent jobs.
-  //
-  // TODO(preempt): Even with immediate dispatch the full cancel chain
+  // Bypass the batch/timer gate for immediate cancel dispatch.
+  // TODO: Even with immediate dispatch the full cancel chain
   // (TerminateJobs RPC → Craned kill → StepStatusChangeAsync → timer →
   // CleanJobStatusChangeQueueCb_ → running_map erase) still has multiple
   // async hops. A dedicated fast-path that bypasses the StatusChange queue
@@ -1143,7 +1063,7 @@ class JobScheduler {
     if (job_ids.empty()) return;
     m_cancel_job_queue_.enqueue(CancelRunningJobByIdElem{
         .job_ids = std::move(job_ids),
-        .terminate_source = crane::grpc::TERMINATE_SOURCE_USER_CANCEL});
+        .terminate_source = crane::grpc::TERMINATE_SOURCE_PREEMPT});
     m_clean_cancel_job_queue_handle_->send();
   }
 
@@ -1399,7 +1319,7 @@ class JobScheduler {
   struct CancelRunningJobByIdElem {
     std::vector<job_id_t> job_ids;
     crane::grpc::TerminateSource terminate_source{
-        crane::grpc::TERMINATE_SOURCE_PREEMPT};
+        crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
   using CancelJobQueueElem =

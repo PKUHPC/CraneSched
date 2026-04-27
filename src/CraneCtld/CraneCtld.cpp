@@ -787,8 +787,9 @@ void ParseConfig(int argc, char** argv) {
             g_config.Preempt.PreemptType =
                 crane::grpc::PreemptType::PREEMPT_PARTITION;
           else {
-            CRANE_CRITICAL("Unknown PreemptType '{}'. Valid: none|qos|partition",
-                           preempt_type);
+            CRANE_CRITICAL(
+                "Unknown PreemptType '{}'. Valid: none|qos|partition",
+                preempt_type);
             std::exit(1);
           }
         }

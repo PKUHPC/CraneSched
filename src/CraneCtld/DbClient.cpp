@@ -3721,9 +3721,9 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         qos->preempt.emplace_back(preempt_qos.get_string().value);
       }
     }
-    qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(ViewValueOr_(
-        qos_view[Qos::FieldStringOfPreemptMode()],
-        int64_t(crane::grpc::PreemptMode::PREEMPT_MODE_OFF)));
+    qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(
+        ViewValueOr_(qos_view[Qos::FieldStringOfPreemptMode()],
+                     int64_t(crane::grpc::PreemptMode::PREEMPT_MODE_OFF)));
 
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());

@@ -170,7 +170,8 @@ struct Config {
   ContainerConfig Container;
 
   struct PreemptConfig {
-    crane::grpc::PreemptType PreemptType{crane::grpc::PreemptType::PREEMPT_NONE};
+    crane::grpc::PreemptType PreemptType{
+        crane::grpc::PreemptType::PREEMPT_NONE};
     crane::grpc::PreemptMode PreemptMode{
         crane::grpc::PreemptMode::PREEMPT_MODE_OFF};
   };

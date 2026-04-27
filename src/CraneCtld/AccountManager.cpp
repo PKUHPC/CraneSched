@@ -1288,9 +1288,9 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       // TODO(preempt): accept REQUEUE / SUSPEND once the scheduler supports
       // those modes. The proto enum already reserves both values.
       if (v != "OFF" && v != "CANCEL") {
-        rich_error_list.emplace_back(std::unexpected{
-            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                          "invalid preempt_mode {}: expected OFF or CANCEL", v)});
+        rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "invalid preempt_mode {}: expected OFF or CANCEL", v)});
       }
       continue;
     }
