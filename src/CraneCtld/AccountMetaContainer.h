@@ -73,16 +73,20 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosSubmitResource(JobInCtld& job);
+  // `count` is the number of submit-slots this call wants to reserve. A plain
+  // single-task submission uses the default `count=1`. An array parent
+  // submission passes `count=task_count` so the whole array is reserved
+  // atomically at submit time (Slurm-parity semantics).
+  CraneErrCode TryMallocQosSubmitResource(JobInCtld& job, uint32_t count = 1);
 
-  void MallocQosSubmitResource(const JobInCtld& job);
+  void MallocQosSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
   void MallocQosResourceToRecoveredRunningJob(JobInCtld& job);
 
   std::expected<void, std::string> CheckAndMallocQosResource(
       const PdJobInScheduler& job);
 
-  void FreeQosSubmitResource(const JobInCtld& job);
+  void FreeQosSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
   void FreeQosResource(const JobInCtld& job);
 
@@ -93,9 +97,9 @@ class AccountMetaContainer final {
 
   void DeleteQosMeta(const std::string& qos);
 
-  void UserAddJob(const std::string& username);
+  void UserAddJob(const std::string& username, uint32_t count = 1);
 
-  void UserReduceJob(const std::string& username);
+  void UserReduceJob(const std::string& username, uint32_t count = 1);
 
   bool UserHasJob(const std::string& username);
 
@@ -107,13 +111,14 @@ class AccountMetaContainer final {
   }
 
   CraneErrCode CheckUserQosSubmitResourceUsage_(const JobInCtld& job,
-                                                const Qos& qos);
+                                                const Qos& qos, uint32_t count);
 
   CraneErrCode CheckAccountQosSubmitResourceUsage_(const JobInCtld& job,
-                                                   const Qos& qos);
+                                                   const Qos& qos,
+                                                   uint32_t count);
 
   CraneErrCode CheckQosSubmitResourceUsage_(const JobInCtld& job,
-                                            const Qos& qos);
+                                            const Qos& qos, uint32_t count);
 
   std::expected<void, std::string> CheckQosResource_(
       const Qos& qos, const PdJobInScheduler& job);

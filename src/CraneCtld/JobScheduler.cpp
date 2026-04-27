@@ -376,12 +376,29 @@ bool JobScheduler::Init() {
     }
 
     m_array_manager_->ForEachMeta([this](job_id_t array_job_id,
-                                          ArrayMeta& meta) {
+                                         ArrayMeta& meta) {
       m_array_manager_->RefreshRecoveredSummary(&meta);
       CRANE_DEBUG(
           "Recovered array root job #{}: reconstructed next_array_task_index = "
           "{}.",
           array_job_id, meta.NextTaskIndex());
+
+      // Slurm-parity: re-reserve QoS submit-slots for array tasks that were
+      // not yet materialized before the restart. Materialized children are
+      // already accounted for individually above (either via the pending
+      // queue's MallocQosSubmitResource or the running queue's
+      // MallocQosResourceToRecoveredRunningJob). The parent owes the diff so
+      // that the in-memory submit_jobs_count matches the task_count reserved
+      // at original submit time.
+      auto& root = meta.MutableRoot();
+      uint32_t task_count = ArrayUtil::TaskCount(root.JobToCtld().array_spec());
+      uint32_t materialized =
+          static_cast<uint32_t>(meta.MaterializedTaskCount());
+      if (task_count > materialized) {
+        uint32_t leftover = task_count - materialized;
+        g_account_meta_container->MallocQosSubmitResource(root, leftover);
+        g_account_meta_container->UserAddJob(root.Username(), leftover);
+      }
     });
   }
 
@@ -577,14 +594,13 @@ bool JobScheduler::Init() {
       }
     }
 
-    m_array_manager_->ForEachMetaConst(
-        [&](job_id_t job_id, const ArrayMeta& meta) {
-          for (const auto& [dep_id, dep_info] :
-               meta.Root().Dependencies().deps) {
-            const auto& [dep_type, delay_seconds] = dep_info;
-            dependee_to_dependents[dep_id].emplace_back(job_id, dep_type);
-          }
-        });
+    m_array_manager_->ForEachMetaConst([&](job_id_t job_id,
+                                           const ArrayMeta& meta) {
+      for (const auto& [dep_id, dep_info] : meta.Root().Dependencies().deps) {
+        const auto& [dep_type, delay_seconds] = dep_info;
+        dependee_to_dependents[dep_id].emplace_back(job_id, dep_type);
+      }
+    });
 
     std::unordered_set<job_id_t> missing_dependee_ids;
 
@@ -670,7 +686,7 @@ bool JobScheduler::Init() {
       }
 
       m_array_manager_->ForEachMetaConst([&](job_id_t job_id,
-                                              const ArrayMeta& meta) {
+                                             const ArrayMeta& meta) {
         for (const auto& [dep_id, dep_info] : meta.Root().Dependencies().deps) {
           if (!missing_dependee_ids.contains(dep_id)) continue;
 
@@ -1205,9 +1221,8 @@ void JobScheduler::ScheduleThread_() {
             continue;
           }
 
-          m_array_manager_->ApplyDependencyEvent(event.dependent_job_id,
-                                                  event.dependee_job_id,
-                                                  event.event_time);
+          m_array_manager_->ApplyDependencyEvent(
+              event.dependent_job_id, event.dependee_job_id, event.event_time);
         }
       }
 
@@ -2189,10 +2204,12 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
                                              child->executing_craned_ids);
         }
       };
-      for (job_id_t child_job_id : m_array_manager_->PendingChildJobIds(*meta)) {
+      for (job_id_t child_job_id :
+           m_array_manager_->PendingChildJobIds(*meta)) {
         apply_to_child(child_job_id);
       }
-      for (job_id_t child_job_id : m_array_manager_->RunningChildJobIds(*meta)) {
+      for (job_id_t child_job_id :
+           m_array_manager_->RunningChildJobIds(*meta)) {
         apply_to_child(child_job_id);
       }
 
@@ -3102,7 +3119,7 @@ std::optional<std::future<CraneRichError>> JobScheduler::JobSubmitLuaCheck(
 
 void JobScheduler::JobModifyLuaCheck(
     const crane::grpc::ModifyJobRequest& request,
-    crane::grpc::ModifyJobReply* response, std::vector<job_id_t>* job_ids) {
+    crane::grpc::ModifyJobReply* response, std::list<job_id_t>* job_ids) {
 #ifdef HAVE_LUA
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
@@ -3212,18 +3229,27 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (result) result = JobScheduler::CheckJobValidity(job.get());
   if (result) {
     {
-      if (!job->IsArrayParent()) {
-        const auto& user_ptr =
-            g_account_manager->GetExistedUserInfo(job->Username());
-        if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      const auto& user_ptr =
+          g_account_manager->GetExistedUserInfo(job->Username());
+      if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-        auto res = g_account_meta_container->TryMallocQosSubmitResource(*job);
-        if (res != CraneErrCode::SUCCESS) {
-          CRANE_DEBUG("The requested QoS resources have reached the limit.");
-          return std::unexpected(res);
+      // Slurm-parity: array parent pre-reserves submit-slots for the entire
+      // task_count up front; children inherit and never re-check at
+      // materialization time. Non-array jobs still check count=1.
+      uint32_t reserve_count = 1;
+      if (job->IsArrayParent()) {
+        reserve_count = ArrayUtil::TaskCount(job->JobToCtld().array_spec());
+        if (reserve_count == 0) {
+          return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
         }
-        g_account_meta_container->UserAddJob(user_ptr->name);
       }
+      auto res = g_account_meta_container->TryMallocQosSubmitResource(
+          *job, reserve_count);
+      if (res != CraneErrCode::SUCCESS) {
+        CRANE_DEBUG("The requested QoS resources have reached the limit.");
+        return std::unexpected(res);
+      }
+      g_account_meta_container->UserAddJob(user_ptr->name, reserve_count);
     }
     job->MutableJobToCtld()->set_qos(job->qos);
     job->MutableJobToCtld()->mutable_time_limit()->set_seconds(
@@ -5633,77 +5659,77 @@ void JobScheduler::QueryJobsInRam(
 
   ranges::for_each(id_filtered_job_rng, append_fn);
 
-  m_array_manager_->ForEachMetaConst([&](job_id_t array_job_id,
-                                          const ArrayMeta& meta) {
-    if (job_info_map->contains(array_job_id)) {
-      return;
-    }
-    if (!no_ids_constraint && !req_steps.contains(array_job_id)) {
-      return;
-    }
-
-    const auto& root = meta.Root();
-    bool valid = true;
-    if (request->has_filter_submit_time_interval()) {
-      const auto& interval = request->filter_submit_time_interval();
-      valid &= !interval.has_lower_bound() ||
-               root.RuntimeAttr().submit_time() >= interval.lower_bound();
-      valid &= !interval.has_upper_bound() ||
-               root.RuntimeAttr().submit_time() <= interval.upper_bound();
-    }
-    if (request->has_filter_start_time_interval()) {
-      const auto& interval = request->filter_start_time_interval();
-      valid &= !interval.has_lower_bound() ||
-               root.RuntimeAttr().start_time() >= interval.lower_bound();
-      valid &= !interval.has_upper_bound() ||
-               root.RuntimeAttr().start_time() <= interval.upper_bound();
-    }
-    if (request->has_filter_end_time_interval()) {
-      const auto& interval = request->filter_end_time_interval();
-      valid &= !interval.has_lower_bound() ||
-               root.RuntimeAttr().end_time() >= interval.lower_bound();
-      valid &= !interval.has_upper_bound() ||
-               root.RuntimeAttr().end_time() <= interval.upper_bound();
-    }
-    valid &= no_accounts_constraint ||
-             req_accounts.contains(root.JobToCtld().account());
-    valid &= no_username_constraint || req_users.contains(root.Username());
-    valid &= no_qos_constraint || req_qos.contains(root.JobToCtld().qos());
-    valid &= no_job_names_constraint ||
-             req_job_names.contains(root.JobToCtld().name());
-    valid &= no_partitions_constraint ||
-             req_partitions.contains(root.JobToCtld().partition_name());
-    valid &= no_job_states_constraint ||
-             req_job_states.contains(root.RuntimeAttr().status());
-    valid &= no_job_types_constraint ||
-             req_job_types.contains(root.JobToCtld().type());
-    if (!no_licenses_constraint) {
-      bool has_license = false;
-      for (const auto& license : root.JobToCtld().licenses_count()) {
-        if (req_licenses.contains(license.key())) {
-          has_license = true;
-          break;
+  m_array_manager_->ForEachMetaConst(
+      [&](job_id_t array_job_id, const ArrayMeta& meta) {
+        if (job_info_map->contains(array_job_id)) {
+          return;
         }
-      }
-      valid &= has_license;
-    }
-    if (!no_nodename_list_constraint) {
-      bool has_node = false;
-      for (const auto& node : root.executing_craned_ids) {
-        if (req_nodename_list.contains(node)) {
-          has_node = true;
-          break;
+        if (!no_ids_constraint && !req_steps.contains(array_job_id)) {
+          return;
         }
-      }
-      valid &= has_node;
-    }
 
-    if (!valid) {
-      return;
-    }
+        const auto& root = meta.Root();
+        bool valid = true;
+        if (request->has_filter_submit_time_interval()) {
+          const auto& interval = request->filter_submit_time_interval();
+          valid &= !interval.has_lower_bound() ||
+                   root.RuntimeAttr().submit_time() >= interval.lower_bound();
+          valid &= !interval.has_upper_bound() ||
+                   root.RuntimeAttr().submit_time() <= interval.upper_bound();
+        }
+        if (request->has_filter_start_time_interval()) {
+          const auto& interval = request->filter_start_time_interval();
+          valid &= !interval.has_lower_bound() ||
+                   root.RuntimeAttr().start_time() >= interval.lower_bound();
+          valid &= !interval.has_upper_bound() ||
+                   root.RuntimeAttr().start_time() <= interval.upper_bound();
+        }
+        if (request->has_filter_end_time_interval()) {
+          const auto& interval = request->filter_end_time_interval();
+          valid &= !interval.has_lower_bound() ||
+                   root.RuntimeAttr().end_time() >= interval.lower_bound();
+          valid &= !interval.has_upper_bound() ||
+                   root.RuntimeAttr().end_time() <= interval.upper_bound();
+        }
+        valid &= no_accounts_constraint ||
+                 req_accounts.contains(root.JobToCtld().account());
+        valid &= no_username_constraint || req_users.contains(root.Username());
+        valid &= no_qos_constraint || req_qos.contains(root.JobToCtld().qos());
+        valid &= no_job_names_constraint ||
+                 req_job_names.contains(root.JobToCtld().name());
+        valid &= no_partitions_constraint ||
+                 req_partitions.contains(root.JobToCtld().partition_name());
+        valid &= no_job_states_constraint ||
+                 req_job_states.contains(root.RuntimeAttr().status());
+        valid &= no_job_types_constraint ||
+                 req_job_types.contains(root.JobToCtld().type());
+        if (!no_licenses_constraint) {
+          bool has_license = false;
+          for (const auto& license : root.JobToCtld().licenses_count()) {
+            if (req_licenses.contains(license.key())) {
+              has_license = true;
+              break;
+            }
+          }
+          valid &= has_license;
+        }
+        if (!no_nodename_list_constraint) {
+          bool has_node = false;
+          for (const auto& node : root.executing_craned_ids) {
+            if (req_nodename_list.contains(node)) {
+              has_node = true;
+              break;
+            }
+          }
+          valid &= has_node;
+        }
 
-    append_array_root_fn(meta);
-  });
+        if (!valid) {
+          return;
+        }
+
+        append_array_root_fn(meta);
+      });
 }
 
 void JobScheduler::QueryRnJobOnCtldForNodeConfig(

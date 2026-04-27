@@ -263,9 +263,7 @@ class ArrayManager {
 
   bool CanMaterializeRootNoLock_(ArrayMeta* meta, absl::Time now) const;
 
-  static CraneErrCode TryMallocChildSubmitResource_(JobInCtld& child);
-  static void FreeChildSubmitResources_(
-      const std::vector<JobInCtld*>& children);
+  static void InheritChildAttributesFromParent_(JobInCtld& child);
 
   CraneExpected<void> AdmitChildPtrsNoLock_(
       ArrayMeta* meta, const std::vector<JobInCtld*>& children);
@@ -287,15 +285,13 @@ class ArrayManager {
   static uint32_t EffectiveArrayRunLimit_(const JobInCtld& root);
   static bool ArrayChildrenExpanded_(const JobInCtld& root);
   static void SetArrayChildrenExpanded_(JobInCtld* root, bool expanded);
-  static bool IsArrayChildQosSubmitLimitError_(CraneErrCode err);
   static void TriggerTerminalDependencyEvents_(JobInCtld* job,
                                                absl::Time end_time);
   static void TriggerTerminalDependencyEvents_(ArrayMeta* root,
                                                absl::Time end_time);
 
   static std::pair<crane::grpc::JobStatus, uint32_t> BuildAggregateResult_(
-      job_id_t array_job_id,
-      const std::unordered_set<JobInCtld*>& final_jobs);
+      job_id_t array_job_id, const std::unordered_set<JobInCtld*>& final_jobs);
 
   PendingJobMap& m_pending_jobs_;
   RunningJobMap& m_running_jobs_;

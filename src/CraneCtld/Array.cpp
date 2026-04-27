@@ -132,8 +132,7 @@ void ArrayMeta::UntrackMaterialized(JobInCtld* child) {
   if (!task_id.has_value()) return;
 
   auto it = child_job_id_by_task_id_.find(*task_id);
-  if (it != child_job_id_by_task_id_.end() &&
-      it->second == child->JobId()) {
+  if (it != child_job_id_by_task_id_.end() && it->second == child->JobId()) {
     child_job_id_by_task_id_.erase(it);
   }
 }
@@ -252,20 +251,6 @@ void ArrayManager::SetArrayChildrenExpanded_(JobInCtld* root, bool expanded) {
   root->SetArrayChildrenExpanded(expanded);
 }
 
-bool ArrayManager::IsArrayChildQosSubmitLimitError_(CraneErrCode err) {
-  switch (err) {
-  case CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER:
-  case CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT:
-  case CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED:
-  case CraneErrCode::ERR_CPUS_PER_TASK_BEYOND:
-  case CraneErrCode::ERR_TRES_PER_JOB_BEYOND:
-  case CraneErrCode::ERR_TIME_TIMIT_BEYOND:
-    return true;
-  default:
-    return false;
-  }
-}
-
 void ArrayManager::TriggerTerminalDependencyEvents_(JobInCtld* job,
                                                     absl::Time end_time) {
   if (job == nullptr) return;
@@ -279,10 +264,8 @@ void ArrayManager::TriggerTerminalDependencyEvents_(ArrayMeta* meta,
                                       meta->root_job_->ExitCode(), end_time);
 }
 
-std::pair<crane::grpc::JobStatus, uint32_t>
-ArrayManager::BuildAggregateResult_(
-    job_id_t array_job_id,
-    const std::unordered_set<JobInCtld*>& final_jobs) {
+std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
+    job_id_t array_job_id, const std::unordered_set<JobInCtld*>& final_jobs) {
   bool any_cancelled = false;
   bool any_exceed_time_limit = false;
   bool any_out_of_memory = false;
@@ -318,27 +301,15 @@ ArrayManager::BuildAggregateResult_(
           max_exit_code};
 }
 
-CraneErrCode ArrayManager::TryMallocChildSubmitResource_(JobInCtld& child) {
-  auto res = g_account_meta_container->TryMallocQosSubmitResource(child);
-  if (res != CraneErrCode::SUCCESS) {
-    CRANE_DEBUG(
-        "The requested QoS submit resources for array child task {} of parent "
-        "#{} have reached the limit.",
-        child.ArrayTaskId().value_or(0), child.ArrayJobId().value_or(0));
-    return res;
-  }
+// Slurm-parity: the array parent already reserved a submit-slot per task
+// at submission time (JobScheduler::SubmitJobToScheduler with
+// count=task_count). Child materialization therefore owes no independent
+// QoS submit check — it only inherits the parent's qos/time_limit into its
+// own proto so downstream consumers can read it per child.
+void ArrayManager::InheritChildAttributesFromParent_(JobInCtld& child) {
   child.MutableJobToCtld()->set_qos(child.qos);
   child.MutableJobToCtld()->mutable_time_limit()->set_seconds(
       ToInt64Seconds(child.time_limit));
-  g_account_meta_container->UserAddJob(child.Username());
-  return CraneErrCode::SUCCESS;
-}
-
-void ArrayManager::FreeChildSubmitResources_(
-    const std::vector<JobInCtld*>& children) {
-  for (JobInCtld* child : children) {
-    g_account_meta_container->FreeQosSubmitResource(*child);
-  }
 }
 
 // ----------------------------------------------------------------------------
@@ -583,15 +554,10 @@ CraneExpected<void> ArrayManager::AdmitChildPtrsNoLock_(
   }
 
   auto& root = meta->MutableRoot();
-  std::vector<JobInCtld*> malloced_ptrs;
-  malloced_ptrs.reserve(child_ptrs.size());
+  // Child submit-slots were pre-reserved on the parent at submission time;
+  // here we only propagate inherited fields onto the child's proto.
   for (JobInCtld* child : child_ptrs) {
-    auto err = TryMallocChildSubmitResource_(*child);
-    if (err != CraneErrCode::SUCCESS) {
-      FreeChildSubmitResources_(malloced_ptrs);
-      return std::unexpected(err);
-    }
-    malloced_ptrs.push_back(child);
+    InheritChildAttributesFromParent_(*child);
   }
 
   bool mark_expanded = meta->MaterializedTaskCount() + child_ptrs.size() ==
@@ -610,7 +576,6 @@ CraneExpected<void> ArrayManager::AdmitChildPtrsNoLock_(
     if (mark_expanded) {
       SetArrayChildrenExpanded_(&root, false);
     }
-    FreeChildSubmitResources_(malloced_ptrs);
     return std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED);
   }
   return {};
@@ -674,11 +639,6 @@ bool ArrayManager::TryEnqueueNextChildNoLock_(ArrayMeta* meta) {
   JobInCtld* child_raw = child.get();
   auto admit = AdmitChildNoLock_(meta, child_raw);
   if (!admit.has_value()) {
-    if (IsArrayChildQosSubmitLimitError_(admit.error())) {
-      root.pending_reason = "QosSubmitLimit";
-      RefreshRootSummaryStateNoLock_(meta);
-      return false;
-    }
     CRANE_ERROR("Failed to admit array child task {} for parent job #{}: {}.",
                 child_raw->ArrayTaskId().value_or(0), root.JobId(),
                 CraneErrStr(admit.error()));
@@ -737,12 +697,6 @@ std::vector<job_id_t> ArrayManager::MaterializeSpecificTasksNoLock_(
 
   auto admit = AdmitChildrenNoLock_(meta, children);
   if (!admit.has_value()) {
-    if (IsArrayChildQosSubmitLimitError_(admit.error())) {
-      auto& mutable_root = meta->MutableRoot();
-      mutable_root.pending_reason = "QosSubmitLimit";
-      RefreshRootSummaryStateNoLock_(meta);
-      return {};
-    }
     CRANE_ERROR(
         "Failed to materialize specific array tasks for parent job #{}: {}.",
         root.JobId(), CraneErrStr(admit.error()));
@@ -796,8 +750,7 @@ void ArrayManager::TryFinalizeRootNoLock_(
   if (meta == nullptr || meta->root_job_ == nullptr) return;
 
   RefreshRootSummaryStateNoLock_(meta);
-  if (!ArrayChildrenExpanded_(meta->Root()) ||
-      meta->ActiveChildCount() != 0) {
+  if (!ArrayChildrenExpanded_(meta->Root()) || meta->ActiveChildCount() != 0) {
     return;
   }
 
@@ -809,6 +762,16 @@ void ArrayManager::TryFinalizeRootNoLock_(
   root.SetExitCode(final_exit_code);
   root.SetEndTime(absl::Now());
   TriggerTerminalDependencyEvents_(meta, root.EndTime());
+
+  // Slurm-parity: the parent pre-reserved task_count submit slots at submit
+  // time; each materialized child's terminal FreeQosResource releases one.
+  // Release any leftover slots for tasks that were never materialized.
+  uint32_t task_count = ArrayUtil::TaskCount(root.JobToCtld().array_spec());
+  auto materialized = static_cast<uint32_t>(meta->MaterializedTaskCount());
+  if (task_count > materialized) {
+    uint32_t leftover = task_count - materialized;
+    g_account_meta_container->FreeQosSubmitResource(root, leftover);
+  }
 
   auto it = m_metas_.find(array_job_id);
   if (it == m_metas_.end()) return;
@@ -920,8 +883,7 @@ void ArrayManager::TryEnqueueReadyChildren(absl::Time now) {
   for (auto& [_, meta_ptr] : m_metas_) {
     auto* meta = meta_ptr.get();
     auto& root = meta->MutableRoot();
-    if (ArrayChildrenExpanded_(root) ||
-        !CanMaterializeRootNoLock_(meta, now)) {
+    if (ArrayChildrenExpanded_(root) || !CanMaterializeRootNoLock_(meta, now)) {
       continue;
     }
 
