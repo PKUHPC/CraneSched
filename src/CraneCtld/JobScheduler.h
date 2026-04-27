@@ -805,7 +805,7 @@ class JobScheduler {
 
   void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
                          crane::grpc::ModifyJobReply* response,
-                         std::vector<job_id_t>* job_ids);
+                         std::list<job_id_t>* job_ids);
 
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
