@@ -1233,13 +1233,14 @@ struct Qos {
   bool operator<(Qos const& other) const { return name < other.name; }
 };
 
+/* resource limits applied to a user or account within a specific partition */
 struct PartitionResourceLimit {
-  ResourceView max_tres;
-  ResourceView max_tres_per_job;
-  uint32_t max_jobs{std::numeric_limits<uint32_t>::max()};
-  uint32_t max_submit_jobs{std::numeric_limits<uint32_t>::max()};
-  absl::Duration max_wall;
-  absl::Duration max_wall_duration_per_job;
+  ResourceView max_tres;                /* max total TRES allowed (running) */
+  ResourceView max_tres_per_job;        /* max TRES per individual job */
+  uint32_t max_jobs{std::numeric_limits<uint32_t>::max()};        /* max running jobs; UINT32_MAX = unlimited */
+  uint32_t max_submit_jobs{std::numeric_limits<uint32_t>::max()}; /* max submit jobs; UINT32_MAX = unlimited */
+  absl::Duration max_wall;              /* max total wall time; ZeroDuration = unlimited */
+  absl::Duration max_wall_duration_per_job; /* max wall time per job */
 };
 
 using PartitionToLimitMap = std::unordered_map<std::string,  // partition

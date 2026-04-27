@@ -65,34 +65,73 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  // Called at job submission time: validates and reserves submit-slot resources
-  // (QoS + partition limits).
+  /*
+   * Validate QoS and partition submit-slot limits and reserve resources.
+   * IN/OUT: job - job to be submitted; qos_priority field is set on success
+   * RET: CraneErrCode::SUCCESS on success, error code on limit exceeded
+   *
+   * NOTE: Acquires internal stripe locks. Do not hold AccountManager locks.
+   */
   CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job);
 
-  // Unconditionally reserves submit-slot resources (called after validation).
+  /*
+   * Unconditionally reserve submit-slot resources without validation.
+   * IN: job - job whose submit-slot resources should be reserved
+   * RET: none
+   *
+   * NOTE: Call only after TryMallocMetaSubmitResource succeeds.
+   */
   void MallocMetaSubmitResource(const JobInCtld& job);
 
-  // Reserves running resources for a job recovered from the embedded DB.
+  /*
+   * Reserve running resources for a job recovered from the embedded DB.
+   * IN/OUT: job - recovered running job; qos_priority is set on success
+   * RET: none
+   */
   void MallocMetaResourceToRecoveredRunningJob(JobInCtld& job);
 
-  // Called at scheduling time: validates running-slot resources (QoS +
-  // partition limits) and, if successful, reserves them atomically.
+  /*
+   * Validate running-slot limits and atomically reserve resources.
+   * IN: job - pending job to be scheduled
+   * RET: void on success, string describing the pending reason on failure
+   *
+   * NOTE: Acquires internal stripe locks. Do not hold AccountManager locks.
+   */
   std::expected<void, std::string> CheckAndMallocMetaResource(
       const PdJobInScheduler& job);
 
-  // Releases submit-slot resources when a pending job is cancelled/rejected.
+  /*
+   * Release submit-slot resources when a pending job is cancelled or rejected.
+   * IN: job - job whose submit-slot resources should be released
+   * RET: none
+   */
   void FreeMetaSubmitResource(const JobInCtld& job);
 
-  // Releases running-slot resources when a running job finishes.
+  /*
+   * Release running-slot resources when a running job finishes.
+   * IN: job - job whose running-slot resources should be released
+   * RET: none
+   */
   void FreeMetaResource(const JobInCtld& job);
 
-  // When a user/account/qos object is deleted, resources need to be reset.
+  /*
+   * Remove all cached meta entries for a deleted user/account/qos object.
+   * IN: username/account/qos - name of the deleted entity
+   * RET: none
+   */
   void DeleteUserMeta(const std::string& username);
   void DeleteAccountMeta(const std::string& account);
   void DeleteQosMeta(const std::string& qos);
 
+  /* Increment the running job counter for a user */
   void UserAddJob(const std::string& username);
+  /* Decrement the running job counter for a user */
   void UserReduceJob(const std::string& username);
+  /*
+   * Check whether a user has any jobs.
+   * IN:  username - name of the user to check
+   * RET: true if the user has at least one job, false otherwise
+   */
   bool UserHasJob(const std::string& username);
 
  private:
