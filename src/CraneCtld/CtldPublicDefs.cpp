@@ -38,7 +38,7 @@ uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec) {
 }
 
 bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
-                    uint32_t task_id) {
+                    array_task_id_t task_id) {
   if (task_id < array_spec.start() || task_id > array_spec.end()) {
     return false;
   }
@@ -69,7 +69,6 @@ void ArrayMeta::TrackBookkeeping_(JobInCtld* child) {
 
   auto task_id = child->ArrayTaskId();
   CRANE_ASSERT(task_id.has_value());
-  materialized_task_ids.insert(*task_id);
   child_job_id_by_task_id[*task_id] = child->JobId();
 }
 
@@ -98,7 +97,7 @@ void ArrayMeta::Untrack(JobInCtld* child) {
     return;
   }
 
-  uint32_t task_id = *child->ArrayTaskId();
+  array_task_id_t task_id = *child->ArrayTaskId();
   pending_child_job_ids.erase(child->JobId());
   running_child_job_ids.erase(child->JobId());
 
@@ -1694,7 +1693,7 @@ void JobInCtld::SetArrayChildrenExpanded(bool expanded) {
   }
 }
 
-void JobInCtld::SetArrayTaskIdentity(job_id_t val, uint32_t task_id) {
+void JobInCtld::SetArrayTaskIdentity(job_id_t val, array_task_id_t task_id) {
   auto* array_task = runtime_attr.mutable_array_task();
   array_task->set_array_job_id(val);
   array_task->set_task_id(task_id);

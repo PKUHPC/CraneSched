@@ -971,7 +971,7 @@ class JobScheduler {
   }
 
  private:
-  ArrayMeta* FindArrayRootNoLock_(job_id_t array_job_id);
+  ArrayMeta* FindArrayMetaNoLock_(job_id_t array_job_id);
   JobInCtld* FindJobInPendingOrRunningNoLock_(job_id_t job_id);
   std::shared_ptr<ArrayMeta> BuildArrayMetaFromParentNoLock_(
       std::unique_ptr<JobInCtld> parent) const;
@@ -983,12 +983,12 @@ class JobScheduler {
   std::unique_ptr<JobInCtld> BuildNextArrayChildNoLock_(ArrayMeta* meta) const;
   void SyncNextArrayTaskIndexNoLock_(ArrayMeta* meta) const;
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
-  void TrackArrayChildPendingNoLock_(job_id_t array_job_id, JobInCtld* child);
-  void TrackArrayChildRunningNoLock_(job_id_t array_job_id, JobInCtld* child);
-  void UntrackArrayChildNoLock_(JobInCtld* child);
-  void RefreshArrayRootSummaryStateNoLock_(job_id_t array_job_id);
+  void TrackArrayChildPendingNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void TrackArrayChildRunningNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void UntrackArrayChildNoLock_(ArrayMeta* meta, JobInCtld* child);
+  void RefreshArrayRootSummaryStateNoLock_(ArrayMeta* meta);
   void TryFinalizeArrayRootNoLock_(
-      job_id_t array_job_id, const std::unordered_set<JobInCtld*>& final_jobs,
+      ArrayMeta* meta, const std::unordered_set<JobInCtld*>& final_jobs,
       std::vector<std::shared_ptr<ArrayMeta>>* final_roots);
   CraneErrCode TryMallocArrayChildSubmitResource_(JobInCtld& child) const;
   static void FreeArrayChildSubmitResources_(
@@ -1084,7 +1084,8 @@ class JobScheduler {
 
   CraneExpected<void> AdmitArrayChildPtrsNoLock_(
       ArrayMeta* meta, const std::vector<JobInCtld*>& children);
-  CraneExpected<void> AdmitArrayChildNoLock_(JobInCtld* child);
+  CraneExpected<void> AdmitArrayChildNoLock_(ArrayMeta* meta,
+                                             JobInCtld* child);
   CraneExpected<void> AdmitArrayChildrenNoLock_(
       ArrayMeta* meta, std::vector<std::unique_ptr<JobInCtld>>& children);
   void EnqueuePendingJobNoLock_(std::unique_ptr<JobInCtld> job);

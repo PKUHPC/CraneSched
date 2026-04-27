@@ -243,10 +243,13 @@ struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> db_logger;
 };
 
+using array_task_id_t = uint32_t;  // Task index within a job array
+
 namespace ArrayUtil {
 uint32_t Stride(const crane::grpc::ArraySpec& array_spec);
 uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec);
-bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec, uint32_t task_id);
+bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
+                    array_task_id_t task_id);
 uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
                        uint32_t index);
 crane::grpc::ArrayTaskSummary BuildSummary(
@@ -1082,14 +1085,14 @@ struct JobInCtld {
 
   // Array job tracking accessors
   void SetArrayChildrenExpanded(bool expanded);
-  void SetArrayTaskIdentity(job_id_t array_job_id, uint32_t task_id);
+  void SetArrayTaskIdentity(job_id_t array_job_id, array_task_id_t task_id);
   [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
     if (!runtime_attr.has_array_task()) {
       return std::nullopt;
     }
     return runtime_attr.array_task().array_job_id();
   }
-  [[nodiscard]] std::optional<uint32_t> ArrayTaskId() const {
+  [[nodiscard]] std::optional<array_task_id_t> ArrayTaskId() const {
     if (!runtime_attr.has_array_task()) {
       return std::nullopt;
     }
@@ -1157,7 +1160,7 @@ struct JobInCtld {
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);
   DependenciesInJob const& Dependencies() const { return dependencies; }
-  std::span<const job_id_t> Dependents(
+  const std::vector<job_id_t>& Dependents(
       crane::grpc::DependencyType dep_type) const {
     return dependents[dep_type];
   }
@@ -1184,12 +1187,14 @@ struct JobInCtld {
 // to track materialized, pending and running array children.
 struct ArrayMeta {
  public:
-  bool IsTaskMaterialized(uint32_t task_id) const {
-    return materialized_task_ids.contains(task_id);
+  bool IsTaskMaterialized(array_task_id_t task_id) const {
+    return child_job_id_by_task_id.contains(task_id);
   }
-  size_t MaterializedTaskCount() const { return materialized_task_ids.size(); }
+  size_t MaterializedTaskCount() const {
+    return child_job_id_by_task_id.size();
+  }
 
-  std::optional<job_id_t> ChildJobIdOfTask(uint32_t task_id) const {
+  std::optional<job_id_t> ChildJobIdOfTask(array_task_id_t task_id) const {
     auto it = child_job_id_by_task_id.find(task_id);
     if (it == child_job_id_by_task_id.end()) {
       return std::nullopt;
@@ -1206,9 +1211,8 @@ struct ArrayMeta {
   void Untrack(JobInCtld* child);
 
   std::unique_ptr<JobInCtld> root_job;
-  absl::flat_hash_set<uint32_t> materialized_task_ids;
-  uint32_t next_array_task_index{0};
-  absl::flat_hash_map<uint32_t, job_id_t> child_job_id_by_task_id;
+  array_task_id_t next_array_task_index{0};
+  absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id;
   absl::flat_hash_set<job_id_t> pending_child_job_ids;
   absl::flat_hash_set<job_id_t> running_child_job_ids;
 

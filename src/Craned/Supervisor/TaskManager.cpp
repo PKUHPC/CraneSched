@@ -2135,13 +2135,6 @@ CraneErrCode ProcInstance::Prepare() {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
   } else {
     // Prepare file output name for batch tasks.
-    /* Perform file name substitutions
-     * %A - Array parent job ID
-     * %a - Array task index
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
     auto meta = std::make_unique<BatchInstanceMeta>();
     m_meta_ = std::move(meta);
   }
@@ -2157,7 +2150,7 @@ CraneErrCode ProcInstance::Prepare() {
       auto [path, fwd] =
           CrunParseFilePattern_(GetParentStep().io_meta().input_file_pattern());
       meta->fwd_stdin = fwd;
-      meta->parsed_input_file_pattern = path;
+      meta->parsed_output_file_pattern = path;
     }
     {
       auto [path, fwd] =
