@@ -625,8 +625,8 @@ void CforedClient::AsyncSendRecvThread_() {
           }
         }
         CRANE_ERROR("Terminating step due to cfored connection failure.");
-        g_task_mgr->TerminateStepAsync(
-            false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
+        g_task_mgr->TerminateStepAsync(false,
+                                     TaskFinalizeCause::CFORED_DISCONNECTED);
         m_stopped_ = true;
         m_wait_reconn_ = false;
         return;
