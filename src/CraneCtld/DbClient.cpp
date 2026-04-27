@@ -3714,6 +3714,17 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(),
                            &qos->max_tres_per_account);
 
+    qos->preempt.clear();
+    if (auto preempt_it = qos_view.find(Qos::FieldStringOfPreempt());
+        preempt_it != qos_view.end()) {
+      for (auto&& preempt_qos : preempt_it->get_array().value) {
+        qos->preempt.emplace_back(preempt_qos.get_string().value);
+      }
+    }
+    qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(
+        ViewValueOr_(qos_view[Qos::FieldStringOfPreemptMode()],
+                     int64_t(crane::grpc::PreemptMode::PREEMPT_MODE_OFF)));
+
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -3721,7 +3732,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 18> fields{
+  std::array<std::string, 20> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -3739,10 +3750,13 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxTres(),
       Qos::FieldStringOfMaxTresPerUser(),
       Qos::FieldStringOfMaxTresPerAccount(),
-      Qos::FieldStringOfFlags()};
+      Qos::FieldStringOfFlags(),
+      Qos::FieldStringOfPreempt(),
+      Qos::FieldStringOfPreemptMode()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
              int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-             ResourceView, ResourceView, ResourceView, int64_t>
+             ResourceView, ResourceView, ResourceView, int64_t,
+             std::list<std::string>, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -3760,7 +3774,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_tres,
              qos.max_tres_per_user,
              qos.max_tres_per_account,
-             qos.flags.ToInt64()};
+             qos.flags.ToInt64(),
+             qos.preempt,
+             static_cast<int64_t>(qos.preempt_mode)};
 
   return DocumentConstructor_(fields, values);
 }

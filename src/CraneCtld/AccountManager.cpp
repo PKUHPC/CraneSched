@@ -173,6 +173,18 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
   if (find_qos && !find_qos->deleted)
     return std::unexpected(CraneErrCode::ERR_DB_QOS_ALREADY_EXISTS);
 
+  // Each QoS listed in `preempt` must already exist. Self-reference would
+  // create a trivial cycle, which is also rejected.
+  // AddQos returns a plain CraneErrCode (no description field), so the
+  // distinction between "does not exist" and "self reference" is coded by
+  // code value: ERR_INVALID_QOS vs ERR_INVALID_PARAM.
+  for (const auto& preempt_qos_name : new_qos.preempt) {
+    if (preempt_qos_name == new_qos.name)
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    if (!GetExistedQosInfoNoLock_(preempt_qos_name))
+      return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+  }
+
   return AddQos_(actor_name, new_qos, find_qos);
 }
 
@@ -1245,8 +1257,45 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
 
   // check operations
   for (const auto& operation : operations) {
-    auto value = operation.value_list()[0];
     auto item = Qos::GetModifyFieldStr(operation.modify_field());
+
+    if (item == Qos::FieldStringOfPreempt()) {
+      // value_list holds the full preempt set (possibly empty to clear it).
+      // Every name must already exist, and self-reference is rejected.
+      // Use ERR_INVALID_PARAM for self-reference so the message does not claim
+      // the QoS "does not exist" when it is in fact the target QoS itself.
+      for (const auto& qos_name : operation.value_list()) {
+        if (qos_name == name) {
+          rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "QoS {} cannot list itself in its preempt set", qos_name)});
+        } else if (!GetExistedQosInfoNoLock_(qos_name)) {
+          rich_error_list.emplace_back(std::unexpected{
+              FormatRichErr(CraneErrCode::ERR_INVALID_QOS, qos_name)});
+        }
+      }
+      continue;
+    }
+
+    if (item == Qos::FieldStringOfPreemptMode()) {
+      if (operation.value_list().empty()) {
+        rich_error_list.emplace_back(std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                          "preempt_mode requires a value (OFF or CANCEL)")});
+        continue;
+      }
+      const auto& v = operation.value_list()[0];
+      // TODO(preempt): accept REQUEUE / SUSPEND once the scheduler supports
+      // those modes. The proto enum already reserves both values.
+      if (v != "OFF" && v != "CANCEL") {
+        rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "invalid preempt_mode {}: expected OFF or CANCEL", v)});
+      }
+      continue;
+    }
+
+    auto value = operation.value_list()[0];
     int64_t value_number;
     if (item != Qos::FieldStringOfDescription() &&
         item != Qos::FieldStringOfMaxTresPerUser() &&
@@ -1282,7 +1331,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
   std::string log;
 
   for (const auto& operation : operations) {
-    auto value = operation.value_list()[0];
+    std::string value =
+        operation.value_list().empty() ? "" : operation.value_list()[0];
     switch (operation.modify_field()) {
     case crane::grpc::ModifyField::Description: {
       res_qos.description = value;
@@ -1381,6 +1431,23 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       util::ConvertStringToInt64(value, &value_number);
       res_qos.flags.FromInt64(value_number);
       log += fmt::format("flags: {}\n", res_qos.flags.ToString());
+      break;
+    }
+    case crane::grpc::ModifyField::Preempt: {
+      res_qos.preempt.assign(operation.value_list().begin(),
+                             operation.value_list().end());
+      log += fmt::format("preempt: [{}]\n", fmt::join(res_qos.preempt, ", "));
+      break;
+    }
+    case crane::grpc::ModifyField::ModifyPreemptMode: {
+      // Validation above guarantees value is either "OFF" or "CANCEL". The
+      // else branch is defensive only.
+      // TODO(preempt): extend once REQUEUE / SUSPEND are implemented.
+      if (value == "CANCEL")
+        res_qos.preempt_mode = crane::grpc::PreemptMode::PREEMPT_MODE_CANCEL;
+      else
+        res_qos.preempt_mode = crane::grpc::PreemptMode::PREEMPT_MODE_OFF;
+      log += fmt::format("preempt_mode: {}\n", value);
       break;
     }
     default:

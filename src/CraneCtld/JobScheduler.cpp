@@ -1195,6 +1195,21 @@ void JobScheduler::ScheduleThread_() {
             continue;
           }
 
+          bool preempted_still_alive = false;
+          for (const auto& preempted : job_in_scheduler->preempted_jobs) {
+            auto* rn_ptr = std::get_if<RnJobInScheduler*>(&preempted);
+            if (!rn_ptr) continue;  // pending preempted, no physical state
+            if (m_running_job_map_.contains((*rn_ptr)->job_id)) {
+              preempted_still_alive = true;
+              break;
+            }
+          }
+          if (preempted_still_alive) {
+            job_in_scheduler->reason = "Waiting for Preemption";
+            job->pending_reason = job_in_scheduler->reason;
+            continue;
+          }
+
           if (!job_in_scheduler->actual_licenses.empty()) {
             if (!g_licenses_manager->MallocLicense(
                     job_in_scheduler->actual_licenses)) {
@@ -3923,6 +3938,23 @@ void JobScheduler::CleanCancelJobQueueCb_() {
             [&](CancelPendingStepQueueElem& pd_step_elem) {
               pending_step_ptr_vec.emplace_back(std::move(pd_step_elem.step));
             },
+            [&](CancelRunningJobByIdElem& id_elem) {
+              LockGuard running_guard_for_id(&m_running_job_map_mtx_);
+              for (job_id_t jid : id_elem.job_ids) {
+                auto job_it = m_running_job_map_.find(jid);
+                if (job_it == m_running_job_map_.end()) continue;
+                auto& job = job_it->second;
+                auto process_step = [&](CommonStepInCtld* step) {
+                  for (const CranedId& craned_id : step->ExecutionNodes()) {
+                    running_job_craned_id_map[craned_id]
+                                             [id_elem.terminate_source][jid]
+                                                 .insert(step->StepId());
+                  }
+                };
+                if (job->PrimaryStep()) process_step(job->PrimaryStep());
+                for (auto& [sid, step] : job->Steps()) process_step(step.get());
+              }
+            },
         },
         elem);
   }
@@ -5130,15 +5162,33 @@ void JobScheduler::TerminateOrphanedSteps(
 }
 
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
-    const absl::Time& now, PdJobInScheduler* job) {
+    const absl::Time& now, PdJobInScheduler* job,
+    const absl::flat_hash_map<std::string, std::vector<std::string>>&
+        qos_preempt_map,
+    const absl::flat_hash_set<job_id_t>& preempting_set) {
   std::vector<NodeState*> nodes_to_sched;
+  if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) return true;
+  if (nodes_to_sched.size() < job->node_num) {
+    CRANE_TRACE(
+        "Only {} nodes are available for job #{} but {} nodes are required.",
+        nodes_to_sched.size(), job->job_id, job->node_num);
+    return false;
+  }
+  if (g_config.Preempt.PreemptType != crane::grpc::PreemptType::PREEMPT_NONE &&
+      TryPreempt_(now, job, nodes_to_sched, qos_preempt_map, preempting_set)) {
+    return true;
+  }
+  return Backfill_(now, job, nodes_to_sched);
+}
 
+bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
+    const absl::Time& now, PdJobInScheduler* job,
+    std::vector<NodeState*>* nodes_to_sched) {
   absl::Time earliest_end_time = now + job->time_limit;
 
   const ResourceView min_res_view =
       job->req_node_res_view +
       job->req_task_res_view * job->ntasks_per_node_min;
-  ResourceV3 job_alloc_res;
   struct node_info {
     int ntasks_on_node;
     ResourceInNodeV3 res;
@@ -5325,34 +5375,168 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         topk_nodes_total.size(), topk_ntasks_sum_total, job->job_id,
         job->node_num, job->ntasks);
     return false;
-  } else {
-    int rest_ntasks = job->ntasks - job->node_num;
-    while (!topk_nodes_total.empty()) {
-      const auto& info = topk_nodes_total.top();
-      const auto& res = info.res;
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
-      if (job->exclusive) {
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
-      } else {
-        ResourceInNodeV3 feasible_res;
-        bool ok =
-            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
-                .GetFeasibleResourceInNode(res, &feasible_res);
-        CRANE_ASSERT_MSG(
-            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                    info.node_state->craned_id, job->job_id));
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
-                                             feasible_res);
+  }
+
+  int rest_ntasks = job->ntasks - job->node_num;
+  while (!topk_nodes_total.empty()) {
+    const auto& info = topk_nodes_total.top();
+    const auto& res = info.res;
+    int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+    if (job->exclusive) {
+      job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+    } else {
+      ResourceInNodeV3 feasible_res;
+      bool ok =
+          (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
+              .GetFeasibleResourceInNode(res, &feasible_res);
+      CRANE_ASSERT_MSG(
+          ok, fmt("Failed to get feasible resource on craned {} for job #{}",
+                  info.node_state->craned_id, job->job_id));
+      job->allocated_res.AddResourceInNode(info.node_state->craned_id,
+                                           feasible_res);
+    }
+    job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
+    nodes_to_sched->push_back(info.node_state);
+    rest_ntasks -= ntasks_on_node - 1;
+    topk_nodes_total.pop();
+  }
+  return false;
+}
+
+bool SchedulerAlgo::LocalScheduler::Backfill_(
+    const absl::Time& now, PdJobInScheduler* job,
+    const std::vector<NodeState*>& nodes_to_sched) {
+  EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
+  return scheduler.CalcEarliestStartTime(now, job);
+}
+
+bool SchedulerAlgo::LocalScheduler::TryPreempt_(
+    const absl::Time& now, PdJobInScheduler* job,
+    const std::vector<NodeState*>& nodes_to_sched,
+    const absl::flat_hash_map<std::string, std::vector<std::string>>&
+        qos_preempt_map,
+    const absl::flat_hash_set<job_id_t>& preempting_set) {
+  auto qit = qos_preempt_map.find(job->qos);
+  if (qit == qos_preempt_map.end() || qit->second.empty()) return false;
+
+  absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
+      preemptable_set;
+  for (const auto* node : nodes_to_sched) {
+    for (const auto& qos : qit->second) {
+      auto it = node->qos_job_map.find(qos);
+      if (it != node->qos_job_map.end()) {
+        preemptable_set.insert(it->second.begin(), it->second.end());
       }
-      job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
-      nodes_to_sched.push_back(info.node_state);
-      rest_ntasks -= ntasks_on_node - 1;
-      topk_nodes_total.pop();
+    }
+  }
+  if (preemptable_set.empty()) return false;
+
+  std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>> ordered(
+      preemptable_set.begin(), preemptable_set.end());
+  std::sort(
+      ordered.begin(), ordered.end(),
+      [&preempting_set](const auto& a, const auto& b) {
+        auto is_preempting =
+            [&preempting_set](
+                const std::variant<PdJobInScheduler*, RnJobInScheduler*>& v) {
+              if (auto* rn = std::get_if<RnJobInScheduler*>(&v))
+                return preempting_set.contains((*rn)->job_id);
+              return false;
+            };
+        bool ca = is_preempting(a), cb = is_preempting(b);
+        if (ca != cb) return ca;
+
+        bool pa = std::holds_alternative<PdJobInScheduler*>(a);
+        bool pb = std::holds_alternative<PdJobInScheduler*>(b);
+        if (pa != pb) return pa;
+
+        if (pa) {
+          auto* x = std::get<PdJobInScheduler*>(a);
+          auto* y = std::get<PdJobInScheduler*>(b);
+          if (x->qos_priority != y->qos_priority)
+            return x->qos_priority < y->qos_priority;
+          return x->priority < y->priority;
+        } else {
+          auto* x = std::get<RnJobInScheduler*>(a);
+          auto* y = std::get<RnJobInScheduler*>(b);
+          if (x->qos_priority != y->qos_priority)
+            return x->qos_priority < y->qos_priority;
+          return x->start_time > y->start_time;
+        }
+      });
+
+  absl::Time seg_start = now;
+  absl::Time seg_end = now + job->time_limit;
+  std::vector<PreemptSegTree> seg_trees;
+  seg_trees.reserve(nodes_to_sched.size());
+  absl::flat_hash_map<CranedId, size_t> node_index;
+  node_index.reserve(nodes_to_sched.size());
+  const auto& alloc_per_node = job->allocated_res.EachNodeResMap();
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    auto* node = nodes_to_sched[i];
+    node_index[node->craned_id] = i;
+    auto alloc_it = alloc_per_node.find(node->craned_id);
+    CRANE_ASSERT_MSG(
+        alloc_it != alloc_per_node.end(),
+        fmt("TryPreempt_: stage 1 didn't size craned {}", node->craned_id));
+    seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
+
+    auto& tree = seg_trees.back();
+    const auto& tmap = node->time_avail_res_map;
+    for (auto it = tmap.begin(); it != tmap.end();) {
+      absl::Time st = it->first;
+      auto nxt = std::next(it);
+      absl::Time ed = (nxt == tmap.end() ? seg_end : nxt->first);
+      tree.Add(st, ed, it->second);
+      if (ed >= seg_end) break;
+      it = nxt;
     }
   }
 
-  EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
-  return scheduler.CalcEarliestStartTime(now, job);
+  auto apply_to_trees = [&](const auto& preempted, bool add) {
+    std::visit(
+        [&](auto* pj) {
+          for (const auto& [cid, res] : pj->allocated_res.EachNodeResMap()) {
+            auto ni = node_index.find(cid);
+            if (ni == node_index.end()) continue;
+            if (add)
+              seg_trees[ni->second].Add(pj->start_time, pj->end_time, res);
+            else
+              seg_trees[ni->second].Sub(pj->start_time, pj->end_time, res);
+          }
+        },
+        preempted);
+  };
+  auto all_satisfied = [&]() {
+    for (const auto& t : seg_trees)
+      if (!t.IsSatisfied()) return false;
+    return true;
+  };
+
+  int preempt_idx = -1;
+  for (size_t i = 0; !all_satisfied() && i < ordered.size(); ++i) {
+    apply_to_trees(ordered[i], /*add=*/true);
+    preempt_idx = static_cast<int>(i);
+  }
+  if (!all_satisfied()) {
+    return false;  // even preempting every candidate isn't enough
+  }
+
+  job->preempted_jobs.push_back(ordered[preempt_idx]);
+  for (int i = preempt_idx - 1; i >= 0; --i) {
+    apply_to_trees(ordered[i], /*add=*/false);
+    if (!all_satisfied()) {
+      apply_to_trees(ordered[i], /*add=*/true);  // still needed — put back
+      job->preempted_jobs.push_back(ordered[i]);
+    }
+  }
+
+  job->craned_ids.clear();
+  job->craned_ids.reserve(nodes_to_sched.size());
+  for (const auto* node : nodes_to_sched)
+    job->craned_ids.emplace_back(node->craned_id);
+  job->start_time = now;
+  return true;
 }
 
 void SchedulerAlgo::NodeSelect(
@@ -5365,11 +5549,45 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<ResvId, std::vector<PdJobInScheduler*>>
       resv_pd_job_ptr_map;
 
+  // QoS → preemptable QoS names
+  absl::flat_hash_map<std::string, std::vector<std::string>> qos_preempt_map;
+
   for (const auto& job : pending_jobs) {
     auto& pd_job_ptr_vec = job->reservation.empty()
                                ? part_pd_job_ptr_map[job->partition_id]
                                : resv_pd_job_ptr_map[job->reservation];
     pd_job_ptr_vec.emplace_back(job.get());
+    qos_preempt_map[job->qos];  // insert key, value filled below
+  }
+
+  if (g_config.Preempt.PreemptType == crane::grpc::PreemptType::PREEMPT_QOS) {
+    auto qos_meta_map = g_account_manager->GetAllQosInfo();
+    if (qos_meta_map) {
+      for (auto& [qos_name, preempt_list] : qos_preempt_map) {
+        auto it = qos_meta_map->find(qos_name);
+        if (it == qos_meta_map->end() || !it->second || it->second->deleted)
+          continue;
+        preempt_list.reserve(it->second->preempt.size());
+        for (const auto& p : it->second->preempt) preempt_list.push_back(p);
+      }
+    }
+  }
+
+  {
+    absl::flat_hash_map<job_id_t, RnJobInScheduler*> rn_job_id_map;
+    rn_job_id_map.reserve(running_jobs.size());
+    for (const auto& rn : running_jobs)
+      rn_job_id_map.emplace(rn->job_id, rn.get());
+    for (auto it = m_preempting_set_.begin(); it != m_preempting_set_.end();) {
+      auto rn_it = rn_job_id_map.find(*it);
+      if (rn_it == rn_job_id_map.end()) {
+        // absl::flat_hash_set::erase returns void; advance before erasing.
+        m_preempting_set_.erase(it++);
+      } else {
+        rn_it->second->end_time = now + absl::Seconds(1);
+        ++it;
+      }
+    }
   }
 
   // For nodes in partition, reservations and running jobs on node are
@@ -5494,14 +5712,13 @@ void SchedulerAlgo::NodeSelect(
 
   {
     for (const auto& job : running_jobs) {
-      absl::Time end_time = std::max(
-          job->end_time,
-          now + absl::Seconds(1));  // In case StepStatusChange is delayed
+      absl::Time end_time = std::max(job->end_time, now + absl::Seconds(1));
       if (job->reservation.empty()) {
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto it = node_state_map.find(craned_id);
           if (it != node_state_map.end()) {
             it->second.allocated_res.emplace_back(end_time, res);
+            it->second.qos_job_map[job->qos].emplace(job.get());
           }
         }
       } else {
@@ -5516,8 +5733,9 @@ void SchedulerAlgo::NodeSelect(
         }
         auto& craned_id_node_map = it->second.second;
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
-          craned_id_node_map.at(craned_id).allocated_res.emplace_back(end_time,
-                                                                      res);
+          auto& ns = craned_id_node_map.at(craned_id);
+          ns.allocated_res.emplace_back(end_time, res);
+          ns.qos_job_map[job->qos].emplace(job.get());
         }
       }
     }
@@ -5575,19 +5793,37 @@ void SchedulerAlgo::NodeSelect(
       scheduler = &resv_scheduler_map[job->reservation];
     }
 
-    bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
+    bool ok = scheduler->CalculateRunningNodesAndStartTime_(
+        now, job, qos_preempt_map, m_preempting_set_);
 
     if (!ok) {
       // Leave start_time unset
       job->reason = "Resource";
     } else {
+      job->end_time = job->start_time + job->time_limit;
       if constexpr (kAlgoTraceOutput) {
-        CRANE_TRACE(
-            "\t job #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
-            job->job_id, absl::ToInt64Seconds(job->start_time - now),
-            absl::ToInt64Seconds(job->start_time + job->time_limit - now));
+        CRANE_TRACE("\t job #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
+                    job->job_id, absl::ToInt64Seconds(job->start_time - now),
+                    absl::ToInt64Seconds(job->end_time - now));
       }
-      scheduler->UpdateNodeSelector(job);
+
+      std::vector<job_id_t> preempted_rn_jobs;
+      for (const auto& preempted : job->preempted_jobs) {
+        scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
+        if (std::holds_alternative<PdJobInScheduler*>(preempted)) {
+          std::get<PdJobInScheduler*>(preempted)->reason = "Preempted";
+          continue;
+        }
+        auto* rn = std::get<RnJobInScheduler*>(preempted);
+        if (!m_preempting_set_.insert(rn->job_id).second) continue;
+        CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
+                   job->job_id);
+        preempted_rn_jobs.push_back(rn->job_id);
+      }
+      // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when supported.
+      g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
+
+      scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
       if (job->start_time != now) {
         if (job->reservation.empty()) {
