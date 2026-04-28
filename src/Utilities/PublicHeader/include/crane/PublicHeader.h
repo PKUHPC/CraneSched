@@ -332,19 +332,19 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Lua script validation failed",
         "ERR_RESOURCE_NOT_FOUND",
 
-        // 95-99
+        // 95 - 99
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
-        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerAccount)",
         "Cannot delete user with active jobs.",
-        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "Invalid resource",
 
         // 100 - 104
-        "Not a valide resource string",
-        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
-        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
-        "The current submitted job exceeds the QoS limit (ERR_MAX_TRES_PER_ACCOUNT_BEYOND)",
-        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "Not a valid resource string",
+        "The current submitted job exceeds the QoS limit (MaxTresPerUser)",
+        "The current submitted job exceeds the QoS limit (MaxTresPerAccount)",
+        "The current submitted job exceeds the QoS limit (MaxTresPerJob)",
 
         // 105 - 106
         "Invalid deadline",
