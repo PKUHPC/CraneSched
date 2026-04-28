@@ -65,9 +65,6 @@ class ArrayMeta {
   // A child is "active" from pending admission until it terminates.
   // Pending-vs-running state lives in the scheduler maps, not here.
   size_t ActiveChildCount() const { return active_child_job_ids_.size(); }
-  const absl::flat_hash_set<job_id_t>& ActiveChildJobIds() const {
-    return active_child_job_ids_;
-  }
 
   array_task_id_t NextTaskIndex() const { return next_array_task_index_; }
   void SetNextTaskIndex(array_task_id_t idx) { next_array_task_index_ = idx; }
@@ -77,7 +74,6 @@ class ArrayMeta {
   friend class ArrayManager;
 
   void TrackMaterialized(JobInCtld* child);
-  void UntrackMaterialized(JobInCtld* child);
   void MarkChildActive(job_id_t child_job_id);
   void MarkChildInactive(job_id_t child_job_id);
 
@@ -152,8 +148,6 @@ class ArrayManager {
   // Lookup -------------------------------------------------------------------
   ArrayMeta* FindMeta(job_id_t array_job_id);
   const ArrayMeta* FindMeta(job_id_t array_job_id) const;
-  bool Empty() const { return m_metas_.empty(); }
-  size_t Size() const { return m_metas_.size(); }
 
   // Iteration helpers (for query, modify, cancel, hold paths).
   template <typename Fn>
@@ -170,8 +164,6 @@ class ArrayManager {
   // operations that need to propagate changes to a subset of children.
   std::vector<job_id_t> PendingChildJobIds(const ArrayMeta& meta) const;
   std::vector<job_id_t> RunningChildJobIds(const ArrayMeta& meta) const;
-  size_t PendingChildCount(const ArrayMeta& meta) const;
-  size_t RunningChildCount(const ArrayMeta& meta) const;
 
   // Registration -------------------------------------------------------------
   // Register a freshly submitted array parent. The parent's JobId must be
@@ -200,12 +192,6 @@ class ArrayManager {
   void TryEnqueueReadyChildren(absl::Time now);
 
   // Lifecycle callbacks ------------------------------------------------------
-  // Called right after a child is inserted into the pending map via
-  // RegisterParent / admit paths. (In practice, the internal admit flow
-  // already calls this — the public entry is exposed for submit paths that
-  // build the child outside of the manager.)
-  void OnChildPending(JobInCtld* child);
-
   // Called when a pending child is moved to running in the scheduler loop.
   // Requires both pending and running locks to be held by the caller
   // (derivation of running state relies on the running map being stable).
@@ -257,7 +243,6 @@ class ArrayManager {
 
  private:
   // --- helpers (all must run while m_pending_job_map_mtx_ is held) ---
-  JobInCtld* FindJobInPendingOrRunningNoLock_(job_id_t job_id);
   bool IsChildInRunningNoLock_(job_id_t child_job_id) const;
   bool IsChildInPendingNoLock_(job_id_t child_job_id) const;
   size_t RunningChildCountNoLock_(const ArrayMeta& meta) const;
@@ -280,7 +265,7 @@ class ArrayManager {
 
   void EnqueuePendingJobNoLock_(std::unique_ptr<JobInCtld> job);
   bool TryEnqueueNextChildNoLock_(ArrayMeta* meta);
-  std::vector<job_id_t> MaterializeSpecificTasksNoLock_(
+  void MaterializeSpecificTasksNoLock_(
       job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids);
 
   void RefreshRootSummaryStateNoLock_(ArrayMeta* meta);
@@ -291,8 +276,6 @@ class ArrayManager {
   static uint32_t EffectiveArrayRunLimit_(const JobInCtld& root);
   static bool ArrayChildrenExpanded_(const JobInCtld& root);
   static void SetArrayChildrenExpanded_(JobInCtld* root, bool expanded);
-  static void TriggerTerminalDependencyEvents_(JobInCtld* job,
-                                               absl::Time end_time);
   static void TriggerTerminalDependencyEvents_(ArrayMeta* root,
                                                absl::Time end_time);
 

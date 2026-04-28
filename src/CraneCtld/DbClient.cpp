@@ -148,9 +148,7 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
 }
 
 std::optional<std::pair<job_id_t, uint32_t>> GetPersistedArrayIdentity_(
-    const crane::grpc::RuntimeAttrOfJob& runtime_attr,
-    const crane::grpc::JobToCtld& job_to_ctld) {
-  static_cast<void>(job_to_ctld);
+    const crane::grpc::RuntimeAttrOfJob& runtime_attr) {
   if (runtime_attr.has_array_task()) {
     return std::pair{runtime_attr.array_task().array_job_id(),
                      runtime_attr.array_task().task_id()};
@@ -1316,19 +1314,12 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
 }
 
 std::optional<MongodbClient::ArrayTaskAggregateInfo>
-MongodbClient::FetchArrayTaskAggregateInfo(
-    job_id_t array_job_id, std::optional<job_id_t> excluded_job_id) {
+MongodbClient::FetchArrayTaskAggregateInfo(job_id_t array_job_id) {
   ArrayTaskAggregateInfo result;
 
   try {
     document filter;
     filter.append(kvp("array_job_id", static_cast<std::int32_t>(array_job_id)));
-    if (excluded_job_id.has_value()) {
-      filter.append(
-          kvp("job_id",
-              bsoncxx::builder::basic::make_document(kvp(
-                  "$ne", static_cast<std::int32_t>(excluded_job_id.value())))));
-    }
 
     mongocxx::options::find options;
     document projection;
@@ -1341,8 +1332,6 @@ MongodbClient::FetchArrayTaskAggregateInfo(
                                                                  options);
 
     for (auto view : cursor) {
-      result.has_records = true;
-
       crane::grpc::JobStatus status =
           static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value);
       uint32_t exit_code = view["exit_code"].get_int32().value;
@@ -4487,8 +4476,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
 
   int32_t array_job_id = -1;
   int32_t array_task_id = -1;
-  if (auto array_identity =
-          GetPersistedArrayIdentity_(runtime_attr, job_to_ctld);
+  if (auto array_identity = GetPersistedArrayIdentity_(runtime_attr);
       array_identity.has_value()) {
     array_job_id = static_cast<int32_t>(array_identity->first);
     array_task_id = static_cast<int32_t>(array_identity->second);

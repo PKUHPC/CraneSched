@@ -123,19 +123,6 @@ void ArrayMeta::TrackMaterialized(JobInCtld* child) {
   child_job_id_by_task_id_[*task_id] = child->JobId();
 }
 
-void ArrayMeta::UntrackMaterialized(JobInCtld* child) {
-  if (child == nullptr || !child->IsArrayChild()) {
-    return;
-  }
-  auto task_id = child->ArrayTaskId();
-  if (!task_id.has_value()) return;
-
-  auto it = child_job_id_by_task_id_.find(*task_id);
-  if (it != child_job_id_by_task_id_.end() && it->second == child->JobId()) {
-    child_job_id_by_task_id_.erase(it);
-  }
-}
-
 void ArrayMeta::MarkChildActive(job_id_t child_job_id) {
   active_child_job_ids_.insert(child_job_id);
 }
@@ -236,12 +223,6 @@ void ArrayManager::SetArrayChildrenExpanded_(JobInCtld* root, bool expanded) {
   root->SetArrayChildrenExpanded(expanded);
 }
 
-void ArrayManager::TriggerTerminalDependencyEvents_(JobInCtld* job,
-                                                    absl::Time end_time) {
-  if (job == nullptr) return;
-  TriggerTerminalDependencyEventsImpl(job, job->ExitCode(), end_time);
-}
-
 void ArrayManager::TriggerTerminalDependencyEvents_(ArrayMeta* meta,
                                                     absl::Time end_time) {
   if (meta == nullptr || meta->root_job_ == nullptr) return;
@@ -319,18 +300,6 @@ const ArrayMeta* ArrayManager::FindMeta(job_id_t array_job_id) const {
   return it == m_metas_.end() ? nullptr : it->second.get();
 }
 
-JobInCtld* ArrayManager::FindJobInPendingOrRunningNoLock_(job_id_t job_id) {
-  auto pd_it = m_pending_jobs_.find(job_id);
-  if (pd_it != m_pending_jobs_.end()) {
-    return pd_it->second.get();
-  }
-  auto rn_it = m_running_jobs_.find(job_id);
-  if (rn_it != m_running_jobs_.end()) {
-    return rn_it->second.get();
-  }
-  return nullptr;
-}
-
 bool ArrayManager::IsChildInRunningNoLock_(job_id_t child_job_id) const {
   return m_running_jobs_.contains(child_job_id);
 }
@@ -373,14 +342,6 @@ std::vector<job_id_t> ArrayManager::RunningChildJobIds(
     if (IsChildInRunningNoLock_(cid)) out.push_back(cid);
   }
   return out;
-}
-
-size_t ArrayManager::PendingChildCount(const ArrayMeta& meta) const {
-  return PendingChildCountNoLock_(meta);
-}
-
-size_t ArrayManager::RunningChildCount(const ArrayMeta& meta) const {
-  return RunningChildCountNoLock_(meta);
 }
 
 // ----------------------------------------------------------------------------
@@ -639,13 +600,11 @@ bool ArrayManager::TryEnqueueNextChildNoLock_(ArrayMeta* meta) {
   return true;
 }
 
-std::vector<job_id_t> ArrayManager::MaterializeSpecificTasksNoLock_(
+void ArrayManager::MaterializeSpecificTasksNoLock_(
     job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids) {
-  std::vector<job_id_t> materialized_child_ids;
-
   auto* meta = FindMeta(array_job_id);
   if (meta == nullptr || meta->root_job_ == nullptr || task_ids.empty()) {
-    return materialized_child_ids;
+    return;
   }
   const auto& root = meta->Root();
 
@@ -671,7 +630,7 @@ std::vector<job_id_t> ArrayManager::MaterializeSpecificTasksNoLock_(
         SetArrayChildrenExpanded_(&mutable_root, false);
       }
     }
-    return materialized_child_ids;
+    return;
   }
 
   CRANE_INFO(
@@ -686,7 +645,7 @@ std::vector<job_id_t> ArrayManager::MaterializeSpecificTasksNoLock_(
     CRANE_ERROR(
         "Failed to materialize specific array tasks for parent job #{}: {}.",
         root.JobId(), CraneErrStr(admit.error()));
-    return {};
+    return;
   }
 
   for (auto& child : children) {
@@ -697,14 +656,6 @@ std::vector<job_id_t> ArrayManager::MaterializeSpecificTasksNoLock_(
   }
   SyncNextTaskIndexNoLock_(meta);
   RefreshRootSummaryStateNoLock_(meta);
-
-  for (uint32_t task_id : task_ids) {
-    if (auto child_job_id = meta->ChildJobIdOfTask(task_id);
-        child_job_id.has_value()) {
-      materialized_child_ids.push_back(*child_job_id);
-    }
-  }
-  return materialized_child_ids;
 }
 
 // ----------------------------------------------------------------------------
@@ -800,17 +751,6 @@ std::vector<ArrayManager::FinalizedArrayRoot> ArrayManager::ExtractFinalRoots(
 // ----------------------------------------------------------------------------
 // ArrayManager: lifecycle
 // ----------------------------------------------------------------------------
-
-void ArrayManager::OnChildPending(JobInCtld* child) {
-  if (child == nullptr || !child->IsArrayChild() ||
-      !child->ArrayJobId().has_value()) {
-    return;
-  }
-  auto* meta = FindMeta(child->ArrayJobId().value());
-  if (meta == nullptr) return;
-  meta->TrackMaterialized(child);
-  meta->MarkChildActive(child->JobId());
-}
 
 void ArrayManager::OnChildRunning(JobInCtld* child) {
   if (child == nullptr || !child->IsArrayChild() ||

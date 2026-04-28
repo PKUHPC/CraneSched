@@ -121,7 +121,6 @@ class MongodbClient {
 
   struct ArrayTaskAggregateInfo {
     uint32_t max_exit_code{0};
-    bool has_records{false};
     bool any_cancelled{false};
     bool any_exceed_time_limit{false};
     bool any_out_of_memory{false};
@@ -164,8 +163,7 @@ class MongodbClient {
   FetchJobStatus(const std::unordered_set<job_id_t>& job_ids);
 
   std::optional<ArrayTaskAggregateInfo> FetchArrayTaskAggregateInfo(
-      job_id_t array_job_id,
-      std::optional<job_id_t> excluded_job_id = std::nullopt);
+      job_id_t array_job_id);
 
   /* ----- Method of operating the step table ----------- */
   bool InsertRecoveredStep(
