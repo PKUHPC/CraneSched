@@ -163,7 +163,7 @@ message ArrayTaskIdentity {
   uint32 task_id = 2;
 }
 
-message ArrayTaskSummary {
+message ArrayTaskMeta {
   uint32 task_count = 1;
   uint32 task_min = 2;
   uint32 task_max = 3;
@@ -409,7 +409,7 @@ message JobToD {
   string name = 9;
 
   optional ArrayTaskIdentity array_task = 16;
-  optional ArrayTaskSummary array_summary = 17;
+  optional ArrayTaskMeta array_task_meta = 17;
 }
 
 enum StepType {
@@ -676,7 +676,7 @@ message JobInfo {
 
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;
-  ArrayTaskSummary array_summary = 52;
+  ArrayTaskMeta array_task_meta = 52;
 }
 
 message StepInfo {

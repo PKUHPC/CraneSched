@@ -907,17 +907,26 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         resolved_ids.push_back(job_id);
         continue;
       }
-      // Resolve parent to specific children via scheduler.
+      // Modify only affects already-materialized children. Unmaterialized
+      // tasks inherit from the parent template, so users should modify the
+      // parent directly if they want future children to pick up the change.
       auto resolved = g_job_scheduler->ResolveArrayTaskIds(
           job_id, it->second.array_task_ids(),
-          Ctld::ArrayTaskResolveMode::kCreateIfMissing);
-      if (resolved.child_job_ids.empty()) {
+          Ctld::ArrayTaskResolveMode::kQueryOnly);
+      if (resolved.child_job_ids.empty() && resolved.virtual_jobs.empty()) {
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
             "Job #{} is not an array parent or no matching array tasks "
             "found.",
             job_id));
         continue;
+      }
+      for (const auto& virtual_info : resolved.virtual_jobs) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Job #{} array task {} has not been materialized yet; modify the "
+            "array parent to update the template for future children.",
+            job_id, virtual_info.array_task().task_id()));
       }
       for (auto child_id : resolved.child_job_ids) {
         resolved_ids.push_back(child_id);

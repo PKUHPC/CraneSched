@@ -185,19 +185,19 @@ PersistedArraySpecFields GetPersistedArraySpecFields_(
   return fields;
 }
 
-void PopulateArraySummaryFromSpec_(
+void PopulateArrayTaskMetaFromSpec_(
     const crane::grpc::ArraySpec& array_spec,
-    crane::grpc::ArrayTaskSummary* array_summary) {
+    crane::grpc::ArrayTaskMeta* array_task_meta) {
   uint32_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
   if (stride == 0) {
     stride = 1;
   }
 
-  array_summary->set_task_count(
+  array_task_meta->set_task_count(
       (array_spec.end() - array_spec.start()) / stride + 1);
-  array_summary->set_task_min(array_spec.start());
-  array_summary->set_task_max(array_spec.end());
-  array_summary->set_task_step(stride);
+  array_task_meta->set_task_min(array_spec.start());
+  array_task_meta->set_task_max(array_spec.end());
+  array_task_meta->set_task_step(stride);
 }
 
 template <typename T>
@@ -988,8 +988,8 @@ bool MongodbClient::FetchJobRecords(
         if (auto array_spec = GetPersistedArraySpec_(view);
             array_spec.has_value()) {
           job_info.mutable_array_spec()->CopyFrom(*array_spec);
-          PopulateArraySummaryFromSpec_(*array_spec,
-                                        job_info.mutable_array_summary());
+          PopulateArrayTaskMetaFromSpec_(*array_spec,
+                                         job_info.mutable_array_task_meta());
         }
 
         if (auto value = ViewValueOr_(view["array_job_id"], int64_t{-1});
@@ -4696,9 +4696,9 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
 
   int32_t array_job_id = -1;
   int32_t array_task_id = -1;
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
-    array_job_id = static_cast<int32_t>(array_meta->array_job_id);
-    array_task_id = static_cast<int32_t>(array_meta->task_id);
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    array_job_id = static_cast<int32_t>(identity->array_job_id);
+    array_task_id = static_cast<int32_t>(identity->task_id);
   }
   auto array_spec_fields = GetPersistedArraySpecFields_(job->JobToCtld());
 

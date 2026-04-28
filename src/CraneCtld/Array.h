@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -104,7 +104,7 @@ bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
                     array_task_id_t task_id);
 uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
                        uint32_t index);
-crane::grpc::ArrayTaskSummary BuildSummary(
+crane::grpc::ArrayTaskMeta BuildTaskMeta(
     const crane::grpc::ArraySpec& array_spec);
 
 // Build a virtual pending JobInfo entry for a task that hasn't been
@@ -288,7 +288,6 @@ class ArrayManager {
                               const std::unordered_set<JobInCtld*>& final_jobs,
                               std::vector<FinalizedArrayRoot>* final_roots);
 
-  static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
   static uint32_t EffectiveArrayRunLimit_(const JobInCtld& root);
   static bool ArrayChildrenExpanded_(const JobInCtld& root);
   static void SetArrayChildrenExpanded_(JobInCtld* root, bool expanded);

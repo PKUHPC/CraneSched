@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2026 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -54,14 +54,14 @@ uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
   return array_spec.start() + index * Stride(array_spec);
 }
 
-crane::grpc::ArrayTaskSummary BuildSummary(
+crane::grpc::ArrayTaskMeta BuildTaskMeta(
     const crane::grpc::ArraySpec& array_spec) {
-  crane::grpc::ArrayTaskSummary summary;
-  summary.set_task_count(TaskCount(array_spec));
-  summary.set_task_min(array_spec.start());
-  summary.set_task_max(array_spec.end());
-  summary.set_task_step(Stride(array_spec));
-  return summary;
+  crane::grpc::ArrayTaskMeta task_meta;
+  task_meta.set_task_count(TaskCount(array_spec));
+  task_meta.set_task_min(array_spec.start());
+  task_meta.set_task_max(array_spec.end());
+  task_meta.set_task_step(Stride(array_spec));
+  return task_meta;
 }
 
 bool BuildVirtualArrayChildJobInfo(const JobInCtld& array_root,
@@ -213,20 +213,6 @@ void TriggerTerminalDependencyEventsImpl(T* obj, uint32_t exit_code,
 // ----------------------------------------------------------------------------
 // ArrayManager: static helpers
 // ----------------------------------------------------------------------------
-
-bool ArrayManager::IsArrayRootTerminalStatus_(crane::grpc::JobStatus status) {
-  switch (status) {
-  case crane::grpc::Completed:
-  case crane::grpc::Failed:
-  case crane::grpc::Cancelled:
-  case crane::grpc::ExceedTimeLimit:
-  case crane::grpc::OutOfMemory:
-  case crane::grpc::Deadline:
-    return true;
-  default:
-    return false;
-  }
-}
 
 uint32_t ArrayManager::EffectiveArrayRunLimit_(const JobInCtld& root) {
   const auto* array_spec = root.GetArraySpec();
@@ -730,7 +716,7 @@ void ArrayManager::RefreshRootSummaryStateNoLock_(ArrayMeta* meta) {
   auto& root = meta->MutableRoot();
 
   // Aggregate terminal statuses derived from children are authoritative.
-  if (IsArrayRootTerminalStatus_(root.Status())) return;
+  if (IsFinishedStepStatus(root.Status())) return;
 
   crane::grpc::JobStatus summary = crane::grpc::Pending;
   size_t running_count = RunningChildCountNoLock_(*meta);

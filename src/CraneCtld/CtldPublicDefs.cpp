@@ -548,16 +548,17 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.at(craned_id));
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = job_to_d.mutable_array_task();
-    array_task->set_array_job_id(array_meta->array_job_id);
-    array_task->set_task_id(array_meta->task_id);
-
-    auto* array_summary = job_to_d.mutable_array_summary();
-    array_summary->set_task_count(array_meta->task_count);
-    array_summary->set_task_min(array_meta->task_min);
-    array_summary->set_task_max(array_meta->task_max);
-    array_summary->set_task_step(array_meta->task_step);
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
+  if (auto task_meta = job->GetArrayTaskMeta(); task_meta.has_value()) {
+    auto* array_task_meta = job_to_d.mutable_array_task_meta();
+    array_task_meta->set_task_count(task_meta->task_count);
+    array_task_meta->set_task_min(task_meta->task_min);
+    array_task_meta->set_task_max(task_meta->task_max);
+    array_task_meta->set_task_step(task_meta->task_step);
   }
   return job_to_d;
 }
@@ -608,10 +609,10 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = step_to_d.mutable_array_task();
-    array_task->set_array_job_id(array_meta->array_job_id);
-    array_task->set_task_id(array_meta->task_id);
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
   }
 
   return step_to_d;
@@ -1200,10 +1201,10 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
-  if (auto array_meta = job->GetArrayTaskMeta(); array_meta.has_value()) {
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = step_to_d.mutable_array_task();
-    array_task->set_array_job_id(array_meta->array_job_id);
-    array_task->set_task_id(array_meta->task_id);
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
   }
 
   return step_to_d;
@@ -1615,12 +1616,17 @@ void JobInCtld::SetArrayTaskIdentity(job_id_t val, array_task_id_t task_id) {
   array_task->set_task_id(task_id);
 }
 
-std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
-  if (!job_to_ctld.has_array_spec()) {
+std::optional<JobInCtld::ArrayTaskIdentity> JobInCtld::GetArrayTaskIdentity()
+    const {
+  if (!runtime_attr.has_array_task()) {
     return std::nullopt;
   }
+  return ArrayTaskIdentity{runtime_attr.array_task().array_job_id(),
+                           runtime_attr.array_task().task_id()};
+}
 
-  if (!runtime_attr.has_array_task()) {
+std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
+  if (!job_to_ctld.has_array_spec()) {
     return std::nullopt;
   }
 
@@ -1629,14 +1635,10 @@ std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
     return std::nullopt;
   }
 
-  auto summary = ArrayUtil::BuildSummary(array_spec);
+  auto task_meta = ArrayUtil::BuildTaskMeta(array_spec);
 
-  return ArrayTaskMeta{runtime_attr.array_task().array_job_id(),
-                       runtime_attr.array_task().task_id(),
-                       summary.task_count(),
-                       summary.task_min(),
-                       summary.task_max(),
-                       summary.task_step()};
+  return ArrayTaskMeta{task_meta.task_count(), task_meta.task_min(),
+                       task_meta.task_max(), task_meta.task_step()};
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -1858,14 +1860,14 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
     job_info->mutable_array_spec()->CopyFrom(*array_spec);
-    job_info->mutable_array_summary()->CopyFrom(
-        ArrayUtil::BuildSummary(*array_spec));
+    job_info->mutable_array_task_meta()->CopyFrom(
+        ArrayUtil::BuildTaskMeta(*array_spec));
   }
 
-  if (auto array_meta = GetArrayTaskMeta(); array_meta.has_value()) {
+  if (auto identity = GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = job_info->mutable_array_task();
-    array_task->set_array_job_id(array_meta->array_job_id);
-    array_task->set_task_id(array_meta->task_id);
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
   }
 
   // Only pass container meta if it's a container step

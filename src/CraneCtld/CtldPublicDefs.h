@@ -892,15 +892,19 @@ struct JobInCtld {
   // Returns true if this is an expanded array child.
   bool IsArrayChild() const { return runtime_attr.has_array_task(); }
 
-  struct ArrayTaskMeta {
+  struct ArrayTaskIdentity {
     job_id_t array_job_id;
     uint32_t task_id;
+  };
+
+  struct ArrayTaskMeta {
     uint32_t task_count;
     uint32_t task_min;
     uint32_t task_max;
     uint32_t task_step;
   };
 
+  std::optional<ArrayTaskIdentity> GetArrayTaskIdentity() const;
   std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
 
  private:
