@@ -92,6 +92,7 @@ nav:
       - Job Control:
           - ccancel: command/ccancel.md
           - ccontrol: command/ccontrol.md
+          - cattach: command/cattach.md
       - Container:
           - ccon: command/ccon.md
       - Account Management:
