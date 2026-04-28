@@ -37,6 +37,13 @@ namespace {
 using TimeRange = std::pair<std::chrono::sys_seconds /*start*/,
                             std::chrono::sys_seconds /*end*/>;
 
+bool IsDuplicateKeyError(const std::exception& e) {
+  const std::string message = e.what();
+  return message.find("E11000") != std::string::npos ||
+         message.find("E11001") != std::string::npos ||
+         message.find("duplicate key") != std::string::npos;
+}
+
 // EfficientSplitTimeRange(start, end)
 //
 // Why this exists (and why it looks a bit “state-machine-ish”):
@@ -420,46 +427,43 @@ bool MongodbClient::InsertRecoveredJob(
   job_doc.append(kvp("steps", bsoncxx::types::b_array{}));
   job_id_t job_id = job_in_embedded_db.runtime_attr().job_id();
 
-  // Create filter by job_id
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
-
   try {
-    mongocxx::options::find find_options;
-    document projection;
-    projection.append(kvp("_id", 1));
-    find_options.projection(projection.view());
     auto job_collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
-    auto existing = job_collection.find_one(filter.view(), find_options);
-
-    if (!existing) {
-      bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-          job_collection.insert_one(*GetSession_(), job_doc.view());
-      if (ret == bsoncxx::stdx::nullopt) {
-        CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
-        return false;
-      }
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        job_collection.insert_one(*GetSession_(), job_doc.view());
+    if (ret == bsoncxx::stdx::nullopt) {
+      CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+      return false;
     }
 
-    bool txn_success = CommitTransaction(
-        [this, &job_doc](mongocxx::client_session* session) {
-          // 1. Append to acc_usage tables (hour/day/month)
-          AppendToAccUsageTable(job_doc.view(), session);
-
-          // 2. Mark as aggregated
-          MarkJobAsAggregated(
-              ViewGetArithmeticValue_<int32_t>(job_doc.view()["job_id"]),
-              session);
-        });
-    if (txn_success) return true;
-    CRANE_WARN(
-        "Transaction failed for job {} aggregation. "
-        "Will be recovered on startup.",
-        job_id);
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    if (IsDuplicateKeyError(e)) {
+      CRANE_LOGGER_DEBUG(
+          m_logger_,
+          "Job {} already exists in job_table. Skipping insert.",
+          job_id);
+    } else {
+      CRANE_LOGGER_ERROR(m_logger_, e.what());
+      CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+      return false;
+    }
   }
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+
+  bool txn_success = CommitTransaction(
+      [this, &job_doc](mongocxx::client_session* session) {
+        // 1. Append to acc_usage tables (hour/day/month)
+        AppendToAccUsageTable(job_doc.view(), session);
+
+        // 2. Mark as aggregated
+        MarkJobAsAggregated(
+            ViewGetArithmeticValue_<int32_t>(job_doc.view()["job_id"]),
+            session);
+      });
+  if (txn_success) return true;
+  CRANE_WARN(
+      "Transaction failed for job {} aggregation. "
+      "Will be recovered on startup.",
+      job_id);
   return false;
 }
 
@@ -467,132 +471,113 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
   document job_doc = JobInCtldToDocument_(job);
   job_doc.append(kvp("steps", bsoncxx::types::b_array{}));
 
-  // Create filter by job_id
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
-
   try {
-    mongocxx::options::find find_options;
-    document projection;
-    projection.append(kvp("_id", 1));
-    find_options.projection(projection.view());
     auto job_collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
-    auto existing = job_collection.find_one(filter.view(), find_options);
-
-    if (!existing) {
-      bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-          job_collection.insert_one(*GetSession_(), job_doc.view());
-      if (ret == bsoncxx::stdx::nullopt) {
-        CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
-        return false;
-      }
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        job_collection.insert_one(*GetSession_(), job_doc.view());
+    if (ret == bsoncxx::stdx::nullopt) {
+      CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+      return false;
     }
-
-    // Real-time aggregation: append to acc_usage tables with transaction
-    // Note: Tasks in database are always completed/failed/cancelled
-    // Uses transaction to ensure atomicity of aggregation and marking
-    try {
-      auto job_doc_copy = bsoncxx::document::value(job_doc.view());
-
-      bool txn_success = CommitTransaction(
-          [this, &job_doc_copy, job](mongocxx::client_session* session) {
-            // 1. Append to acc_usage tables (hour/day/month)
-            AppendToAccUsageTable(job_doc_copy.view(), session);
-
-            // 2. Mark as aggregated
-            MarkJobAsAggregated(job->JobId(), session);
-          });
-
-      if (!txn_success) {
-        CRANE_WARN(
-            "Transaction failed for job {} aggregation. "
-            "Will be recovered on startup.",
-            job->JobId());
-      }
-    } catch (const std::exception& e) {
-      // Best effort: failure does not affect job insertion
-      // Startup recovery will handle unaggregated jobs
-      CRANE_WARN(
-          "Failed to append job {} to acc_usage tables: {}. "
-          "Will be recovered on startup.",
-          job->JobId(), e.what());
-    }
-
-    return true;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    if (IsDuplicateKeyError(e)) {
+      CRANE_LOGGER_DEBUG(
+          m_logger_,
+          "Job {} already exists in job_table. Skipping insert.",
+          job->JobId());
+    } else {
+      CRANE_LOGGER_ERROR(m_logger_, e.what());
+      CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+      return false;
+    }
   }
 
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
-  return false;
+  // Real-time aggregation: append to acc_usage tables with transaction
+  // Note: Tasks in database are always completed/failed/cancelled
+  // Uses transaction to ensure atomicity of aggregation and marking
+  try {
+    auto job_doc_copy = bsoncxx::document::value(job_doc.view());
+
+    bool txn_success = CommitTransaction(
+        [this, &job_doc_copy, job](mongocxx::client_session* session) {
+          // 1. Append to acc_usage tables (hour/day/month)
+          AppendToAccUsageTable(job_doc_copy.view(), session);
+
+          // 2. Mark as aggregated
+          MarkJobAsAggregated(job->JobId(), session);
+        });
+
+    if (!txn_success) {
+      CRANE_WARN(
+          "Transaction failed for job {} aggregation. "
+          "Will be recovered on startup.",
+          job->JobId());
+    }
+  } catch (const std::exception& e) {
+    // Best effort: failure does not affect job insertion
+    // Startup recovery will handle unaggregated jobs
+    CRANE_WARN(
+        "Failed to append job {} to acc_usage tables: {}. "
+        "Will be recovered on startup.",
+        job->JobId(), e.what());
+  }
+
+  return true;
 }
 
 bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
   if (jobs.empty()) return false;
-  try {
-    auto job_collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
-    std::unordered_set<job_id_t> existing_job_ids;
+  auto job_collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
 
-    document filter;
-    filter.append(kvp("job_id", [&jobs](sub_document job_id_doc) {
-      array job_id_array;
-      for (const auto& job : jobs) {
-        job_id_array.append(static_cast<int32_t>(job->JobId()));
-      }
-      job_id_doc.append(kvp("$in", job_id_array));
-    }));
+  std::vector<bsoncxx::document::view_or_value> insert_docs;
+  insert_docs.reserve(jobs.size());
+  for (const auto& job : jobs) {
+    document job_doc = JobInCtldToDocument_(job);
+    job_doc.append(kvp("steps", bsoncxx::types::b_array{}));
+    insert_docs.emplace_back(job_doc.extract());
+  }
 
-    mongocxx::options::find find_options;
-    document projection;
-    projection.append(kvp("job_id", 1));
-    find_options.projection(projection.view());
-    auto cursor = job_collection.find(filter.view(), find_options);
-    for (auto&& view : cursor) {
-      existing_job_ids.emplace(
-          static_cast<job_id_t>(view["job_id"].get_int32().value));
-    }
-
-    std::vector<bsoncxx::document::view_or_value> insert_docs;
-    insert_docs.reserve(jobs.size());
-    for (const auto& job : jobs) {
-      if (existing_job_ids.contains(job->JobId())) continue;
-      document job_doc = JobInCtldToDocument_(job);
-      job_doc.append(kvp("steps", bsoncxx::types::b_array{}));
-      insert_docs.emplace_back(job_doc.extract());
-    }
-
-    if (!insert_docs.empty()) {
+  if (!insert_docs.empty()) {
+    mongocxx::options::insert insert_options;
+    insert_options.ordered(false);
+    try {
       bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
-          job_collection.insert_many(*GetSession_(), insert_docs);
+          job_collection.insert_many(*GetSession_(), insert_docs, insert_options);
       if (ret == bsoncxx::stdx::nullopt) {
         CRANE_LOGGER_ERROR(m_logger_,
                            "Failed to insert in-memory JobInCtld batch.");
         return false;
       }
+    } catch (const std::exception& e) {
+      if (IsDuplicateKeyError(e)) {
+        CRANE_LOGGER_DEBUG(
+            m_logger_,
+            "Duplicate job_id detected during batch insert. "
+            "Existing records were skipped.");
+      } else {
+        CRANE_LOGGER_ERROR(m_logger_, e.what());
+        CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
+        return false;
+      }
     }
-
-    // Real-time aggregation for each job (best effort)
-    // Failures will be recovered on startup via RecoverMissingAggregations
-    for (const JobInCtld* job : jobs) {
-      bool txn_success =
-          CommitTransaction([this, job](mongocxx::client_session* session) {
-            AppendToAccUsageTable(job, session);
-            // 2. Mark as aggregated
-            MarkJobAsAggregated(job->JobId(), session);
-          });
-      if (!txn_success)
-        CRANE_WARN(
-            "Failed to append job {} to acc_usage tables. "
-            "Will be recovered on startup.",
-            job->JobId());
-    }
-    return true;
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory JobInCtld.");
-  return false;
+  // Real-time aggregation for each job (best effort)
+  // Failures will be recovered on startup via RecoverMissingAggregations
+  for (const JobInCtld* job : jobs) {
+    bool txn_success =
+        CommitTransaction([this, job](mongocxx::client_session* session) {
+          AppendToAccUsageTable(job, session);
+          // 2. Mark as aggregated
+          MarkJobAsAggregated(job->JobId(), session);
+        });
+    if (!txn_success)
+      CRANE_WARN(
+          "Failed to append job {} to acc_usage tables. "
+          "Will be recovered on startup.",
+          job->JobId());
+  }
+  return true;
 }
 
 bool MongodbClient::FetchJobRecords(
@@ -4856,8 +4841,8 @@ bool MongodbClient::InitTableIndexes() {
     CRANE_LOGGER_DEBUG(m_logger_, "Creating indexes for job_table...");
     auto client = m_connect_pool_->acquire();
     auto raw_table = client[m_db_name_][m_job_collection_name_];
-    // Fast path for job_id lookups (insert de-duplication, step updates, etc.)
-    CreateCollectionIndex(raw_table, {"job_id"}, false);
+    // Fast path for job_id lookups and duplicate detection
+    CreateCollectionIndex(raw_table, {"job_id"}, true);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
