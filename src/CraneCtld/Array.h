@@ -40,8 +40,9 @@ namespace Ctld {
 
 class ArrayManager;  // forward declared for friendship
 
-// ArrayMeta owns the array root JobInCtld and tracks scheduler-side
-// materialization state of its array children.
+// ArrayMeta tracks scheduler-side materialization state of array children.
+// ArrayManager owns the array root JobInCtld; ArrayMeta keeps a non-owning
+// pointer to it.
 //
 // All mutating methods must be called while m_pending_job_map_mtx_ is held
 // by the caller. Active (pending/running) partitioning is NOT stored on
@@ -49,12 +50,11 @@ class ArrayManager;  // forward declared for friendship
 // and running maps.
 class ArrayMeta {
  public:
-  explicit ArrayMeta(std::unique_ptr<JobInCtld> root_job);
+  explicit ArrayMeta(JobInCtld* root_job);
 
   const JobInCtld& Root() const { return *root_job_; }
   JobInCtld& MutableRoot() { return *root_job_; }
-  JobInCtld* RootPtr() const { return root_job_.get(); }
-  std::unique_ptr<JobInCtld> ReleaseRoot() { return std::move(root_job_); }
+  JobInCtld* RootPtr() const { return root_job_; }
 
   // Materialization bookkeeping (task_id -> child job id).
   bool IsTaskMaterialized(array_task_id_t task_id) const;
@@ -81,7 +81,7 @@ class ArrayMeta {
   void MarkChildActive(job_id_t child_job_id);
   void MarkChildInactive(job_id_t child_job_id);
 
-  std::unique_ptr<JobInCtld> root_job_;
+  JobInCtld* root_job_{nullptr};
   array_task_id_t next_array_task_index_{0};
   absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id_;
   absl::flat_hash_set<job_id_t> active_child_job_ids_;
@@ -114,8 +114,8 @@ bool BuildVirtualArrayChildJobInfo(const JobInCtld& array_root,
                                    crane::grpc::JobInfo* job_info);
 }  // namespace ArrayUtil
 
-// ArrayManager owns all array parent metas and drives array child
-// materialization, lifecycle tracking, and finalization.
+// ArrayManager owns all array root jobs and parent metas, and drives array
+// child materialization, lifecycle tracking, and finalization.
 //
 // Locking contract:
 //   * All instance methods require m_pending_job_map_mtx_ held by the caller
@@ -137,6 +137,13 @@ class ArrayManager {
     PendingJobMap& pending_jobs;
     RunningJobMap& running_jobs;
     std::atomic_uint32_t& pending_cached_size;
+  };
+
+  struct FinalizedArrayRoot {
+    // Keeps the non-owning ArrayMeta root pointer valid while finalization
+    // runs outside scheduler locks.
+    std::unique_ptr<JobInCtld> root_job;
+    std::shared_ptr<ArrayMeta> meta;
   };
 
   ArrayManager(ActiveJobMaps maps, absl::Mutex* pending_mtx,
@@ -213,15 +220,16 @@ class ArrayManager {
   // For each candidate root id (typically the set of array roots whose
   // children just finalized), if the root is expanded and has zero active
   // children, aggregate the final status against `final_jobs`, mutate the
-  // root's runtime attrs, run the dependency triggers, and extract the
-  // ArrayMeta shared_ptr from the manager. Returns the extracted metas.
-  std::vector<std::shared_ptr<ArrayMeta>> ExtractFinalRootsById(
+  // root's runtime attrs, run the dependency triggers, and extract ArrayMeta
+  // plus root ownership from the manager. Returns finalized root carriers that
+  // keep root jobs alive while DB/plugin work runs outside scheduler locks.
+  std::vector<FinalizedArrayRoot> ExtractFinalRootsById(
       const std::unordered_set<job_id_t>& candidate_root_ids,
       const std::unordered_set<JobInCtld*>& final_jobs);
 
   // Same as above but takes raw ArrayMeta pointers (cheap path for callers
   // that already resolved the meta pointer during the child-terminal loop).
-  std::vector<std::shared_ptr<ArrayMeta>> ExtractFinalRoots(
+  std::vector<FinalizedArrayRoot> ExtractFinalRoots(
       const std::unordered_set<ArrayMeta*>& candidate_metas,
       const std::unordered_set<JobInCtld*>& final_jobs);
 
@@ -239,14 +247,13 @@ class ArrayManager {
 
   // Persistence / plugin hooks for final array roots.
   // These are thread-safe against the manager (they do not touch m_metas_).
-  static void ProcessFinalRoots(
-      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
+  static void ProcessFinalRoots(const std::vector<FinalizedArrayRoot>& roots);
   static crane::grpc::JobInEmbeddedDb BuildFinalRootRecord(
       const JobInCtld& array_root);
   static void CallPluginHookForFinalRoots(
-      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
+      const std::vector<FinalizedArrayRoot>& roots);
   static void PersistAndTransferRootsToMongodb(
-      const std::vector<std::shared_ptr<ArrayMeta>>& roots);
+      const std::vector<FinalizedArrayRoot>& roots);
 
  private:
   // --- helpers (all must run while m_pending_job_map_mtx_ is held) ---
@@ -277,9 +284,9 @@ class ArrayManager {
       job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids);
 
   void RefreshRootSummaryStateNoLock_(ArrayMeta* meta);
-  void TryFinalizeRootNoLock_(
-      ArrayMeta* meta, const std::unordered_set<JobInCtld*>& final_jobs,
-      std::vector<std::shared_ptr<ArrayMeta>>* final_roots);
+  void TryFinalizeRootNoLock_(ArrayMeta* meta,
+                              const std::unordered_set<JobInCtld*>& final_jobs,
+                              std::vector<FinalizedArrayRoot>* final_roots);
 
   static bool IsArrayRootTerminalStatus_(crane::grpc::JobStatus status);
   static uint32_t EffectiveArrayRunLimit_(const JobInCtld& root);
@@ -299,6 +306,7 @@ class ArrayManager {
   absl::Mutex* m_pending_mtx_;
   absl::Mutex* m_running_mtx_;
 
+  absl::flat_hash_map<job_id_t, std::unique_ptr<JobInCtld>> m_root_jobs_;
   absl::flat_hash_map<job_id_t, std::shared_ptr<ArrayMeta>> m_metas_;
 };
 

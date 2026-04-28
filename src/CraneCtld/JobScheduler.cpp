@@ -1193,7 +1193,7 @@ void JobScheduler::ScheduleThread_() {
 
     // Collected once the failed-child cleanup inside the `if` branch finalizes
     // array roots; processed after all scheduler locks are released (below).
-    std::vector<std::shared_ptr<ArrayMeta>> sched_loop_final_array_roots;
+    std::vector<ArrayManager::FinalizedArrayRoot> sched_loop_final_array_roots;
 
     if (!m_pending_job_map_.empty() ||
         has_array_child_to_materialize) {  // all_part_metas is locked here.
@@ -4523,7 +4523,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
   absl::Time cancel_time = absl::Now();
 
   std::unordered_set<job_id_t> array_roots_pending_finalize;
-  std::vector<std::shared_ptr<ArrayMeta>> final_array_roots;
+  std::vector<ArrayManager::FinalizedArrayRoot> final_array_roots;
 
   if (!pending_job_ptr_vec.empty()) {
     for (auto& job : pending_job_ptr_vec) {
@@ -4944,7 +4944,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   context.rn_job_raw_ptrs.reserve(actual_size);
   std::unordered_set<ArrayMeta*> array_roots_pending_finalize;
   array_roots_pending_finalize.reserve(actual_size);
-  std::vector<std::shared_ptr<ArrayMeta>> final_array_roots;
+  std::vector<ArrayManager::FinalizedArrayRoot> final_array_roots;
   final_array_roots.reserve(actual_size);
 
   {

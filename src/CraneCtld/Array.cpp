@@ -95,8 +95,7 @@ bool BuildVirtualArrayChildJobInfo(const JobInCtld& array_root,
 // ArrayMeta
 // ----------------------------------------------------------------------------
 
-ArrayMeta::ArrayMeta(std::unique_ptr<JobInCtld> root_job)
-    : root_job_(std::move(root_job)) {}
+ArrayMeta::ArrayMeta(JobInCtld* root_job) : root_job_(root_job) {}
 
 bool ArrayMeta::IsTaskMaterialized(array_task_id_t task_id) const {
   return child_job_id_by_task_id_.contains(task_id);
@@ -260,7 +259,7 @@ void ArrayManager::TriggerTerminalDependencyEvents_(JobInCtld* job,
 void ArrayManager::TriggerTerminalDependencyEvents_(ArrayMeta* meta,
                                                     absl::Time end_time) {
   if (meta == nullptr || meta->root_job_ == nullptr) return;
-  TriggerTerminalDependencyEventsImpl(meta->root_job_.get(),
+  TriggerTerminalDependencyEventsImpl(meta->root_job_,
                                       meta->root_job_->ExitCode(), end_time);
 }
 
@@ -415,7 +414,8 @@ std::shared_ptr<ArrayMeta> ArrayManager::RegisterParent(
       expanded ? ArrayUtil::TaskCount(parent->JobToCtld().array_spec()) : 0;
 
   job_id_t root_id = parent->JobId();
-  auto meta = std::make_shared<ArrayMeta>(std::move(parent));
+  auto root_insert = m_root_jobs_.insert_or_assign(root_id, std::move(parent));
+  auto meta = std::make_shared<ArrayMeta>(root_insert.first->second.get());
   meta->SetNextTaskIndex(starting_index);
   m_metas_[root_id] = meta;
   return meta;
@@ -746,7 +746,7 @@ void ArrayManager::RefreshRootSummaryStateNoLock_(ArrayMeta* meta) {
 
 void ArrayManager::TryFinalizeRootNoLock_(
     ArrayMeta* meta, const std::unordered_set<JobInCtld*>& final_jobs,
-    std::vector<std::shared_ptr<ArrayMeta>>* final_roots) {
+    std::vector<FinalizedArrayRoot>* final_roots) {
   if (meta == nullptr || meta->root_job_ == nullptr) return;
 
   RefreshRootSummaryStateNoLock_(meta);
@@ -773,19 +773,25 @@ void ArrayManager::TryFinalizeRootNoLock_(
     g_account_meta_container->FreeQosSubmitResource(root, leftover);
   }
 
-  auto it = m_metas_.find(array_job_id);
-  if (it == m_metas_.end()) return;
+  auto meta_it = m_metas_.find(array_job_id);
+  if (meta_it == m_metas_.end()) return;
+
+  auto root_it = m_root_jobs_.find(array_job_id);
+  if (root_it == m_root_jobs_.end()) return;
 
   if (final_roots != nullptr) {
-    final_roots->emplace_back(it->second);
+    final_roots->push_back(
+        FinalizedArrayRoot{std::move(root_it->second), meta_it->second});
   }
-  m_metas_.erase(it);
+  m_root_jobs_.erase(root_it);
+  m_metas_.erase(meta_it);
 }
 
-std::vector<std::shared_ptr<ArrayMeta>> ArrayManager::ExtractFinalRootsById(
+std::vector<ArrayManager::FinalizedArrayRoot>
+ArrayManager::ExtractFinalRootsById(
     const std::unordered_set<job_id_t>& candidate_root_ids,
     const std::unordered_set<JobInCtld*>& final_jobs) {
-  std::vector<std::shared_ptr<ArrayMeta>> out;
+  std::vector<FinalizedArrayRoot> out;
   out.reserve(candidate_root_ids.size());
   for (job_id_t root_id : candidate_root_ids) {
     auto* meta = FindMeta(root_id);
@@ -794,10 +800,10 @@ std::vector<std::shared_ptr<ArrayMeta>> ArrayManager::ExtractFinalRootsById(
   return out;
 }
 
-std::vector<std::shared_ptr<ArrayMeta>> ArrayManager::ExtractFinalRoots(
+std::vector<ArrayManager::FinalizedArrayRoot> ArrayManager::ExtractFinalRoots(
     const std::unordered_set<ArrayMeta*>& candidate_metas,
     const std::unordered_set<JobInCtld*>& final_jobs) {
-  std::vector<std::shared_ptr<ArrayMeta>> out;
+  std::vector<FinalizedArrayRoot> out;
   out.reserve(candidate_metas.size());
   for (ArrayMeta* meta : candidate_metas) {
     TryFinalizeRootNoLock_(meta, final_jobs, &out);
@@ -970,43 +976,48 @@ crane::grpc::JobInEmbeddedDb ArrayManager::BuildFinalRootRecord(
 }
 
 void ArrayManager::CallPluginHookForFinalRoots(
-    const std::vector<std::shared_ptr<ArrayMeta>>& roots) {
+    const std::vector<FinalizedArrayRoot>& roots) {
   if (!g_config.Plugin.Enabled || roots.empty()) return;
 
   std::vector<crane::grpc::JobInfo> jobs_post_comp;
   jobs_post_comp.reserve(roots.size());
-  for (const auto& meta : roots) {
+  for (const auto& root : roots) {
+    if (root.root_job == nullptr) continue;
     crane::grpc::JobInfo t;
-    meta->RootPtr()->SetFieldsOfJobInfo(&t);
+    root.root_job->SetFieldsOfJobInfo(&t);
     jobs_post_comp.emplace_back(std::move(t));
   }
   g_plugin_client->EndHookAsync(std::move(jobs_post_comp));
 }
 
 void ArrayManager::PersistAndTransferRootsToMongodb(
-    const std::vector<std::shared_ptr<ArrayMeta>>& roots) {
+    const std::vector<FinalizedArrayRoot>& roots) {
   if (roots.empty()) return;
 
   txn_id_t txn_id;
   g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-  for (const auto& meta : roots) {
+  for (const auto& root : roots) {
+    if (root.root_job == nullptr) continue;
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
-            txn_id, meta->RootPtr()->JobDbId(), meta->RootPtr()->RuntimeAttr()))
+            txn_id, root.root_job->JobDbId(), root.root_job->RuntimeAttr()))
       CRANE_ERROR("Failed to call UpdateRuntimeAttrOfJob() for array root #{}",
-                  meta->RootPtr()->JobId());
+                  root.root_job->JobId());
   }
   g_embedded_db_client->CommitVariableDbTransaction(txn_id);
 
-  for (const auto& meta : roots) {
-    auto record = BuildFinalRootRecord(*meta->RootPtr());
+  for (const auto& root : roots) {
+    if (root.root_job == nullptr) continue;
+    auto record = BuildFinalRootRecord(*root.root_job);
     if (!g_db_client->InsertRecoveredJob(record))
       CRANE_ERROR("Failed to insert array root #{} into MongoDB",
-                  meta->RootPtr()->JobId());
+                  root.root_job->JobId());
   }
 
   std::unordered_map<job_id_t, job_db_id_t> db_ids;
-  for (const auto& meta : roots)
-    db_ids[meta->RootPtr()->JobId()] = meta->RootPtr()->JobDbId();
+  for (const auto& root : roots) {
+    if (root.root_job == nullptr) continue;
+    db_ids[root.root_job->JobId()] = root.root_job->JobDbId();
+  }
   if (!g_embedded_db_client->PurgeEndedJobs(db_ids))
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->PurgeEndedJobs() "
@@ -1014,7 +1025,7 @@ void ArrayManager::PersistAndTransferRootsToMongodb(
 }
 
 void ArrayManager::ProcessFinalRoots(
-    const std::vector<std::shared_ptr<ArrayMeta>>& roots) {
+    const std::vector<FinalizedArrayRoot>& roots) {
   PersistAndTransferRootsToMongodb(roots);
   CallPluginHookForFinalRoots(roots);
 }
