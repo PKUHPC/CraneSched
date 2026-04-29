@@ -835,6 +835,21 @@ class JobScheduler {
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
+  /*
+   * Query step metadata and the node-regex of its allocated nodes
+   * IN:  job_id  - unique identifier of the job owning the step
+   * IN:  step_id - unique identifier of the step to query;
+   *               use kPrimaryStepId for the primary (interactive) step
+   * OUT: step    - filled with StepToCtld proto including nodelist regex
+   *               on success; undefined on failure
+   * RET: true if the job and step were found, false otherwise
+   *
+   * NOTE: caller must hold no locks; this function acquires
+   *       m_running_job_map_mtx_ internally (read lock).
+   */
+  bool QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
+                             crane::grpc::StepToCtld* step);
+
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 

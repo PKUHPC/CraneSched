@@ -82,6 +82,7 @@ class CforedStreamWriter {
     auto* job_res_alloc_reply = reply.mutable_payload_job_res_alloc_reply();
     job_res_alloc_reply->set_job_id(job_id);
     job_res_alloc_reply->set_step_id(step_id);
+    CRANE_TRACE("[Step #{}.{}] WriteJobResAllocReply called", job_id, step_id);
 
     if (allocated_res_info_expt.has_value()) {
       job_res_alloc_reply->set_ok(true);
@@ -166,6 +167,30 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
+  /*
+   * Write a STEP_META_REPLY to the cfored stream
+   * IN:  ok             - true if step metadata was found and permitted
+   * IN:  failure_reason - human-readable failure message when ok is false
+   * IN:  step           - step metadata to return (valid when ok is true)
+   * IN:  pid            - cattach client PID for reply routing
+   * RET: true on success, false if the stream write fails or is invalidated
+   */
+  bool WriteStepMetaReply(bool ok, const std::string &failure_reason,
+                          const crane::grpc::StepToCtld &step, int32_t pid) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::STEP_META_REPLY);
+    auto *task_meta_reply = reply.mutable_payload_step_meta_reply();
+    task_meta_reply->set_ok(ok);
+    task_meta_reply->set_failure_reason(failure_reason);
+    task_meta_reply->set_cattach_pid(pid);
+    task_meta_reply->mutable_step()->CopyFrom(step);
+
+    return m_stream_->Write(reply);
+  }
+
   void Invalidate() {
     LockGuard guard(&m_stream_mtx_);
     m_valid_ = false;
@@ -179,6 +204,38 @@ class CforedStreamWriter {
   grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                            crane::grpc::StreamCforedRequest>* m_stream_
       ABSL_GUARDED_BY(m_stream_mtx_);
+};
+
+/* Proxy that holds the current CforedStreamWriter for one cfored connection.
+ * When cfored reconnects, SetWriter() atomically replaces the writer so all
+ * pending callbacks continue to route through the new stream without needing
+ * to update every stored callback lambda. */
+class StreamWriterProxy {
+ public:
+  /* Replace the underlying stream writer with a new one on cfored reconnect.
+   * IN: writer - new CforedStreamWriter for the reconnected cfored stream
+   * RET: none
+   */
+  void SetWriter(std::shared_ptr<CforedStreamWriter> writer) {
+    absl::MutexLock lock(&mtx_);
+    writer_ = std::move(writer);
+  }
+
+  /* Execute a callback with the current writer if it is still valid.
+   * The lock is held for the duration of func to prevent concurrent
+   * replacement of the writer while the callback is running.
+   * IN: func - callable that receives a CforedStreamWriter reference
+   * RET: none
+   */
+  template <typename Func>
+  void WithWriter(Func &&func) {
+    absl::MutexLock lock(&mtx_);
+    if (writer_) func(*writer_);
+  }
+
+ private:
+  absl::Mutex mtx_;
+  std::shared_ptr<CforedStreamWriter> writer_ ABSL_GUARDED_BY(mtx_);
 };
 
 class CtldServer;
@@ -501,6 +558,10 @@ class CtldServer {
   HashMap<std::string /* cfored_name */,
           HashMap<job_id_t, std::unordered_set<step_id_t>>>
       m_cfored_running_jobs_ ABSL_GUARDED_BY(m_mtx_);
+
+  Mutex m_stream_proxy_mtx_;
+  HashMap<std::string /* cfored_name */, std::shared_ptr<StreamWriterProxy>>
+      m_cfored_stream_proxy_map_ ABSL_GUARDED_BY(m_stream_proxy_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;

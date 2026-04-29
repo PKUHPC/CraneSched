@@ -102,6 +102,8 @@ inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
+inline constexpr size_t kMaxOutputQueueBytes = 10 * 1024 * 1024ULL;
+
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
     "cranectld/cranectld.lock";
@@ -141,6 +143,9 @@ constexpr uint64_t kEraseResvIntervalSec = 5;
 
 constexpr const char* const kCrunFwdALL = "all";
 constexpr const char* const kCrunFwdNONE = "none";
+
+constexpr uint32_t kMaxReconnectAttempts = 1000;
+constexpr uint32_t kMaxReconnectIntervalSec = 60;
 
 enum PrologFlagEnum : std::uint8_t {
   Contain = 1 << 0,             // 0000 0001 = 1

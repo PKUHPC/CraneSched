@@ -117,7 +117,8 @@ class CforedClient {
 
   void AsyncSendRecvThread_();
 
-  void TaskOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
+  void TaskOutPutForward(task_id_t task_id, std::unique_ptr<char[]>&& data,
+                         size_t len);
 
   void TaskErrOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
@@ -134,11 +135,14 @@ class CforedClient {
       std::atomic<bool>* write_pending);
 
   std::atomic<bool> m_stopped_{false};
+  std::atomic<bool> m_wait_reconn_{false};
   std::atomic<bool> m_output_drained_{false};
 
+  std::atomic<size_t> m_output_queue_bytes_{0};
   struct IOFwdRequest {
     // true for stdout, false for stderr
     bool is_stdout;
+    task_id_t task_id{0};  // The rank/id of the task that produced this output.
     std::unique_ptr<char[]> data;
     size_t len;
   };
@@ -174,6 +178,8 @@ class CforedClient {
 
   std::shared_ptr<uvw::loop> m_loop_;
   std::thread m_ev_thread_;
+
+  std::atomic<uint32_t> m_reconnect_attempts_{0};
 
   std::string m_cfored_name_;
   std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map

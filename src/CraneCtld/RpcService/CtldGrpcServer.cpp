@@ -230,74 +230,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     kWaitRegReq = 0,
     kWaitMsg,
     kCleanData,
+    kWaitReConnect,
   };
 
   bool ok;
 
   StreamCforedRequest cfored_request;
-
   auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
-  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
-  auto cb_step_res_allocated =
-      [writer_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteJobResAllocReply(arg);
-      };
-  auto cb_step_cancel =
-      [writer_weak_ptr](StepInteractiveMeta::StepCancelArgs const& args) {
-        auto& [job_id, step_id] = args;
-        CRANE_TRACE("[Step #{}.{}] Sending JobCancelRequest in job_cancel",
-                    job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteJobCancelRequest(job_id, step_id);
-      };
-  auto cb_step_completed =
-      [this,
-       writer_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
-        auto& [job_id, step_id, send_completion_ack, cfored_name] = args;
-        CRANE_TRACE("[Step #{}.{}] The completion callback of has been called.",
-                    job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer) {
-          if (send_completion_ack)
-            writer->WriteJobCompletionAckReply(job_id, step_id);
-        } else {
-          CRANE_ERROR(
-              "[Step #{}.{}] Stream writer of has been destroyed. "
-              "JobCompletionAckReply will not be sent.",
-              job_id, step_id);
-        }
+  std::weak_ptr<StreamWriterProxy> proxy_weak_ptr;
 
-        m_ctld_server_->m_mtx_.Lock();
-
-        // If cfored disconnected, the cfored_name should have be
-        // removed from the map and the job completion callback is
-        // generated from cleaning the remaining jobs by calling
-        // g_job_scheduler->TerminateJob(), we should ignore this
-        // callback since the job id has already been cleaned.
-        auto iter = m_ctld_server_->m_cfored_running_jobs_.find(cfored_name);
-        if (iter != m_ctld_server_->m_cfored_running_jobs_.end()) {
-          auto& cfored_job_map = iter->second;
-          auto job_iter = cfored_job_map.find(job_id);
-          if (job_iter != cfored_job_map.end()) {
-            auto& step_set = job_iter->second;
-            bool present = step_set.erase(step_id);
-            if (step_set.empty()) cfored_job_map.erase(job_iter);
-            if (!present) {
-              CRANE_ERROR(
-                  "[Step #{}.{}] not found in cfored {} running job map "
-                  "when handling job completion callback.",
-                  job_id, step_id, cfored_name);
-            }
-          } else {
-            CRANE_ERROR(
-                "Job #{} not found in cfored {} running job map when "
-                "handling job completion callback.",
-                job_id, cfored_name);
-          }
-        }
-        m_ctld_server_->m_mtx_.Unlock();
-      };
+  std::function<void(const StepInteractiveMeta::StepResAllocArgs&)>
+      cb_step_res_allocated;
+  std::function<void(const StepInteractiveMeta::StepCancelArgs& args)>
+      cb_step_cancel;
+  std::function<void(const StepInteractiveMeta::StepCompeteArgs& args)>
+      cb_step_completed;
 
   CRANE_TRACE("CforedStream from {} created.", context->peer());
 
@@ -314,6 +262,91 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         }
 
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+
+        m_ctld_server_->m_stream_proxy_mtx_.Lock();
+        auto iter =
+            m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
+        if (iter != m_ctld_server_->m_cfored_stream_proxy_map_.end()) {
+          iter->second->SetWriter(stream_writer);
+          proxy_weak_ptr = iter->second;
+        } else {
+          auto proxy = std::make_shared<StreamWriterProxy>();
+          proxy->SetWriter(stream_writer);
+          m_ctld_server_->m_cfored_stream_proxy_map_[cfored_name] = proxy;
+          proxy_weak_ptr = proxy;
+        }
+        m_ctld_server_->m_stream_proxy_mtx_.Unlock();
+
+        cb_step_res_allocated =
+            [proxy_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
+              if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  writer.WriteJobResAllocReply(arg);
+                });
+              }
+            };
+        cb_step_cancel = [proxy_weak_ptr](
+                             StepInteractiveMeta::StepCancelArgs const& args) {
+          auto& [job_id, step_id] = args;
+          CRANE_TRACE("[Step #{}.{}] Sending JobCancelRequest in job_cancel",
+                      job_id, step_id);
+          if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+            proxy->WithWriter([&](CforedStreamWriter& writer) {
+              writer.WriteJobCancelRequest(job_id, step_id);
+            });
+          }
+        };
+        cb_step_completed =
+            [this,
+             proxy_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
+              auto& [job_id, step_id, send_completion_ack, cfored_name] = args;
+              CRANE_TRACE(
+                  "[Step #{}.{}] The completion callback of has been called.",
+                  job_id, step_id);
+              if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  if (send_completion_ack)
+                    writer.WriteJobCompletionAckReply(job_id, step_id);
+                });
+              } else {
+                CRANE_ERROR(
+                    "[Step #{}.{}] Stream writer of has been destroyed. "
+                    "JobCompletionAckReply will not be sent.",
+                    job_id, step_id);
+              }
+
+              m_ctld_server_->m_mtx_.Lock();
+
+              // If cfored disconnected, the cfored_name should have be
+              // removed from the map and the job completion callback is
+              // generated from cleaning the remaining jobs by calling
+              // g_job_scheduler->TerminateJob(), we should ignore this
+              // callback since the job id has already been cleaned.
+              auto iter =
+                  m_ctld_server_->m_cfored_running_jobs_.find(cfored_name);
+              if (iter != m_ctld_server_->m_cfored_running_jobs_.end()) {
+                auto& cfored_job_map = iter->second;
+                auto job_iter = cfored_job_map.find(job_id);
+                if (job_iter != cfored_job_map.end()) {
+                  auto& step_set = job_iter->second;
+                  bool present = step_set.erase(step_id);
+                  if (step_set.empty()) cfored_job_map.erase(job_iter);
+                  if (!present) {
+                    CRANE_ERROR(
+                        "[Step #{}.{}] not found in cfored {} running job map "
+                        "when handling job completion callback.",
+                        job_id, step_id, cfored_name);
+                  }
+                } else {
+                  CRANE_ERROR(
+                      "Job #{} not found in cfored {} running job map when "
+                      "handling job completion callback.",
+                      job_id, cfored_name);
+                }
+              }
+              m_ctld_server_->m_mtx_.Unlock();
+            };
+
         CRANE_INFO("Cfored {} registered.", cfored_name);
 
         ok = stream_writer->WriteCforedRegistrationAck({});
@@ -322,13 +355,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         } else {
           CRANE_ERROR(
               "Failed to send msg to cfored {}. Connection is broken. "
-              "Exiting...",
+              "Waiting for reconnection...",
               cfored_name);
-          state = StreamState::kCleanData;
+          state = StreamState::kWaitReConnect;
         }
 
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
 
       break;
@@ -341,6 +374,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto const& payload = cfored_request.payload_job_req();
           auto job = std::make_unique<JobInCtld>();
           job->SetFieldsByJobToCtld(payload.job());
+
+          CRANE_TRACE("[Job #{}] Recv JOB_REQUEST.", job->JobId());
 
           InteractiveMeta meta;
           meta.cfored_name = cfored_name;
@@ -394,9 +429,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
           }
         } break;
         case StreamCforedRequest::STEP_REQUEST: {
@@ -439,9 +474,39 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
+          }
+        } break;
+
+        case StreamCforedRequest::STEP_META_REQUEST: {
+          auto const& payload = cfored_request.payload_step_meta_req();
+          CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(),
+                      payload.step_id());
+          std::string failure_reason;
+          /* Use step_ok to avoid shadowing the outer bool ok used for
+           * stream-write results throughout the rest of this function. */
+          bool step_ok = true;
+          crane::grpc::StepToCtld step;
+          if (!g_job_scheduler->QueryStepAndNodeRegex(
+                  payload.job_id(), payload.step_id(), &step)) {
+            step_ok = false;
+            failure_reason = "Step not found";
+          } else {
+            if (payload.uid() != step.uid() &&
+                !g_account_manager->CheckUidIsAdmin(payload.uid())) {
+              step_ok = false;
+              failure_reason = "permission denied";
+            }
+          }
+          if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
+                                                 payload.cattach_pid())) {
+            CRANE_ERROR(
+                "Failed to send STEP_META_REPLY to cfored {}. "
+                "Connection is broken.",
+                cfored_name);
+            state = StreamState::kWaitReConnect;
           }
         } break;
 
@@ -477,10 +542,18 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           return Status::CANCELLED;
         }
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
     } break;
 
+    case StreamState::kWaitReConnect: {
+      CRANE_INFO(
+          "Cfored {} unexpectedly disconnected. "
+          "Waiting for it to reconnect.",
+          cfored_name);
+      stream_writer->Invalidate();
+      return Status::OK;
+    }
     case StreamState::kCleanData: {
       CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
       stream_writer->Invalidate();
@@ -493,6 +566,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
       g_job_scheduler->TerminateRunningStep(
           running_steps, crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
+
+      m_ctld_server_->m_stream_proxy_mtx_.Lock();
+      m_ctld_server_->m_cfored_stream_proxy_map_.erase(cfored_name);
+      m_ctld_server_->m_stream_proxy_mtx_.Unlock();
 
       return Status::OK;
     }

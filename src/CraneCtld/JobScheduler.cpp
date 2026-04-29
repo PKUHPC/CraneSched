@@ -5014,6 +5014,39 @@ void JobScheduler::QueryJobsInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
+bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
+                                         crane::grpc::StepToCtld* step) {
+  LockGuard running_guard(&m_running_job_map_mtx_);
+  auto iter = m_running_job_map_.find(job_id);
+  if (iter == m_running_job_map_.end()) return false;
+
+  if (step_id == 0) return false;
+
+  auto* job = iter->second.get();
+  if (!job) {
+    CRANE_DEBUG("Job {} not found in running job map.", job_id);
+    return false;
+  }
+
+  if (step_id == kPrimaryStepId) {
+    auto* primary_step = job->PrimaryStep();
+    if (!primary_step) {
+      CRANE_DEBUG("PrimaryStep is null for job {}", job_id);
+      return false;
+    }
+
+    *step = primary_step->StepToCtld();
+    step->set_nodelist(primary_step->allocated_craneds_regex);
+    return true;
+  }
+
+  auto step_iter = job->Steps().find(step_id);
+  if (step_iter == job->Steps().end()) return false;
+  *step = step_iter->second->StepToCtld();
+  step->set_nodelist(step_iter->second->allocated_craneds_regex);
+  return true;
+}
+
 void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_job_map_mtx_);
