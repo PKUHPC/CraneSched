@@ -715,7 +715,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
-    for (auto& [step, retry_count] : m_completing_step_retry_map_) {
+    for (auto& [step, state] : m_completing_step_retry_map_) {
       if (step->err_before_supv_start) {
         exit_steps.push_back(step);
         continue;
@@ -725,8 +725,9 @@ bool JobManager::EvCheckSupervisorRunning_() {
       auto exists = kill(step->supv_pid, 0) == 0;
 
       if (exists) {
-        retry_count++;
-        if (retry_count >= kMaxSupervisorCheckRetryCount) {
+        state.alive_check_count++;
+        if (!state.sigkill_sent &&
+            state.alive_check_count >= kMaxSupervisorCheckRetryCount) {
           CRANE_WARN(
               "[Step #{}.{}] Supervisor is still running after {} checks, "
               "sending SIGKILL.",
@@ -735,18 +736,34 @@ bool JobManager::EvCheckSupervisorRunning_() {
           SendCompletingAndTerminal_(
               job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
               "Supervisor not responding during step completion");
+          state.sigkill_sent = true;
         }
         continue;
       }
       // Supervisor exited. Wait for pending_terminal_status to be set
       // (Completing message may still be in the status change queue).
       if (!step->pending_terminal_status.has_value() && !step->silent_cleanup) {
-        retry_count--;
-        CRANE_TRACE(
-            "[Step #{}.{}] Supervisor exited but pending_terminal_status "
-            "not set, waiting for next tick.",
-            job_id, step_id);
-        continue;
+        state.status_wait_count++;
+        if (state.status_wait_count >= kMaxSupervisorCheckRetryCount) {
+          CRANE_ERROR(
+              "[Step #{}.{}] Timed out waiting for pending_terminal_status "
+              "after supervisor exit. Forcing Failed.",
+              job_id, step_id);
+          step->pending_terminal_status =
+              StepInstance::PendingTerminalStatus{
+                  .final_status = StepStatus::Failed,
+                  .exit_code = ExitCode::EC_RPC_ERR,
+                  .reason = "Timed out waiting for terminal status "
+                            "after supervisor exit",
+                  .timestamp = google::protobuf::util::TimeUtil::
+                      GetCurrentTime()};
+        } else {
+          CRANE_TRACE(
+              "[Step #{}.{}] Supervisor exited but pending_terminal_status "
+              "not set, waiting for next tick.",
+              job_id, step_id);
+          continue;
+        }
       }
       exit_steps.push_back(step);
     }
@@ -1305,6 +1322,19 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
           if (auto it = job_ptr->step_map.find(status_change.step_id);
               it != job_ptr->step_map.end()) {
             update_step(it->second.get());
+            found = true;
+          }
+        }
+      }
+      // FreeSteps path: step was release()'d from step_map and only
+      // exists in m_completing_step_retry_map_.
+      if (!found) {
+        absl::MutexLock lk(&m_free_job_step_mtx_);
+        for (auto& [step_ptr, _] : m_completing_step_retry_map_) {
+          if (step_ptr->job_id == status_change.job_id &&
+              step_ptr->step_id == status_change.step_id) {
+            update_step(step_ptr);
+            break;
           }
         }
       }
@@ -1771,7 +1801,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                   step->job_id, step->step_id);
       continue;
     }
-    m_completing_step_retry_map_[step] = 0;
+    m_completing_step_retry_map_[step] = CompletingStepState{};
   }
 
   for (auto&& job : jobs) {

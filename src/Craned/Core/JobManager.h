@@ -31,6 +31,12 @@ namespace Craned {
 
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 
+struct CompletingStepState {
+  int alive_check_count = 0;
+  int status_wait_count = 0;
+  bool sigkill_sent = false;
+};
+
 using StepToD = crane::grpc::StepToD;
 
 // Job allocation info, where allocation = job spec + execution info
@@ -288,7 +294,7 @@ class JobManager {
 
   absl::Mutex m_free_job_step_mtx_;
   // Step may hold by a job, use raw pointer here.
-  std::unordered_map<StepInstance*, int /*retry count*/>
+  std::unordered_map<StepInstance*, CompletingStepState>
       m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
   std::unordered_map<job_id_t, JobInD> m_completing_job_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
