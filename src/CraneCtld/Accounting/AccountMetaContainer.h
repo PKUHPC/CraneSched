@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "Account/AccountDefs.h"
+
 namespace Ctld {
 
 struct PdJobInScheduler;

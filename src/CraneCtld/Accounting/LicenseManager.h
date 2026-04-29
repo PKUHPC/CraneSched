@@ -21,7 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "DbClient.h"
+#include "Account/AccountDefs.h"
+#include "Database/DbClient.h"
 #include "absl/container/flat_hash_map.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
@@ -41,11 +42,11 @@ using LicensesMetaRawMap = LicensesAtomicMap::RawMap;
 using LicensesMapExclusivePtr =
     util::ScopeExclusivePtr<LicensesMetaRawMap, util::rw_mutex>;
 
-class LicensesManager {
+class LicenseManager {
  public:
-  LicensesManager();
+  LicenseManager();
 
-  ~LicensesManager() = default;
+  ~LicenseManager() = default;
 
   int Init(const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map);
 
@@ -121,4 +122,4 @@ class LicensesManager {
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::LicensesManager> g_licenses_manager;
+inline std::unique_ptr<Ctld::LicenseManager> g_license_manager;

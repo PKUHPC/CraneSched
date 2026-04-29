@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "Account/AccountDefs.h"
 #include "CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 

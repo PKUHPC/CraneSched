@@ -18,7 +18,7 @@
 
 #include "CtldPublicDefs.h"
 
-#include "EmbeddedDbClient.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace Ctld {
