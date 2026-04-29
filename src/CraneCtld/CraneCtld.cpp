@@ -26,14 +26,14 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 
-#include "AccountManager.h"
-#include "AccountMetaContainer.h"
+#include "Account/AccountManager.h"
+#include "Accounting/AccountMetaContainer.h"
+#include "Accounting/LicenseManager.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
-#include "DbClient.h"
-#include "EmbeddedDbClient.h"
+#include "Database/DbClient.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
-#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
@@ -1002,8 +1002,8 @@ void InitializeCtldGlobalVariables() {
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
-  g_licenses_manager = std::make_unique<LicensesManager>();
-  g_licenses_manager->Init(g_config.lic_id_to_count_map);
+  g_license_manager = std::make_unique<LicenseManager>();
+  g_license_manager->Init(g_config.lic_id_to_count_map);
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);

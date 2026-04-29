@@ -22,7 +22,8 @@
 
 #include <optional>
 
-#include "DbClient.h"
+#include "AccountDefs.h"
+#include "Database/DbClient.h"
 #include "Security/VaultClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"

@@ -1,20 +1,21 @@
 add_executable(cranectld
         CtldPublicDefs.h
         CtldPublicDefs.cpp
-        DbClient.h
-        DbClient.cpp
+        Account/AccountDefs.h
+        Database/DbClient.h
+        Database/DbClient.cpp
         JobScheduler.h
         JobScheduler.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
-        AccountManager.h
-        AccountManager.cpp
-        AccountMetaContainer.h
-        AccountMetaContainer.cpp
-        LicensesManager.h
-        LicensesManager.cpp
-        EmbeddedDbClient.cpp
-        EmbeddedDbClient.h
+        Account/AccountManager.h
+        Account/AccountManager.cpp
+        Accounting/AccountMetaContainer.h
+        Accounting/AccountMetaContainer.cpp
+        Accounting/LicenseManager.h
+        Accounting/LicenseManager.cpp
+        Database/EmbeddedDbClient.cpp
+        Database/EmbeddedDbClient.h
 
         Security/VaultClient.cpp
         Security/VaultClient.h

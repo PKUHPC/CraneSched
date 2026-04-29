@@ -18,7 +18,7 @@
 
 #include "AccountManager.h"
 
-#include "AccountMetaContainer.h"
+#include "Accounting/AccountMetaContainer.h"
 #include "Security/VaultClient.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"

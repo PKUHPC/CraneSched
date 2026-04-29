@@ -30,6 +30,7 @@
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
 
+#include "Account/AccountDefs.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace Ctld {

@@ -20,14 +20,14 @@
 
 #include <grpcpp/support/status.h>
 
-#include "AccountManager.h"
-#include "AccountMetaContainer.h"
+#include "Account/AccountManager.h"
+#include "Accounting/AccountMetaContainer.h"
+#include "Accounting/LicenseManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
-#include "EmbeddedDbClient.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
-#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "absl/strings/ascii.h"
@@ -827,7 +827,7 @@ grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  g_licenses_manager->GetLicensesInfo(request, response);
+  g_license_manager->GetLicensesInfo(request, response);
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -2127,10 +2127,10 @@ grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
   CraneExpectedRich<void> operator_result;
 
   if (request->is_add())
-    operator_result = g_licenses_manager->AddLicenseResource(
+    operator_result = g_license_manager->AddLicenseResource(
         request->resource_name(), request->server(), clusters, operators);
   else
-    operator_result = g_licenses_manager->ModifyLicenseResource(
+    operator_result = g_license_manager->ModifyLicenseResource(
         request->resource_name(), request->server(), clusters, operators);
 
   if (!operator_result) {
@@ -2162,7 +2162,7 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
 
   if (absl::AsciiStrToUpper(request->resource_name()) == "ALL" &&
       request->force()) {
-    auto errors = g_licenses_manager->PurgeAllLicenseResources();
+    auto errors = g_license_manager->PurgeAllLicenseResources();
     if (!errors.empty()) {
       response->set_ok(false);
       response->mutable_rich_err()->CopyFrom(errors.front());
@@ -2182,7 +2182,7 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
 
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
-  auto del_result = g_licenses_manager->RemoveLicenseResource(
+  auto del_result = g_license_manager->RemoveLicenseResource(
       request->resource_name(), request->server(), clusters);
   if (!del_result) {
     response->set_ok(false);
@@ -2207,7 +2207,7 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
   std::list<LicenseResourceInDb> res_resources;
-  auto result = g_licenses_manager->QueryLicenseResource(
+  auto result = g_license_manager->QueryLicenseResource(
       request->resource_name(), request->server(), clusters, &res_resources);
 
   if (!result) {
