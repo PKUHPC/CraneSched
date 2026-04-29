@@ -350,14 +350,21 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           job->meta = std::move(meta);
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
-          if (lua_result) {
-            auto rich_err = lua_result.value().get();
-            if (rich_err.code() != CraneErrCode::SUCCESS) {
-              if (rich_err.description().empty()) {
-                result = std::unexpected(CraneErrStr(rich_err.code()));
-              } else {
-                result = std::unexpected(rich_err.description());
+
+          if (auto check = JobScheduler::PreJobSubmitCheck(job.get()); !check) {
+            result = std::unexpected(check.error());
+          }
+
+          if (result) {
+            auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
+            if (lua_result) {
+              auto rich_err = lua_result.value().get();
+              if (rich_err.code() != CraneErrCode::SUCCESS) {
+                if (rich_err.description().empty()) {
+                  result = std::unexpected(CraneErrStr(rich_err.code()));
+                } else {
+                  result = std::unexpected(rich_err.description());
+                }
               }
             }
           }
@@ -412,16 +419,25 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_step_completed = cb_step_completed;
           step->ia_meta = std::move(meta);
 
-          auto submit_result =
-              g_job_scheduler->SubmitStepAsync(std::move(step));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto submit_expt = submit_result.get();
-          if (submit_expt.has_value()) {
-            step_id_t step_id = submit_expt.value();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, step_id)};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_expt.error()));
+
+          if (auto check = JobScheduler::PreStepSubmitCheck(step.get());
+              !check) {
+            result = std::unexpected(check.error());
+          }
+
+          if (result) {
+            auto submit_result =
+                g_job_scheduler->SubmitStepAsync(std::move(step));
+            auto submit_expt = submit_result.get();
+            if (submit_expt.has_value()) {
+              step_id_t step_id = submit_expt.value();
+              result =
+                  std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                      std::pair(job_id, step_id)};
+            } else {
+              result = std::unexpected(CraneErrStr(submit_expt.error()));
+            }
           }
 
           // Track in map before Write so kCleanData can always find
@@ -498,6 +514,80 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     }
     }
   }
+}
+
+grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
+    grpc::ServerContext* context,
+    const crane::grpc::BroadcastPmixPortRequest* request,
+    crane::grpc::BroadcastPmixPortReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
+
+  using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
+  using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
+
+  PmixPortsMetaMapKey map_key(request->job_id(), request->step_id());
+
+  // Snapshot of the completed port map, populated inside the locked callback.
+  // Empty means not all ports have arrived yet and no broadcast is needed.
+  std::optional<PmixPortsMetaMapValue> ports_to_broadcast;
+
+  pmix_ports_map.lazy_emplace_l(
+      map_key,
+      [&](std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>& pair) {
+        pair.second.emplace(request->craned_id(), request->port());
+
+        if (pair.second.size() == request->craned_ids().size()) {
+          CRANE_TRACE(
+              "[Step#{}.{}] All pmix ports have been collected, start "
+              "broadcasting.",
+              request->job_id(), request->step_id());
+          ports_to_broadcast = pair.second;
+        }
+      },
+      [&](auto&& ctor) {
+        // First time insert
+
+        PmixPortsMetaMapValue value;
+        value.emplace(request->craned_id(), request->port());
+
+        ctor(map_key, std::move(value));
+      });
+
+  // The map lock has been released at this point.  Perform the fanout now.
+  if (ports_to_broadcast.has_value()) {
+    auto ports_shared =
+        std::make_shared<PmixPortsMetaMapValue>(std::move(*ports_to_broadcast));
+
+    job_id_t job_id = request->job_id();
+    step_id_t step_id = request->step_id();
+
+    for (const auto& craned_id : request->craned_ids()) {
+      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
+        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!craned_stub) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Craned {} stub not found when broadcasting "
+              "pmix port.",
+              job_id, step_id, craned_id);
+          return;
+        }
+        auto result =
+            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
+        if (result != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+              job_id, step_id, craned_id);
+        }
+      });
+    }
+  }
+
+  response->set_ok(true);
+  return grpc::Status::OK;
 }
 
 grpc::Status CraneCtldServiceImpl::SubmitBatchJob(

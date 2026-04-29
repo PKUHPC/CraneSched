@@ -791,6 +791,20 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(step_status_change));
 }
 
+void CtldClient::BroadcastPmixPort(
+    const crane::grpc::BroadcastPmixPortRequest& request,
+    crane::grpc::BroadcastPmixPortReply* response) {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+
+  grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
+  if (!status.ok()) {
+    CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
+                static_cast<int>(status.error_code()), status.error_message());
+  }
+}
+
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                                        crane::grpc::JobStatus new_status,
                                        uint32_t exit_code,

@@ -1,0 +1,280 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "PmixDModex.h"
+
+#include "CranedClient.h"
+#include "Pmix.h"
+#include "PmixCommon.h"
+#include "PmixConn/PmixClient.h"
+#include "absl/synchronization/blocking_counter.h"
+#include "crane/Logger.h"
+#include "protos/Crane.pb.h"
+
+namespace pmix {
+
+#ifdef HAVE_PMIX
+
+namespace {
+
+void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
+  auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData *>(cbdata);
+
+  CRANE_DEBUG("DModexOpCb: seq_num={}, craned_id={}",
+              dmo_modex_cb_data->seq_num, dmo_modex_cb_data->craned_id);
+
+  crane::grpc::pmix::PmixDModexResponseReq request{};
+  request.set_seq_num(dmo_modex_cb_data->seq_num);
+  request.set_data(data, sz);
+  request.set_status(status);
+  request.set_craned_id(dmo_modex_cb_data->craned_id);
+
+  // Use the injected PmixClient pointer — no global access needed.
+  if (!dmo_modex_cb_data->pmix_client) {
+    CRANE_ERROR(
+        "PmixClient is null in DModexCbData, cannot send direct modex response "
+        "to {}",
+        dmo_modex_cb_data->craned_id);
+    delete dmo_modex_cb_data;
+    return;
+  }
+
+  auto stub =
+      dmo_modex_cb_data->pmix_client->GetPmixStub(dmo_modex_cb_data->craned_id);
+  if (!stub) {
+    CRANE_ERROR(
+        "Stub for craned_id={} not found, cannot send direct modex response.",
+        dmo_modex_cb_data->craned_id);
+    delete dmo_modex_cb_data;
+    return;
+  }
+
+  stub->PmixDModexResponseNoBlock(
+      request, [craned_id = dmo_modex_cb_data->craned_id](bool ok) {
+        if (!ok) {
+          /* not much we can do here. Caller will react by timeout */
+          CRANE_ERROR("Cannot send direct modex response to {}", craned_id);
+        }
+      });
+
+  delete dmo_modex_cb_data;
+}
+
+}  // namespace
+
+bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
+                                         int rank, pmix_modex_cbfunc_t cbfunc,
+                                         void *cbdata) {
+  // Find the node host corresponding to the nspace-rank.
+  // Guard: negative rank would wrap when compared to size_t, check explicitly.
+  if (rank < 0) {
+    CRANE_ERROR("Invalid negative rank {}", rank);
+    return false;
+  }
+
+  if (m_pmix_step_info_.nspace != pmix_namespace) {
+    CRANE_ERROR("Cannot find pmix namespace {}", pmix_namespace);
+    return false;
+  }
+
+  if (static_cast<size_t>(rank) >= m_pmix_step_info_.task_map.size()) {
+    CRANE_ERROR("The rank {} is out of the range of the task_map (size={}).",
+                rank, m_pmix_step_info_.task_map.size());
+    return false;
+  }
+
+  CranedId craned_id =
+      m_pmix_step_info_.node_list[m_pmix_step_info_.task_map[rank]];
+
+  crane::grpc::pmix::PmixDModexRequestReq request{};
+
+  uint32_t assigned_seq{};
+  {
+    util::lock_guard lock(m_dmodex_mutex_);
+    assigned_seq = m_dmdx_seq_num_;
+    m_pmix_dmodex_req_list_.emplace_back(
+        PmixDModexReq{.seq_num = m_dmdx_seq_num_,
+                      .ts = std::chrono::steady_clock::now(),
+                      .cb_func = cbfunc,
+                      .cb_data = cbdata});
+    request.set_seq_num(m_dmdx_seq_num_++);
+  }
+
+  // Helper: remove the pending request entry by seq_num.
+  // Must be called on every error path to prevent double-callback from
+  // CleanupTimeoutRequests().
+  auto remove_req = [this, assigned_seq]() {
+    util::lock_guard lock(m_dmodex_mutex_);
+    std::erase_if(m_pmix_dmodex_req_list_, [assigned_seq](const auto &r) {
+      return r.seq_num == assigned_seq;
+    });
+  };
+
+  auto *pmix_proc = request.mutable_pmix_proc();
+  pmix_proc->set_nspace(pmix_namespace);
+  pmix_proc->set_rank(rank);
+
+  request.set_local_namespace(pmix_namespace);
+  request.set_craned_id(m_pmix_step_info_.hostname);
+
+  auto stub = m_pmix_client_->GetPmixStub(craned_id);
+  if (!stub) {
+    CRANE_ERROR("DModexGet: stub for {} not found, pmixDModex rpc failed.",
+                craned_id);
+    remove_req();
+    PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
+                       nullptr);
+    return false;
+  }
+
+  CRANE_TRACE("PmixDModexRequest to {} for nspace={}, rank={}", craned_id,
+              pmix_namespace, rank);
+
+  stub->PmixDModexRequestNoBlock(
+      request, [cbfunc, cbdata, remove_req](bool ok) {
+        if (!ok) {
+          CRANE_ERROR("PmixDModex rpc failed.");
+          remove_req();
+          PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
+                             nullptr);
+        }
+      });
+
+  return true;
+}
+
+void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
+                                              const CranedId &craned_id,
+                                              const pmix_proc_t &pmix_proc,
+                                              const std::string &send_nspace) {
+  if (pmix_proc.nspace != m_pmix_step_info_.nspace) {
+    CRANE_ERROR("Bad request from {}: asked for nspace = {}", craned_id,
+                send_nspace);
+    ResponseWithError_(seq_num, craned_id, PMIX_ERR_INVALID_NAMESPACE);
+    return;
+  }
+
+  if (m_pmix_step_info_.task_num <= pmix_proc.rank) {
+    CRANE_ERROR(
+        "Bad request from {}: nspace {} has only {} ranks, asked for {}",
+        craned_id, pmix_proc.nspace, m_pmix_step_info_.task_num,
+        pmix_proc.rank);
+    ResponseWithError_(seq_num, craned_id, PMIX_ERR_BAD_PARAM);
+    return;
+  }
+
+  CRANE_TRACE("PmixProcessRequest from {} for nspace={}, rank={}", craned_id,
+              pmix_proc.nspace, pmix_proc.rank);
+
+  auto dmo_modex_cb_data = std::make_unique<DModexCbData>();
+  dmo_modex_cb_data->seq_num = seq_num;
+  dmo_modex_cb_data->craned_id = craned_id;
+  dmo_modex_cb_data->nspace = pmix_proc.nspace;
+  dmo_modex_cb_data->rank = pmix_proc.rank;
+  dmo_modex_cb_data->pmix_client = m_pmix_client_;  // inject client pointer
+  auto rc = PMIx_server_dmodex_request(&pmix_proc, DModexOpCb,
+                                       dmo_modex_cb_data.release());
+  if (rc != PMIX_SUCCESS) {
+    CRANE_ERROR("Error: PMIx_server_dmodex_request. {}", PMIx_Error_string(rc));
+    ResponseWithError_(seq_num, craned_id, rc);
+  }
+}
+
+void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
+                                               const CranedId &craned_id,
+                                               const std::string &data,
+                                               pmix_status_t status) {
+  PmixDModexReq pmix_dmodex_req{};
+
+  {
+    util::lock_guard lock(m_dmodex_mutex_);
+    auto it = std::ranges::find_if(
+        m_pmix_dmodex_req_list_,
+        [seq_num](const auto &req) { return req.seq_num == seq_num; });
+
+    if (it != m_pmix_dmodex_req_list_.end()) {
+      pmix_dmodex_req = *it;
+      m_pmix_dmodex_req_list_.erase(it);
+    } else {
+      CRANE_ERROR("Received DMDX response with bad seq_num={} from {}!",
+                  seq_num, craned_id);
+      return;
+    }
+  }
+
+  CRANE_TRACE("PmixProcessResponse from {} for seq_num={}", craned_id, seq_num);
+
+  PmixLibModexInvoke(pmix_dmodex_req.cb_func, status, data.data(), data.size(),
+                     pmix_dmodex_req.cb_data, nullptr, nullptr);
+}
+
+void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
+                                              const std::string &craned_id,
+                                              pmix_status_t status) {
+  crane::grpc::pmix::PmixDModexResponseReq request{};
+
+  request.set_status(status);
+  request.set_seq_num(seq_num);
+
+  auto stub = m_pmix_client_->GetPmixStub(craned_id);
+  if (!stub) {
+    CRANE_ERROR("ResponseWithError_: stub for {} is null", craned_id);
+    return;
+  }
+
+  stub->PmixDModexResponseNoBlock(request, [craned_id](bool ok) {
+    if (!ok) {
+      CRANE_ERROR("Cannot send direct modex error response to {}", craned_id);
+    }
+  });
+}
+
+void PmixDModexReqManager::CleanupTimeoutRequests() {
+  auto now = std::chrono::steady_clock::now();
+
+  {
+    util::lock_guard lock(m_dmodex_mutex_);
+    auto it = m_pmix_dmodex_req_list_.begin();
+    while (it != m_pmix_dmodex_req_list_.end()) {
+      if (now - it->ts > m_timeout_) {
+        CRANE_ERROR("DModex request seq_num={} timed out after {}s",
+                    it->seq_num, m_timeout_.count());
+        PmixLibModexInvoke(it->cb_func, PMIX_ERR_TIMEOUT, nullptr, 0,
+                           it->cb_data, nullptr, nullptr);
+        it = m_pmix_dmodex_req_list_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+}
+
+void PmixDModexReqManager::DrainAllRequests() {
+  util::lock_guard lock(m_dmodex_mutex_);
+
+  for (auto &req : m_pmix_dmodex_req_list_) {
+    CRANE_WARN("DrainAllRequests: cancelling dmodex seq_num={} on shutdown",
+               req.seq_num);
+    PmixLibModexInvoke(req.cb_func, PMIX_ERR_TIMEOUT, nullptr, 0, req.cb_data,
+                       nullptr, nullptr);
+  }
+  m_pmix_dmodex_req_list_.clear();
+}
+
+#endif
+}  // namespace pmix

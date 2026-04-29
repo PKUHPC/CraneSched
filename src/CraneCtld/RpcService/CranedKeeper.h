@@ -105,6 +105,10 @@ class CranedStub {
   crane::grpc::ExecInContainerStepReply ExecInContainerStep(
       const crane::grpc::ExecInContainerStepRequest &request);
 
+  CraneErrCode ReceivePmixPort(
+      job_id_t job_id, step_id_t step_id,
+      const std::unordered_map<CranedId, std::string> &pmix_ports);
+
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
   }

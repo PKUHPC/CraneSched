@@ -180,6 +180,8 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
+  std::set<CranedId> NodeList;
+
   struct CranedMeta {
     SystemRelInfo SysInfo;
     absl::Time CranedStartTime;

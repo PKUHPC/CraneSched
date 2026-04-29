@@ -31,6 +31,8 @@
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
@@ -113,6 +115,23 @@ CraneErrCode StepInstance::Prepare() {
       this->x11_meta = std::move(x11_meta);
       close(xauth_fd);
     }
+    if (!IsDaemon() && IsPmix()) {
+      pmix_server = std::make_unique<pmix::PmixServer>();
+      pmix::Config pmix_config{
+          .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
+          .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
+          .CompressedRpc = g_config.CompressedRpc,
+          .CraneBaseDir = g_config.CraneBaseDir,
+          .CraneScriptDir = g_config.CraneScriptDir,
+          .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+
+      if (!pmix_server->Init(pmix_config, m_step_to_supv_)) {
+        // Init() already cleaned up PMIx internals on failure.
+        // Reset here so ~PmixServer() does not attempt a second finalize.
+        pmix_server.reset();
+        return CraneErrCode::ERR_PMIX_ERR;
+      }
+    }
   }
   return CraneErrCode::SUCCESS;
 }
@@ -181,6 +200,10 @@ bool StepInstance::IsPod() const noexcept {
 
 bool StepInstance::IsContainer() const noexcept {
   return m_step_to_supv_.has_container_meta();
+}
+
+bool StepInstance::IsPmix() const noexcept {
+  return m_step_to_supv_.interactive_meta().mpi() == kMpiTypePmix;
 }
 
 bool StepInstance::IsDaemon() const noexcept {
@@ -461,6 +484,24 @@ void ProcInstance::InitEnvMap() {
   }
   m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
   m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
+
+  if (m_parent_step_inst_->IsCrun() &&
+      m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
+    // SetupFork() is called in the forked child process.  On failure use
+    // _exit() rather than abort() to avoid flushing stdio buffers or running
+    // parent-process destructors, and to prevent generating a core dump.
+    auto result = m_parent_step_inst_->pmix_server->SetupFork(task_id);
+    if (!result) {
+      fmt::print(stderr,
+                 "[Craned Subprocess] Pmix Server SetupFork() failed for "
+                 "task_id={}. Terminating child process.\n",
+                 task_id);
+      _exit(EXIT_FAILURE);
+    }
+    for (const auto& [k, v] : result.value()) {
+      m_env_.insert_or_assign(k, v);
+    }
+  }
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -2676,6 +2717,36 @@ TaskManager::~TaskManager() {
 void TaskManager::SupervisorFinishInit(StepStatus status) {
   m_step_.GotNewStatus(status);
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
+}
+
+bool TaskManager::ReceivePmixPort(
+    const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
+  if (!m_step_.pmix_server) {
+    CRANE_ERROR(
+        "[Step#{}.{}] PMIx server is not initialized when receiving "
+        "pmix ports.",
+        g_config.JobId, g_config.StepId);
+    return false;
+  }
+
+  auto* pmix_client = m_step_.pmix_server->GetPmixClient();
+  if (!pmix_client) {
+    CRANE_ERROR("[Step#{}.{}] PMIx client is null when receiving pmix ports.",
+                g_config.JobId, g_config.StepId);
+    return false;
+  }
+
+  CRANE_DEBUG("[Step#{}.{}] Receiving {} PMIx port(s).", g_config.JobId,
+              g_config.StepId, request.pmix_ports().size());
+
+  for (const auto& pmix_port : request.pmix_ports()) {
+    CRANE_TRACE("[Step#{}.{}] Emplacing PMIx stub: craned_id={}, port={}",
+                g_config.JobId, g_config.StepId, pmix_port.craned_id(),
+                pmix_port.port());
+    pmix_client->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
+  }
+
+  return true;
 }
 
 void TaskManager::Wait() {

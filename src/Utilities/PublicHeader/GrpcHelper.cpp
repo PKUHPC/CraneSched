@@ -113,6 +113,37 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(
                             grpc::SslServerCredentials(ssl_opts));
 }
 
+void ServerBuilderAddTcpInsecureListeningRandomPort(
+    grpc::ServerBuilder* builder, const std::string& address,
+    int* select_port) {
+  std::string listen_addr_port =
+      fmt::format("{}:{}", GrpcFormatIpAddress(address), 0);
+  builder->AddListeningPort(listen_addr_port, grpc::InsecureServerCredentials(),
+                            select_port);
+}
+
+void ServerBuilderAddTcpTlsListeningRandomPort(grpc::ServerBuilder* builder,
+                                               const std::string& address,
+                                               const TlsCertificates& certs,
+                                               int* selected_port) {
+  std::string listen_addr_port =
+      fmt::format("{}:{}", GrpcFormatIpAddress(address), 0);
+
+  grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
+  pem_key_cert_pair.cert_chain = certs.CertContent;
+  pem_key_cert_pair.private_key = certs.KeyContent;
+
+  grpc::SslServerCredentialsOptions ssl_opts;
+  // Self-signed peer-to-peer pattern: the cert itself acts as its own CA.
+  ssl_opts.pem_root_certs = certs.CertContent;
+  ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
+  ssl_opts.client_certificate_request =
+      GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+
+  builder->AddListeningPort(
+      listen_addr_port, grpc::SslServerCredentials(ssl_opts), selected_port);
+}
+
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,

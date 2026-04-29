@@ -1798,4 +1798,47 @@ void JobManager::StepStatusChangeAsync(
                                  std::move(reason), std::move(timestamp));
 }
 
+bool JobManager::ReceivePmixPort(
+    const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
+    job_id_t job_id, step_id_t step_id) {
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to find job allocation when receiving PMIx ports",
+        job_id, step_id);
+    return false;
+  }
+
+  absl::MutexLock lk(job->step_map_mtx.get());
+  auto step_it = job->step_map.find(step_id);
+  if (step_it == job->step_map.end()) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to find step allocation when receiving PMIx "
+        "ports",
+        job_id, step_id);
+    return false;
+  }
+
+  auto& stub = step_it->second->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Supervisor stub is null when receiving PMIx ports",
+        job_id, step_id);
+    return false;
+  }
+
+  auto result = stub->ReceivePmixPort(pmix_ports);
+  if (result != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to deliver PMIx ports to supervisor: {}",
+                job_id, step_id, CraneErrStr(result));
+    return false;
+  }
+
+  CRANE_TRACE(
+      "[Step #{}.{}] Successfully delivered {} PMIx ports to supervisor",
+      job_id, step_id, pmix_ports.size());
+
+  return true;
+}
+
 }  // namespace Craned

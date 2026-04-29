@@ -78,6 +78,7 @@ nav:
       - Keepalived Guide: deployment/configuration/keepalived.md
       - Lua Guide: deployment/configuration/lua_guide.md
       - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
+      - PMIx Support: deployment/configuration/pmix.md
   - Commands:
       - Job Submission:
           - cbatch: command/cbatch.md
@@ -178,6 +179,7 @@ plugins:
             Container Deployment: 容器功能部署
             PowerControl Deployment: 节能模块部署
             Plugins: 插件部署
+            PMIx Support: PMIx 使用指南
         - locale: en
           name: English
           build: true

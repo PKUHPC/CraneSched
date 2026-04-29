@@ -770,6 +770,16 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
+  using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
+  using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
+  using PmixPortsMetaMap = phmap::parallel_flat_hash_map<
+      PmixPortsMetaMapKey, PmixPortsMetaMapValue,
+      phmap::priv::hash_default_hash<PmixPortsMetaMapKey>,
+      phmap::priv::hash_default_eq<PmixPortsMetaMapKey>,
+      std::allocator<
+          std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>>,
+      4, std::shared_mutex>;
+
  public:
   JobScheduler();
 
@@ -938,6 +948,13 @@ class JobScheduler {
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
+  // Pre-submit checks (compile-time capability, feature flags, etc.).
+  // Return ok when allowed; otherwise return human-readable reason.
+  static std::expected<void, std::string> PreJobSubmitCheck(
+      const JobInCtld* job);
+  static std::expected<void, std::string> PreStepSubmitCheck(
+      const CommonStepInCtld* step);
+
   // TODO: Move to Reservation Mini-Scheduler.
   crane::grpc::CreateReservationReply CreateResv(
       const crane::grpc::CreateReservationRequest& request);
@@ -955,6 +972,8 @@ class JobScheduler {
                         .dependee_job_id = dependee,
                         .event_time = timestamp});
   }
+
+  PmixPortsMetaMap& GetPmixPortsMetaMap() { return m_pmix_ports_meta_; }
 
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1185,6 +1204,8 @@ class JobScheduler {
   void CreateDeadlineTimerCb_();
 
   void DelDeadlineTimer_(job_id_t job_id);
+
+  PmixPortsMetaMap m_pmix_ports_meta_;
 };
 
 }  // namespace Ctld

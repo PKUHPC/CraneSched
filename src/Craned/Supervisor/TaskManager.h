@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "Pmix.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
@@ -99,6 +100,8 @@ class StepInstance {
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
 
+  std::unique_ptr<pmix::PmixServer> pmix_server;
+
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
         job_id(step.job_id()),
@@ -156,6 +159,7 @@ class StepInstance {
   // Perspective 3: Container support
   [[nodiscard]] bool IsPod() const noexcept;
   [[nodiscard]] bool IsContainer() const noexcept;
+  [[nodiscard]] bool IsPmix() const noexcept;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
 
@@ -548,6 +552,9 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void SupervisorFinishInit(StepStatus status);
+
+  bool ReceivePmixPort(
+      const crane::grpc::supervisor::ReceivePmixPortRequest& request);
 
   void Wait();
   // Shutdown supervisor asynchronously with given status, exit code and reason.

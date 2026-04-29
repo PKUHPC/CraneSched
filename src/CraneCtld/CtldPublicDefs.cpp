@@ -1383,6 +1383,13 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
           context->craned_step_free_map[node][job_id].insert(step_id);
         }
       }
+
+      if (this->IsPmix()) {
+        g_job_scheduler->GetPmixPortsMetaMap().erase({job_id, step_id});
+        CRANE_DEBUG("[Step #{}.{}] Erased PMIx port meta for this step.",
+                    job_id, step_id);
+      }
+
       if (this->PrevErrorStatus().has_value()) {
         this->SetStatus(this->PrevErrorStatus().value());
         this->SetExitCode(this->PrevErrorExitCode());

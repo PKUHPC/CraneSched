@@ -72,6 +72,9 @@ constexpr task_id_t kCriStepTaskId = 0;
 constexpr step_id_t kDaemonStepId = 0;
 constexpr step_id_t kPrimaryStepId = 1;
 
+// Supported MPI type strings for interactive_meta().mpi()
+constexpr std::string_view kMpiTypePmix = "pmix";
+
 inline const char* const kCtldDefaultPort = "10011";
 inline const char* const kCranedDefaultPort = "10010";
 inline const char* const kCforedDefaultPort = "10012";
@@ -184,6 +187,7 @@ enum ExitCodeEnum : uint16_t {
   EC_RPC_ERR,
   EC_PROLOG_ERR,
   EC_REACHED_DEADLINE,
+  EC_MPI_ERR,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };
@@ -328,17 +332,23 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Lua script validation failed",
         "ERR_RESOURCE_NOT_FOUND",
 
-        // 95-99
+        // 95 - 99
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
-        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerAccount)",
         "Cannot delete user with active jobs.",
-        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "Invalid resource",
 
-        "Not a valide resource string",
-        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
-        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
-        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_JOB_BEYOND)"
+        // 100 - 104
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "Not a valid resource string",
+        "The current submitted job exceeds the QoS limit (MaxTresPerUser)",
+        "The current submitted job exceeds the QoS limit (MaxTresPerAccount)",
+        "The current submitted job exceeds the QoS limit (MaxTresPerJob)",
+
+        // 105 - 106
+        "Invalid deadline",
+        "PMIx error",
     };
 // clang-format on
 }  // namespace Internal

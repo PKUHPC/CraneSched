@@ -489,6 +489,8 @@ message InteractiveJobAdditionalMeta {
 
   // Task ID to forward crun input to
   optional uint32 input_task_id = 8;
+
+  string mpi = 9;
 }
 
 message PodJobAdditionalMeta {
@@ -889,6 +891,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
+  ERR_PMIX_ERR = 106;  // PMIx initialization or runtime error
 }
 
 enum EntityType {
@@ -1122,4 +1125,9 @@ message JobSizeSummaryItem {
   uint32 cpus_alloc = 4;
   double total_cpu_time = 5;
   int64 total_count = 6;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }
