@@ -355,7 +355,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         } else {
           CRANE_ERROR(
               "Failed to send msg to cfored {}. Connection is broken. "
-              "Exiting...",
+              "Waiting for reconnection...",
               cfored_name);
           state = StreamState::kWaitReConnect;
         }
@@ -429,7 +429,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
             state = StreamState::kWaitReConnect;
           }
@@ -474,7 +474,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
             state = StreamState::kWaitReConnect;
           }
