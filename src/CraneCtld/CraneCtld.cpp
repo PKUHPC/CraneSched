@@ -547,6 +547,9 @@ void ParseConfig(int argc, char** argv) {
       std::unordered_set nodes_without_part = g_config.Nodes |
                                               ranges::views::keys |
                                               ranges::to<std::unordered_set>();
+      const std::list<std::string> all_node_list =
+          g_config.Nodes | ranges::views::keys |
+          ranges::to<std::list<std::string>>();
       if (config["Partitions"]) {
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
@@ -575,14 +578,11 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          std::list<std::string> host_list =
-              g_config.Nodes | ranges::views::keys |
-              ranges::to<std::list<std::string>>();
-          part.nodelist_str = util::HostNameListToStr(host_list);
-          if (!util::PartitionNodesProcess(nodes, host_list, name, true,
-                                           part.nodes)) {
+          if (!util::PartitionNodesProcess(nodes, all_node_list, name, true,
+                                           &part.nodes)) {
             std::exit(1);
           }
+          part.nodelist_str = util::HostNameListToStr(part.nodes);
 
           for (const auto& node_name : part.nodes) {
             nodes_without_part.erase(node_name);

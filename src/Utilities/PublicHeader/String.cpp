@@ -830,18 +830,16 @@ bool PartitionNodesProcess(const std::string &node_str,
                            const std::list<std::string> &host_list,
                            const std::string &part_name,
                            bool disallow_unknown_node,
-                           std::unordered_set<std::string> &part_node_list) {
-  std::list<std::string> name_list;
-  std::unordered_set<std::string> node_name_set_list(host_list.begin(),
-                                                     host_list.end());
-
+                           std::unordered_set<std::string> *part_node_list) {
   auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
-  if (act_nodes_str == "ALL") {
+
+  if (absl::EqualsIgnoreCase(act_nodes_str, "ALL")) {
     for (const auto &node : host_list) {
-      part_node_list.emplace(node);
+      part_node_list->emplace(node);
       CRANE_TRACE("Find node {} in partition {}", node, part_name);
     }
   } else {
+    std::list<std::string> name_list;
     if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
       CRANE_ERROR("Illegal node name string format.");
       return false;
@@ -850,18 +848,27 @@ bool PartitionNodesProcess(const std::string &node_str,
     if (name_list.empty()) {
       CRANE_WARN("No nodes in partition '{}'.", part_name);
     } else {
+      const std::unordered_set<std::string> node_name_set(host_list.begin(),
+                                                          host_list.end());
       for (const auto &node : name_list) {
-        auto node_it = node_name_set_list.find(node);
-        if (node_it != node_name_set_list.end()) {
-          part_node_list.emplace(*node_it);
+        auto node_it = node_name_set.find(node);
+        if (node_it != node_name_set.end()) {
+          part_node_list->emplace(*node_it);
           CRANE_TRACE("Find node {} in partition {}", *node_it, part_name);
         } else {
-          CRANE_ERROR(
-              "Unknown node '{}' found in partition '{}'. It is "
-              "ignored "
-              "and should be contained in the configuration file.",
-              node, part_name);
-          if (disallow_unknown_node) return false;
+          if (disallow_unknown_node) {
+            CRANE_ERROR(
+                "Unknown node '{}' found in partition '{}'. "
+                "It must be defined in the Nodes section of the "
+                "configuration file.",
+                node, part_name);
+            return false;
+          } else {
+            CRANE_WARN(
+                "Node '{}' in partition '{}' is not defined in the Nodes "
+                "section, skipped.",
+                node, part_name);
+          }
         }
       }
     }

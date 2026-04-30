@@ -1000,6 +1000,9 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["Partitions"]) {
+        const std::list<std::string> all_node_list =
+            g_config.CranedRes | std::ranges::views::keys |
+            std::ranges::to<std::list<std::string>>();
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
           auto partition = it->as<YAML::Node>();
@@ -1017,11 +1020,8 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::list<std::string> host_list =
-              g_config.CranedRes | std::ranges::views::keys |
-              std::ranges::to<std::list<std::string>>();
-          if (!util::PartitionNodesProcess(nodes, host_list, name, false,
-                                           part.nodes)) {
+          if (!util::PartitionNodesProcess(nodes, all_node_list, name, false,
+                                           &part.nodes)) {
             std::exit(1);
           }
 
