@@ -86,6 +86,9 @@ class AccountMetaContainer final {
 
   void FreeQosResource(const JobInCtld& job);
 
+  // Free only running resource (not submit count) — used for requeue.
+  void FreeQosRunningResource(const JobInCtld& job);
+
   // When a user/account object is deleted, resources need to be reset.
   void DeleteUserMeta(const std::string& username);
 

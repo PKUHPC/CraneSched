@@ -67,6 +67,10 @@ void ParseCtldConfig(const YAML::Node& config) {
     if (ctld_cfg["MaxLogFileNum"]) {
       ctld_config.MaxLogFileNum = ctld_cfg["MaxLogFileNum"].as<uint64_t>();
     }
+
+    if (ctld_cfg["MaxRequeueCount"]) {
+      ctld_config.MaxRequeueCount = ctld_cfg["MaxRequeueCount"].as<int32_t>();
+    }
   }
 
   g_config.CtldConf = std::move(ctld_config);

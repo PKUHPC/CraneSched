@@ -479,7 +479,7 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
 
   SetStepType(crane::grpc::StepType::DAEMON);
 
-  SetRequeueCount(0);
+  SetRequeueCount(job.RequeueCount());
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
@@ -880,7 +880,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   SetStepType(crane::grpc::StepType::PRIMARY);
 
-  SetRequeueCount(0);
+  SetRequeueCount(job.RequeueCount());
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
@@ -1591,6 +1591,46 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+bool JobInCtld::ShouldRequeue() const {
+  if (type != crane::grpc::Batch) return false;
+  if (requeue_requested) return true;
+  if (job_to_ctld.no_requeue()) return false;
+  if (exit_code == ExitCode::EC_CRANED_DOWN ||
+      exit_code == ExitCode::EC_RPC_ERR)
+    return true;
+  return requeue_if_failed && status != crane::grpc::Completed &&
+         status != crane::grpc::Cancelled;
+}
+
+void JobInCtld::ResetForRequeue() {
+  requeue_count++;
+  runtime_attr.set_requeue_count(requeue_count);
+
+  requeue_requested = false;
+  runtime_attr.set_requeue_requested(false);
+  cancel_requested = false;
+
+  m_daemon_step_.reset();
+  m_primary_step_.reset();
+  m_steps_.clear();
+  while (!pending_step_ids_.empty()) pending_step_ids_.pop();
+  step_res_avail_ = ResourceV3{};
+
+  craned_ids.clear();
+  executing_craned_ids.clear();
+  allocated_craneds_regex.clear();
+  nodes_alloc = 0;
+  allocated_res_view = ResourceView{};
+  pending_reason.clear();
+
+  SetStatus(crane::grpc::Pending);
+  SetExitCode(0);
+  SetPrimaryStepStatus(crane::grpc::JobStatus{});
+  SetPrimaryStepExitCode(0);
+  start_time = absl::Time{};
+  end_time = absl::Time{};
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1737,6 +1777,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   username = runtime_attr.username();
 
   requeue_count = runtime_attr.requeue_count();
+  requeue_requested = runtime_attr.requeue_requested();
 
   primary_status = runtime_attr.primary_step_status();
   status = runtime_attr.status();
@@ -1877,6 +1918,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
     (*mutable_env)[k] = v;
   }
   job_info->set_ntasks(ntasks);
+  job_info->set_requeue_count(requeue_count);
+  job_info->set_requeue_if_failed(requeue_if_failed);
 }
 
 int JobInCtld::SchedulePendingSteps(

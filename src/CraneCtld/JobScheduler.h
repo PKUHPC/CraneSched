@@ -844,6 +844,9 @@ class JobScheduler {
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
 
+  crane::grpc::RequeueJobReply RequeueJob(
+      const crane::grpc::RequeueJobRequest& request);
+
   crane::grpc::AttachContainerStepReply AttachContainerStep(
       const crane::grpc::AttachContainerStepRequest& request);
 
@@ -977,6 +980,8 @@ class JobScheduler {
 
   static void PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
+
+  void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =

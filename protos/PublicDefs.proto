@@ -244,6 +244,7 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
+  bool no_requeue = 53;
 }
 
 message JobInEmbeddedDb {
@@ -279,6 +280,8 @@ message RuntimeAttrOfJob {
   // Used to extend end_time upon resume so that suspended time
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
+
+  bool requeue_requested = 25;
 }
 
 message StepToCtld {
@@ -635,6 +638,8 @@ message JobInfo {
   string submit_hostname = 43;
   uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
+  int32 requeue_count = 46;
+  bool requeue_if_failed = 47;
 }
 
 message StepInfo {

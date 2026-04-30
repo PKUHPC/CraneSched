@@ -685,6 +685,31 @@ bool EmbeddedDbClient::ResetNextStepDbId() {
   return true;
 }
 
+bool EmbeddedDbClient::ResetJobStepIdCounter(job_id_t job_id) {
+  absl::MutexLock lock_steps(&s_step_id_mtx_);
+
+  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+  next_step_id_map.erase(job_id);
+
+  txn_id_t txn_id;
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+
+  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
+  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
+  auto res = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                              &db_next_step_id_map);
+  if (!res) {
+    CRANE_ERROR("Failed to reset step_id counter for job {}.", job_id);
+    return false;
+  }
+
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  s_next_step_id_map_ = db_next_step_id_map;
+  CRANE_DEBUG("Reset step_id counter for job {}.", job_id);
+  return true;
+}
+
 bool EmbeddedDbClient::PurgeAllJobHistory() {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> res;

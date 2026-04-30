@@ -209,6 +209,16 @@ message CancelJobReply {
   map<uint32, NotCancelledJobSteps> not_cancelled_job_steps = 2;
 }
 
+message RequeueJobRequest {
+  uint32 operator_uid = 1;
+  repeated uint32 job_ids = 2;
+}
+
+message RequeueJobReply {
+  repeated uint32 requeued_jobs = 1;
+  map<uint32, string> not_requeued_jobs = 2;
+}
+
 message QueryStepFromPortRequest {
   uint32 port = 1;
 }
@@ -1327,6 +1337,9 @@ message QueryJobSizeSummaryReply {
 service CraneCtld {
   /* RPCs called from ccancel */
   rpc CancelJob(CancelJobRequest) returns (CancelJobReply);
+
+  /* RPCs called from ccontrol requeue */
+  rpc RequeueJob(RequeueJobRequest) returns (RequeueJobReply);
 
   /* RPCs called from cbatch */
   rpc SubmitBatchJob(SubmitBatchJobRequest) returns (SubmitBatchJobReply);
