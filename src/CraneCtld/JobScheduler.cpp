@@ -5517,6 +5517,9 @@ void SchedulerAlgo::NodeSelect(
     const absl::Time& now,
     const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
     const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs) {
+  for (const auto& rn : running_jobs)
+    rn->end_time = std::max(rn->end_time, now + absl::Seconds(1));
+
   // Split pending jobs by partition and reservation
   absl::flat_hash_map<PartitionId, std::vector<PdJobInScheduler*>>
       part_pd_job_ptr_map;
@@ -5686,12 +5689,11 @@ void SchedulerAlgo::NodeSelect(
 
   {
     for (const auto& job : running_jobs) {
-      absl::Time end_time = std::max(job->end_time, now + absl::Seconds(1));
       if (job->reservation.empty()) {
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto it = node_state_map.find(craned_id);
           if (it != node_state_map.end()) {
-            it->second.allocated_res.emplace_back(end_time, res);
+            it->second.allocated_res.emplace_back(job->end_time, res);
             it->second.qos_job_map[job->qos].emplace(job.get());
           }
         }
@@ -5708,7 +5710,7 @@ void SchedulerAlgo::NodeSelect(
         auto& craned_id_node_map = it->second.second;
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto& ns = craned_id_node_map.at(craned_id);
-          ns.allocated_res.emplace_back(end_time, res);
+          ns.allocated_res.emplace_back(job->end_time, res);
           ns.qos_job_map[job->qos].emplace(job.get());
         }
       }

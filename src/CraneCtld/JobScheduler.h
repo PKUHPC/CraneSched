@@ -624,8 +624,7 @@ class SchedulerAlgo {
         std::variant<PdJobInScheduler*, RnJobInScheduler*> preempted_job) {
       if (std::holds_alternative<RnJobInScheduler*>(preempted_job)) {
         auto* rn = std::get<RnJobInScheduler*>(preempted_job);
-        m_node_selector_->UpdateResource(rn->start_time, rn->end_time,
-                                         rn->allocated_res,
+        m_node_selector_->UpdateResource(now, rn->end_time, rn->allocated_res,
                                          /*is_release=*/true);
         for (const auto& [craned_id, _] : rn->allocated_res.EachNodeResMap()) {
           m_node_selector_->GetNodeState(craned_id)->qos_job_map[rn->qos].erase(
