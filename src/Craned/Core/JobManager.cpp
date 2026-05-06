@@ -735,14 +735,13 @@ bool JobManager::EvCheckSupervisorRunning_() {
               "[Step #{}.{}] Timed out waiting for pending_terminal_status "
               "after supervisor exit. Forcing Failed.",
               job_id, step_id);
-          step->pending_terminal_status =
-              StepInstance::PendingTerminalStatus{
-                  .final_status = StepStatus::Failed,
-                  .exit_code = ExitCode::EC_RPC_ERR,
-                  .reason = "Timed out waiting for terminal status "
-                            "after supervisor exit",
-                  .timestamp = google::protobuf::util::TimeUtil::
-                      GetCurrentTime()};
+          step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+              .final_status = StepStatus::Failed,
+              .exit_code = ExitCode::EC_RPC_ERR,
+              .reason =
+                  "Timed out waiting for terminal status "
+                  "after supervisor exit",
+              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
         } else {
           CRANE_TRACE(
               "[Step #{}.{}] Supervisor exited but pending_terminal_status "
