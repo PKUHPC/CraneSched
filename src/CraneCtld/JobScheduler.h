@@ -22,7 +22,7 @@
 // Precompiled header comes first!
 
 #include "Account/AccountDefs.h"
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {

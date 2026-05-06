@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"

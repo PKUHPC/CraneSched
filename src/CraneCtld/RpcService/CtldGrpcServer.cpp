@@ -24,7 +24,7 @@
 #include "Accounting/AccountMetaContainer.h"
 #include "Accounting/LicenseManager.h"
 #include "CranedKeeper.h"
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"

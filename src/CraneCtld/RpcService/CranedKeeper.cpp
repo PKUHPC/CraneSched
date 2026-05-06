@@ -18,7 +18,7 @@
 
 #include "CranedKeeper.h"
 
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 #include "JobScheduler.h"
 #include "protos/Crane.pb.h"
 

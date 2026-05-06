@@ -2,12 +2,14 @@ add_executable(cranectld
         CtldPublicDefs.h
         CtldPublicDefs.cpp
         Account/AccountDefs.h
+        Node/NodeDefs.h
+        Node/NodeDefs.cpp
+        Node/CranedMetaContainer.h
+        Node/CranedMetaContainer.cpp
         Database/DbClient.h
         Database/DbClient.cpp
         JobScheduler.h
         JobScheduler.cpp
-        CranedMetaContainer.h
-        CranedMetaContainer.cpp
         Account/AccountManager.h
         Account/AccountManager.cpp
         Accounting/AccountMetaContainer.h

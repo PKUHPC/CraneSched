@@ -24,7 +24,7 @@
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
 #include "Accounting/LicenseManager.h"
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
 #include "Lua/LuaJobHandler.h"

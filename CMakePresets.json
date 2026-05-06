@@ -53,19 +53,28 @@
     ],
     "buildPresets": [
         {
+            "name": "_base",
+            "hidden": true,
+            "targets": ["cranectld", "craned", "csupervisor", "pam_crane"]
+        },
+        {
             "name": "debug",
+            "inherits": "_base",
             "configurePreset": "debug"
         },
         {
             "name": "release",
+            "inherits": "_base",
             "configurePreset": "release"
         },
         {
             "name": "ci-debug",
+            "inherits": "_base",
             "configurePreset": "ci-debug"
         },
         {
             "name": "ci-release",
+            "inherits": "_base",
             "configurePreset": "ci-release"
         }
     ]

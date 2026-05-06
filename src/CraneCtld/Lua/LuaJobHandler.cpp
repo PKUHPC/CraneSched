@@ -19,7 +19,7 @@
 #include "LuaJobHandler.h"
 
 #include "Account/AccountManager.h"
-#include "CranedMetaContainer.h"
+#include "Node/CranedMetaContainer.h"
 #include "JobScheduler.h"
 
 namespace Ctld {
