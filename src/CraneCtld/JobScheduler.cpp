@@ -21,13 +21,13 @@
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
-#include "AccountManager.h"
-#include "AccountMetaContainer.h"
-#include "CranedMetaContainer.h"
+#include "Account/AccountManager.h"
+#include "Accounting/AccountMetaContainer.h"
+#include "Accounting/LicenseManager.h"
 #include "CtldPublicDefs.h"
-#include "EmbeddedDbClient.h"
-#include "LicensesManager.h"
+#include "Database/EmbeddedDbClient.h"
 #include "Lua/LuaJobHandler.h"
+#include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/Tracing.h"
@@ -836,7 +836,7 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
                                              job->AllocatedRes());
   }
   if (!job->licenses_count.empty())
-    g_licenses_manager->MallocLicenseWhenRecoverRunning(job->licenses_count);
+    g_license_manager->MallocLicenseWhenRecoverRunning(job->licenses_count);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_job_map_mtx_);
@@ -1213,7 +1213,7 @@ void JobScheduler::ScheduleThread_() {
           }
 
           if (!job_in_scheduler->actual_licenses.empty()) {
-            if (!g_licenses_manager->MallocLicense(
+            if (!g_license_manager->MallocLicense(
                     job_in_scheduler->actual_licenses)) {
               job->pending_reason = "Licenses";
               continue;
@@ -1225,8 +1225,7 @@ void JobScheduler::ScheduleThread_() {
               !result) {
             // free licenses
             if (!job_in_scheduler->actual_licenses.empty()) {
-              g_licenses_manager->FreeLicense(
-                  job_in_scheduler->actual_licenses);
+              g_license_manager->FreeLicense(job_in_scheduler->actual_licenses);
             }
             job->pending_reason = result.error();
             continue;
@@ -1604,7 +1603,7 @@ void JobScheduler::ScheduleThread_() {
                                                    job->JobId());
           g_account_meta_container->FreeQosResource(*job);
           if (!job->licenses_count.empty())
-            g_licenses_manager->FreeLicense(job->licenses_count);
+            g_license_manager->FreeLicense(job->licenses_count);
           LockGuard indexes_guard(&m_job_indexes_mtx_);
           for (const CranedId& craned_id : job->CranedIds()) {
             m_node_to_jobs_map_[craned_id].erase(job->JobId());
@@ -4623,7 +4622,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         g_meta_container->FreeResourceFromResv(job->reservation, job->JobId());
       g_account_meta_container->FreeQosResource(*job);
       if (!job->licenses_count.empty())
-        g_licenses_manager->FreeLicense(job->licenses_count);
+        g_license_manager->FreeLicense(job->licenses_count);
 
       if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
         g_thread_pool->detach_task(
@@ -5466,7 +5465,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
 
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
-        min_res_on_node.ckmin(res);
+        min_res_on_node.Ckmin(res);
       }
 
       int ntasks_on_node_avail = get_max_tasks(min_res_on_node);
@@ -5753,7 +5752,7 @@ void SchedulerAlgo::NodeSelect(
                                           g_config.ScheduledBatchSize,
                                           job_ptr_vec);
 
-  g_licenses_manager->CheckLicenseCountSufficient(&job_ptr_vec);
+  g_license_manager->CheckLicenseCountSufficient(&job_ptr_vec);
 
   // Schedule pending jobs
   // TODO: do it in parallel
@@ -6101,7 +6100,7 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   }
 
   if (!job->JobToCtld().licenses_count().empty()) {
-    auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
+    auto check_licenses_result = g_license_manager->CheckLicensesLegal(
         job->JobToCtld().licenses_count(), job->JobToCtld().is_licenses_or());
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
@@ -6435,7 +6434,7 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
   for (const auto& craned_id : job->CranedIds()) {
     const auto& job_res = job->AllocatedRes();
     if (step->req_node_res_view + step->req_task_res_view <=
-            job_res.at(craned_id) &&
+            job_res.At(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
         (step->excluded_nodes.empty() ||

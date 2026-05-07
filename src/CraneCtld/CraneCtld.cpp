@@ -26,15 +26,15 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 
-#include "AccountManager.h"
-#include "AccountMetaContainer.h"
-#include "CranedMetaContainer.h"
+#include "Account/AccountManager.h"
+#include "Accounting/AccountMetaContainer.h"
+#include "Accounting/LicenseManager.h"
 #include "CtldPublicDefs.h"
-#include "DbClient.h"
-#include "EmbeddedDbClient.h"
+#include "Database/DbClient.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
-#include "LicensesManager.h"
 #include "Lua/LuaJobHandler.h"
+#include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
@@ -551,6 +551,9 @@ void ParseConfig(int argc, char** argv) {
       std::unordered_set nodes_without_part = g_config.Nodes |
                                               ranges::views::keys |
                                               ranges::to<std::unordered_set>();
+      const std::list<std::string> all_node_list =
+          g_config.Nodes | ranges::views::keys |
+          ranges::to<std::list<std::string>>();
       if (config["Partitions"]) {
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
@@ -579,45 +582,14 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          std::list<std::string> name_list;
-          auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
-          if (act_nodes_str == "ALL") {
-            std::list<std::string> host_list =
-                g_config.Nodes | ranges::views::keys |
-                ranges::to<std::list<std::string>>();
-            part.nodelist_str = util::HostNameListToStr(host_list);
-            for (auto&& node : host_list) {
-              part.nodes.emplace(node);
-              nodes_without_part.erase(node);
-              CRANE_TRACE("Set the partition of node {} to {}", node, name);
-            }
-          } else {
-            part.nodelist_str = nodes;
-            if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
-              CRANE_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
+          if (!util::PartitionNodesProcess(nodes, all_node_list, name, true,
+                                           &part.nodes)) {
+            std::exit(1);
+          }
+          part.nodelist_str = util::HostNameListToStr(part.nodes);
 
-            if (name_list.empty()) {
-              CRANE_WARN("No nodes in partition '{}'.", name);
-            } else {
-              for (auto&& node : name_list) {
-                auto node_it = g_config.Nodes.find(node);
-                if (node_it != g_config.Nodes.end()) {
-                  part.nodes.emplace(node_it->first);
-                  nodes_without_part.erase(node_it->first);
-                  CRANE_TRACE("Set the partition of node {} to {}",
-                              node_it->first, name);
-                } else {
-                  CRANE_ERROR(
-                      "Unknown node '{}' found in partition '{}'. It is "
-                      "ignored "
-                      "and should be contained in the configuration file.",
-                      node, name);
-                  std::exit(1);
-                }
-              }
-            }
+          for (const auto& node_name : part.nodes) {
+            nodes_without_part.erase(node_name);
           }
 
           if (partition["AllowedAccounts"] &&
@@ -1028,8 +1000,8 @@ void InitializeCtldGlobalVariables() {
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
-  g_licenses_manager = std::make_unique<LicensesManager>();
-  g_licenses_manager->Init(g_config.lic_id_to_count_map);
+  g_license_manager = std::make_unique<LicenseManager>();
+  g_license_manager->Init(g_config.lic_id_to_count_map);
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);

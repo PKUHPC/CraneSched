@@ -7,7 +7,9 @@ hide:
 
 <p class="lead">新一代超智融合算力调度系统 — 国内首个超智融合信创开源算力调度系统</p>
 
-<p>鹤思（CraneSched）是由北京大学、北京大学长沙计算与数字经济研究院和长沙尖山塔图科技有限公司联合自主研发的分布式作业调度系统，面向高性能计算（HPC）和人工智能（AI）工作负载，统一超算和智算算力资源，打破传统算力壁垒，为教育、工业、气象、国防科工等各行各业提供高效、稳定、可靠的算力服务。</p>
+<p>鹤思（CraneSched）是一款面向高性能计算（HPC）和人工智能（AI）工作负载的分布式作业调度系统。它在统一平台上整合超算与智算算力资源，为教育、工业、气象等各行各业提供高效、稳定、可靠的调度服务。</p>
+
+<p>本项目由北京大学、北京大学长沙计算与数字经济研究院和长沙尖山塔图科技有限公司联合自主研发。</p>
 
 [快速开始](deployment/index.md){ .md-button .md-button--primary } [体验演示](https://hpc.pku.edu.cn/demo/cranesched){ .md-button } [GitHub](https://github.com/PKUHPC/CraneSched){ .md-button }
 

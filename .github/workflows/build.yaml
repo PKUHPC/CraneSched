@@ -367,12 +367,12 @@ jobs:
       - name: Upload to private repository (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         continue-on-error: true
-        env: 
+        env:
           NEXUS_URL: ${{ secrets.CCREPO_URL }}
           NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
 
-          VERSION: >- 
+          VERSION: >-
             ${{ (github.event_name == 'pull_request')
             && format('pr-{0}', github.event.number)
             || github.ref_name }}
@@ -392,16 +392,17 @@ jobs:
 
         run: |
           set -euo pipefail
-          
+
           # Check if secrets are available (they won't be in forked repositories)
           if [ -z "${NEXUS_URL:-}" ] || [ -z "${NEXUS_USERNAME:-}" ] || [ -z "${NEXUS_PASSWORD:-}" ]; then
             echo "Skipping upload: Repository secrets not available"
             echo "This is expected for forked repositories and does not affect build/test results."
             exit 0
           fi
-          
+
           unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
           "${AUTOTEST_REPO}/github-runner/upload.sh"
+
 
   test:
     needs: [ prepare, build ]
@@ -512,3 +513,11 @@ jobs:
       - name: Alarm on test failure
         if: env.TEST_FAILED == 'true'
         run: exit 1
+
+      # Launch CI failure analysis agent on test failure
+      - name: Launch CI failure analysis agent
+        if: failure()
+        continue-on-error: true
+        run: |
+          bash "${AUTOTEST_REPO}/github-runner/ci-agent-launcher.sh" 2>/dev/null
+          echo "Agent launched."

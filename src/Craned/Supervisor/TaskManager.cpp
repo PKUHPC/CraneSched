@@ -3569,6 +3569,19 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
 
+    if (m_step_.IsContainer() && m_step_.task_ids.size() > 1) {
+      CRANE_ERROR(
+          "Container step #{}.{} has {} tasks, but container steps only "
+          "support exactly one task. Rejecting.",
+          m_step_.job_id, m_step_.step_id, m_step_.task_ids.size());
+      for (auto task_id : m_step_.task_ids)
+        g_task_mgr->FinalizeTaskAsync(
+            task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
+            "Container steps only support exactly one task");
+      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
     m_step_.GotNewStatus(StepStatus::Running);
 
     CRANE_TRACE_MANUAL_FROM_REMOTE(exec_span, "step/execute",

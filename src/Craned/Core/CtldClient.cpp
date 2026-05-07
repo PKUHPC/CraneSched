@@ -1079,7 +1079,7 @@ void CtldClient::HealthCheck_() {
   auto fut = std::async(std::launch::async,
                         [pid, &status]() { return waitpid(pid, &status, 0); });
 
-  if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTimeMs)) ==
+  if (fut.wait_for(std::chrono::milliseconds(kMaxHealthCheckWaitTimeMs)) ==
       std::future_status::ready) {
     if (fut.get() == pid) {
       child_exited = true;

@@ -23,6 +23,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "Account/AccountDefs.h"
 #include "crane/Lock.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
@@ -43,7 +44,7 @@ class CforedStreamWriter {
  public:
   explicit CforedStreamWriter(
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                               crane::grpc::StreamCforedRequest> *stream)
+                               crane::grpc::StreamCforedRequest>* stream)
       : m_stream_(stream), m_valid_(true) {}
 
   bool WriteJobIdReply(
@@ -54,7 +55,7 @@ class CforedStreamWriter {
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::JOB_ID_REPLY);
-    auto *job_id_reply = reply.mutable_payload_job_id_reply();
+    auto* job_id_reply = reply.mutable_payload_job_id_reply();
     if (res.has_value()) {
       job_id_reply->set_ok(true);
       job_id_reply->set_pid(calloc_pid);
@@ -71,27 +72,27 @@ class CforedStreamWriter {
   }
 
   bool WriteJobResAllocReply(
-      const StepInteractiveMeta::StepResAllocArgs &args) {
+      const StepInteractiveMeta::StepResAllocArgs& args) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::JOB_RES_ALLOC_REPLY);
-    auto &[job_id, step_id, allocated_res_info_expt] = args;
-    auto *job_res_alloc_reply = reply.mutable_payload_job_res_alloc_reply();
+    auto& [job_id, step_id, allocated_res_info_expt] = args;
+    auto* job_res_alloc_reply = reply.mutable_payload_job_res_alloc_reply();
     job_res_alloc_reply->set_job_id(job_id);
     job_res_alloc_reply->set_step_id(step_id);
 
     if (allocated_res_info_expt.has_value()) {
       job_res_alloc_reply->set_ok(true);
-      auto &res_info = allocated_res_info_expt.value();
+      auto& res_info = allocated_res_info_expt.value();
       job_res_alloc_reply->set_allocated_craned_regex(
           res_info.allocated_craned_regex);
       job_res_alloc_reply->mutable_craned_ids()->Assign(
           res_info.allocated_craned_ids.begin(),
           res_info.allocated_craned_ids.end());
-      for (auto &[craned_name, tasks] : res_info.craned_task_map) {
-        auto &craned_res_info_pb =
+      for (auto& [craned_name, tasks] : res_info.craned_task_map) {
+        auto& craned_res_info_pb =
             (*job_res_alloc_reply->mutable_craned_task_map())[craned_name];
         craned_res_info_pb.mutable_task_ids()->Assign(tasks.begin(),
                                                       tasks.end());
@@ -113,7 +114,7 @@ class CforedStreamWriter {
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::JOB_COMPLETION_ACK_REPLY);
 
-    auto *job_completion_ack = reply.mutable_payload_job_completion_ack();
+    auto* job_completion_ack = reply.mutable_payload_job_completion_ack();
     job_completion_ack->set_job_id(job_id);
     job_completion_ack->set_step_id(step_id);
 
@@ -127,21 +128,21 @@ class CforedStreamWriter {
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::JOB_CANCEL_REQUEST);
 
-    auto *job_cancel_req = reply.mutable_payload_job_cancel_request();
+    auto* job_cancel_req = reply.mutable_payload_job_cancel_request();
     job_cancel_req->set_job_id(job_id);
     job_cancel_req->set_step_id(step_id);
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteCforedRegistrationAck(const std::expected<void, std::string> &res) {
+  bool WriteCforedRegistrationAck(const std::expected<void, std::string>& res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::CFORED_REGISTRATION_ACK);
 
-    auto *cfored_reg_ack = reply.mutable_payload_cfored_reg_ack();
+    auto* cfored_reg_ack = reply.mutable_payload_cfored_reg_ack();
     if (res.has_value()) {
       cfored_reg_ack->set_ok(true);
     } else {
@@ -159,7 +160,7 @@ class CforedStreamWriter {
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::CFORED_GRACEFUL_EXIT_ACK);
 
-    auto *cfored_graceful_exit_ack = reply.mutable_payload_graceful_exit_ack();
+    auto* cfored_graceful_exit_ack = reply.mutable_payload_graceful_exit_ack();
     cfored_graceful_exit_ack->set_ok(true);
 
     return m_stream_->Write(reply);
@@ -176,7 +177,7 @@ class CforedStreamWriter {
   bool m_valid_;
 
   grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                           crane::grpc::StreamCforedRequest> *m_stream_
+                           crane::grpc::StreamCforedRequest>* m_stream_
       ABSL_GUARDED_BY(m_stream_mtx_);
 };
 
@@ -185,291 +186,291 @@ class CtldServer;
 class CtldForInternalServiceImpl final
     : public crane::grpc::CraneCtldForInternal::Service {
  public:
-  explicit CtldForInternalServiceImpl(CtldServer *server)
+  explicit CtldForInternalServiceImpl(CtldServer* server)
       : m_ctld_server_(server) {}
 
   grpc::Status StepStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::StepStatusChangeRequest *request,
-      crane::grpc::StepStatusChangeReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::StepStatusChangeRequest* request,
+      crane::grpc::StepStatusChangeReply* response) override;
 
   grpc::Status CranedTriggerReverseConn(
-      grpc::ServerContext *context,
-      const crane::grpc::CranedTriggerReverseConnRequest *request,
-      google::protobuf::Empty *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::CranedTriggerReverseConnRequest* request,
+      google::protobuf::Empty* response) override;
 
   grpc::Status CranedRegister(
-      grpc::ServerContext *context,
-      const crane::grpc::CranedRegisterRequest *request,
-      crane::grpc::CranedRegisterReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::CranedRegisterRequest* request,
+      crane::grpc::CranedRegisterReply* response) override;
 
-  grpc::Status CranedPing(grpc::ServerContext *context,
-                          const crane::grpc::CranedPingRequest *request,
-                          crane::grpc::CranedPingReply *response) override;
+  grpc::Status CranedPing(grpc::ServerContext* context,
+                          const crane::grpc::CranedPingRequest* request,
+                          crane::grpc::CranedPingReply* response) override;
 
   grpc::Status UpdateNodeDrainState(
-      grpc::ServerContext *context,
-      const crane::grpc::UpdateNodeDrainStateRequest *request,
-      crane::grpc::UpdateNodeDrainStateReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::UpdateNodeDrainStateRequest* request,
+      crane::grpc::UpdateNodeDrainStateReply* response) override;
 
   grpc::Status QueryCranedInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedInfoRequest *request,
-      crane::grpc::QueryCranedInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryCranedInfoRequest* request,
+      crane::grpc::QueryCranedInfoReply* response) override;
 
   grpc::Status CforedStream(
-      grpc::ServerContext *context,
+      grpc::ServerContext* context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                               crane::grpc::StreamCforedRequest> *stream)
+                               crane::grpc::StreamCforedRequest>* stream)
       override;
 
  private:
-  CtldServer *m_ctld_server_;
+  CtldServer* m_ctld_server_;
 };
 
 class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
-  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+  explicit CraneCtldServiceImpl(CtldServer* server) : m_ctld_server_(server) {}
 
   grpc::Status SubmitBatchJob(
-      grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchJobRequest *request,
-      crane::grpc::SubmitBatchJobReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::SubmitBatchJobRequest* request,
+      crane::grpc::SubmitBatchJobReply* response) override;
 
   grpc::Status SubmitContainerStep(
-      grpc::ServerContext *context,
-      const crane::grpc::SubmitContainerStepRequest *request,
-      crane::grpc::SubmitContainerStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::SubmitContainerStepRequest* request,
+      crane::grpc::SubmitContainerStepReply* response) override;
 
   // This gRPC is for testing purposes only
   grpc::Status SubmitBatchJobs(
-      grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchJobsRequest *request,
-      crane::grpc::SubmitBatchJobsReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::SubmitBatchJobsRequest* request,
+      crane::grpc::SubmitBatchJobsReply* response) override;
 
-  grpc::Status CancelJob(grpc::ServerContext *context,
-                         const crane::grpc::CancelJobRequest *request,
-                         crane::grpc::CancelJobReply *response) override;
+  grpc::Status CancelJob(grpc::ServerContext* context,
+                         const crane::grpc::CancelJobRequest* request,
+                         crane::grpc::CancelJobReply* response) override;
 
   grpc::Status QueryJobsInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryJobsInfoRequest *request,
-      crane::grpc::QueryJobsInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryJobsInfoRequest* request,
+      crane::grpc::QueryJobsInfoReply* response) override;
 
   grpc::Status QueryCranedInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedInfoRequest *request,
-      crane::grpc::QueryCranedInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryCranedInfoRequest* request,
+      crane::grpc::QueryCranedInfoReply* response) override;
 
   grpc::Status QueryPartitionInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryPartitionInfoRequest *request,
-      crane::grpc::QueryPartitionInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryPartitionInfoRequest* request,
+      crane::grpc::QueryPartitionInfoReply* response) override;
 
   grpc::Status QueryReservationInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryReservationInfoRequest *request,
-      crane::grpc::QueryReservationInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryReservationInfoRequest* request,
+      crane::grpc::QueryReservationInfoReply* response) override;
 
   grpc::Status QueryLicensesInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryLicensesInfoRequest *request,
-      crane::grpc::QueryLicensesInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryLicensesInfoRequest* request,
+      crane::grpc::QueryLicensesInfoReply* response) override;
 
-  grpc::Status ModifyJob(grpc::ServerContext *context,
-                         const crane::grpc::ModifyJobRequest *request,
-                         crane::grpc::ModifyJobReply *response) override;
+  grpc::Status ModifyJob(grpc::ServerContext* context,
+                         const crane::grpc::ModifyJobRequest* request,
+                         crane::grpc::ModifyJobReply* response) override;
 
   grpc::Status ModifyJobsExtraAttrs(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyJobsExtraAttrsRequest *request,
-      crane::grpc::ModifyJobsExtraAttrsReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ModifyJobsExtraAttrsRequest* request,
+      crane::grpc::ModifyJobsExtraAttrsReply* response) override;
 
   grpc::Status ResetNextJobId(
-      grpc::ServerContext *context,
-      const crane::grpc::ResetNextJobIdRequest *request,
-      crane::grpc::ResetNextJobIdReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ResetNextJobIdRequest* request,
+      crane::grpc::ResetNextJobIdReply* response) override;
 
   grpc::Status ResetNextStepDbId(
-      grpc::ServerContext *context,
-      const crane::grpc::ResetNextStepDbIdRequest *request,
-      crane::grpc::ResetNextStepDbIdReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ResetNextStepDbIdRequest* request,
+      crane::grpc::ResetNextStepDbIdReply* response) override;
 
   grpc::Status PurgeJobHistory(
-      grpc::ServerContext *context,
-      const crane::grpc::PurgeJobHistoryRequest *request,
-      crane::grpc::PurgeJobHistoryReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::PurgeJobHistoryRequest* request,
+      crane::grpc::PurgeJobHistoryReply* response) override;
 
   grpc::Status ModifyNode(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyCranedStateRequest *request,
-      crane::grpc::ModifyCranedStateReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ModifyCranedStateRequest* request,
+      crane::grpc::ModifyCranedStateReply* response) override;
 
   grpc::Status ModifyPartitionAcl(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyPartitionAclRequest *request,
-      crane::grpc::ModifyPartitionAclReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ModifyPartitionAclRequest* request,
+      crane::grpc::ModifyPartitionAclReply* response) override;
 
   grpc::Status ResetPartitionAcl(
-      grpc::ServerContext *context,
-      const crane::grpc::ResetPartitionAclRequest *request,
-      crane::grpc::ResetPartitionAclReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ResetPartitionAclRequest* request,
+      crane::grpc::ResetPartitionAclReply* response) override;
 
-  grpc::Status AddAccount(grpc::ServerContext *context,
-                          const crane::grpc::AddAccountRequest *request,
-                          crane::grpc::AddAccountReply *response) override;
+  grpc::Status AddAccount(grpc::ServerContext* context,
+                          const crane::grpc::AddAccountRequest* request,
+                          crane::grpc::AddAccountReply* response) override;
 
-  grpc::Status AddUser(grpc::ServerContext *context,
-                       const crane::grpc::AddUserRequest *request,
-                       crane::grpc::AddUserReply *response) override;
+  grpc::Status AddUser(grpc::ServerContext* context,
+                       const crane::grpc::AddUserRequest* request,
+                       crane::grpc::AddUserReply* response) override;
 
-  grpc::Status AddQos(grpc::ServerContext *context,
-                      const crane::grpc::AddQosRequest *request,
-                      crane::grpc::AddQosReply *response) override;
+  grpc::Status AddQos(grpc::ServerContext* context,
+                      const crane::grpc::AddQosRequest* request,
+                      crane::grpc::AddQosReply* response) override;
 
-  grpc::Status AddWckey(grpc::ServerContext *context,
-                        const crane::grpc::AddWckeyRequest *request,
-                        crane::grpc::AddWckeyReply *response) override;
+  grpc::Status AddWckey(grpc::ServerContext* context,
+                        const crane::grpc::AddWckeyRequest* request,
+                        crane::grpc::AddWckeyReply* response) override;
 
   grpc::Status ModifyAccount(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyAccountRequest *request,
-      crane::grpc::ModifyAccountReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ModifyAccountRequest* request,
+      crane::grpc::ModifyAccountReply* response) override;
 
-  grpc::Status ModifyUser(grpc::ServerContext *context,
-                          const crane::grpc::ModifyUserRequest *request,
-                          crane::grpc::ModifyUserReply *response) override;
+  grpc::Status ModifyUser(grpc::ServerContext* context,
+                          const crane::grpc::ModifyUserRequest* request,
+                          crane::grpc::ModifyUserReply* response) override;
 
-  grpc::Status ModifyQos(grpc::ServerContext *context,
-                         const crane::grpc::ModifyQosRequest *request,
-                         crane::grpc::ModifyQosReply *response) override;
+  grpc::Status ModifyQos(grpc::ServerContext* context,
+                         const crane::grpc::ModifyQosRequest* request,
+                         crane::grpc::ModifyQosReply* response) override;
 
   grpc::Status ModifyDefaultWckey(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyDefaultWckeyRequest *request,
-      crane::grpc::ModifyDefaultWckeyReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ModifyDefaultWckeyRequest* request,
+      crane::grpc::ModifyDefaultWckeyReply* response) override;
 
   grpc::Status QueryAccountInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryAccountInfoRequest *request,
-      crane::grpc::QueryAccountInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryAccountInfoRequest* request,
+      crane::grpc::QueryAccountInfoReply* response) override;
 
   grpc::Status QueryUserInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryUserInfoRequest *request,
-      crane::grpc::QueryUserInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryUserInfoRequest* request,
+      crane::grpc::QueryUserInfoReply* response) override;
 
   grpc::Status QueryWckeyInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryWckeyInfoRequest *request,
-      crane::grpc::QueryWckeyInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryWckeyInfoRequest* request,
+      crane::grpc::QueryWckeyInfoReply* response) override;
 
-  grpc::Status QueryQosInfo(grpc::ServerContext *context,
-                            const crane::grpc::QueryQosInfoRequest *request,
-                            crane::grpc::QueryQosInfoReply *response) override;
+  grpc::Status QueryQosInfo(grpc::ServerContext* context,
+                            const crane::grpc::QueryQosInfoRequest* request,
+                            crane::grpc::QueryQosInfoReply* response) override;
 
   grpc::Status DeleteAccount(
-      grpc::ServerContext *context,
-      const crane::grpc::DeleteAccountRequest *request,
-      crane::grpc::DeleteAccountReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::DeleteAccountRequest* request,
+      crane::grpc::DeleteAccountReply* response) override;
 
-  grpc::Status DeleteUser(grpc::ServerContext *context,
-                          const crane::grpc::DeleteUserRequest *request,
-                          crane::grpc::DeleteUserReply *response) override;
+  grpc::Status DeleteUser(grpc::ServerContext* context,
+                          const crane::grpc::DeleteUserRequest* request,
+                          crane::grpc::DeleteUserReply* response) override;
 
-  grpc::Status DeleteQos(grpc::ServerContext *context,
-                         const crane::grpc::DeleteQosRequest *request,
-                         crane::grpc::DeleteQosReply *response) override;
+  grpc::Status DeleteQos(grpc::ServerContext* context,
+                         const crane::grpc::DeleteQosRequest* request,
+                         crane::grpc::DeleteQosReply* response) override;
 
-  grpc::Status DeleteWckey(grpc::ServerContext *context,
-                           const crane::grpc::DeleteWckeyRequest *request,
-                           crane::grpc::DeleteWckeyReply *response) override;
+  grpc::Status DeleteWckey(grpc::ServerContext* context,
+                           const crane::grpc::DeleteWckeyRequest* request,
+                           crane::grpc::DeleteWckeyReply* response) override;
 
   grpc::Status BlockAccountOrUser(
-      grpc::ServerContext *context,
-      const crane::grpc::BlockAccountOrUserRequest *request,
-      crane::grpc::BlockAccountOrUserReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::BlockAccountOrUserRequest* request,
+      crane::grpc::BlockAccountOrUserReply* response) override;
 
   grpc::Status ResetUserCredential(
-      grpc::ServerContext *context,
-      const crane::grpc::ResetUserCredentialRequest *request,
-      crane::grpc::ResetUserCredentialReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ResetUserCredentialRequest* request,
+      crane::grpc::ResetUserCredentialReply* response) override;
 
-  grpc::Status QueryTxnLog(grpc::ServerContext *context,
-                           const crane::grpc::QueryTxnLogRequest *request,
-                           crane::grpc::QueryTxnLogReply *response) override;
+  grpc::Status QueryTxnLog(grpc::ServerContext* context,
+                           const crane::grpc::QueryTxnLogRequest* request,
+                           crane::grpc::QueryTxnLogReply* response) override;
 
   grpc::Status AddOrModifyLicenseResource(
-      grpc::ServerContext *context,
-      const crane::grpc::AddOrModifyLicenseResourceRequest *request,
-      crane::grpc::AddOrModifyLicenseResourceReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::AddOrModifyLicenseResourceRequest* request,
+      crane::grpc::AddOrModifyLicenseResourceReply* response) override;
 
   grpc::Status DeleteLicenseResource(
-      grpc::ServerContext *context,
-      const crane::grpc::DeleteLicenseResourceRequest *request,
-      crane::grpc::DeleteLicenseResourceReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::DeleteLicenseResourceRequest* request,
+      crane::grpc::DeleteLicenseResourceReply* response) override;
 
   grpc::Status QueryLicenseResource(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryLicenseResourceRequest *request,
-      crane::grpc::QueryLicenseResourceReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryLicenseResourceRequest* request,
+      crane::grpc::QueryLicenseResourceReply* response) override;
 
   grpc::Status QueryClusterInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryClusterInfoRequest *request,
-      crane::grpc::QueryClusterInfoReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryClusterInfoRequest* request,
+      crane::grpc::QueryClusterInfoReply* response) override;
 
   grpc::Status CreateReservation(
-      grpc::ServerContext *context,
-      const crane::grpc::CreateReservationRequest *request,
-      crane::grpc::CreateReservationReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::CreateReservationRequest* request,
+      crane::grpc::CreateReservationReply* response) override;
 
   grpc::Status DeleteReservation(
-      grpc::ServerContext *context,
-      const crane::grpc::DeleteReservationRequest *request,
-      crane::grpc::DeleteReservationReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::DeleteReservationRequest* request,
+      crane::grpc::DeleteReservationReply* response) override;
 
   grpc::Status PowerStateChange(
-      grpc::ServerContext *context,
-      const crane::grpc::PowerStateChangeRequest *request,
-      crane::grpc::PowerStateChangeReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::PowerStateChangeRequest* request,
+      crane::grpc::PowerStateChangeReply* response) override;
 
   grpc::Status EnableAutoPowerControl(
-      grpc::ServerContext *context,
-      const crane::grpc::EnableAutoPowerControlRequest *request,
-      crane::grpc::EnableAutoPowerControlReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::EnableAutoPowerControlRequest* request,
+      crane::grpc::EnableAutoPowerControlReply* response) override;
 
   grpc::Status SignUserCertificate(
-      grpc::ServerContext *context,
-      const crane::grpc::SignUserCertificateRequest *request,
-      crane::grpc::SignUserCertificateResponse *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::SignUserCertificateRequest* request,
+      crane::grpc::SignUserCertificateResponse* response) override;
 
   grpc::Status AttachContainerStep(
-      grpc::ServerContext *context,
-      const crane::grpc::AttachContainerStepRequest *request,
-      crane::grpc::AttachContainerStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::AttachContainerStepRequest* request,
+      crane::grpc::AttachContainerStepReply* response) override;
 
   grpc::Status ExecInContainerStep(
-      grpc::ServerContext *context,
-      const crane::grpc::ExecInContainerStepRequest *request,
-      crane::grpc::ExecInContainerStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ExecInContainerStepRequest* request,
+      crane::grpc::ExecInContainerStepReply* response) override;
 
   ::grpc::Status QueryJobSummary(
-      ::grpc::ServerContext *context,
-      const ::crane::grpc::QueryJobSummaryRequest *request,
-      ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer)
+      ::grpc::ServerContext* context,
+      const ::crane::grpc::QueryJobSummaryRequest* request,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* writer)
       override;
   grpc::Status QueryJobSizeSummary(
-      ::grpc::ServerContext *context,
-      const ::crane::grpc::QueryJobSizeSummaryRequest *request,
-      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer)
+      ::grpc::ServerContext* context,
+      const ::crane::grpc::QueryJobSizeSummaryRequest* request,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* writer)
       override;
 
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(
-      const grpc::ServerContext *context, uint32_t uid);
+      const grpc::ServerContext* context, uint32_t uid);
 
-  CtldServer *m_ctld_server_;
+  CtldServer* m_ctld_server_;
 };
 
 /***
@@ -480,7 +481,7 @@ class CtldServer {
   /***
    * User must make sure that this constructor is called only once!
    */
-  explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
+  explicit CtldServer(const Config::CraneCtldListenConf& listen_conf);
 
   void Wait() { m_server_->Wait(); }
 

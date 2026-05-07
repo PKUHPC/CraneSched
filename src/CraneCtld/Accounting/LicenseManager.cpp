@@ -16,15 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "LicensesManager.h"
+#include "LicenseManager.h"
 
 #include "JobScheduler.h"
 
 namespace Ctld {
 
-LicensesManager::LicensesManager() {}
+LicenseManager::LicenseManager() {}
 
-int LicensesManager::Init(
+int LicenseManager::Init(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   HashMap<LicenseId, License> licenses_map;
   std::list<LicenseResourceInDb> resource_list;
@@ -84,11 +84,11 @@ int LicensesManager::Init(
   return 0;
 }
 
-LicensesMapExclusivePtr LicensesManager::GetLicensesMapExclusivePtr() {
+LicensesMapExclusivePtr LicenseManager::GetLicensesMapExclusivePtr() {
   return m_licenses_map_.GetMapExclusivePtr();
 }
 
-void LicensesManager::GetLicensesInfo(
+void LicenseManager::GetLicensesInfo(
     const crane::grpc::QueryLicensesInfoRequest* request,
     crane::grpc::QueryLicensesInfoReply* response) {
   auto* list = response->mutable_license_info_list();
@@ -131,7 +131,7 @@ void LicensesManager::GetLicensesInfo(
   }
 }
 
-std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
+std::expected<void, std::string> LicenseManager::CheckLicensesLegal(
     const google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>&
         lic_id_to_count,
     bool is_license_or) {
@@ -164,7 +164,7 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   return {};
 }
 
-void LicensesManager::CheckLicenseCountSufficient(
+void LicenseManager::CheckLicenseCountSufficient(
     std::vector<PdJobInScheduler*>* job_ptr_vec) {
   std::unordered_map<LicenseId, License> avail_license_map;
 
@@ -220,7 +220,7 @@ void LicensesManager::CheckLicenseCountSufficient(
   }
 }
 
-void LicensesManager::FreeReserved(
+void LicenseManager::FreeReserved(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -240,7 +240,7 @@ void LicensesManager::FreeReserved(
   }
 }
 
-bool LicensesManager::MallocLicense(
+bool LicenseManager::MallocLicense(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -279,7 +279,7 @@ bool LicensesManager::MallocLicense(
   return true;
 }
 
-void LicensesManager::MallocLicenseWhenRecoverRunning(
+void LicenseManager::MallocLicenseWhenRecoverRunning(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -316,7 +316,7 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
   }
 }
 
-void LicensesManager::FreeLicense(
+void LicenseManager::FreeLicense(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -355,7 +355,7 @@ void LicensesManager::FreeLicense(
   }
 }
 
-CraneExpectedRich<void> LicensesManager::AddLicenseResource(
+CraneExpectedRich<void> LicenseManager::AddLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
@@ -437,7 +437,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
   return {};
 }
 
-CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
+CraneExpectedRich<void> LicenseManager::ModifyLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
@@ -503,7 +503,7 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
   return {};
 }
 
-CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
+CraneExpectedRich<void> LicenseManager::RemoveLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
@@ -575,8 +575,7 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
   return {};
 }
 
-std::vector<crane::grpc::RichError>
-LicensesManager::PurgeAllLicenseResources() {
+std::vector<crane::grpc::RichError> LicenseManager::PurgeAllLicenseResources() {
   std::vector<crane::grpc::RichError> errors;
 
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
@@ -612,7 +611,7 @@ LicensesManager::PurgeAllLicenseResources() {
   return errors;
 }
 
-CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
+CraneExpectedRich<void> LicenseManager::QueryLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
     std::list<LicenseResourceInDb>* res_licenses) {
@@ -653,7 +652,7 @@ CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
   return {};
 }
 
-CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
+CraneExpectedRich<void> LicenseManager::CheckAndUpdateFields_(
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
         operators,
@@ -780,9 +779,8 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   return {};
 }
 
-void LicensesManager::UpdateLicense_(
-    const LicenseResourceInDb& license_resource, uint32_t cluster_allowed,
-    License* lic) {
+void LicenseManager::UpdateLicense_(const LicenseResourceInDb& license_resource,
+                                    uint32_t cluster_allowed, License* lic) {
   if (license_resource.flags & crane::grpc::LicenseResource::Absolute)
     lic->total = cluster_allowed;
   else  // when non-absolute, the cluster_allowed is the percentage of the

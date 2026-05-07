@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "Account/AccountDefs.h"
+
 #ifdef CRANE_HAVE_BERKELEY_DB
 #  include <db_cxx.h>
 #endif

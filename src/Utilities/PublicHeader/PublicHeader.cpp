@@ -221,11 +221,11 @@ TypeSlotsMap& DedicatedResourceInNode::operator[](
   return this->name_type_slots_map[device_name];
 }
 
-TypeSlotsMap& DedicatedResourceInNode::at(const std::string& device_name) {
+TypeSlotsMap& DedicatedResourceInNode::At(const std::string& device_name) {
   return this->name_type_slots_map.at(device_name);
 }
 
-const TypeSlotsMap& DedicatedResourceInNode::at(
+const TypeSlotsMap& DedicatedResourceInNode::At(
     const std::string& device_name) const {
   return this->name_type_slots_map.at(device_name);
 }
@@ -248,7 +248,7 @@ DedicatedResourceInNode& DedicatedResourceInNode::operator=(
   return *this;
 }
 
-bool DedicatedResourceInNode::contains(const std::string& device_name) const {
+bool DedicatedResourceInNode::Contains(const std::string& device_name) const {
   return this->name_type_slots_map.contains(device_name);
 }
 
@@ -298,11 +298,11 @@ std::set<SlotId>& TypeSlotsMap::operator[](const std::string& type) {
   return type_slots_map[type];
 }
 
-const std::set<SlotId>& TypeSlotsMap::at(const std::string& type) const {
+const std::set<SlotId>& TypeSlotsMap::At(const std::string& type) const {
   return type_slots_map.at(type);
 }
 
-bool TypeSlotsMap::contains(const std::string& type) const {
+bool TypeSlotsMap::Contains(const std::string& type) const {
   return type_slots_map.contains(type);
 }
 
@@ -361,26 +361,26 @@ TypeSlotsMap Intersection(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
 // ==================== ResourceView ====================
 
 ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
-  cpu_count_ = cpu_t{rhs.cpu_count()};
-  memory_bytes_ = rhs.memory_bytes();
-  memory_sw_bytes_ = rhs.memory_sw_bytes();
-  gres_map_ = FromGrpcGresMap(rhs.gres_map());
+  m_cpu_count_ = cpu_t{rhs.cpu_count()};
+  m_memory_bytes_ = rhs.memory_bytes();
+  m_memory_sw_bytes_ = rhs.memory_sw_bytes();
+  m_gres_map_ = FromGrpcGresMap(rhs.gres_map());
 }
 
 ResourceView& ResourceView::operator=(const crane::grpc::ResourceView& rhs) {
-  cpu_count_ = cpu_t{rhs.cpu_count()};
-  memory_bytes_ = rhs.memory_bytes();
-  memory_sw_bytes_ = rhs.memory_sw_bytes();
-  gres_map_ = FromGrpcGresMap(rhs.gres_map());
+  m_cpu_count_ = cpu_t{rhs.cpu_count()};
+  m_memory_bytes_ = rhs.memory_bytes();
+  m_memory_sw_bytes_ = rhs.memory_sw_bytes();
+  m_gres_map_ = FromGrpcGresMap(rhs.gres_map());
   return *this;
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {
   crane::grpc::ResourceView val{};
-  val.set_cpu_count(static_cast<double>(cpu_count_));
-  val.set_memory_bytes(memory_bytes_);
-  val.set_memory_sw_bytes(memory_sw_bytes_);
-  *val.mutable_gres_map() = ToGrpcGresMap(gres_map_);
+  val.set_cpu_count(static_cast<double>(m_cpu_count_));
+  val.set_memory_bytes(m_memory_bytes_);
+  val.set_memory_sw_bytes(m_memory_sw_bytes_);
+  *val.mutable_gres_map() = ToGrpcGresMap(m_gres_map_);
   return val;
 }
 
@@ -397,26 +397,26 @@ ResourceView& ResourceView::operator-=(const ResourceV3& rhs) {
 }
 
 ResourceView& ResourceView::operator+=(const ResourceInNodeV3& rhs) {
-  cpu_count_ += rhs.GetCpuSet().cpu_count;
-  memory_bytes_ += rhs.GetMemoryBytes();
-  memory_sw_bytes_ += rhs.GetMemorySwBytes();
+  m_cpu_count_ += rhs.GetCpuSet().cpu_count;
+  m_memory_bytes_ += rhs.GetMemoryBytes();
+  m_memory_sw_bytes_ += rhs.GetMemorySwBytes();
   *this += rhs.GetGres();
   return *this;
 }
 
 ResourceView& ResourceView::operator-=(const ResourceInNodeV3& rhs) {
-  ABSL_ASSERT(rhs.GetCpuSet().cpu_count <= cpu_count_);
-  ABSL_ASSERT(rhs.GetMemoryBytes() <= memory_bytes_);
-  cpu_count_ -= rhs.GetCpuSet().cpu_count;
-  memory_bytes_ -= rhs.GetMemoryBytes();
-  memory_sw_bytes_ -= rhs.GetMemorySwBytes();
+  ABSL_ASSERT(rhs.GetCpuSet().cpu_count <= m_cpu_count_);
+  ABSL_ASSERT(rhs.GetMemoryBytes() <= m_memory_bytes_);
+  m_cpu_count_ -= rhs.GetCpuSet().cpu_count;
+  m_memory_bytes_ -= rhs.GetMemoryBytes();
+  m_memory_sw_bytes_ -= rhs.GetMemorySwBytes();
   *this -= rhs.GetGres();
   return *this;
 }
 
 ResourceView& ResourceView::operator+=(const DedicatedResourceInNode& rhs) {
   for (const auto& [name, type_slots_map] : rhs.name_type_slots_map) {
-    GresCount& gc = gres_map_[name];
+    GresCount& gc = m_gres_map_[name];
     for (const auto& [type, slots] : type_slots_map.type_slots_map) {
       uint64_t cnt = slots.size();
       gc.total += cnt;
@@ -428,8 +428,8 @@ ResourceView& ResourceView::operator+=(const DedicatedResourceInNode& rhs) {
 
 ResourceView& ResourceView::operator-=(const DedicatedResourceInNode& rhs) {
   for (const auto& [name, type_slots_map] : rhs.name_type_slots_map) {
-    auto it = gres_map_.find(name);
-    ABSL_ASSERT(it != gres_map_.end());
+    auto it = m_gres_map_.find(name);
+    ABSL_ASSERT(it != m_gres_map_.end());
     GresCount& gc = it->second;
     for (const auto& [type, slots] : type_slots_map.type_slots_map) {
       uint64_t cnt = slots.size();
@@ -440,99 +440,101 @@ ResourceView& ResourceView::operator-=(const DedicatedResourceInNode& rhs) {
       type_it->second -= cnt;
       if (type_it->second == 0) gc.specified.erase(type_it);
     }
-    if (gc.IsZero()) gres_map_.erase(it);
+    if (gc.IsZero()) m_gres_map_.erase(it);
   }
   return *this;
 }
 
 ResourceView& ResourceView::operator+=(const ResourceView& rhs) {
-  cpu_count_ += rhs.cpu_count_;
-  memory_bytes_ += rhs.memory_bytes_;
-  memory_sw_bytes_ += rhs.memory_sw_bytes_;
-  for (const auto& [name, gc] : rhs.gres_map_) {
-    gres_map_[name] += gc;
+  m_cpu_count_ += rhs.m_cpu_count_;
+  m_memory_bytes_ += rhs.m_memory_bytes_;
+  m_memory_sw_bytes_ += rhs.m_memory_sw_bytes_;
+  for (const auto& [name, gc] : rhs.m_gres_map_) {
+    m_gres_map_[name] += gc;
   }
   return *this;
 }
 
 ResourceView& ResourceView::operator-=(const ResourceView& rhs) {
-  ABSL_ASSERT(rhs.cpu_count_ <= cpu_count_);
-  ABSL_ASSERT(rhs.memory_bytes_ <= memory_bytes_);
-  cpu_count_ -= rhs.cpu_count_;
-  memory_bytes_ -= rhs.memory_bytes_;
-  memory_sw_bytes_ -= rhs.memory_sw_bytes_;
-  for (const auto& [name, rhs_gc] : rhs.gres_map_) {
-    auto it = gres_map_.find(name);
-    ABSL_ASSERT(it != gres_map_.end());
+  ABSL_ASSERT(rhs.m_cpu_count_ <= m_cpu_count_);
+  ABSL_ASSERT(rhs.m_memory_bytes_ <= m_memory_bytes_);
+  m_cpu_count_ -= rhs.m_cpu_count_;
+  m_memory_bytes_ -= rhs.m_memory_bytes_;
+  m_memory_sw_bytes_ -= rhs.m_memory_sw_bytes_;
+  for (const auto& [name, rhs_gc] : rhs.m_gres_map_) {
+    auto it = m_gres_map_.find(name);
+    ABSL_ASSERT(it != m_gres_map_.end());
     it->second -= rhs_gc;
-    if (it->second.IsZero()) gres_map_.erase(it);
+    if (it->second.IsZero()) m_gres_map_.erase(it);
   }
   return *this;
 }
 
 ResourceView& ResourceView::operator*=(uint32_t rhs) {
-  cpu_count_ *= rhs;
-  memory_bytes_ *= rhs;
-  memory_sw_bytes_ *= rhs;
-  for (auto& [_, gc] : gres_map_) {
+  m_cpu_count_ *= rhs;
+  m_memory_bytes_ *= rhs;
+  m_memory_sw_bytes_ *= rhs;
+  for (auto& [_, gc] : m_gres_map_) {
     gc *= rhs;
   }
   return *this;
 }
 
 bool ResourceView::IsZero() const {
-  return cpu_count_ == cpu_t{0} && memory_bytes_ == 0 &&
-         memory_sw_bytes_ == 0 && gres_map_.empty();
+  return m_cpu_count_ == cpu_t{0} && m_memory_bytes_ == 0 &&
+         m_memory_sw_bytes_ == 0 && m_gres_map_.empty();
 }
 
 void ResourceView::SetToZero() {
-  cpu_count_ = cpu_t{0};
-  memory_bytes_ = 0;
-  memory_sw_bytes_ = 0;
-  gres_map_.clear();
+  m_cpu_count_ = cpu_t{0};
+  m_memory_bytes_ = 0;
+  m_memory_sw_bytes_ = 0;
+  m_gres_map_.clear();
 }
 
-cpu_t ResourceView::GetCpuCount() const { return cpu_count_; }
-void ResourceView::SetCpuCount(cpu_t count) { cpu_count_ = count; }
+cpu_t ResourceView::GetCpuCount() const { return m_cpu_count_; }
+void ResourceView::SetCpuCount(cpu_t count) { m_cpu_count_ = count; }
 
-uint64_t ResourceView::GetMemoryBytes() const { return memory_bytes_; }
-void ResourceView::SetMemoryBytes(uint64_t bytes) { memory_bytes_ = bytes; }
+uint64_t ResourceView::GetMemoryBytes() const { return m_memory_bytes_; }
+void ResourceView::SetMemoryBytes(uint64_t bytes) { m_memory_bytes_ = bytes; }
 
-uint64_t ResourceView::GetMemorySwBytes() const { return memory_sw_bytes_; }
+uint64_t ResourceView::GetMemorySwBytes() const { return m_memory_sw_bytes_; }
 void ResourceView::SetMemorySwBytes(uint64_t bytes) {
-  memory_sw_bytes_ = bytes;
+  m_memory_sw_bytes_ = bytes;
 }
 
-const GresMap& ResourceView::GetGresMap() const { return gres_map_; }
-GresMap& ResourceView::GetGresMap() { return gres_map_; }
+const GresMap& ResourceView::GetGresMap() const { return m_gres_map_; }
+GresMap& ResourceView::GetGresMap() { return m_gres_map_; }
 
 double ResourceView::CpuCountDouble() const {
-  return static_cast<double>(cpu_count_);
+  return static_cast<double>(m_cpu_count_);
 }
 
 uint64_t ResourceView::GpuCount() const {
-  auto it = gres_map_.find(kResourceTypeGpu);
-  if (it == gres_map_.end()) return 0;
+  auto it = m_gres_map_.find(kResourceTypeGpu);
+  if (it == m_gres_map_.end()) return 0;
   return it->second.total;
 }
 
 bool ResourceView::GetFeasibleResourceInNode(
     const ResourceInNodeV3& avail_res, ResourceInNodeV3* feasible_res) const {
   // Check CPU and memory
-  if (cpu_count_ > avail_res.GetCpuSet().cpu_count) return false;
-  if (memory_bytes_ > avail_res.GetMemoryBytes()) return false;
+  if (m_cpu_count_ > avail_res.GetCpuSet().cpu_count) return false;
+  if (m_memory_bytes_ > avail_res.GetMemoryBytes()) return false;
+
+  ResourceInNodeV3 candidate;
 
   // TODO: Allocate specific CPU core IDs here in the future.
   // Currently only sets cpu_count; craned decides core binding.
-  feasible_res->GetCpuSet().cpu_count = cpu_count_;
-  feasible_res->SetMemoryBytes(memory_bytes_);
-  feasible_res->SetMemorySwBytes(memory_sw_bytes_);
+  candidate.GetCpuSet().cpu_count = m_cpu_count_;
+  candidate.SetMemoryBytes(m_memory_bytes_);
+  candidate.SetMemorySwBytes(m_memory_sw_bytes_);
 
   // Choose slots for each GRES request
   const auto& avail_gres = avail_res.GetGres();
-  auto& feasible_gres = feasible_res->GetGres();
+  auto& feasible_gres = candidate.GetGres();
 
-  for (const auto& [dev_name, gres_req] : gres_map_) {
+  for (const auto& [dev_name, gres_req] : m_gres_map_) {
     auto dres_avail_it = avail_gres.name_type_slots_map.find(dev_name);
     if (dres_avail_it == avail_gres.name_type_slots_map.end()) return false;
 
@@ -580,6 +582,7 @@ bool ResourceView::GetFeasibleResourceInNode(
     if (untyped_cnt != 0) return false;
   }
 
+  *feasible_res = std::move(candidate);
   return true;
 }
 
@@ -602,12 +605,12 @@ ResourceView operator-(const ResourceView& lhs, const ResourceView& rhs) {
 }
 
 bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs) {
-  if (lhs.cpu_count_ > rhs.GetCpuSet().cpu_count) return false;
-  if (lhs.memory_bytes_ > rhs.GetMemoryBytes()) return false;
+  if (lhs.m_cpu_count_ > rhs.GetCpuSet().cpu_count) return false;
+  if (lhs.m_memory_bytes_ > rhs.GetMemoryBytes()) return false;
 
   // Check GRES: ResourceView uses GresMap (counts), ResourceInNodeV3 uses
   // DedicatedResourceInNode (slot IDs)
-  for (const auto& [name, lhs_gc] : lhs.gres_map_) {
+  for (const auto& [name, lhs_gc] : lhs.m_gres_map_) {
     auto rhs_it = rhs.GetGres().name_type_slots_map.find(name);
     if (rhs_it == rhs.GetGres().name_type_slots_map.end()) return false;
 
@@ -631,12 +634,12 @@ bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs) {
 }
 
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
-  if (lhs.cpu_count_ > rhs.cpu_count_) return false;
-  if (lhs.memory_bytes_ > rhs.memory_bytes_) return false;
+  if (lhs.m_cpu_count_ > rhs.m_cpu_count_) return false;
+  if (lhs.m_memory_bytes_ > rhs.m_memory_bytes_) return false;
 
-  for (const auto& [name, lhs_gc] : lhs.gres_map_) {
-    auto rhs_it = rhs.gres_map_.find(name);
-    if (rhs_it == rhs.gres_map_.end()) return false;
+  for (const auto& [name, lhs_gc] : lhs.m_gres_map_) {
+    auto rhs_it = rhs.m_gres_map_.find(name);
+    if (rhs_it == rhs.m_gres_map_.end()) return false;
     if (!(lhs_gc <= rhs_it->second)) return false;
   }
 
@@ -647,28 +650,28 @@ uint64_t operator/(const ResourceView& lhs, const ResourceView& rhs) {
   uint64_t min_quotient = std::numeric_limits<uint64_t>::max();
 
   // CPU division
-  if (rhs.cpu_count_ > cpu_t{0}) {
+  if (rhs.m_cpu_count_ > cpu_t{0}) {
     uint64_t cpu_quotient =
-        static_cast<uint64_t>(lhs.cpu_count_ / rhs.cpu_count_);
+        static_cast<uint64_t>(lhs.m_cpu_count_ / rhs.m_cpu_count_);
     min_quotient = std::min(min_quotient, cpu_quotient);
   }
 
   // Memory division
-  if (rhs.memory_bytes_ > 0) {
-    uint64_t mem_quotient = lhs.memory_bytes_ / rhs.memory_bytes_;
+  if (rhs.m_memory_bytes_ > 0) {
+    uint64_t mem_quotient = lhs.m_memory_bytes_ / rhs.m_memory_bytes_;
     min_quotient = std::min(min_quotient, mem_quotient);
   }
 
   // Memory+Swap division
-  if (rhs.memory_sw_bytes_ > 0) {
-    uint64_t mem_sw_quotient = lhs.memory_sw_bytes_ / rhs.memory_sw_bytes_;
+  if (rhs.m_memory_sw_bytes_ > 0) {
+    uint64_t mem_sw_quotient = lhs.m_memory_sw_bytes_ / rhs.m_memory_sw_bytes_;
     min_quotient = std::min(min_quotient, mem_sw_quotient);
   }
 
   // GRES division
-  for (const auto& [name, rhs_gc] : rhs.gres_map_) {
-    auto lhs_it = lhs.gres_map_.find(name);
-    if (lhs_it == lhs.gres_map_.end()) {
+  for (const auto& [name, rhs_gc] : rhs.m_gres_map_) {
+    auto lhs_it = lhs.m_gres_map_.find(name);
+    if (lhs_it == lhs.m_gres_map_.end()) {
       return 0;
     }
     uint64_t gres_quotient = lhs_it->second / rhs_gc;
@@ -681,26 +684,26 @@ uint64_t operator/(const ResourceView& lhs, const ResourceView& rhs) {
 ResourceView ResourceView::Max(const ResourceView& lhs,
                                const ResourceView& rhs) {
   ResourceView result;
-  result.cpu_count_ = std::max(lhs.cpu_count_, rhs.cpu_count_);
-  result.memory_bytes_ = std::max(lhs.memory_bytes_, rhs.memory_bytes_);
-  result.memory_sw_bytes_ =
-      std::max(lhs.memory_sw_bytes_, rhs.memory_sw_bytes_);
+  result.m_cpu_count_ = std::max(lhs.m_cpu_count_, rhs.m_cpu_count_);
+  result.m_memory_bytes_ = std::max(lhs.m_memory_bytes_, rhs.m_memory_bytes_);
+  result.m_memory_sw_bytes_ =
+      std::max(lhs.m_memory_sw_bytes_, rhs.m_memory_sw_bytes_);
 
   // Collect all GRES names
   std::set<std::string> all_names;
-  for (const auto& [name, _] : lhs.gres_map_) all_names.insert(name);
-  for (const auto& [name, _] : rhs.gres_map_) all_names.insert(name);
+  for (const auto& [name, _] : lhs.m_gres_map_) all_names.insert(name);
+  for (const auto& [name, _] : rhs.m_gres_map_) all_names.insert(name);
 
   for (const auto& name : all_names) {
-    auto lhs_it = lhs.gres_map_.find(name);
-    auto rhs_it = rhs.gres_map_.find(name);
+    auto lhs_it = lhs.m_gres_map_.find(name);
+    auto rhs_it = rhs.m_gres_map_.find(name);
 
-    if (lhs_it != lhs.gres_map_.end() && rhs_it != rhs.gres_map_.end()) {
-      result.gres_map_[name] = GresCountMax(lhs_it->second, rhs_it->second);
-    } else if (lhs_it != lhs.gres_map_.end()) {
-      result.gres_map_[name] = lhs_it->second;
+    if (lhs_it != lhs.m_gres_map_.end() && rhs_it != rhs.m_gres_map_.end()) {
+      result.m_gres_map_[name] = GresCountMax(lhs_it->second, rhs_it->second);
+    } else if (lhs_it != lhs.m_gres_map_.end()) {
+      result.m_gres_map_[name] = lhs_it->second;
     } else {
-      result.gres_map_[name] = rhs_it->second;
+      result.m_gres_map_[name] = rhs_it->second;
     }
   }
 
@@ -710,16 +713,16 @@ ResourceView ResourceView::Max(const ResourceView& lhs,
 ResourceView ResourceView::Min(const ResourceView& lhs,
                                const ResourceView& rhs) {
   ResourceView result;
-  result.cpu_count_ = std::min(lhs.cpu_count_, rhs.cpu_count_);
-  result.memory_bytes_ = std::min(lhs.memory_bytes_, rhs.memory_bytes_);
-  result.memory_sw_bytes_ =
-      std::min(lhs.memory_sw_bytes_, rhs.memory_sw_bytes_);
+  result.m_cpu_count_ = std::min(lhs.m_cpu_count_, rhs.m_cpu_count_);
+  result.m_memory_bytes_ = std::min(lhs.m_memory_bytes_, rhs.m_memory_bytes_);
+  result.m_memory_sw_bytes_ =
+      std::min(lhs.m_memory_sw_bytes_, rhs.m_memory_sw_bytes_);
 
   // Only include GRES present in both
-  for (const auto& [name, lhs_gc] : lhs.gres_map_) {
-    auto rhs_it = rhs.gres_map_.find(name);
-    if (rhs_it != rhs.gres_map_.end()) {
-      result.gres_map_[name] = GresCountMin(lhs_gc, rhs_it->second);
+  for (const auto& [name, lhs_gc] : lhs.m_gres_map_) {
+    auto rhs_it = rhs.m_gres_map_.find(name);
+    if (rhs_it != rhs.m_gres_map_.end()) {
+      result.m_gres_map_[name] = GresCountMin(lhs_gc, rhs_it->second);
     }
   }
 
@@ -765,80 +768,85 @@ bool CpuSet::IsInteger() const { return !core_ids.empty(); }
 // ==================== ResourceInNodeV3 ====================
 
 ResourceInNodeV3& ResourceInNodeV3::operator+=(const ResourceInNodeV3& rhs) {
-  cpu_set_ += rhs.cpu_set_;
-  memory_bytes_ += rhs.memory_bytes_;
-  memory_sw_bytes_ += rhs.memory_sw_bytes_;
-  gres_ += rhs.gres_;
+  m_cpu_set_ += rhs.m_cpu_set_;
+  m_memory_bytes_ += rhs.m_memory_bytes_;
+  m_memory_sw_bytes_ += rhs.m_memory_sw_bytes_;
+  m_gres_ += rhs.m_gres_;
   return *this;
 }
 
 ResourceInNodeV3& ResourceInNodeV3::operator-=(const ResourceInNodeV3& rhs) {
-  cpu_set_ -= rhs.cpu_set_;
-  ABSL_ASSERT(memory_bytes_ >= rhs.memory_bytes_);
-  memory_bytes_ -= rhs.memory_bytes_;
-  memory_sw_bytes_ -= rhs.memory_sw_bytes_;
-  gres_ -= rhs.gres_;
+  m_cpu_set_ -= rhs.m_cpu_set_;
+  ABSL_ASSERT(m_memory_bytes_ >= rhs.m_memory_bytes_);
+  m_memory_bytes_ -= rhs.m_memory_bytes_;
+  m_memory_sw_bytes_ -= rhs.m_memory_sw_bytes_;
+  m_gres_ -= rhs.m_gres_;
   return *this;
 }
 
 bool ResourceInNodeV3::IsZero() const {
-  return cpu_set_.IsZero() && memory_bytes_ == 0 && memory_sw_bytes_ == 0 &&
-         gres_.IsZero();
+  return m_cpu_set_.IsZero() && m_memory_bytes_ == 0 &&
+         m_memory_sw_bytes_ == 0 && m_gres_.IsZero();
 }
 
 bool ResourceInNodeV3::IsExhausted() const {
-  return cpu_set_.cpu_count == cpu_t{0} || memory_bytes_ == 0 ||
-         memory_sw_bytes_ == 0;
+  return m_cpu_set_.cpu_count == cpu_t{0} || m_memory_bytes_ == 0 ||
+         m_memory_sw_bytes_ == 0;
 }
 
 void ResourceInNodeV3::SetToZero() {
-  cpu_set_.SetToZero();
-  memory_bytes_ = 0;
-  memory_sw_bytes_ = 0;
-  gres_.SetToZero();
+  m_cpu_set_.SetToZero();
+  m_memory_bytes_ = 0;
+  m_memory_sw_bytes_ = 0;
+  m_gres_.SetToZero();
 }
 
-void ResourceInNodeV3::ckmin(const ResourceInNodeV3& rhs) {
-  cpu_set_.cpu_count = std::min(cpu_set_.cpu_count, rhs.cpu_set_.cpu_count);
-  if (!cpu_set_.core_ids.empty() && !rhs.cpu_set_.core_ids.empty()) {
+void ResourceInNodeV3::Ckmin(const ResourceInNodeV3& rhs) {
+  m_cpu_set_.cpu_count =
+      std::min(m_cpu_set_.cpu_count, rhs.m_cpu_set_.cpu_count);
+  if (!m_cpu_set_.core_ids.empty() && !rhs.m_cpu_set_.core_ids.empty()) {
     std::set<uint32_t> inter;
-    std::ranges::set_intersection(cpu_set_.core_ids, rhs.cpu_set_.core_ids,
+    std::ranges::set_intersection(m_cpu_set_.core_ids, rhs.m_cpu_set_.core_ids,
                                   std::inserter(inter, inter.begin()));
-    cpu_set_.core_ids = std::move(inter);
+    m_cpu_set_.core_ids = std::move(inter);
   }
-  memory_bytes_ = std::min(memory_bytes_, rhs.memory_bytes_);
-  memory_sw_bytes_ = std::min(memory_sw_bytes_, rhs.memory_sw_bytes_);
-  gres_ = Intersection(gres_, rhs.gres_);
+  m_memory_bytes_ = std::min(m_memory_bytes_, rhs.m_memory_bytes_);
+  m_memory_sw_bytes_ = std::min(m_memory_sw_bytes_, rhs.m_memory_sw_bytes_);
+  m_gres_ = Intersection(m_gres_, rhs.m_gres_);
 }
 
-const CpuSet& ResourceInNodeV3::GetCpuSet() const { return cpu_set_; }
-CpuSet& ResourceInNodeV3::GetCpuSet() { return cpu_set_; }
+const CpuSet& ResourceInNodeV3::GetCpuSet() const { return m_cpu_set_; }
+CpuSet& ResourceInNodeV3::GetCpuSet() { return m_cpu_set_; }
 
-uint64_t ResourceInNodeV3::GetMemoryBytes() const { return memory_bytes_; }
-void ResourceInNodeV3::SetMemoryBytes(uint64_t bytes) { memory_bytes_ = bytes; }
+uint64_t ResourceInNodeV3::GetMemoryBytes() const { return m_memory_bytes_; }
+void ResourceInNodeV3::SetMemoryBytes(uint64_t bytes) {
+  m_memory_bytes_ = bytes;
+}
 
-uint64_t ResourceInNodeV3::GetMemorySwBytes() const { return memory_sw_bytes_; }
+uint64_t ResourceInNodeV3::GetMemorySwBytes() const {
+  return m_memory_sw_bytes_;
+}
 void ResourceInNodeV3::SetMemorySwBytes(uint64_t bytes) {
-  memory_sw_bytes_ = bytes;
+  m_memory_sw_bytes_ = bytes;
 }
 
 const DedicatedResourceInNode& ResourceInNodeV3::GetGres() const {
-  return gres_;
+  return m_gres_;
 }
-DedicatedResourceInNode& ResourceInNodeV3::GetGres() { return gres_; }
+DedicatedResourceInNode& ResourceInNodeV3::GetGres() { return m_gres_; }
 
 ResourceView ResourceInNodeV3::ToResourceView() const {
   ResourceView view;
 
   // CPU: total count (integer + fractional)
-  view.SetCpuCount(cpu_set_.cpu_count);
+  view.SetCpuCount(m_cpu_set_.cpu_count);
 
   // Memory
-  view.SetMemoryBytes(memory_bytes_);
-  view.SetMemorySwBytes(memory_sw_bytes_);
+  view.SetMemoryBytes(m_memory_bytes_);
+  view.SetMemorySwBytes(m_memory_sw_bytes_);
 
   // Convert GRES slots to counts
-  for (const auto& [name, type_slots_map] : gres_.name_type_slots_map) {
+  for (const auto& [name, type_slots_map] : m_gres_.name_type_slots_map) {
     GresCount& gc = view.GetGresMap()[name];
     for (const auto& [type, slots] : type_slots_map.type_slots_map) {
       uint64_t cnt = slots.size();
@@ -873,21 +881,21 @@ bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs) {
 // ==================== ResourceV3 ====================
 
 ResourceV3& ResourceV3::operator+=(const ResourceV3& rhs) {
-  for (const auto& [node_id, res_in_node] : rhs.each_node_res_map_) {
-    each_node_res_map_[node_id] += res_in_node;
+  for (const auto& [node_id, res_in_node] : rhs.m_each_node_res_map_) {
+    m_each_node_res_map_[node_id] += res_in_node;
   }
   return *this;
 }
 
 ResourceV3& ResourceV3::operator-=(const ResourceV3& rhs) {
-  for (const auto& [node_id, res_in_node] : rhs.each_node_res_map_) {
-    auto it = each_node_res_map_.find(node_id);
-    if (it == each_node_res_map_.end()) continue;
+  for (const auto& [node_id, res_in_node] : rhs.m_each_node_res_map_) {
+    auto it = m_each_node_res_map_.find(node_id);
+    if (it == m_each_node_res_map_.end()) continue;
 
     it->second -= res_in_node;
 
     if (it->second.IsZero()) {
-      each_node_res_map_.erase(it);
+      m_each_node_res_map_.erase(it);
     }
   }
   return *this;
@@ -895,38 +903,38 @@ ResourceV3& ResourceV3::operator-=(const ResourceV3& rhs) {
 
 ResourceV3& ResourceV3::AddResourceInNode(const std::string& craned_id,
                                           const ResourceInNodeV3& rhs) {
-  each_node_res_map_[craned_id] += rhs;
+  m_each_node_res_map_[craned_id] += rhs;
   return *this;
 }
 
 ResourceV3& ResourceV3::SubtractResourceInNode(const std::string& craned_id,
                                                const ResourceInNodeV3& rhs) {
-  auto it = each_node_res_map_.find(craned_id);
-  if (it == each_node_res_map_.end()) return *this;
+  auto it = m_each_node_res_map_.find(craned_id);
+  if (it == m_each_node_res_map_.end()) return *this;
 
   it->second -= rhs;
 
   if (it->second.IsZero()) {
-    each_node_res_map_.erase(it);
+    m_each_node_res_map_.erase(it);
   }
   return *this;
 }
 
-ResourceInNodeV3& ResourceV3::at(const std::string& craned_id) {
-  return each_node_res_map_.at(craned_id);
+ResourceInNodeV3& ResourceV3::At(const std::string& craned_id) {
+  return m_each_node_res_map_.at(craned_id);
 }
 
-const ResourceInNodeV3& ResourceV3::at(const std::string& craned_id) const {
-  return each_node_res_map_.at(craned_id);
+const ResourceInNodeV3& ResourceV3::At(const std::string& craned_id) const {
+  return m_each_node_res_map_.at(craned_id);
 }
 
-bool ResourceV3::IsZero() const { return each_node_res_map_.empty(); }
+bool ResourceV3::IsZero() const { return m_each_node_res_map_.empty(); }
 
-void ResourceV3::SetToZero() { each_node_res_map_.clear(); }
+void ResourceV3::SetToZero() { m_each_node_res_map_.clear(); }
 
 ResourceView ResourceV3::View() const noexcept {
   ResourceView view;
-  for (const auto& [_, res_in_node] : each_node_res_map_) {
+  for (const auto& [_, res_in_node] : m_each_node_res_map_) {
     view += res_in_node.ToResourceView();
   }
   return view;
@@ -948,32 +956,32 @@ ResourceV3 operator-(const ResourceV3& lhs, const ResourceV3& rhs) {
 
 ResourceInNodeV3::ResourceInNodeV3(const crane::grpc::ResourceInNodeV3& rhs) {
   // CPU
-  cpu_set_.core_ids.insert(rhs.cpu_ids().begin(), rhs.cpu_ids().end());
-  cpu_set_.cpu_count = cpu_t{rhs.cpu_count()};
+  m_cpu_set_.core_ids.insert(rhs.cpu_ids().begin(), rhs.cpu_ids().end());
+  m_cpu_set_.cpu_count = cpu_t{rhs.cpu_count()};
 
   // Memory
-  memory_bytes_ = rhs.memory_bytes();
-  memory_sw_bytes_ = rhs.memory_sw_bytes();
+  m_memory_bytes_ = rhs.memory_bytes();
+  m_memory_sw_bytes_ = rhs.memory_sw_bytes();
 
   // GRES
-  gres_ = DedicatedResourceInNode(rhs.gres());
+  m_gres_ = DedicatedResourceInNode(rhs.gres());
 }
 
 ResourceInNodeV3::operator crane::grpc::ResourceInNodeV3() const {
   crane::grpc::ResourceInNodeV3 val;
 
   // CPU
-  val.mutable_cpu_ids()->Assign(cpu_set_.core_ids.begin(),
-                                cpu_set_.core_ids.end());
-  val.set_cpu_count(static_cast<double>(cpu_set_.cpu_count));
+  val.mutable_cpu_ids()->Assign(m_cpu_set_.core_ids.begin(),
+                                m_cpu_set_.core_ids.end());
+  val.set_cpu_count(static_cast<double>(m_cpu_set_.cpu_count));
 
   // Memory
-  val.set_memory_bytes(memory_bytes_);
-  val.set_memory_sw_bytes(memory_sw_bytes_);
+  val.set_memory_bytes(m_memory_bytes_);
+  val.set_memory_sw_bytes(m_memory_sw_bytes_);
 
   // GRES
   *val.mutable_gres() =
-      static_cast<crane::grpc::DedicatedResourceInNode>(gres_);
+      static_cast<crane::grpc::DedicatedResourceInNode>(m_gres_);
 
   return val;
 }
@@ -982,14 +990,14 @@ ResourceInNodeV3::operator crane::grpc::ResourceInNodeV3() const {
 
 ResourceV3::ResourceV3(const crane::grpc::ResourceV3& rhs) {
   for (const auto& [node_id, res_in_node] : rhs.each_node_res_map()) {
-    each_node_res_map_.emplace(node_id, ResourceInNodeV3(res_in_node));
+    m_each_node_res_map_.emplace(node_id, ResourceInNodeV3(res_in_node));
   }
 }
 
 ResourceV3::operator crane::grpc::ResourceV3() const {
   crane::grpc::ResourceV3 val;
 
-  for (const auto& [node_id, res_in_node] : each_node_res_map_) {
+  for (const auto& [node_id, res_in_node] : m_each_node_res_map_) {
     (*val.mutable_each_node_res_map())[node_id] =
         static_cast<crane::grpc::ResourceInNodeV3>(res_in_node);
   }

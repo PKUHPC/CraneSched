@@ -18,27 +18,10 @@
 
 #include "CtldPublicDefs.h"
 
-#include "EmbeddedDbClient.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace Ctld {
-
-CranedRemoteMeta::CranedRemoteMeta(
-    const crane::grpc::CranedRemoteMeta& grpc_meta)
-    : dres_in_node(grpc_meta.dres_in_node()) {
-  this->sys_rel_info.name = grpc_meta.sys_rel_info().name();
-  this->sys_rel_info.release = grpc_meta.sys_rel_info().release();
-  this->sys_rel_info.version = grpc_meta.sys_rel_info().version();
-  this->craned_start_time =
-      absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
-  this->system_boot_time =
-      absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
-
-  this->network_interfaces.clear();
-  for (const auto& interface : grpc_meta.network_interfaces()) {
-    this->network_interfaces.emplace_back(interface);
-  }
-}
 
 PodMetaInJob::PodMetaInJob(const crane::grpc::PodJobAdditionalMeta& rhs)
     : name(rhs.name()),
@@ -546,7 +529,7 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_qos(job->qos);
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
   if (!job->Traceparent().empty()) job_to_d.set_traceparent(job->Traceparent());
   return job_to_d;
 }
@@ -556,7 +539,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   crane::grpc::StepToD step_to_d;
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
 
   step_to_d.set_type(this->type);
   step_to_d.set_step_type(this->step_type);
@@ -590,7 +573,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   step_to_d.set_submit_hostname(job->JobToCtld().submit_hostname());
   ResourceView res_view_in_node;
-  res_view_in_node += m_allocated_res_.at(craned_id);
+  res_view_in_node += m_allocated_res_.At(craned_id);
   step_to_d.set_total_gpus(res_view_in_node.GpuCount());
   step_to_d.set_cwd(this->job->cwd);
   step_to_d.set_ntasks(this->job->ntasks);
@@ -908,12 +891,12 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     // that appended container steps can reuse the job allocation.
     craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
     task_res_map[cur_task_id] =
-        job.AllocatedRes().at(job.executing_craned_ids.front());
+        job.AllocatedRes().At(job.executing_craned_ids.front());
   } else {
     ResourceV3 step_alloc_res;
     task_id_t cur_task_id = 0;
     for (const auto& craned_id : job.CranedIds()) {
-      ResourceInNodeV3& res_avail = job.StepResAvail().at(craned_id);
+      ResourceInNodeV3& res_avail = job.StepResAvail().At(craned_id);
       ResourceInNodeV3 feasible_res;
       req_node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
       res_avail -= feasible_res;
@@ -1087,7 +1070,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node = static_cast<crane::grpc::ResourceInNodeV3>(
-      m_allocated_res_.at(craned_id));
+      m_allocated_res_.At(craned_id));
 
   // Set type
   step_to_d.set_type(this->type);
@@ -1868,9 +1851,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   job_info->set_ntasks(ntasks);
 }
 
-int JobInCtld::SchedulePendingSteps(
+uint32_t JobInCtld::SchedulePendingSteps(
     std::vector<CommonStepInCtld*>* scheduled_steps) {
-  int popped_count = 0;
+  uint32_t popped_count = 0;
   auto now = absl::Now();
   while (!pending_step_ids_.empty()) {
     const step_id_t& step_id = pending_step_ids_.front();
@@ -1881,18 +1864,21 @@ int JobInCtld::SchedulePendingSteps(
       pending_step_ids_.pop();
       continue;
     }
-    int max_ntask_per_node = step->ntasks_per_node_max;
-    int min_ntask_per_node = step->ntasks_per_node_min;
+
+    auto max_ntask_per_node = step->ntasks_per_node_max;
+    auto min_ntask_per_node = step->ntasks_per_node_min;
     ResourceV3 step_alloc_res;
-    struct node_info {
-      int ntasks_on_node;
+
+    struct NodeInfo {
+      uint32_t ntasks_on_node;
       const CranedId* craned_id;
-      bool operator<(const node_info& other) const {
+      bool operator<(const NodeInfo& other) const {
         return ntasks_on_node > other.ntasks_on_node;
       }
     };
-    std::priority_queue<node_info> candidates;
-    int sum_ntasks = 0;
+    std::priority_queue<NodeInfo> candidates;
+
+    uint32_t sum_ntasks = 0;
     for (auto const& craned_id :
          step_res_avail_.EachNodeResMap() | std::views::keys) {
       if (step->excluded_nodes.contains(craned_id)) {
@@ -1904,12 +1890,12 @@ int JobInCtld::SchedulePendingSteps(
       }
       ResourceInNodeV3 feasible_res;
       if (!step->req_node_res_view.GetFeasibleResourceInNode(
-              step_res_avail_.at(craned_id), &feasible_res)) {
+              step_res_avail_.At(craned_id), &feasible_res)) {
         continue;
       }
-      ResourceInNodeV3 res_avail = step_res_avail_.at(craned_id);
+      ResourceInNodeV3 res_avail = step_res_avail_.At(craned_id);
       res_avail -= feasible_res;
-      int ntasks_on_node = 0;
+      uint32_t ntasks_on_node = 0;
       while (ntasks_on_node < max_ntask_per_node &&
              step->req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                                &feasible_res)) {
@@ -1919,7 +1905,8 @@ int JobInCtld::SchedulePendingSteps(
       if (ntasks_on_node < min_ntask_per_node) {
         continue;
       }
-      candidates.push(node_info{ntasks_on_node, &craned_id});
+      candidates.push(
+          NodeInfo{.ntasks_on_node = ntasks_on_node, .craned_id = &craned_id});
       sum_ntasks += ntasks_on_node;
       if (candidates.size() > step->node_num) {
         sum_ntasks -= candidates.top().ntasks_on_node;
@@ -1932,18 +1919,19 @@ int JobInCtld::SchedulePendingSteps(
     if (candidates.size() < step->node_num || sum_ntasks < step->ntasks) {
       break;
     }
-    int rest_ntasks = step->ntasks - step->node_num;
+    uint32_t rest_ntasks = step->ntasks - step->node_num;
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
-      ResourceInNodeV3& res_avail = step_res_avail_.at(*info.craned_id);
+      ResourceInNodeV3& res_avail = step_res_avail_.At(*info.craned_id);
       ResourceInNodeV3 feasible_res;
       step->req_node_res_view.GetFeasibleResourceInNode(res_avail,
                                                         &feasible_res);
       res_avail -= feasible_res;
       step_alloc_res.AddResourceInNode(*info.craned_id, feasible_res);
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
-      for (int i = 0; i < ntasks_on_node; ++i) {
+      uint32_t ntasks_on_node =
+          std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      for (uint32_t i = 0; i < ntasks_on_node; ++i) {
         step->req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                           &feasible_res);
         res_avail -= feasible_res;
