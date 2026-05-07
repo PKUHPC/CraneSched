@@ -21,6 +21,8 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include <memory>
+
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -74,6 +76,7 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
+constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -251,6 +254,8 @@ struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
   std::shared_ptr<spdlog::async_logger> db_logger;
 };
+
+using array_task_id_t = uint32_t;  // Task index within a job array
 
 }  // namespace Ctld
 
@@ -790,6 +795,46 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
+  // Array job model:
+  //
+  //   JobToCtld.array_spec carries only submission-time array spec.
+  //   RuntimeAttrOfJob.array_task carries only materialized child identity.
+  //   The array parent/root has array_spec but no array_task identity.
+  [[nodiscard]] bool HasArraySpec() const {
+    return job_to_ctld.has_array_spec();
+  }
+  [[nodiscard]] const crane::grpc::ArraySpec* GetArraySpec() const {
+    return job_to_ctld.has_array_spec() ? &job_to_ctld.array_spec() : nullptr;
+  }
+  crane::grpc::ArraySpec* MutableArraySpec() {
+    return job_to_ctld.has_array_spec() ? job_to_ctld.mutable_array_spec()
+                                        : nullptr;
+  }
+
+  [[nodiscard]] bool IsArrayRoot() const {
+    return HasArraySpec() && !runtime_attr.has_array_task();
+  }
+
+  bool IsArrayParent() const { return IsArrayRoot(); }
+
+  // Returns true if this is an expanded array child.
+  bool IsArrayChild() const { return runtime_attr.has_array_task(); }
+
+  struct ArrayTaskIdentity {
+    job_id_t array_job_id;
+    uint32_t task_id;
+  };
+
+  struct ArrayTaskMeta {
+    uint32_t task_count;
+    uint32_t task_min;
+    uint32_t task_max;
+    uint32_t task_step;
+  };
+
+  std::optional<ArrayTaskIdentity> GetArrayTaskIdentity() const;
+  std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -907,7 +952,9 @@ struct JobInCtld {
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
-  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
+    return runtime_attr;
+  }
 
   // =================== Setter/Getter ===================
 
@@ -963,6 +1010,22 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  // Array job tracking accessors
+  void SetArrayChildrenExpanded(bool expanded);
+  void SetArrayTaskIdentity(job_id_t array_job_id, array_task_id_t task_id);
+  [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().array_job_id();
+  }
+  [[nodiscard]] std::optional<array_task_id_t> ArrayTaskId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().task_id();
+  }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);
@@ -1038,7 +1101,7 @@ struct JobInCtld {
   // Helper function to set the fields of JobInfo using info in
   // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

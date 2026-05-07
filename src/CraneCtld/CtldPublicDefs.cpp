@@ -18,6 +18,7 @@
 
 #include "CtldPublicDefs.h"
 
+#include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
@@ -544,6 +545,18 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.At(craned_id));
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = job_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
+  if (auto task_meta = job->GetArrayTaskMeta(); task_meta.has_value()) {
+    auto* array_task_meta = job_to_d.mutable_array_task_meta();
+    array_task_meta->set_task_count(task_meta->task_count);
+    array_task_meta->set_task_min(task_meta->task_min);
+    array_task_meta->set_task_max(task_meta->task_max);
+    array_task_meta->set_task_step(task_meta->task_step);
+  }
   return job_to_d;
 }
 
@@ -593,6 +606,11 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   return step_to_d;
 }
@@ -1169,6 +1187,11 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   return step_to_d;
 }
@@ -1586,6 +1609,45 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+void JobInCtld::SetArrayChildrenExpanded(bool expanded) {
+  if (expanded) {
+    runtime_attr.set_array_children_expanded(true);
+  } else {
+    runtime_attr.clear_array_children_expanded();
+  }
+}
+
+void JobInCtld::SetArrayTaskIdentity(job_id_t val, array_task_id_t task_id) {
+  auto* array_task = runtime_attr.mutable_array_task();
+  array_task->set_array_job_id(val);
+  array_task->set_task_id(task_id);
+}
+
+std::optional<JobInCtld::ArrayTaskIdentity> JobInCtld::GetArrayTaskIdentity()
+    const {
+  if (!runtime_attr.has_array_task()) {
+    return std::nullopt;
+  }
+  return ArrayTaskIdentity{runtime_attr.array_task().array_job_id(),
+                           runtime_attr.array_task().task_id()};
+}
+
+std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
+  if (!job_to_ctld.has_array_spec()) {
+    return std::nullopt;
+  }
+
+  const auto& array_spec = job_to_ctld.array_spec();
+  if (ArrayUtil::TaskCount(array_spec) == 0) {
+    return std::nullopt;
+  }
+
+  auto task_meta = ArrayUtil::BuildTaskMeta(array_spec);
+
+  return ArrayTaskMeta{task_meta.task_count(), task_meta.task_min(),
+                       task_meta.task_max(), task_meta.task_step()};
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1773,7 +1835,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   }
 }
 
-void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
+void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_type(type);
   job_info->set_job_id(job_id);
   job_info->set_name(name);
@@ -1802,6 +1864,18 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   job_info->set_reservation(reservation);
 
   job_info->set_submit_hostname(submit_hostname);
+
+  if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
+    job_info->mutable_array_spec()->CopyFrom(*array_spec);
+    job_info->mutable_array_task_meta()->CopyFrom(
+        ArrayUtil::BuildTaskMeta(*array_spec));
+  }
+
+  if (auto identity = GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = job_info->mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
