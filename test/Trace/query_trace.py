@@ -92,6 +92,8 @@ def setup_args():
                    help="Export to Perfetto native proto format (.pftrace) with nested slices and flow arrows")
     p.add_argument("--system",  "-s", action="store_true",
                    help="System-level aggregate analysis (no job filter needed)")
+    p.add_argument("--json",    type=str, metavar="FILE",
+                   help="Export system analysis as structured JSON (use with --system)")
 
     return p.parse_args()
 
@@ -842,6 +844,88 @@ def print_system_analysis(spans: list[Span]):
     print()
 
 
+def system_analysis_to_dict(spans: list[Span]) -> dict:
+    """Return system-level performance analysis as a structured dictionary."""
+    if not spans:
+        return {"total_spans": 0, "jobs_seen": 0, "completed": 0, "failed": 0,
+                "spans": {}, "sub_spans": {}, "node_rpc_latency": {}}
+
+    by_name: dict[str, list[Span]] = defaultdict(list)
+    for s in spans:
+        by_name[s.name].append(s)
+
+    job_ids = set()
+    completed = set()
+    failed = set()
+    for s in spans:
+        jid = s.attrs.get("job_id")
+        if jid is not None:
+            job_ids.add(jid)
+        if s.name == "job/end":
+            status = s.attrs.get("status")
+            exit_code = s.attrs.get("exit_code")
+            if jid:
+                if str(status) == "2" or str(exit_code) == "0":
+                    completed.add(jid)
+                else:
+                    failed.add(jid)
+
+    def span_stats(durations: list[int]) -> dict:
+        if not durations:
+            return {}
+        avg = sum(durations) / len(durations)
+        return {
+            "count": len(durations),
+            "avg_ms": round(avg / 1000.0, 2),
+            "p50_ms": round(percentile(durations, 0.50) / 1000.0, 2),
+            "p95_ms": round(percentile(durations, 0.95) / 1000.0, 2),
+            "p99_ms": round(percentile(durations, 0.99) / 1000.0, 2),
+            "max_ms": round(max(durations) / 1000.0, 2),
+        }
+
+    PERF_SPANS = [
+        "scheduling/cycle", "job/pending", "job/rpc_execute",
+        "step/supervisor_spawn", "step/execute", "step/queue_dispatch",
+    ]
+    SUB_SPANS = [
+        "scheduling/node_select", "scheduling/resource_validate",
+        "scheduling/db_persist", "scheduling/rpc_alloc_jobs",
+        "scheduling/rpc_alloc_steps",
+    ]
+
+    spans_dict = {}
+    for name in PERF_SPANS:
+        spans_list = by_name.get(name, [])
+        if spans_list:
+            spans_dict[name] = span_stats([s.duration_us for s in spans_list])
+
+    sub_spans_dict = {}
+    for name in SUB_SPANS:
+        spans_list = by_name.get(name, [])
+        if spans_list:
+            sub_spans_dict[name] = span_stats([s.duration_us for s in spans_list])
+
+    node_rpc = {}
+    rpc_spans = by_name.get("job/rpc_execute", [])
+    if rpc_spans:
+        node_rpcs: dict[str, list[int]] = defaultdict(list)
+        for s in rpc_spans:
+            node = s.attrs.get("craned_id", "unknown")
+            node_rpcs[node].append(s.duration_us)
+        for node, durs in node_rpcs.items():
+            node_rpc[node] = span_stats(durs)
+
+    return {
+        "total_spans": len(spans),
+        "jobs_seen": len(job_ids),
+        "completed": len(completed),
+        "failed": len(failed),
+        "spans": spans_dict,
+        "sub_spans": sub_spans_dict,
+        "node_rpc_latency": node_rpc,
+    }
+
+
 def export_system_chrome(spans: list[Span], output_path: str):
     """Export system-level Chrome Trace — grouped by span name, not step_id."""
     if not spans:
@@ -948,7 +1032,12 @@ def main():
         with InfluxDBClient(url=args.url, token=args.token, org=args.org) as client:
             if args.system:
                 spans = query_all_spans(client, args)
-                if args.perfetto:
+                if args.json:
+                    result = system_analysis_to_dict(spans)
+                    with open(args.json, "w") as f:
+                        json.dump(result, f, indent=2)
+                    print(f"Exported system analysis ({len(spans)} spans) to {args.json}")
+                elif args.perfetto:
                     export_perfetto(spans, args.perfetto, system_mode=True)
                 elif args.chrome:
                     export_system_chrome(spans, args.chrome)
