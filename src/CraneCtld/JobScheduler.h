@@ -22,6 +22,7 @@
 // Precompiled header comes first!
 
 #include "Account/AccountDefs.h"
+#include "Array.h"
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
@@ -135,6 +136,12 @@ struct PdJobInScheduler {
   std::list<std::string> account_chain;
 
   bool is_scheduled() const { return reason.empty(); }
+
+  // True iff this candidate represents an array parent/root. On successful
+  // allocation the scheduler calls ArrayManager::ExpandChildWithAllocation
+  // to materialize a child inheriting this allocation, rather than running
+  // the parent itself.
+  bool is_array_parent_candidate{false};
 
   PdJobInScheduler(JobInCtld* job)
       : job_id(job->JobId()),
@@ -1039,7 +1046,7 @@ class JobScheduler {
 
   void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
                          crane::grpc::ModifyJobReply* response,
-                         std::list<job_id_t>* job_ids);
+                         std::vector<job_id_t>* job_ids);
 
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
@@ -1212,7 +1219,32 @@ class JobScheduler {
 
   PmixPortsMetaMap& GetPmixPortsMetaMap() { return m_pmix_ports_meta_; }
 
+  // Convenience wrappers that forward to the ArrayManager after taking the
+  // scheduler's pending-map mutex. Query is a pure read and must NEVER
+  // materialize children; modify reports explicit rejections for
+  // unmaterialized tasks.
+  ArrayTaskResolveResult ResolveArrayTaskIdsForQuery(
+      job_id_t array_job_id,
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) {
+    std::unordered_set<uint32_t> task_ids(array_task_ids.begin(),
+                                          array_task_ids.end());
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    return m_array_manager_->ResolveForQueryNoLock(array_job_id, task_ids);
+  }
+
+  ArrayTaskResolveMutationResult ResolveArrayTaskIdsForModify(
+      job_id_t array_job_id,
+      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) {
+    std::unordered_set<uint32_t> task_ids(array_task_ids.begin(),
+                                          array_task_ids.end());
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    return m_array_manager_->ResolveForMutationNoLock(array_job_id, task_ids,
+                                                      ArrayMutationKind::kModify);
+  }
+
  private:
+  JobInCtld* FindJobInPendingOrRunningNoLock_(job_id_t job_id);
+
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1223,6 +1255,19 @@ class JobScheduler {
       std::unordered_set<StepInCtld*> const& steps);
 
   static void ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
+
+  // For each FinalizedArrayRoot bundle whose root_job is nullptr, move the
+  // parent unique_ptr out of m_pending_job_map_ into bundle.root_job. Must
+  // be called with m_pending_job_map_mtx_ held.
+  void SpliceFinalArrayRootsFromPendingMapNoLock_(
+      std::vector<ArrayManager::FinalizedArrayRoot>& roots);
+
+  // Persist a real history record for an array task that was cancelled
+  // before it was ever materialized. Allocates a job_id via the embedded
+  // DB, writes the cancelled job to MongoDB, then purges the transient
+  // pending-DB entry. Must be called with m_pending_job_map_mtx_ held.
+  void PersistCancelledVirtualTaskNoLock_(job_id_t array_job_id,
+                                          array_task_id_t task_id);
 
   static void CallPluginHookForFinalJobs_(
       std::unordered_set<JobInCtld*> const& jobs);
@@ -1254,6 +1299,12 @@ class JobScheduler {
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
   Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
+
+  // Owns all array metas and drives child materialization/lifecycle.
+  // Uses references to the above pending/running maps and must be
+  // constructed after them. Accesses require m_pending_job_map_mtx_
+  // (and for some entry points m_running_job_map_mtx_).
+  std::unique_ptr<ArrayManager> m_array_manager_;
 
   // Job Indexes
   HashMap<CranedId, HashSet<uint32_t /* Job ID*/>> m_node_to_jobs_map_
