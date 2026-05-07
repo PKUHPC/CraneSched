@@ -180,6 +180,10 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
       return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
   }
 
+  if (new_qos.preempt_mode != crane::grpc::PREEMPT_MODE_OFF &&
+      new_qos.preempt_mode != crane::grpc::PREEMPT_MODE_CANCEL)
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+
   return AddQos_(actor_name, new_qos, find_qos);
 }
 
@@ -1286,6 +1290,11 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       continue;
     }
 
+    if (operation.value_list().empty()) {
+      rich_error_list.emplace_back(std::unexpected{FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM, "{} requires a value", item)});
+      continue;
+    }
     auto value = operation.value_list()[0];
     int64_t value_number;
     if (item != Qos::FieldStringOfDescription() &&

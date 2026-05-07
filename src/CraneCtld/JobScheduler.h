@@ -932,7 +932,10 @@ class SchedulerAlgo {
 
     PreemptSegTree(const PreemptSegTree&) = delete;
     PreemptSegTree& operator=(const PreemptSegTree&) = delete;
-    PreemptSegTree(PreemptSegTree&&) = default;
+    PreemptSegTree(PreemptSegTree&& other) noexcept
+        : m_root_(other.m_root_), m_target_res_(other.m_target_res_) {
+      other.m_root_ = nullptr;
+    }
 
     void Add(const absl::Time& st, const absl::Time& ed,
              const ResourceInNodeV3& res) {
