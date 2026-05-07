@@ -19,7 +19,6 @@
 #pragma once
 
 #include "CtldPreCompiledHeader.h"
-
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
