@@ -551,9 +551,16 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
   std::unordered_map<char, std::string> replacement_map{
       {'%', "%"},
       // Job array's master job allocation number.
-      //  {'A', ""}
+      {'A',
+       m_parent_step_inst_->GetStep().has_array_task()
+           ? std::to_string(
+                 m_parent_step_inst_->GetStep().array_task().array_job_id())
+           : std::to_string(g_config.JobId)},
       // Job array ID (index) number.
-      {'a', "0"},
+      {'a', m_parent_step_inst_->GetStep().has_array_task()
+                ? std::to_string(
+                      m_parent_step_inst_->GetStep().array_task().task_id())
+                : std::to_string(4294967294u)},
       // jobid.stepid of the running job (e.g. "128.0")
       {'J', fmt::format("{}.{}", g_config.JobId, g_config.StepId)},
       // job id

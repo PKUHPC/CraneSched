@@ -112,6 +112,7 @@ Container-related options are used to create Pod jobs that support container exe
 - **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
 - **-D, --chdir string**: Working directory of the job
 - **--extra-attr string**: Extra attributes of the job (JSON format)
+- **-a, --array string**: Submit an array job with `start-end` range (e.g., `0-9`), mutually exclusive with `--repeat`
 - **--repeat uint32**: Submit job multiple times (default: 1)
 - **--wrap string**: Wrap command string in a shell script and submit
 - **--json**: Output in JSON format
@@ -149,6 +150,7 @@ Usage:
 
 Flags:
   -A, --account string           Account used for the job
+  -a, --array string             Submit an array job using index range start-end
   -b, --begin string             Defer job until specified time.
   -D, --chdir string             Working directory of the job
       --comment string           Comment of the job
@@ -473,6 +475,21 @@ JOBID PARTITION NAME     USER ACCOUNT STATUS TYPE    TIME      TIMELIMIT NODES N
 174   CPU       Test_Job root ROOT    Running Batch 00:00:02 00:03:01   1     cranetest03
 ```
 
+### Array Submission (Simplified)
+
+Submit an array as one batched request using an index range (only `start-end` is supported in this version):
+```bash
+cbatch --array 0-2 test.sh
+```
+```text
+[root@cranetest01 zhouhao]# cbatch --array 0-2 cbatch_test.sh
+Submitted array job 179, array range [0-2].
+```
+
+Notes:
+- `--array` and `--repeat` are mutually exclusive.
+- Array jobs expose the parent array job ID and the current task index separately.
+
 ## Environment Variables
 
 Common environment variables available in batch scripts:
@@ -480,7 +497,23 @@ Common environment variables available in batch scripts:
 | Variable | Description |
 |----------|-------------|
 | **CRANE_JOB_NODELIST** | List of allocated nodes |
-| **%j** | Job ID (for use in file patterns) |
+| **CRANE_ARRAY_JOB_ID** | Parent/anchor job ID of the whole array |
+| **CRANE_ARRAY_TASK_ID** | Current array task index |
+| **CRANE_ARRAY_TASK_COUNT** | Total number of array tasks |
+| **CRANE_ARRAY_TASK_MIN** | Minimum array task index |
+| **CRANE_ARRAY_TASK_MAX** | Maximum array task index |
+| **CRANE_ARRAY_TASK_STEP** | Array task index stride |
+
+## File Pattern Placeholders
+
+The following placeholders are expanded in `-o/--output` and `-e/--error`
+patterns:
+
+| Placeholder | Description |
+|-------------|-------------|
+| **%A** | Parent/anchor job ID of the whole array. For non-array jobs, falls back to the current job ID |
+| **%a** | Current array task index. For non-array jobs, expands to `4294967294` |
+| **%j** | Current job ID |
 
 ## Multi-node Parallel Jobs
 
