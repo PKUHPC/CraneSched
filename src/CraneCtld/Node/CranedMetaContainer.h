@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "Node/NodeDefs.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
