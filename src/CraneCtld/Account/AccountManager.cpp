@@ -173,11 +173,6 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
   if (find_qos && !find_qos->deleted)
     return std::unexpected(CraneErrCode::ERR_DB_QOS_ALREADY_EXISTS);
 
-  // Each QoS listed in `preempt` must already exist. Self-reference would
-  // create a trivial cycle, which is also rejected.
-  // AddQos returns a plain CraneErrCode (no description field), so the
-  // distinction between "does not exist" and "self reference" is coded by
-  // code value: ERR_INVALID_QOS vs ERR_INVALID_PARAM.
   for (const auto& preempt_qos_name : new_qos.preempt) {
     if (preempt_qos_name == new_qos.name)
       return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
@@ -1260,10 +1255,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     auto item = Qos::GetModifyFieldStr(operation.modify_field());
 
     if (item == Qos::FieldStringOfPreempt()) {
-      // value_list holds the full preempt set (possibly empty to clear it).
-      // Every name must already exist, and self-reference is rejected.
-      // Use ERR_INVALID_PARAM for self-reference so the message does not claim
-      // the QoS "does not exist" when it is in fact the target QoS itself.
       for (const auto& qos_name : operation.value_list()) {
         if (qos_name == name) {
           rich_error_list.emplace_back(std::unexpected{FormatRichErr(
@@ -1440,8 +1431,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       break;
     }
     case crane::grpc::ModifyField::ModifyPreemptMode: {
-      // Validation above guarantees value is either "OFF" or "CANCEL". The
-      // else branch is defensive only.
       // TODO(preempt): extend once REQUEUE / SUSPEND are implemented.
       if (value == "CANCEL")
         res_qos.preempt_mode = crane::grpc::PreemptMode::PREEMPT_MODE_CANCEL;

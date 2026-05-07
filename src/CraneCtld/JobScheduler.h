@@ -30,8 +30,6 @@ namespace Ctld {
 class IUpdateNodeCostPolicy {
  public:
   virtual ~IUpdateNodeCostPolicy() = default;
-  // is_release=false: resources newly allocated on the node, cost increases.
-  // is_release=true:  resources released from the node, cost decreases.
   virtual void UpdateCost(double& cost, const absl::Time& start_time,
                           const absl::Time& end_time,
                           const ResourceInNodeV3& resources,
@@ -428,7 +426,6 @@ class SchedulerAlgo {
         auto job_duration_end_it = std::prev(time_avail_res_map.upper_bound(
             end_time));  // job_duration_end_it->first <= end_time
 
-        // Update the resources within the interval.
         for (auto in_duration_it = job_duration_begin_it;
              in_duration_it != job_duration_end_it; in_duration_it++) {
           if (is_release) {
@@ -635,10 +632,6 @@ class SchedulerAlgo {
         m_node_selector_->UpdateResource(pd->start_time, pd->end_time,
                                          pd->allocated_res,
                                          /*is_release=*/true);
-        // Mirror UpdateNodeSelectorWithScheduledJob's gate: the pending was
-        // registered in qos_job_map only if is_scheduled() was true when it
-        // got scheduled. The caller must invoke this method BEFORE setting
-        // pd->reason = "Preempted", so is_scheduled() is still true here.
         if (pd->is_scheduled()) {
           for (const CranedId& craned_id : pd->craned_ids) {
             m_node_selector_->GetNodeState(craned_id)
@@ -1052,13 +1045,6 @@ class JobScheduler {
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
 
-  // Bypass the batch/timer gate for immediate cancel dispatch.
-  // TODO: Even with immediate dispatch the full cancel chain
-  // (TerminateJobs RPC → Craned kill → StepStatusChangeAsync → timer →
-  // CleanJobStatusChangeQueueCb_ → running_map erase) still has multiple
-  // async hops. A dedicated fast-path that bypasses the StatusChange queue
-  // for preempt-initiated cancels could further reduce the round-trip, but
-  // would risk duplicate RPCs and status-machine complexity. Profile first.
   void EnqueuePreemptCancel(std::vector<job_id_t> job_ids) {
     if (job_ids.empty()) return;
     m_cancel_job_queue_.enqueue(CancelRunningJobByIdElem{

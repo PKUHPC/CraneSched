@@ -1212,7 +1212,7 @@ void JobScheduler::ScheduleThread_() {
           bool preempted_still_alive = false;
           for (const auto& preempted : job_in_scheduler->preempted_jobs) {
             auto* rn_ptr = std::get_if<RnJobInScheduler*>(&preempted);
-            if (!rn_ptr) continue;  // pending preempted, no physical state
+            if (!rn_ptr) continue;
             if (m_running_job_map_.contains((*rn_ptr)->job_id)) {
               preempted_still_alive = true;
               break;
@@ -5452,7 +5452,7 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     auto alloc_it = alloc_per_node.find(node->craned_id);
     CRANE_ASSERT_MSG(
         alloc_it != alloc_per_node.end(),
-        fmt("TryPreempt_: stage 1 didn't size craned {}", node->craned_id));
+        fmt("TryPreempt_: allocated_res missing craned {}", node->craned_id));
     seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
 
     auto& tree = seg_trees.back();
@@ -5493,14 +5493,14 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     preempt_idx = static_cast<int>(i);
   }
   if (!all_satisfied()) {
-    return false;  // even preempting every candidate isn't enough
+    return false;
   }
 
   job->preempted_jobs.push_back(ordered[preempt_idx]);
   for (int i = preempt_idx - 1; i >= 0; --i) {
     apply_to_trees(ordered[i], /*add=*/false);
     if (!all_satisfied()) {
-      apply_to_trees(ordered[i], /*add=*/true);  // still needed — put back
+      apply_to_trees(ordered[i], /*add=*/true);
       job->preempted_jobs.push_back(ordered[i]);
     }
   }
@@ -5526,7 +5526,6 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<ResvId, std::vector<PdJobInScheduler*>>
       resv_pd_job_ptr_map;
 
-  // QoS → preemptable QoS names
   absl::flat_hash_map<std::string, std::vector<std::string>> qos_preempt_map;
 
   for (const auto& job : pending_jobs) {
@@ -5534,7 +5533,7 @@ void SchedulerAlgo::NodeSelect(
                                ? part_pd_job_ptr_map[job->partition_id]
                                : resv_pd_job_ptr_map[job->reservation];
     pd_job_ptr_vec.emplace_back(job.get());
-    qos_preempt_map[job->qos];  // insert key, value filled below
+    qos_preempt_map[job->qos];
   }
 
   if (g_config.Preempt.PreemptType == crane::grpc::PreemptType::PREEMPT_QOS) {
@@ -5558,7 +5557,6 @@ void SchedulerAlgo::NodeSelect(
     for (auto it = m_preempting_set_.begin(); it != m_preempting_set_.end();) {
       auto rn_it = rn_job_id_map.find(*it);
       if (rn_it == rn_job_id_map.end()) {
-        // absl::flat_hash_set::erase returns void; advance before erasing.
         m_preempting_set_.erase(it++);
       } else {
         rn_it->second->end_time = now + absl::Seconds(1);
