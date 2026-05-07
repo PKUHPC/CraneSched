@@ -60,76 +60,74 @@ void CranedClient::AsyncSendThread_() {
   while (true) {
     {
       absl::MutexLock lock(&m_mutex_);
+      while (m_task_status_change_queue_.empty() && !m_thread_stop_) {
+        m_cv_.Wait(&m_mutex_);
+      }
       if (m_task_status_change_queue_.empty() && m_thread_stop_) break;
     }
 
     bool connected = m_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
+        std::chrono::system_clock::now() +
+        std::chrono::seconds(
+            g_config.StatusChange.ChannelConnectTimeoutSec));
     if (!connected) {
       CRANE_INFO(
           "Channel to CraneD is not connected. "
           "Reconnecting...");
       m_channel_->GetState(true);
 
-      // Interruptible sleep: wake up immediately on Shutdown()
       absl::MutexLock lock(&m_mutex_);
-      m_cv_.WaitWithTimeout(&m_mutex_, absl::Seconds(10));
+      m_cv_.WaitWithTimeout(
+          &m_mutex_,
+          absl::Seconds(g_config.StatusChange.ReconnectBackoffSec));
       if (m_thread_stop_) break;
       continue;
     }
 
+    std::list<StepStatusChangeQueueElem> elems;
     {
-      std::list<StepStatusChangeQueueElem> elems;
-      {
-        absl::MutexLock lock(&m_mutex_);
-        if (!m_task_status_change_queue_.empty()) {
-          elems.splice(elems.end(), std::move(m_task_status_change_queue_));
-        }
-      }
+      absl::MutexLock lock(&m_mutex_);
+      elems.splice(elems.end(), std::move(m_task_status_change_queue_));
+    }
 
-      while (!elems.empty()) {
-        auto& elem = elems.front();
-        grpc::ClientContext context;
-        crane::grpc::StepStatusChangeRequest request;
-        crane::grpc::StepStatusChangeReply reply;
-        grpc::Status status;
+    while (!elems.empty()) {
+      auto& elem = elems.front();
+      grpc::ClientContext context;
+      crane::grpc::StepStatusChangeRequest request;
+      crane::grpc::StepStatusChangeReply reply;
 
-        CRANE_TRACE("Sending StepStatusChange for step status: {}",
-                    elem.new_status);
+      CRANE_TRACE("Sending StepStatusChange for step status: {}",
+                  elem.new_status);
 
-        request.set_job_id(g_config.JobId);
-        request.set_step_id(g_config.StepId);
-        request.set_new_status(elem.new_status);
-        request.set_exit_code(elem.exit_code);
-        *request.mutable_timestamp() = elem.timestamp;
-        if (elem.reason.has_value()) request.set_reason(elem.reason.value());
+      request.set_job_id(g_config.JobId);
+      request.set_step_id(g_config.StepId);
+      request.set_new_status(elem.new_status);
+      request.set_exit_code(elem.exit_code);
+      *request.mutable_timestamp() = elem.timestamp;
+      if (elem.reason.has_value()) request.set_reason(elem.reason.value());
         if (elem.final_status.has_value())
           request.set_final_status(elem.final_status.value());
 
-        status = m_stub_->StepStatusChange(&context, request, &reply);
-        if (!status.ok()) {
-          CRANE_ERROR(
-              "Failed to send StepStatusChange: "
-              "new_status: {}, reason: {} | {}, code: {}",
-              elem.new_status, status.error_message(),
-              context.debug_error_string(), int(status.error_code()));
-          break;
-        }
-        CRANE_TRACE("StepStatusChange sent, status={}, reply.ok={}",
-                    elem.new_status, reply.ok());
-        elems.pop_front();
+      auto status =
+          m_stub_->StepStatusChange(&context, request, &reply);
+      if (!status.ok()) {
+        CRANE_ERROR(
+            "Failed to send StepStatusChange: "
+            "new_status: {}, reason: {} | {}, code: {}",
+            elem.new_status, status.error_message(),
+            context.debug_error_string(), int(status.error_code()));
+        break;
       }
-      m_mutex_.Lock();
-      if (!elems.empty()) {
-        m_task_status_change_queue_.splice(m_task_status_change_queue_.begin(),
-                                           std::move(elems));
-      }
-      m_mutex_.Unlock();
+      CRANE_TRACE("StepStatusChange sent, status={}, reply.ok={}",
+                  elem.new_status, reply.ok());
+      elems.pop_front();
     }
 
-    // Interruptible wait for new queue items
-    absl::MutexLock lock(&m_mutex_);
-    m_cv_.WaitWithTimeout(&m_mutex_, absl::Milliseconds(50));
+    if (!elems.empty()) {
+      absl::MutexLock lock(&m_mutex_);
+      m_task_status_change_queue_.splice(
+          m_task_status_change_queue_.begin(), std::move(elems));
+    }
   }
 }
 

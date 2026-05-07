@@ -236,6 +236,15 @@ int InitFromStdin(int argc, char** argv) {
 
   g_config.EnableSlurmCompatibleEnv = msg.enable_slurm_compatible_env();
 
+  g_config.StatusChange.ChannelConnectTimeoutSec =
+      msg.status_change_channel_connect_timeout_sec() > 0
+          ? msg.status_change_channel_connect_timeout_sec()
+          : 3;
+  g_config.StatusChange.ReconnectBackoffSec =
+      msg.status_change_reconnect_backoff_sec() > 0
+          ? msg.status_change_reconnect_backoff_sec()
+          : 10;
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,

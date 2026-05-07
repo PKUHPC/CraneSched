@@ -927,11 +927,12 @@ void CtldClient::AsyncSendThread_() {
   bool prev_connected = false, connected = false;
 
   // Variable for StepStatusChange sending part.
-  absl::Condition cond(
-      +[](decltype(m_step_status_change_list_)* queue) {
-        return !queue->empty();
+  absl::Condition cond_or_stop(
+      +[](CtldClient* self) {
+        return !self->m_step_status_change_list_.empty() ||
+               self->m_stopping_.load(std::memory_order_relaxed);
       },
-      &m_step_status_change_list_);
+      this);
 
   while (true) {
     if (m_stopping_) {
@@ -978,24 +979,18 @@ void CtldClient::AsyncSendThread_() {
 
     if (g_ctld_client_sm->IsReadyNow() == false) continue;
 
-    // StepStatusChange sending is done in this grpc channel maintaining thread
-    // if the channel is connected.
-    // This is equivalent to sharing some time slice with grpc sending,
-    // i.e. this thread is maintaining grpc channel and sending rpc at the same
-    // time.
-
-    bool has_msg = m_step_status_change_mtx_.LockWhenWithTimeout(
-        cond, absl::Milliseconds(50));
-    if (!has_msg) {
+    m_step_status_change_mtx_.LockWhen(cond_or_stop);
+    if (m_step_status_change_list_.empty()) {
       m_step_status_change_mtx_.Unlock();
-      // No msg, sleep for a while to avoid busy loop.
-      std::this_thread::sleep_for(50ms);
-    } else {
-      std::list<StepStatusChangeQueueElem> changes;
-      changes.splice(changes.begin(), std::move(m_step_status_change_list_));
-      m_step_status_change_mtx_.Unlock();
-      bool success = SendStatusChanges_(std::move(changes));
-      if (!success) std::this_thread::sleep_for(100ms);
+      continue;
+    }
+    std::list<StepStatusChangeQueueElem> changes;
+    changes.splice(changes.begin(), std::move(m_step_status_change_list_));
+    m_step_status_change_mtx_.Unlock();
+    bool success = SendStatusChanges_(std::move(changes));
+    if (!success) {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(g_config.StatusChange.RetrySleepMs));
     }
   }
 }

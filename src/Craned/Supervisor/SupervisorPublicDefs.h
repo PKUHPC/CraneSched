@@ -141,6 +141,12 @@ struct Config {
   JobLifecycleHookConfig JobLifecycleHook;
 
   bool EnableSlurmCompatibleEnv{false};
+
+  struct StatusChangeConfig {
+    uint32_t ChannelConnectTimeoutSec{3};
+    uint32_t ReconnectBackoffSec{10};
+  };
+  StatusChangeConfig StatusChange;
 };
 
 inline Config g_config;

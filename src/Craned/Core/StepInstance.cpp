@@ -376,6 +376,11 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
+    init_req.set_status_change_channel_connect_timeout_sec(
+        g_config.StatusChange.ChannelConnectTimeoutSec);
+    init_req.set_status_change_reconnect_backoff_sec(
+        g_config.StatusChange.ReconnectBackoffSec);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",

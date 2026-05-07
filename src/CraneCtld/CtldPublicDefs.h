@@ -232,6 +232,12 @@ struct Config {
   KeepalivedConfig KeepalivedConfig;
 
   bool AllLicenseResourcesAbsolute{false};
+
+  struct StatusChangeConfig {
+    uint32_t FlushTimeoutMs{100};
+    uint32_t BatchNum{1000};
+  };
+  StatusChangeConfig StatusChange;
 };
 
 struct RunTimeStatus {

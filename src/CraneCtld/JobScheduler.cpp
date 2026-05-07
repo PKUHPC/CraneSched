@@ -718,8 +718,8 @@ bool JobScheduler::Init() {
         JobStatusChangeTimerCb_();
       });
   m_job_status_change_timer_handle_->start(
-      std::chrono::milliseconds(kJobStatusChangeTimeoutMS * 3),
-      std::chrono::milliseconds(kJobStatusChangeTimeoutMS));
+      std::chrono::milliseconds(g_config.StatusChange.FlushTimeoutMs * 3),
+      std::chrono::milliseconds(g_config.StatusChange.FlushTimeoutMs));
 
   m_job_status_change_async_handle_ =
       uvw_job_status_change_loop->resource<uvw::async_handle>();
@@ -1289,6 +1289,7 @@ void JobScheduler::ScheduleThread_() {
 
       Mutex thread_pool_mtx;
       HashSet<job_id_t> failed_job_id_set;
+      HashSet<CranedId> failed_alloc_job_craneds;
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
@@ -1382,6 +1383,7 @@ void JobScheduler::ScheduleThread_() {
             absl::MutexLock lk(&thread_pool_mtx);
             for (const auto& job_to_d : jobs)
               failed_job_id_set.emplace(job_to_d.job_id());
+            failed_alloc_job_craneds.emplace(craned_id);
             alloc_job_latch.count_down();
             return;
           }
@@ -1402,6 +1404,7 @@ void JobScheduler::ScheduleThread_() {
           thread_pool_mtx.Lock();
           for (const auto& job_to_d : jobs)
             failed_job_id_set.emplace(job_to_d.job_id());
+          failed_alloc_job_craneds.emplace(craned_id);
           thread_pool_mtx.Unlock();
 
           // If jobs in task_uid_pairs failed to start, they will be moved to
@@ -1422,6 +1425,9 @@ void JobScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+      for (const auto& craned_id : failed_alloc_job_craneds)
+        craned_alloc_steps.erase(craned_id);
+
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -4369,7 +4375,8 @@ void JobScheduler::JobStatusChangeTimerCb_() {
 }
 
 void JobScheduler::JobStatusChangeAsyncCb_() {
-  if (m_job_status_change_queue_.size_approx() >= kJobStatusChangeBatchNum)
+  if (m_job_status_change_queue_.size_approx() >=
+      g_config.StatusChange.BatchNum)
     m_clean_job_status_change_handle_->send();
 }
 

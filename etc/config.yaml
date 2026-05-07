@@ -43,6 +43,11 @@ CraneCtld:
   # max files of cranectld log file
   MaxLogFileNum: 3
 
+  # StatusChange queue processing tuning
+  # StatusChange:
+  #   FlushTimeoutMs: 100            # Queue flush timer interval
+  #   BatchNum: 1000                 # Batch threshold for immediate processing
+
 Keepalived:
   # the base directory of NFS storage
   CraneSharedBaseDir: /var/crane/
@@ -76,6 +81,12 @@ Craned:
   # Set the interval for node health check.
   # 0 means the health check is disabled.
   NodeHealthCheckInterval: 0
+
+  # StatusChange RPC tuning parameters
+  # StatusChange:
+  #   ChannelConnectTimeoutSec: 3    # Supervisor->Craned connection timeout
+  #   ReconnectBackoffSec: 10        # Supervisor reconnect backoff
+  #   RetrySleepMs: 100              # Craned->Ctld retry sleep on failure
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:

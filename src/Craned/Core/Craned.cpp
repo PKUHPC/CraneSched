@@ -252,6 +252,16 @@ void ParseCranedConfig(const YAML::Node& config) {
 
     conf.NodeHealthCheckInterval =
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
+
+    if (craned_config["StatusChange"]) {
+      auto sc = craned_config["StatusChange"];
+      g_config.StatusChange.ChannelConnectTimeoutSec =
+          YamlValueOr<uint32_t>(sc["ChannelConnectTimeoutSec"], 3);
+      g_config.StatusChange.ReconnectBackoffSec =
+          YamlValueOr<uint32_t>(sc["ReconnectBackoffSec"], 10);
+      g_config.StatusChange.RetrySleepMs =
+          YamlValueOr<uint32_t>(sc["RetrySleepMs"], 100);
+    }
   }
   g_config.CranedConf = std::move(conf);
 }

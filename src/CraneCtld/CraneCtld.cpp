@@ -67,6 +67,14 @@ void ParseCtldConfig(const YAML::Node& config) {
     if (ctld_cfg["MaxLogFileNum"]) {
       ctld_config.MaxLogFileNum = ctld_cfg["MaxLogFileNum"].as<uint64_t>();
     }
+
+    if (ctld_cfg["StatusChange"]) {
+      auto sc = ctld_cfg["StatusChange"];
+      g_config.StatusChange.FlushTimeoutMs =
+          YamlValueOr<uint32_t>(sc["FlushTimeoutMs"], 100);
+      g_config.StatusChange.BatchNum =
+          YamlValueOr<uint32_t>(sc["BatchNum"], 1000);
+    }
   }
 
   g_config.CtldConf = std::move(ctld_config);
