@@ -1052,6 +1052,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    step_it->second->wait_execute_span.End();
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1286,6 +1287,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     // process.
     CRANE_TRACE("[Step #{}.{}] Supervisor spawned successfully.", job_id,
                 step_id);
+    CRANE_TRACE_MANUAL_FROM_REMOTE(wait_span, "step/wait_execute",
+                                   step_ptr->traceparent);
+    wait_span.SetAttribute("job_id", job_id);
+    wait_span.SetAttribute("step_id", step_id);
+    step_ptr->wait_execute_span = std::move(wait_span);
   }
 }
 

@@ -915,6 +915,27 @@ def system_analysis_to_dict(spans: list[Span]) -> dict:
         for node, durs in node_rpcs.items():
             node_rpc[node] = span_stats(durs)
 
+    # Compute spawn-to-execute gap (barrier + RPC wait time)
+    spawn_spans = by_name.get("step/supervisor_spawn", [])
+    exec_spans = by_name.get("step/execute", [])
+    gap_durations = []
+    if spawn_spans and exec_spans:
+        spawn_end_by_key: dict[tuple, object] = {}
+        for s in spawn_spans:
+            key = (s.attrs.get("job_id"), s.attrs.get("step_id"))
+            if s.start_time:
+                end_time = s.start_time + timedelta(microseconds=s.duration_us)
+                spawn_end_by_key[key] = end_time
+        for s in exec_spans:
+            key = (s.attrs.get("job_id"), s.attrs.get("step_id"))
+            spawn_end = spawn_end_by_key.get(key)
+            if spawn_end and s.start_time:
+                gap_us = int((s.start_time - spawn_end).total_seconds() * 1_000_000)
+                if gap_us > 0:
+                    gap_durations.append(gap_us)
+
+    spawn_to_execute_gap = span_stats(gap_durations) if gap_durations else {}
+
     return {
         "total_spans": len(spans),
         "jobs_seen": len(job_ids),
@@ -923,6 +944,7 @@ def system_analysis_to_dict(spans: list[Span]) -> dict:
         "spans": spans_dict,
         "sub_spans": sub_spans_dict,
         "node_rpc_latency": node_rpc,
+        "spawn_to_execute_gap": spawn_to_execute_gap,
     }
 
 
@@ -1029,7 +1051,7 @@ def main():
     print(f"Connecting to {args.url}, Org: {args.org}, Bucket: {args.bucket}")
 
     try:
-        with InfluxDBClient(url=args.url, token=args.token, org=args.org) as client:
+        with InfluxDBClient(url=args.url, token=args.token, org=args.org, timeout=60_000) as client:
             if args.system:
                 spans = query_all_spans(client, args)
                 if args.json:
