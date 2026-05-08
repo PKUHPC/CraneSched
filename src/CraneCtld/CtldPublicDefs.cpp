@@ -1364,6 +1364,10 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                     .cfored_name = meta.cfored_name});
           }
           pd_steps.insert(comm_step->StepId());
+        } else if (IsFinishedStepStatus(comm_step->Status()) ||
+                   comm_step->Status() ==
+                       crane::grpc::JobStatus::Completing) {
+          continue;
         } else {
           for (const auto& node : comm_step->ExecutionNodes()) {
             context->craned_cancel_steps[node][comm_step->job_id].emplace(
