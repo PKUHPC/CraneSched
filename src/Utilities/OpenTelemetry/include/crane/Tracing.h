@@ -366,8 +366,7 @@ class ManualSpan {
   }
 
   [[nodiscard]] ScopedSpan CreateChild(std::string_view child_name) const {
-    if (span_)
-      return ScopedSpan(child_name, tracer_, span_->GetContext());
+    if (span_) return ScopedSpan(child_name, tracer_, span_->GetContext());
     return ScopedSpan();
   }
 

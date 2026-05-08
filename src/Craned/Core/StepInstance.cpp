@@ -157,7 +157,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   spawn_span.SetAttribute("job_id", job_id);
   spawn_span.SetAttribute("step_id", step_id);
   spawn_span.SetAttribute("step_type",
-                           static_cast<int64_t>(step_to_d.step_type()));
+                          static_cast<int64_t>(step_to_d.step_type()));
 
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;

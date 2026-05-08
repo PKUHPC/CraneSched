@@ -3590,11 +3590,9 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     exec_span.SetAttribute("step_id", m_step_.step_id);
     exec_span.SetAttribute("task_count",
                            static_cast<int64_t>(m_step_.task_ids.size()));
-    exec_span.SetAttribute(
-        "step_type",
-        static_cast<int64_t>(m_step_.GetStep().step_type()));
+    exec_span.SetAttribute("step_type",
+                           static_cast<int64_t>(m_step_.GetStep().step_type()));
     m_step_.ExecuteSpan() = std::move(exec_span);
-
 
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
@@ -3616,7 +3614,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "uid_lookup_failed");
+      m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                      "uid_lookup_failed");
       for (auto task_id : m_step_.task_ids)
         g_task_mgr->FinalizeTaskAsync(
             task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
@@ -3633,7 +3632,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
                     m_step_.step_id, static_cast<int>(err));
         prep_span.SetStatus(crane::StatusCode::kError, "prepare_failed");
-        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "prepare_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "prepare_failed");
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->FinalizeTaskAsync(
               task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
@@ -3692,7 +3692,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
     {
-      CRANE_TRACE_CHILD_NAMED(cg_span, m_step_.ExecuteSpan(), "step/cgroup_alloc");
+      CRANE_TRACE_CHILD_NAMED(cg_span, m_step_.ExecuteSpan(),
+                              "step/cgroup_alloc");
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
           CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
                                            false),
@@ -3701,7 +3702,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
                     m_step_.step_id);
         cg_span.SetStatus(crane::StatusCode::kError, "cgroup_alloc_failed");
-        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, "cgroup_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "cgroup_failed");
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->FinalizeTaskAsync(task_id,
                                         TaskFinalizeCause::STEP_CGROUP_FAILED,
@@ -3712,13 +3714,14 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       }
       m_step_.step_user_cg = std::move(cg_expt.value());
       cg_span.SetAttribute("cgroup_path",
-                            m_step_.step_user_cg->CgroupPath().string());
+                           m_step_.step_user_cg->CgroupPath().string());
     }
 
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(), "step/task_launch");
+    CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(),
+                            "step/task_launch");
     launch_span.SetAttribute("task_count",
                              static_cast<int64_t>(m_step_.task_ids.size()));
 

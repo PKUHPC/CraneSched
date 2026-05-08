@@ -1032,12 +1032,10 @@ void JobScheduler::ScheduleThread_() {
 
       CRANE_TRACE_SCOPE_NAMED(sched_cycle, "scheduling/cycle");
       sched_cycle.SetAttribute("crane.dimension", "scheduling");
-      sched_cycle.SetAttribute(
-          "pending_queue_depth",
-          static_cast<int64_t>(m_pending_job_map_.size()));
-      sched_cycle.SetAttribute(
-          "running_job_count",
-          static_cast<int64_t>(m_running_job_map_.size()));
+      sched_cycle.SetAttribute("pending_queue_depth",
+                               static_cast<int64_t>(m_pending_job_map_.size()));
+      sched_cycle.SetAttribute("running_job_count",
+                               static_cast<int64_t>(m_running_job_map_.size()));
 
       std::vector<DependencyEvent> dep_events;
       size_t approx_size = m_dependency_event_queue_.size_approx();
@@ -4281,8 +4279,8 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
       }
 
       // Start pending span to track scheduling wait time.
-      // Independent trace (not child of submit) since it outlives submit/request.
-      // Linked to submit via crane.submit_id attribute.
+      // Independent trace (not child of submit) since it outlives
+      // submit/request. Linked to submit via crane.submit_id attribute.
       {
         auto* job_ptr = accepted_jobs[pos].first.get();
         CRANE_TRACE_MANUAL(pending_span, "job/pending");
@@ -4530,9 +4528,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                                   job->Traceparent());
     sc_job_span.SetAttribute("job_id", job_id);
     sc_job_span.SetAttribute("step_id", step_id);
-    sc_job_span.SetAttribute(
-        "new_status",
-        static_cast<int64_t>(new_status));
+    sc_job_span.SetAttribute("new_status", static_cast<int64_t>(new_status));
 
     // Free job allocation
     std::optional<std::pair<crane::grpc::JobStatus, uint32_t /*exit code*/>>
@@ -4692,8 +4688,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         // Trace per-job alloc step RPC
-        for (const auto& step :
-             context.craned_step_alloc_map.at(craned_id)) {
+        for (const auto& step : context.craned_step_alloc_map.at(craned_id)) {
           auto tp_it = context.job_traceparents.find(step.job_id());
           if (tp_it != context.job_traceparents.end()) {
             CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc_step",

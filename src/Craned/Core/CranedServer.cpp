@@ -24,9 +24,9 @@
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "crane/Tracing.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 
@@ -69,7 +69,7 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
   g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
-                               std::move(traceparents));
+                              std::move(traceparents));
 
   return Status::OK;
 }
