@@ -138,6 +138,7 @@ class PmixCollRing : public Coll,
 
   int m_next_peerid_{};
   CranedId m_next_craned_id_;
+  CranedId m_prev_craned_id_;
   std::array<CollRingCtx, PMIX_COLL_RING_CTX_NUM> m_ctx_array_;
 #endif
 };

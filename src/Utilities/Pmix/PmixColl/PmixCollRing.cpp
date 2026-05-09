@@ -18,6 +18,11 @@
 
 #include "PmixCollRing.h"
 
+#include <chrono>
+#include <ranges>
+#include <set>
+#include <string>
+
 #include "Pmix.h"
 
 namespace pmix {
@@ -68,6 +73,11 @@ bool PmixCollRing::PmixCollInit(CollType type,
     next_iter = hostname_set.begin();
   }
   m_next_craned_id_ = *next_iter;
+
+  // compute previous neighbor id as well
+  auto prev_iter = (it == hostname_set.begin()) ? std::prev(hostname_set.end())
+                                                : std::prev(it);
+  m_prev_craned_id_ = *prev_iter;
 
   for (int i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
     CollRingCtx& coll_ctx = m_ctx_array_[i];
@@ -177,7 +187,9 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
       pmix_procs->set_rank(proc.rank);
     }
 
-    request.set_msg(coll_ring_ctx.ring_buf);
+    // Forward only the newly contributed delta, keep local ring_buf as the
+    // aggregated store for FINALIZE callback.
+    request.set_msg(data);
 
     CRANE_DEBUG(
         "coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, "
@@ -200,7 +212,6 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
       if (!ok) {
         CRANE_ERROR("{:p}, Cannot forward ring data",
                     static_cast<void*>(&coll_ring_ctx));
-        coll_ring_ctx.ring_buf.clear();
         if (coll_ring_ctx.cbfunc) {
           PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_ERR_TIMEOUT, nullptr, 0,
                              coll_ring_ctx.cbdata, nullptr, nullptr);
@@ -215,13 +226,11 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
       if (seq != coll_ring_ctx.seq) {
         CRANE_DEBUG("{:p}: collective was reset!",
                     static_cast<void*>(&coll_ring_ctx));
-        coll_ring_ctx.ring_buf.clear();
         return;
       }
 
       coll_ring_ctx.forward_cnt++;
       self->ProgressCollectRing_(coll_ring_ctx);
-      coll_ring_ctx.ring_buf.clear();
     });
   }
 
@@ -369,9 +378,22 @@ bool PmixCollRing::ProcessRingRequest(
     const std::string& msg) {
   std::lock_guard lock_guard(this->m_lock_);
 
+  // Basic message sanity checks first: size and previous neighbor.
+  if (hdr.msgsize() != msg.size()) {
+    CRANE_DEBUG("{:p}: unexpected message size={}, expect={}",
+                static_cast<void*>(this), msg.size(), hdr.msgsize());
+    return false;
+  }
+
+  if (m_peers_cnt_ > 1 && !m_prev_craned_id_.empty() &&
+      hdr.craned_id() != m_prev_craned_id_) {
+    CRANE_ERROR("{:p}: unexpected contrib from {}, expected prev {}",
+                static_cast<void*>(this), hdr.craned_id(), m_prev_craned_id_);
+    return false;
+  }
+
   CRANE_DEBUG(
-      "collective message from nodeid={}, contrib_id={}, seq={}, hop={}, "
-      "msgsize={}",
+      "collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}",
       hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(),
       hdr.msgsize());
 
@@ -423,11 +445,10 @@ bool PmixCollRing::PmixCollRingNeighbor_(
                 static_cast<void*>(this), hdr.seq());
     return false;
   }
-
   CRANE_DEBUG(
       "{:p}: contrib/nbr: seq_num={}, state={}, nodeid={}, contrib={}, "
       "hop_seq={}, size={}",
-      static_cast<void*>(&coll_ring_ctx), coll_ring_ctx->seq,
+      static_cast<void*>(coll_ring_ctx), coll_ring_ctx->seq,
       ToString(coll_ring_ctx->state), hdr.craned_id(), hdr.contrib_id(),
       hdr.hop_seq(), hdr.msgsize());
 
