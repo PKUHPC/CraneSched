@@ -141,16 +141,32 @@ void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
     return;
   }
 
-  /*
-   * If width is more than nodes total, then don't bother trying to
-   * figure out the tree as there isn't a tree. All nodes just directly
-   * talk to the controller.
+    /*
+   * When width >= num_nodes the regular tree formula breaks down:
+   * Dep() returns 0, which causes integer underflow (max_children/width - 1 ==
+   * -1) in SearchTree and produces wrong parent/child counts.
+   *
+   * Fall back to a flat star topology: rank 0 is the single root and all other
+   * ranks are its direct children.  This preserves correct all-to-all data
+   * exchange regardless of the configured tree width.
    */
-  if (width > num_nodes) {
-    *parent = -1;
-    *num_children = 0;
-    *depth = 0;     /* not used currently */
-    *max_depth = 0; /* not used currently */
+  if (width >= num_nodes) {
+    if (num_nodes == 1) {
+      *parent = -1;
+      *num_children = 0;
+      *depth = 0;
+      *max_depth = 0;
+    } else if (rank == 0) {
+      *parent = -1;
+      *num_children = num_nodes - 1;
+      *depth = 0;
+      *max_depth = 1;
+    } else {
+      *parent = 0;
+      *num_children = 0;
+      *depth = 1;
+      *max_depth = 1;
+    }
     return;
   }
 
@@ -183,9 +199,6 @@ int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth,
   // - width <= 0: would cause infinite loop in Dep() / divide-by-zero below
   // - rank out of range
   if (num_nodes <= 0 || width <= 0 || rank < 0 || rank >= num_nodes) return 0;
-
-  // no children if tree is disabled or degenerate
-  if (width > num_nodes) return 0;
 
   // Guard against null pointer; caller is expected to provide a valid vector.
   if (children == nullptr) return 0;
