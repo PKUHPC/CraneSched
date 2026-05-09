@@ -176,8 +176,6 @@ bool PmixCollTree::PmixCollContribLocal(const std::string& data,
     CRANE_DEBUG("{:p}: contrib/loc: next coll!", static_cast<void*>(this));
     break;
   case CollTreeState::UPFWD:
-  case CollTreeState::UPFWD_WPC:
-  case CollTreeState::UPFWD_WSC:
     CRANE_DEBUG("coll {:p}: contrib/loc: before prev coll is finished!",
                 static_cast<void*>(this));
     return false;
@@ -230,12 +228,6 @@ void PmixCollTree::ProgressCollectTree_() {
       break;
     case CollTreeState::UPFWD:
       result = ProgressUpFwd_();
-      break;
-    case CollTreeState::UPFWD_WPC:
-      result = ProgressUpFwdWpc_();
-      break;
-    case CollTreeState::UPFWD_WSC:
-      result = ProgressUpFwdWsc_();
       break;
     case CollTreeState::DOWNFWD:
       result = ProgressDownFwd_();
@@ -447,64 +439,6 @@ bool PmixCollTree::ProgressUpFwd_() {
   return true;
 }
 
-bool PmixCollTree::ProgressUpFwdWsc_() {
-  switch (m_upfwd_status_) {
-  case CollTreeSndState::FAILED:
-    if (m_cbfunc_) {
-      m_cbfunc_(PMIX_ERROR, nullptr, 0, m_cbdata_, nullptr, nullptr);
-    }
-    m_cbfunc_ = nullptr;
-    m_cbdata_ = nullptr;
-    ResetCollTree_();
-    return false;
-  case CollTreeSndState::ACTIVE:
-    /* still waiting for the send completion */
-    return false;
-  case CollTreeSndState::DONE:
-    /* all-set to go to the next stage */
-    break;
-  default:
-    CRANE_ERROR("Bad collective ufwd state {}", ToString(m_upfwd_status_));
-    m_state_ = CollTreeState::SYNC;
-    m_craned_client_->TerminateSteps();
-    return false;
-  }
-
-  ResetCollTreeUpFwd_();
-
-  m_state_ = CollTreeState::UPFWD_WPC;
-  return true;
-}
-
-bool PmixCollTree::ProgressUpFwdWpc_() {
-  if (!m_contrib_prnt_) return false;
-
-  /* Need to wait only for the local completion callback if installed*/
-  m_downfwd_status_ = CollTreeSndState::ACTIVE;
-  m_downfwd_cb_wait_ = 0;
-
-  /* move to the next state */
-  m_state_ = CollTreeState::DOWNFWD;
-
-  /* local delivery */
-  if (this->m_cbfunc_) {
-    auto cb_data = std::make_unique<CbData>();
-    cb_data->coll = shared_from_this();
-    cb_data->seq = m_seq_;
-
-    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_downfwd_buf_.data(),
-                       m_downfwd_buf_.size(), m_cbdata_, TreeReleaseFn,
-                       cb_data.release());
-    m_downfwd_cb_wait_++;
-    m_cbfunc_ = nullptr;
-    m_cbdata_ = nullptr;
-    CRANE_DEBUG("{:p}: local delivery, size = {}", static_cast<void*>(this),
-                m_downfwd_buf_.size());
-  }
-
-  return true;
-}
-
 bool PmixCollTree::ProgressDownFwd_() {
   /* if all children + local callbacks was invoked */
   if (m_downfwd_cb_wait_ == m_downfwd_cb_cnt_)
@@ -570,11 +504,9 @@ bool PmixCollTree::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
     }
     break;
   case CollTreeState::UPFWD:
-  case CollTreeState::UPFWD_WSC:
     CRANE_ERROR("{:p}: unexpected contrib from {}, state = {}",
                 static_cast<void*>(this), peer_host, ToString(m_state_));
     goto error;
-  case CollTreeState::UPFWD_WPC:
   case CollTreeState::DOWNFWD:
     CRANE_DEBUG(
         "{:p}: contrib for the next coll. node_id={}, child={} seq={}, "
@@ -658,13 +590,7 @@ bool PmixCollTree::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
     }
     ProgressCollectTree_();
     return true;
-  case CollTreeState::UPFWD_WSC:
-    CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
-                static_cast<void*>(this), peer_host, seq, m_seq_,
-                static_cast<int>(m_state_));
-    goto error;
   case CollTreeState::UPFWD:
-  case CollTreeState::UPFWD_WPC:
     break;
   case CollTreeState::DOWNFWD:
     CRANE_DEBUG("{:p}: double contrib node_id={} seq={}, cur_seq={}, state={}",
@@ -716,7 +642,6 @@ void PmixCollTree::ResetCollTree_() {
     break;
   case CollTreeState::COLLECT:
   case CollTreeState::UPFWD:
-  case CollTreeState::UPFWD_WSC:
     this->m_seq_++;
     m_state_ = CollTreeState::SYNC;
     this->ResetCollTreeUpFwd_();
@@ -727,7 +652,6 @@ void PmixCollTree::ResetCollTree_() {
     m_ts_ = {};
     break;
   case CollTreeState::DOWNFWD:
-  case CollTreeState::UPFWD_WPC:
     this->m_seq_++;
     this->ResetCollTreeDownFwd_();
     if (m_contrib_local_ || m_contrib_children_) {

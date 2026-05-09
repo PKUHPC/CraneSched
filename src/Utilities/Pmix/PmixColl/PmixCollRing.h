@@ -108,8 +108,6 @@ class PmixCollRing : public Coll,
  private:
   /* ring coll functions */
   bool PmixCollRingInit_(const std::set<std::string>& hostset);
-  bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
-                          void* cbdata);
 
   CollRingCtx* CollRingCtxNew_();
 

@@ -32,8 +32,6 @@ enum class CollTreeState : std::uint8_t {
   SYNC,
   COLLECT,
   UPFWD,
-  UPFWD_WSC, /* Wait for the upward Send Complete */
-  UPFWD_WPC, /* Wait for Parent Contrib */
   DOWNFWD,
 };
 
@@ -45,10 +43,6 @@ inline std::string ToString(CollTreeState state) {
     return "COLLECT";
   case CollTreeState::UPFWD:
     return "UPFWD";
-  case CollTreeState::UPFWD_WSC:
-    return "UPFWD_WSC";
-  case CollTreeState::UPFWD_WPC:
-    return "UPFWD_WPC";
   case CollTreeState::DOWNFWD:
     return "DOWNFWD";
   default:
@@ -116,14 +110,10 @@ class PmixCollTree : public Coll,
  private:
   /* tree coll functions */
   bool PmixCollTreeInit_(const std::set<std::string>& hostset);
-  bool PmixCollTreeLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
-                          void* cbdata);
 
   void ProgressCollectTree_();
   bool ProgressCollect_();
   bool ProgressUpFwd_();
-  bool ProgressUpFwdWsc_();
-  bool ProgressUpFwdWpc_();
   bool ProgressDownFwd_();
 
   void ResetCollTree_();
