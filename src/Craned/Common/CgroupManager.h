@@ -313,12 +313,15 @@ constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 // hierarchy and overflow uses a flat cpuset structure (no per-job children).
 // CPUSET cgroups are managed separately by CpuPoolManager.
 // See .claude/docs/cpu_pool/overflow_cg.md for the design rationale.
-constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
+constexpr ControllerFlags CG_V1_BASE_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
     CgConstant::Controller::FREEZE_CONTROLLER |
     CgConstant::Controller::DEVICES_CONTROLLER |
     CgConstant::Controller::BLOCK_CONTROLLER;
+
+constexpr ControllerFlags CG_V1_INT_JOB_CONTROLLERS =
+    CG_V1_BASE_CONTROLLERS | CgConstant::Controller::CPUSET_CONTROLLER;
 
 constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
@@ -611,7 +614,7 @@ class CgroupManager {
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string& cgroup_str,
       const crane::grpc::ResourceInNodeV3& resource, bool recover,
-      std::uint64_t min_mem = 0U);
+      std::uint64_t min_mem = 0U, bool is_int_job = false);
   static CraneExpected<std::unique_ptr<CgroupInterface>> CreateOrOpenCgroup(
       const std::string& cgroup_str, bool retrieve);
   static CraneErrCode SetCgroupResource(

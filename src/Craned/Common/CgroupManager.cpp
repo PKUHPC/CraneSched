@@ -523,12 +523,14 @@ CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(
     const std::string& cgroup_str,
     const crane::grpc::ResourceInNodeV3& resource, bool recover,
-    std::uint64_t min_mem) {
+    std::uint64_t min_mem, bool is_int_job) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_REQUIRED_CONTROLLERS,
-                                  NO_CONTROLLER_FLAG, recover);
+    cg_unique_ptr = CreateOrOpen_(
+        cgroup_str,
+        is_int_job ? CG_V1_INT_JOB_CONTROLLERS : CG_V1_BASE_CONTROLLERS,
+        NO_CONTROLLER_FLAG, recover);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
                                   NO_CONTROLLER_FLAG, recover);
@@ -581,7 +583,7 @@ CgroupManager::CreateOrOpenCgroup(const std::string& cgroup_str,
                                   bool retrieve) {
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_REQUIRED_CONTROLLERS,
+    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_BASE_CONTROLLERS,
                                   NO_CONTROLLER_FLAG, retrieve);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
@@ -648,8 +650,9 @@ CgroupPathInfo CgroupManager::MakeCgroupPathInfo(job_id_t job_id,
     // v1 separated hierarchies: no overflow layer in cpu/mem/devices
     info.cg_str = job_name;
     // cpuset is managed separately; overflow jobs migrate to crane/overflow
-    info.cpuset_cg_str =
-        cpu_set.IsInteger() ? "" : std::string(CgConstant::kOverflowCgName);
+    info.cpuset_cg_str = cpu_set.IsInteger()
+                             ? job_name
+                             : std::string(CgConstant::kOverflowCgName);
   }
 
   return info;
@@ -670,8 +673,8 @@ CgroupManager::AllocateAndGetCgroupForJob(
     UpdateOverflowCpuset_();
   }
 
-  auto result =
-      AllocateAndGetCgroup(path_info.cg_str, resource, recover, min_mem);
+  auto result = AllocateAndGetCgroup(path_info.cg_str, resource, recover,
+                                     min_mem, is_integer);
 
   if (!result.has_value() && is_integer) {
     for (uint32_t id : cpu_set.core_ids) m_int_cpus_.erase(id);
@@ -1299,6 +1302,14 @@ bool CgroupV1::SetCpuSet(const std::unordered_set<uint32_t>& cpu_set) {
   if (cpu_set.empty()) {
     CRANE_WARN("Empty CPU set provided for CPU binding");
     return false;
+  }
+
+  // Skip if this cgroup was not created with cpuset controller.
+  if (cgroup_get_controller(m_cgroup_info_.RawCgHandle(),
+                            CgConstant::GetControllerStringView(
+                                CgConstant::Controller::CPUSET_CONTROLLER)
+                                .data()) == nullptr) {
+    return true;
   }
 
   // cgroupv1 cpuset requires cpuset.mems to be set before cpuset.cpus.
@@ -2146,7 +2157,7 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
 
   // Create persistent overflow cgroup in cpu/memory/devices hierarchy
   ControllerFlags flags =
-      IsCgV2() ? CG_V2_REQUIRED_CONTROLLERS : CG_V1_REQUIRED_CONTROLLERS;
+      IsCgV2() ? CG_V2_REQUIRED_CONTROLLERS : CG_V1_BASE_CONTROLLERS;
 
   auto cg = CreateOrOpen_(CgConstant::kOverflowCgName, flags,
                           NO_CONTROLLER_FLAG, false);

@@ -117,7 +117,7 @@ CraneErrCode RecoverCgForJobSteps(
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
     if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_BASE_CONTROLLERS,
                                             NO_CONTROLLER_FLAG, true);
     else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
       cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,

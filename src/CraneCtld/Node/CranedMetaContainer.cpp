@@ -327,8 +327,10 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     craned_meta.remote_meta.sys_rel_info.name = "unknown";
 
     auto& static_meta = craned_meta.static_meta;
-    static_meta.res.GetCpuSet().cpu_count =
-        cpu_t(config.Nodes.at(craned_name)->cpu);
+    uint32_t cpu_cnt = config.Nodes.at(craned_name)->cpu;
+    static_meta.res.GetCpuSet().cpu_count = cpu_t(cpu_cnt);
+    for (uint32_t i = 0; i < cpu_cnt; ++i)
+      static_meta.res.GetCpuSet().core_ids.insert(i);
     static_meta.res.SetMemoryBytes(config.Nodes.at(craned_name)->memory_bytes);
     static_meta.res.SetMemorySwBytes(
         config.Nodes.at(craned_name)->memory_bytes);
