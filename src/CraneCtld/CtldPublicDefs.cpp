@@ -530,6 +530,7 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.At(craned_id));
+  if (!job->Traceparent().empty()) job_to_d.set_traceparent(job->Traceparent());
   return job_to_d;
 }
 

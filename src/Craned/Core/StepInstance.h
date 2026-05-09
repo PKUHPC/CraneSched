@@ -22,6 +22,7 @@
 // Precompiled header comes first.
 
 #include "SupervisorStub.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 
@@ -32,6 +33,10 @@ struct StepInstance {
   pid_t supv_pid;
 
   crane::grpc::StepToD step_to_d;
+  std::string
+      traceparent;  // W3C traceparent from JobToD for distributed tracing
+
+  crane::ManualSpan wait_execute_span;
 
   std::atomic_bool err_before_supv_start{false};
   uint32_t exit_code{0};

@@ -810,6 +810,10 @@ class JobScheduler {
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
+  size_t PendingQueueSize() const {
+    return m_pending_map_cached_size_.load(std::memory_order_relaxed);
+  }
+
   void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
                                        const CranedId& craned_index,
                                        crane::grpc::JobStatus new_status,

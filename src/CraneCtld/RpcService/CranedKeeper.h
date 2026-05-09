@@ -78,7 +78,8 @@ class CranedStub {
   CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+      const std::unordered_map<job_id_t, std::string> &traceparents = {});
 
   CraneErrCode FreeSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);

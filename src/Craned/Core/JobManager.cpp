@@ -30,6 +30,7 @@
 #include "CtldClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 #include "protos/Supervisor.pb.h"
 
@@ -414,8 +415,13 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
-    uid_t uid = job.Uid();
 
+    CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc",
+                                  job.job_to_d.traceparent());
+    alloc_span.SetAttribute("job_id", job_id);
+    alloc_span.SetAttribute("crane.dimension", "lifecycle");
+
+    uid_t uid = job.Uid();
     job_map_ptr->emplace(job_id, std::move(job));
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
@@ -447,6 +453,12 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
           .reason = "Job not found on craned during free request",
           .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       continue;
+    }
+
+    {
+      CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/free",
+                                    job->job_to_d.traceparent());
+      span.SetAttribute("job_id", job_id);
     }
 
     for (auto& step : job->step_map | std::views::values) {
@@ -495,6 +507,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       // in the corresponding handler.
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
+      step_inst->traceparent = job_ptr->job_to_d.traceparent();
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
                                    .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
@@ -762,7 +775,14 @@ bool JobManager::EvCheckSupervisorRunning_() {
                                       }),
                               ","));
     FreeStepAllocation_(std::move(steps_to_clean));
-    if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
+    if (!jobs_to_clean.empty()) {
+      for (const auto& job : jobs_to_clean) {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/finish_release",
+                                      job.job_to_d.traceparent());
+        span.SetAttribute("job_id", job.job_id);
+      }
+      FreeJobAllocation_(std::move(jobs_to_clean));
+    }
   }
 
   return m_completing_step_retry_map_.empty();
@@ -816,9 +836,15 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
                                 need_run_prolog = elem.need_run_prolog,
                                 job_env = elem.job_env] {
       if (need_run_prolog) {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(prolog_span, "step/prolog",
+                                      execution->traceparent);
+        prolog_span.SetAttribute("job_id", execution->job_id);
+        prolog_span.SetAttribute("step_id", execution->step_id);
         if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
-                                      job_env))
+                                      job_env)) {
+          prolog_span.SetStatus(crane::StatusCode::kError, "prolog_failed");
           return;
+        }
       }
 
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
@@ -838,7 +864,8 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
 // This change needs to be applied in StepInstance.cpp which now holds
 // the SpawnSupervisor logic (moved there by x11_task branch).
 CraneErrCode JobManager::ExecuteStepAsync(
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
+    std::unordered_map<job_id_t, std::string> traceparents) {
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
@@ -852,9 +879,11 @@ CraneErrCode JobManager::ExecuteStepAsync(
         return CraneErrCode::ERR_CGROUP;
       }
 
-      EvQueueExecuteStepElem elem{.job_id = job_id,
-                                  .step_id = step_id,
-                                  .ok_prom = std::promise<CraneErrCode>{}};
+      EvQueueExecuteStepElem elem{
+          .job_id = job_id,
+          .step_id = step_id,
+          .traceparent = traceparents.count(job_id) ? traceparents[job_id] : "",
+          .ok_prom = std::promise<CraneErrCode>{}};
 
       m_grpc_execute_step_queue_.enqueue(std::move(elem));
     }
@@ -1000,7 +1029,13 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
-    auto& [job_id, step_id, ok_prom] = elem;
+    auto& [job_id, step_id, traceparent, ok_prom] = elem;
+
+    CRANE_TRACE_SCOPE_FROM_REMOTE(dispatch_span, "step/queue_dispatch",
+                                  traceparent);
+    dispatch_span.SetAttribute("job_id", job_id);
+    dispatch_span.SetAttribute("step_id", step_id);
+
     auto job = m_job_map_.GetValueExclusivePtr(job_id);
 
     if (!job) {
@@ -1017,6 +1052,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    step_it->second->wait_execute_span.End();
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1251,6 +1287,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     // process.
     CRANE_TRACE("[Step #{}.{}] Supervisor spawned successfully.", job_id,
                 step_id);
+    CRANE_TRACE_MANUAL_FROM_REMOTE(wait_span, "step/wait_execute",
+                                   step_ptr->traceparent);
+    wait_span.SetAttribute("job_id", job_id);
+    wait_span.SetAttribute("step_id", step_id);
+    step_ptr->wait_execute_span = std::move(wait_span);
   }
 }
 
@@ -1741,8 +1782,13 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     if (!g_config.JobLifecycleHook.Epilogs.empty() &&
         !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
-      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap(),
+      // Capture traceparent before job is moved into m_completing_job_
+      std::string tp = job.job_to_d.traceparent();
+      g_thread_pool->detach_task([job_id, tp, env_map = job.GetJobEnvMap(),
                                   this]() {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "job/epilog", tp);
+        epilog_span.SetAttribute("job_id", job_id);
+
         bool script_lock = false;
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
           m_prolog_serial_mutex_.Lock();
@@ -1776,6 +1822,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
           auto status = result.error();
           CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
                       status.exit_code, status.signal_num);
+          epilog_span.SetStatus(crane::StatusCode::kError, "job_epilog_failed");
           g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
         } else {
           CRANE_DEBUG("[Job #{}]: Epilog success", job_id);

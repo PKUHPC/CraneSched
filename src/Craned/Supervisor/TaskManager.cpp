@@ -39,6 +39,7 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 
 namespace Craned::Supervisor {
 using namespace std::chrono_literals;
@@ -2429,8 +2430,6 @@ CraneErrCode ProcInstance::Spawn() {
     // only. Integer cores should be pinned to the task process here.
 
     // Exec
-    // fmt::print(stderr, "DEBUG\n");
-    // for (const auto& arg : argv) fmt::print(stderr, "\"{}\" ", arg);
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
@@ -2651,6 +2650,11 @@ TaskManager::~TaskManager() {
 
   if (!g_config.JobLifecycleHook.Epilogs.empty()) {
     CRANE_TRACE("Running Epilogs...");
+    CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "step/supervisor_epilog",
+                                  g_config.Tracing.Traceparent);
+    epilog_span.SetAttribute("job_id", m_step_.job_id);
+    epilog_span.SetAttribute("step_id", m_step_.step_id);
+
     RunPrologEpilogArgs run_epilog_args{
         .scripts = g_config.JobLifecycleHook.Epilogs,
         .envs = g_config.JobEnv,
@@ -2667,6 +2671,8 @@ TaskManager::~TaskManager() {
       auto status = result.error();
       CRANE_DEBUG("Epilog failed status={}:{}", status.exit_code,
                   status.signal_num);
+      epilog_span.SetStatus(crane::StatusCode::kError,
+                            "supervisor_epilog_failed");
     } else {
       CRANE_DEBUG("Epilog success");
     }
@@ -2752,7 +2758,24 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     DelTerminationTimer_();
     DelSignalTimers_();
     m_step_.StopCforedClient();
+
+    // End the execute span now that all tasks have finished
+    if (m_step_.ExecuteSpan().IsActive()) {
+      if (status.max_exit_code != 0)
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "nonzero_exit");
+      m_step_.ExecuteSpan().End();
+    }
+
     if (!m_step_.orphaned) {
+      CRANE_TRACE_SCOPE_FROM_REMOTE(finish_span, "step/finish",
+                                    g_config.Tracing.Traceparent);
+      finish_span.SetAttribute("job_id", m_step_.job_id);
+      finish_span.SetAttribute("step_id", m_step_.step_id);
+      finish_span.SetAttribute("exit_code",
+                               static_cast<int64_t>(status.max_exit_code));
+      if (status.max_exit_code != 0)
+        finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
       g_craned_client->StepStatusChangeAsync(
           status.final_status_on_termination, status.max_exit_code,
           status.final_reason_on_termination);
@@ -3125,6 +3148,11 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
 
     if (!m_step_.GetStep().task_epilog().empty()) {
       CRANE_TRACE("[Task #{}] Running step task_epilog...", task_id);
+      CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "step/task_epilog",
+                                    g_config.Tracing.Traceparent);
+      epilog_span.SetAttribute("job_id", m_step_.job_id);
+      epilog_span.SetAttribute("task_id", task_id);
+
       RunPrologEpilogArgs run_epilog_args{
           .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
@@ -3143,6 +3171,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
         auto status = result.error();
         CRANE_DEBUG("[Task #{}]: step task_epilog failed status={}:{}", task_id,
                     status.exit_code, status.signal_num);
+        epilog_span.SetStatus(crane::StatusCode::kError, "task_epilog_failed");
       } else {
         CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
       }
@@ -3150,6 +3179,11 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
 
     if (!g_config.JobLifecycleHook.TaskEpilogs.empty()) {
       CRANE_TRACE("[Task #{}] Running task_epilog...", task_id);
+      CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "step/config_task_epilog",
+                                    g_config.Tracing.Traceparent);
+      epilog_span.SetAttribute("job_id", m_step_.job_id);
+      epilog_span.SetAttribute("task_id", task_id);
+
       RunPrologEpilogArgs run_epilog_args{
           .scripts = g_config.JobLifecycleHook.TaskEpilogs,
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
@@ -3168,6 +3202,8 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
         auto status = result.error();
         CRANE_DEBUG("[Task #{}]: task_epilog failed status={}:{}", task_id,
                     status.exit_code, status.signal_num);
+        epilog_span.SetStatus(crane::StatusCode::kError,
+                              "config_task_epilog_failed");
       } else {
         CRANE_DEBUG("[Task #{}]: task_epilog success", task_id);
       }
@@ -3548,6 +3584,16 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
     m_step_.GotNewStatus(StepStatus::Running);
 
+    CRANE_TRACE_MANUAL_FROM_REMOTE(exec_span, "step/execute",
+                                   g_config.Tracing.Traceparent);
+    exec_span.SetAttribute("job_id", m_step_.job_id);
+    exec_span.SetAttribute("step_id", m_step_.step_id);
+    exec_span.SetAttribute("task_count",
+                           static_cast<int64_t>(m_step_.task_ids.size()));
+    exec_span.SetAttribute("step_type",
+                           static_cast<int64_t>(m_step_.GetStep().step_type()));
+    m_step_.ExecuteSpan() = std::move(exec_span);
+
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
       if (m_step_.IsPod()) {
@@ -3568,6 +3614,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
+      m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                      "uid_lookup_failed");
       for (auto task_id : m_step_.task_ids)
         g_task_mgr->FinalizeTaskAsync(
             task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
@@ -3578,10 +3626,14 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     }
 
     {
+      CRANE_TRACE_CHILD_NAMED(prep_span, m_step_.ExecuteSpan(), "step/prepare");
       auto err = m_step_.Prepare();
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
                     m_step_.step_id, static_cast<int>(err));
+        prep_span.SetStatus(crane::StatusCode::kError, "prepare_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "prepare_failed");
         for (auto task_id : m_step_.task_ids) {
           g_task_mgr->FinalizeTaskAsync(
               task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
@@ -3639,26 +3691,40 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
-    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-        CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
-                                         false),
-        m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
-    if (!cg_expt.has_value()) {
-      CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
-                  m_step_.step_id);
-      for (auto task_id : m_step_.task_ids) {
-        g_task_mgr->FinalizeTaskAsync(task_id,
-                                      TaskFinalizeCause::STEP_CGROUP_FAILED,
-                                      "Failed to allocate cgroup");
+    {
+      CRANE_TRACE_CHILD_NAMED(cg_span, m_step_.ExecuteSpan(),
+                              "step/cgroup_alloc");
+      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+          CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
+                                           false),
+          m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+      if (!cg_expt.has_value()) {
+        CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                    m_step_.step_id);
+        cg_span.SetStatus(crane::StatusCode::kError, "cgroup_alloc_failed");
+        m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
+                                        "cgroup_failed");
+        for (auto task_id : m_step_.task_ids) {
+          g_task_mgr->FinalizeTaskAsync(task_id,
+                                        TaskFinalizeCause::STEP_CGROUP_FAILED,
+                                        "Failed to allocate cgroup");
+        }
+        elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+        continue;
       }
-      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
-      continue;
+      m_step_.step_user_cg = std::move(cg_expt.value());
+      cg_span.SetAttribute("cgroup_path",
+                           m_step_.step_user_cg->CgroupPath().string());
     }
-    m_step_.step_user_cg = std::move(cg_expt.value());
 
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
+    CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(),
+                            "step/task_launch");
+    launch_span.SetAttribute("task_count",
+                             static_cast<int64_t>(m_step_.task_ids.size()));
+
     CraneErrCode err = CraneErrCode::SUCCESS;
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
@@ -3675,6 +3741,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         m_exec_id_task_id_map_[exec_id] = task_id;
       }
     }
+    launch_span.End();
 
     elem.ok_prom.set_value(err);
   }

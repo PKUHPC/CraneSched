@@ -30,6 +30,7 @@
 #include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
+#include "crane/Tracing.h"
 #include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -1029,6 +1030,13 @@ void JobScheduler::ScheduleThread_() {
       // We use the time now as the base time across the whole algorithm.
       absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
+      CRANE_TRACE_SCOPE_NAMED(sched_cycle, "scheduling/cycle");
+      sched_cycle.SetAttribute("crane.dimension", "scheduling");
+      sched_cycle.SetAttribute("pending_queue_depth",
+                               static_cast<int64_t>(m_pending_job_map_.size()));
+      sched_cycle.SetAttribute("running_job_count",
+                               static_cast<int64_t>(m_running_job_map_.size()));
+
       std::vector<DependencyEvent> dep_events;
       size_t approx_size = m_dependency_event_queue_.size_approx();
       if (approx_size > 0) {
@@ -1097,7 +1105,12 @@ void JobScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
-      m_node_selection_algo_->NodeSelect(now, running_jobs, pending_jobs);
+      {
+        CRANE_TRACE_CHILD_NAMED(ns_span, sched_cycle, "scheduling/node_select");
+        ns_span.SetAttribute("pending_count",
+                             static_cast<int64_t>(pending_jobs.size()));
+        m_node_selection_algo_->NodeSelect(now, running_jobs, pending_jobs);
+      }
 
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
@@ -1106,6 +1119,8 @@ void JobScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+      CRANE_TRACE_CHILD_NAMED(rv_span, sched_cycle,
+                              "scheduling/resource_validate");
 
       // All events reduce resources during scheduling should be handled here.
       // Resource increase(such as job ended) events are not considered here,
@@ -1225,6 +1240,25 @@ void JobScheduler::ScheduleThread_() {
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
 
+          // End pending span — job is now being allocated
+          if (job->PendingSpan().IsActive()) {
+            job->PendingSpan().End();
+          }
+
+          {
+            CRANE_TRACE_MANUAL(lifecycle_span, "job/lifecycle");
+            lifecycle_span.SetAttribute("crane.dimension", "lifecycle");
+            lifecycle_span.SetAttribute("job_id", job->JobId());
+            lifecycle_span.SetAttribute("partition", job->partition_id);
+            if (!job->SubmitId().empty())
+              lifecycle_span.SetAttribute("crane.submit_id", job->SubmitId());
+            lifecycle_span.SetAttribute(
+                "node_count", static_cast<int64_t>(job->CranedIds().size()));
+            job->SetTraceparent(
+                crane::SerializeTraceParent(lifecycle_span.GetContext()));
+            job->LifecycleSpan() = std::move(lifecycle_span);
+          }
+
           job->SetStatus(crane::grpc::JobStatus::Configuring);
 
           job->allocated_craneds_regex =
@@ -1258,6 +1292,10 @@ void JobScheduler::ScheduleThread_() {
       // Resource has been subtracted, other resource reduce events are
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
+
+      rv_span.SetAttribute("allocated_count",
+                           static_cast<int64_t>(jobs_to_run.size()));
+      rv_span.End();
 
       num_jobs_single_execution = jobs_to_run.size();
 
@@ -1300,6 +1338,10 @@ void JobScheduler::ScheduleThread_() {
       std::vector<std::unique_ptr<JobInCtld>> jobs_failed;
 
       // Move jobs into running queue.
+      CRANE_TRACE_CHILD_NAMED(db_span, sched_cycle, "scheduling/db_persist");
+      db_span.SetAttribute("job_count",
+                           static_cast<int64_t>(jobs_to_run.size()));
+
       txn_id_t txn_id{0};
       bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
       if (!ok) {
@@ -1348,6 +1390,7 @@ void JobScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      db_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Append steps to embedded DB costed {} ms",
@@ -1357,6 +1400,17 @@ void JobScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
+      CRANE_TRACE_CHILD_NAMED(rpc_aj_span, sched_cycle,
+                              "scheduling/rpc_alloc_jobs");
+      rpc_aj_span.SetAttribute(
+          "craned_count", static_cast<int64_t>(craned_alloc_job_map.size()));
+
+      // Build job traceparent map for lifecycle-linked alloc spans
+      std::unordered_map<job_id_t, std::string> alloc_traceparents;
+      for (auto& job : jobs_to_run) {
+        alloc_traceparents[job->JobId()] = job->Traceparent();
+      }
+
       std::latch alloc_job_latch(craned_alloc_job_map.size());
       for (auto&& iter : craned_alloc_job_map) {
         CranedId const& craned_id = iter.first;
@@ -1364,8 +1418,6 @@ void JobScheduler::ScheduleThread_() {
 
         m_rpc_worker_pool_->detach_task([&] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send AllocJobs for {} jobs to {}", jobs.size(),
-                      craned_id);
           if (stub == nullptr || stub->Invalid()) {
             CRANE_TRACE(
                 "AllocJobs for jobs [{}] to {} failed: Craned down.",
@@ -1412,6 +1464,7 @@ void JobScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      rpc_aj_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Alloc job costed {} ms",
@@ -1419,6 +1472,11 @@ void JobScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+      CRANE_TRACE_CHILD_NAMED(rpc_as_span, sched_cycle,
+                              "scheduling/rpc_alloc_steps");
+      rpc_as_span.SetAttribute("craned_count",
+                               static_cast<int64_t>(craned_alloc_steps.size()));
+
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1465,6 +1523,7 @@ void JobScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      rpc_as_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Alloc daemon steps costed {} ms",
@@ -1513,6 +1572,11 @@ void JobScheduler::ScheduleThread_() {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
+
+      sched_cycle.SetAttribute("allocated_count",
+                               static_cast<int64_t>(jobs_created.size()));
+      sched_cycle.SetAttribute("failed_count",
+                               static_cast<int64_t>(jobs_failed.size()));
 
       schedule_end = end;
       CRANE_TRACE(
@@ -1629,14 +1693,33 @@ void JobScheduler::StepScheduleThread_() {
           }
         }
 
+        // Collect traceparents from running jobs for step scheduling trace
+        std::unordered_map<job_id_t, std::string> step_traceparents;
+        for (auto* step : scheduled_steps) {
+          if (!step_traceparents.contains(step->job_id)) {
+            auto it = m_running_job_map_.find(step->job_id);
+            if (it != m_running_job_map_.end())
+              step_traceparents[step->job_id] = it->second->Traceparent();
+          }
+        }
+
+        // Trace step scheduling (fills the gap between crun completions)
+        for (auto* step : scheduled_steps) {
+          auto tp_it = step_traceparents.find(step->job_id);
+          if (tp_it != step_traceparents.end()) {
+            CRANE_TRACE_SCOPE_FROM_REMOTE(sched_span, "step/schedule",
+                                          tp_it->second);
+            sched_span.SetAttribute("job_id", step->job_id);
+            sched_span.SetAttribute("step_id", step->StepId());
+          }
+        }
+
         Mutex thread_pool_mtx;
         std::latch alloc_step_latch(craned_alloc_steps.size());
         for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
           m_rpc_worker_pool_->detach_task([&, craned_id] {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
             auto& steps = craned_alloc_steps[craned_id];
-            CRANE_TRACE("Send AllocSteps for [{}] steps to {}",
-                        util::StepToDRangeIdString(steps), craned_id);
 
             if (stub == nullptr || stub->Invalid()) {
               thread_pool_mtx.Lock();
@@ -2751,11 +2834,16 @@ void JobScheduler::JobModifyLuaCheck(
 
 CraneExpected<std::future<CraneExpected<job_id_t>>>
 JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
+  CRANE_TRACE_SCOPE_FROM_REMOTE(validate_span, "submit/validate",
+                                job->SubmitTraceparent());
+
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
+    validate_span.SetStatus(crane::StatusCode::kError, "invalid_uid");
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
   job->SetUsername(job->password_entry->Username());
+  validate_span.AddEvent("uid_validated");
 
   {  // Limit the lifecycle of user_scoped_ptr
     auto user_scoped_ptr =
@@ -2763,6 +2851,7 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     if (!user_scoped_ptr) {
       CRANE_DEBUG("User '{}' not found in the account database",
                   job->Username());
+      validate_span.SetStatus(crane::StatusCode::kError, "invalid_user");
       return std::unexpected(CraneErrCode::ERR_INVALID_USER);
     }
 
@@ -2775,10 +2864,12 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
             "Account '{}' is not in the user account list when submitting the "
             "job",
             job->account);
+        validate_span.SetStatus(crane::StatusCode::kError, "account_mismatch");
         return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
   }
+  validate_span.AddEvent("account_validated");
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           job->Username(), job->account, job->partition_id)) {
@@ -2786,24 +2877,33 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
         "User '{}' doesn't have permission to use partition '{}' when using "
         "account '{}'",
         job->Username(), job->partition_id, job->account);
+    validate_span.SetStatus(crane::StatusCode::kError, "partition_denied");
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       job->Username(), job->account);
   if (!enable_res) {
+    validate_span.SetStatus(crane::StatusCode::kError, "account_disabled");
     return std::unexpected(enable_res.error());
   }
 
   auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
       job->partition_id, job->account);
-  if (!result) return std::unexpected(result.error());
+  if (!result) {
+    validate_span.SetStatus(crane::StatusCode::kError,
+                            "account_not_in_partition");
+    return std::unexpected(result.error());
+  }
+  validate_span.AddEvent("partition_validated");
 
   job->SetSubmitTime(absl::Now());
 
   result = JobScheduler::HandleUnsetOptionalInJobToCtld(job.get());
   if (result) result = JobScheduler::AcquireJobAttributes(job.get());
+  validate_span.AddEvent("attributes_acquired");
   if (result) result = JobScheduler::CheckJobValidity(job.get());
+  validate_span.AddEvent("validity_checked");
   if (result) {
     {
       const auto& user_ptr =
@@ -4178,6 +4278,18 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
         deadline_timer_vec.emplace_back(id, absl::ToUnixSeconds(deadline_time));
       }
 
+      // Start pending span to track scheduling wait time.
+      // Independent trace (not child of submit) since it outlives
+      // submit/request. Linked to submit via crane.submit_id attribute.
+      {
+        auto* job_ptr = accepted_jobs[pos].first.get();
+        CRANE_TRACE_MANUAL(pending_span, "job/pending");
+        pending_span.SetAttribute("job_id", job_ptr->JobId());
+        if (!job_ptr->SubmitId().empty())
+          pending_span.SetAttribute("crane.submit_id", job_ptr->SubmitId());
+        job_ptr->PendingSpan() = std::move(pending_span);
+      }
+
       m_pending_job_map_.emplace(id, std::move(accepted_jobs[pos].first));
       job_id_promise.set_value(id);
     }
@@ -4382,6 +4494,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   args.resize(actual_size);
   auto begin_time = std::chrono::steady_clock::now();
 
+  CRANE_TRACE_SCOPE_NAMED(sc_span, "status_change/process");
+  sc_span.SetAttribute("crane.dimension", "lifecycle");
+  sc_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
+
   StepStatusChangeContext context{};
   context.rn_step_raw_ptrs.reserve(actual_size);
   context.step_ptrs.reserve(actual_size);
@@ -4405,11 +4521,19 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       continue;
     }
 
+    std::unique_ptr<JobInCtld>& job = iter->second;
+
+    // Trace per-job status change, linked to lifecycle
+    CRANE_TRACE_SCOPE_FROM_REMOTE(sc_job_span, "job/status_change",
+                                  job->Traceparent());
+    sc_job_span.SetAttribute("job_id", job_id);
+    sc_job_span.SetAttribute("step_id", step_id);
+    sc_job_span.SetAttribute("new_status", static_cast<int64_t>(new_status));
+
     // Free job allocation
     std::optional<std::pair<crane::grpc::JobStatus, uint32_t /*exit code*/>>
         job_finished_status{std::nullopt};
 
-    std::unique_ptr<JobInCtld>& job = iter->second;
     if (job->DaemonStep() != nullptr &&
         step_id == job->DaemonStep()->StepId()) {
       CRANE_TRACE(
@@ -4434,6 +4558,17 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     if (job_finished_status.has_value()) {
       CRANE_TRACE("[Job #{}] Completed with status {}.", job_id,
                   job_finished_status.value());
+      CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end", job->Traceparent());
+      end_span.SetAttribute("job_id", job->JobId());
+      end_span.SetAttribute(
+          "status", static_cast<int64_t>(job_finished_status.value().first));
+      end_span.SetAttribute(
+          "exit_code",
+          static_cast<int64_t>(job_finished_status.value().second));
+      if (job_finished_status.value().first !=
+          crane::grpc::JobStatus::Completed)
+        end_span.SetStatus(crane::StatusCode::kError, "job_failed");
+
       job->SetStatus(job_finished_status.value().first);
       job->SetExitCode(job_finished_status.value().second);
 
@@ -4524,6 +4659,25 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     }
   }
 
+  // Populate traceparent lookup for RPC worker threads
+  for (auto* job : context.rn_job_raw_ptrs)
+    context.job_traceparents[job->JobId()] = job->Traceparent();
+  for (auto* job : context.job_raw_ptrs)
+    context.job_traceparents[job->JobId()] = job->Traceparent();
+  // Also populate from running jobs that have steps being executed/freed
+  // (e.g., crun steps in a still-running job)
+  for (const auto& [craned_id, job_steps] : context.craned_step_exec_map) {
+    for (const auto& [job_id, step_ids] : job_steps) {
+      if (!context.job_traceparents.contains(job_id)) {
+        auto it = m_running_job_map_.find(job_id);
+        if (it != m_running_job_map_.end())
+          context.job_traceparents[job_id] = it->second->Traceparent();
+      }
+    }
+  }
+
+  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span, "status_change/rpc_fanout");
+
   std::latch alloc_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
 
@@ -4533,6 +4687,17 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
+        // Trace per-job alloc step RPC
+        for (const auto& step : context.craned_step_alloc_map.at(craned_id)) {
+          auto tp_it = context.job_traceparents.find(step.job_id());
+          if (tp_it != context.job_traceparents.end()) {
+            CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc_step",
+                                          tp_it->second);
+            alloc_span.SetAttribute("job_id", step.job_id());
+            alloc_span.SetAttribute("step_id", step.step_id());
+            alloc_span.SetAttribute("craned_id", std::string(craned_id));
+          }
+        }
         auto err =
             stub->AllocSteps(context.craned_step_alloc_map.at(craned_id));
         if (err != CraneErrCode::SUCCESS) {
@@ -4604,8 +4769,22 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
-        CraneExpected failed_steps =
-            stub->ExecuteSteps(context.craned_step_exec_map.at(craned_id));
+        // Collect traceparents for this craned's jobs
+        std::unordered_map<job_id_t, std::string> traceparents;
+        for (const auto& [job_id, step_ids] :
+             context.craned_step_exec_map.at(craned_id)) {
+          traceparents[job_id] = context.job_traceparents[job_id];
+        }
+
+        // Independent span for RPC timing (not lifecycle child to avoid
+        // parallel overlap on the same track when multiple craneds are called)
+        auto first_job_id = traceparents.begin()->first;
+        CRANE_TRACE_SCOPE_NAMED(rpc_span, "job/rpc_execute");
+        rpc_span.SetAttribute("job_id", first_job_id);
+        rpc_span.SetAttribute("craned_id", std::string(craned_id));
+
+        CraneExpected failed_steps = stub->ExecuteSteps(
+            context.craned_step_exec_map.at(craned_id), traceparents);
         if (failed_steps.has_value() && !failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
@@ -4711,6 +4890,9 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   orphaned_step_latch.wait();
   cancel_step_latch.wait();
   free_job_latch.wait();
+  rpc_fanout_span.End();
+
+  CRANE_TRACE_CHILD_NAMED(db_commit_span, sc_span, "status_change/db_commit");
 
   txn_id_t txn_id;
 
@@ -4756,6 +4938,9 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
   // Jobs will update in embedded db
   for (auto* job : context.rn_job_raw_ptrs) {
+    CRANE_TRACE_SCOPE_FROM_REMOTE(commit_span, "job/commit",
+                                  job->Traceparent());
+    commit_span.SetAttribute("job_id", job->JobId());
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(txn_id, job->JobDbId(),
                                                       job->RuntimeAttr()))
       CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfJob()",
@@ -4773,6 +4958,18 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       "Persist job status changes to embedded db cost {} ms",
       std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
   now = std::chrono::steady_clock::now();
+  // End lifecycle spans for completed jobs (before ownership transfer)
+  // Note: only job_raw_ptrs contains truly finished jobs.
+  // rn_job_raw_ptrs also includes jobs that just entered Running state,
+  // so we must NOT End() lifecycle spans there.
+  for (auto* job : context.job_raw_ptrs) {
+    if (job->LifecycleSpan().IsActive()) {
+      job->LifecycleSpan().SetAttribute("final_status",
+                                        static_cast<int64_t>(job->Status()));
+      job->LifecycleSpan().End();
+    }
+  }
+
   ProcessFinalJobs_(context.job_raw_ptrs);
   duration = std::chrono::steady_clock::now() - now;
   CRANE_TRACE(
