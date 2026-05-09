@@ -225,10 +225,10 @@ class JobManager {
     std::promise<void> terminate_prom;
   };
 
-  struct UnexpectedSupervisorExitInfo {
+  struct SupervisorExitInfo {
     uint32_t exit_code;
     std::string reason;
-    int retry_count{0};
+    std::chrono::steady_clock::time_point exit_time;
   };
 
   std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
@@ -280,7 +280,6 @@ class JobManager {
 
   void EvCleanTerminateStepQueueCb_();
 
-  void RecordUnexpectedSupervisorExit_(pid_t pid, int status);
   void HandleUnexpectedSupervisorExits_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
@@ -299,13 +298,12 @@ class JobManager {
   std::unordered_map<job_id_t, JobInD> m_completing_job_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
 
-  absl::Mutex m_unexpected_supervisor_exit_mtx_;
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      UnexpectedSupervisorExitInfo>
-      m_unexpected_supervisor_exit_map_
-          ABSL_GUARDED_BY(m_unexpected_supervisor_exit_mtx_);
+  absl::Mutex m_exited_supervisor_mtx_;
+  absl::flat_hash_map<pid_t, SupervisorExitInfo> m_exited_supervisor_map_
+      ABSL_GUARDED_BY(m_exited_supervisor_mtx_);
 
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
+  std::shared_ptr<uvw::async_handle> m_check_supervisor_async_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
   ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
