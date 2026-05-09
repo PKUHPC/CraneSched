@@ -4842,6 +4842,7 @@ bool MongodbClient::InitTableIndexes() {
     CRANE_LOGGER_DEBUG(m_logger_, "Creating indexes for job_table...");
     auto client = m_connect_pool_->acquire();
     auto raw_table = client[m_db_name_][m_job_collection_name_];
+    CreateCollectionIndex(raw_table, {"job_id"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
