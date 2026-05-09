@@ -81,6 +81,7 @@ struct Config {
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
     uint32_t NodeHealthCheckInterval;
+    uint32_t ThreadPoolSize{0};
   };
   CranedConfig CranedConf;
   struct CranedListenConf {
@@ -157,6 +158,7 @@ struct Config {
     std::filesystem::path LogDir;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t ThreadPoolSize{0};
   };
   SupervisorConfig Supervisor;
 

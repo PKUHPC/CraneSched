@@ -42,6 +42,10 @@ CraneCtld:
   MaxLogFileSize: 50M
   # max files of cranectld log file
   MaxLogFileNum: 3
+  # Thread pool size for general async tasks (default: number of CPU cores)
+  # ThreadPoolSize: 0
+  # Thread pool size for RPC workers (default: max(nodes/100, 4))
+  # RpcWorkerPoolSize: 0
 
   # StatusChange queue processing tuning
   # StatusChange:
@@ -81,6 +85,8 @@ Craned:
   # Set the interval for node health check.
   # 0 means the health check is disabled.
   NodeHealthCheckInterval: 0
+  # Thread pool size (default: number of CPU cores)
+  # ThreadPoolSize: 0
 
   # StatusChange RPC tuning parameters
   # StatusChange:
@@ -237,6 +243,8 @@ Supervisor:
   MaxLogFileSize: 50M
   # max files of supervisor log file
   MaxLogFileNum: 3
+  # Thread pool size (default: number of CPU cores)
+  # ThreadPoolSize: 0
 
 Container:
   # Toggle the container support in CraneSched

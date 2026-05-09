@@ -123,6 +123,8 @@ message InitSupervisorRequest {
 
   uint32 status_change_channel_connect_timeout_sec = 32;
   uint32 status_change_reconnect_backoff_sec = 33;
+
+  uint32 thread_pool_size = 34;
 }
 
 message SupervisorReady {

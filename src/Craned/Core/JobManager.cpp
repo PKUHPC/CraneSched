@@ -1065,7 +1065,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
       g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupName());
     }
 
-    g_thread_pool->detach_task([cgroup]() {
+    auto fut = g_thread_pool->submit_task([cgroup]() {
       int cnt = 0;
 
       while (true) {

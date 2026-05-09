@@ -119,9 +119,14 @@ JobScheduler::JobScheduler() {
 
   m_node_selection_algo_ =
       std::make_unique<SchedulerAlgo>(m_priority_sorter_.get());
+  size_t rpc_pool_size =
+      g_config.CtldConf.RpcWorkerPoolSize > 0
+          ? g_config.CtldConf.RpcWorkerPoolSize
+          : std::max(g_config.Nodes.size() / kNodePerRpcWorker,
+                     kMinRpcWorkerNum);
   m_rpc_worker_pool_ = std::make_unique<BS::thread_pool>(
-      std::max(g_config.Nodes.size() / kNodePerRpcWorker, kMinRpcWorkerNum),
-      [] { util::SetCurrentThreadName("SchedRpcWorker"); });
+      rpc_pool_size, [] { util::SetCurrentThreadName("SchedRpcWorker"); });
+  CRANE_INFO("RPC worker pool size: {}", rpc_pool_size);
 }
 
 JobScheduler::~JobScheduler() {

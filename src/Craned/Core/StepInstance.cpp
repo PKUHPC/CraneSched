@@ -381,6 +381,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_status_change_reconnect_backoff_sec(
         g_config.StatusChange.ReconnectBackoffSec);
 
+    if (g_config.Supervisor.ThreadPoolSize > 0)
+      init_req.set_thread_pool_size(g_config.Supervisor.ThreadPoolSize);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",

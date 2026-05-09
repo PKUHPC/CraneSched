@@ -147,6 +147,8 @@ struct Config {
     uint32_t ReconnectBackoffSec{10};
   };
   StatusChangeConfig StatusChange;
+
+  uint32_t ThreadPoolSize{0};
 };
 
 inline Config g_config;
