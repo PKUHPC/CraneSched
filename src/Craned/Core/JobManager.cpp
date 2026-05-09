@@ -679,13 +679,32 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
+  auto check_start = std::chrono::steady_clock::now();
+
+  // Fast path: nothing to check, skip acquiring global lock
+  bool has_completing_steps;
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    has_completing_steps = !m_completing_step_retry_map_.empty();
+  }
+
+  bool has_unexpected_exits;
+  {
+    absl::MutexLock lk(&m_unexpected_supervisor_exit_mtx_);
+    has_unexpected_exits = !m_unexpected_supervisor_exit_map_.empty();
+  }
+
+  if (!has_completing_steps && !has_unexpected_exits) {
+    return true;
+  }
+
   std::vector<std::pair<job_id_t, std::string>> jobs_to_check_pending_sigkill;
   std::vector<JobInD> jobs_to_clean;
   // Step is completing, get ownership here.
   std::vector<std::unique_ptr<StepInstance>> steps_to_clean;
   {
     {
-      auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+      auto job_map_ptr = m_job_map_.GetMapSharedPtr();
       jobs_to_check_pending_sigkill.reserve(job_map_ptr->size());
       for (auto& [job_id, job] : *job_map_ptr) {
         auto* job_ptr = job.RawPtr();
@@ -787,12 +806,22 @@ bool JobManager::EvCheckSupervisorRunning_() {
     if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
   }
 
+  auto check_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::steady_clock::now() - check_start)
+                      .count();
+  if (check_us > 1000)
+    CRANE_DEBUG("EvCheckSupervisorRunning_ took {}us", check_us);
+
   return m_completing_step_retry_map_.empty();
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
   std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+  auto sigchld_start = std::chrono::steady_clock::now();
+  int reap_count = 0;
+  int unexpected_count = 0;
+
   int status;
   pid_t pid;
   while (true) {
@@ -800,7 +829,9 @@ void JobManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
+      reap_count++;
       if (!m_exit_watcher_.TryDeliver(pid, status)) {
+        unexpected_count++;
         RecordUnexpectedSupervisorExit_(pid, status);
       }
     } else if (pid == 0) {
@@ -811,6 +842,15 @@ void JobManager::EvSigchldCb_() {
         CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
       break;
     }
+  }
+
+  if (reap_count > 0) {
+    auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - sigchld_start)
+                        .count();
+    CRANE_INFO(
+        "EvSigchldCb_: reaped {} pids ({} unexpected), total {}us",
+        reap_count, unexpected_count, total_us);
   }
 }
 
