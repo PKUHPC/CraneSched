@@ -1202,10 +1202,9 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       update_doc.append(kvp("$push", [&steps_array](sub_document push_doc) {
         push_doc.append(kvp("steps", [&steps_array](sub_document each_doc) {
           each_doc.append(kvp("$each", steps_array));
-          each_doc.append(
-              kvp("$sort", [](sub_document sort_doc) {
-                sort_doc.append(kvp("step_id", 1));
-              }));
+          each_doc.append(kvp("$sort", [](sub_document sort_doc) {
+            sort_doc.append(kvp("step_id", 1));
+          }));
         }));
       }));
       update_doc.append(
