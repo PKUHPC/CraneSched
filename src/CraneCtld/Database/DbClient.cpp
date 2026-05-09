@@ -771,19 +771,17 @@ bool MongodbClient::FetchJobRecords(
             job_info.mutable_req_total_res_view();
         mutable_req_total_res_view->set_cpu_count(static_cast<double>(
             cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
-        mutable_req_total_res_view->set_memory_bytes(
-            view["mem_req"].get_int64().value);
-        mutable_req_total_res_view->set_memory_sw_bytes(
-            view["mem_req"].get_int64().value);
+        auto mem_req = ViewGetArithmeticValue_<uint64_t>(view["mem_req"]);
+        mutable_req_total_res_view->set_memory_bytes(mem_req);
+        mutable_req_total_res_view->set_memory_sw_bytes(mem_req);
 
         auto* mutable_allocated_res_view =
             job_info.mutable_allocated_res_view();
         mutable_allocated_res_view->set_cpu_count(static_cast<double>(
             cpu_t::from_raw_value(view["cpus_alloc"].get_int64().value)));
-        mutable_allocated_res_view->set_memory_bytes(
-            view["mem_alloc"].get_int64().value);
-        mutable_allocated_res_view->set_memory_sw_bytes(
-            view["mem_alloc"].get_int64().value);
+        auto mem_alloc = ViewGetArithmeticValue_<uint64_t>(view["mem_alloc"]);
+        mutable_allocated_res_view->set_memory_bytes(mem_alloc);
+        mutable_allocated_res_view->set_memory_sw_bytes(mem_alloc);
         auto* gres_map_ptr = mutable_allocated_res_view->mutable_gres_map();
         *gres_map_ptr = ToGrpcGresMap(
             BsonToGresMap(view["device_map"].get_document().value));
@@ -1198,12 +1196,15 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
 
       // Combine $push and $setOnInsert
-      // $push: append steps to existing document
+      // $push: append steps to existing document, sorted by step_id
       // $setOnInsert: create minimal document if it doesn't exist
       document update_doc;
       update_doc.append(kvp("$push", [&steps_array](sub_document push_doc) {
         push_doc.append(kvp("steps", [&steps_array](sub_document each_doc) {
           each_doc.append(kvp("$each", steps_array));
+          each_doc.append(kvp("$sort", [](sub_document sort_doc) {
+            sort_doc.append(kvp("step_id", 1));
+          }));
         }));
       }));
       update_doc.append(
@@ -5185,6 +5186,8 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("exclude_nodes",
             make_document(
                 kvp("$ifNull", make_array("$exclude_nodes", make_array())))),
+        kvp("submit_hostname",
+            make_document(kvp("$ifNull", make_array("$submit_hostname", "")))),
         kvp("execution_nodes",
             make_document(kvp("$ifNull",
                               make_array("$execution_nodes", make_array()))))));

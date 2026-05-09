@@ -345,6 +345,7 @@ message RuntimeAttrOfStep {
   repeated string execution_nodes = 16;
   repeated string configuring_nodes = 17;
   repeated string running_nodes = 18;
+  repeated string completing_nodes = 19;
 
   google.protobuf.Timestamp submit_time = 25;
   google.protobuf.Timestamp start_time = 26;

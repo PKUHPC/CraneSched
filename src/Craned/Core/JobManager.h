@@ -31,6 +31,12 @@ namespace Craned {
 
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 
+struct CompletingStepState {
+  int alive_check_count = 0;
+  int status_wait_count = 0;
+  bool sigkill_sent = false;
+};
+
 using StepToD = crane::grpc::StepToD;
 
 // Job allocation info, where allocation = job spec + execution info
@@ -139,7 +145,14 @@ class JobManager {
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id,
                           crane::grpc::TerminateSource terminate_source);
 
-  void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
+  void MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id);
+
+  // Send Completing + Terminal as two separate status changes.
+  // Used for error paths where Craned detects failure and needs to
+  // drive both AllNodesCompleting and AllNodesFinished on CraneCtld.
+  void SendCompletingAndTerminal_(job_id_t job_id, step_id_t step_id,
+                                  crane::grpc::JobStatus terminal_status,
+                                  uint32_t exit_code, std::string reason);
 
   /**
    *
@@ -159,6 +172,7 @@ class JobManager {
                              crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
+                             std::optional<crane::grpc::JobStatus> final_status,
                              const google::protobuf::Timestamp& timestamp);
 
   // Wait internal libuv base loop to exit...
@@ -243,6 +257,7 @@ class JobManager {
   void ActivateStepStatusChangeAsync_(
       job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
       uint32_t exit_code, std::optional<std::string> reason,
+      std::optional<crane::grpc::JobStatus> final_status,
       const google::protobuf::Timestamp& timestamp);
 
   // Contains all the jobs that are running on this Craned node.
@@ -279,7 +294,7 @@ class JobManager {
 
   absl::Mutex m_free_job_step_mtx_;
   // Step may hold by a job, use raw pointer here.
-  std::unordered_map<StepInstance*, int /*retry count*/>
+  std::unordered_map<StepInstance*, CompletingStepState>
       m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
   std::unordered_map<job_id_t, JobInD> m_completing_job_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);

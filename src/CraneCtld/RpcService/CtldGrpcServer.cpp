@@ -143,16 +143,24 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
              util::JobStepsToString(orphaned_steps));
   if (!orphaned_steps.empty()) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-    g_job_scheduler->TerminateOrphanedSteps(orphaned_steps,
-                                            request->craned_id());
+    // Terminate steps on other alive nodes (normal cancel flow)
+    g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
+                                                request->craned_id());
+    // For the crashed node: send synthetic Completing + Terminal
+    // (two independent events, not "terminal implies completing")
     for (const auto& [job_id, steps] : orphaned_steps) {
-      // Reverse order: we should process larger step_id first to avoid warnings
-      // abort daemon/primary steps
-      for (const auto step_id : steps | std::views::reverse)
+      for (const auto step_id : steps | std::views::reverse) {
+        // Synthetic Completing → drives AllNodesCompleting → FreeSteps
+        g_job_scheduler->StepStatusChangeWithReasonAsync(
+            job_id, step_id, request->craned_id(),
+            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
+            "Craned re-registered but step lost.", now);
+        // Synthetic Terminal → drives AllNodesFinished → release/FreeJobs
         g_job_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
             crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);
+      }
     }
   }
 
