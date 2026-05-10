@@ -194,6 +194,11 @@ class CtldForInternalServiceImpl final
       const crane::grpc::StepStatusChangeRequest* request,
       crane::grpc::StepStatusChangeReply* response) override;
 
+  grpc::Status BatchStepStatusChange(
+      grpc::ServerContext* context,
+      const crane::grpc::BatchStepStatusChangeRequest* request,
+      crane::grpc::BatchStepStatusChangeReply* response) override;
+
   grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext* context,
       const crane::grpc::CranedTriggerReverseConnRequest* request,

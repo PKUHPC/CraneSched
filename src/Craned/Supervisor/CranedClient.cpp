@@ -90,43 +90,40 @@ void CranedClient::AsyncSendThread_() {
       elems.splice(elems.end(), std::move(m_task_status_change_queue_));
     }
 
-    while (!elems.empty()) {
-      auto& elem = elems.front();
-      grpc::ClientContext context;
-      crane::grpc::StepStatusChangeRequest request;
-      crane::grpc::StepStatusChangeReply reply;
+    if (elems.empty()) continue;
 
-      CRANE_TRACE("Sending StepStatusChange for step status: {}",
-                  elem.new_status);
-
-      request.set_job_id(g_config.JobId);
-      request.set_step_id(g_config.StepId);
-      request.set_new_status(elem.new_status);
-      request.set_exit_code(elem.exit_code);
-      *request.mutable_timestamp() = elem.timestamp;
-      if (elem.reason.has_value()) request.set_reason(elem.reason.value());
-        if (elem.final_status.has_value())
-          request.set_final_status(elem.final_status.value());
-
-      auto status =
-          m_stub_->StepStatusChange(&context, request, &reply);
-      if (!status.ok()) {
-        CRANE_ERROR(
-            "Failed to send StepStatusChange: "
-            "new_status: {}, reason: {} | {}, code: {}",
-            elem.new_status, status.error_message(),
-            context.debug_error_string(), int(status.error_code()));
-        break;
-      }
-      CRANE_TRACE("StepStatusChange sent, status={}, reply.ok={}",
-                  elem.new_status, reply.ok());
-      elems.pop_front();
+    crane::grpc::BatchStepStatusChangeRequest batch_request;
+    for (auto& elem : elems) {
+      auto* req = batch_request.add_changes();
+      req->set_job_id(g_config.JobId);
+      req->set_step_id(g_config.StepId);
+      req->set_new_status(elem.new_status);
+      req->set_exit_code(elem.exit_code);
+      *req->mutable_timestamp() = elem.timestamp;
+      if (elem.reason.has_value()) req->set_reason(elem.reason.value());
+      if (elem.final_status.has_value())
+        req->set_final_status(elem.final_status.value());
     }
 
-    if (!elems.empty()) {
+    CRANE_TRACE("Sending batch StepStatusChange with {} items.",
+                batch_request.changes_size());
+
+    grpc::ClientContext context;
+    crane::grpc::BatchStepStatusChangeReply reply;
+    auto status =
+        m_stub_->BatchStepStatusChange(&context, batch_request, &reply);
+    if (!status.ok()) {
+      CRANE_ERROR(
+          "Failed to send batch StepStatusChange ({} items), "
+          "reason: {} | {}, code: {}",
+          batch_request.changes_size(), status.error_message(),
+          context.debug_error_string(), int(status.error_code()));
       absl::MutexLock lock(&m_mutex_);
       m_task_status_change_queue_.splice(
           m_task_status_change_queue_.begin(), std::move(elems));
+    } else {
+      CRANE_TRACE("Batch StepStatusChange sent ({} items), reply.ok={}",
+                  batch_request.changes_size(), reply.ok());
     }
   }
 }

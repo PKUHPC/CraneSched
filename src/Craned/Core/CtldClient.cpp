@@ -997,61 +997,54 @@ void CtldClient::AsyncSendThread_() {
 
 bool CtldClient::SendStatusChanges_(
     std::list<StepStatusChangeQueueElem>&& changes) {
-  while (!changes.empty()) {
-    grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  if (changes.empty()) return true;
 
-    crane::grpc::StepStatusChangeRequest request;
-    crane::grpc::StepStatusChangeReply reply;
-    grpc::Status status;
-
-    auto status_change = changes.front();
-
-    CRANE_TRACE("[Step #{}.{}] Sending StepStatusChange.", status_change.job_id,
-                status_change.step_id);
-
-    request.set_craned_id(m_craned_id_);
-    request.set_job_id(status_change.job_id);
-    request.set_step_id(status_change.step_id);
-    request.set_new_status(status_change.new_status);
-    request.set_exit_code(status_change.exit_code);
-    *request.mutable_timestamp() = status_change.timestamp;
-    if (status_change.reason.has_value())
-      request.set_reason(status_change.reason.value());
-    if (status_change.final_status.has_value())
-      request.set_final_status(status_change.final_status.value());
-
-    status = m_stub_->StepStatusChange(&context, request, &reply);
-    if (!status.ok()) {
-      CRANE_ERROR(
-          "Failed to send StepStatusChange: "
-          "{{Step: #{}.{}, NewStatus: {}}}, reason: {} | {}, code: {}",
-          status_change.job_id, status_change.step_id, status_change.new_status,
-          status.error_message(), context.debug_error_string(),
-          static_cast<int>(status.error_code()));
-
-      if (m_stopping_) {
-        CRANE_INFO(
-            "Failed to send StepStatusChange but stopping, drop all status "
-            "change to send.");
-        return false;
-      }
-      // If some messages are not sent due to channel failure,
-      // put them back into m_step_status_change_list_
-      if (!changes.empty()) {
-        m_step_status_change_mtx_.Lock();
-        m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
-                                          std::move(changes));
-        m_step_status_change_mtx_.Unlock();
-      }
-      return false;
-    } else {
-      CRANE_TRACE("[Step #{}.{}] StepStatusChange sent. reply.ok={}",
-                  status_change.job_id, status_change.step_id, reply.ok());
-      changes.pop_front();
-    }
+  crane::grpc::BatchStepStatusChangeRequest batch_request;
+  for (auto& sc : changes) {
+    auto* req = batch_request.add_changes();
+    req->set_craned_id(m_craned_id_);
+    req->set_job_id(sc.job_id);
+    req->set_step_id(sc.step_id);
+    req->set_new_status(sc.new_status);
+    req->set_exit_code(sc.exit_code);
+    *req->mutable_timestamp() = sc.timestamp;
+    if (sc.reason.has_value()) req->set_reason(sc.reason.value());
+    if (sc.final_status.has_value())
+      req->set_final_status(sc.final_status.value());
   }
+
+  CRANE_TRACE("Sending batch StepStatusChange with {} items.",
+              batch_request.changes_size());
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  crane::grpc::BatchStepStatusChangeReply reply;
+  auto status =
+      m_stub_->BatchStepStatusChange(&context, batch_request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "Failed to send batch StepStatusChange ({} items), reason: {} | "
+        "{}, code: {}",
+        batch_request.changes_size(), status.error_message(),
+        context.debug_error_string(),
+        static_cast<int>(status.error_code()));
+
+    if (m_stopping_) {
+      CRANE_INFO(
+          "Failed to send batch StepStatusChange but stopping, drop all.");
+      return false;
+    }
+    m_step_status_change_mtx_.Lock();
+    m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
+                                      std::move(changes));
+    m_step_status_change_mtx_.Unlock();
+    return false;
+  }
+
+  CRANE_TRACE("Batch StepStatusChange sent ({} items), reply.ok={}",
+              batch_request.changes_size(), reply.ok());
   return true;
 }
 

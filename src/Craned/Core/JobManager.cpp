@@ -44,7 +44,6 @@ constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
 constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
 constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 
-
 std::filesystem::path GetV1ControllerPath_(
     const std::string& cg_path, Common::CgConstant::Controller ctrl) {
   return Common::CgConstant::kSystemCgPathPrefix /
@@ -295,8 +294,7 @@ JobManager::JobManager() {
     CRANE_ERROR("Failed to start the SIGTERM handle: {}", uv_err_name(rc));
   }
 
-  m_check_supervisor_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
+  m_check_supervisor_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_check_supervisor_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCheckSupervisorRunning_();
@@ -739,11 +737,11 @@ bool JobManager::EvCheckSupervisorRunning_() {
     if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
   }
 
-  auto check_us = std::chrono::duration_cast<std::chrono::microseconds>(
+  auto check_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - check_start)
                       .count();
-  if (check_us > 1000)
-    CRANE_DEBUG("EvCheckSupervisorRunning_ took {}us", check_us);
+  if (check_ms > 10)
+    CRANE_DEBUG("EvCheckSupervisorRunning_ took {}us", check_ms);
 
   return m_completing_step_retry_map_.empty();
 }

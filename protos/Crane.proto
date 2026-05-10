@@ -40,6 +40,14 @@ message StepStatusChangeReply {
   bool ok = 1;
 }
 
+message BatchStepStatusChangeRequest {
+  repeated StepStatusChangeRequest changes = 1;
+}
+
+message BatchStepStatusChangeReply {
+  bool ok = 1;
+}
+
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
@@ -1409,6 +1417,7 @@ service PluginQueryService {
 service CraneCtldForInternal {
   /* RPCs called from Craned */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
+  rpc BatchStepStatusChange(BatchStepStatusChangeRequest) returns (BatchStepStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
@@ -1451,6 +1460,7 @@ service Craned {
   rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
+  rpc BatchStepStatusChange(BatchStepStatusChangeRequest) returns (BatchStepStatusChangeReply);
 }
 
 service CranedForPam {

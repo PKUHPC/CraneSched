@@ -52,6 +52,24 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::BatchStepStatusChange(
+    grpc::ServerContext* context,
+    const crane::grpc::BatchStepStatusChangeRequest* request,
+    crane::grpc::BatchStepStatusChangeReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  for (const auto& change : request->changes()) {
+    g_job_scheduler->StepStatusChangeAsync(
+        change.job_id(), change.step_id(), change.craned_id(),
+        change.new_status(), change.exit_code(), change.reason(),
+        change.timestamp());
+  }
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext* context,
     const crane::grpc::CranedTriggerReverseConnRequest* request,

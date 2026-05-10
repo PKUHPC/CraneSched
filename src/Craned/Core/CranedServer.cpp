@@ -559,6 +559,27 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::BatchStepStatusChange(
+    grpc::ServerContext *context,
+    const crane::grpc::BatchStepStatusChangeRequest *request,
+    crane::grpc::BatchStepStatusChangeReply *response) {
+  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+  for (const auto &change : request->changes()) {
+    std::optional<crane::grpc::JobStatus> final_status;
+    if (change.has_final_status()) final_status = change.final_status();
+    g_job_mgr->StepStatusChangeAsync(change.job_id(), change.step_id(),
+                                     change.new_status(), change.exit_code(),
+                                     change.reason(), final_status,
+                                     change.timestamp());
+  }
+  response->set_ok(true);
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
