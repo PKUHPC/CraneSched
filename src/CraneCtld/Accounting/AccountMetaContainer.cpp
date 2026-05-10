@@ -229,7 +229,7 @@ void AccountMetaContainer::FreeQosRunningResource(const JobInCtld& job) {
                              .wall_time = job.time_limit};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
-                  meta_resource);
+                  meta_resource, false);
 }
 
 void AccountMetaContainer::UserAddJob(const std::string& username) {
@@ -604,7 +604,7 @@ void AccountMetaContainer::DoMallocResource_(
 void AccountMetaContainer::DoFreeResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
-    const MetaResource& meta_resource) {
+    const MetaResource& meta_resource, bool reduce_user_job) {
   m_user_meta_map_.if_contains(username, [&](std::pair<const std::string,
                                                        QosToResourceMap>&
                                                  pair) {
@@ -671,7 +671,7 @@ void AccountMetaContainer::DoFreeResource_(
         }
       });
 
-  UserReduceJob(username);
+  if (reduce_user_job) UserReduceJob(username);
 }
 
 }  // namespace Ctld

@@ -45,71 +45,56 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       status(status),
       supervisor_stub(supervisor_stub) {}
 
-void StepInstance::CleanUp() {
+void StepInstance::CleanUp(bool async) {
   if (!IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
         "[Step #{}.{}] Cleaning up a step which is not in finished status, "
         "current status: {}.",
         job_id, step_id, static_cast<int>(this->status));
   }
-  if (this->crane_cgroup != nullptr) {
-    g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
-                                cgroup = crane_cgroup.release(),
-                                step_cg_str = this->cg_str] {
-      // This is step_id/system cgroup
-      int cnt = 0;
 
-      while (true) {
-        if (cgroup->Empty()) break;
+  auto* cgroup = crane_cgroup.release();
+  if (cgroup == nullptr) return;
 
-        if (cnt >= 5) {
-          CRANE_ERROR(
-              "Couldn't kill the processes in cgroup {} after {} times. "
-              "Skipping it.",
-              cgroup->CgroupName(), cnt);
-          break;
-        }
+  auto clean_step_cgroup = [job_id = job_id, step_id = step_id, cgroup,
+                            step_cg_str = this->cg_str] {
+    CgroupManager::KillAndDestroyCgroup(
+        std::unique_ptr<CgroupInterface>{cgroup});
 
-        cgroup->KillAllProcesses(SIGKILL);
-        ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
-      }
-      // TODO: Plugin support step cgroup destroy hooks.
-      cgroup->Destroy();
+    // step_cg_str is e.g. "overflow/job_1/step_0/system"
+    // We want to remove the step_N directory (parent of system/user).
+    auto step_cg_path =
+        (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+         Common::CgConstant::kRootCgNamePrefix / step_cg_str)
+            .parent_path();
 
-      delete cgroup;
-
-      // step_cg_str is e.g. "overflow/job_1/step_0/system"
-      // We want to remove the step_N directory (parent of system/user).
-      auto step_cg_path =
-          (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-           Common::CgConstant::kRootCgNamePrefix / step_cg_str)
-              .parent_path();
-
-      std::error_code ec;
-      if (std::filesystem::exists(step_cg_path, ec)) {
-        // Remove step cgroup directory
-        std::filesystem::remove(step_cg_path, ec);
-        if (ec) {
-          CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                      job_id, step_id, step_cg_path, ec.message());
-        } else {
-          CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
-                      step_id, step_cg_path);
-        }
+    std::error_code ec;
+    if (std::filesystem::exists(step_cg_path, ec)) {
+      std::filesystem::remove(step_cg_path, ec);
+      if (ec) {
+        CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
+                    job_id, step_id, step_cg_path, ec.message());
       } else {
-        if (ec) {
-          CRANE_ERROR(
-              "[Step #{}.{}] Failed to check existence of step cgroup dir {}: "
-              "{}",
-              job_id, step_id, step_cg_path, ec.message());
-        } else {
-          CRANE_DEBUG(
-              "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-              job_id, step_id, step_cg_path);
-        }
+        CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
+                    step_id, step_cg_path);
       }
-    });
+    } else {
+      if (ec) {
+        CRANE_ERROR(
+            "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
+            job_id, step_id, step_cg_path, ec.message());
+      } else {
+        CRANE_DEBUG(
+            "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
+            job_id, step_id, step_cg_path);
+      }
+    }
+  };
+
+  if (async) {
+    g_thread_pool->detach_task(std::move(clean_step_cgroup));
+  } else {
+    clean_step_cgroup();
   }
 }
 

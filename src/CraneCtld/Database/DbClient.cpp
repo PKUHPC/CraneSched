@@ -446,6 +446,8 @@ bool MongodbClient::InsertRecoveredJob(
             // 2. Mark as aggregated
             MarkJobAsAggregated(
                 ViewGetArithmeticValue_<int32_t>(job_doc.view()["job_id"]),
+                ViewGetArithmeticValue_<int32_t>(
+                    job_doc.view()["requeue_count"]),
                 session);
           });
       if (txn_success) return true;
@@ -511,7 +513,7 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
               AppendToAccUsageTable(job_doc_copy.view(), session);
 
               // 2. Mark as aggregated
-              MarkJobAsAggregated(job->JobId(), session);
+              MarkJobAsAggregated(job->JobId(), job->RequeueCount(), session);
             });
 
         if (!txn_success) {
@@ -581,7 +583,7 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
             CommitTransaction([this, job](mongocxx::client_session* session) {
               AppendToAccUsageTable(job, session);
               // 2. Mark as aggregated
-              MarkJobAsAggregated(job->JobId(), session);
+              MarkJobAsAggregated(job->JobId(), job->RequeueCount(), session);
             });
         if (!txn_success)
           CRANE_WARN(
@@ -747,14 +749,15 @@ bool MongodbClient::FetchJobRecords(
   }
 
   // Use aggregation to deduplicate: for each job_id, only return the
-  // record with the highest requeue_count (the latest run).
+  // record with the highest requeue_count (the latest run), then apply
+  // request filters to those latest-run documents.
   mongocxx::pipeline pipeline;
-  pipeline.match(filter.view());
   pipeline.sort(make_document(kvp("requeue_count", -1)));
   pipeline.group(
       make_document(kvp("_id", "$job_id"),
                     kvp("doc", make_document(kvp("$first", "$$ROOT")))));
   pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(filter.view());
   pipeline.sort(make_document(kvp("job_db_id", -1)));
   pipeline.limit(static_cast<int32_t>(limit));
 
@@ -1039,13 +1042,16 @@ bool MongodbClient::FetchJobStepRecords(
 
   // Use aggregation to deduplicate: for each job_id, only return the
   // record with the highest requeue_count (the latest run).
+  // Apply the caller filter after deduplication so state/type/time-related
+  // constraints are evaluated against the latest run rather than an older
+  // matching run.
   mongocxx::pipeline pipeline;
-  pipeline.match(filter.view());
   pipeline.sort(make_document(kvp("requeue_count", -1)));
   pipeline.group(
       make_document(kvp("_id", "$job_id"),
                     kvp("doc", make_document(kvp("$first", "$$ROOT")))));
   pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(filter.view());
   pipeline.sort(make_document(kvp("job_db_id", -1)));
 
   mongocxx::cursor cursor =
@@ -1580,14 +1586,16 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
 }
 
 // Mark job as aggregated in job_table
-void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
+void MongodbClient::MarkJobAsAggregated(job_id_t job_id, int32_t requeue_count,
                                         mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
   auto client = GetClient_();
-  auto filter = make_document(kvp("job_id", static_cast<int32_t>(job_id)));
+  auto filter =
+      make_document(kvp("job_id", static_cast<int32_t>(job_id)),
+                    kvp("requeue_count", static_cast<int32_t>(requeue_count)));
   auto update = make_document(kvp(
       "$set", make_document(kvp("aggregated", true),
                             kvp("aggregated_at",
@@ -1842,7 +1850,9 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
         CommitTransaction([this, &job_doc](mongocxx::client_session* session) {
           AppendToAccUsageTable(job_doc, session);
           MarkJobAsAggregated(
-              ViewGetArithmeticValue_<int32_t>(job_doc["job_id"]), session);
+              ViewGetArithmeticValue_<int32_t>(job_doc["job_id"]),
+              ViewGetArithmeticValue_<int32_t>(job_doc["requeue_count"]),
+              session);
         });
     if (!success) {
       CRANE_ERROR("Failed to append job to acc usage table.");
@@ -4914,6 +4924,7 @@ bool MongodbClient::InitTableIndexes() {
     auto client = m_connect_pool_->acquire();
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
+    CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(

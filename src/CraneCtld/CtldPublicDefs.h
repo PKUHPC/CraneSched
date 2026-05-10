@@ -263,6 +263,28 @@ namespace Ctld {
 
 struct InteractiveMeta {
   InteractiveMeta() = default;
+
+  InteractiveMeta& operator=(InteractiveMeta&& other) noexcept {
+    if (this == &other) return *this;
+    interactive_type = other.interactive_type;
+    cb_step_res_allocated = std::move(other.cb_step_res_allocated);
+    cb_step_completed = std::move(other.cb_step_completed);
+    cb_step_cancel = std::move(other.cb_step_cancel);
+    has_been_cancelled_on_front_end =
+        other.has_been_cancelled_on_front_end.load();
+    has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
+    cfored_name = std::move(other.cfored_name);
+
+    other.cb_step_res_allocated = nullptr;
+    other.cb_step_completed = nullptr;
+    other.cb_step_cancel = nullptr;
+    return *this;
+  }
+
+  InteractiveMeta(InteractiveMeta&& other) noexcept {
+    *this = std::move(other);
+  }
+
   InteractiveMeta& operator=(const InteractiveMeta& other) {
     interactive_type = other.interactive_type;
     cb_step_res_allocated = other.cb_step_res_allocated;

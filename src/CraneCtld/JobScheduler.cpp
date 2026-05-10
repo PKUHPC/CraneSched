@@ -902,6 +902,12 @@ void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
   // already been evaluated, which is the same as before the restart.
   g_account_meta_container->MallocQosSubmitResource(*job);
 
+  if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    m_job_deadline_timer_create_queue_.enqueue(
+        {job->JobId(), absl::ToUnixSeconds(job->deadline_time)});
+    m_job_deadline_timer_create_async_handle_->send();
+  }
+
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   m_pending_job_map_.emplace(job->JobId(), std::move(job));
@@ -4628,6 +4634,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         }
         job->SetEndTime(end_time);
 
+        for (const auto& craned_id : job->CranedIds()) {
+          context.craned_jobs_to_free[craned_id].emplace_back(job_id);
+        }
+
         bool should_requeue = job->ShouldRequeue();
 
         // Release resources from nodes
@@ -4656,7 +4666,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           // licenses, don't trigger dependency events.
           g_account_meta_container->FreeQosRunningResource(*job);
           if (!job->licenses_count.empty())
-            g_licenses_manager->FreeLicense(job->licenses_count);
+            g_license_manager->FreeLicense(job->licenses_count);
 
           // Collect raw ptr for batch EmbeddedDB write (first write:
           // terminal status). PersistAndRequeueJobs_ handles the rest.
@@ -6120,6 +6130,18 @@ void JobScheduler::PersistAndRequeueJobs_(
   if (!drop_ids.empty()) g_embedded_db_client->PurgeEndedJobs(drop_ids);
 
   if (!requeued.empty()) {
+    std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
+    for (auto& job : requeued) {
+      if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec))
+        deadline_timer_vec.emplace_back(
+            job->JobId(), absl::ToUnixSeconds(job->deadline_time));
+    }
+    if (!deadline_timer_vec.empty()) {
+      m_job_deadline_timer_create_queue_.enqueue_bulk(
+          deadline_timer_vec.data(), deadline_timer_vec.size());
+      m_job_deadline_timer_create_async_handle_->send();
+    }
+
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     for (auto& job : requeued)
       m_pending_job_map_.emplace(job->JobId(), std::move(job));

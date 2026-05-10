@@ -32,7 +32,10 @@ namespace Craned {
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 constexpr int kMaxStatusWaitRetryCount = 50;  // 50 * 200ms = 10s
 
+using StepKey = std::pair<job_id_t, step_id_t>;
+
 struct CompletingStepState {
+  StepInstance* step = nullptr;
   int alive_check_count = 0;
   int status_wait_count = 0;
   bool sigkill_sent = false;
@@ -72,6 +75,8 @@ struct JobInD {
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
   bool is_prolog_run{false};
+
+  std::optional<StepStatusChangeQueueElem> daemon_pending_terminal;
 
   EnvMap GetJobEnvMap();
 };
@@ -159,6 +164,20 @@ class JobManager {
                                   crane::grpc::JobStatus terminal_status,
                                   uint32_t exit_code, std::string reason);
 
+  /**
+   *
+   * @param jobs legacy completing jobs tracked outside m_job_map_
+   * @param steps completing step to clean up, for daemon steps will send
+   * ShutdownSupervisor RPC.
+   *
+   * If a job and its steps are both provided, the ownership of its steps submit
+   * in `steps` is in step_map.
+   * If step is not provided with its job, the step is erased from its job's
+   * step_map.
+   */
+  void CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
+                               std::vector<StepInstance*>&& steps);
+
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
@@ -227,7 +246,8 @@ class JobManager {
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
       UidMap::MapExclusivePtr& uid_map_ptr);
 
-  bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
+  void CleanUpJobEnvironment_(job_id_t job_id,
+                              StepInstance::DaemonJobCleanupCtx&& ctx);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 
@@ -284,9 +304,10 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_free_job_step_mtx_;
-  // Step may hold by a job, use raw pointer here.
-  std::unordered_map<StepInstance*, CompletingStepState>
-      m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
+  // Step ownership remains in m_job_map_ or m_completing_job_; this map only
+  // tracks cleanup polling state.
+  absl::flat_hash_map<StepKey, CompletingStepState> m_completing_step_retry_map_
+      ABSL_GUARDED_BY(m_free_job_step_mtx_);
   std::unordered_map<job_id_t, JobInD> m_completing_job_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
 
@@ -311,19 +332,6 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
-
-  struct FreeStepElem {
-    job_id_t job_id;
-    step_id_t step_id;
-  };
-
-  std::shared_ptr<uvw::async_handle> m_free_jobs_async_handle_;
-  ConcurrentQueue<JobInD> m_free_jobs_queue_;
-  void EvCleanFreeJobsQueueCb_();
-
-  std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
-  ConcurrentQueue<FreeStepElem> m_free_steps_queue_;
-  void EvCleanFreeStepsQueueCb_();
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;

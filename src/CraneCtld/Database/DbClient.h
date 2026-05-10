@@ -174,8 +174,8 @@ class MongodbClient {
   void AppendToAccUsageTable(const JobInCtld* job,
                              mongocxx::client_session* session = nullptr);
 
-  // Mark job as aggregated in job_table
-  void MarkJobAsAggregated(job_id_t job_id,
+  // Mark job as aggregated in job_table (keyed by job_id + requeue_count)
+  void MarkJobAsAggregated(job_id_t job_id, int32_t requeue_count,
                            mongocxx::client_session* session = nullptr);
 
   // Recovery functions for startup
