@@ -59,8 +59,8 @@ inline std::string ToString(CollType type) {
 }
 
 inline CollType StrToCollType(const std::string& str) {
-  if (str == "FENCE_TREE") return CollType::FENCE_TREE;
-  if (str == "FENCE_RING") return CollType::FENCE_RING;
+  if (str == "tree") return CollType::FENCE_TREE;
+  if (str == "ring") return CollType::FENCE_RING;
 
   return CollType::FENCE_MAX;
 }
