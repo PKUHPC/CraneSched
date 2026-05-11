@@ -619,19 +619,18 @@ void CforedClient::AsyncSendRecvThread_() {
       uint32_t attempts = m_reconnect_attempts_.load();
       if (attempts > kMaxReconnectAttempts) {
         CRANE_ERROR("Cfored reconnect failed after {} attempts.", attempts);
-        {
-          absl::MutexLock lock(&m_mtx_);
-          for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
-            CRANE_ERROR(
-                "[Task #{}] Marked task io stopped due to cfored conn failure.",
-                task_id);
-            m_stop_task_io_queue_.enqueue(task_id);
-            m_clean_stop_task_io_queue_async_handle_->send();
-          }
+        absl::MutexLock lock(&m_mtx_);
+        for (auto& [task_id, meta] : m_fwd_meta_map) {
+          CRANE_ERROR(
+              "[Task #{}] Markd task io stopped due to cfored conn failure.",
+              task_id);
+          meta.output_stopped = true;
+          meta.err_stopped = true;
+          m_stop_task_io_queue_.enqueue(task_id);
+          m_clean_stop_task_io_queue_async_handle_->send();
         }
         CRANE_ERROR("Terminating step due to cfored connection failure.");
-        g_task_mgr->TerminateStepAsync(false,
-                                       TaskFinalizeCause::CFORED_DISCONNECTED);
+        g_task_mgr->TerminateStepAsync(TaskFinalizeCause::CFORED_DISCONNECTED);
         m_stopped_ = true;
         m_wait_reconn_ = false;
         return;
