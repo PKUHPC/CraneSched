@@ -514,7 +514,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   bool ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
 
   // Make sure before exit all output has been drained.
-  while (!m_wait_reconn_ && (!m_stopped_ || ok)) {
+  while (!m_wait_reconn_.load(std::memory_order::acquire) && (!m_stopped_ || ok)) {
     if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
@@ -574,7 +574,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
           // path.  The reconnect path resets m_output_drained_ = false before
           // starting a new CleanOutputQueueThread on the new connection.
           CRANE_TRACE(
-              "CleanOutputQueueThread: reconnect exit, queue data preserved.");
+              "CleanOutputQueueThread: exit on disconnection, queue data "
+              "preserved.");
           m_output_drained_.store(true, std::memory_order::release);
           return;
         }
@@ -636,9 +637,10 @@ void CforedClient::AsyncSendRecvThread_() {
         return;
       }
 
-      // Exponential backoff with upper bound of kMaxReconnectIntervalSec
+      // Exponential backoff: 1s, 2s, 4s, ... capped at kMaxReconnectIntervalSec
+      uint32_t backoff = 1u << std::min(attempts, 5u);  // 1, 2, 4, 8, 16, 32
       int interval =
-          static_cast<int>(std::min(attempts, kMaxReconnectIntervalSec));
+          static_cast<int>(std::min(backoff, kMaxReconnectIntervalSec));
       CRANE_INFO("Reconnecting to cfored {} (attempt {}/{}), waiting {}s...",
                  m_cfored_name_, attempts + 1, kMaxReconnectAttempts, interval);
       m_reconnect_attempts_++;
@@ -656,6 +658,7 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_INFO("Channel state {} usable, creating new stream...",
                  static_cast<int>(ch_state));
       m_wait_reconn_ = false;
+      m_reconnect_attempts_ = 0;
     }
 
     std::thread output_clean_thread;
@@ -742,7 +745,7 @@ void CforedClient::AsyncSendRecvThread_() {
           bool has_x11 = false;
           {
             absl::MutexLock lock(&m_mtx_);
-            for (auto& [id, _] : m_x11_fd_info_map_) {
+            for (auto& id : m_x11_fd_info_map_ | std::ranges::views::keys) {
               m_x11_fwd_remote_eof_queue_.enqueue(id);
               has_x11 = true;
             }

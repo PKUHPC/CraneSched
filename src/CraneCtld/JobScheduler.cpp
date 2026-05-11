@@ -4996,11 +4996,11 @@ void JobScheduler::QueryJobsInRam(
 
 bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
                                          crane::grpc::StepToCtld* step) {
+  if (step_id == 0) return false;
+
   LockGuard running_guard(&m_running_job_map_mtx_);
   auto iter = m_running_job_map_.find(job_id);
   if (iter == m_running_job_map_.end()) return false;
-
-  if (step_id == 0) return false;
 
   auto* job = iter->second.get();
   if (!job) {
