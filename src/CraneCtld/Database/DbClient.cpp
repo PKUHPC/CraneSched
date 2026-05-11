@@ -5070,23 +5070,74 @@ bool MongodbClient::SwapMigratedJobTable_(const std::string& source_collection,
       std::string target_ns =
           fmt::format("{}.{}", m_db_name_, m_job_collection_name_);
 
+      // Check if the target collection already exists (e.g. a previous
+      // cranectld version already created it with v1 schema).
+      auto target_cursor = (*client)[m_db_name_].list_collections(
+          make_document(kvp("name", m_job_collection_name_)));
+      bool target_exists = target_cursor.begin() != target_cursor.end();
+
       admin_db.run_command(
           make_document(kvp("renameCollection", src_ns), kvp("to", backup_ns)));
       CRANE_LOGGER_INFO(m_logger_, "Renamed '{}' to '{}'.", source_collection,
                         backup_name);
 
-      try {
-        admin_db.run_command(make_document(kvp("renameCollection", temp_ns),
-                                           kvp("to", target_ns)));
-      } catch (const std::exception& e) {
-        CRANE_LOGGER_ERROR(m_logger_,
-                           "Failed to rename '{}' to '{}': {}. "
-                           "Rolling back...",
-                           m_migration_temp_collection_name_,
-                           m_job_collection_name_, e.what());
-        admin_db.run_command(make_document(kvp("renameCollection", backup_ns),
-                                           kvp("to", src_ns)));
-        return false;
+      if (target_exists) {
+        // Target collection already has data — merge migrated records by
+        // inserting any records whose job_id does not already exist.
+        CRANE_LOGGER_WARN(
+            m_logger_,
+            "Target collection '{}' already exists with data. "
+            "Merging migrated records from '{}'.",
+            m_job_collection_name_, m_migration_temp_collection_name_);
+        try {
+          auto temp_coll =
+              (*client)[m_db_name_][m_migration_temp_collection_name_];
+          auto target_coll = (*client)[m_db_name_][m_job_collection_name_];
+
+          auto cursor = temp_coll.find({});
+          int merged = 0, skipped = 0;
+          for (auto&& doc : cursor) {
+            auto job_id_it = doc.find("job_id");
+            if (job_id_it == doc.end()) {
+              ++skipped;
+              continue;
+            }
+            auto filter = make_document(kvp("job_id", (*job_id_it).get_value()));
+            if (!target_coll.find_one(filter.view())) {
+              target_coll.insert_one(doc);
+              ++merged;
+            } else {
+              ++skipped;
+            }
+          }
+          CRANE_LOGGER_INFO(m_logger_,
+                            "Merged {} records into '{}', skipped {} "
+                            "duplicates.",
+                            merged, m_job_collection_name_, skipped);
+          CleanupMigrationTemp_();
+        } catch (const std::exception& e) {
+          CRANE_LOGGER_ERROR(m_logger_,
+                             "Failed to merge migrated records: {}. "
+                             "Rolling back...",
+                             e.what());
+          admin_db.run_command(make_document(
+              kvp("renameCollection", backup_ns), kvp("to", src_ns)));
+          return false;
+        }
+      } else {
+        try {
+          admin_db.run_command(make_document(kvp("renameCollection", temp_ns),
+                                             kvp("to", target_ns)));
+        } catch (const std::exception& e) {
+          CRANE_LOGGER_ERROR(m_logger_,
+                             "Failed to rename '{}' to '{}': {}. "
+                             "Rolling back...",
+                             m_migration_temp_collection_name_,
+                             m_job_collection_name_, e.what());
+          admin_db.run_command(make_document(
+              kvp("renameCollection", backup_ns), kvp("to", src_ns)));
+          return false;
+        }
       }
 
       CRANE_LOGGER_INFO(m_logger_,

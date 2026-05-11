@@ -3627,6 +3627,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
     {
       CRANE_TRACE_CHILD_NAMED(prep_span, m_step_.ExecuteSpan(), "step/prepare");
+      prep_span.SetAttribute("job_id", m_step_.job_id);
+      prep_span.SetAttribute("step_id", m_step_.step_id);
       auto err = m_step_.Prepare();
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
@@ -3694,6 +3696,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     {
       CRANE_TRACE_CHILD_NAMED(cg_span, m_step_.ExecuteSpan(),
                               "step/cgroup_alloc");
+      cg_span.SetAttribute("job_id", m_step_.job_id);
+      cg_span.SetAttribute("step_id", m_step_.step_id);
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
           CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
                                            false),
@@ -3722,6 +3726,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // operate (Like terminate due to cfored conn err for crun task) any task.
     CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(),
                             "step/task_launch");
+    launch_span.SetAttribute("job_id", m_step_.job_id);
+    launch_span.SetAttribute("step_id", m_step_.step_id);
     launch_span.SetAttribute("task_count",
                              static_cast<int64_t>(m_step_.task_ids.size()));
 

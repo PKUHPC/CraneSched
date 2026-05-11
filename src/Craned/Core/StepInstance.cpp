@@ -420,6 +420,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_span.End();
 
     CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span, "step/supervisor_ready");
+    ready_span.SetAttribute("job_id", job_id);
+    ready_span.SetAttribute("step_id", step_id);
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,
