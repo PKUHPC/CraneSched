@@ -512,6 +512,8 @@ inline opentelemetry::trace::SpanContext DeserializeTraceParent(
 /// Stub StatusCode so call sites compile without #ifdef guards.
 enum class StatusCode { kUnset = 0, kOk = 1, kError = 2 };
 
+struct StubSpanContext {};
+
 class ScopedSpan {
  public:
   ScopedSpan() = default;
@@ -522,6 +524,7 @@ class ScopedSpan {
   [[nodiscard]] bool IsActive() const { return false; }
   void AddEvent(std::string_view) {}
   void SetStatus(StatusCode, std::string_view = {}) {}
+  [[nodiscard]] StubSpanContext GetContext() const { return {}; }
 };
 
 #  define CRANE_TRACE_SCOPE(name) (void)0
@@ -544,7 +547,10 @@ class ManualSpan {
   void SetStatus(StatusCode, std::string_view = {}) {}
   [[nodiscard]] ScopedSpan CreateChild(std::string_view) const { return {}; }
   [[nodiscard]] bool IsActive() const { return false; }
+  [[nodiscard]] StubSpanContext GetContext() const { return {}; }
 };
+
+inline std::string SerializeTraceParent(StubSpanContext) { return {}; }
 
 #  define CRANE_TRACE_MANUAL(var, name) ::crane::ManualSpan var
 #  define CRANE_TRACE_MANUAL_FROM_REMOTE(var, name, tp) ::crane::ManualSpan var
