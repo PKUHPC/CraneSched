@@ -1321,83 +1321,172 @@ message QueryJobSizeSummaryReply {
   repeated JobSizeSummaryItem item_list = 1;
 }
 
-// Todo: Divide service into two parts: one for Craned and one for Crun
-//  We need to distinguish the message sender
-//  and have some kind of authentication
 service CraneCtld {
   /* RPCs called from ccancel */
+
   rpc CancelJob(CancelJobRequest) returns (CancelJobReply);
 
   /* RPCs called from cbatch */
+
+  // Possible ErrCodes in reply.code: ERR_CRI_DISABLED, ERR_LUA_FAILED, ERR_SHUTTING_DOWN, ERR_INVALID_PARTITION, 
+  // ERR_BLOCKED_ACCOUNT, ERR_BLOCKED_USER, ERR_NO_RESOURCE, ERR_PERMISSION_DENIED, ERR_INVALID_USER, ERR_MAX_JOB_COUNT_PER_USER, 
+  // ERR_MAX_JOB_COUNT_PER_ACCOUNT, ERR_QOS_JOB_COUNT_EXCEEDED, ERR_INVALID_PARAM, ERR_NOT_IN_ALLOWED_LIST, ERR_IN_DENIED_LIST, 
+  // ERR_TRES_PER_JOB_BEYOND, ERR_MAX_TRES_PER_USER_BEYOND, ERR_MAX_TRES_PER_ACCOUNT_BEYOND, ERR_MISSING_DEPENDENCY, ERR_INVALID_DEADLINE
   rpc SubmitBatchJob(SubmitBatchJobRequest) returns (SubmitBatchJobReply);
+
+  // Possible ErrCodes in reply.code_list (per-job, same as SubmitBatchJob): ERR_CRI_DISABLED
   rpc SubmitBatchJobs(SubmitBatchJobsRequest) returns (SubmitBatchJobsReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_PARAM, ERR_CRI_DISABLED, ERR_SHUTTING_DOWN, ERR_NON_EXISTENT, ERR_STEP_RES_BEYOND, ERR_PERMISSION_DENIED
   rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
+
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+
   rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
+
   rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
+
   rpc ModifyJob(ModifyJobRequest) returns (ModifyJobReply);
+
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+
+  // Possible ErrCodes in reply.code: ERR_USER_NO_PRIVILEGE, ERR_INVALID_OP_USER, ERR_INVALID_PARTITION, ERR_INVALID_ACCOUNT
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
+
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
+
   rpc ModifyJobsExtraAttrs(ModifyJobsExtraAttrsRequest) returns (ModifyJobsExtraAttrsReply);
+
   rpc ResetNextJobId(ResetNextJobIdRequest) returns (ResetNextJobIdReply);
+
   rpc ResetNextStepDbId(ResetNextStepDbIdRequest) returns (ResetNextStepDbIdReply);
+
   rpc PurgeJobHistory(PurgeJobHistoryRequest) returns (PurgeJobHistoryReply);
 
   /* RPCs called from cacctmgr */
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_OP_USER, ERR_ACCOUNT_ALREADY_EXISTS, ERR_INVALID_PARENT_ACCOUNT, 
+  // ERR_INVALID_PARTITION, ERR_PARENT_ACCOUNT_PARTITION_MISSING, ERR_INVALID_QOS, ERR_PARENT_ACCOUNT_QOS_MISSING, 
+  // ERR_DB_INSERT_FAILED, ERR_UPDATE_DATABASE
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_OP_USER, ERR_USER_ALREADY_EXISTS, ERR_INVALID_ACCOUNT, 
+  // ERR_INVALID_PARTITION, ERR_PARTITION_MISSING, ERR_INVALID_QOS, ERR_DB_INSERT_FAILED
   rpc AddUser(AddUserRequest) returns (AddUserReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_PARAM, ERR_TIME_LIMIT, ERR_INVALID_OP_USER, 
+  // ERR_DB_QOS_ALREADY_EXISTS, ERR_UPDATE_DATABASE
   rpc AddQos(AddQosRequest) returns (AddQosReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_OP_USER, ERR_WCKEY_ALREADY_EXISTS, 
+  // ERR_INVALID_USER, ERR_UPDATE_DATABASE
   rpc AddWckey(AddWckeyRequest) returns (AddWckeyReply);
 
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_NOT_FORCE, ERR_INVALID_OP_USER, ERR_INVALID_ACCOUNT, 
+  // ERR_ACCOUNT_HAS_CHILDREN, ERR_USER_HAS_JOB, ERR_UPDATE_DATABASE
   rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_NOT_FORCE, ERR_INVALID_ACCOUNT, ERR_INVALID_OP_USER, 
+  // ERR_INVALID_USER, ERR_USER_HAS_JOB, ERR_UPDATE_DATABASE
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_NOT_FORCE, ERR_INVALID_OP_USER, ERR_INVALID_QOS, 
+  // ERR_QOS_REFERENCES_EXIST, ERR_UPDATE_DATABASE
   rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
+
+  // Possible ErrCodes in reply.rich_error.code: ERR_NOT_FORCE, ERR_INVALID_OP_USER, ERR_INVALID_WCKEY, 
+  // ERR_DEL_DEFAULT_WCKEY, ERR_UPDATE_DATABASE
   rpc DeleteWckey(DeleteWckeyRequest) returns (DeleteWckeyReply);
 
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_ACCOUNT, ERR_PERMISSION_DENIED
   rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_USER, ERR_PERMISSION_DENIED
   rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_QOS, ERR_PERMISSION_DENIED
   rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_OP_USER, ERR_PERMISSION_DENIED
   rpc QueryWckeyInfo(QueryWckeyInfoRequest) returns (QueryWckeyInfoReply);
 
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_ACCOUNT, ERR_INVALID_PARTITION, 
+  // ERR_INVALID_QOS, ERR_SET_ALLOWED_QOS, ERR_DEFAULT_QOS_NOT_INHERITED, ERR_UPDATE_DATABASE
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_USER, ERR_INVALID_ACCOUNT, 
+  // ERR_INVALID_PARTITION, ERR_INVALID_QOS, ERR_UPDATE_DATABASE
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
+
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_QOS, 
+  // ERR_TIME_LIMIT, ERR_UPDATE_DATABASE
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
+
+  // Possible ErrCodes in reply.code: ERR_INVALID_OP_USER, ERR_INVALID_USER, ERR_INVALID_WCKEY, 
+  // ERR_UPDATE_DATABASE
   rpc ModifyDefaultWckey(ModifyDefaultWckeyRequest) returns (ModifyDefaultWckeyReply);
 
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_ACCOUNT, 
+  // ERR_INVALID_USER, ERR_UPDATE_DATABASE
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
+  // Possible ErrCodes in reply.rich_error_list[].code: ERR_INVALID_OP_USER, ERR_INVALID_USER, 
+  // ERR_REVOKE_CERTIFICATE, ERR_UPDATE_DATABASE
   rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
 
+  // Possible ErrCodes in reply.code: ERR_PERMISSION_DENIED, ERR_GENERIC_FAILURE
   rpc QueryTxnLog(QueryTxnLogRequest) returns (QueryTxnLogReply);
 
+  // Possible ErrCodes in reply.rich_err.code: ERR_USER_NO_PRIVILEGE, ERR_NOT_FORCE, ERR_RESOURCE_NOT_FOUND, ERR_UPDATE_DATABASE
   rpc DeleteLicenseResource(DeleteLicenseResourceRequest) returns (DeleteLicenseResourceReply);
+
+  // Possible ErrCodes in reply.rich_err.code: ERR_USER_NO_PRIVILEGE, ERR_RESOURCE_ALREADY_EXIST, 
+  // ERR_RESOURCE_NOT_FOUND, ERR_INVALID_ARGUMENT, ERR_UPDATE_DATABASE
   rpc AddOrModifyLicenseResource(AddOrModifyLicenseResourceRequest) returns (AddOrModifyLicenseResourceReply);
+
+  // Possible ErrCodes in reply.rich_err.code: ERR_RESOURCE_NOT_FOUND
   rpc QueryLicenseResource(QueryLicenseResourceRequest) returns (QueryLicenseResourceReply);
 
   /* RPCs called from cinfo */
+
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
   /* common RPCs */
+
   rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
+
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
+
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+
   rpc ResetPartitionAcl(ResetPartitionAclRequest) returns (ResetPartitionAclReply);
 
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+
   rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
   /* RPC called form plugin */
+
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
 
   /* RPCS called from PKI request */
+
+  // Possible ErrCodes in reply.reason: ERR_INVALID_PARAM, ERR_PERMISSION_USER, ERR_SIGN_CERTIFICATE, 
+  // ERR_DUPLICATE_CERTIFICATE, ERR_INVALID_USER
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
+
+  // Possible ErrCodes in reply.status.code: ERR_INVALID_PARAM, ERR_CRI_DISABLED, ERR_NON_EXISTENT, 
+  // ERR_CRI_MULTIPLE_NODES, ERR_PERMISSION_DENIED, ERR_CRI_GENERIC
   rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+
+  // Possible ErrCodes in reply.status.code: ERR_INVALID_PARAM, ERR_CRI_DISABLED, ERR_NON_EXISTENT, 
+  // ERR_CRI_MULTIPLE_NODES, ERR_PERMISSION_DENIED, ERR_CRI_GENERIC
   rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
