@@ -56,7 +56,17 @@ pmix_status_t PmixServerCallbacks::Abort(
     const char msg[], pmix_proc_t /*pmix_procs*/[], size_t /*nprocs*/,
     pmix_op_cbfunc_t cbfunc, void* cbdata) {
   CRANE_WARN("PMIx Abort invoked: status={}, msg={}", status, msg);
-  PmixServer::GetInstance()->GetCranedClient()->TerminateSteps();
+  auto* srv = PmixServer::GetInstance();
+  if (srv) {
+    // Immediately abort all pending collectives so that any in-flight fence
+    // callbacks are fired with PMIX_ERR_TIMEOUT before we call TerminateSteps.
+    // Without this, a racing FENCE_RING/FENCE_TREE from a peer node may have
+    // already activated a context whose local contribution will never arrive
+    // (because this process is aborting), leaving the collective stuck forever
+    // and causing PMIx_server_finalize() to block during ~PmixServer().
+    if (srv->GetPmixState()) srv->GetPmixState()->AbortAllColls();
+    srv->GetCranedClient()->TerminateSteps();
+  }
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
 }

@@ -57,6 +57,14 @@ class PmixState {
 
   util::rw_mutex m_mutex_;
   std::vector<std::shared_ptr<Coll>> m_coll_list_;
+
+  // Set to true by AbortAllColls() to prevent PmixStateCollGet() from creating
+  // new collective objects after the step has been aborted.  Without this,
+  // racing peer ring messages that arrive after AbortAllColls() clears
+  // m_coll_list_ would cause PmixStateCollGet() to create a brand-new
+  // PmixCollRing (with m_aborted_=false) that then hits the "unexpected contrib"
+  // path, triggering a spurious extra TerminateSteps() call.
+  bool m_aborted_{false};
 #endif
 };
 

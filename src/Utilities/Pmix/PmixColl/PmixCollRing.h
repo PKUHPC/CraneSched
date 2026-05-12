@@ -138,6 +138,14 @@ class PmixCollRing : public Coll,
   CranedId m_next_craned_id_;
   CranedId m_prev_craned_id_;
   std::array<CollRingCtx, PMIX_COLL_RING_CTX_NUM> m_ctx_array_;
+
+  // Set to true by AbortOnTimeout() to prevent new neighbor-initiated contexts
+  // from being activated after the collective has been aborted.  This guards
+  // against the race where a peer's ring message arrives just after
+  // PMIx_Abort() fires: without this flag the message would activate a fresh
+  // ctx with no cbfunc and no local contribution ever coming, leaving it stuck
+  // in PROGRESS state and causing PMIx_server_finalize() to block.
+  bool m_aborted_{false};
 #endif
 };
 

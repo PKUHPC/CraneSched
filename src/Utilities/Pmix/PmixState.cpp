@@ -31,6 +31,18 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     CollType type, const std::vector<pmix_proc_t>& procs) {
   util::write_lock_guard lock_guard(m_mutex_);
 
+  // Refuse to create new collectives after AbortAllColls() has been called.
+  // Racing peer messages (e.g., a second FENCE_RING from the remote node
+  // arriving after the abort) would otherwise cause PmixStateCollGet() to
+  // allocate a brand-new collective object, which then hits the
+  // "unexpected contrib" error path and fires a spurious TerminateSteps().
+  if (m_aborted_) {
+    CRANE_WARN(
+        "PmixStateCollGet: state already aborted, rejecting new {} collective",
+        ToString(type));
+    return nullptr;
+  }
+
   for (const auto& coll : m_coll_list_) {
     if (coll->GetType() != type) continue;
     if (coll->GetProcNum() != procs.size()) continue;
@@ -112,6 +124,11 @@ void PmixState::CleanupTimeoutColls(std::chrono::seconds timeout) {
 
 void PmixState::AbortAllColls() {
   util::write_lock_guard lock(m_mutex_);
+
+  // Prevent PmixStateCollGet() from creating new collectives after this point.
+  // Any racing peer messages that arrive after we clear m_coll_list_ below
+  // will be rejected at the PmixStateCollGet() entry guard.
+  m_aborted_ = true;
 
   for (auto& coll : m_coll_list_) {
     CRANE_WARN("AbortAllColls: aborting collective {:p} (type={})",

@@ -169,6 +169,20 @@ PmixServer::~PmixServer() {
   // Guard against double-finalize: Init()'s err_conn path already called
   // PMIx_server_finalize() and cleared m_pmix_inited_.
   if (m_pmix_inited_) {
+    // Deregister the nspace before finalizing so that PMIx forces all pending
+    // client connections (including those waiting for in-flight fence/modex
+    // operations) to be torn down.  Without this, PMIx_server_finalize() can
+    // block indefinitely when a peer's FENCE_RING message arrived just before
+    // PMIx_Abort was called, leaving a collective stuck in PROGRESS state with
+    // no local contribution ever coming.
+    if (!m_pmix_step_info_.nspace.empty()) {
+      // PMIx_server_deregister_nspace() returns void; completion is signalled
+      // exclusively through the callback (OpCbWrapper → BlockingCounter).
+      absl::BlockingCounter bc(1);
+      PMIx_server_deregister_nspace(m_pmix_step_info_.nspace.c_str(),
+                                    OpCbWrapper, &bc);
+      bc.Wait();
+    }
     int rc = PMIx_server_finalize();
     if (rc != PMIX_SUCCESS)
       CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));

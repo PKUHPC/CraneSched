@@ -223,7 +223,13 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
 
       CRANE_DEBUG("{:p}: called {}", static_cast<void*>(&coll_ring_ctx),
                   coll_ring_ctx.seq);
-      if (seq != coll_ring_ctx.seq) {
+      // Guard against a ctx that was reset (or recycled) between the time the
+      // async send was issued and when the completion callback fires.
+      // ResetCollRing_() sets in_use=false but does NOT change seq, so we must
+      // check both: seq mismatch catches a *recycled* slot, in_use=false catches
+      // a *reset-but-not-yet-recycled* slot (e.g. reset by AbortOnTimeout while
+      // the send was still in flight).
+      if (seq != coll_ring_ctx.seq || !coll_ring_ctx.in_use) {
         CRANE_DEBUG("{:p}: collective was reset!",
                     static_cast<void*>(&coll_ring_ctx));
         return;
@@ -291,6 +297,11 @@ void PmixCollRing::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
 
 void PmixCollRing::AbortOnTimeout() {
   std::lock_guard lock(m_lock_);
+
+  // Mark as aborted so that any subsequent neighbor-initiated context
+  // activations (e.g., a racing FENCE_RING message arriving just after
+  // PMIx_Abort fired) are rejected immediately in PmixCollRingNeighbor_().
+  m_aborted_ = true;
 
   // Check whether any context is actively progressing (not just idle SYNC).
   bool any_active =
@@ -423,6 +434,19 @@ bool PmixCollRing::ProcessRingRequest(
 bool PmixCollRing::PmixCollRingNeighbor_(
     const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::string& msg) {
+  // If AbortOnTimeout() has already been called, reject any new neighbor
+  // message that would activate a fresh ctx with no local cbfunc.  Such a
+  // ctx would be permanently stuck in PROGRESS state (local contribution
+  // never arrives because the process has already aborted), which in turn
+  // blocks PMIx_server_finalize() during ~PmixServer().
+  if (m_aborted_) {
+    CRANE_DEBUG(
+        "{:p}: collective already aborted, ignoring neighbor msg from {}, "
+        "seq={}",
+        static_cast<void*>(this), hdr.craned_id(), hdr.seq());
+    return false;
+  }
+
   CollRingCtx* coll_ring_ctx = nullptr;
 
   for (size_t i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
