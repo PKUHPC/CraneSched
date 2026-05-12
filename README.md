@@ -10,6 +10,8 @@
 
 # CraneSched 简介
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/PKUHPC/CraneSched)
+
 [中文 | [ENG](./README_EN.md)]
 
 **鹤思（CraneSched）**是北京大学高性能计算校级公共平台自主研发的**分布式智能调度系统**，团队在总结高性能公共平台运行近六年的管理和维护经验之后，
