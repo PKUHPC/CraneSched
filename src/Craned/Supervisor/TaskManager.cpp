@@ -2733,7 +2733,15 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
   }
 
   // One-shot model: nothing to stop, just proceed to cleanup.
-  auto err = task->Cleanup();
+  CraneErrCode err;
+  {
+    CRANE_TRACE_CHILD_NAMED(cleanup_span, m_step_.ExecuteSpan(),
+                            "step/task_cleanup");
+    cleanup_span.SetAttribute("job_id", m_step_.job_id);
+    cleanup_span.SetAttribute("step_id", m_step_.step_id);
+    cleanup_span.SetAttribute("task_id", static_cast<int64_t>(task_id));
+    err = task->Cleanup();
+  }
   if (err != CraneErrCode::SUCCESS) {
     CRANE_WARN("[Task #{}] Failed to cleanup task: {}", task_id,
                static_cast<int>(err));
