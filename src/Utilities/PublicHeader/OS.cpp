@@ -27,6 +27,7 @@
 
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstring>
 #include <future>
 #include <string>
@@ -201,6 +202,24 @@ void CloseFdFrom(int fd_begin) {
 }
 
 void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::directory_iterator dir_it("/proc/self/fd", ec);
+  if (!ec) {
+    std::vector<int> fds_to_close;
+    for (const auto& entry : dir_it) {
+      int fd = 0;
+      auto name = entry.path().filename().string();
+      auto [ptr, errc] =
+          std::from_chars(name.data(), name.data() + name.size(), fd);
+      if (errc != std::errc{}) continue;
+      if (fd >= fd_begin && !skip_fds.contains(fd)) {
+        fds_to_close.push_back(fd);
+      }
+    }
+    for (int fd : fds_to_close) close(fd);
+    return;
+  }
   int fd_max = GetFdOpenMax();
   for (int i = fd_begin; i < fd_max; i++)
     if (!skip_fds.contains(i)) close(i);
