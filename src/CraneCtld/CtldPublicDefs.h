@@ -455,6 +455,9 @@ struct StepStatusChangeContext {
   std::unordered_set<std::unique_ptr<JobInCtld>> job_ptrs;
   // Ended jobs will transfer from embedded db to mongodb
   std::unordered_set<JobInCtld*> job_raw_ptrs;
+
+  // Jobs whose primary steps need batch AppendSteps after the main loop.
+  std::vector<JobInCtld*> pending_append_steps_jobs;
 };
 
 // Abstract interface of all the steps in Ctld.
