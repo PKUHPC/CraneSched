@@ -182,6 +182,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   // in the child proc will block forever.
   // auto res_in_node = job->job_spec.cgroup_spec.res_in_node;
 
+  auto t_before_fork = std::chrono::steady_clock::now();
   pid_t child_pid = fork();
 
   if (child_pid == -1) {
@@ -196,8 +197,13 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   }
 
   if (child_pid > 0) {  // Parent proc
-    CRANE_DEBUG("[Step #{}.{}] Subprocess was created, pid: {}", job_id,
-                step_id, child_pid);
+    auto t_after_fork = std::chrono::steady_clock::now();
+    CRANE_INFO(
+        "[Step #{}.{}] Subprocess was created, pid: {}. fork took {}us",
+        job_id, step_id, child_pid,
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            t_after_fork - t_before_fork)
+            .count());
 
     bool ok;
     CanStartMessage msg;
@@ -376,6 +382,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
 
+    auto t_before_serialize = std::chrono::steady_clock::now();
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
@@ -383,6 +390,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     }
 
     if (ok) ok &= ostream.Flush();
+    auto t_after_send = std::chrono::steady_clock::now();
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
                   job_id, step_id, strerror(ostream.GetErrno()));
@@ -394,12 +402,21 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       return CraneErrCode::ERR_PROTOBUF;
     }
 
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
+    CRANE_INFO(
+        "[Step #{}.{}] Init msg sent. build_msg={}us send={}us", job_id,
+        step_id,
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            t_before_serialize - t_after_fork)
+            .count(),
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            t_after_send - t_before_serialize)
+            .count());
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,
                                           &clean_eof);
+    auto t_after_ready = std::chrono::steady_clock::now();
     if (!ok || !supervisor_ready.ok()) {
       if (!ok)
         CRANE_ERROR("[Step #{}.{}] Pipe child endpoint failed: {},{}", job_id,
@@ -421,42 +438,41 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
 
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg received.", job_id, step_id);
+    CRANE_INFO(
+        "[Step #{}.{}] Supervisor ready. wait_ready={}us total={}us", job_id,
+        step_id,
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            t_after_ready - t_after_send)
+            .count(),
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            t_after_ready - t_before_fork)
+            .count());
     this->supervisor_stub = std::make_shared<SupervisorStub>(job_id, step_id);
 
     this->supv_pid = child_pid;
     return CraneErrCode::SUCCESS;
   } else {  // Child proc, NOLINT(readability-else-after-return)
+    auto t_child_start = std::chrono::steady_clock::now();
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    // Migrate into step's system cgroup (cpu/memory/devices).
-    if (!this->crane_cgroup->MigrateProcIn(getpid())) {
-      fmt::print(
-          stderr,
-          "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
-          "migration.",
-          job_id, step_id);
-      std::abort();
-    }
-
-    // cgroupv1: additionally migrate into overflow cpuset (flat structure).
-    // In v1, cpuset is a separate hierarchy; the step cgroup above only
-    // covers cpu/memory/devices. Overflow processes share crane/overflow
-    // in cpuset hierarchy directly. See overflow_cg.md.
-    if (!CgroupManager::MigrateToCpuset(getpid(),
-                                        this->job_path_info.cpuset_cg_str)) {
-      fmt::print(stderr, "[Step #{}.{}] Failed to migrate to overflow cpuset.",
-                 job_id, step_id);
-      // Non-fatal for now: process will run without cpuset binding
-    }
+    // Cgroup migration is deferred to csupervisor (after SupervisorReady)
+    // so the supervisor init is not throttled by the job's CPU quota.
+    auto t_after_cgroup = std::chrono::steady_clock::now();
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
 
-    util::os::CloseFdFromExcept(3,
-                                {craned_supervisor_fd, supervisor_craned_fd});
+    if (!util::os::CloseFdFromExcept(3,
+                                     {craned_supervisor_fd,
+                                      supervisor_craned_fd})) {
+      fmt::print(stderr,
+                 "[Step #{}.{}] Failed to read /proc/self/fd, aborting.\n",
+                 job_id, step_id);
+      _exit(1);
+    }
+    auto t_after_closefd = std::chrono::steady_clock::now();
     // Prepare the command line arguments.
     std::vector<std::string> string_argv;
     std::vector<const char*> argv;
@@ -473,9 +489,23 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);  // argv must be null-terminated.
-    fmt::print(stderr,
-               "[{:%Y-%m-%d %H:%M:%S}] [Step #{}.{}]: Executing supervisor\n",
-               std::chrono::system_clock::now(), job_id, step_id);
+    auto us = [](auto a, auto b) {
+      return std::chrono::duration_cast<std::chrono::microseconds>(b - a)
+          .count();
+    };
+    auto child_timing = fmt::format(
+        "[Step #{}.{}] child: cgroup={}us closefd={}us total={}us\n",
+        job_id, step_id,
+        us(t_child_start, t_after_cgroup),
+        us(t_after_cgroup, t_after_closefd),
+        us(t_child_start, t_after_closefd));
+    int log_fd = open("/var/crane/craned/child_timing.log",
+                      O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (log_fd >= 0) {
+      [[maybe_unused]] auto _ = write(log_fd, child_timing.data(),
+                                      child_timing.size());
+      close(log_fd);
+    }
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),

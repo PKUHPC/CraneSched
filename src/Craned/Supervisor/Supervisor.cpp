@@ -306,7 +306,9 @@ bool CreateRequiredDirectories() {
 }
 
 void GlobalVariableInit(int grpc_output_fd) {
+  auto t0 = std::chrono::steady_clock::now();
   bool ok = CreateRequiredDirectories();
+  auto t1 = std::chrono::steady_clock::now();
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
   auto ostream = FileOutputStream(grpc_output_fd);
@@ -349,15 +351,75 @@ void GlobalVariableInit(int grpc_output_fd) {
     std::exit(1);
   }
 
+  auto t2 = std::chrono::steady_clock::now();
   PasswordEntry::InitializeEntrySize();
+  auto t3 = std::chrono::steady_clock::now();
 
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
+  auto t4 = std::chrono::steady_clock::now();
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
       [] { util::SetCurrentThreadName("BsThreadPool"); });
+  auto t5 = std::chrono::steady_clock::now();
   g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
+  auto t6 = std::chrono::steady_clock::now();
 
+  // SupervisorServer must be listening before we send SupervisorReady,
+  // because craned will create a stub to this server upon receiving it.
+  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
+  auto t7 = std::chrono::steady_clock::now();
+
+  auto us = [](auto a, auto b) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count();
+  };
+  CRANE_INFO(
+      "[Supv #{}.{}] Init timing: dirs={}us oom_signals={}us "
+      "passwd={}us cgroup={}us threadpool={}us taskmgr={}us "
+      "server={}us total={}us",
+      g_config.JobId, g_config.StepId, us(t0, t1), us(t1, t2), us(t2, t3),
+      us(t3, t4), us(t4, t5), us(t5, t6), us(t6, t7), us(t0, t7));
+
+  // Send SupervisorReady early — craned is blocking on this.
+  ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+  ok &= ostream.Flush();
+  if (!ok) std::abort();
+  close(grpc_output_fd);
+  auto t8 = std::chrono::steady_clock::now();
+
+  // Migrate supervisor into the job's cgroup now that initialization is
+  // complete and SupervisorReady has been sent. This is deferred from the
+  // child process (before execvp) so the supervisor init runs without the
+  // job's CPU quota constraint.
+  {
+    auto procs_path =
+        std::filesystem::path(g_config.SupvCgroupPath) / "cgroup.procs";
+    std::ofstream ofs(procs_path);
+    if (ofs.is_open()) {
+      ofs << getpid();
+      ofs.close();
+      if (ofs.fail()) {
+        CRANE_ERROR("[Supv #{}.{}] Failed to migrate into cgroup {}",
+                    g_config.JobId, g_config.StepId,
+                    g_config.SupvCgroupPath);
+      }
+    } else {
+      CRANE_ERROR(
+          "[Supv #{}.{}] Failed to open cgroup.procs at {}",
+          g_config.JobId, g_config.StepId, procs_path.string());
+    }
+
+    if (!g_config.CpusetCgStr.empty()) {
+      Craned::Common::CgroupManager::MigrateToCpuset(getpid(),
+                                                      g_config.CpusetCgStr);
+    }
+  }
+  auto t_after_cg = std::chrono::steady_clock::now();
+
+  // Initialize gRPC clients after sending SupervisorReady.
+  // These are only needed when the supervisor reports status back to craned
+  // or calls plugin hooks, so they don't need to be ready before craned
+  // unblocks.
   g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(
       fmt::format("unix://{}", g_config.CranedUnixSocketPath.string()));
@@ -367,14 +429,10 @@ void GlobalVariableInit(int grpc_output_fd) {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
-
-  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
-
-  ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-
-  ok &= ostream.Flush();
-  if (!ok) std::abort();
-  close(grpc_output_fd);
+  auto t9 = std::chrono::steady_clock::now();
+  CRANE_INFO(
+      "[Supv #{}.{}] Post-ready init: cgroup_migrate={}us grpc_clients={}us",
+      g_config.JobId, g_config.StepId, us(t8, t_after_cg), us(t_after_cg, t9));
 }
 
 void StartServer(int grpc_output_fd) {
@@ -382,10 +440,17 @@ void StartServer(int grpc_output_fd) {
   using Craned::Supervisor::StepStatus;
 
   constexpr uint64_t file_max = 640000;
+  auto t_setfd = std::chrono::steady_clock::now();
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
+  auto t_after_setfd = std::chrono::steady_clock::now();
+  CRANE_INFO(
+      "[Supv #{}.{}] SetMaxFd took {}us", g_config.JobId, g_config.StepId,
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          t_after_setfd - t_setfd)
+          .count());
 
   GlobalVariableInit(grpc_output_fd);
 
@@ -472,7 +537,19 @@ void InstallStackTraceHooks() {
 }
 
 int main(int argc, char** argv) {
+  auto t_main_start = std::chrono::steady_clock::now();
   auto grpc_output_fd = InitFromStdin(argc, argv);
+  auto t_after_init = std::chrono::steady_clock::now();
   InstallStackTraceHooks();
+  auto t_after_hooks = std::chrono::steady_clock::now();
+  CRANE_INFO(
+      "[Supv #{}.{}] main: InitFromStdin={}us InstallStackTraceHooks={}us",
+      g_config.JobId, g_config.StepId,
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          t_after_init - t_main_start)
+          .count(),
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          t_after_hooks - t_after_init)
+          .count());
   StartServer(grpc_output_fd);
 }
