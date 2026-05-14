@@ -437,9 +437,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
 
-    if (!util::os::CloseFdFromExcept(3,
-                                     {craned_supervisor_fd,
-                                      supervisor_craned_fd})) {
+    if (!util::os::CloseFdFromExcept(
+            3, {craned_supervisor_fd, supervisor_craned_fd})) {
       fmt::print(stderr,
                  "[Step #{}.{}] Failed to read /proc/self/fd, aborting.\n",
                  job_id, step_id);

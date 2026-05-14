@@ -381,18 +381,16 @@ void GlobalVariableInit(int grpc_output_fd) {
       ofs.close();
       if (ofs.fail()) {
         CRANE_ERROR("[Supv #{}.{}] Failed to migrate into cgroup {}",
-                    g_config.JobId, g_config.StepId,
-                    g_config.SupvCgroupPath);
+                    g_config.JobId, g_config.StepId, g_config.SupvCgroupPath);
       }
     } else {
-      CRANE_ERROR(
-          "[Supv #{}.{}] Failed to open cgroup.procs at {}",
-          g_config.JobId, g_config.StepId, procs_path.string());
+      CRANE_ERROR("[Supv #{}.{}] Failed to open cgroup.procs at {}",
+                  g_config.JobId, g_config.StepId, procs_path.string());
     }
 
     if (!g_config.CpusetCgStr.empty()) {
       Craned::Common::CgroupManager::MigrateToCpuset(getpid(),
-                                                      g_config.CpusetCgStr);
+                                                     g_config.CpusetCgStr);
     }
   }
 
