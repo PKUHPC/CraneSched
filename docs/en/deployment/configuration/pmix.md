@@ -10,7 +10,7 @@ CraneSched ships with a built-in PMIx server hosted by the Supervisor process on
 
 | Component | Minimum Version | Notes |
 |----------|------------------|-------|
-| OpenPMIx | 4.x              | PMIx runtime library (required) |
+| OpenPMIx | 3.x              | PMIx runtime library (required) |
 | Open MPI | 4.1+             | MPI implementation with PMIx support (5.x recommended) |
 | UCX (optional) | 1.12+       | Enable high-performance direct connection mode (requires InfiniBand/RoCE, etc.) |
 
@@ -21,32 +21,46 @@ Build from source (recommended for production). Refer to the OpenPMIx official d
 ```bash
 sudo dnf install libevent-devel
 sudo dnf install hwloc-devel
-# Example: install to /opt/pmix
-wget https://github.com/openpmix/openpmix/releases/download/v4.2.9/pmix-4.2.9.tar.bz2
-tar xf pmix-4.2.9.tar.bz2 && cd pmix-4.2.9
-./configure --prefix=/opt/pmix
-make -j$(nproc) && sudo make install
+## Recommended to install in a shared directory, such as /nfs
+cd /nfs/software/pmix/src
+wget https://github.com/openpmix/openpmix/releases/download/v3.1.7/pmix-3.1.7.tar.gz
+tar -xzf pmix-3.1.7.tar.gz
+cd pmix-3.1.7
+
+# Note: Use an independent path, which does not affect the system
+./configure --prefix=/nfs/software/pmix/3.1.7 \
+            --enable-embedded-libevent \
+            --enable-embedded-hwloc \
+            --disable-docs \
+            --enable-shared
+
+make -j$(nproc)
+make install
 ```
 
 ### 1.3 Installing an MPI Implementation with PMIx Support
 
 Open MPI (recommended)
 
-Using Open MPI 5.0.6 + system PMIx as an example. Refer to the Open MPI official documentation for details.
+Using Open MPI 4.1.6 +  system PMIx as an example. Refer to the Open MPI official documentation for details.
 
 ```bash
-sudo dnf install gcc-gfortran
-wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.6.tar.bz2
-tar xf openmpi-5.0.6.tar.bz2 && cd openmpi-5.0.6
+## Recommended to install in a shared directory, such as /nfs
+cd /nfs/software/openmpi/src
+wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-4.1.6.tar.gz
+tar -xzf openmpi-4.1.6.tar.gz
+cd openmpi-4.1.6
 
-# If PMIx is installed in /opt/pmix, specify it via --with-pmix
-./configure --prefix=/opt/openmpi \
-            --with-pmix=/opt/pmix
+./configure --prefix=/nfs/software/openmpi/4.1.6 \
+            --with-pmix=/nfs/software/pmix/3.1.7 \
+            --enable-mpi-fortran=yes \
+            --enable-mpi-cxx=yes \
+            --enable-shared \
+            --with-slurm \
+            --enable-orterun-prefix-by-default
 
-make -j$(nproc) && sudo make install
-# Verify PMIx support:
-/opt/openmpi/bin/ompi_info | grep pmix
-# The output should contain MCA psec: pmix or similar
+make -j$(nproc)
+make install
 ```
 
 If OpenPMIx was installed via a package manager under `/opt`, you can omit `--with-pmix`; Open MPI’s configure script will detect it automatically.
