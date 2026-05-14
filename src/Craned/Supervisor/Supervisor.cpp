@@ -358,22 +358,7 @@ void GlobalVariableInit(int grpc_output_fd) {
       [] { util::SetCurrentThreadName("BsThreadPool"); });
   g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
 
-  // SupervisorServer must be listening before we send SupervisorReady,
-  // because craned will create a stub to this server upon receiving it.
-  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
-
-  // Send SupervisorReady early — craned is blocking on this.
-  // Cgroup migration is done by the parent (craned) after receiving
-  // SupervisorReady, so the supervisor init runs without CPU quota constraint.
-  ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-  ok &= ostream.Flush();
-  if (!ok) std::abort();
-  close(grpc_output_fd);
-
-  // Initialize gRPC clients after sending SupervisorReady.
-  // These are only needed when the supervisor reports status back to craned
-  // or calls plugin hooks, so they don't need to be ready before craned
-  // unblocks.
+  
   g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(
       fmt::format("unix://{}", g_config.CranedUnixSocketPath.string()));
@@ -383,6 +368,14 @@ void GlobalVariableInit(int grpc_output_fd) {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+  
+  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
+
+  ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+  ok &= ostream.Flush();
+  if (!ok) std::abort();
+  close(grpc_output_fd);
+
 }
 
 void StartServer(int grpc_output_fd) {
