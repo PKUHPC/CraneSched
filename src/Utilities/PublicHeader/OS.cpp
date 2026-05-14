@@ -27,6 +27,7 @@
 
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstring>
 #include <future>
 #include <string>
@@ -196,14 +197,31 @@ void CloseFdRange(int fd_begin, int fd_end) {
 }
 
 void CloseFdFrom(int fd_begin) {
-  int fd_max = GetFdOpenMax();
-  for (int i = fd_begin; i < fd_max; i++) close(i);
+  std::set<int> empty;
+  if (!CloseFdFromExcept(fd_begin, empty)) {
+    int fd_max = GetFdOpenMax();
+    for (int i = fd_begin; i < fd_max; i++) close(i);
+  }
 }
 
-void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
-  int fd_max = GetFdOpenMax();
-  for (int i = fd_begin; i < fd_max; i++)
-    if (!skip_fds.contains(i)) close(i);
+bool CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
+  std::error_code ec;
+  std::filesystem::directory_iterator dir_it("/proc/self/fd", ec);
+  if (ec) return false;
+
+  std::vector<int> fds_to_close;
+  for (const auto& entry : dir_it) {
+    int fd = 0;
+    auto name = entry.path().filename().string();
+    auto [ptr, errc] =
+        std::from_chars(name.data(), name.data() + name.size(), fd);
+    if (errc != std::errc{}) continue;
+    if (fd >= fd_begin && !skip_fds.contains(fd)) {
+      fds_to_close.push_back(fd);
+    }
+  }
+  for (int fd : fds_to_close) close(fd);
+  return true;
 }
 
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end) {

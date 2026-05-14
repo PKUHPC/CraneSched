@@ -371,7 +371,6 @@ void GlobalVariableInit(int grpc_output_fd) {
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-
   ok &= ostream.Flush();
   if (!ok) std::abort();
   close(grpc_output_fd);
