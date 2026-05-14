@@ -19,7 +19,6 @@
 #include "crane/OS.h"
 
 #include <absl/cleanup/cleanup.h>
-#include <dirent.h>
 #include <grp.h>
 #include <poll.h>
 #include <pwd.h>
@@ -206,22 +205,21 @@ void CloseFdFrom(int fd_begin) {
 }
 
 bool CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
-  DIR* dir = opendir("/proc/self/fd");
-  if (!dir) return false;
+  std::error_code ec;
+  std::filesystem::directory_iterator dir_it("/proc/self/fd", ec);
+  if (ec) return false;
 
-  int dir_fd = dirfd(dir);
   std::vector<int> fds_to_close;
-  struct dirent* entry;
-  while ((entry = readdir(dir)) != nullptr) {
+  for (const auto& entry : dir_it) {
     int fd = 0;
-    auto [ptr, errc] = std::from_chars(
-        entry->d_name, entry->d_name + strlen(entry->d_name), fd);
+    auto name = entry.path().filename().string();
+    auto [ptr, errc] =
+        std::from_chars(name.data(), name.data() + name.size(), fd);
     if (errc != std::errc{}) continue;
-    if (fd >= fd_begin && fd != dir_fd && !skip_fds.contains(fd)) {
+    if (fd >= fd_begin && !skip_fds.contains(fd)) {
       fds_to_close.push_back(fd);
     }
   }
-  closedir(dir);
   for (int fd : fds_to_close) close(fd);
   return true;
 }

@@ -1264,13 +1264,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this job, and
   // we should send StepStatusChange manually.
-  auto t_launch_start = std::chrono::steady_clock::now();
   CraneErrCode err = step_ptr->Prepare(job->path_info);
-  auto t_after_prepare = std::chrono::steady_clock::now();
-  CRANE_INFO("[Step #{}.{}] Prepare took {}us", job_id, step_id,
-             std::chrono::duration_cast<std::chrono::microseconds>(
-                 t_after_prepare - t_launch_start)
-                 .count());
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
