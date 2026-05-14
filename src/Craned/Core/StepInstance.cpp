@@ -422,6 +422,21 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(supervisor_craned_fd);
 
     CRANE_TRACE("[Step #{}.{}] Supervisor init msg received.", job_id, step_id);
+
+    // Migrate supervisor into the job's cgroup after it has finished
+    // initialization. This avoids throttling supervisor startup by the
+    // job's CPU quota.
+    if (!this->crane_cgroup->MigrateProcIn(child_pid)) {
+      CRANE_ERROR(
+          "[Step #{}.{}] Failed to migrate supervisor pid {} into cgroup.",
+          job_id, step_id, child_pid);
+    }
+    if (!CgroupManager::MigrateToCpuset(child_pid,
+                                        this->job_path_info.cpuset_cg_str)) {
+      CRANE_WARN("[Step #{}.{}] Failed to migrate supervisor to cpuset.",
+                 job_id, step_id);
+    }
+
     this->supervisor_stub = std::make_shared<SupervisorStub>(job_id, step_id);
 
     this->supv_pid = child_pid;

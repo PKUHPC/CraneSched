@@ -363,36 +363,12 @@ void GlobalVariableInit(int grpc_output_fd) {
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   // Send SupervisorReady early — craned is blocking on this.
+  // Cgroup migration is done by the parent (craned) after receiving
+  // SupervisorReady, so the supervisor init runs without CPU quota constraint.
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();
   if (!ok) std::abort();
   close(grpc_output_fd);
-
-  // Migrate supervisor into the job's cgroup now that initialization is
-  // complete and SupervisorReady has been sent. This is deferred from the
-  // child process (before execvp) so the supervisor init runs without the
-  // job's CPU quota constraint.
-  {
-    auto procs_path =
-        std::filesystem::path(g_config.SupvCgroupPath) / "cgroup.procs";
-    std::ofstream ofs(procs_path);
-    if (ofs.is_open()) {
-      ofs << getpid();
-      ofs.close();
-      if (ofs.fail()) {
-        CRANE_ERROR("[Supv #{}.{}] Failed to migrate into cgroup {}",
-                    g_config.JobId, g_config.StepId, g_config.SupvCgroupPath);
-      }
-    } else {
-      CRANE_ERROR("[Supv #{}.{}] Failed to open cgroup.procs at {}",
-                  g_config.JobId, g_config.StepId, procs_path.string());
-    }
-
-    if (!g_config.CpusetCgStr.empty()) {
-      Craned::Common::CgroupManager::MigrateToCpuset(getpid(),
-                                                     g_config.CpusetCgStr);
-    }
-  }
 
   // Initialize gRPC clients after sending SupervisorReady.
   // These are only needed when the supervisor reports status back to craned
