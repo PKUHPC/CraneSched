@@ -885,6 +885,10 @@ message StreamCtldReply {
     string failure_reason = 2;
     StepToCtld step = 3;
     int32 cattach_pid = 4;
+    message Tasks {
+      repeated uint32 task_ids = 1;
+    }
+    map<string, Tasks> craned_task_map = 5;
   }
 
   CtldReplyType type = 1;

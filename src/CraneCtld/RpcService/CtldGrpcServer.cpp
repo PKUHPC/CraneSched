@@ -497,8 +497,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
            * stream-write results throughout the rest of this function. */
           bool step_ok = true;
           crane::grpc::StepToCtld step;
+          std::unordered_map<CranedId, std::set<task_id_t>> task_map;
           if (!g_job_scheduler->QueryStepAndNodeRegex(
-                  payload.job_id(), payload.step_id(), &step)) {
+                  payload.job_id(), payload.step_id(), &step, &task_map)) {
             step_ok = false;
             failure_reason = "Step not found";
           } else {
@@ -509,7 +510,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             }
           }
           if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
-                                                 payload.cattach_pid())) {
+                                                 payload.cattach_pid(),
+                                                 task_map)) {
             CRANE_ERROR(
                 "Failed to send STEP_META_REPLY to cfored {}. "
                 "Connection is broken.",
