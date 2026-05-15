@@ -312,7 +312,6 @@ constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 // CPUSET is NOT included here for cgroupv1. In v1 each controller has its own
 // hierarchy and overflow uses a flat cpuset structure (no per-job children).
 // CPUSET cgroups are managed separately by CpuPoolManager.
-// See .claude/docs/cpu_pool/overflow_cg.md for the design rationale.
 constexpr ControllerFlags CG_V1_BASE_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
@@ -637,15 +636,13 @@ class CgroupManager {
       const crane::grpc::ResourceInNodeV3& res_in_node);
 
   // --- CPU Pool Management ---
-  // Initialize overflow cgroup and CPU pool state. Call after Init().
+  // All state modifications below must be called from event loop only.
   static bool InitCpuPool(const std::set<uint32_t>& node_cpus);
   static void ShutdownCpuPool();
 
-  // Release CPU pool state for a completed job.
-  // INT jobs: removes core_ids from int pool, updates overflow cpuset.
-  // Overflow jobs: no-op (no pool state to update).
-  static void ReleaseJobCpuPool(job_id_t job_id,
-                                const crane::grpc::ResourceInNodeV3& resource);
+  static void ClaimCoresForIntJob(const std::set<uint32_t>& core_ids);
+  static void ReleaseCoresForIntJob(const std::set<uint32_t>& core_ids);
+  static void WriteOverflowCpuset();
 
   // Construct cgroup path info for a job based on its CPU allocation and
   // the active cgroup version. See CgroupPathInfo struct for semantics.
@@ -725,10 +722,8 @@ class CgroupManager {
   GetCgInoJobIdMapCgroupV2_(const std::filesystem::path& root_cgroup_path);
 
   // --- CPU Pool internals ---
-  // Recompute overflow cpuset = m_node_cpus_ \ m_int_cpus_ and write to cgroup.
-  static void UpdateOverflowCpuset_();
-  // Format CPU set as cgroup cpuset string (e.g. "0-3,5,7")
   static std::string FormatCpusetString_(const std::set<uint32_t>& cpus);
+  static std::string FormatOverflowCpusetString_();
 
   // cgroupv1 only: write a value to a cpuset hierarchy file directly.
   // path is relative to /sys/fs/cgroup/cpuset/ (e.g.
@@ -750,9 +745,9 @@ class CgroupManager {
 
   inline static CgConstant::CgroupVersion m_cg_version_;
 
-  // CPU pool state
-  inline static std::set<uint32_t> m_node_cpus_;
-  inline static std::set<uint32_t> m_int_cpus_;
+  // Overflow pool — modified only from event loop (single-threaded).
+  inline static std::vector<bool> m_overflow_bits_;
+  inline static uint32_t m_core_count_{0};
   inline static std::unique_ptr<CgroupInterface> m_overflow_cg_;
 };
 

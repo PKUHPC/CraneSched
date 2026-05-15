@@ -668,18 +668,8 @@ CgroupManager::AllocateAndGetCgroupForJob(
 
   auto path_info = MakeCgroupPathInfo(job_id, cpu_set);
 
-  if (is_integer) {
-    for (uint32_t id : cpu_set.core_ids) m_int_cpus_.insert(id);
-    UpdateOverflowCpuset_();
-  }
-
   auto result = AllocateAndGetCgroup(path_info.cg_str, resource, recover,
                                      min_mem, is_integer);
-
-  if (!result.has_value() && is_integer) {
-    for (uint32_t id : cpu_set.core_ids) m_int_cpus_.erase(id);
-    UpdateOverflowCpuset_();
-  }
 
   return result;
 }
@@ -2134,8 +2124,9 @@ bool CgroupManager::MigrateToCpuset(pid_t pid,
 // --- CPU Pool Management ---
 
 bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
-  m_node_cpus_ = node_cpus;
-  m_int_cpus_.clear();
+  m_core_count_ = node_cpus.empty() ? 0 : *node_cpus.rbegin() + 1;
+  m_overflow_bits_.assign(m_core_count_, false);
+  for (uint32_t c : node_cpus) m_overflow_bits_[c] = true;
 
   auto all_cpus_str = FormatCpusetString_(node_cpus);
 
@@ -2143,7 +2134,7 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
   // In v1, cpuset is a separate hierarchy. Empty cpuset.cpus means "nothing
   // allowed", so parent cgroups must be initialized before children.
   // Overflow processes will be migrated directly into crane/overflow (flat),
-  // not into per-job children. See .claude/docs/cpu_pool/overflow_cg.md
+  // not into per-job children.
   if (!IsCgV2() && IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
     if (!InitCpusetCgroup_("", all_cpus_str)) {
       CRANE_ERROR("Failed to init root crane cpuset");
@@ -2170,7 +2161,7 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
 
   // For v2, set overflow cpuset via the unified cgroup object
   if (IsCgV2()) {
-    UpdateOverflowCpuset_();
+    WriteOverflowCpuset();
   }
 
   CRANE_INFO("CPU pool initialized. node_cpus=[{}]", all_cpus_str);
@@ -2182,58 +2173,57 @@ void CgroupManager::ShutdownCpuPool() {
     m_overflow_cg_->Destroy();
     m_overflow_cg_.reset();
   }
-  m_int_cpus_.clear();
-  m_node_cpus_.clear();
+  m_overflow_bits_.clear();
+  m_core_count_ = 0;
 }
 
-void CgroupManager::ReleaseJobCpuPool(
-    job_id_t job_id, const crane::grpc::ResourceInNodeV3& resource) {
-  ResourceInNodeV3 res_v3(resource);
-  const auto& cpu_set = res_v3.GetCpuSet();
-
-  if (cpu_set.IsInteger()) {
-    for (uint32_t id : cpu_set.core_ids) {
-      m_int_cpus_.erase(id);
-    }
-    UpdateOverflowCpuset_();
-    CRANE_DEBUG("Released INT job #{} cpus=[{}]", job_id,
-                FormatCpusetString_(cpu_set.core_ids));
-  } else {
-    CRANE_DEBUG("Released overflow job #{}", job_id);
-  }
+void CgroupManager::ClaimCoresForIntJob(const std::set<uint32_t>& core_ids) {
+  for (uint32_t id : core_ids) m_overflow_bits_[id] = false;
 }
 
-void CgroupManager::UpdateOverflowCpuset_() {
-  // overflow cpuset = m_node_cpus_ \ m_int_cpus_
-  std::set<uint32_t> overflow_cpus;
-  for (uint32_t c : m_node_cpus_) {
-    if (!m_int_cpus_.contains(c)) {
-      overflow_cpus.insert(c);
-    }
-  }
+void CgroupManager::ReleaseCoresForIntJob(const std::set<uint32_t>& core_ids) {
+  for (uint32_t id : core_ids) m_overflow_bits_[id] = true;
+}
 
-  if (overflow_cpus.empty()) {
-    CRANE_WARN("Overflow cpuset is empty — all CPUs are in INT pool");
+void CgroupManager::WriteOverflowCpuset() {
+  auto cpus_str = FormatOverflowCpusetString_();
+  if (cpus_str.empty()) {
+    CRANE_TRACE("Overflow cpuset is empty — all CPUs are in INT pool");
     return;
   }
 
-  auto cpus_str = FormatCpusetString_(overflow_cpus);
-
   if (IsCgV2()) {
-    // v2: use the unified cgroup object
     if (m_overflow_cg_) {
-      std::unordered_set<uint32_t> cpu_set(overflow_cpus.begin(),
-                                           overflow_cpus.end());
+      std::unordered_set<uint32_t> cpu_set;
+      for (uint32_t i = 0; i < m_core_count_; ++i)
+        if (m_overflow_bits_[i]) cpu_set.insert(i);
       m_overflow_cg_->SetCpuSet(cpu_set);
     }
   } else {
-    // v1: write directly to cpuset hierarchy (flat, no children)
     WriteCpusetFile_(
         CpusetHierarchyPath_(CgConstant::kOverflowCgName) / "cpuset.cpus",
         cpus_str);
   }
 
   CRANE_TRACE("Overflow cpuset=[{}]", cpus_str);
+}
+
+std::string CgroupManager::FormatOverflowCpusetString_() {
+  std::string result;
+  uint32_t i = 0;
+  while (i < m_core_count_) {
+    if (!m_overflow_bits_[i]) {
+      ++i;
+      continue;
+    }
+    uint32_t start = i;
+    while (i < m_core_count_ && m_overflow_bits_[i]) ++i;
+    uint32_t end = i - 1;
+    if (!result.empty()) result += ",";
+    result += (start == end) ? std::to_string(start)
+                             : fmt::format("{}-{}", start, end);
+  }
+  return result;
 }
 
 std::string CgroupManager::FormatCpusetString_(const std::set<uint32_t>& cpus) {

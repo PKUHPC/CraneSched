@@ -756,9 +756,7 @@ CpuSet& CpuSet::operator+=(const CpuSet& rhs) {
 }
 
 CpuSet& CpuSet::operator-=(const CpuSet& rhs) {
-  // Tolerant erase: scheduler uses ResourceInNodeV3 in time_avail_res_map
-  // where Ckmin may leave stale core_ids. Will be resolved when scheduler
-  // migrates to ResourceView (no core_ids in scheduling phase).
+  // Tolerant erase: Ckmin may leave stale core_ids across time windows.
   for (const auto& id : rhs.core_ids) {
     core_ids.erase(id);
   }
