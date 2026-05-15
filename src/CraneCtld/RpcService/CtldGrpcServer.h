@@ -189,7 +189,14 @@ class CforedStreamWriter {
     task_meta_reply->set_ok(ok);
     task_meta_reply->set_failure_reason(failure_reason);
     task_meta_reply->set_cattach_pid(pid);
-    task_meta_reply->mutable_step()->CopyFrom(step);
+    auto *si = task_meta_reply->mutable_step_info();
+    si->set_pty(step.has_interactive_meta() && step.interactive_meta().pty());
+    if (step.has_io_meta() && step.io_meta().has_input_task_id()) {
+      si->set_input_task_id(step.io_meta().input_task_id());
+    }
+    si->set_ntasks(step.ntasks());
+    si->set_node_num(step.node_num());
+    si->set_nodelist(step.nodelist());
     for (const auto &[craned_name, tasks] : craned_task_map) {
       auto &pb_tasks =
           (*task_meta_reply->mutable_craned_task_map())[craned_name];
