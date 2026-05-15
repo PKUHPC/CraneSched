@@ -197,6 +197,11 @@ class CforedStreamWriter {
     si->set_ntasks(step.ntasks());
     si->set_node_num(step.node_num());
     si->set_nodelist(step.nodelist());
+    // Populate per-node task map into step_info for --layout output.
+    for (const auto &[craned_name, tasks] : craned_task_map) {
+      auto &pb_node_tasks = (*si->mutable_craned_task_map())[craned_name];
+      pb_node_tasks.mutable_task_ids()->Assign(tasks.begin(), tasks.end());
+    }
     for (const auto &[craned_name, tasks] : craned_task_map) {
       auto &pb_tasks =
           (*task_meta_reply->mutable_craned_task_map())[craned_name];
