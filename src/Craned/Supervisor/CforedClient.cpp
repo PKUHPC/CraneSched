@@ -514,7 +514,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   bool ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
 
   // Make sure before exit all output has been drained.
-  while (!m_wait_reconn_.load(std::memory_order::acquire) && (!m_stopped_ || ok)) {
+  while (!m_wait_reconn_.load(std::memory_order::acquire) &&
+         (!m_stopped_ || ok)) {
     if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);

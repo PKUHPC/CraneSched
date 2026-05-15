@@ -176,20 +176,20 @@ class CforedStreamWriter {
    * RET: true on success, false if the stream write fails or is invalidated
    */
   bool WriteStepMetaReply(
-      bool ok, const std::string &failure_reason,
-      const crane::grpc::StepToCtld &step, int32_t pid,
-      const std::unordered_map<CranedId, std::set<task_id_t>>
-          &craned_task_map = {}) {
+      bool ok, const std::string& failure_reason,
+      const crane::grpc::StepToCtld& step, int32_t pid,
+      const std::unordered_map<CranedId, std::set<task_id_t>>& craned_task_map =
+          {}) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::STEP_META_REPLY);
-    auto *task_meta_reply = reply.mutable_payload_step_meta_reply();
+    auto* task_meta_reply = reply.mutable_payload_step_meta_reply();
     task_meta_reply->set_ok(ok);
     task_meta_reply->set_failure_reason(failure_reason);
     task_meta_reply->set_cattach_pid(pid);
-    auto *si = task_meta_reply->mutable_step_info();
+    auto* si = task_meta_reply->mutable_step_info();
     si->set_pty(step.has_interactive_meta() && step.interactive_meta().pty());
     if (step.has_io_meta() && step.io_meta().has_input_task_id()) {
       // Explicit input_task_id set by crun (new path, preferred).
@@ -200,7 +200,7 @@ class CforedStreamWriter {
       // If the pattern is a pure non-negative integer and within [0, ntasks),
       // it represents an exclusive-stdin task ID; propagate it to
       // CattachStepInfo so that cattach can enter read-only mode correctly.
-      const auto &pattern = step.io_meta().input_file_pattern();
+      const auto& pattern = step.io_meta().input_file_pattern();
       if (!pattern.empty() &&
           std::all_of(pattern.begin(), pattern.end(), ::isdigit)) {
         uint64_t task_id = std::stoull(pattern);
@@ -215,8 +215,8 @@ class CforedStreamWriter {
     // Populate per-node task map into CattachStepInfo for --layout output and
     // cfored stdin routing.  The outer StepMetaReply.craned_task_map has been
     // removed; cfored now reads the map from step_info directly.
-    for (const auto &[craned_name, tasks] : craned_task_map) {
-      auto &pb_node_tasks = (*si->mutable_craned_task_map())[craned_name];
+    for (const auto& [craned_name, tasks] : craned_task_map) {
+      auto& pb_node_tasks = (*si->mutable_craned_task_map())[craned_name];
       pb_node_tasks.mutable_task_ids()->Assign(tasks.begin(), tasks.end());
     }
 
@@ -260,7 +260,7 @@ class StreamWriterProxy {
    * RET: none
    */
   template <typename Func>
-  void WithWriter(Func &&func) {
+  void WithWriter(Func&& func) {
     absl::MutexLock lock(&mtx_);
     if (writer_) func(*writer_);
   }

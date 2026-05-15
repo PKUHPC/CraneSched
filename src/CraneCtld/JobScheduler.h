@@ -1081,10 +1081,10 @@ class JobScheduler {
    * NOTE: caller must hold no locks; this function acquires
    *       m_running_job_map_mtx_ internally (read lock).
    */
-  bool QueryStepAndNodeRegex(
-      job_id_t job_id, step_id_t step_id, crane::grpc::StepToCtld* step,
-      std::unordered_map<CranedId, std::set<task_id_t>>* craned_task_map =
-          nullptr);
+  bool QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
+                             crane::grpc::StepToCtld* step,
+                             std::unordered_map<CranedId, std::set<task_id_t>>*
+                                 craned_task_map = nullptr);
 
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
