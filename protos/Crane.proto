@@ -834,6 +834,10 @@ message CattachStepInfo {
   uint32          ntasks        = 3;  // for --layout
   uint32          node_num      = 4;  // for --layout
   string          nodelist      = 5;  // for --layout and execCranedIds parsing
+  message NodeTasks {
+    repeated uint32 task_ids = 1;
+  }
+  map<string, NodeTasks> craned_task_map = 6;
 }
 
 message StreamCtldReply {
