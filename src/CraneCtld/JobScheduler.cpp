@@ -5049,8 +5049,9 @@ void JobScheduler::QueryJobsInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
-bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
-                                         crane::grpc::StepToCtld* step) {
+bool JobScheduler::QueryStepAndNodeRegex(
+    job_id_t job_id, step_id_t step_id, crane::grpc::StepToCtld* step,
+    std::unordered_map<CranedId, std::set<task_id_t>>* craned_task_map) {
   if (step_id == 0) return false;
 
   LockGuard running_guard(&m_running_job_map_mtx_);
@@ -5072,6 +5073,7 @@ bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
 
     *step = primary_step->StepToCtld();
     step->set_nodelist(primary_step->allocated_craneds_regex);
+    if (craned_task_map) *craned_task_map = primary_step->craned_task_map;
     return true;
   }
 
@@ -5079,6 +5081,7 @@ bool JobScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id,
   if (step_iter == job->Steps().end()) return false;
   *step = step_iter->second->StepToCtld();
   step->set_nodelist(step_iter->second->allocated_craneds_regex);
+  if (craned_task_map) *craned_task_map = step_iter->second->craned_task_map;
   return true;
 }
 

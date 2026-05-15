@@ -175,8 +175,11 @@ class CforedStreamWriter {
    * IN:  pid            - cattach client PID for reply routing
    * RET: true on success, false if the stream write fails or is invalidated
    */
-  bool WriteStepMetaReply(bool ok, const std::string &failure_reason,
-                          const crane::grpc::StepToCtld &step, int32_t pid) {
+  bool WriteStepMetaReply(
+      bool ok, const std::string &failure_reason,
+      const crane::grpc::StepToCtld &step, int32_t pid,
+      const std::unordered_map<CranedId, std::set<task_id_t>>
+          &craned_task_map = {}) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -187,6 +190,11 @@ class CforedStreamWriter {
     task_meta_reply->set_failure_reason(failure_reason);
     task_meta_reply->set_cattach_pid(pid);
     task_meta_reply->mutable_step()->CopyFrom(step);
+    for (const auto &[craned_name, tasks] : craned_task_map) {
+      auto &pb_tasks =
+          (*task_meta_reply->mutable_craned_task_map())[craned_name];
+      pb_tasks.mutable_task_ids()->Assign(tasks.begin(), tasks.end());
+    }
 
     return m_stream_->Write(reply);
   }
