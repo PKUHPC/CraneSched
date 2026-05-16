@@ -89,6 +89,8 @@ struct Config {
     uint64_t MaxLogFileNum;
     uint32_t ThreadPoolSize{0};
     uint32_t SchedulerRpcThreadPoolSize{0};
+    uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
+    uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
   };
   CraneCtldConf CtldConf;
 

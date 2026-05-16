@@ -725,8 +725,10 @@ bool JobScheduler::Init() {
         JobStatusChangeTimerCb_();
       });
   m_job_status_change_timer_handle_->start(
-      std::chrono::milliseconds(kJobStatusChangeTimeoutMS * 3),
-      std::chrono::milliseconds(kJobStatusChangeTimeoutMS));
+      std::chrono::milliseconds(
+          g_config.CtldConf.StatusChangeFlushTimeoutMs * 3),
+      std::chrono::milliseconds(
+          g_config.CtldConf.StatusChangeFlushTimeoutMs));
 
   m_job_status_change_async_handle_ =
       uvw_job_status_change_loop->resource<uvw::async_handle>();
@@ -4376,7 +4378,8 @@ void JobScheduler::JobStatusChangeTimerCb_() {
 }
 
 void JobScheduler::JobStatusChangeAsyncCb_() {
-  if (m_job_status_change_queue_.size_approx() >= kJobStatusChangeBatchNum)
+  if (m_job_status_change_queue_.size_approx() >=
+      g_config.CtldConf.StatusChangeBatchNum)
     m_clean_job_status_change_handle_->send();
 }
 

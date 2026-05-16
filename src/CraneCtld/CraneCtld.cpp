@@ -72,6 +72,11 @@ void ParseCtldConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(ctld_cfg["ThreadPoolSize"], 0);
     ctld_config.SchedulerRpcThreadPoolSize =
         YamlValueOr<uint32_t>(ctld_cfg["SchedulerRpcThreadPoolSize"], 0);
+    ctld_config.StatusChangeFlushTimeoutMs = YamlValueOr<uint32_t>(
+        ctld_cfg["StatusChangeFlushTimeoutMs"],
+        Ctld::kJobStatusChangeTimeoutMS);
+    ctld_config.StatusChangeBatchNum = YamlValueOr<uint32_t>(
+        ctld_cfg["StatusChangeBatchNum"], Ctld::kJobStatusChangeBatchNum);
   }
 
   g_config.CtldConf = std::move(ctld_config);
