@@ -314,7 +314,7 @@ class JobManager {
   };
 
   std::shared_ptr<uvw::async_handle> m_free_jobs_async_handle_;
-  ConcurrentQueue<job_id_t> m_free_jobs_queue_;
+  ConcurrentQueue<JobInD> m_free_jobs_queue_;
   void EvCleanFreeJobsQueueCb_();
 
   std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;

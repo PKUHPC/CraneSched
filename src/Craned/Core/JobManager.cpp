@@ -440,10 +440,29 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 }
 
 bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
-  for (job_id_t job_id : job_ids) {
-    m_free_jobs_queue_.enqueue(job_id);
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    CRANE_TRACE("JobManager is ending now, ignoring FreeJobs request.");
+    return false;
   }
-  m_free_jobs_async_handle_->send();
+
+  bool any_freed = false;
+  for (job_id_t job_id : job_ids) {
+    auto job = FreeJobInfo_(job_id);
+    if (!job.has_value()) {
+      CRANE_INFO(
+          "Try to free non-existent job #{}, sending a status change as "
+          "daemon step",
+          job_id);
+      SendCompletingAndTerminal_(job_id, kDaemonStepId, StepStatus::Cancelled,
+                                 ExitCode::EC_TERMINATED,
+                                 "Job not found on craned during free request");
+      continue;
+    }
+    m_free_jobs_queue_.enqueue(std::move(job.value()));
+    any_freed = true;
+  }
+
+  if (any_freed) m_free_jobs_async_handle_->send();
   return true;
 }
 
@@ -1709,31 +1728,19 @@ void JobManager::MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id) {
 }
 
 void JobManager::EvCleanFreeJobsQueueCb_() {
-  job_id_t job_id;
+  JobInD job;
   std::vector<JobInD> jobs_to_free;
   std::vector<StepInstance*> steps_to_free;
 
-  while (m_free_jobs_queue_.try_dequeue(job_id)) {
-    auto job = FreeJobInfo_(job_id);
-    if (!job.has_value()) {
-      CRANE_INFO(
-          "Try to free non-existent job #{}, sending a status change as "
-          "daemon step",
-          job_id);
-      SendCompletingAndTerminal_(job_id, kDaemonStepId, StepStatus::Cancelled,
-                                 ExitCode::EC_TERMINATED,
-                                 "Job not found on craned during free request");
-      continue;
-    }
-
-    for (auto& step : job->step_map | std::views::values) {
+  while (m_free_jobs_queue_.try_dequeue(job)) {
+    for (auto& step : job.step_map | std::views::values) {
       steps_to_free.emplace_back(step.get());
     }
 
-    if (job->step_map.size() != 1)
-      CRANE_DEBUG("Job #{} to free has more than one step.", job_id);
+    if (job.step_map.size() != 1)
+      CRANE_DEBUG("Job #{} to free has more than one step.", job.job_id);
 
-    jobs_to_free.emplace_back(std::move(job.value()));
+    jobs_to_free.emplace_back(std::move(job));
   }
 
   if (steps_to_free.empty() && jobs_to_free.empty()) return;
