@@ -87,6 +87,8 @@ struct Config {
     uint32_t CranedTimeout;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t ThreadPoolSize{0};
+    uint32_t SchedulerRpcThreadPoolSize{0};
   };
   CraneCtldConf CtldConf;
 

@@ -375,6 +375,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     }
 
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
+    init_req.set_thread_pool_size(g_config.Supervisor.ThreadPoolSize);
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
@@ -393,8 +394,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
-
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
@@ -420,8 +419,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
-
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg received.", job_id, step_id);
 
     // Migrate supervisor into the job's cgroup after it has finished
     // initialization. This avoids throttling supervisor startup by the
