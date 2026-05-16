@@ -725,10 +725,9 @@ bool JobScheduler::Init() {
         JobStatusChangeTimerCb_();
       });
   m_job_status_change_timer_handle_->start(
-      std::chrono::milliseconds(
-          g_config.CtldConf.StatusChangeFlushTimeoutMs * 3),
-      std::chrono::milliseconds(
-          g_config.CtldConf.StatusChangeFlushTimeoutMs));
+      std::chrono::milliseconds(g_config.CtldConf.StatusChangeFlushTimeoutMs *
+                                3),
+      std::chrono::milliseconds(g_config.CtldConf.StatusChangeFlushTimeoutMs));
 
   m_job_status_change_async_handle_ =
       uvw_job_status_change_loop->resource<uvw::async_handle>();
