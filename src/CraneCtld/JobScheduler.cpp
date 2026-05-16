@@ -4562,12 +4562,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         for (const auto& node_id : primary->ExecutionNodes()) {
           auto it = context.craned_step_alloc_map.find(node_id);
           if (it == context.craned_step_alloc_map.end()) continue;
-          std::erase_if(it->second,
-                        [job_id = job->JobId()](const auto& s) {
-                          return s.job_id() == job_id;
-                        });
-          if (it->second.empty())
-            context.craned_step_alloc_map.erase(it);
+          std::erase_if(it->second, [job_id = job->JobId()](const auto& s) {
+            return s.job_id() == job_id;
+          });
+          if (it->second.empty()) context.craned_step_alloc_map.erase(it);
         }
       }
     }
