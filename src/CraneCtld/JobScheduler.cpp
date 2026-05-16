@@ -175,7 +175,7 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
-        if (!result) {
+        if (result) {
           job->SetExitCode(ExitCode::EC_CRANED_DOWN);
         }
         auto now = absl::Now();
