@@ -1224,6 +1224,24 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
             context->craned_cancel_steps[node][job->JobId()].insert(step_id);
         }
         step_all_completing = this->AllNodesCompleting();
+      } else if (job->CancelRequested()) {
+        // Cancel was requested during primary step Configuring, after the
+        // daemon step had already transitioned Configuring→Running (so the
+        // daemon step's CancelRequested check at DaemonStepInCtld::
+        // StepStatusChange was bypassed). All supervisors reported Starting
+        // successfully; terminate them via the completing flow instead of
+        // launching execution.
+        CRANE_INFO(
+            "[Step #{}.{}] Cancel was requested during Configuring. "
+            "Entering completing flow.",
+            job_id, step_id);
+        this->SetErrorStatus(crane::grpc::JobStatus::Cancelled);
+        this->SetErrorExitCode(ExitCode::EC_TERMINATED);
+        this->SetStatus(crane::grpc::JobStatus::Completing);
+        for (const auto& node : this->ExecutionNodes())
+          context->craned_cancel_steps[node][job->JobId()].insert(step_id);
+        step_all_completing = this->AllNodesCompleting();
+        context->rn_step_raw_ptrs.insert(this);
       } else {
         // Configuring -> Running
         // All supervisor ready without failure, start execution.
@@ -1235,7 +1253,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         this->SetErrorExitCode(0U);
         this->SetRunningNodes(this->ExecutionNodes());
 
-        // Primary:Update job status when primary step is Running.
+        // Primary: Update job status when primary step is Running.
         if (this->IsPrimaryStep()) {
           job->SetStatus(crane::grpc::JobStatus::Running);
           context->rn_job_raw_ptrs.insert(job);
