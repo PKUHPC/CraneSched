@@ -1816,16 +1816,16 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
     if (step->err_before_supv_start || !step->IsDaemonStep()) continue;
     auto stub = step->supervisor_stub;
     if (!stub) continue;
-    g_thread_pool->detach_task([stub, job_id = step->job_id,
-                                step_id = step->step_id] {
-      CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.", job_id,
-                  step_id);
-      auto err = stub->ShutdownSupervisor();
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Failed to shut down supervisor.", job_id,
-                    step_id);
-      }
-    });
+    g_thread_pool->detach_task(
+        [stub, job_id = step->job_id, step_id = step->step_id] {
+          CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.", job_id,
+                      step_id);
+          auto err = stub->ShutdownSupervisor();
+          if (err != CraneErrCode::SUCCESS) {
+            CRANE_ERROR("[Step #{}.{}] Failed to shut down supervisor.", job_id,
+                        step_id);
+          }
+        });
   }
 }
 
@@ -1836,8 +1836,8 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
   while (m_free_steps_queue_.try_dequeue(elem)) {
     auto job = m_job_map_.GetValueExclusivePtr(elem.job_id);
     if (!job) {
-      CRANE_WARN("Try to free step [{}] for nonexistent job #{}.",
-                 elem.step_id, elem.job_id);
+      CRANE_WARN("Try to free step [{}] for nonexistent job #{}.", elem.step_id,
+                 elem.job_id);
       continue;
     }
     absl::MutexLock lk(job->step_map_mtx.get());

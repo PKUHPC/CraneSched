@@ -4552,8 +4552,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         for (const auto& node_id : job->CranedIds()) {
           StepStatusChangeWithReasonAsync(
               job->JobId(), daemon_step->StepId(), node_id,
-              crane::grpc::JobStatus::Failed,
-              ExitCode::EC_RPC_ERR,
+              crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
               "Batch AppendSteps failed", now_ts);
         }
       }
@@ -4590,95 +4589,88 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   for (auto& [craned_id, steps] : context.craned_step_free_map) {
-    m_rpc_worker_pool_->detach_task(
-        [craned_id, steps = std::move(steps)] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub && !stub->Invalid()) {
-            auto err = stub->FreeSteps(steps);
-            if (err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR(
-                  "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure",
-                  util::JobStepsToString(steps), craned_id);
-            }
-          } else {
-            CRANE_ERROR(
-                "Failed to FreeSteps for [{}] steps on Node {}, stub invalid",
-                util::JobStepsToString(steps), craned_id);
-          }
-        });
+    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps)] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        auto err = stub->FreeSteps(steps);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure",
+              util::JobStepsToString(steps), craned_id);
+        }
+      } else {
+        CRANE_ERROR(
+            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid",
+            util::JobStepsToString(steps), craned_id);
+      }
+    });
   }
 
   for (auto& [craned_id, steps] : context.craned_step_exec_map) {
-    m_rpc_worker_pool_->detach_task(
-        [this, craned_id, steps = std::move(steps)] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-          if (stub && !stub->Invalid()) {
-            CraneExpected failed_steps = stub->ExecuteSteps(steps);
-            if (failed_steps.has_value() && !failed_steps.value().empty()) {
-              CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
-                          util::JobStepsToString(failed_steps.value()),
-                          craned_id);
-              for (const auto& [job_id, step_ids] : failed_steps.value()) {
-                for (const auto& step_id : step_ids)
-                  StepStatusChangeWithReasonAsync(
-                      job_id, step_id, craned_id,
-                      crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
-                      "ExecRpcError", now);
-              }
-            }
-          } else {
-            CRANE_ERROR(
-                "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
-                util::JobStepsToString(steps), craned_id);
-            for (const auto& [job_id, step_ids] : steps) {
-              for (const auto& step_id : step_ids)
-                StepStatusChangeWithReasonAsync(
-                    job_id, step_id, craned_id,
-                    crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
-                    "CranedDown", now);
-            }
+    m_rpc_worker_pool_->detach_task([this, craned_id,
+                                     steps = std::move(steps)] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+      if (stub && !stub->Invalid()) {
+        CraneExpected failed_steps = stub->ExecuteSteps(steps);
+        if (failed_steps.has_value() && !failed_steps.value().empty()) {
+          CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
+                      util::JobStepsToString(failed_steps.value()), craned_id);
+          for (const auto& [job_id, step_ids] : failed_steps.value()) {
+            for (const auto& step_id : step_ids)
+              StepStatusChangeWithReasonAsync(
+                  job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
+                  ExitCode::EC_RPC_ERR, "ExecRpcError", now);
           }
-        });
+        }
+      } else {
+        CRANE_ERROR(
+            "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
+            util::JobStepsToString(steps), craned_id);
+        for (const auto& [job_id, step_ids] : steps) {
+          for (const auto& step_id : step_ids)
+            StepStatusChangeWithReasonAsync(
+                job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
+                ExitCode::EC_CRANED_DOWN, "CranedDown", now);
+        }
+      }
+    });
   }
 
   for (auto& [craned_id, steps] : context.craned_cancel_steps) {
-    m_rpc_worker_pool_->detach_task(
-        [craned_id, steps = std::move(steps)] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub && !stub->Invalid()) {
-            auto err = stub->TerminateSteps(steps);
-            if (err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Failed to TerminateSteps for [{}] jobs on Node {}",
-                          util::JobStepsToString(steps), craned_id);
-            }
-          }
-        });
+    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps)] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        auto err = stub->TerminateSteps(steps);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to TerminateSteps for [{}] jobs on Node {}",
+                      util::JobStepsToString(steps), craned_id);
+        }
+      }
+    });
   }
 
   for (auto& [craned_id, jobs] : context.craned_jobs_to_free) {
-    m_rpc_worker_pool_->detach_task(
-        [this, craned_id, jobs = std::move(jobs)] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          bool success{false};
-          if (stub && !stub->Invalid()) {
-            auto err = stub->FreeJobs(jobs);
-            if (err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Failed to FreeJobs for [{}] on Node {}",
-                          absl::StrJoin(jobs, ","), craned_id);
-            } else
-              success = true;
-          }
-          if (!success) {
-            auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-            for (const auto& job_id : jobs) {
-              StepStatusChangeWithReasonAsync(
-                  job_id, kDaemonStepId, craned_id,
-                  crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
-                  "Rpc failure when free job", now);
-            }
-          }
-        });
+    m_rpc_worker_pool_->detach_task([this, craned_id, jobs = std::move(jobs)] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      bool success{false};
+      if (stub && !stub->Invalid()) {
+        auto err = stub->FreeJobs(jobs);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to FreeJobs for [{}] on Node {}",
+                      absl::StrJoin(jobs, ","), craned_id);
+        } else
+          success = true;
+      }
+      if (!success) {
+        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        for (const auto& job_id : jobs) {
+          StepStatusChangeWithReasonAsync(
+              job_id, kDaemonStepId, craned_id, crane::grpc::JobStatus::Failed,
+              ExitCode::EC_RPC_ERR, "Rpc failure when free job", now);
+        }
+      }
+    });
   }
 
   txn_id_t txn_id;
