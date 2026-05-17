@@ -439,6 +439,10 @@ struct StepStatusChangeContext {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_cancel_steps{};
+  // Steps to cancel only after ExecuteSteps has been accepted by Craned.
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_cancel_steps_after_exec{};
   // Steps will update in embeddedDb
   std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
   std::unordered_set<StepInCtld*> step_raw_ptrs;

@@ -4656,6 +4656,30 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         });
   }
 
+  exec_step_latch.wait();
+
+  std::latch cancel_step_after_exec_latch{static_cast<std::ptrdiff_t>(
+      context.craned_cancel_steps_after_exec.size())};
+  for (const auto& craned_id :
+       context.craned_cancel_steps_after_exec | std::views::keys) {
+    m_rpc_worker_pool_->detach_task(
+        [&cancel_step_after_exec_latch, craned_id, &context]() {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+          // If the craned is down, just ignore it.
+          if (stub && !stub->Invalid()) {
+            const auto& steps =
+                context.craned_cancel_steps_after_exec.at(craned_id);
+            auto err = stub->TerminateSteps(steps);
+            if (err != CraneErrCode::SUCCESS) {
+              CRANE_ERROR("Failed to TerminateSteps for [{}] jobs on Node {}",
+                          util::JobStepsToString(steps), craned_id);
+            }
+          }
+          cancel_step_after_exec_latch.count_down();
+        });
+  }
+
   // Jobs to free
   std::latch free_job_latch{
       static_cast<std::ptrdiff_t>(context.craned_jobs_to_free.size())};
@@ -4690,6 +4714,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   free_step_latch.wait();
   exec_step_latch.wait();
   cancel_step_latch.wait();
+  cancel_step_after_exec_latch.wait();
   free_job_latch.wait();
 
   txn_id_t txn_id;

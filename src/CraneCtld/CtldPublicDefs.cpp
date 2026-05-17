@@ -1224,24 +1224,6 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
             context->craned_cancel_steps[node][job->JobId()].insert(step_id);
         }
         step_all_completing = this->AllNodesCompleting();
-      } else if (job->CancelRequested()) {
-        // Cancel was requested during primary step Configuring, after the
-        // daemon step had already transitioned Configuring→Running (so the
-        // daemon step's CancelRequested check at DaemonStepInCtld::
-        // StepStatusChange was bypassed). All supervisors reported Starting
-        // successfully; terminate them via the completing flow instead of
-        // launching execution.
-        CRANE_INFO(
-            "[Step #{}.{}] Cancel was requested during Configuring. "
-            "Entering completing flow.",
-            job_id, step_id);
-        this->SetErrorStatus(crane::grpc::JobStatus::Cancelled);
-        this->SetErrorExitCode(ExitCode::EC_TERMINATED);
-        this->SetStatus(crane::grpc::JobStatus::Completing);
-        for (const auto& node : this->ExecutionNodes())
-          context->craned_cancel_steps[node][job->JobId()].insert(step_id);
-        step_all_completing = this->AllNodesCompleting();
-        context->rn_step_raw_ptrs.insert(this);
       } else {
         // Configuring -> Running
         // All supervisor ready without failure, start execution.
@@ -1262,6 +1244,15 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         // Launch step execution
         for (const auto& node : this->ExecutionNodes())
           context->craned_step_exec_map[node][job_id].insert(step_id);
+
+        if (job->CancelRequested()) {
+          CRANE_INFO(
+              "[Step #{}.{}] Cancel was requested during Configuring. "
+              "Cancelling after ExecuteSteps is accepted.",
+              job_id, step_id);
+          for (const auto& node : this->ExecutionNodes())
+            context->craned_cancel_steps_after_exec[node][job_id].insert(step_id);
+        }
 
         context->rn_step_raw_ptrs.insert(this);
       }
