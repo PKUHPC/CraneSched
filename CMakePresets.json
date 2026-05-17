@@ -37,7 +37,8 @@
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_MIN_LOG_LEVEL": "TRACE",
-                "CRANE_NATIVE_ARCH_OPT": "OFF"
+                "CRANE_NATIVE_ARCH_OPT": "OFF",
+                "CRANE_ENABLE_TRACING": "ON"
             }
         },
         {
