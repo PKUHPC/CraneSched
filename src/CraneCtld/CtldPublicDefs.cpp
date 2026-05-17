@@ -1251,7 +1251,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
               "Cancelling after ExecuteSteps is accepted.",
               job_id, step_id);
           for (const auto& node : this->ExecutionNodes())
-            context->craned_cancel_steps_after_exec[node][job_id].insert(step_id);
+            context->craned_cancel_steps_after_exec[node][job_id].insert(
+                step_id);
         }
 
         context->rn_step_raw_ptrs.insert(this);
