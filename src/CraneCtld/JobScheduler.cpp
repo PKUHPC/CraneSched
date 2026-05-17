@@ -4712,7 +4712,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   alloc_step_latch.wait();
   free_step_latch.wait();
-  exec_step_latch.wait();
   cancel_step_latch.wait();
   cancel_step_after_exec_latch.wait();
   free_job_latch.wait();
