@@ -550,10 +550,12 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   }
 
   case StepStatus::Completing: {
-    if (status != StepStatus::Running)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (status != StepStatus::Running && status != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running' when receiving new "
-          "status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, this->status);
     break;
   }

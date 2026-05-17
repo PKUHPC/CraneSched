@@ -310,12 +310,12 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Completing: {
-    // TODO: Daemon pod bootstrap may fail before the step ever reaches
-    // Running...
-    if (m_status_ != StepStatus::Running)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running' when receiving new "
-          "status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
@@ -3381,7 +3381,23 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
     }
 
     if (step_status == StepStatus::Starting) {
-      CRANE_DEBUG("Terminating step at Starting state, shutting down...");
+      CRANE_DEBUG(
+          "Terminating step at Starting state, completing without launching "
+          "tasks...");
+      m_step_.GotNewStatus(StepStatus::Completing);
+
+      auto& final_status = m_step_.final_termination_status;
+      final_status.max_exit_code = 0U;
+      final_status.final_status_on_termination = StepStatus::Cancelled;
+      final_status.final_reason_on_termination.clear();
+
+      if (elem.cause != TaskFinalizeCause::NORMAL) {
+        g_craned_client->StepStatusChangeAsync(
+            StepStatus::Completing, final_status.max_exit_code,
+            final_status.final_reason_on_termination,
+            final_status.final_status_on_termination);
+      }
+
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
@@ -3521,6 +3537,16 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
   ExecuteStepElem elem;
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
+    auto step_status = m_step_.GetStatus();
+    if (step_status == StepStatus::Completing ||
+        IsFinishedStepStatus(step_status)) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] ExecuteStep ignored because step status is {}.",
+          m_step_.job_id, m_step_.step_id, step_status);
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      continue;
+    }
+
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {

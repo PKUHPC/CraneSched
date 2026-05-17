@@ -1241,18 +1241,17 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
           context->rn_job_raw_ptrs.insert(job);
         }
 
-        // Launch step execution
-        for (const auto& node : this->ExecutionNodes())
-          context->craned_step_exec_map[node][job_id].insert(step_id);
-
         if (job->CancelRequested()) {
           CRANE_INFO(
               "[Step #{}.{}] Cancel was requested during Configuring. "
-              "Cancelling after ExecuteSteps is accepted.",
+              "Cancelling without launching step execution.",
               job_id, step_id);
           for (const auto& node : this->ExecutionNodes())
-            context->craned_cancel_steps_after_exec[node][job_id].insert(
-                step_id);
+            context->craned_cancel_steps[node][job_id].insert(step_id);
+        } else {
+          // Launch step execution
+          for (const auto& node : this->ExecutionNodes())
+            context->craned_step_exec_map[node][job_id].insert(step_id);
         }
 
         context->rn_step_raw_ptrs.insert(this);
