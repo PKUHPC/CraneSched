@@ -519,5 +519,4 @@ jobs:
         if: failure()
         continue-on-error: true
         run: |
-          bash "${AUTOTEST_REPO}/github-runner/ci-agent-launcher.sh" 2>/dev/null
-          echo "Agent launched."
+          bash "${AUTOTEST_REPO}/github-runner/ci-agent-launcher.sh"
