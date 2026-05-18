@@ -156,6 +156,26 @@ message TerminateStepsReply {
   string reason = 2;
 }
 
+message SuspendJobsRequest {
+  // Suspend operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
+}
+
+message SuspendJobsReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ResumeJobsRequest {
+  // Resume operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
+}
+
+message ResumeJobsReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message ChangeJobTimeConstraintRequest {
   uint32 job_id = 1;
   optional int64 time_limit_seconds = 2;
@@ -1548,6 +1568,8 @@ service Craned {
   If the job is a batch job, just kill it.
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
+  rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
+  rpc ResumeJobs(ResumeJobsRequest) returns (ResumeJobsReply);
   rpc ChangeJobTimeConstraint(ChangeJobTimeConstraintRequest) returns (ChangeJobTimeConstraintReply);
 
   /*
