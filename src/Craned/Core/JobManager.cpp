@@ -1679,11 +1679,12 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
         continue;
       }
       auto& step = job_instance->step_map.at(elem.step_id);
-      if (!step->IsRunning()) {
+      if (step->status != StepStatus::Running &&
+          step->status != StepStatus::Starting) {
         not_ready_elems.emplace_back(std::move(elem));
         CRANE_DEBUG(
-            "[Step #{}.{}] Step not running, current: {}, cannot terminate "
-            "now.",
+            "[Step #{}.{}] Step not running/starting, current: {}, cannot "
+            "terminate now.",
             elem.job_id, elem.step_id, step->status);
         continue;
       }

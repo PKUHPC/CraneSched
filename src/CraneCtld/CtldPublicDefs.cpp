@@ -1235,15 +1235,24 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         this->SetErrorExitCode(0U);
         this->SetRunningNodes(this->ExecutionNodes());
 
-        // Primary:Update job status when primary step is Running.
+        // Primary: Update job status when primary step is Running.
         if (this->IsPrimaryStep()) {
           job->SetStatus(crane::grpc::JobStatus::Running);
           context->rn_job_raw_ptrs.insert(job);
         }
 
-        // Launch step execution
-        for (const auto& node : this->ExecutionNodes())
-          context->craned_step_exec_map[node][job_id].insert(step_id);
+        if (job->CancelRequested()) {
+          CRANE_INFO(
+              "[Step #{}.{}] Cancel was requested during Configuring. "
+              "Cancelling without launching step execution.",
+              job_id, step_id);
+          for (const auto& node : this->ExecutionNodes())
+            context->craned_cancel_steps[node][job_id].insert(step_id);
+        } else {
+          // Launch step execution
+          for (const auto& node : this->ExecutionNodes())
+            context->craned_step_exec_map[node][job_id].insert(step_id);
+        }
 
         context->rn_step_raw_ptrs.insert(this);
       }
