@@ -252,6 +252,8 @@ void ParseCranedConfig(const YAML::Node& config) {
 
     conf.NodeHealthCheckInterval =
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
+    conf.ThreadPoolSize =
+        YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -293,6 +295,8 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
 
   g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
       supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
+  g_config.Supervisor.ThreadPoolSize =
+      YamlValueOr<uint32_t>(supervisor_config["ThreadPoolSize"], 0);
 }
 
 void ParseContainerConfig(const YAML::Node& container_config) {
@@ -1407,9 +1411,14 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
   // It is always ok to create thread pool first.
-  g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency(),
-      [] { util::SetCurrentThreadName("BsThreadPool"); });
+  {
+    uint32_t pool_size = g_config.CranedConf.ThreadPoolSize > 0
+                             ? g_config.CranedConf.ThreadPoolSize
+                             : std::thread::hardware_concurrency();
+    CRANE_INFO("Craned thread pool size: {}", pool_size);
+    g_thread_pool = std::make_unique<BS::thread_pool>(
+        pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
+  }
 
   using CgConstant::Controller;
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());

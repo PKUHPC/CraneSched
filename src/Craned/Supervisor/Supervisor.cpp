@@ -235,6 +235,7 @@ int InitFromStdin(int argc, char** argv) {
   }
 
   g_config.EnableSlurmCompatibleEnv = msg.enable_slurm_compatible_env();
+  g_config.ThreadPoolSize = msg.thread_pool_size();
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -353,9 +354,13 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
-  g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency(),
-      [] { util::SetCurrentThreadName("BsThreadPool"); });
+  {
+    uint32_t pool_size = g_config.ThreadPoolSize > 0
+                             ? g_config.ThreadPoolSize
+                             : std::thread::hardware_concurrency();
+    g_thread_pool = std::make_unique<BS::thread_pool>(
+        pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
+  }
   g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
 
   g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();

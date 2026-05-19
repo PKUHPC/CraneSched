@@ -110,6 +110,7 @@ nav:
         - Quick Start: reference/container/quickstart.md
         - Examples: reference/container/examples.md
         - Troubleshooting: reference/container/troubleshooting.md
+    - Performance Tuning: reference/performance_tuning.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -160,6 +161,7 @@ plugins:
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
+            Performance Tuning: 性能调优指南
             Concepts: 核心概念
             Quick Start: 快速上手
             Examples: 使用示例

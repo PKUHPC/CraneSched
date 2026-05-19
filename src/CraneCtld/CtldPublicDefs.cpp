@@ -662,16 +662,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         context->rn_step_raw_ptrs.insert(this);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
-
-        // TODO: Aggregate this operation
-        if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
-          this->SetStatus(crane::grpc::JobStatus::Failed);
-          job_finished = true;
-          CRANE_ERROR("[Job #{}] Failed to append a step to embedded db.",
-                      job->JobId());
-          context->rn_step_raw_ptrs.erase(this);
-          break;
-        }
+        primary_step->SetStepId(kPrimaryStepId);
 
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
@@ -693,6 +684,9 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
           context->craned_step_alloc_map[node_id].emplace_back(
               job->PrimaryStep()->GetStepToD(node_id));
         }
+
+        // Defer DB persistence to batch after the main loop
+        context->pending_append_steps_jobs.push_back(job);
       }
     }
 

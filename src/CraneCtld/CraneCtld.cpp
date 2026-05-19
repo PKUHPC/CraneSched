@@ -67,6 +67,16 @@ void ParseCtldConfig(const YAML::Node& config) {
     if (ctld_cfg["MaxLogFileNum"]) {
       ctld_config.MaxLogFileNum = ctld_cfg["MaxLogFileNum"].as<uint64_t>();
     }
+
+    ctld_config.ThreadPoolSize =
+        YamlValueOr<uint32_t>(ctld_cfg["ThreadPoolSize"], 0);
+    ctld_config.SchedulerRpcThreadPoolSize =
+        YamlValueOr<uint32_t>(ctld_cfg["SchedulerRpcThreadPoolSize"], 0);
+    ctld_config.StatusChangeFlushTimeoutMs =
+        YamlValueOr<uint32_t>(ctld_cfg["StatusChangeFlushTimeoutMs"],
+                              Ctld::kJobStatusChangeTimeoutMS);
+    ctld_config.StatusChangeBatchNum = YamlValueOr<uint32_t>(
+        ctld_cfg["StatusChangeBatchNum"], Ctld::kJobStatusChangeBatchNum);
   }
 
   g_config.CtldConf = std::move(ctld_config);
@@ -945,9 +955,14 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-  g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency(),
-      [] { util::SetCurrentThreadName("BsThreadPool"); });
+  {
+    uint32_t pool_size = g_config.CtldConf.ThreadPoolSize > 0
+                             ? g_config.CtldConf.ThreadPoolSize
+                             : std::thread::hardware_concurrency();
+    CRANE_INFO("CraneCtld thread pool size: {}", pool_size);
+    g_thread_pool = std::make_unique<BS::thread_pool>(
+        pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
+  }
 
   g_db_client = std::make_unique<MongodbClient>();
   if (!g_db_client->Connect()) {

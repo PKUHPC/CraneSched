@@ -106,6 +106,7 @@ struct Config {
   std::filesystem::path SupervisorLogFile;
   uint64_t SupervisorMaxLogFileSize{kDefaultSupervisorMaxLogFileSize};
   uint64_t SupervisorMaxLogFileNum;
+  uint32_t ThreadPoolSize{0};
   CranedId CranedIdOfThisNode;
 
   std::filesystem::path SupervisorUnixSockPath;
