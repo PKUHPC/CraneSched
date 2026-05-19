@@ -182,6 +182,9 @@ bool JobScheduler::Init() {
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
+        if (result) {
+          job->SetExitCode(ExitCode::EC_CRANED_DOWN);
+        }
         auto now = absl::Now();
         auto max_end_time = job->StartTime() + job->time_limit;
         auto end_time = std::min(now, max_end_time);
