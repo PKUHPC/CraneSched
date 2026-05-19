@@ -419,8 +419,6 @@ JobManager::~JobManager() {
 }
 
 bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
-  // NOTE: Cgroup is lazily created when the first step is arrived.
-  // Only maintain the job info here.
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
 
@@ -793,6 +791,7 @@ void JobManager::EvSigintCb_() {
 
 void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
   EvQueueAllocateStepElem elem;
+  bool has_int_job = false;
 
   while (m_grpc_alloc_step_queue_.try_dequeue(elem)) {
     std::unique_ptr step_inst = std::move(elem.step_inst);
@@ -803,6 +802,16 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
+
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(step_inst->job_id);
+    if (job_ptr && !job_ptr->cgroup) {
+      ResourceInNodeV3 res_v3(job_ptr->job_to_d.res());
+      if (res_v3.GetCpuSet().IsInteger()) {
+        CgroupManager::ClaimCoresForIntJob(res_v3.GetCpuSet().core_ids);
+        has_int_job = true;
+      }
+    }
+
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
     g_thread_pool->detach_task([this, execution = step_inst.release(),
@@ -817,6 +826,8 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
     });
   }
+
+  if (has_int_job) CgroupManager::WriteOverflowCpuset();
 }
 
 void JobManager::Wait() {
@@ -1049,8 +1060,12 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
                             ","));
   std::unordered_map<job_id_t, CgroupInterface*> job_cg_map;
 
+  std::vector<std::set<uint32_t>> int_core_ids_to_release;
   for (auto& job : jobs) {
-    CgroupManager::ReleaseJobCpuPool(job.job_id, job.job_to_d.res());
+    ResourceInNodeV3 res_v3(job.job_to_d.res());
+    if (res_v3.GetCpuSet().IsInteger()) {
+      int_core_ids_to_release.push_back(res_v3.GetCpuSet().core_ids);
+    }
     job_cg_map[job.job_id] = job.cgroup.release();
   }
 
@@ -1084,6 +1099,12 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
       delete cgroup;
     });
   }
+
+  for (const auto& core_ids : int_core_ids_to_release) {
+    CgroupManager::ReleaseCoresForIntJob(core_ids);
+  }
+  if (!int_core_ids_to_release.empty()) CgroupManager::WriteOverflowCpuset();
+
   return true;
 }
 

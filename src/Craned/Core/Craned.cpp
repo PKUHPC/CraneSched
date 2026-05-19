@@ -117,7 +117,7 @@ CraneErrCode RecoverCgForJobSteps(
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
     if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_BASE_CONTROLLERS,
                                             NO_CONTROLLER_FLAG, true);
     else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
       cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
@@ -136,6 +136,7 @@ CraneErrCode RecoverCgForJobSteps(
     cg_ptr->Destroy();
   };
 
+  bool has_int_recovery = false;
   for (auto ids : rn_job_ids_with_cg) {
     auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] = ids;
     job_id_t job_id = job_id_opt.value();
@@ -152,7 +153,7 @@ CraneErrCode RecoverCgForJobSteps(
     } else {
       job_path_info.cg_str = job_name;
       job_path_info.cpuset_cg_str =
-          is_overflow ? std::string(kOverflowCgName) : "";
+          is_overflow ? std::string(kOverflowCgName) : job_name;
     }
 
     // For craned, we don't care task cgroup
@@ -198,7 +199,6 @@ CraneErrCode RecoverCgForJobSteps(
       continue;
     }
 
-    // Job cgroup recovery (use AllocateAndGetCgroupForJob for CPU pool routing)
     if (rn_jobs_from_ctld.contains(job_id)) {
       JobInD& job = rn_jobs_from_ctld.at(job_id);
 
@@ -209,6 +209,12 @@ CraneErrCode RecoverCgForJobSteps(
       if (cg_expt.has_value()) {
         job.cgroup = std::move(cg_expt.value());
         job.path_info = job_path_info;
+
+        ResourceInNodeV3 res_v3(job.job_to_d.res());
+        if (res_v3.GetCpuSet().IsInteger()) {
+          CgroupManager::ClaimCoresForIntJob(res_v3.GetCpuSet().core_ids);
+          has_int_recovery = true;
+        }
       } else {
         CRANE_ERROR("Cgroup for job #{} not recoverable.", job_id);
       }
@@ -219,6 +225,7 @@ CraneErrCode RecoverCgForJobSteps(
     clean_invalid_cg(ids);
   }
 
+  if (has_int_recovery) CgroupManager::WriteOverflowCpuset();
   return CraneErrCode::SUCCESS;
 }
 

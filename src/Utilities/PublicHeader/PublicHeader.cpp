@@ -524,9 +524,21 @@ bool ResourceView::GetFeasibleResourceInNode(
 
   ResourceInNodeV3 candidate;
 
-  // TODO: Allocate specific CPU core IDs here in the future.
-  // Currently only sets cpu_count; craned decides core binding.
-  candidate.GetCpuSet().cpu_count = m_cpu_count_;
+  // TODO: Replace sequential selection with affinity-aware policy.
+  auto req_int = static_cast<int64_t>(m_cpu_count_);
+  bool is_integer_req = (cpu_t(req_int) == m_cpu_count_) &&
+                        !avail_res.GetCpuSet().core_ids.empty();
+
+  if (is_integer_req) {
+    auto n = static_cast<uint32_t>(req_int);
+    if (avail_res.GetCpuSet().core_ids.size() < n) return false;
+    auto it = avail_res.GetCpuSet().core_ids.begin();
+    for (uint32_t i = 0; i < n; ++i, ++it)
+      candidate.GetCpuSet().core_ids.insert(*it);
+    candidate.GetCpuSet().cpu_count = m_cpu_count_;
+  } else {
+    candidate.GetCpuSet().cpu_count = m_cpu_count_;
+  }
   candidate.SetMemoryBytes(m_memory_bytes_);
   candidate.SetMemorySwBytes(m_memory_sw_bytes_);
 
@@ -744,10 +756,9 @@ CpuSet& CpuSet::operator+=(const CpuSet& rhs) {
 }
 
 CpuSet& CpuSet::operator-=(const CpuSet& rhs) {
+  // Tolerant erase: Ckmin may leave stale core_ids across time windows.
   for (const auto& id : rhs.core_ids) {
-    auto it = core_ids.find(id);
-    ABSL_ASSERT(it != core_ids.end());
-    core_ids.erase(it);
+    core_ids.erase(id);
   }
   ABSL_ASSERT(cpu_count >= rhs.cpu_count);
   cpu_count -= rhs.cpu_count;
