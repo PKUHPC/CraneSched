@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <absl/time/time.h>
 #include <spdlog/fmt/bundled/format.h>
 
 #include <source_location>

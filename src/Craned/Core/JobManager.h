@@ -23,6 +23,8 @@
 
 #include <grp.h>
 
+#include <future>
+
 #include "StepInstance.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -33,6 +35,10 @@ constexpr int kMaxSupervisorCheckRetryCount = 10;
 constexpr int kMaxStatusWaitRetryCount = 50;  // 50 * 200ms = 10s
 
 using StepKey = std::pair<job_id_t, step_id_t>;
+using StepCleanupFutureMap = std::unordered_map<
+    job_id_t, std::unordered_map<step_id_t, std::future<CraneErrCode>>>;
+using JobCleanupFutureMap =
+    std::unordered_map<job_id_t, std::future<CraneErrCode>>;
 
 struct CompletingStepState {
   StepInstance* step = nullptr;
@@ -76,8 +82,6 @@ struct JobInD {
 
   bool is_prolog_run{false};
 
-  std::optional<StepStatusChangeQueueElem> daemon_pending_terminal;
-
   EnvMap GetJobEnvMap();
 };
 
@@ -109,8 +113,10 @@ class JobManager {
 
   void AllocSteps(std::vector<StepToD>&& steps);
 
-  void FreeSteps(
+  StepCleanupFutureMap FreeSteps(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+
+  JobCleanupFutureMap FreeInvalidJobs(std::set<job_id_t>&& job_ids);
 
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
@@ -163,20 +169,6 @@ class JobManager {
   void SendCompletingAndTerminal_(job_id_t job_id, step_id_t step_id,
                                   crane::grpc::JobStatus terminal_status,
                                   uint32_t exit_code, std::string reason);
-
-  /**
-   *
-   * @param jobs legacy completing jobs tracked outside m_job_map_
-   * @param steps completing step to clean up, for daemon steps will send
-   * ShutdownSupervisor RPC.
-   *
-   * If a job and its steps are both provided, the ownership of its steps submit
-   * in `steps` is in step_map.
-   * If step is not provided with its job, the step is erased from its job's
-   * step_map.
-   */
-  void CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
-                               std::vector<StepInstance*>&& steps);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,
@@ -247,9 +239,12 @@ class JobManager {
       UidMap::MapExclusivePtr& uid_map_ptr);
 
   void CleanUpJobEnvironment_(job_id_t job_id,
-                              StepInstance::DaemonJobCleanupCtx&& ctx);
+                              StepInstance::DaemonJobCleanupCtx&& ctx,
+                              bool run_epilog = true);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
+
+  void ResolveStepCleanupWaiters_(const StepKey& key, CraneErrCode result);
 
   bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
                                 const EnvMap& job_env);
@@ -304,12 +299,13 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_free_job_step_mtx_;
-  // Step ownership remains in m_job_map_ or m_completing_job_; this map only
-  // tracks cleanup polling state.
+  // Step ownership remains in m_job_map_ or in the cleanup caller; this map
+  // only tracks cleanup polling state.
   absl::flat_hash_map<StepKey, CompletingStepState> m_completing_step_retry_map_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
-  std::unordered_map<job_id_t, JobInD> m_completing_job_
-      ABSL_GUARDED_BY(m_free_job_step_mtx_);
+  using StepCleanupPromise = std::shared_ptr<std::promise<CraneErrCode>>;
+  absl::flat_hash_map<StepKey, std::vector<StepCleanupPromise>>
+      m_step_cleanup_waiters_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
 
   absl::Mutex m_unexpected_supervisor_exit_mtx_;
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
@@ -332,6 +328,15 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
+
+  struct FreeStepElem {
+    job_id_t job_id;
+    step_id_t step_id;
+  };
+
+  std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
+  ConcurrentQueue<FreeStepElem> m_free_steps_queue_;
+  void EvCleanFreeStepsQueueCb_();
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;

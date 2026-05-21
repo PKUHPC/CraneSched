@@ -25,10 +25,6 @@
 
 namespace Ctld {
 
-// NOTE: MongoDB field names "job_id", "job_db_id", "job_name" were renamed
-// to "job_id", "job_db_id", "job_name" in this version. Existing databases from
-// older versions require field name migration before upgrading.
-
 using bsoncxx::builder::basic::kvp;
 using namespace std::chrono_literals;
 
@@ -752,7 +748,7 @@ bool MongodbClient::FetchJobRecords(
   // record with the highest requeue_count (the latest run), then apply
   // request filters to those latest-run documents.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1)));
+  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
   pipeline.group(
       make_document(kvp("_id", "$job_id"),
                     kvp("doc", make_document(kvp("$first", "$$ROOT")))));
@@ -772,6 +768,7 @@ bool MongodbClient::FetchJobRecords(
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
   // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
+  // 40 licenses_alloc nodename_list wckey          using_default_wckey cluster
   // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
   // 50 requeue_count
   try {
@@ -813,6 +810,16 @@ bool MongodbClient::FetchJobRecords(
         auto* gres_map_ptr = mutable_allocated_res_view->mutable_gres_map();
         *gres_map_ptr = ToGrpcGresMap(
             BsonToGresMap(view["device_map"].get_document().value));
+        if (auto env_elem = view["env"]; env_elem) {
+          auto env_doc =
+              bsoncxx::from_json(std::string(env_elem.get_string().value));
+          auto* mutable_env = job_info.mutable_env();
+          for (const auto& elem : env_doc.view()) {
+            if (elem.type() != bsoncxx::type::k_string) continue;
+            (*mutable_env)[std::string(elem.key())] =
+                std::string(elem.get_string().value);
+          }
+        }
         job_info.set_name(std::string(view["job_name"].get_string().value));
         job_info.set_qos(std::string(view["qos"].get_string().value));
         job_info.set_uid(view["id_user"].get_int32().value);
@@ -886,13 +893,26 @@ bool MongodbClient::FetchJobRecords(
         wckey_info += ViewValueOr_(view["wckey"], std::string(""));
         job_info.set_wckey(wckey_info);
 
+        auto* mutable_licenses = job_info.mutable_licenses_count();
+        for (auto&& elem :
+             ViewValueOr_(view["licenses_alloc"],
+                          bsoncxx::builder::basic::make_document().view())) {
+          auto license_count = ViewValueOr_(elem, int64_t{0});
+          if (license_count < 0) continue;
+          mutable_licenses->emplace(std::string(elem.key()),
+                                    static_cast<uint32_t>(license_count));
+        }
+        job_info.set_requeue_count(
+            ViewGetArithmeticValue_<int32_t>(view["requeue_count"]));
+
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
         job_info_ptr = &in_mem_job_it->second;
       }
       // TODO: Support fetch duplicate job records
-      int32_t db_requeue_count = ViewValueOr_(view["requeue_count"], 0);
+      int32_t db_requeue_count =
+          ViewGetArithmeticValue_<int32_t>(view["requeue_count"]);
       if (db_requeue_count < job_info_ptr->requeue_count()) continue;
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
@@ -1046,7 +1066,7 @@ bool MongodbClient::FetchJobStepRecords(
   // constraints are evaluated against the latest run rather than an older
   // matching run.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1)));
+  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
   pipeline.group(
       make_document(kvp("_id", "$job_id"),
                     kvp("doc", make_document(kvp("$first", "$$ROOT")))));
@@ -1064,7 +1084,10 @@ bool MongodbClient::FetchJobStepRecords(
   // 20 script        state          timelimit      time_submit   work_dir
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
-  // 35 mem_alloc     device_map     meta_container has_job_info
+  // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
+  // 40 licenses_alloc nodename_list wckey          using_default_wckey cluster
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 requeue_count
 
   try {
     for (auto view : cursor) {
@@ -1079,7 +1102,8 @@ bool MongodbClient::FetchJobStepRecords(
       }
       auto* job_info_ptr = &in_mem_job_it->second;
 
-      int32_t db_requeue_count = ViewValueOr_(view["requeue_count"], 0);
+      int32_t db_requeue_count =
+          ViewGetArithmeticValue_<int32_t>(view["requeue_count"]);
       if (db_requeue_count < job_info_ptr->requeue_count()) continue;
 
       auto steps_elem = view["steps"];
@@ -1094,11 +1118,18 @@ bool MongodbClient::FetchJobStepRecords(
       for (auto&& elem :
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {
+        auto license_count = ViewValueOr_(elem, int64_t{0});
+        if (license_count < 0) continue;
         mutable_licenses->emplace(std::string(elem.key()),
-                                  elem.get_int64().value);
+                                  static_cast<uint32_t>(license_count));
       }
 
-      job_info_ptr->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
+      if (view["wckey"]) {
+        std::string wckey_info;
+        if (ViewValueOr_(view["using_default_wckey"], false)) wckey_info += "*";
+        wckey_info += ViewValueOr_(view["wckey"], std::string(""));
+        job_info_ptr->set_wckey(wckey_info);
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1109,7 +1140,7 @@ bool MongodbClient::FetchJobStepRecords(
 
 bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
   document doc;
-  doc.append(kvp("job_db_inx", job_db_id));
+  doc.append(kvp("job_db_id", job_db_id));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
@@ -5218,7 +5249,8 @@ bool MongodbClient::MigrateV0ToV1_() {
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
       "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
-      "exclude_nodes(=[]), execution_nodes(=[])]...");
+      "exclude_nodes(=[]), submit_hostname(=\"\"), "
+      "execution_nodes(=[])]...");
 
   try {
     auto client = GetClient_();
@@ -5285,20 +5317,20 @@ bool MongodbClient::MigrateV0ToV1_() {
 
 // Detect and recover from interrupted migration on startup.
 //
-// SwapMigratedTaskTable_ performs two non-atomic renameCollection calls:
-//   Step 1: task_table -> task_table_backup_v{N}
-//   Step 2: task_table_migrating -> task_table
+// SwapMigratedJobTable_ performs two non-atomic renameCollection calls:
+//   Step 1: source_collection -> source_collection_backup_v{N}
+//   Step 2: job_table_migrating -> job_table
 //
 // Two failure scenarios can leave the database in an inconsistent state:
 //
 //   Scenario A (swap interrupted): Step 1 succeeded but step 2 failed
 //   and rollback also failed (or the process crashed between the two
-//   renames). Result: task_table is gone, only backup_v{N} remains.
-//   Recovery: rename backup back to task_table, then let the caller
+//   renames). Result: the source collection is gone, only backup_v{N} remains.
+//   Recovery: rename backup back to the source collection, then let the caller
 //   re-run migration from scratch.
 //
 //   Scenario B (version not persisted): Both renames succeeded but
-//   SetDbSchemaVersion_ failed. Result: task_table has migrated data,
+//   SetDbSchemaVersion_ failed. Result: job_table has migrated data,
 //   backup_v{N} still exists, version is stale.
 //   Recovery: set version to kCurrentDbSchemaVersion directly — the
 //   data is already migrated, no need to redo the migration.
@@ -5405,12 +5437,12 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
     return false;
   }
 
-  if (current < kCurrentDbSchemaVersion - 1) {
+  if (current < 0) {
     CRANE_LOGGER_ERROR(
         m_logger_,
-        "Database schema version {} is too old. Only migration from "
-        "version {} is supported. Please migrate manually.",
-        current, kCurrentDbSchemaVersion - 1);
+        "Database schema version {} is too old. Earliest supported version is "
+        "0. Please migrate manually.",
+        current);
     return false;
   }
 
@@ -5443,7 +5475,7 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
   // Copy-migrate-swap strategy:
   // 1. Copy source collection to temp collection (once)
   // 2. Run all migration steps on temp collection
-  // 3. Swap temp with original + persist version (once)
+  // 3. Swap temp into the target collection + persist version (once)
   // Original data is never modified until swap succeeds.
 
   // Step 1: Copy source collection to temp collection
@@ -5478,7 +5510,7 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
     }
   }
 
-  // Step 3: Swap temp collection with original + persist version
+  // Step 3: Swap temp collection into target collection + persist version
   if (!SwapMigratedJobTable_(source_collection, current,
                              kCurrentDbSchemaVersion)) {
     CRANE_LOGGER_ERROR(m_logger_,
