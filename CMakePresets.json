@@ -11,7 +11,8 @@
                 "ENABLE_UNQLITE": "ON",
                 "ENABLE_BERKELEY_DB": "OFF",
                 "CRANE_FULL_DYNAMIC": "OFF",
-                "CRANE_USE_GITEE_SOURCE": "OFF"
+                "CRANE_USE_GITEE_SOURCE": "OFF",
+                "CRANE_ENABLE_BPF": "ON"
             }
         },
         {
@@ -24,7 +25,8 @@
                 "ENABLE_UNQLITE": "ON",
                 "ENABLE_BERKELEY_DB": "OFF",
                 "CRANE_FULL_DYNAMIC": "OFF",
-                "CRANE_USE_GITEE_SOURCE": "OFF"
+                "CRANE_USE_GITEE_SOURCE": "OFF",
+                "CRANE_ENABLE_BPF": "ON"
             }
         },
         {
@@ -36,7 +38,8 @@
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_MIN_LOG_LEVEL": "TRACE",
-                "CRANE_NATIVE_ARCH_OPT": "OFF"
+                "CRANE_NATIVE_ARCH_OPT": "OFF",
+                "CRANE_ENABLE_BPF": "ON"
             }
         },
         {
@@ -47,7 +50,8 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
-                "CRANE_NATIVE_ARCH_OPT": "OFF"
+                "CRANE_NATIVE_ARCH_OPT": "OFF",
+                "CRANE_ENABLE_BPF": "ON"
             }
         }
     ],
@@ -55,7 +59,12 @@
         {
             "name": "_base",
             "hidden": true,
-            "targets": ["cranectld", "craned", "csupervisor", "pam_crane"]
+            "targets": [
+                "cranectld",
+                "craned",
+                "csupervisor",
+                "pam_crane"
+            ]
         },
         {
             "name": "debug",
