@@ -119,6 +119,7 @@ message InitSupervisorRequest {
   };
   JobLifecycleHookConfig job_lifecycle_hook_config = 30;
   bool enable_slurm_compatible_env = 31;
+  uint32 thread_pool_size = 32;
 
   bool tracing_enabled = 41;
   optional string traceparent = 42;  // W3C traceparent for distributed tracing
@@ -161,7 +162,7 @@ message ChangeStepTimeConstraintReply {
 }
 
 message TerminateStepRequest {
-  bool mark_orphaned = 1;
+  reserved 1;  // was mark_orphaned
   crane.grpc.TerminateSource terminate_source = 2;
 }
 

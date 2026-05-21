@@ -311,12 +311,12 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Completing: {
-    // TODO: Daemon pod bootstrap may fail before the step ever reaches
-    // Running...
-    if (m_status_ != StepStatus::Running)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running' when receiving new "
-          "status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
@@ -2775,7 +2775,7 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
       m_step_.ExecuteSpan().End();
     }
 
-    if (!m_step_.orphaned) {
+    {
       CRANE_TRACE_SCOPE_FROM_REMOTE(finish_span, "step/finish",
                                     g_config.Tracing.Traceparent);
       finish_span.SetAttribute("job_id", m_step_.job_id);
@@ -2784,10 +2784,10 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
                                static_cast<int64_t>(status.max_exit_code));
       if (status.max_exit_code != 0)
         finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
-      g_craned_client->StepStatusChangeAsync(
-          status.final_status_on_termination, status.max_exit_code,
-          status.final_reason_on_termination);
     }
+    g_craned_client->StepStatusChangeAsync(
+        StepStatus::Completing, status.max_exit_code,
+        status.final_reason_on_termination, status.final_status_on_termination);
     ShutdownSupervisorAsync();
   }
 }
@@ -2946,11 +2946,9 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
   return ok_future;
 }
 
-void TaskManager::TerminateStepAsync(bool mark_as_orphaned,
-                                     TaskFinalizeCause cause) {
+void TaskManager::TerminateStepAsync(TaskFinalizeCause cause) {
   m_step_terminate_queue_.enqueue(StepTerminateQueueElem{
       .cause = cause,
-      .mark_as_orphaned = mark_as_orphaned,
   });
   m_terminate_step_async_handle_->send();
 }
@@ -2998,11 +2996,10 @@ void TaskManager::EvShutdownSupervisorCb_() {
 
     auto& [status, exit_code, reason] = final_status;
     if (m_step_.IsDaemon()) {
-      m_step_.GotNewStatus(status);
-      if (!m_step_.orphaned) {
-        CRANE_DEBUG("Sending a {} status as daemon step.", status);
-        g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
-      }
+      m_step_.GotNewStatus(StepStatus::Completing);
+      CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
+      g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
+                                             reason, status);
     }
 
     // Non-daemon step don't need to report the status change in shutting down.
@@ -3407,38 +3404,56 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
                 g_config.JobId, g_config.StepId);
 
     if (m_step_.IsDaemon()) {
-      if (elem.mark_as_orphaned) {
-        m_step_.orphaned = true;
-        CRANE_INFO("Orphaned daemon step is shutting down directly.");
-        SetAllowDaemonShutdown();
-        ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      } else {
-        CRANE_TRACE(
-            "Terminate request for daemon step is ignored. Use "
-            "ShutdownSupervisor to actively stop a daemon pod.");
-      }
+      CRANE_TRACE(
+          "Terminate request for daemon step is ignored. Use "
+          "ShutdownSupervisor to actively stop a daemon pod.");
       continue;
     }
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = true;
+    auto step_status = m_step_.GetStatus();
 
-    auto status = m_step_.GetStatus();
-    if (!elem.mark_as_orphaned && status != StepStatus::Running) {
+    if (step_status == StepStatus::Configuring) {
       not_ready_elems.emplace_back(elem);
-      CRANE_DEBUG("Step is not ready to terminate, will check next time.");
+      CRANE_DEBUG("Step status {} not cancellable, defer.", step_status);
+      continue;
+    } else if (step_status == StepStatus::Completing) {
+      CRANE_DEBUG("[Step #{}.{}] Terminating a completing step, ignored.",
+                  g_config.JobId, g_config.StepId);
+      continue;
+    } else if (IsFinishedStepStatus(step_status)) {
+      CRANE_DEBUG("[Step #{}.{}] Terminating a finished step, ignored.",
+                  g_config.JobId, g_config.StepId);
       continue;
     }
 
-    int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
+    if (step_status == StepStatus::Starting) {
+      CRANE_DEBUG(
+          "Terminating step at Starting state, completing without launching "
+          "tasks...");
+      m_step_.GotNewStatus(StepStatus::Completing);
 
-    if (elem.mark_as_orphaned) {
-      CRANE_DEBUG("Step is terminated as orphaned, shutting down...");
+      auto& final_status = m_step_.final_termination_status;
+      final_status.max_exit_code = 0U;
+      final_status.final_status_on_termination = StepStatus::Cancelled;
+      final_status.final_reason_on_termination.clear();
+
+      if (elem.cause != TaskFinalizeCause::NORMAL) {
+        g_craned_client->StepStatusChangeAsync(
+            StepStatus::Completing, final_status.max_exit_code,
+            final_status.final_reason_on_termination,
+            final_status.final_status_on_termination);
+      }
+
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
-    CRANE_TRACE("Terminating all running tasks (orphaned: {}, reason: {})...",
-                elem.mark_as_orphaned, static_cast<int>(elem.cause));
+    CRANE_ASSERT(!m_step_.AllTaskFinished());
+
+    int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
+
+    CRANE_TRACE("Terminating all running tasks (reason: {})...",
+                static_cast<int>(elem.cause));
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
@@ -3568,6 +3583,16 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
   ExecuteStepElem elem;
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
+    auto step_status = m_step_.GetStatus();
+    if (step_status == StepStatus::Completing ||
+        IsFinishedStepStatus(step_status)) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] ExecuteStep ignored because step status is {}.",
+          m_step_.job_id, m_step_.step_id, step_status);
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      continue;
+    }
+
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {

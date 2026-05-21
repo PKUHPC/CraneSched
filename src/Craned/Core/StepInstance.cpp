@@ -23,6 +23,7 @@
 
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "JobManager.h"
 #include "crane/CriClient.h"
 #include "crane/Tracing.h"
 
@@ -386,6 +387,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     }
 
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
+    init_req.set_thread_pool_size(g_config.Supervisor.ThreadPoolSize);
 
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
     // Pass spawn span's context so step/execute becomes child of
@@ -449,7 +451,20 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
 
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg received.", job_id, step_id);
+    // Migrate supervisor into the job's cgroup after it has finished
+    // initialization. This avoids throttling supervisor startup by the
+    // job's CPU quota.
+    if (!this->crane_cgroup->MigrateProcIn(child_pid)) {
+      CRANE_ERROR(
+          "[Step #{}.{}] Failed to migrate supervisor pid {} into cgroup.",
+          job_id, step_id, child_pid);
+    }
+    if (!CgroupManager::MigrateToCpuset(child_pid,
+                                        this->job_path_info.cpuset_cg_str)) {
+      CRANE_WARN("[Step #{}.{}] Failed to migrate supervisor to cpuset.",
+                 job_id, step_id);
+    }
+
     this->supervisor_stub = std::make_shared<SupervisorStub>(job_id, step_id);
 
     this->supv_pid = child_pid;
@@ -458,38 +473,24 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    // Migrate into step's system cgroup (cpu/memory/devices).
-    if (!this->crane_cgroup->MigrateProcIn(getpid())) {
-      fmt::print(
-          stderr,
-          "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
-          "migration.",
-          job_id, step_id);
-      std::abort();
-    }
-
-    // cgroupv1: additionally migrate into overflow cpuset (flat structure).
-    // In v1, cpuset is a separate hierarchy; the step cgroup above only
-    // covers cpu/memory/devices. Overflow processes share crane/overflow
-    // in cpuset hierarchy directly. See overflow_cg.md.
-    if (!CgroupManager::MigrateToCpuset(getpid(),
-                                        this->job_path_info.cpuset_cg_str)) {
-      fmt::print(stderr, "[Step #{}.{}] Failed to migrate to overflow cpuset.",
-                 job_id, step_id);
-      // Non-fatal for now: process will run without cpuset binding
-    }
+    // Cgroup migration is deferred to csupervisor (after SupervisorReady)
+    // so the supervisor init is not throttled by the job's CPU quota.
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
 
-    util::os::CloseFdFromExcept(3,
-                                {craned_supervisor_fd, supervisor_craned_fd});
-    // Prepare the command line arguments.
+    if (!util::os::CloseFdFromExcept(
+            3, {craned_supervisor_fd, supervisor_craned_fd})) {
+      fmt::print(stderr,
+                 "[Step #{}.{}] Failed to read /proc/self/fd, aborting.\n",
+                 job_id, step_id);
+      _exit(1);
+    }
+
     std::vector<std::string> string_argv;
     std::vector<const char*> argv;
 
-    // Argv[0] is the program name which can be anything.
     auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
     string_argv.emplace_back(supv_name.c_str());
     string_argv.push_back("--input-fd");
@@ -577,10 +578,12 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   }
 
   case StepStatus::Completing: {
-    if (status != StepStatus::Running)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (status != StepStatus::Running && status != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running' when receiving new "
-          "status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, this->status);
     break;
   }
@@ -601,13 +604,9 @@ void StepInstance::ExecuteStepAsync() {
     if (code != CraneErrCode::SUCCESS) {
       CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute step, code:{}.",
                   job_id, step_id, static_cast<int>(code));
-      g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
-          .job_id = job_id,
-          .step_id = step_id,
-          .new_status = StepStatus::Failed,
-          .exit_code = ExitCode::EC_RPC_ERR,
-          .reason = "Supervisor not responding when execute step",
-          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
+      g_job_mgr->SendCompletingAndTerminal_(
+          job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+          "Supervisor not responding when execute step");
       // Ctld will send ShutdownSupervisor after status change from
       // daemon supervisor, for common step, will shut down itself when all
       // steps finished locally.

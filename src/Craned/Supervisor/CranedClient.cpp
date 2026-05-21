@@ -40,13 +40,15 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CranedClient::StepStatusChangeAsync(crane::grpc::JobStatus new_status,
-                                         uint32_t exit_code,
-                                         std::optional<std::string> reason) {
+void CranedClient::StepStatusChangeAsync(
+    crane::grpc::JobStatus new_status, uint32_t exit_code,
+    std::optional<std::string> reason,
+    std::optional<crane::grpc::JobStatus> final_status) {
   StepStatusChangeQueueElem elem{
       .new_status = new_status,
       .exit_code = exit_code,
       .reason = std::move(reason),
+      .final_status = final_status,
       .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
   absl::MutexLock lock(&m_mutex_);
   m_task_status_change_queue_.push_back(std::move(elem));
@@ -101,6 +103,8 @@ void CranedClient::AsyncSendThread_() {
         request.set_exit_code(elem.exit_code);
         *request.mutable_timestamp() = elem.timestamp;
         if (elem.reason.has_value()) request.set_reason(elem.reason.value());
+        if (elem.final_status.has_value())
+          request.set_final_status(elem.final_status.value());
 
         status = m_stub_->StepStatusChange(&context, request, &reply);
         if (!status.ok()) {

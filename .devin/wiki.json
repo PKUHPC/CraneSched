@@ -1,0 +1,302 @@
+{
+  "repo_notes": [
+    {
+      "content": "(English prompting supported) 本仓库是 CraneSched 后端，包含 CraneCtld（控制器）、Craned（节点代理）、Supervisor（任务监管进程）三个 C++ 守护进程，以及它们共享的 Utilities 公共库和 protos 中的 gRPC 协议定义。前端命令行工具（cbatch/crun/cqueue 等）位于独立仓库 CraneSched-FrontEnd。Wiki 采用循序渐进的组织方式，先建立项目全貌与运行环境认知，再按 daemon 深入各自代码，最后以横切主题与前端客户端收尾。"
+    }
+  ],
+  "pages": [
+    {
+      "title": "项目总览",
+      "purpose": "介绍 CraneSched 的定位（面向 HPC 与 AI 的分布式调度系统）、目标用户、核心特性，以及三大守护进程的职责划分",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "系统架构与组件交互",
+      "purpose": "呈现 CraneCtld / Craned / Supervisor / 前端 CLI / 外部服务（MongoDB、CRI、PluginD）之间的部署拓扑、调用关系与数据流",
+      "parent": "项目总览",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "核心概念与术语",
+      "purpose": "统一讲解 Job / Step / Task、Partition、Node、Account / User / QoS、Cgroup / Device、Plugin / Lua 等贯穿全系统的概念",
+      "parent": "项目总览",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "代码仓库导览",
+      "purpose": "快速定位 src/CraneCtld、src/Craned/{Core,Common,Supervisor}、src/Utilities、protos、docs、scripts 等目录的角色，为后续模块章节提供索引",
+      "parent": "项目总览",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "部署与运维",
+      "purpose": "从开发者视角梳理构建、部署、配置与日常运维所需的端到端流程，作为深入代码前的实操基础",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "构建、打包与 CI/CD",
+      "purpose": "CMake 顶层结构、CMakePresets、dependencies/ 下的第三方依赖管理、编译产物（cranectld/craned/supervisor）、打包指南，以及 .github/workflows 下的构建、测试、格式检查流水线",
+      "parent": "部署与运维",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "后端部署、集群配置与数据库运维",
+      "purpose": "在 Rocky Linux 9 / Debian / Ubuntu / CentOS 7 上安装 cranectld 与 craned，PAM 模块与 eBPF 支持，config.yaml 关键配置、多节点部署、PKI+TLS、Keepalived 高可用，以及 MongoDB / 嵌入式数据库的运维脚本（migrate_db.py、wipe_data 等）",
+      "parent": "部署与运维",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "扩展点部署（Lua / Prolog / PluginD / PowerControl）",
+      "purpose": "Lua 脚本、Prolog/Epilog、CranePluginD 插件守护进程、PowerControl 节能模块、License 管理等运维侧扩展机制的启用方式与容器化部署",
+      "parent": "部署与运维",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "CraneCtld 中央控制器",
+      "purpose": "整体介绍中央控制器的职责边界、启动阶段、线程模型与模块依赖关系，作为后续子页的导览",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "启动流程与全局定义",
+      "purpose": "CraneCtld.cpp 的 main 入口、配置加载、信号处理、全局单例初始化顺序，以及 CtldPublicDefs 中的核心类型定义",
+      "parent": "CraneCtld 中央控制器",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "任务调度器（JobScheduler）",
+      "purpose": "JobScheduler 的调度主循环、优先级计算、作业生命周期状态机（含 completing 状态）、资源分配、排队原因与调度策略",
+      "parent": "CraneCtld 中央控制器",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "gRPC 服务、节点连接与安全",
+      "purpose": "CtldGrpcServer 承接前端 CLI 与 craned 的请求分发、CranedKeeper 维护 craned 连接池与心跳重连、CranedMetaContainer/NodeDefs 的节点元数据，以及 Security 模块证书加载与 PKI 校验",
+      "parent": "CraneCtld 中央控制器",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "账户、QoS 与审计统计",
+      "purpose": "AccountManager 的账户层级、用户归属、QoS 策略与封禁流程、AccountDefs 数据模型，以及 Accounting 模块对作业用量的采集汇总（支撑 creport/cacct 查询）",
+      "parent": "CraneCtld 中央控制器",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "持久化层（MongoDB 与嵌入式数据库）",
+      "purpose": "DbClient 对 MongoDB 的历史数据读写、EmbeddedDbClient 保存运行时状态用于崩溃恢复，以及二者的分工与一致性处理",
+      "parent": "CraneCtld 中央控制器",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Craned 节点代理",
+      "purpose": "Craned 作为每个计算节点的代理进程的职责、与 Ctld 的双向通信模式、节点本地资源管理的总体框架",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Craned 启动、Ctld 注册与节点服务",
+      "purpose": "Craned.cpp 入口、配置加载与单例初始化，CtldClient 向 CraneCtld 注册节点并接收调度指令的连接生命周期，CranedServer 承接 Ctld 下发请求的路由，以及 CranedForPamServer 支撑 PAM 会话鉴权",
+      "parent": "Craned 节点代理",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "作业管理器与 Step 编排",
+      "purpose": "JobManager 对节点作业槽位的维护、与 Ctld 的状态同步，StepInstance 表示单个 step，SupervisorStub 如何 fork/exec 出 Supervisor 子进程并保持联系",
+      "parent": "Craned 节点代理",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "设备与资源感知（Craned/Common）",
+      "purpose": "Craned/Common 下的 CgroupManager、DeviceManager 如何发现和管理本机 CPU/内存/GPU 等设备资源，并为作业分配与隔离提供基础",
+      "parent": "Craned 节点代理",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Supervisor 任务监管",
+      "purpose": "Supervisor 进程作为单个作业 step 的执行监管者的角色定位、与 Craned / 前端 Cfored 的分工",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Supervisor 启动与任务管理",
+      "purpose": "Supervisor.cpp 入口、SupervisorServer gRPC 接口、SupervisorPublicDefs 公共类型，以及 TaskManager 对用户进程的 fork/exec、信号处理、exit 回收，涵盖容器模式与裸进程模式的差异",
+      "parent": "Supervisor 任务监管",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Cfored I/O 与 Craned 反向通信",
+      "purpose": "CforedClient 将交互式作业的 stdin/stdout/stderr 在 Supervisor 与前端 Cfored 之间串流，以及 CranedClient 向所在节点 Craned 汇报任务状态与请求环境信息",
+      "parent": "Supervisor 任务监管",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "横切主题",
+      "purpose": "将跨 daemon 的共享机制集中讲解，避免在各守护进程章节中重复，包括协议、容器、资源隔离、插件/脚本扩展与公共工具",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "gRPC 协议与数据模型",
+      "purpose": "protos/ 下 Crane.proto、PublicDefs.proto、Supervisor.proto、Plugin.proto 的消息与服务定义，以及它们在各 daemon 间的映射关系",
+      "parent": "横切主题",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "容器功能与 CRI 集成",
+      "purpose": "容器支持的整体设计：Utilities/CriClient 对 CRI 运行时（containerd 等）的调用、protos/cri/api.proto、Utilities/BindFs 对挂载命名空间的处理、Supervisor 内容器模式的启动路径，以及 ccon 前端命令与容器部署配置",
+      "parent": "横切主题",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "资源隔离、Cgroup 与设备管理",
+      "purpose": "CgroupManager 的 v1/v2 适配、eBPF 辅助隔离、DeviceManager 与 cgroup device 子系统的协作，以及作业运行时资源限制在 Craned/Supervisor 的施加点",
+      "parent": "横切主题",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "插件、Lua/Prolog 扩展与公共工具库",
+      "purpose": "Plugin.proto 服务定义、Utilities/PluginClient 通用客户端、CranePluginD 的 hook 事件模型，Utilities/Lua 公共库与 Ctld 侧 Lua 调度集成、Prolog/Epilog 脚本执行时点，以及 AnonymousPipe/FileLock/FileLogger/PasswordEntry 等基础设施组件",
+      "parent": "横切主题",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "前端客户端介绍",
+      "purpose": "概述 CraneSched-FrontEnd 仓库中的 Go 客户端工具集，及其与后端 CraneCtld gRPC 接口的对应关系；本章节不深入前端代码细节，仅作为使用入口",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "作业提交（cbatch / crun / calloc）",
+      "purpose": "三种作业提交方式的差异、与 Ctld 的交互流程，以及批处理、交互式、资源预留三种场景的选择指引",
+      "parent": "前端客户端介绍",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "作业查询与控制（cqueue / cinfo / ceff / cacct / creport / ccancel / ccontrol）",
+      "purpose": "排队与节点状态查询、作业效率与历史账务、取消与属性调整、节点/分区维护等命令概览，以及它们对应的后端数据来源与调用路径",
+      "parent": "前端客户端介绍",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "账户管理与容器命令（cacctmgr / ccon）",
+      "purpose": "cacctmgr 对账户、用户、QoS 的增删改查与 CraneCtld AccountManager 的一一对应，以及 ccon 客户端工具如何与后端容器支持协作",
+      "parent": "前端客户端介绍",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    }
+  ]
+}

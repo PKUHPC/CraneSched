@@ -39,8 +39,19 @@ struct StepInstance {
   crane::ManualSpan wait_execute_span;
 
   std::atomic_bool err_before_supv_start{false};
-  uint32_t exit_code{0};
-  google::protobuf::Timestamp end_time;  // Actual end time when step finished
+  // Stored when Completing is received from supervisor.
+  // Used by FreeJobs to send the real terminal status after cleanup.
+  struct PendingTerminalStatus {
+    crane::grpc::JobStatus final_status;
+    uint32_t exit_code;
+    std::string reason;
+    google::protobuf::Timestamp timestamp;
+  };
+  std::optional<PendingTerminalStatus> pending_terminal_status;
+
+  // When true, status changes from this step are NOT forwarded to CraneCtld.
+  // Used for invalid steps (not tracked by CraneCtld) that need local cleanup.
+  bool silent_cleanup{false};
 
   StepStatus status{StepStatus::Invalid};
   std::shared_ptr<SupervisorStub> supervisor_stub{nullptr};
@@ -89,6 +100,6 @@ struct StepInstance {
 
   // Not implemented yet.
   CraneExpected<void> TerminateStep(
-      bool mark_as_orphaned, crane::grpc::TerminateSource terminate_source);
+      crane::grpc::TerminateSource terminate_source);
 };
 }  // namespace Craned

@@ -89,6 +89,10 @@ struct Config {
     uint32_t CranedTimeout;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t ThreadPoolSize{0};
+    uint32_t SchedulerRpcThreadPoolSize{0};
+    uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
+    uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
   };
   CraneCtldConf CtldConf;
 
@@ -442,11 +446,7 @@ struct StepStatusChangeContext {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_step_exec_map;
-  // Error steps to terminate with orphaned status
-  std::unordered_map<CranedId,
-                     std::unordered_map<job_id_t, std::set<step_id_t>>>
-      craned_orphaned_steps{};
-  // Common step to cancel, caused by a finished primary step
+  // Common steps to cancel on Craned.
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_cancel_steps{};
@@ -469,6 +469,9 @@ struct StepStatusChangeContext {
 
   // Trace context lookup for RPC worker threads (job_id -> traceparent)
   std::unordered_map<job_id_t, std::string> job_traceparents;
+
+  // Jobs whose primary steps need batch AppendSteps after the main loop.
+  std::vector<JobInCtld*> pending_append_steps_jobs;
 };
 
 // Abstract interface of all the steps in Ctld.
@@ -533,6 +536,7 @@ struct StepInCtld {
 
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
+  std::unordered_set<CranedId> m_completing_nodes_;
 
   // If this job is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -608,6 +612,9 @@ struct StepInCtld {
   }
   void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
+
+  void StepOnNodeCompleting(const CranedId& node);
+  bool AllNodesCompleting() const;
 
   void SetSubmitTime(absl::Time submit_time);
   absl::Time SubmitTime() const { return m_submit_time_; }
