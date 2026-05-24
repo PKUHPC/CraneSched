@@ -44,7 +44,7 @@ struct Qos {
   ResourceView max_tres_per_user;
   ResourceView max_tres_per_account;
   FlagSet<QosFlags> flags;
-  std::list<std::string> preempt;
+  absl::flat_hash_set<std::string> preempt;
   crane::grpc::PreemptMode preempt_mode{
       crane::grpc::PreemptMode::PREEMPT_MODE_OFF};
 

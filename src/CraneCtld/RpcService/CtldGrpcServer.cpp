@@ -1393,7 +1393,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 
   qos.max_wall = absl::Seconds(qos_info->max_wall());
 
-  qos.preempt.assign(qos_info->preempt().begin(), qos_info->preempt().end());
+  qos.preempt.insert(qos_info->preempt().begin(), qos_info->preempt().end());
   qos.preempt_mode = qos_info->preempt_mode();
 
   auto result = g_account_manager->AddQos(request->uid(), qos);

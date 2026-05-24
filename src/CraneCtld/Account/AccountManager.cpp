@@ -184,6 +184,10 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
       new_qos.preempt_mode != crane::grpc::PREEMPT_MODE_CANCEL)
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
 
+  auto preempt_check_result = CheckQosPreemptAcyclicNoLock_(new_qos);
+  if (!preempt_check_result)
+    return std::unexpected(preempt_check_result.error().code());
+
   return AddQos_(actor_name, new_qos, find_qos);
 }
 
@@ -1255,10 +1259,12 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
   }
 
   // check operations
+  bool preempt_modified = false;
   for (const auto& operation : operations) {
     auto item = Qos::GetModifyFieldStr(operation.modify_field());
 
     if (item == Qos::FieldStringOfPreempt()) {
+      preempt_modified = true;
       for (const auto& qos_name : operation.value_list()) {
         if (qos_name == name) {
           rich_error_list.emplace_back(std::unexpected{FormatRichErr(
@@ -1434,7 +1440,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       break;
     }
     case crane::grpc::ModifyField::Preempt: {
-      res_qos.preempt.assign(operation.value_list().begin(),
+      res_qos.preempt.clear();
+      res_qos.preempt.insert(operation.value_list().begin(),
                              operation.value_list().end());
       log += fmt::format("preempt: [{}]\n", fmt::join(res_qos.preempt, ", "));
       break;
@@ -1452,6 +1459,16 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       std::unreachable();
     }
   }
+
+  if (preempt_modified) {
+    auto preempt_check_result = CheckQosPreemptAcyclicNoLock_(res_qos);
+    if (!preempt_check_result) {
+      rich_error_list.emplace_back(
+          std::unexpected{preempt_check_result.error()});
+      return rich_error_list;
+    }
+  }
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateQos(res_qos);
@@ -1464,6 +1481,14 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
         std::unexpected{FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")});
     return rich_error_list;
   }
+
+  const auto& old_preempt = m_qos_map_[name]->preempt;
+  for (const auto& victim : old_preempt)
+    if (!res_qos.preempt.contains(victim))
+      m_qos_preempted_by_map_[victim].erase(name);
+  for (const auto& victim : res_qos.preempt)
+    if (!old_preempt.contains(victim))
+      m_qos_preempted_by_map_[victim].insert(name);
 
   m_qos_map_[name] = std::make_unique<Ctld::Qos>(std::move(res_qos));
 
@@ -2424,6 +2449,11 @@ void AccountManager::InitDataMap_() {
   for (auto& qos : qos_list) {
     m_qos_map_[qos.name] = std::make_unique<Qos>(qos);
   }
+  for (auto& [qos_name, qos_ptr] : m_qos_map_) {
+    if (qos_ptr->deleted) continue;
+    for (const auto& victim : qos_ptr->preempt)
+      m_qos_preempted_by_map_[victim].insert(qos_name);
+  }
 
   std::list<Wckey> wckey_list;
   g_db_client->SelectAllWckey(&wckey_list);
@@ -2516,6 +2546,38 @@ const Qos* AccountManager::GetExistedQosInfoNoLock_(const std::string& name) {
   const Qos* qos = GetQosInfoNoLock_(name);
   if (qos && !qos->deleted) return qos;
   return nullptr;
+}
+
+CraneExpectedRich<void> AccountManager::CheckQosPreemptAcyclicNoLock_(
+    const Qos& qos) {
+  std::vector<const Qos*> pending_qos_list{&qos};
+  std::unordered_set<const Qos*> visited_qos_set;
+
+  while (!pending_qos_list.empty()) {
+    const Qos* current_qos = pending_qos_list.back();
+    pending_qos_list.pop_back();
+
+    for (const auto& next_qos_name : current_qos->preempt) {
+      if (next_qos_name == qos.name) {
+        return std::unexpected{FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "QoS preempt graph cannot contain cycles: {} is reachable from its "
+            "preempt set",
+            qos.name)};
+      }
+
+      const Qos* next_qos = GetExistedQosInfoNoLock_(next_qos_name);
+      if (!next_qos) {
+        return std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_INVALID_QOS, next_qos_name)};
+      }
+
+      if (visited_qos_set.insert(next_qos).second)
+        pending_qos_list.emplace_back(next_qos);
+    }
+  }
+
+  return {};
 }
 
 bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
@@ -2696,6 +2758,8 @@ CraneExpected<void> AccountManager::AddQos_(const std::string& actor_name,
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
 
+  for (const auto& victim : qos.preempt)
+    m_qos_preempted_by_map_[victim].insert(qos.name);
   m_qos_map_[qos.name] = std::make_unique<Qos>(qos);
 
   return {};
@@ -2944,10 +3008,21 @@ void AccountManager::DeleteAccountSubtreeNoLock_(
 
 CraneExpectedRich<void> AccountManager::DeleteQos_(
     const std::string& actor_name, const std::string& name) {
+  auto preempted_by_it = m_qos_preempted_by_map_.find(name);
+  std::vector<std::string> referencing_qos_names;
+  if (preempted_by_it != m_qos_preempted_by_map_.end())
+    referencing_qos_names.assign(preempted_by_it->second.begin(),
+                                 preempted_by_it->second.end());
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
                                      name, "deleted", true);
+        for (const auto& ref_name : referencing_qos_names) {
+          Qos updated_qos(*m_qos_map_[ref_name]);
+          updated_qos.preempt.erase(name);
+          g_db_client->UpdateQos(updated_qos);
+        }
         AddTxnLogToDB_(actor_name, name, TxnAction::DeleteQos, "");
       };
 
@@ -2956,6 +3031,12 @@ CraneExpectedRich<void> AccountManager::DeleteQos_(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   m_qos_map_[name]->deleted = true;
+  for (const auto& ref_name : referencing_qos_names)
+    m_qos_map_[ref_name]->preempt.erase(name);
+  m_qos_preempted_by_map_.erase(name);
+
+  for (const auto& victim : m_qos_map_[name]->preempt)
+    m_qos_preempted_by_map_[victim].erase(name);
 
   g_account_meta_container->DeleteQosMeta(name);
 
