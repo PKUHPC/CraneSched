@@ -4538,8 +4538,15 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   std::list<std::string> exclude_node_list;
   util::ParseHostList(job_to_ctld.excludes(), &exclude_node_list);
 
+  // Array parents (has_array_spec && !has_array_task) never run on any craned,
+  // so their craned_ids list is empty. Skip per-type extraction for them.
+  const bool is_array_parent =
+      job_to_ctld.has_array_spec() && !runtime_attr.has_array_task();
+
   std::vector<CranedId> execution_nodes;
-  if (job_to_ctld.type() == crane::grpc::JobType::Batch) {
+  if (is_array_parent || runtime_attr.craned_ids().empty()) {
+    // Leave execution_nodes empty.
+  } else if (job_to_ctld.type() == crane::grpc::JobType::Batch) {
     execution_nodes.push_back(runtime_attr.craned_ids(0));
   } else if (job_to_ctld.type() == crane::grpc::JobType::Interactive) {
     const auto& ia_meta = job_to_ctld.interactive_meta();
