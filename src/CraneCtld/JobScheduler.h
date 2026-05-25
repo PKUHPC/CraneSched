@@ -1497,12 +1497,19 @@ class JobScheduler {
   std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
   ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_del_async_handle_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_del_queue_;
+
   TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
 
   void CancelDeadlineJobCb_();
 
   void CreateDeadlineTimerCb_();
 
+  void DelDeadlineTimerCb_();
+
+  // Must only be invoked on the uvw_deadline_loop thread. Other threads should
+  // enqueue into m_job_deadline_timer_del_queue_ and send the async handle.
   void DelDeadlineTimer_(job_id_t job_id);
 
   PmixPortsMetaMap m_pmix_ports_meta_;

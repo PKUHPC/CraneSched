@@ -21,6 +21,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
+#include <limits>
 #include <memory>
 
 #include "protos/PublicDefs.pb.h"
@@ -257,6 +258,12 @@ struct RunTimeStatus {
 };
 
 using array_task_id_t = uint32_t;  // Task index within a job array
+
+// Sentinel value meaning "no array_task_id" (i.e. a plain non-array selector
+// or the array parent itself). Matches Slurm's NO_VAL convention so it can be
+// reused across ctld and craned layers without translation.
+inline constexpr array_task_id_t kNoArrayTaskId =
+    std::numeric_limits<array_task_id_t>::max() - 1;
 
 }  // namespace Ctld
 

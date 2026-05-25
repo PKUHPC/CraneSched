@@ -70,13 +70,6 @@ uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
 
 ArrayMeta::ArrayMeta(JobInCtld* parent_job) : parent_job_(parent_job) {
   CRANE_ASSERT(parent_job_ != nullptr);
-  if (parent_job_->ArrayMaterializationComplete() &&
-      IsFinishedStepStatus(parent_job_->Status())) {
-    terminal_status_override_ =
-        std::pair{parent_job_->Status(), parent_job_->ExitCode()};
-    parent_start_event_triggered_ = true;
-    parent_job_->SetArrayParentStarted(true);
-  }
 }
 
 std::optional<job_id_t> ArrayMeta::ChildJobIdOfTask(
@@ -168,15 +161,6 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
       ToUnixSeconds(parent_job_->deadline_time));
   return child;
-}
-
-std::unique_ptr<JobInCtld> ArrayMeta::BuildNextChild() const {
-  if (parent_job_ == nullptr || parent_job_->ArrayMaterializationComplete()) {
-    return nullptr;
-  }
-  auto next = NextMaterializableTaskId();
-  if (!next.has_value()) return nullptr;
-  return BuildChild(*next);
 }
 
 bool ArrayMeta::TrackMaterialized(JobInCtld* child) {
@@ -336,6 +320,15 @@ bool ArrayManager::ArrayMaterializationComplete_(const JobInCtld& parent) {
   return parent.ArrayMaterializationComplete();
 }
 
+// True iff the parent's persisted state shows it was finalized via
+// FinishForTerminalStatus before a previous crash. Used by RegisterParent
+// to rebuild the transient terminal_status_override_ /
+// parent_start_event_triggered_ cache on startup.
+bool ArrayManager::WasFinalizedBeforeRecovery_(const JobInCtld& parent) {
+  return parent.ArrayMaterializationComplete() &&
+         IsFinishedStepStatus(parent.Status());
+}
+
 std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
     const ArrayMeta& meta, const std::unordered_set<JobInCtld*>& final_jobs) {
   if (auto override_status = meta.TerminalStatusOverride();
@@ -420,7 +413,21 @@ void ArrayManager::RegisterParent(JobInCtld* parent) {
   }
 
   job_id_t parent_id = parent->JobId();
-  m_metas_[parent_id] = std::unique_ptr<ArrayMeta>(new ArrayMeta(parent));
+  auto meta = std::unique_ptr<ArrayMeta>(new ArrayMeta(parent));
+
+  // Recovery path: FinishForTerminalStatus persists Status/ExitCode/EndTime
+  // and ArrayMaterializationComplete=true, but terminal_status_override_ and
+  // parent_start_event_triggered_ are transient. Rebuild them so a later
+  // BuildAggregateResult_ doesn't overwrite the persisted terminal status
+  // with a child-aggregate.
+  if (WasFinalizedBeforeRecovery_(*parent)) {
+    meta->terminal_status_override_ =
+        std::pair{parent->Status(), parent->ExitCode()};
+    meta->parent_start_event_triggered_ = true;
+    parent->SetArrayParentStarted(true);
+  }
+
+  m_metas_[parent_id] = std::move(meta);
 }
 
 CraneExpected<void> ArrayManager::BindRecoveredChildrenForParent(
@@ -721,7 +728,9 @@ std::unique_ptr<JobInCtld> ArrayManager::MaterializeChildForAllocation(
   if (meta == nullptr || meta->ParentPtr() == nullptr) return nullptr;
   if (!meta->CanSpawnMore(now, nullptr)) return nullptr;
 
-  auto child = meta->BuildNextChild();
+  auto next_task_id = meta->NextMaterializableTaskId();
+  if (!next_task_id.has_value()) return nullptr;
+  auto child = meta->BuildChild(*next_task_id);
   if (child == nullptr) return nullptr;
 
   auto admit = AdmitChildNoLock_(*meta, *child);
@@ -752,78 +761,115 @@ bool ArrayManager::OnChildStarted(JobInCtld* child) {
 // ArrayManager: resolve
 // ----------------------------------------------------------------------------
 
+namespace {
+
+// Empty `steps` is the "all steps" sentinel: once a key has been inserted
+// with an empty set, later non-empty inputs must not narrow it.
+void MergeJobSteps_(
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& job_steps,
+    job_id_t job_id, const std::unordered_set<step_id_t>& steps) {
+  auto [it, inserted] = job_steps.try_emplace(job_id);
+  if (steps.empty()) {
+    it->second.clear();
+  } else if (inserted || !it->second.empty()) {
+    it->second.insert(steps.begin(), steps.end());
+  }
+}
+
+}  // namespace
+
+void ArrayManager::MergeResolved_(ResolvedJobIdSelectors& dst,
+                                  ResolvedJobIdSelectors&& src) {
+  for (auto& [job_id, steps] : src.job_steps) {
+    MergeJobSteps_(dst.job_steps, job_id, steps);
+  }
+  for (auto& [child_id, selector] : src.array_selector_by_child_job_id) {
+    dst.array_selector_by_child_job_id.try_emplace(child_id, selector);
+  }
+  for (auto& unresolved : src.unresolved_selectors) {
+    dst.unresolved_selectors.push_back(std::move(unresolved));
+  }
+}
+
 ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelectors(
     const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
         selectors,
     bool expand_array_parents) const {
   ResolvedJobIdSelectors result;
-
-  // Empty `steps` is the "all steps" sentinel: once a key has been inserted
-  // with an empty set, later non-empty inputs must not narrow it.
-  auto merge_job_steps = [](auto& job_steps, job_id_t job_id,
-                            const std::unordered_set<step_id_t>& steps) {
-    auto [it, inserted] = job_steps.try_emplace(job_id);
-    if (steps.empty()) {
-      it->second.clear();
-    } else if (inserted || !it->second.empty()) {
-      it->second.insert(steps.begin(), steps.end());
-    }
-  };
-
   for (const auto& selector : selectors) {
-    std::unordered_set<step_id_t> steps(selector.steps().begin(),
-                                        selector.steps().end());
-    job_id_t job_id = selector.job_id();
-    if (!selector.has_array_task_id()) {
-      const auto* meta = FindMeta_(job_id);
-      if (expand_array_parents && meta != nullptr &&
-          meta->ParentPtr() != nullptr) {
-        merge_job_steps(result.job_steps, job_id, steps);
-        for (const auto& [_, child_id] : meta->child_job_id_by_task_id_) {
-          merge_job_steps(result.job_steps, child_id, steps);
-        }
-        continue;
-      }
-
-      merge_job_steps(result.job_steps, job_id, steps);
-      continue;
-    }
-
-    const auto* meta = FindMeta_(job_id);
-    if (meta == nullptr || meta->ParentPtr() == nullptr) {
-      result.unresolved_selectors.push_back({
-          .job_id = job_id,
-          .array_task_id = selector.array_task_id(),
-          .reason = "Array parent not found",
-      });
-      continue;
-    }
-
-    array_task_id_t array_task_id = selector.array_task_id();
-    const auto& array_spec = meta->Parent().JobToCtld().array_spec();
-    if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
-      result.unresolved_selectors.push_back({
-          .job_id = job_id,
-          .array_task_id = array_task_id,
-          .reason = "Array task id not in array spec",
-      });
-      continue;
-    }
-
-    auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
-    if (!child_job_id.has_value()) {
-      result.unresolved_selectors.push_back({
-          .job_id = job_id,
-          .array_task_id = array_task_id,
-          .reason = "Array task not yet materialized",
-      });
-      continue;
-    }
-
-    merge_job_steps(result.job_steps, *child_job_id, steps);
-    result.array_selector_by_child_job_id.try_emplace(*child_job_id, job_id,
-                                                      array_task_id);
+    MergeResolved_(result, ResolveJobIdSelector(selector, expand_array_parents));
   }
+  return result;
+}
+
+ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelector(
+    const crane::grpc::JobIdSelector& selector,
+    bool expand_array_parents) const {
+  ResolvedJobIdSelectors result;
+  std::unordered_set<step_id_t> steps(selector.steps().begin(),
+                                      selector.steps().end());
+  job_id_t job_id = selector.job_id();
+
+  if (!selector.has_array_task_id()) {
+    const auto* meta = FindMeta_(job_id);
+    if (meta != nullptr && meta->ParentPtr() != nullptr) {
+      // Targeting an array parent with explicit step ids is meaningless: array
+      // parents have no steps of their own. Surface it as unresolved.
+      if (!steps.empty()) {
+        result.unresolved_selectors.push_back({
+            .job_id = job_id,
+            .array_task_id = 0,
+            .reason = "Array parent has no steps",
+        });
+        return result;
+      }
+      if (expand_array_parents) {
+        MergeJobSteps_(result.job_steps, job_id, steps);
+        for (const auto& [_, child_id] : meta->child_job_id_by_task_id_) {
+          MergeJobSteps_(result.job_steps, child_id, steps);
+        }
+        return result;
+      }
+    }
+
+    MergeJobSteps_(result.job_steps, job_id, steps);
+    return result;
+  }
+
+  const auto* meta = FindMeta_(job_id);
+  if (meta == nullptr || meta->ParentPtr() == nullptr) {
+    result.unresolved_selectors.push_back({
+        .job_id = job_id,
+        .array_task_id = selector.array_task_id(),
+        .reason = "No such job",
+    });
+    return result;
+  }
+
+  array_task_id_t array_task_id = selector.array_task_id();
+  const auto& array_spec = meta->Parent().JobToCtld().array_spec();
+  if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
+    result.unresolved_selectors.push_back({
+        .job_id = job_id,
+        .array_task_id = array_task_id,
+        .reason = "No such job",
+    });
+    return result;
+  }
+
+  auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
+  if (!child_job_id.has_value()) {
+    result.unresolved_selectors.push_back({
+        .job_id = job_id,
+        .array_task_id = array_task_id,
+        .reason = "No such job",
+    });
+    return result;
+  }
+
+  MergeJobSteps_(result.job_steps, *child_job_id, steps);
+  result.array_selector_by_child_job_id.try_emplace(*child_job_id, job_id,
+                                                    array_task_id);
   return result;
 }
 

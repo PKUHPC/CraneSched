@@ -951,6 +951,13 @@ bool JobScheduler::Init() {
         CreateDeadlineTimerCb_();
       });
 
+  m_job_deadline_timer_del_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_del_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        DelDeadlineTimerCb_();
+      });
+
   if (!deadline_timer_vec.empty()) {
     m_job_deadline_timer_create_queue_.enqueue_bulk(deadline_timer_vec.data(),
                                                     deadline_timer_vec.size());
@@ -2025,6 +2032,13 @@ void JobScheduler::DelDeadlineTimer_(job_id_t job_id) {
   }
 }
 
+void JobScheduler::DelDeadlineTimerCb_() {
+  job_id_t job_id;
+  while (m_job_deadline_timer_del_queue_.try_dequeue(job_id)) {
+    DelDeadlineTimer_(job_id);
+  }
+}
+
 void JobScheduler::CancelDeadlineJobCb_() {
   job_id_t job_id;
   m_pending_job_map_mtx_.Lock();
@@ -2257,7 +2271,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             {job_id, deadline_time.value()});
         m_job_deadline_timer_create_async_handle_->send();
       } else if (is_pending) {
-        DelDeadlineTimer_(job_id);
+        m_job_deadline_timer_del_queue_.enqueue(job_id);
+        m_job_deadline_timer_del_async_handle_->send();
       }
     }
   }
@@ -3437,36 +3452,36 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
   auto rng_get_job_id = [](JobInCtld* job) { return job->JobId(); };
 
-  // Maps an internal (possibly materialized child) job id back to the user's
-  // original selector form (job_id [+ array_task_id]) before writing it into a
-  // reply entry. Plain jobs pass through unchanged.
-  auto fill_user_id = [&](auto* entry, job_id_t internal_id) {
-    auto it = resolved.array_selector_by_child_job_id.find(internal_id);
+  // Maps a child job id back to the user's original selector form
+  // (job_id [+ array_task_id]) before writing it into a reply entry. Plain
+  // jobs pass through unchanged.
+  auto fill_user_id = [&](auto* entry, job_id_t job_id) {
+    auto it = resolved.array_selector_by_child_job_id.find(job_id);
     if (it != resolved.array_selector_by_child_job_id.end()) {
       entry->set_job_id(it->second.first);
       entry->set_array_task_id(it->second.second);
     } else {
-      entry->set_job_id(internal_id);
+      entry->set_job_id(job_id);
     }
   };
 
   auto add_cancelled =
-      [&](job_id_t internal_id) -> crane::grpc::CancelledJobStep* {
+      [&](job_id_t job_id) -> crane::grpc::CancelledJobStep* {
     auto* entry = reply.add_cancelled();
-    fill_user_id(entry, internal_id);
+    fill_user_id(entry, job_id);
     return entry;
   };
 
-  auto add_not_cancelled = [&](job_id_t internal_id, std::string reason) {
+  auto add_not_cancelled = [&](job_id_t job_id, std::string reason) {
     auto* entry = reply.add_not_cancelled();
-    fill_user_id(entry, internal_id);
+    fill_user_id(entry, job_id);
     entry->set_reason(std::move(reason));
   };
 
-  auto add_not_cancelled_step = [&](job_id_t internal_id, step_id_t step_id,
+  auto add_not_cancelled_step = [&](job_id_t job_id, step_id_t step_id,
                                     std::string reason) {
     auto* entry = reply.add_not_cancelled();
-    fill_user_id(entry, internal_id);
+    fill_user_id(entry, job_id);
     entry->set_step_id(step_id);
     entry->set_reason(std::move(reason));
   };
@@ -3476,36 +3491,67 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
     auto it = m_pending_job_map_.find(job_id);
     CRANE_ASSERT(it != m_pending_job_map_.end());
+    JobInCtld* job = it->second.get();
 
-    // Array parents are finalized by the pre-pass below via
-    // CancelArrayParentQueueElem; we do not erase them from resolved.job_steps,
-    // so explicit-filter mode will still iterate them here (and sweep mode can
-    // surface them through pd_input_rng). Short-circuit to avoid a second
-    // cancel and to keep ArrayMeta's parent pointer valid until finalization.
-    if (it->second && it->second->IsArrayParent()) {
-      auto step_it = resolved.job_steps.find(job_id);
-      if (step_it != resolved.job_steps.end() && !step_it->second.empty()) {
-        for (step_id_t step_id : step_it->second) {
-          add_not_cancelled_step(job_id, step_id, "Step not found");
-        }
-      }
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        operator_uid, job->Username(), false);
+    if (!result) {
+      add_not_cancelled(job_id, "Permission Denied");
       return;
     }
 
-    auto result = g_account_manager->CheckIfUidHasPermOnUser(
-        operator_uid, it->second->Username(), false);
-    if (!result) {
-      add_not_cancelled(job_id, "Permission Denied");
-    } else {
+    if (job->IsArrayParent()) {
+      if (!m_array_manager_->IsRegisteredParent(job_id)) {
+        CRANE_ERROR(
+            "Array parent #{} is in the pending map but missing ArrayMeta.",
+            job_id);
+        add_not_cancelled(job_id, "No such job");
+        not_found_job_ids.erase(job_id);
+        return;
+      }
+
       add_cancelled(job_id);
+      not_found_job_ids.erase(job_id);
 
-      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
-          .job = std::move(it->second),
-          .finish_status = crane::grpc::JobStatus::Cancelled});
+      // Close the spawn window between this enqueue and the async
+      // CancelArrayParentQueueElem handler. ArrayMeta::CanSpawnMore reads
+      // parent_job_->CancelRequested(); setting it synchronously under
+      // m_pending_job_map_mtx_ guarantees the scheduler's next iteration sees
+      // the cancel and won't materialize another child in the gap.
+      job->SetCancelRequested(true);
+
+      bool terminate_running_children = has_explicit_job_filter;
+      if (terminate_running_children) {
+        for (job_id_t child_id :
+             m_array_manager_->RunningChildJobIdsForParent(job_id)) {
+          if (!m_running_job_map_.contains(child_id)) continue;
+          // Remove the child from both the cancel iteration source and the
+          // not-found tracking. The async CancelArrayParentQueueElem handler
+          // terminates running children; letting fn_cancel_running_job touch
+          // them again would double-cancel.
+          resolved.job_steps.erase(child_id);
+          not_found_job_ids.erase(child_id);
+        }
+      }
+      m_job_deadline_timer_del_queue_.enqueue(job_id);
+      m_job_deadline_timer_del_async_handle_->send();
+      m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
+          .parent_job_id = job_id,
+          .exit_code = ExitCode::EC_TERMINATED,
+          .finish_status = crane::grpc::JobStatus::Cancelled,
+          .terminate_running_children = terminate_running_children});
       m_cancel_job_async_handle_->send();
-
-      m_pending_job_map_.erase(it);
+      return;
     }
+
+    add_cancelled(job_id);
+
+    m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+        .job = std::move(it->second),
+        .finish_status = crane::grpc::JobStatus::Cancelled});
+    m_cancel_job_async_handle_->send();
+
+    m_pending_job_map_.erase(it);
   };
 
   auto fn_cancel_running_job = [&](JobInCtld* job) {
@@ -3562,14 +3608,6 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
                         ranges::views::filter(rng_filter_job_name) |
                         ranges::views::filter(rng_filter_nodes);
 
-  auto rng_filter_array_parent = [](JobInCtld* job) {
-    return job != nullptr && job->IsArrayParent();
-  };
-  auto rng_filter_array_parent_full_cancel = [&](JobInCtld* job) {
-    auto step_it = resolved.job_steps.find(job->JobId());
-    return step_it == resolved.job_steps.end() || step_it->second.empty();
-  };
-
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     LockGuard running_guard(&m_running_job_map_mtx_);
@@ -3591,19 +3629,16 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       }
     }
 
-    // Preserve array-task provenance for completed children. This is a
-    // result-mapping concern, not a separate cancel path.
-    for (const auto& [child_id, selector] :
+    // Children that resolved to a job id which is no longer pending/running
+    // are reported back under the user's original (job_id, array_task_id)
+    // selector via fill_user_id.
+    for (const auto& [child_id, _] :
          resolved.array_selector_by_child_job_id) {
       if (m_pending_job_map_.contains(child_id) ||
           m_running_job_map_.contains(child_id)) {
         continue;
       }
-
-      auto* entry = reply.add_not_cancelled();
-      entry->set_job_id(selector.first);
-      entry->set_array_task_id(selector.second);
-      entry->set_reason("Array task already completed");
+      add_not_cancelled(child_id, "No such job");
       not_found_job_ids.erase(child_id);
     }
 
@@ -3646,63 +3681,6 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
     auto pending_job_id_rng = pd_input_rng | joined_filters |
                               ranges::views::transform(rng_get_job_id);
-    auto array_parent_id_rng =
-        pd_input_rng | joined_filters |
-        ranges::views::filter(rng_filter_array_parent) |
-        ranges::views::filter(rng_filter_array_parent_full_cancel) |
-        ranges::views::transform(rng_get_job_id);
-
-    // Pre-pass: array parents targeted for a full cancel (no per-task step
-    // filter, gated by rng_filter_array_parent_full_cancel) stay in
-    // m_pending_job_map_ until the cancel queue finalizes them.
-    {
-      auto fn_cancel_array_parent = [&](job_id_t parent_id) {
-        auto it = m_pending_job_map_.find(parent_id);
-        if (it == m_pending_job_map_.end() || !it->second) return;
-        JobInCtld* parent = it->second.get();
-
-        auto perm = g_account_manager->CheckIfUidHasPermOnUser(
-            operator_uid, parent->Username(), false);
-        if (!perm) {
-          add_not_cancelled(parent_id, "Permission Denied");
-          not_found_job_ids.erase(parent_id);
-          return;
-        }
-
-        if (!m_array_manager_->IsRegisteredParent(parent_id)) {
-          not_found_job_ids.erase(parent_id);
-          return;
-        }
-
-        add_cancelled(parent_id);
-
-        not_found_job_ids.erase(parent_id);
-        bool terminate_running_children = has_explicit_job_filter;
-        if (terminate_running_children) {
-          for (job_id_t child_id :
-               m_array_manager_->RunningChildJobIdsForParent(parent_id)) {
-            if (!m_running_job_map_.contains(child_id)) continue;
-            // Remove the child from both the main cancel iteration source and
-            // the not-found tracking. The async CancelArrayParentQueueElem
-            // handler is responsible for terminating running children; letting
-            // fn_cancel_running_job touch them again would double-cancel.
-            resolved_job_steps.erase(child_id);
-            not_found_job_ids.erase(child_id);
-          }
-        }
-        DelDeadlineTimer_(parent_id);
-        m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
-            .parent_job_id = parent_id,
-            .exit_code = ExitCode::EC_TERMINATED,
-            .finish_status = crane::grpc::JobStatus::Cancelled,
-            .terminate_running_children = terminate_running_children});
-        m_cancel_job_async_handle_->send();
-      };
-
-      ranges::for_each(
-          array_parent_id_rng | ranges::to<std::vector<job_id_t>>(),
-          fn_cancel_array_parent);
-    }
 
     // Evaluate immediately. fn_cancel_pending_job will change the contents
     // of m_pending_job_map_ and invalidate the end() of
@@ -6554,7 +6532,8 @@ void JobScheduler::SpliceFinalArrayParentsFromPendingMapNoLock_(
           bundle.array_job_id);
       continue;
     }
-    DelDeadlineTimer_(bundle.array_job_id);
+    m_job_deadline_timer_del_queue_.enqueue(bundle.array_job_id);
+    m_job_deadline_timer_del_async_handle_->send();
     bundle.parent_job = std::move(it->second);
     m_pending_job_map_.erase(it);
   }

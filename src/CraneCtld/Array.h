@@ -66,7 +66,6 @@ class ArrayMeta {
   std::optional<array_task_id_t> NextMaterializableTaskId() const;
   bool WillCompleteMaterializationAfter(array_task_id_t task_id) const;
   std::unique_ptr<JobInCtld> BuildChild(array_task_id_t task_id) const;
-  std::unique_ptr<JobInCtld> BuildNextChild() const;
 
   size_t RunningChildCount() const { return running_child_job_ids_.size(); }
   const absl::flat_hash_set<job_id_t>& RunningChildJobIds() const {
@@ -203,6 +202,14 @@ class ArrayManager {
   std::vector<job_id_t> RunningChildJobIdsForParent(
       job_id_t parent_job_id) const;
 
+  // Resolves a single JobIdSelector. Requires the scheduler's
+  // pending-job-map mutex held by the caller (reads m_metas_).
+  ResolvedJobIdSelectors ResolveJobIdSelector(
+      const crane::grpc::JobIdSelector& selector,
+      bool expand_array_parents) const;
+
+  // Batch wrapper: resolves every selector and merges into one result.
+  // Same locking contract as ResolveJobIdSelector.
   ResolvedJobIdSelectors ResolveJobIdSelectors(
       const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
           selectors,
@@ -217,9 +224,15 @@ class ArrayManager {
   const ArrayMeta* FindMeta_(job_id_t array_job_id) const;
 
   static bool ArrayMaterializationComplete_(const JobInCtld& parent);
+  static bool WasFinalizedBeforeRecovery_(const JobInCtld& parent);
   static void InheritChildAttributesFromParent_(JobInCtld& child);
   static const absl::flat_hash_set<job_id_t>& RunningChildJobIds_(
       const ArrayMeta& meta);
+
+  // Merges `src` into `dst`, preserving the "empty step set = all steps"
+  // sentinel semantics of job_steps.
+  static void MergeResolved_(ResolvedJobIdSelectors& dst,
+                             ResolvedJobIdSelectors&& src);
 
   CraneExpected<void> AdmitChildNoLock_(ArrayMeta& meta, JobInCtld& child);
 

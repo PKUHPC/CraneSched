@@ -664,7 +664,7 @@ void MongodbClient::AppendJobIdSelectorClause_(
 
       // Querying a plain selector against an array parent should also surface
       // every materialized child, matching the in-memory expand_array_parents
-      // behavior in ResolveJobIdSelectors.
+      // behavior in ResolveJobIdSelector.
       or_array.append([&](sub_document match_doc) {
         match_doc.append(
             kvp("array_job_id", static_cast<std::int32_t>(selector.job_id())));
@@ -673,9 +673,17 @@ void MongodbClient::AppendJobIdSelectorClause_(
   }));
 }
 
-template <typename K>
+// Step filter map keyed by (job_id, array_task_id). The sentinel kNoArrayTaskId
+// (UINT32_MAX-1, Slurm NO_VAL) stands for "no array_task_id" — i.e. a plain
+// job_id selector or the array parent itself. CheckJobValidity bounds task
+// counts via kMaxArrayTaskCount, so a real array_task_id never reaches the
+// sentinel value.
+using RequestedStepMap =
+    absl::flat_hash_map<std::pair<job_id_t, array_task_id_t>,
+                        std::unordered_set<step_id_t>>;
+
 static void MergeRequestedSteps_(
-    std::unordered_map<K, std::unordered_set<step_id_t>>* req_steps, K key,
+    RequestedStepMap* req_steps, std::pair<job_id_t, array_task_id_t> key,
     const google::protobuf::RepeatedField<uint32_t>& steps) {
   // Empty `steps` is the "all steps" sentinel: once a key has been inserted
   // with an empty set, later non-empty inputs must not narrow it.
@@ -687,35 +695,21 @@ static void MergeRequestedSteps_(
   }
 }
 
-static uint64_t ArrayTaskStepKey_(job_id_t array_job_id,
-                                  array_task_id_t task_id) {
-  return (static_cast<uint64_t>(array_job_id) << 32) |
-         static_cast<uint64_t>(task_id);
-}
-
-struct RequestedStepMaps {
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> by_job_id;
-  std::unordered_map<uint64_t, std::unordered_set<step_id_t>> by_array_task;
-};
-
-static RequestedStepMaps BuildRequestedStepMaps_(
+static RequestedStepMap BuildRequestedStepMap_(
     const crane::grpc::QueryJobsInfoRequest* request) {
-  RequestedStepMaps maps;
+  RequestedStepMap map;
   for (const auto& selector : request->filter_job_ids()) {
-    if (selector.has_array_task_id()) {
-      auto key = ArrayTaskStepKey_(selector.job_id(), selector.array_task_id());
-      MergeRequestedSteps_(&maps.by_array_task, key, selector.steps());
-    } else {
-      MergeRequestedSteps_(&maps.by_job_id, selector.job_id(),
-                           selector.steps());
-    }
+    array_task_id_t task_id = selector.has_array_task_id()
+                                  ? selector.array_task_id()
+                                  : kNoArrayTaskId;
+    MergeRequestedSteps_(&map, {selector.job_id(), task_id}, selector.steps());
   }
-  return maps;
+  return map;
 }
 
 static std::optional<std::unordered_set<step_id_t>> RequestedStepsForJob_(
     job_id_t job_id, int64_t array_job_id, int64_t array_task_id,
-    const RequestedStepMaps& maps) {
+    const RequestedStepMap& map) {
   std::optional<std::unordered_set<step_id_t>> requested_steps;
 
   auto merge = [&requested_steps](const std::unordered_set<step_id_t>* steps) {
@@ -733,22 +727,21 @@ static std::optional<std::unordered_set<step_id_t>> RequestedStepsForJob_(
   };
 
   if (array_job_id >= 0 && array_task_id >= 0) {
-    auto array_it = maps.by_array_task.find(
-        ArrayTaskStepKey_(static_cast<job_id_t>(array_job_id),
-                          static_cast<array_task_id_t>(array_task_id)));
-    if (array_it != maps.by_array_task.end()) {
-      merge(&array_it->second);
+    if (auto it = map.find({static_cast<job_id_t>(array_job_id),
+                            static_cast<array_task_id_t>(array_task_id)});
+        it != map.end()) {
+      merge(&it->second);
     }
 
-    auto parent_it = maps.by_job_id.find(static_cast<job_id_t>(array_job_id));
-    if (parent_it != maps.by_job_id.end()) {
-      merge(&parent_it->second);
+    if (auto it = map.find(
+            {static_cast<job_id_t>(array_job_id), kNoArrayTaskId});
+        it != map.end()) {
+      merge(&it->second);
     }
   }
 
-  auto job_it = maps.by_job_id.find(job_id);
-  if (job_it != maps.by_job_id.end()) {
-    merge(&job_it->second);
+  if (auto it = map.find({job_id, kNoArrayTaskId}); it != map.end()) {
+    merge(&it->second);
   }
   return requested_steps;
 }
@@ -765,7 +758,7 @@ bool MongodbClient::FetchJobRecords(
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
     size_t limit) {
   document filter;
-  auto req_step_maps = BuildRequestedStepMaps_(request);
+  auto req_step_map = BuildRequestedStepMap_(request);
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
   if (has_submit_time_interval) {
@@ -1054,7 +1047,7 @@ bool MongodbClient::FetchJobRecords(
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
       auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
-                                             array_task_id, req_step_maps);
+                                             array_task_id, req_step_map);
       for (const auto& elem : steps_elem.get_array().value) {
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
@@ -1076,7 +1069,7 @@ bool MongodbClient::FetchJobStepRecords(
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
   if (job_info_map->empty()) return true;
   document filter;
-  auto req_step_maps = BuildRequestedStepMaps_(request);
+  auto req_step_map = BuildRequestedStepMap_(request);
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
   if (has_submit_time_interval) {
@@ -1239,7 +1232,7 @@ bool MongodbClient::FetchJobStepRecords(
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
       auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
-                                             array_task_id, req_step_maps);
+                                             array_task_id, req_step_map);
       for (const auto& elem : steps_elem.get_array().value) {
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
