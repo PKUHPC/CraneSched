@@ -804,8 +804,8 @@ void ParseConfig(int argc, char** argv) {
           NodeTopoInfo node_topo;
           if (node["sockets"]) {
             uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
-            uint32_t cpu_count = static_cast<uint32_t>(
-                node_res->GetCpuSet().core_ids.size());
+            uint32_t cpu_count =
+                static_cast<uint32_t>(node_res->GetCpuSet().core_ids.size());
             if (sockets_val == 0) {
               CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
                           node["name"].Scalar());

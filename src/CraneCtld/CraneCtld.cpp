@@ -497,9 +497,8 @@ void ParseConfig(int argc, char** argv) {
           if (node["sockets"]) {
             uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
             if (sockets_val == 0) {
-              CRANE_ERROR(
-                  "Invalid sockets=0 for node '{}'. Resetting to 1.",
-                  node["name"].Scalar());
+              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
+                          node["name"].Scalar());
               sockets_val = 1;
             } else if (sockets_val > node_ptr->cpu) {
               CRANE_WARN(

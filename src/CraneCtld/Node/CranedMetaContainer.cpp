@@ -67,8 +67,7 @@ void CranedMetaContainer::CranedUp(
       CRANE_WARN(
           "Craned {} reports sockets={} but config has sockets={}; "
           "using reported value.",
-          craned_id, reported,
-          node_meta->static_meta.node_topo_info.sockets);
+          craned_id, reported, node_meta->static_meta.node_topo_info.sockets);
     }
     node_meta->static_meta.node_topo_info.sockets = reported;
   }
@@ -348,7 +347,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->memory_bytes);
     static_meta.res.GetGres() =
         config.Nodes.at(craned_name)->dedicated_resource;
-    static_meta.node_topo_info.sockets = config.Nodes.at(craned_name)->node_topo_info.sockets;
+    static_meta.node_topo_info.sockets =
+        config.Nodes.at(craned_name)->node_topo_info.sockets;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
@@ -1135,7 +1135,8 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
       craned_meta.static_meta.partition_ids.end());
 
   // Set physical CPU socket count from static configuration.
-  craned_info->mutable_node_topo_info()->set_sockets(craned_meta.static_meta.node_topo_info.sockets);
+  craned_info->mutable_node_topo_info()->set_sockets(
+      craned_meta.static_meta.node_topo_info.sockets);
 }
 
 }  // namespace Ctld

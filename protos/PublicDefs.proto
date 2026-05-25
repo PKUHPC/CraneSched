@@ -685,11 +685,11 @@ message StepInfo {
 
 // Physical CPU topology of a node or job topology constraint.
 message NodeTopoInfo {
-  uint32 boards           = 1;
-  uint32 sockets          = 2;
+  uint32 boards = 1;
+  uint32 sockets = 2;
   uint32 cores_per_socket = 3;
   uint32 threads_per_core = 4;
-  uint32 total_cpus       = 5;
+  uint32 total_cpus = 5;
 }
 
 message PartitionInfo {
