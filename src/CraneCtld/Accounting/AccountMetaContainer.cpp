@@ -508,21 +508,20 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
 
 bool AccountMetaContainer::CheckGres_(const GresMap& device_req,
                                       const GresMap& device_total) {
-  for (const auto& [lhs_name, lhs_cnt] : device_req) {
-    auto rhs_it = device_total.find(lhs_name);
-    // Requests for unrecorded devices should not be restricted.
-    if (rhs_it == device_total.end()) continue;
+  for (const auto& [name, lhs] : device_req) {
+    auto rhs_it = device_total.find(name);
+    if (rhs_it == device_total.end()) return true;
 
-    const auto& [lhs_untyped_cnt, lhs_typed_cnt_map] = lhs_cnt;
-    const auto& [rhs_untyped_cnt, rhs_typed_cnt_map] = rhs_it->second;
+    const auto& rhs = rhs_it->second;
 
-    if (lhs_untyped_cnt > rhs_untyped_cnt) return false;
+    // Check total
+    if (lhs.total > rhs.total) return false;
 
-    for (const auto& [lhs_type, lhs_type_cnt] : lhs_typed_cnt_map) {
-      auto rhs_type_it = rhs_typed_cnt_map.find(lhs_type);
-      if (rhs_type_it == rhs_typed_cnt_map.end()) continue;
-
-      if (lhs_type_cnt > rhs_type_it->second) return false;
+    // Check each specified type
+    for (const auto& [type, lhs_cnt] : lhs.specified) {
+      auto rhs_it = rhs.specified.find(type);
+      if (rhs_it == rhs.specified.end()) return true;
+      if (lhs_cnt > rhs_it->second) return false;
     }
   }
 
