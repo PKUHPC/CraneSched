@@ -137,11 +137,10 @@ struct PdJobInScheduler {
 
   bool is_scheduled() const { return reason.empty(); }
 
-  // True iff this candidate represents an array parent/root. On successful
-  // allocation the scheduler calls ArrayManager::ExpandChildWithAllocation
-  // to materialize a child inheriting this allocation, rather than running
-  // the parent itself.
-  bool is_array_parent_candidate{false};
+  // True iff this candidate represents an array parent template. On successful
+  // allocation the scheduler asks ArrayManager to materialize a child
+  // inheriting this allocation, rather than running the parent itself.
+  bool materializes_array_child{false};
 
   PdJobInScheduler(JobInCtld* job)
       : job_id(job->JobId()),
@@ -1048,6 +1047,10 @@ class JobScheduler {
                          crane::grpc::ModifyJobReply* response,
                          std::vector<job_id_t>* job_ids);
 
+  void CollectJobIdsForModify(const crane::grpc::ModifyJobRequest& request,
+                              crane::grpc::ModifyJobReply* response,
+                              std::vector<job_id_t>* job_ids);
+
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
@@ -1243,8 +1246,6 @@ class JobScheduler {
   }
 
  private:
-  JobInCtld* FindJobInPendingOrRunningNoLock_(job_id_t job_id);
-
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1256,18 +1257,12 @@ class JobScheduler {
 
   static void ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
 
-  // For each FinalizedArrayRoot bundle whose root_job is nullptr, move the
-  // parent unique_ptr out of m_pending_job_map_ into bundle.root_job. Must
-  // be called with m_pending_job_map_mtx_ held.
-  void SpliceFinalArrayRootsFromPendingMapNoLock_(
-      std::vector<ArrayManager::FinalizedArrayRoot>& roots);
-
-  // Persist a real history record for an array task that was cancelled
-  // before it was ever materialized. Allocates a job_id via the embedded
-  // DB, writes the cancelled job to MongoDB, then purges the transient
-  // pending-DB entry. Must be called with m_pending_job_map_mtx_ held.
-  void PersistCancelledVirtualTaskNoLock_(job_id_t array_job_id,
-                                          array_task_id_t task_id);
+  // Move the parent unique_ptr out of m_pending_job_map_ into each
+  // bundle.parent_job. Must be called with m_pending_job_map_mtx_ held.
+  // Caller guarantees every bundle.array_job_id is present in the pending map.
+  void SpliceFinalArrayParentsFromPendingMapNoLock_(
+      std::vector<ArrayManager::FinalizedArrayParent>& parents)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
   static void CallPluginHookForFinalJobs_(
       std::unordered_set<JobInCtld*> const& jobs);
@@ -1278,6 +1273,9 @@ class JobScheduler {
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
                                   crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
+  void CancelRunningJobNoLock_(JobInCtld* job,
+                               crane::grpc::TerminateSource terminate_source =
+                                   crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
@@ -1386,7 +1384,7 @@ class JobScheduler {
   struct CancelPendingJobQueueElem {
     std::unique_ptr<JobInCtld> job;
     std::string reason;
-    crane::grpc::JobStatus finish_status;
+    crane::grpc::JobStatus finish_status{crane::grpc::JobStatus::Cancelled};
   };
 
   struct CancelPendingStepQueueElem {
@@ -1407,9 +1405,17 @@ class JobScheduler {
         crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
+  struct CancelArrayParentQueueElem {
+    job_id_t parent_job_id;
+    uint32_t exit_code;
+    crane::grpc::JobStatus finish_status;
+    bool terminate_running_children;
+  };
+
   using CancelJobQueueElem =
       std::variant<CancelPendingJobQueueElem, CancelPendingStepQueueElem,
-                   CancelRunningJobQueueElem, CancelRunningJobByIdElem>;
+                   CancelRunningJobQueueElem, CancelRunningJobByIdElem,
+                   CancelArrayParentQueueElem>;
 
   std::shared_ptr<uvw::async_handle> m_cancel_job_async_handle_;
   ConcurrentQueue<CancelJobQueueElem> m_cancel_job_queue_;

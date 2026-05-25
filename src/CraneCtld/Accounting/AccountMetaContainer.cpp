@@ -156,11 +156,12 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningJob(
       "Malloc QOS {} resource for recover job {} of user {} and account {}.",
       job.qos, job.JobId(), job.Username(), job.account);
 
-  g_account_meta_container->UserAddJob(job.Username());
+  uint32_t submit_jobs_count = job.IsArrayChild() ? 0u : 1u;
+  g_account_meta_container->UserAddJob(job.Username(), submit_jobs_count);
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = submit_jobs_count,
                              .wall_time = job.time_limit};
 
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -220,7 +221,7 @@ void AccountMetaContainer::FreeQosResource(const JobInCtld& job) {
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = job.IsArrayChild() ? 0u : 1u,
                              .wall_time = job.time_limit};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -319,8 +320,8 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
           return;
         }
 
-        // Running/TRES limits are per-task; bulk submit (array) does not
-        // multiply them because only one task runs per "slot" at a time.
+        // DenyOnLimit validates one prospective task here. Array children are
+        // still checked individually when materialized and scheduled.
         if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs_per_user) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;

@@ -613,6 +613,9 @@ class MongodbClient {
     }
   }
 
+  std::optional<crane::grpc::ArraySpec> ViewToArraySpec_(
+      const bsoncxx::document::view& view);
+
   bool ViewValueOr_(const bsoncxx::document::element& view_value,
                     const bool& default_value) {
     if (!view_value) {
@@ -655,6 +658,9 @@ class MongodbClient {
   document JobInCtldToDocument_(JobInCtld* job);
   document JobInEmbeddedDbToDocument_(
       crane::grpc::JobInEmbeddedDb const& job_in_db);
+
+  void AppendJobIdSelectorClause_(
+      const crane::grpc::QueryJobsInfoRequest* request, document& filter);
 
   document StepInCtldToDocument_(StepInCtld* step);
   document StepInEmbeddedDbToDocument_(

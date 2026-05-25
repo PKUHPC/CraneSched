@@ -550,13 +550,6 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
     array_task->set_array_job_id(identity->array_job_id);
     array_task->set_task_id(identity->task_id);
   }
-  if (auto task_meta = job->GetArrayTaskMeta(); task_meta.has_value()) {
-    auto* array_task_meta = job_to_d.mutable_array_task_meta();
-    array_task_meta->set_task_count(task_meta->task_count);
-    array_task_meta->set_task_min(task_meta->task_min);
-    array_task_meta->set_task_max(task_meta->task_max);
-    array_task_meta->set_task_step(task_meta->task_step);
-  }
   return job_to_d;
 }
 
@@ -1609,8 +1602,13 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
-void JobInCtld::SetArrayChildrenExpanded(bool expanded) {
-  if (expanded) {
+bool JobInCtld::ArrayMaterializationComplete() const {
+  return runtime_attr.has_array_children_expanded() &&
+         runtime_attr.array_children_expanded();
+}
+
+void JobInCtld::SetArrayMaterializationComplete(bool complete) {
+  if (complete) {
     runtime_attr.set_array_children_expanded(true);
   } else {
     runtime_attr.clear_array_children_expanded();
@@ -1630,22 +1628,6 @@ std::optional<JobInCtld::ArrayTaskIdentity> JobInCtld::GetArrayTaskIdentity()
   }
   return ArrayTaskIdentity{runtime_attr.array_task().array_job_id(),
                            runtime_attr.array_task().task_id()};
-}
-
-std::optional<JobInCtld::ArrayTaskMeta> JobInCtld::GetArrayTaskMeta() const {
-  if (!job_to_ctld.has_array_spec()) {
-    return std::nullopt;
-  }
-
-  const auto& array_spec = job_to_ctld.array_spec();
-  if (ArrayUtil::TaskCount(array_spec) == 0) {
-    return std::nullopt;
-  }
-
-  auto task_meta = ArrayUtil::BuildTaskMeta(array_spec);
-
-  return ArrayTaskMeta{task_meta.task_count(), task_meta.task_min(),
-                       task_meta.task_max(), task_meta.task_step()};
 }
 
 void JobInCtld::SetCachedPriority(double val) {
@@ -1692,6 +1674,15 @@ void JobInCtld::TriggerDependencyEvents(
   for (job_id_t dependent_id : dependents[dep_type]) {
     g_job_scheduler->AddDependencyEvent(dependent_id, job_id, event_time);
   }
+}
+
+void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
+  uint32_t exit_code = ExitCode();
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY, end_time);
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_OK,
+                          exit_code == 0 ? end_time : absl::InfiniteFuture());
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_NOT_OK,
+                          exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
@@ -1866,9 +1857,7 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_submit_hostname(submit_hostname);
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
-    job_info->mutable_array_spec()->CopyFrom(*array_spec);
-    job_info->mutable_array_task_meta()->CopyFrom(
-        ArrayUtil::BuildTaskMeta(*array_spec));
+    *job_info->mutable_array_spec() = *array_spec;
   }
 
   if (auto identity = GetArrayTaskIdentity(); identity.has_value()) {
@@ -1922,8 +1911,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_exit_code(runtime_attr.exit_code());
   job_info->set_priority(cached_priority);  // FIXME: A BUG?
 
-  job_info->set_status(status);
-  if (Status() == crane::grpc::Pending) {
+  auto job_status = EffectiveDisplayStatus();
+  job_info->set_status(job_status);
+  if (job_status == crane::grpc::Pending) {
     job_info->set_pending_reason(pending_reason);
   } else {
     job_info->set_craned_list(allocated_craneds_regex);

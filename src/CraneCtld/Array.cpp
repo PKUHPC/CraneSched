@@ -41,6 +41,14 @@ uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec) {
   return (array_spec.end() - array_spec.start()) / Stride(array_spec) + 1;
 }
 
+uint32_t EffectiveRunLimit(const crane::grpc::ArraySpec& array_spec) {
+  uint32_t task_count = TaskCount(array_spec);
+  if (!array_spec.has_max_concurrent() || array_spec.max_concurrent() == 0) {
+    return task_count;
+  }
+  return std::min(array_spec.max_concurrent(), task_count);
+}
+
 bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
                     array_task_id_t task_id) {
   if (task_id < array_spec.start() || task_id > array_spec.end()) {
@@ -54,55 +62,21 @@ uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
   return array_spec.start() + index * Stride(array_spec);
 }
 
-crane::grpc::ArrayTaskMeta BuildTaskMeta(
-    const crane::grpc::ArraySpec& array_spec) {
-  crane::grpc::ArrayTaskMeta task_meta;
-  task_meta.set_task_count(TaskCount(array_spec));
-  task_meta.set_task_min(array_spec.start());
-  task_meta.set_task_max(array_spec.end());
-  task_meta.set_task_step(Stride(array_spec));
-  return task_meta;
-}
-
-bool BuildVirtualArrayChildJobInfo(const JobInCtld& array_root,
-                                   uint32_t task_id,
-                                   crane::grpc::JobInfo* job_info) {
-  const auto* array_spec = array_root.GetArraySpec();
-  if (array_spec == nullptr || !ContainsTaskId(*array_spec, task_id)) {
-    return false;
-  }
-
-  array_root.SetFieldsOfJobInfo(job_info);
-  job_info->set_job_id(0);
-  auto* array_task = job_info->mutable_array_task();
-  array_task->set_array_job_id(array_root.JobId());
-  array_task->set_task_id(task_id);
-  job_info->set_status(crane::grpc::Pending);
-  job_info->mutable_start_time()->Clear();
-  job_info->mutable_end_time()->Clear();
-  job_info->mutable_elapsed_time()->Clear();
-  job_info->set_craned_list("");
-  job_info->mutable_execution_node()->Clear();
-  job_info->set_exit_code(0);
-  *job_info->mutable_allocated_res_view() = crane::grpc::ResourceView{};
-  job_info->clear_step_info_list();
-  return true;
-}
-
 }  // namespace ArrayUtil
 
 // ----------------------------------------------------------------------------
 // ArrayMeta
 // ----------------------------------------------------------------------------
 
-ArrayMeta::ArrayMeta(JobInCtld* root_job) : root_job_(root_job) {}
-
-bool ArrayMeta::IsTaskMaterialized(array_task_id_t task_id) const {
-  return child_job_id_by_task_id_.contains(task_id);
-}
-
-size_t ArrayMeta::MaterializedTaskCount() const {
-  return child_job_id_by_task_id_.size();
+ArrayMeta::ArrayMeta(JobInCtld* parent_job) : parent_job_(parent_job) {
+  CRANE_ASSERT(parent_job_ != nullptr);
+  if (parent_job_->ArrayMaterializationComplete() &&
+      IsFinishedStepStatus(parent_job_->Status())) {
+    terminal_status_override_ =
+        std::pair{parent_job_->Status(), parent_job_->ExitCode()};
+    parent_start_event_triggered_ = true;
+    parent_job_->SetArrayParentStarted(true);
+  }
 }
 
 std::optional<job_id_t> ArrayMeta::ChildJobIdOfTask(
@@ -114,27 +88,191 @@ std::optional<job_id_t> ArrayMeta::ChildJobIdOfTask(
   return it->second;
 }
 
-void ArrayMeta::TrackMaterialized(JobInCtld* child) {
+std::optional<array_task_id_t> ArrayMeta::NextMaterializableTaskId() const {
+  if (parent_job_ == nullptr || !parent_job_->HasArraySpec()) {
+    return std::nullopt;
+  }
+
+  const auto& array_spec = parent_job_->JobToCtld().array_spec();
+  if (!has_any_materialized_) return array_spec.start();
+
+  // Children are materialized strictly in task-id order. Do not scan backward
+  // for gaps: after recovery, an earlier child may already have completed and
+  // been purged from embedded DB, so rematerializing that task would duplicate
+  // work.
+  uint32_t stride = ArrayUtil::Stride(array_spec);
+  if (max_materialized_task_id_ > array_spec.end() ||
+      array_spec.end() - max_materialized_task_id_ < stride) {
+    return std::nullopt;
+  }
+
+  return static_cast<array_task_id_t>(max_materialized_task_id_ + stride);
+}
+
+bool ArrayMeta::WillCompleteMaterializationAfter(
+    array_task_id_t task_id) const {
+  if (parent_job_ == nullptr || !parent_job_->HasArraySpec()) return false;
+  if (parent_job_->ArrayMaterializationComplete()) return false;
+
+  const auto& array_spec = parent_job_->JobToCtld().array_spec();
+  uint32_t task_count = ArrayUtil::TaskCount(array_spec);
+  if (task_count == 0) return false;
+
+  return task_id == ArrayUtil::TaskIdByIndex(array_spec, task_count - 1);
+}
+
+std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
+    array_task_id_t task_id) const {
+  if (parent_job_ == nullptr) return nullptr;
+
+  const auto* array_spec = parent_job_->GetArraySpec();
+  if (array_spec == nullptr ||
+      !ArrayUtil::ContainsTaskId(*array_spec, task_id)) {
+    return nullptr;
+  }
+
+  auto child = std::make_unique<JobInCtld>();
+  child->SetFieldsByJobToCtld(parent_job_->JobToCtld());
+  child->MutableJobToCtld()->clear_array_spec();
+  child->SetStatus(crane::grpc::Pending);
+  child->SetArrayTaskIdentity(parent_job_->JobId(), task_id);
+  child->SetUsername(parent_job_->Username());
+  child->qos = parent_job_->qos;
+  child->time_limit = parent_job_->time_limit;
+  child->account_chain = parent_job_->account_chain;
+  child->req_total_res_view = parent_job_->req_total_res_view;
+
+  {
+    std::list<std::string> included_list;
+    util::ParseHostList(parent_job_->JobToCtld().nodelist(), &included_list);
+    for (auto&& node : included_list)
+      child->included_nodes.emplace(std::move(node));
+  }
+  {
+    std::list<std::string> excluded_list;
+    util::ParseHostList(parent_job_->JobToCtld().excludes(), &excluded_list);
+    for (auto&& node : excluded_list)
+      child->excluded_nodes.emplace(std::move(node));
+  }
+
+  child->ntasks_per_node_min = parent_job_->ntasks_per_node_min;
+  child->ntasks_per_node_max = parent_job_->ntasks_per_node_max;
+  child->partition_priority = parent_job_->partition_priority;
+  child->qos_priority = parent_job_->qos_priority;
+  child->mandated_priority = parent_job_->mandated_priority;
+  child->SetCachedPriority(parent_job_->CachedPriority());
+  child->using_default_wckey = parent_job_->using_default_wckey;
+  child->wckey = parent_job_->wckey;
+  child->SetSubmitTime(parent_job_->SubmitTime());
+  child->deadline_time = parent_job_->deadline_time;
+  child->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(parent_job_->deadline_time));
+  return child;
+}
+
+std::unique_ptr<JobInCtld> ArrayMeta::BuildNextChild() const {
+  if (parent_job_ == nullptr || parent_job_->ArrayMaterializationComplete()) {
+    return nullptr;
+  }
+  auto next = NextMaterializableTaskId();
+  if (!next.has_value()) return nullptr;
+  return BuildChild(*next);
+}
+
+bool ArrayMeta::TrackMaterialized(JobInCtld* child) {
   CRANE_ASSERT(child != nullptr && child->IsArrayChild());
   auto task_id = child->ArrayTaskId();
   CRANE_ASSERT(task_id.has_value());
-  child_job_id_by_task_id_[*task_id] = child->JobId();
-  if (!has_any_materialized_ || *task_id > max_materialized_task_id_) {
-    max_materialized_task_id_ = *task_id;
-    has_any_materialized_ = true;
-  }
+  return TrackMaterialized(*task_id, child->JobId());
 }
 
-void ArrayMeta::MarkChildRunning(job_id_t child_job_id) {
+bool ArrayMeta::TrackMaterialized(array_task_id_t task_id,
+                                  job_id_t child_job_id) {
+  child_job_id_by_task_id_[task_id] = child_job_id;
+  if (!has_any_materialized_ || task_id > max_materialized_task_id_) {
+    max_materialized_task_id_ = task_id;
+    has_any_materialized_ = true;
+  }
+
+  if (!WillCompleteMaterializationAfter(task_id)) return false;
+  parent_job_->SetArrayMaterializationComplete(true);
+  return true;
+}
+
+void ArrayMeta::OnChildRunning(job_id_t child_job_id) {
   running_child_job_ids_.insert(child_job_id);
 }
 
-void ArrayMeta::MarkChildInactive(job_id_t child_job_id) {
+void ArrayMeta::OnChildTerminal(job_id_t child_job_id) {
   running_child_job_ids_.erase(child_job_id);
 }
 
-void ArrayMeta::MarkTaskCancelledBeforeMaterialized(array_task_id_t task_id) {
-  cancelled_before_materialized_task_ids_.insert(task_id);
+void ArrayMeta::FinishForTerminalStatus(crane::grpc::JobStatus status,
+                                        uint32_t exit_code,
+                                        absl::Time end_time) {
+  if (parent_job_ == nullptr) return;
+  // Idempotent: a parent may be finished twice (e.g. deadline timer fires
+  // concurrently with an explicit cancel). The first call wins.
+  if (terminal_status_override_.has_value()) return;
+  terminal_status_override_ = std::pair{status, exit_code};
+  // Deadline/cancel may finish an array parent before any child starts. Emit
+  // the parent's start event first so its timeline is start -> terminal.
+  if (!parent_start_event_triggered_) {
+    parent_job_->SetStartTime(end_time);
+    parent_job_->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                         end_time);
+    parent_start_event_triggered_ = true;
+    parent_job_->SetArrayParentStarted(true);
+  }
+  parent_job_->SetArrayMaterializationComplete(true);
+  parent_job_->SetStatus(status);
+  parent_job_->SetExitCode(exit_code);
+  parent_job_->SetEndTime(end_time);
+}
+
+bool ArrayMeta::MarkParentStarted(absl::Time start_time) {
+  if (parent_job_ == nullptr || parent_start_event_triggered_) return false;
+  parent_job_->SetStartTime(start_time);
+  // Parent's stored Status stays Pending while running; the "Running"
+  // representation is synthesized at query time from
+  // parent_start_event_triggered_ (mirrored to JobInCtld::array_parent_started)
+  // to keep the pending map free of Running-status entries.
+  parent_job_->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                       start_time);
+  parent_start_event_triggered_ = true;
+  parent_job_->SetArrayParentStarted(true);
+  return true;
+}
+
+bool ArrayMeta::CanSpawnMore(absl::Time now, std::string* reason) const {
+  if (parent_job_ == nullptr) {
+    if (reason != nullptr) *reason = "";
+    return false;
+  }
+  if (parent_job_->ArrayMaterializationComplete()) {
+    if (reason != nullptr) *reason = "ArrayMaterializationComplete";
+    return false;
+  }
+  if (parent_job_->CancelRequested()) {
+    if (reason != nullptr) *reason = "Cancelled";
+    return false;
+  }
+  if (parent_job_->deadline_time <= now) {
+    if (reason != nullptr) *reason = "Deadline";
+    return false;
+  }
+  if (!NextMaterializableTaskId().has_value()) {
+    if (reason != nullptr) *reason = "";
+    return false;
+  }
+
+  size_t limit =
+      ArrayUtil::EffectiveRunLimit(parent_job_->JobToCtld().array_spec());
+  if (RunningChildCount() >= limit) {
+    if (reason != nullptr) *reason = "ArrayTaskLimit";
+    return false;
+  }
+  return true;
 }
 
 // ----------------------------------------------------------------------------
@@ -194,31 +332,19 @@ crane::grpc::JobStatus BuildArrayAggregateStatus(bool any_cancelled,
 // ArrayManager: static helpers
 // ----------------------------------------------------------------------------
 
-uint32_t ArrayManager::EffectiveArrayRunLimit_(const JobInCtld& root) {
-  const auto* array_spec = root.GetArraySpec();
-  if (array_spec == nullptr) {
-    return 0;
-  }
-  uint32_t task_count = ArrayUtil::TaskCount(*array_spec);
-  if (!array_spec->has_max_concurrent() || array_spec->max_concurrent() == 0) {
-    return task_count;
-  }
-  return std::min(array_spec->max_concurrent(), task_count);
-}
-
-bool ArrayManager::ArrayChildrenExpanded_(const JobInCtld& root) {
-  return root.RuntimeAttr().has_array_children_expanded() &&
-         root.RuntimeAttr().array_children_expanded();
+bool ArrayManager::ArrayMaterializationComplete_(const JobInCtld& parent) {
+  return parent.ArrayMaterializationComplete();
 }
 
 std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
     const ArrayMeta& meta, const std::unordered_set<JobInCtld*>& final_jobs) {
-  job_id_t array_job_id = meta.Root().JobId();
-  // Cancelled-before-materialized tasks are tracked in-memory and their
-  // MongoDB inserts may be pending on a background worker when finalize
-  // runs. Treat any presence in that set as a cancellation signal so the
-  // aggregate status is correct regardless of insert ordering.
-  bool any_cancelled = !meta.cancelled_before_materialized_task_ids_.empty();
+  if (auto override_status = meta.TerminalStatusOverride();
+      override_status.has_value()) {
+    return *override_status;
+  }
+
+  job_id_t array_job_id = meta.Parent().JobId();
+  bool any_cancelled = false;
   bool any_exceed_time_limit = false;
   bool any_out_of_memory = false;
   bool any_failed = false;
@@ -253,195 +379,154 @@ std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
           max_exit_code};
 }
 
-// Slurm-parity: the array parent already reserved a submit-slot per task at
-// submission time. Child materialization owes no independent QoS submit
-// check — it only inherits the parent's qos/time_limit into its own proto.
+// The array parent owns submit-slot accounting for the effective concurrent
+// task limit. Child materialization owes no independent QoS submit check.
+// BuildChild copies effective parent fields into the child, and this mirrors
+// them into the child proto before persistence.
 void ArrayManager::InheritChildAttributesFromParent_(JobInCtld& child) {
   child.MutableJobToCtld()->set_qos(child.qos);
   child.MutableJobToCtld()->mutable_time_limit()->set_seconds(
       ToInt64Seconds(child.time_limit));
 }
 
+const absl::flat_hash_set<job_id_t>& ArrayManager::RunningChildJobIds_(
+    const ArrayMeta& meta) {
+  return meta.RunningChildJobIds();
+}
+
 // ----------------------------------------------------------------------------
 // ArrayManager: lookup + per-meta projections
 // ----------------------------------------------------------------------------
 
-ArrayMeta* ArrayManager::FindMeta(job_id_t array_job_id) {
+ArrayMeta* ArrayManager::FindMeta_(job_id_t array_job_id) {
   auto it = m_metas_.find(array_job_id);
   return it == m_metas_.end() ? nullptr : it->second.get();
 }
 
-const ArrayMeta* ArrayManager::FindMeta(job_id_t array_job_id) const {
+const ArrayMeta* ArrayManager::FindMeta_(job_id_t array_job_id) const {
   auto it = m_metas_.find(array_job_id);
   return it == m_metas_.end() ? nullptr : it->second.get();
-}
-
-std::vector<job_id_t> ArrayManager::RunningChildJobIds(
-    const ArrayMeta& meta) const {
-  return {meta.running_child_job_ids_.begin(),
-          meta.running_child_job_ids_.end()};
-}
-
-bool ArrayManager::IsRootReadyToFinalizeNoLock(const ArrayMeta& meta) const {
-  if (meta.root_job_ == nullptr) return false;
-  return ArrayChildrenExpanded_(meta.Root()) && meta.ActiveChildCount() == 0;
-}
-
-std::vector<array_task_id_t> ArrayManager::AllTaskIdsNoLock(
-    job_id_t array_job_id) const {
-  std::vector<array_task_id_t> out;
-  const auto* meta = FindMeta(array_job_id);
-  if (meta == nullptr || meta->root_job_ == nullptr) return out;
-  const auto& spec = meta->Root().JobToCtld().array_spec();
-  uint32_t stride = ArrayUtil::Stride(spec);
-  if (spec.end() < spec.start()) return out;
-  out.reserve(ArrayUtil::TaskCount(spec));
-  for (array_task_id_t t = spec.start(); t <= spec.end(); t += stride) {
-    out.push_back(t);
-  }
-  return out;
-}
-
-bool ArrayManager::FlipExpandedIfFullyAccountedNoLock_(ArrayMeta* meta) const {
-  if (meta == nullptr || meta->root_job_ == nullptr) return false;
-  auto& root = meta->MutableRoot();
-  if (ArrayChildrenExpanded_(root)) return false;
-  uint32_t task_count = ArrayUtil::TaskCount(root.JobToCtld().array_spec());
-  size_t accounted = meta->MaterializedTaskCount() +
-                     meta->cancelled_before_materialized_task_ids_.size();
-  if (accounted < task_count) return false;
-  root.SetArrayChildrenExpanded(true);
-  return true;
 }
 
 // ----------------------------------------------------------------------------
 // ArrayManager: registration + recovery
 // ----------------------------------------------------------------------------
 
-std::shared_ptr<ArrayMeta> ArrayManager::RegisterParent(JobInCtld* parent) {
+void ArrayManager::RegisterParent(JobInCtld* parent) {
   CRANE_ASSERT(parent != nullptr && parent->IsArrayParent());
 
   if (parent->qos.empty()) {
     parent->qos = parent->JobToCtld().qos();
   }
 
-  job_id_t root_id = parent->JobId();
-  auto meta = std::make_shared<ArrayMeta>(parent);
-  m_metas_[root_id] = meta;
-  return meta;
+  job_id_t parent_id = parent->JobId();
+  m_metas_[parent_id] = std::unique_ptr<ArrayMeta>(new ArrayMeta(parent));
+}
+
+CraneExpected<void> ArrayManager::BindRecoveredChildrenForParent(
+    job_id_t array_job_id, const std::vector<JobInCtld*>& children) {
+  auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr || meta->ParentPtr() == nullptr) {
+    return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
+  }
+
+  for (JobInCtld* child : children) {
+    if (child == nullptr || !child->IsArrayChild() ||
+        !child->ArrayJobId().has_value() ||
+        child->ArrayJobId().value() != array_job_id ||
+        !child->ArrayTaskId().has_value() ||
+        !ArrayUtil::ContainsTaskId(meta->Parent().JobToCtld().array_spec(),
+                                   child->ArrayTaskId().value())) {
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    }
+  }
+
+  bool materialization_complete = false;
+  for (JobInCtld* child : children) {
+    materialization_complete |= meta->TrackMaterialized(child);
+    meta->OnChildRunning(child->JobId());
+    meta->MarkParentStarted(child->StartTime());
+  }
+
+  if (materialization_complete) {
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+            0, meta->Parent().JobDbId(), meta->Parent().RuntimeAttr())) {
+      CRANE_ERROR("Failed to persist recovered array parent #{} runtime attr.",
+                  array_job_id);
+    }
+  }
+  return {};
+}
+
+CraneExpected<void> ArrayManager::TrackRecoveredTerminalChild(
+    JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild() ||
+      !child->ArrayJobId().has_value()) {
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+
+  auto task_id = child->ArrayTaskId();
+  if (!task_id.has_value()) {
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+
+  return TrackRecoveredTerminalChild(child->ArrayJobId().value(), *task_id,
+                                     child->JobId());
+}
+
+CraneExpected<void> ArrayManager::TrackRecoveredTerminalChild(
+    job_id_t array_job_id, array_task_id_t task_id, job_id_t child_job_id) {
+  auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr || meta->ParentPtr() == nullptr) {
+    return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
+  }
+  if (!ArrayUtil::ContainsTaskId(meta->Parent().JobToCtld().array_spec(),
+                                 task_id)) {
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+
+  if (meta->TrackMaterialized(task_id, child_job_id)) {
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+            0, meta->Parent().JobDbId(), meta->Parent().RuntimeAttr())) {
+      CRANE_ERROR("Failed to persist recovered array parent #{} runtime attr.",
+                  array_job_id);
+    }
+  }
+  return {};
+}
+
+void ArrayManager::RecoverAccountingForRegisteredParents() {
+  for (const auto& [array_job_id, meta] : m_metas_) {
+    if (meta == nullptr || meta->ParentPtr() == nullptr) continue;
+    JobInCtld& parent = meta->MutableParent();
+    uint32_t reserve_count =
+        ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec());
+    g_account_meta_container->MallocQosSubmitResource(parent, reserve_count);
+    g_account_meta_container->UserAddJob(parent.Username(), reserve_count);
+  }
 }
 
 // ----------------------------------------------------------------------------
 // ArrayManager: materialization
 // ----------------------------------------------------------------------------
 
-std::unique_ptr<JobInCtld> ArrayManager::BuildChildJob_(
-    const JobInCtld& array_parent, uint32_t task_id) const {
-  const auto* array_spec = array_parent.GetArraySpec();
-  if (array_spec == nullptr ||
-      !ArrayUtil::ContainsTaskId(*array_spec, task_id)) {
-    return nullptr;
-  }
-
-  auto child = std::make_unique<JobInCtld>();
-  child->SetFieldsByJobToCtld(array_parent.JobToCtld());
-  child->SetStatus(crane::grpc::Pending);
-  child->SetArrayTaskIdentity(array_parent.JobId(), task_id);
-  child->SetUsername(array_parent.Username());
-  child->qos = array_parent.qos;
-  child->account_chain = array_parent.account_chain;
-  child->req_total_res_view = array_parent.req_total_res_view;
-
-  {
-    std::list<std::string> included_list;
-    util::ParseHostList(array_parent.JobToCtld().nodelist(), &included_list);
-    for (auto&& node : included_list)
-      child->included_nodes.emplace(std::move(node));
-  }
-  {
-    std::list<std::string> excluded_list;
-    util::ParseHostList(array_parent.JobToCtld().excludes(), &excluded_list);
-    for (auto&& node : excluded_list)
-      child->excluded_nodes.emplace(std::move(node));
-  }
-
-  child->ntasks_per_node_min = array_parent.ntasks_per_node_min;
-  child->ntasks_per_node_max = array_parent.ntasks_per_node_max;
-  child->partition_priority = array_parent.partition_priority;
-  child->qos_priority = array_parent.qos_priority;
-  child->mandated_priority = array_parent.mandated_priority;
-  child->SetCachedPriority(array_parent.CachedPriority());
-  child->using_default_wckey = array_parent.using_default_wckey;
-  child->wckey = array_parent.wckey;
-  child->SetSubmitTime(array_parent.SubmitTime());
-  return child;
-}
-
-std::optional<array_task_id_t> ArrayManager::NextTaskIdNoLock_(
-    const ArrayMeta& meta) const {
-  const auto& root = meta.Root();
-  const auto& array_spec = root.JobToCtld().array_spec();
-  uint32_t stride = ArrayUtil::Stride(array_spec);
-  array_task_id_t end = array_spec.end();
-
-  array_task_id_t candidate =
-      meta.has_any_materialized_
-          ? static_cast<array_task_id_t>(meta.max_materialized_task_id_ +
-                                         stride)
-          : static_cast<array_task_id_t>(array_spec.start());
-  // Skip any task ids the user cancelled before materialization. The skipped
-  // tasks remain counted in the "fully expanded" task count so the root can
-  // eventually finalize.
-  while (candidate <= end &&
-         meta.IsTaskCancelledBeforeMaterialized(candidate)) {
-    candidate += stride;
-  }
-  if (candidate > end) return std::nullopt;
-  return candidate;
-}
-
-std::unique_ptr<JobInCtld> ArrayManager::BuildNextChildNoLock_(
-    ArrayMeta* meta) const {
-  if (meta == nullptr || meta->root_job_ == nullptr ||
-      ArrayChildrenExpanded_(meta->Root())) {
-    return nullptr;
-  }
-  auto next = NextTaskIdNoLock_(*meta);
-  if (!next.has_value()) return nullptr;
-  return BuildChildJob_(meta->Root(), *next);
-}
-
-std::unique_ptr<JobInCtld> ArrayManager::BuildCancelledVirtualChildNoLock(
-    job_id_t array_job_id, array_task_id_t task_id, absl::Time now) const {
-  const auto* meta = FindMeta(array_job_id);
-  if (meta == nullptr || meta->root_job_ == nullptr) return nullptr;
-  auto child = BuildChildJob_(meta->Root(), task_id);
-  if (child == nullptr) return nullptr;
-  InheritChildAttributesFromParent_(*child);
-  child->SetStatus(crane::grpc::Cancelled);
-  child->SetStartTime(now);
-  child->SetEndTime(now);
-  child->SetExitCode(0);
-  return child;
-}
-
 CraneExpected<void> ArrayManager::AdmitChildNoLock_(ArrayMeta& meta,
                                                     JobInCtld& child) {
-  CRANE_ASSERT(meta.root_job_ != nullptr);
+  CRANE_ASSERT(meta.ParentPtr() != nullptr);
   CRANE_ASSERT(child.IsArrayChild() && child.ArrayJobId().has_value() &&
-               child.ArrayJobId().value() == meta.Root().JobId());
-  auto& root = meta.MutableRoot();
+               child.ArrayJobId().value() == meta.Parent().JobId());
+  auto& parent = meta.MutableParent();
   InheritChildAttributesFromParent_(child);
 
-  uint32_t task_count = ArrayUtil::TaskCount(root.JobToCtld().array_spec());
-  size_t accounted = meta.MaterializedTaskCount() + 1 +
-                     meta.cancelled_before_materialized_task_ids_.size();
-  bool mark_expanded = accounted == task_count;
+  auto child_task_id = child.ArrayTaskId();
+  bool mark_materialization_complete =
+      child_task_id.has_value() &&
+      meta.WillCompleteMaterializationAfter(child_task_id.value());
 
   std::vector<EmbeddedDbClient::ExtraVariableWrite> extra_writes;
-  if (mark_expanded) {
-    root.SetArrayChildrenExpanded(true);
-    extra_writes.push_back({root.JobDbId(), &root.RuntimeAttr()});
+  if (mark_materialization_complete) {
+    parent.SetArrayMaterializationComplete(true);
+    extra_writes.push_back({parent.JobDbId(), &parent.RuntimeAttr()});
   }
 
   std::vector<JobInCtld*> one{&child};
@@ -452,9 +537,9 @@ CraneExpected<void> ArrayManager::AdmitChildNoLock_(ArrayMeta& meta,
   if (!g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
           one, extra_writes)) {
     CRANE_ERROR("Failed to persist array child for parent job #{}.",
-                root.JobId());
-    if (mark_expanded) {
-      root.SetArrayChildrenExpanded(false);
+                parent.JobId());
+    if (mark_materialization_complete) {
+      parent.SetArrayMaterializationComplete(false);
     }
     return std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED);
   }
@@ -464,254 +549,280 @@ CraneExpected<void> ArrayManager::AdmitChildNoLock_(ArrayMeta& meta,
 }
 
 // ----------------------------------------------------------------------------
-// ArrayManager: summary + finalize
+// ArrayManager: finalize
 // ----------------------------------------------------------------------------
 
-void ArrayManager::RefreshRootSummaryStateNoLock_(ArrayMeta* meta) {
-  if (meta == nullptr || meta->root_job_ == nullptr) return;
-  auto& root = meta->MutableRoot();
+void ArrayManager::TryFinalizeParentNoLock_(
+    ArrayMeta* meta, std::vector<FinalizedArrayParent>* final_parents,
+    const std::unordered_set<JobInCtld*>& final_jobs) {
+  if (meta == nullptr || meta->ParentPtr() == nullptr) return;
 
-  // Aggregate terminal statuses derived from children are authoritative.
-  if (IsFinishedStepStatus(root.Status())) return;
-
-  // Once a root has ever entered Running, keep it Running until finalize. An
-  // intermediate "all prior batch done, next batch not yet scheduled" window
-  // must not flip the status back to Pending.
-  if (root.Status() == crane::grpc::Running) return;
-
-  if (meta->RunningChildCount() > 0) {
-    root.SetStatus(crane::grpc::Running);
+  if (!ArrayMaterializationComplete_(meta->Parent()) ||
+      meta->RunningChildCount() != 0) {
     return;
   }
 
-  // No running children; only leave as Pending. Completed is assigned by
-  // TryFinalizeRootNoLock_ based on aggregated child results.
-  root.SetStatus(crane::grpc::Pending);
-}
-
-void ArrayManager::TryFinalizeRootNoLock_(
-    ArrayMeta* meta, const std::unordered_set<JobInCtld*>& final_jobs,
-    std::vector<FinalizedArrayRoot>* final_roots) {
-  if (meta == nullptr || meta->root_job_ == nullptr) return;
-
-  if (!ArrayChildrenExpanded_(meta->Root()) || meta->ActiveChildCount() != 0) {
-    RefreshRootSummaryStateNoLock_(meta);
-    return;
-  }
-
-  auto& root = meta->MutableRoot();
-  job_id_t array_job_id = root.JobId();
+  auto& parent = meta->MutableParent();
+  job_id_t array_job_id = parent.JobId();
   auto [final_status, final_exit_code] =
       BuildAggregateResult_(*meta, final_jobs);
-  root.SetStatus(final_status);
-  root.SetExitCode(final_exit_code);
+  parent.SetStatus(final_status);
+  parent.SetExitCode(final_exit_code);
   absl::Time end_time = absl::Now();
-  root.SetEndTime(end_time);
-
-  // Terminal dependency events, previously wrapped in a template helper.
-  root.TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
-                               end_time);
-  root.TriggerDependencyEvents(
-      crane::grpc::DependencyType::AFTER_OK,
-      root.ExitCode() == 0 ? end_time : absl::InfiniteFuture());
-  root.TriggerDependencyEvents(
-      crane::grpc::DependencyType::AFTER_NOT_OK,
-      root.ExitCode() != 0 ? end_time : absl::InfiniteFuture());
-
-  // Slurm-parity: the parent pre-reserved task_count submit slots at submit
-  // time; each materialized child's terminal FreeQosResource releases one.
-  // Release any leftover slots for tasks that were never materialized.
-  uint32_t task_count = ArrayUtil::TaskCount(root.JobToCtld().array_spec());
-  auto materialized = static_cast<uint32_t>(meta->MaterializedTaskCount());
-  if (task_count > materialized) {
-    uint32_t leftover = task_count - materialized;
-    g_account_meta_container->FreeQosSubmitResource(root, leftover);
+  if (!meta->ParentStartEventTriggered() &&
+      final_status == crane::grpc::JobStatus::Cancelled) {
+    parent.SetStartTime(end_time);
+    parent.TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                   end_time);
   }
+  parent.SetEndTime(end_time);
+
+  parent.TriggerTerminalDependencyEvents(end_time);
+
+  // TODO: Revisit array submit-slot accounting. Currently the parent reserves
+  // EffectiveRunLimit(array_spec) submit slots and releases them at parent
+  // finalization. If we switch to per-child submit accounting later, release
+  // one slot when each child reaches a terminal state.
+  g_account_meta_container->FreeQosSubmitResource(
+      parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
 
   auto meta_it = m_metas_.find(array_job_id);
   if (meta_it == m_metas_.end()) return;
 
-  if (final_roots != nullptr) {
-    // The scheduler owns the parent unique_ptr in m_pending_job_map_ and
-    // will splice it in once this bundle is returned. We only surface the
-    // id + meta here.
-    final_roots->push_back(FinalizedArrayRoot{/*root_job=*/nullptr,
-                                              meta_it->second, array_job_id});
+  if (final_parents != nullptr) {
+    final_parents->push_back(FinalizedArrayParent{
+        /*parent_job=*/nullptr, /*array_job_id=*/array_job_id});
   }
   m_metas_.erase(meta_it);
 }
 
-std::vector<ArrayManager::FinalizedArrayRoot>
-ArrayManager::ExtractFinalRootsById(
-    const std::unordered_set<job_id_t>& candidate_root_ids,
-    const std::unordered_set<JobInCtld*>& final_jobs) {
-  std::vector<FinalizedArrayRoot> out;
-  out.reserve(candidate_root_ids.size());
-  for (job_id_t root_id : candidate_root_ids) {
-    auto* meta = FindMeta(root_id);
-    TryFinalizeRootNoLock_(meta, final_jobs, &out);
+ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
+    job_id_t parent_job_id, crane::grpc::JobStatus status, uint32_t exit_code,
+    absl::Time end_time) {
+  FinishedParentResult result;
+  auto meta_it = m_metas_.find(parent_job_id);
+  if (meta_it == m_metas_.end()) return result;
+
+  ArrayMeta* meta = meta_it->second.get();
+  if (meta == nullptr || meta->ParentPtr() == nullptr) {
+    return result;
   }
-  return out;
+  result.parent_found = true;
+  const auto& running_child_job_ids = RunningChildJobIds_(*meta);
+  result.running_child_job_ids.assign(running_child_job_ids.begin(),
+                                      running_child_job_ids.end());
+
+  meta->FinishForTerminalStatus(status, exit_code, end_time);
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+          0, meta->Parent().JobDbId(), meta->Parent().RuntimeAttr())) {
+    CRANE_ERROR("Failed to persist finished array parent #{} runtime attr.",
+                parent_job_id);
+  }
+
+  if (meta->RunningChildCount() != 0) {
+    return result;
+  }
+
+  auto& parent = meta->MutableParent();
+  parent.TriggerTerminalDependencyEvents(end_time);
+
+  g_account_meta_container->FreeQosSubmitResource(
+      parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
+
+  result.final_parents.push_back(FinalizedArrayParent{
+      /*parent_job=*/nullptr, /*array_job_id=*/parent_job_id});
+  m_metas_.erase(meta_it);
+  return result;
 }
 
-std::vector<ArrayManager::FinalizedArrayRoot> ArrayManager::ExtractFinalRoots(
-    const std::unordered_set<ArrayMeta*>& candidate_metas,
-    const std::unordered_set<JobInCtld*>& final_jobs) {
-  std::vector<FinalizedArrayRoot> out;
-  out.reserve(candidate_metas.size());
-  for (ArrayMeta* meta : candidate_metas) {
-    TryFinalizeRootNoLock_(meta, final_jobs, &out);
-  }
-  return out;
+std::vector<ArrayManager::FinalizedArrayParent>
+ArrayManager::TryFinalizeParentIfComplete(job_id_t parent_job_id) {
+  std::vector<FinalizedArrayParent> final_parents;
+  auto* meta = FindMeta_(parent_job_id);
+  if (meta == nullptr) return final_parents;
+  TryFinalizeParentNoLock_(meta, &final_parents);
+  return final_parents;
+}
+
+std::vector<job_id_t> ArrayManager::RunningChildJobIdsForParent(
+    job_id_t parent_job_id) const {
+  const auto* meta = FindMeta_(parent_job_id);
+  if (meta == nullptr) return {};
+  const auto& running_child_job_ids = RunningChildJobIds_(*meta);
+  return {running_child_job_ids.begin(), running_child_job_ids.end()};
 }
 
 // ----------------------------------------------------------------------------
 // ArrayManager: lifecycle
 // ----------------------------------------------------------------------------
 
-ArrayMeta* ArrayManager::OnChildTerminal(JobInCtld* child) {
+std::vector<ArrayManager::FinalizedArrayParent> ArrayManager::OnChildTerminal(
+    JobInCtld* child, const std::unordered_set<JobInCtld*>& final_jobs) {
+  std::vector<FinalizedArrayParent> final_parents;
   CRANE_ASSERT(child != nullptr && child->IsArrayChild() &&
                child->ArrayJobId().has_value());
-  auto* meta = FindMeta(child->ArrayJobId().value());
-  if (meta == nullptr) return nullptr;
-  meta->MarkChildInactive(child->JobId());
-  return meta;
+  auto* meta = FindMeta_(child->ArrayJobId().value());
+  if (meta == nullptr) return final_parents;
+  meta->OnChildTerminal(child->JobId());
+  TryFinalizeParentNoLock_(meta, &final_parents, final_jobs);
+  return final_parents;
+}
+
+bool ArrayManager::IsRegisteredParent(job_id_t array_job_id) const {
+  return FindMeta_(array_job_id) != nullptr;
 }
 
 // ----------------------------------------------------------------------------
 // ArrayManager: scheduler-loop entry points
 // ----------------------------------------------------------------------------
 
-bool ArrayManager::ApplyDependencyEvent(job_id_t dependent_id,
-                                        job_id_t dependee_id,
-                                        absl::Time event_time) {
-  auto* meta = FindMeta(dependent_id);
-  if (meta == nullptr) return false;
-  meta->MutableRoot().UpdateDependency(dependee_id, event_time);
-  return true;
-}
+std::vector<ArrayManager::FinalizedArrayParent>
+ArrayManager::FinalizeAllCompletedParents() {
+  std::vector<FinalizedArrayParent> final_parents;
 
-bool ArrayManager::CanSpawnAnotherChild(const JobInCtld& parent) const {
-  return GetSpawnBlockedReason(parent) == nullptr;
-}
-
-const char* ArrayManager::GetSpawnBlockedReason(const JobInCtld& parent) const {
-  const auto* meta = FindMeta(parent.JobId());
-  if (meta == nullptr) return "";
-  if (ArrayChildrenExpanded_(parent)) return "ArrayExpanded";
-  if (!NextTaskIdNoLock_(*meta).has_value()) return "";
-
-  size_t limit = EffectiveArrayRunLimit_(parent);
-  if (meta->RunningChildCount() >= limit) return "ArrayTaskLimit";
-  return nullptr;
-}
-
-std::vector<JobInCtld*> ArrayManager::GetSchedulableParents() const {
-  std::vector<JobInCtld*> out;
-  out.reserve(m_metas_.size());
-  for (const auto& [_, meta] : m_metas_) {
-    if (meta == nullptr || meta->root_job_ == nullptr) continue;
-    if (CanSpawnAnotherChild(meta->Root())) {
-      out.push_back(meta->root_job_);
+  // TryFinalizeParentNoLock_ erases from m_metas_, so snapshot the candidate
+  // ids first to avoid mutating the map during iteration.
+  std::vector<job_id_t> candidates;
+  candidates.reserve(m_metas_.size());
+  for (const auto& [array_job_id, meta] : m_metas_) {
+    if (ArrayMaterializationComplete_(meta->Parent())) {
+      candidates.push_back(array_job_id);
     }
   }
-  return out;
+  for (job_id_t array_job_id : candidates) {
+    TryFinalizeParentNoLock_(FindMeta_(array_job_id), &final_parents);
+  }
+  return final_parents;
 }
 
-std::unique_ptr<JobInCtld> ArrayManager::ExpandChildWithAllocation(
-    job_id_t parent_job_id) {
-  auto* meta = FindMeta(parent_job_id);
-  if (meta == nullptr || meta->root_job_ == nullptr) return nullptr;
+ArrayManager::ParentMaterializationDecision
+ArrayManager::PrepareParentForMaterialization(const JobInCtld& parent,
+                                              absl::Time now) {
+  ParentMaterializationDecision decision;
+  const auto* meta = FindMeta_(parent.JobId());
+  if (meta == nullptr) {
+    decision.pending_reason = "";
+    return decision;
+  }
 
-  auto child = BuildNextChildNoLock_(meta);
+  std::string reason;
+  if (meta->CanSpawnMore(now, &reason)) {
+    decision.can_materialize = true;
+  } else {
+    decision.pending_reason = std::move(reason);
+  }
+  return decision;
+}
+
+std::unique_ptr<JobInCtld> ArrayManager::MaterializeChildForAllocation(
+    JobInCtld* parent, absl::Time now) {
+  if (parent == nullptr || !parent->IsArrayParent()) return nullptr;
+  auto* meta = FindMeta_(parent->JobId());
+  if (meta == nullptr || meta->ParentPtr() == nullptr) return nullptr;
+  if (!meta->CanSpawnMore(now, nullptr)) return nullptr;
+
+  auto child = meta->BuildNextChild();
   if (child == nullptr) return nullptr;
 
   auto admit = AdmitChildNoLock_(*meta, *child);
   if (!admit.has_value()) {
     CRANE_ERROR("Failed to admit array child task {} for parent job #{}: {}.",
-                child->ArrayTaskId().value_or(0), parent_job_id,
+                child->ArrayTaskId().value_or(0), parent->JobId(),
                 CraneErrStr(admit.error()));
     return nullptr;
   }
 
-  // Child skips the pending phase: ExpandChildWithAllocation is only called
+  // Child skips the pending phase: materialization is only called
   // when NodeSelect has already given the parent an allocation.
-  meta->MarkChildRunning(child->JobId());
-  RefreshRootSummaryStateNoLock_(meta);
+  meta->OnChildRunning(child->JobId());
   return child;
+}
+
+bool ArrayManager::OnChildStarted(JobInCtld* child) {
+  if (child == nullptr || !child->IsArrayChild() ||
+      !child->ArrayJobId().has_value()) {
+    return false;
+  }
+  auto* meta = FindMeta_(child->ArrayJobId().value());
+  if (meta == nullptr || meta->ParentPtr() == nullptr) return false;
+  return meta->MarkParentStarted(child->StartTime());
 }
 
 // ----------------------------------------------------------------------------
 // ArrayManager: resolve
 // ----------------------------------------------------------------------------
 
-ArrayTaskResolveResult ArrayManager::ResolveForQueryNoLock(
-    job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids) const {
-  ArrayTaskResolveResult result;
+ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelectors(
+    const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
+        selectors,
+    bool expand_array_parents) const {
+  ResolvedJobIdSelectors result;
 
-  const auto* meta = FindMeta(array_job_id);
-  if (meta == nullptr || meta->root_job_ == nullptr || task_ids.empty()) {
-    return result;
-  }
-  const auto& root = meta->Root();
-  const auto& array_spec = root.JobToCtld().array_spec();
+  // Empty `steps` is the "all steps" sentinel: once a key has been inserted
+  // with an empty set, later non-empty inputs must not narrow it.
+  auto merge_job_steps = [](auto& job_steps, job_id_t job_id,
+                            const std::unordered_set<step_id_t>& steps) {
+    auto [it, inserted] = job_steps.try_emplace(job_id);
+    if (steps.empty()) {
+      it->second.clear();
+    } else if (inserted || !it->second.empty()) {
+      it->second.insert(steps.begin(), steps.end());
+    }
+  };
 
-  for (uint32_t task_id : task_ids) {
-    if (!ArrayUtil::ContainsTaskId(array_spec, task_id)) continue;
+  for (const auto& selector : selectors) {
+    std::unordered_set<step_id_t> steps(selector.steps().begin(),
+                                        selector.steps().end());
+    job_id_t job_id = selector.job_id();
+    if (!selector.has_array_task_id()) {
+      const auto* meta = FindMeta_(job_id);
+      if (expand_array_parents && meta != nullptr &&
+          meta->ParentPtr() != nullptr) {
+        merge_job_steps(result.job_steps, job_id, steps);
+        for (const auto& [_, child_id] : meta->child_job_id_by_task_id_) {
+          merge_job_steps(result.job_steps, child_id, steps);
+        }
+        continue;
+      }
 
-    if (auto child_job_id = meta->ChildJobIdOfTask(task_id);
-        child_job_id.has_value()) {
-      // Caller guarantees conversion from child_job_id -> JobInfo via the
-      // pending/running/finished-job paths it already walks.
-      result.child_job_ids.push_back(*child_job_id);
+      merge_job_steps(result.job_steps, job_id, steps);
       continue;
     }
 
-    crane::grpc::JobInfo virtual_info;
-    if (ArrayUtil::BuildVirtualArrayChildJobInfo(root, task_id,
-                                                 &virtual_info)) {
-      result.virtual_jobs.emplace_back(std::move(virtual_info));
-    }
-  }
-  return result;
-}
-
-ArrayTaskResolveMutationResult ArrayManager::ResolveForMutationNoLock(
-    job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids,
-    ArrayMutationKind kind) {
-  ArrayTaskResolveMutationResult result;
-
-  auto* meta = FindMeta(array_job_id);
-  if (meta == nullptr || meta->root_job_ == nullptr || task_ids.empty()) {
-    return result;
-  }
-  const auto& array_spec = meta->Root().JobToCtld().array_spec();
-
-  for (uint32_t task_id : task_ids) {
-    if (!ArrayUtil::ContainsTaskId(array_spec, task_id)) continue;
-
-    if (auto child_job_id = meta->ChildJobIdOfTask(task_id);
-        child_job_id.has_value()) {
-      result.child_job_ids.push_back(*child_job_id);
+    const auto* meta = FindMeta_(job_id);
+    if (meta == nullptr || meta->ParentPtr() == nullptr) {
+      result.unresolved_selectors.push_back({
+          .job_id = job_id,
+          .array_task_id = selector.array_task_id(),
+          .reason = "Array parent not found",
+      });
       continue;
     }
 
-    if (kind == ArrayMutationKind::kCancel) {
-      meta->MarkTaskCancelledBeforeMaterialized(task_id);
-      result.virtual_task_ids_cancelled.push_back(task_id);
-    } else {
-      result.virtual_task_ids_rejected.push_back(task_id);
+    array_task_id_t array_task_id = selector.array_task_id();
+    const auto& array_spec = meta->Parent().JobToCtld().array_spec();
+    if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
+      result.unresolved_selectors.push_back({
+          .job_id = job_id,
+          .array_task_id = array_task_id,
+          .reason = "Array task id not in array spec",
+      });
+      continue;
     }
-  }
 
-  // If this cancel batch just closed out every task in the spec, flip the
-  // parent's expanded flag in memory so TryFinalizeRootNoLock_ will succeed
-  // the next time the caller runs it — otherwise a pure-virtual cancel
-  // (no surviving running children to drive OnChildTerminal) would leave
-  // the parent wedged in m_pending_job_map_ forever.
-  if (kind == ArrayMutationKind::kCancel &&
-      !result.virtual_task_ids_cancelled.empty()) {
-    FlipExpandedIfFullyAccountedNoLock_(meta);
+    auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
+    if (!child_job_id.has_value()) {
+      result.unresolved_selectors.push_back({
+          .job_id = job_id,
+          .array_task_id = array_task_id,
+          .reason = "Array task not yet materialized",
+      });
+      continue;
+    }
+
+    merge_job_steps(result.job_steps, *child_job_id, steps);
+    result.array_selector_by_child_job_id.try_emplace(*child_job_id, job_id,
+                                                      array_task_id);
   }
   return result;
 }
@@ -720,69 +831,71 @@ ArrayTaskResolveMutationResult ArrayManager::ResolveForMutationNoLock(
 // ArrayManager: persistence / plugin static helpers
 // ----------------------------------------------------------------------------
 
-crane::grpc::JobInEmbeddedDb ArrayManager::BuildFinalRootRecord(
-    const JobInCtld& array_root) {
+crane::grpc::JobInEmbeddedDb ArrayManager::BuildFinalParentRecord_(
+    const JobInCtld& array_parent) {
   crane::grpc::JobInEmbeddedDb record;
-  *record.mutable_job_to_ctld() = array_root.JobToCtld();
-  *record.mutable_runtime_attr() = array_root.RuntimeAttr();
-  record.mutable_runtime_attr()->set_job_id(array_root.JobId());
-  record.mutable_runtime_attr()->set_job_db_id(array_root.JobDbId());
+  *record.mutable_job_to_ctld() = array_parent.JobToCtld();
+  *record.mutable_runtime_attr() = array_parent.RuntimeAttr();
+  record.mutable_runtime_attr()->set_job_id(array_parent.JobId());
+  record.mutable_runtime_attr()->set_job_db_id(array_parent.JobDbId());
   return record;
 }
 
-void ArrayManager::CallPluginHookForFinalRoots(
-    const std::vector<FinalizedArrayRoot>& roots) {
-  if (!g_config.Plugin.Enabled || roots.empty()) return;
+void ArrayManager::CallPluginHookForFinalParents_(
+    const std::vector<FinalizedArrayParent>& parents) {
+  if (!g_config.Plugin.Enabled || parents.empty()) return;
 
   std::vector<crane::grpc::JobInfo> jobs_post_comp;
-  jobs_post_comp.reserve(roots.size());
-  for (const auto& root : roots) {
-    if (root.root_job == nullptr) continue;
+  jobs_post_comp.reserve(parents.size());
+  for (const auto& parent : parents) {
+    if (parent.parent_job == nullptr) continue;
     crane::grpc::JobInfo t;
-    root.root_job->SetFieldsOfJobInfo(&t);
+    parent.parent_job->SetFieldsOfJobInfo(&t);
     jobs_post_comp.emplace_back(std::move(t));
   }
   g_plugin_client->EndHookAsync(std::move(jobs_post_comp));
 }
 
-void ArrayManager::PersistAndTransferRootsToMongodb(
-    const std::vector<FinalizedArrayRoot>& roots) {
-  if (roots.empty()) return;
+void ArrayManager::PersistAndTransferParentsToMongodb_(
+    const std::vector<FinalizedArrayParent>& parents) {
+  if (parents.empty()) return;
 
   txn_id_t txn_id;
   g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-  for (const auto& root : roots) {
-    if (root.root_job == nullptr) continue;
+  for (const auto& parent : parents) {
+    if (parent.parent_job == nullptr) continue;
     if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
-            txn_id, root.root_job->JobDbId(), root.root_job->RuntimeAttr()))
-      CRANE_ERROR("Failed to call UpdateRuntimeAttrOfJob() for array root #{}",
-                  root.root_job->JobId());
+            txn_id, parent.parent_job->JobDbId(),
+            parent.parent_job->RuntimeAttr()))
+      CRANE_ERROR(
+          "Failed to call UpdateRuntimeAttrOfJob() for array parent #{}",
+          parent.parent_job->JobId());
   }
   g_embedded_db_client->CommitVariableDbTransaction(txn_id);
 
-  for (const auto& root : roots) {
-    if (root.root_job == nullptr) continue;
-    auto record = BuildFinalRootRecord(*root.root_job);
+  for (const auto& parent : parents) {
+    if (parent.parent_job == nullptr) continue;
+    auto record = BuildFinalParentRecord_(*parent.parent_job);
     if (!g_db_client->InsertRecoveredJob(record))
-      CRANE_ERROR("Failed to insert array root #{} into MongoDB",
-                  root.root_job->JobId());
+      CRANE_ERROR("Failed to insert array parent #{} into MongoDB",
+                  parent.parent_job->JobId());
   }
 
   std::unordered_map<job_id_t, job_db_id_t> db_ids;
-  for (const auto& root : roots) {
-    if (root.root_job == nullptr) continue;
-    db_ids[root.root_job->JobId()] = root.root_job->JobDbId();
+  for (const auto& parent : parents) {
+    if (parent.parent_job == nullptr) continue;
+    db_ids[parent.parent_job->JobId()] = parent.parent_job->JobDbId();
   }
   if (!g_embedded_db_client->PurgeEndedJobs(db_ids))
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->PurgeEndedJobs() "
-        "for final array roots");
+        "for final array parents");
 }
 
-void ArrayManager::ProcessFinalRoots(
-    const std::vector<FinalizedArrayRoot>& roots) {
-  PersistAndTransferRootsToMongodb(roots);
-  CallPluginHookForFinalRoots(roots);
+void ArrayManager::ProcessFinalParents(
+    const std::vector<FinalizedArrayParent>& parents) {
+  PersistAndTransferParentsToMongodb_(parents);
+  CallPluginHookForFinalParents_(parents);
 }
 
 }  // namespace Ctld

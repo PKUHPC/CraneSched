@@ -76,7 +76,8 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
-constexpr uint32_t kMaxArrayTaskCount = kPendingQueueMaxSize;
+// TODO: temporary cap; revisit once array submission limits are settled.
+constexpr uint32_t kMaxArrayTaskCount = 10000;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -799,7 +800,7 @@ struct JobInCtld {
   //
   //   JobToCtld.array_spec carries only submission-time array spec.
   //   RuntimeAttrOfJob.array_task carries only materialized child identity.
-  //   The array parent/root has array_spec but no array_task identity.
+  //   The array parent has array_spec but no array_task identity.
   [[nodiscard]] bool HasArraySpec() const {
     return job_to_ctld.has_array_spec();
   }
@@ -811,13 +812,11 @@ struct JobInCtld {
                                         : nullptr;
   }
 
-  [[nodiscard]] bool IsArrayRoot() const {
+  [[nodiscard]] bool IsArrayParent() const {
     return HasArraySpec() && !runtime_attr.has_array_task();
   }
 
-  bool IsArrayParent() const { return IsArrayRoot(); }
-
-  // Returns true if this is an expanded array child.
+  // Returns true if this is a materialized array child.
   bool IsArrayChild() const { return runtime_attr.has_array_task(); }
 
   struct ArrayTaskIdentity {
@@ -825,15 +824,7 @@ struct JobInCtld {
     uint32_t task_id;
   };
 
-  struct ArrayTaskMeta {
-    uint32_t task_count;
-    uint32_t task_min;
-    uint32_t task_max;
-    uint32_t task_step;
-  };
-
   std::optional<ArrayTaskIdentity> GetArrayTaskIdentity() const;
-  std::optional<ArrayTaskMeta> GetArrayTaskMeta() const;
 
  private:
   /* ------------- [2] -------------
@@ -921,6 +912,11 @@ struct JobInCtld {
   // does not count toward the execution timeout (matching Slurm behavior).
   // Persisted to the database via RuntimeAttr.
   absl::Time suspend_time{absl::InfinitePast()};
+
+  // Mirrors ArrayMeta::parent_start_event_triggered_ for array parents so the
+  // running representation can be synthesized without consulting ArrayManager.
+  // Transient cache — recovery re-populates via ArrayMeta on startup.
+  bool array_parent_started{false};
 
   // Helper function
  public:
@@ -1012,7 +1008,21 @@ struct JobInCtld {
   bool CancelRequested() const { return cancel_requested; }
 
   // Array job tracking accessors
-  void SetArrayChildrenExpanded(bool expanded);
+  bool ArrayMaterializationComplete() const;
+  void SetArrayMaterializationComplete(bool complete);
+  void SetArrayParentStarted(bool started) { array_parent_started = started; }
+  bool IsArrayParentStarted() const { return array_parent_started; }
+
+  // Effective status for display/filtering. Array parents stay stored as
+  // Pending while running so they don't appear in running maps; surface them
+  // as Running here once at least one child has started.
+  crane::grpc::JobStatus EffectiveDisplayStatus() const {
+    if (IsArrayParent() && status == crane::grpc::Pending &&
+        array_parent_started) {
+      return crane::grpc::Running;
+    }
+    return status;
+  }
   void SetArrayTaskIdentity(job_id_t array_job_id, array_task_id_t task_id);
   [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
     if (!runtime_attr.has_array_task()) {
@@ -1092,6 +1102,7 @@ struct JobInCtld {
   void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
   void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
                                absl::Time event_time);
+  void TriggerTerminalDependencyEvents(absl::Time end_time);
 
   void SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val);
 

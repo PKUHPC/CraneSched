@@ -260,17 +260,6 @@ EnvMap JobInD::GetJobEnvMap() {
                     std::to_string(array_task.array_job_id()));
     env_map.emplace("CRANE_ARRAY_TASK_ID",
                     std::to_string(array_task.task_id()));
-    if (job_to_d.has_array_task_meta()) {
-      const auto& array_task_meta = job_to_d.array_task_meta();
-      env_map.emplace("CRANE_ARRAY_TASK_COUNT",
-                      std::to_string(array_task_meta.task_count()));
-      env_map.emplace("CRANE_ARRAY_TASK_MIN",
-                      std::to_string(array_task_meta.task_min()));
-      env_map.emplace("CRANE_ARRAY_TASK_MAX",
-                      std::to_string(array_task_meta.task_max()));
-      env_map.emplace("CRANE_ARRAY_TASK_STEP",
-                      std::to_string(array_task_meta.task_step()));
-    }
   }
 
   // SLURM
@@ -288,17 +277,6 @@ EnvMap JobInD::GetJobEnvMap() {
                       std::to_string(array_task.array_job_id()));
       env_map.emplace("SLURM_ARRAY_TASK_ID",
                       std::to_string(array_task.task_id()));
-      if (job_to_d.has_array_task_meta()) {
-        const auto& array_task_meta = job_to_d.array_task_meta();
-        env_map.emplace("SLURM_ARRAY_TASK_COUNT",
-                        std::to_string(array_task_meta.task_count()));
-        env_map.emplace("SLURM_ARRAY_TASK_MIN",
-                        std::to_string(array_task_meta.task_min()));
-        env_map.emplace("SLURM_ARRAY_TASK_MAX",
-                        std::to_string(array_task_meta.task_max()));
-        env_map.emplace("SLURM_ARRAY_TASK_STEP",
-                        std::to_string(array_task_meta.task_step()));
-      }
     }
   }
 

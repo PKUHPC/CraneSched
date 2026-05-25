@@ -499,10 +499,6 @@ Common environment variables available in batch scripts:
 | **CRANE_JOB_NODELIST** | List of allocated nodes |
 | **CRANE_ARRAY_JOB_ID** | Parent/anchor job ID of the whole array |
 | **CRANE_ARRAY_TASK_ID** | Current array task index |
-| **CRANE_ARRAY_TASK_COUNT** | Total number of array tasks |
-| **CRANE_ARRAY_TASK_MIN** | Minimum array task index |
-| **CRANE_ARRAY_TASK_MAX** | Maximum array task index |
-| **CRANE_ARRAY_TASK_STEP** | Array task index stride |
 
 ## File Pattern Placeholders
 

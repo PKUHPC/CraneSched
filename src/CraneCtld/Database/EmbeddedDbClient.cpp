@@ -989,7 +989,8 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
   // Phase 2: variable DB — mutable runtime state, id counters, and any
-  // caller-supplied extra writes (e.g. marking an array parent expanded).
+  // caller-supplied extra writes (e.g. completing array parent
+  // materialization).
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
   for (const auto& job : jobs) {

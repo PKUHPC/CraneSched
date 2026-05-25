@@ -591,33 +591,26 @@ class EmbeddedDbClient {
       IEmbeddedDb* db, txn_id_t txn_id, const std::string& key, const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
   {
-    using google::protobuf::io::CodedOutputStream;
-    using google::protobuf::io::StringOutputStream;
-
-    std::string buf;
-    StringOutputStream stringOutputStream(&buf);
-    CodedOutputStream codedOutputStream(&stringOutputStream);
-
-    size_t n_bytes{value->ByteSizeLong()};
-    value->SerializeToCodedStream(&codedOutputStream);
-
-    if (!BeginDbTransaction_(db, &txn_id))
+    bool owns_txn = txn_id == 0;
+    if (owns_txn && !BeginDbTransaction_(db, &txn_id))
       return std::unexpected(DbErrorCode::OTHER);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
     if (!fetch_result) {
       if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-        CommitDbTransaction_(db, txn_id);
+        if (owns_txn) CommitDbTransaction_(db, txn_id);
         return {};
       }
-      return std::unexpected(fetch_result.error());
+      if (fetch_result.error() != DbErrorCode::BUFFER_SMALL)
+        return std::unexpected(fetch_result.error());
     }
 
     auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
     if (!store_result) return std::unexpected(store_result.error());
 
-    CommitDbTransaction_(db, txn_id);
+    if (owns_txn && !CommitDbTransaction_(db, txn_id))
+      return std::unexpected(DbErrorCode::OTHER);
     return {};
   }
 
@@ -625,23 +618,26 @@ class EmbeddedDbClient {
   std::expected<void, DbErrorCode> StoreTypeIntoDbIfExists_(
       IEmbeddedDb* db, txn_id_t txn_id, const std::string& key,
       const T* value) {
-    if (!BeginDbTransaction_(db, &txn_id))
+    bool owns_txn = txn_id == 0;
+    if (owns_txn && !BeginDbTransaction_(db, &txn_id))
       return std::unexpected(DbErrorCode::OTHER);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
     if (!fetch_result) {
       if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-        CommitDbTransaction_(db, txn_id);
+        if (owns_txn) CommitDbTransaction_(db, txn_id);
         return {};
       }
-      return std::unexpected(fetch_result.error());
+      if (fetch_result.error() != DbErrorCode::BUFFER_SMALL)
+        return std::unexpected(fetch_result.error());
     }
 
     auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
     if (!store_result) return std::unexpected(store_result.error());
 
-    CommitDbTransaction_(db, txn_id);
+    if (owns_txn && !CommitDbTransaction_(db, txn_id))
+      return std::unexpected(DbErrorCode::OTHER);
     return {};
   }
 

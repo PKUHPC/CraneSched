@@ -77,8 +77,8 @@ class AccountMetaContainer final {
 
   // `count` is the number of submit-slots this call wants to reserve. A plain
   // single-task submission uses the default `count=1`. An array parent
-  // submission passes `count=task_count` so the whole array is reserved
-  // atomically at submit time (Slurm-parity semantics).
+  // submission passes its effective concurrent task limit, so user-configured
+  // array concurrency caps are reflected in submit-slot accounting.
   CraneErrCode TryMallocQosSubmitResource(JobInCtld& job, uint32_t count = 1);
 
   void MallocQosSubmitResource(const JobInCtld& job, uint32_t count = 1);

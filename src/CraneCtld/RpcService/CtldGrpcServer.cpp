@@ -975,8 +975,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
-    for (auto job_id : request->job_ids()) {
-      response->add_not_modified_jobs(job_id);
+    for (const auto& selector : request->job_ids()) {
+      response->add_not_modified_jobs(selector.job_id());
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
         response->add_not_modified_reasons("User is not a user of Crane");
       } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
@@ -987,51 +987,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
   }
 
   std::vector<job_id_t> job_ids;
-
-  if (g_config.JobSubmitLuaScript.empty()) {
-    job_ids.assign(request->job_ids().begin(), request->job_ids().end());
-  } else {
-    g_job_scheduler->JobModifyLuaCheck(*request, response, &job_ids);
-  }
-
-  // Resolve parent→children for array task filters.
-  if (!request->filter_array_task_ids().empty()) {
-    std::vector<job_id_t> resolved_ids;
-    resolved_ids.reserve(job_ids.size());
-    for (auto job_id : job_ids) {
-      auto it = request->filter_array_task_ids().find(job_id);
-      if (it == request->filter_array_task_ids().end()) {
-        // No array_task filter for this job, keep as-is.
-        resolved_ids.push_back(job_id);
-        continue;
-      }
-      // Modify only affects already-materialized children. Unmaterialized
-      // tasks inherit from the parent template, so users should modify the
-      // parent directly if they want future children to pick up the change.
-      auto resolved = g_job_scheduler->ResolveArrayTaskIdsForModify(
-          job_id, it->second.array_task_ids());
-      if (resolved.child_job_ids.empty() &&
-          resolved.virtual_task_ids_rejected.empty()) {
-        response->add_not_modified_jobs(job_id);
-        response->add_not_modified_reasons(fmt::format(
-            "Job #{} is not an array parent or no matching array tasks "
-            "found.",
-            job_id));
-        continue;
-      }
-      for (array_task_id_t task_id : resolved.virtual_task_ids_rejected) {
-        response->add_not_modified_jobs(job_id);
-        response->add_not_modified_reasons(fmt::format(
-            "Job #{} array task {} has not been materialized yet; modify the "
-            "array parent to update the template for future children.",
-            job_id, task_id));
-      }
-      for (auto child_id : resolved.child_job_ids) {
-        resolved_ids.push_back(child_id);
-      }
-    }
-    job_ids = std::move(resolved_ids);
-  }
+  g_job_scheduler->CollectJobIdsForModify(*request, response, &job_ids);
 
   CraneErrCode err;
   if (request->attribute() == ModifyJobRequest::TimeLimit) {

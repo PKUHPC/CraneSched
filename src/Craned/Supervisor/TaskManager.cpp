@@ -547,6 +547,10 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
   // For crun, will redirect io to local file instead of forwarding from/to
   // cfored and crun , otherwise will be forwarded from/to cfored and crun.
   const std::unordered_set<char> local_file_replacement{'N', 'n', 't'};
+  // Sentinel for "%a" when the step is not an array task. Matches Slurm's
+  // NO_VAL (UINT32_MAX - 1) so filenames stay compatible with Slurm tooling.
+  constexpr uint32_t kNoArrayTaskIdSentinel =
+      std::numeric_limits<uint32_t>::max() - 1;
   //clang-format off
   std::unordered_map<char, std::string> replacement_map{
       {'%', "%"},
@@ -560,7 +564,7 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
       {'a', m_parent_step_inst_->GetStep().has_array_task()
                 ? std::to_string(
                       m_parent_step_inst_->GetStep().array_task().task_id())
-                : std::to_string(4294967294u)},
+                : std::to_string(kNoArrayTaskIdSentinel)},
       // jobid.stepid of the running job (e.g. "128.0")
       {'J', fmt::format("{}.{}", g_config.JobId, g_config.StepId)},
       // job id

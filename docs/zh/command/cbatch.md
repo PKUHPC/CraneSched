@@ -497,10 +497,6 @@ Submitted array job 179, array range [0-2].
 | **CRANE_JOB_NODELIST** | 作业分配的节点列表 |
 | **CRANE_ARRAY_JOB_ID** | 整个数组的父/锚点作业 ID |
 | **CRANE_ARRAY_TASK_ID** | 当前数组任务索引 |
-| **CRANE_ARRAY_TASK_COUNT** | 数组任务总数 |
-| **CRANE_ARRAY_TASK_MIN** | 数组最小任务索引 |
-| **CRANE_ARRAY_TASK_MAX** | 数组最大任务索引 |
-| **CRANE_ARRAY_TASK_STEP** | 数组任务索引步长 |
 
 ## 文件模式占位符
 

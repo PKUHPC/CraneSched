@@ -21,16 +21,15 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include <absl/container/btree_map.h>
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
-#include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>
-#include <google/protobuf/repeated_field.h>
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "protos/Crane.pb.h"
@@ -38,42 +37,59 @@
 
 namespace Ctld {
 
-class ArrayManager;  // forward declared for friendship
-
-// ArrayMeta tracks scheduler-side materialization + lifecycle state of array
-// children. The scheduler owns the array root JobInCtld via
-// m_pending_job_map_; ArrayMeta keeps a non-owning pointer to it. The running
-// set is maintained by the manager via scheduler-driven callbacks; ArrayMeta
-// never inspects the scheduler's own pending/running maps.
+// Array lifecycle invariants:
+//   1. The array parent is the only control entity. It stays in the scheduler
+//      pending map and owns deadline/dependency/summary/final state.
+//   2. A materialized array child is a normal real job with its own
+//      job_id/job_db_id/status and lives in the running map.
+//   3. Unmaterialized tasks exist only in ArraySpec. They are not queried,
+//      cancelled, modified, or persisted as virtual jobs.
+//   4. ArrayManager exposes lifecycle events. Scheduler code should not drive
+//      task iteration or parent finalization in multiple steps.
+//   5. ArrayMeta owns the state and behavior of one array parent.
 class ArrayMeta {
  public:
-  explicit ArrayMeta(JobInCtld* root_job);
-
-  const JobInCtld& Root() const { return *root_job_; }
-  JobInCtld& MutableRoot() { return *root_job_; }
-  JobInCtld* RootPtr() const { return root_job_; }
-
-  // Materialization bookkeeping (task_id -> child job id).
-  bool IsTaskMaterialized(array_task_id_t task_id) const;
-  size_t MaterializedTaskCount() const;
-  std::optional<job_id_t> ChildJobIdOfTask(array_task_id_t task_id) const;
-
-  size_t RunningChildCount() const { return running_child_job_ids_.size(); }
-  size_t ActiveChildCount() const { return running_child_job_ids_.size(); }
-
-  bool IsTaskCancelledBeforeMaterialized(array_task_id_t task_id) const {
-    return cancelled_before_materialized_task_ids_.contains(task_id);
-  }
+  ~ArrayMeta() = default;
 
  private:
   friend class ArrayManager;
 
-  void TrackMaterialized(JobInCtld* child);
-  void MarkChildRunning(job_id_t child_job_id);
-  void MarkChildInactive(job_id_t child_job_id);
-  void MarkTaskCancelledBeforeMaterialized(array_task_id_t task_id);
+  explicit ArrayMeta(JobInCtld* parent_job);
 
-  JobInCtld* root_job_{nullptr};
+  const JobInCtld& Parent() const { return *parent_job_; }
+  JobInCtld& MutableParent() { return *parent_job_; }
+  JobInCtld* ParentPtr() const { return parent_job_; }
+
+  // Materialization bookkeeping (task_id -> child job id).
+  std::optional<job_id_t> ChildJobIdOfTask(array_task_id_t task_id) const;
+
+  std::optional<array_task_id_t> NextMaterializableTaskId() const;
+  bool WillCompleteMaterializationAfter(array_task_id_t task_id) const;
+  std::unique_ptr<JobInCtld> BuildChild(array_task_id_t task_id) const;
+  std::unique_ptr<JobInCtld> BuildNextChild() const;
+
+  size_t RunningChildCount() const { return running_child_job_ids_.size(); }
+  const absl::flat_hash_set<job_id_t>& RunningChildJobIds() const {
+    return running_child_job_ids_;
+  }
+  bool ParentStartEventTriggered() const {
+    return parent_start_event_triggered_;
+  }
+  std::optional<std::pair<crane::grpc::JobStatus, uint32_t>>
+  TerminalStatusOverride() const {
+    return terminal_status_override_;
+  }
+
+  bool TrackMaterialized(JobInCtld* child);
+  bool TrackMaterialized(array_task_id_t task_id, job_id_t child_job_id);
+  void OnChildRunning(job_id_t child_job_id);
+  void OnChildTerminal(job_id_t child_job_id);
+  bool MarkParentStarted(absl::Time start_time);
+  void FinishForTerminalStatus(crane::grpc::JobStatus status,
+                               uint32_t exit_code, absl::Time end_time);
+  bool CanSpawnMore(absl::Time now, std::string* reason) const;
+
+  JobInCtld* parent_job_{nullptr};
   // Greatest task id that has ever been materialized (in task-id space, not
   // index space). Zero-initialized is fine because task ids start at
   // array_spec.start() >= 0; we use std::optional semantics via
@@ -82,222 +98,146 @@ class ArrayMeta {
   bool has_any_materialized_{false};
   absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id_;
   absl::flat_hash_set<job_id_t> running_child_job_ids_;
-  absl::flat_hash_set<array_task_id_t> cancelled_before_materialized_task_ids_;
-};
-
-struct ArrayTaskResolveResult {
-  std::vector<job_id_t> child_job_ids;
-  std::vector<crane::grpc::JobInfo> virtual_jobs;
-};
-
-enum class ArrayMutationKind {
-  kCancel,
-  kModify,
-};
-
-struct ArrayTaskResolveMutationResult {
-  // Existing materialized children that the caller can apply the mutation to.
-  std::vector<job_id_t> child_job_ids;
-  // Task ids that were just recorded as cancelled-before-materialized. The
-  // caller persists a finished DB record for each so cqueue/cacct show them.
-  // Only populated for mutation_kind == kCancel.
-  std::vector<array_task_id_t> virtual_task_ids_cancelled;
-  // Task ids for which the mutation is not allowed on an unmaterialized task
-  // (e.g. modify). Caller surfaces an explicit error per task id.
-  std::vector<array_task_id_t> virtual_task_ids_rejected;
+  bool parent_start_event_triggered_{false};
+  std::optional<std::pair<crane::grpc::JobStatus, uint32_t>>
+      terminal_status_override_;
 };
 
 namespace ArrayUtil {
 uint32_t Stride(const crane::grpc::ArraySpec& array_spec);
 uint32_t TaskCount(const crane::grpc::ArraySpec& array_spec);
+uint32_t EffectiveRunLimit(const crane::grpc::ArraySpec& array_spec);
 bool ContainsTaskId(const crane::grpc::ArraySpec& array_spec,
                     array_task_id_t task_id);
 uint32_t TaskIdByIndex(const crane::grpc::ArraySpec& array_spec,
                        uint32_t index);
-crane::grpc::ArrayTaskMeta BuildTaskMeta(
-    const crane::grpc::ArraySpec& array_spec);
-
-// Build a virtual pending JobInfo entry for a task that hasn't been
-// materialized yet. This is a query-only synthesized view and is not inserted
-// into the scheduler pending map. Returns false if the task id is out of range.
-bool BuildVirtualArrayChildJobInfo(const JobInCtld& array_root,
-                                   uint32_t task_id,
-                                   crane::grpc::JobInfo* job_info);
 }  // namespace ArrayUtil
 
-// ArrayManager owns array parent metas and drives array child
-// materialization, lifecycle tracking, and finalization.
-//
-// Ownership / encapsulation contract:
-//   * The scheduler's m_pending_job_map_ owns every array parent JobInCtld
-//     via unique_ptr. ArrayMeta::root_job_ is a non-owning raw pointer into
-//     that map. ArrayManager never owns parent JobInCtlds.
-//   * ArrayManager NEVER reads or mutates the scheduler's pending/running
-//     maps. All per-meta active-child state is updated through
-//     scheduler-driven callbacks: ExpandChildWithAllocation and
-//     OnChildTerminal.
-//   * Children are never in the scheduler's pending map. ExpandChildWith-
-//     Allocation builds the next child, persists it to DB, and hands it
-//     back already-materialized; the scheduler applies an allocation and
-//     inserts it directly into m_running_job_map_.
-//   * All instance methods require the scheduler's pending-job-map mutex
-//     held by the caller, unless noted otherwise.
+// ArrayManager owns array parent metas and exposes event-style lifecycle
+// operations to the scheduler. All instance methods require the scheduler's
+// pending-job-map mutex held by the caller, unless noted otherwise.
 class ArrayManager {
  public:
-  struct FinalizedArrayRoot {
-    // Scheduler fills `root_job` by moving the parent unique_ptr out of
-    // m_pending_job_map_ after ExtractFinalRoots{,ById} returns.
-    std::unique_ptr<JobInCtld> root_job;
-    std::shared_ptr<ArrayMeta> meta;
+  struct FinalizedArrayParent {
+    // Scheduler fills `parent_job` by moving the parent unique_ptr out of the
+    // pending map before ProcessFinalParents runs.
+    std::unique_ptr<JobInCtld> parent_job;
     job_id_t array_job_id{0};
+  };
+
+  struct ResolvedJobIdSelectors {
+    // Only array-task selectors can fail to resolve; plain job_id selectors
+    // pass through unconditionally. So an unresolved entry always carries the
+    // array_task_id the user asked for.
+    struct UnresolvedSelector {
+      job_id_t job_id{0};
+      array_task_id_t array_task_id{0};
+      std::string reason;
+    };
+
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
+    // Reverse lookup: child_job_id -> (array_parent_id, array_task_id).
+    // Lets downstream code surface a failure on a materialized child back to
+    // the user as the array task they originally asked for.
+    std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
+        array_selector_by_child_job_id;
+    std::vector<UnresolvedSelector> unresolved_selectors;
+  };
+
+  struct ParentMaterializationDecision {
+    bool can_materialize{false};
+    std::string pending_reason;
+  };
+
+  struct FinishedParentResult {
+    bool parent_found{false};
+    std::vector<job_id_t> running_child_job_ids;
+    std::vector<FinalizedArrayParent> final_parents;
   };
 
   ArrayManager() = default;
 
-  // Lookup -------------------------------------------------------------------
-  ArrayMeta* FindMeta(job_id_t array_job_id);
-  const ArrayMeta* FindMeta(job_id_t array_job_id) const;
+  void RegisterParent(JobInCtld* parent);
+  CraneExpected<void> BindRecoveredChildrenForParent(
+      job_id_t array_job_id, const std::vector<JobInCtld*>& children);
+  CraneExpected<void> TrackRecoveredTerminalChild(JobInCtld* child);
+  CraneExpected<void> TrackRecoveredTerminalChild(job_id_t array_job_id,
+                                                  array_task_id_t task_id,
+                                                  job_id_t child_job_id);
+  void RecoverAccountingForRegisteredParents();
 
-  template <typename Fn>
-  void ForEachMeta(Fn&& fn) {
-    for (auto& [root_id, meta] : m_metas_) fn(root_id, *meta);
-  }
-  template <typename Fn>
-  void ForEachMetaConst(Fn&& fn) const {
-    for (const auto& [root_id, meta] : m_metas_) fn(root_id, *meta);
-  }
+  bool IsRegisteredParent(job_id_t array_job_id) const;
 
-  // Copy of the per-root running child id set. Used by modify/cancel paths to
-  // propagate a root-level mutation to child jobs.
-  std::vector<job_id_t> RunningChildJobIds(const ArrayMeta& meta) const;
+  // Sweeps all registered parents and finalizes those whose materialization
+  // and child execution have both completed. Used at recovery end to surface
+  // parents whose children all reached terminal state in the previous run
+  // (recovery uses TrackRecoveredTerminalChild, which does not fire
+  // OnChildTerminal events).
+  std::vector<FinalizedArrayParent> FinalizeAllCompletedParents();
 
-  // True iff every task is materialized-or-cancelled, the parent has
-  // `array_children_expanded` set, and no active children remain. Callers
-  // that just finished a bulk mutation can use this to trigger an
-  // immediate finalize instead of waiting for a child terminal event.
-  bool IsRootReadyToFinalizeNoLock(const ArrayMeta& meta) const;
+  // Returns whether the parent can enter normal node selection to materialize
+  // one child in this tick.
+  ParentMaterializationDecision PrepareParentForMaterialization(
+      const JobInCtld& parent, absl::Time now);
 
-  // Enumerate every task id belonging to an array parent, in ascending
-  // order. Caller must hold m_pending_job_map_mtx_. Returns empty when the
-  // meta is missing or the parent is not an array.
-  std::vector<array_task_id_t> AllTaskIdsNoLock(job_id_t array_job_id) const;
+  // Builds and persists the next real child for an already allocated parent.
+  std::unique_ptr<JobInCtld> MaterializeChildForAllocation(JobInCtld* parent,
+                                                           absl::Time now);
 
-  // Registration -------------------------------------------------------------
-  // Register a freshly submitted array parent. Caller retains ownership of
-  // the unique_ptr in m_pending_job_map_; we only store a raw pointer.
-  std::shared_ptr<ArrayMeta> RegisterParent(JobInCtld* parent);
+  // Called after a materialized child has successfully started.
+  bool OnChildStarted(JobInCtld* child);
 
-  // Scheduler loop -----------------------------------------------------------
-  // True iff array-local state allows materializing another child this tick:
-  // the parent is not fully expanded, max-concurrent headroom remains, and a
-  // next task id exists. Generic pending-job gates (held/begin_time/
-  // dependencies) belong to ScheduleThread_.
-  bool CanSpawnAnotherChild(const JobInCtld& parent) const;
-
-  // Returns nullptr when array-local state allows spawning another child.
-  // Otherwise returns the pending_reason owned by array scheduling. An empty
-  // string means the parent is blocked without a useful user-facing reason
-  // (for example, no next task id remains).
-  const char* GetSpawnBlockedReason(const JobInCtld& parent) const;
-
-  // Convenience: list raw pointers of array parents with array-local capacity.
-  // The caller already owns each parent via its pending map, so we do not
-  // extend lifetime.
-  std::vector<JobInCtld*> GetSchedulableParents() const;
-
-  // Route a dependency event to a pending plain job OR an array root. Returns
-  // true if the event was consumed by the array side.
-  bool ApplyDependencyEvent(job_id_t dependent_id, job_id_t dependee_id,
-                            absl::Time event_time);
-
-  // Phase 2 hook. Builds the next child for a parent that NodeSelect just
-  // produced an allocation for, persists it to DB (consuming a new job_id),
-  // marks it running on the meta, and refreshes the root summary. Returns
-  // nullptr if no materializable task remains (e.g., all remaining tasks
-  // were cancelled between tick start and here) or if DB persistence fails.
-  std::unique_ptr<JobInCtld> ExpandChildWithAllocation(job_id_t parent_job_id);
-
-  // Lifecycle callbacks ------------------------------------------------------
   // Called when a running child reaches a terminal status.
-  ArrayMeta* OnChildTerminal(JobInCtld* child);
+  std::vector<FinalizedArrayParent> OnChildTerminal(
+      JobInCtld* child, const std::unordered_set<JobInCtld*>& final_jobs);
 
-  // Finalization -------------------------------------------------------------
-  // The returned bundles have `root_job == nullptr`; the scheduler must move
-  // the parent unique_ptr out of m_pending_job_map_ via
-  // TakeFinalizedParentFromPendingMap() or an equivalent helper before
-  // calling ProcessFinalRoots.
-  std::vector<FinalizedArrayRoot> ExtractFinalRootsById(
-      const std::unordered_set<job_id_t>& candidate_root_ids,
-      const std::unordered_set<JobInCtld*>& final_jobs);
+  // Stops further materialization and finalizes immediately if no child is
+  // running; otherwise finalization happens when the last running child exits.
+  FinishedParentResult FinishParentWithStatus(job_id_t parent_job_id,
+                                              crane::grpc::JobStatus status,
+                                              uint32_t exit_code,
+                                              absl::Time end_time);
+  std::vector<FinalizedArrayParent> TryFinalizeParentIfComplete(
+      job_id_t parent_job_id);
 
-  std::vector<FinalizedArrayRoot> ExtractFinalRoots(
-      const std::unordered_set<ArrayMeta*>& candidate_metas,
-      const std::unordered_set<JobInCtld*>& final_jobs);
+  std::vector<job_id_t> RunningChildJobIdsForParent(
+      job_id_t parent_job_id) const;
 
-  // Resolve ------------------------------------------------------------------
-  // Query path: pure read. Returns ids for materialized tasks and synthesized
-  // JobInfo entries for unmaterialized valid tasks. Never mutates state.
-  ArrayTaskResolveResult ResolveForQueryNoLock(
-      job_id_t array_job_id,
-      const std::unordered_set<uint32_t>& task_ids) const;
+  ResolvedJobIdSelectors ResolveJobIdSelectors(
+      const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
+          selectors,
+      bool expand_array_parents) const;
 
-  // Mutation path: returns ids for existing materialized tasks; for
-  // unmaterialized tasks records a cancellation (Cancel) or rejects
-  // (Modify). Does not build new children.
-  ArrayTaskResolveMutationResult ResolveForMutationNoLock(
-      job_id_t array_job_id, const std::unordered_set<uint32_t>& task_ids,
-      ArrayMutationKind kind);
-
-  // Build a JobInCtld for a task the user cancelled before it was ever
-  // materialized. Status is Cancelled and start/end times are pinned to
-  // `now`. The returned job carries no job_id yet — the caller is
-  // responsible for allocating an id via the embedded DB and persisting
-  // to MongoDB so cqueue/cacct see the cancelled task.
-  std::unique_ptr<JobInCtld> BuildCancelledVirtualChildNoLock(
-      job_id_t array_job_id, array_task_id_t task_id, absl::Time now) const;
-
-  // Persistence / plugin hooks for final array roots.
-  static void ProcessFinalRoots(const std::vector<FinalizedArrayRoot>& roots);
-  static crane::grpc::JobInEmbeddedDb BuildFinalRootRecord(
-      const JobInCtld& array_root);
-  static void CallPluginHookForFinalRoots(
-      const std::vector<FinalizedArrayRoot>& roots);
-  static void PersistAndTransferRootsToMongodb(
-      const std::vector<FinalizedArrayRoot>& roots);
+  // Persistence / plugin hooks for final array parents.
+  static void ProcessFinalParents(
+      const std::vector<FinalizedArrayParent>& parents);
 
  private:
-  std::unique_ptr<JobInCtld> BuildChildJob_(const JobInCtld& array_parent,
-                                            uint32_t task_id) const;
-  std::unique_ptr<JobInCtld> BuildNextChildNoLock_(ArrayMeta* meta) const;
+  ArrayMeta* FindMeta_(job_id_t array_job_id);
+  const ArrayMeta* FindMeta_(job_id_t array_job_id) const;
 
-  // Next task id to materialize, honoring stride and the cancelled-before-
-  // materialized set. Returns nullopt if there is nothing left to materialize.
-  std::optional<array_task_id_t> NextTaskIdNoLock_(const ArrayMeta& meta) const;
-
+  static bool ArrayMaterializationComplete_(const JobInCtld& parent);
   static void InheritChildAttributesFromParent_(JobInCtld& child);
+  static const absl::flat_hash_set<job_id_t>& RunningChildJobIds_(
+      const ArrayMeta& meta);
 
   CraneExpected<void> AdmitChildNoLock_(ArrayMeta& meta, JobInCtld& child);
 
-  void RefreshRootSummaryStateNoLock_(ArrayMeta* meta);
-  void TryFinalizeRootNoLock_(ArrayMeta* meta,
-                              const std::unordered_set<JobInCtld*>& final_jobs,
-                              std::vector<FinalizedArrayRoot>* final_roots);
-
-  static uint32_t EffectiveArrayRunLimit_(const JobInCtld& root);
-  static bool ArrayChildrenExpanded_(const JobInCtld& root);
-
-  // Flip array_children_expanded in-memory iff materialized + cancelled-
-  // before-materialized covers every task in the spec. Returns true on a
-  // false→true transition. The flag is persisted only when the next
-  // finalize / admit call writes the parent's runtime_attr to the DB —
-  // callers that need durable persistence must follow up with a
-  // finalize pass.
-  bool FlipExpandedIfFullyAccountedNoLock_(ArrayMeta* meta) const;
+  void TryFinalizeParentNoLock_(
+      ArrayMeta* meta, std::vector<FinalizedArrayParent>* final_parents,
+      const std::unordered_set<JobInCtld*>& final_jobs = {});
 
   static std::pair<crane::grpc::JobStatus, uint32_t> BuildAggregateResult_(
       const ArrayMeta& meta, const std::unordered_set<JobInCtld*>& final_jobs);
 
-  absl::flat_hash_map<job_id_t, std::shared_ptr<ArrayMeta>> m_metas_;
+  static crane::grpc::JobInEmbeddedDb BuildFinalParentRecord_(
+      const JobInCtld& array_parent);
+  static void CallPluginHookForFinalParents_(
+      const std::vector<FinalizedArrayParent>& parents);
+  static void PersistAndTransferParentsToMongodb_(
+      const std::vector<FinalizedArrayParent>& parents);
+
+  absl::flat_hash_map<job_id_t, std::unique_ptr<ArrayMeta>> m_metas_;
 };
 
 }  // namespace Ctld

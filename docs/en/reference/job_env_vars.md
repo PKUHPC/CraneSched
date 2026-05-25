@@ -47,26 +47,6 @@ These variables are set only for expanded array tasks.
 - **Type**: Integer
 - **Example**: `7`
 
-### CRANE_ARRAY_TASK_COUNT
-- **Description**: Total number of tasks in the array
-- **Type**: Integer
-- **Example**: `16`
-
-### CRANE_ARRAY_TASK_MIN
-- **Description**: Minimum array task index
-- **Type**: Integer
-- **Example**: `0`
-
-### CRANE_ARRAY_TASK_MAX
-- **Description**: Maximum array task index
-- **Type**: Integer
-- **Example**: `15`
-
-### CRANE_ARRAY_TASK_STEP
-- **Description**: Step size used by the array indices
-- **Type**: Integer
-- **Example**: `1`
-
 ---
 
 ## Step Environment Variables
