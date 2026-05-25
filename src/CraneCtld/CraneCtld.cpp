@@ -508,7 +508,7 @@ void ParseConfig(int argc, char** argv) {
                   sockets_val, node["name"].Scalar(), node_ptr->cpu);
               sockets_val = 1;
             }
-            node_ptr->cpu_topology.sockets = sockets_val;
+            node_ptr->node_topo_info.sockets = sockets_val;
           }
 
           DedicatedResourceInNode resourceInNode;

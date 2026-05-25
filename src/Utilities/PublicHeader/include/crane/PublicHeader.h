@@ -548,10 +548,12 @@ struct CpuSet {
 };
 
 /// @brief Physical CPU topology of a node, shared between CraneCtld and Craned.
-struct CpuTopology {
+struct NodeTopoInfo {
+  uint32_t boards{1};
   uint32_t sockets{1};
-  // Phase 2 (future): uint32_t cores_per_socket{1};
-  //                   uint32_t threads_per_core{1};
+  uint32_t cores_per_socket{1};
+  uint32_t threads_per_core{1};
+  uint32_t total_cpus{0};
 };
 
 // ResourceInNodeV3: Execution phase resource tracking for a single node

@@ -99,7 +99,7 @@ struct Config {
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
 
-    CpuTopology cpu_topology;
+    NodeTopoInfo node_topo_info;
   };
 
   struct Partition {

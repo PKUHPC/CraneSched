@@ -580,7 +580,7 @@ void ParseConfig(int argc, char** argv) {
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
-  std::unordered_map<std::string, CpuTopology> node_topologies;
+  std::unordered_map<std::string, NodeTopoInfo> node_topologies;
   if (std::filesystem::exists(config_path)) {
     try {
       using util::YamlValueOr;
@@ -801,7 +801,7 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          CpuTopology node_topo;
+          NodeTopoInfo node_topo;
           if (node["sockets"]) {
             uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
             uint32_t cpu_count = static_cast<uint32_t>(
@@ -1199,7 +1199,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
-  g_config.cpu_topology = node_topologies.at(g_config.Hostname);
+  g_config.node_topo_info = node_topologies.at(g_config.Hostname);
   // get this node device info
   // Todo: Auto detect device
   {

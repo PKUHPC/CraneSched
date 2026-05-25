@@ -36,7 +36,7 @@ struct CranedStaticMeta {
                                          // this craned belongs to
   ResourceInNodeV3 res;
 
-  CpuTopology cpu_topology;
+  NodeTopoInfo node_topo_info;
 };
 
 struct CranedRemoteMeta {
