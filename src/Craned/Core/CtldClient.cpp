@@ -879,6 +879,7 @@ bool CtldClient::CranedRegister_(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
+  grpc_meta->mutable_cpu_topology()->set_sockets(g_config.cpu_topology.sockets);
 
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();

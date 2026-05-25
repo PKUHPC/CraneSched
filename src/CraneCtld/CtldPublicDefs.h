@@ -98,6 +98,8 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+
+    CpuTopology cpu_topology;
   };
 
   struct Partition {

@@ -547,6 +547,13 @@ struct CpuSet {
   bool IsInteger() const;
 };
 
+/// @brief Physical CPU topology of a node, shared between CraneCtld and Craned.
+struct CpuTopology {
+  uint32_t sockets{1};
+  // Phase 2 (future): uint32_t cores_per_socket{1};
+  //                   uint32_t threads_per_core{1};
+};
+
 // ResourceInNodeV3: Execution phase resource tracking for a single node
 // Tracks actual hardware resources with specific slot IDs for affinity
 class ResourceInNodeV3 {

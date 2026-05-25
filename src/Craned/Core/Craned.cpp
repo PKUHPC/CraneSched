@@ -580,6 +580,7 @@ void ParseConfig(int argc, char** argv) {
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
+  std::unordered_map<std::string, CpuTopology> node_topologies;
   if (std::filesystem::exists(config_path)) {
     try {
       using util::YamlValueOr;
@@ -800,6 +801,24 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          CpuTopology node_topo;
+          if (node["sockets"]) {
+            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
+            uint32_t cpu_count = static_cast<uint32_t>(
+                node_res->GetCpuSet().core_ids.size());
+            if (sockets_val == 0) {
+              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
+                          node["name"].Scalar());
+              sockets_val = 1;
+            } else if (sockets_val > cpu_count) {
+              CRANE_WARN(
+                  "Sockets {} > cpu count {} for node '{}'. Resetting to 1.",
+                  sockets_val, cpu_count, node["name"].Scalar());
+              sockets_val = 1;
+            }
+            node_topo.sockets = sockets_val;
+          }
+
           std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
             std::set<std::pair<std::string, std::string>> seen_gres_types;
@@ -1006,6 +1025,7 @@ void ParseConfig(int argc, char** argv) {
               ABSL_UNREACHABLE();
             }
             g_config.CranedRes[name] = node_res;
+            node_topologies[name] = node_topo;
           }
         }
       }
@@ -1179,6 +1199,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
+  g_config.cpu_topology = node_topologies.at(g_config.Hostname);
   // get this node device info
   // Todo: Auto detect device
   {

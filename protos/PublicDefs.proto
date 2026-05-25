@@ -683,6 +683,16 @@ message StepInfo {
   google.protobuf.Timestamp deadline_time = 41;
 }
 
+// Physical CPU topology of a node or job topology constraint.
+message CpuTopology {
+  // Number of physical CPU sockets. Default 1 when unset.
+  optional uint32 sockets = 1;
+
+  // Reserved for Phase 2:
+  // optional uint32 cores_per_socket = 2;
+  // optional uint32 threads_per_core = 3;
+}
+
 message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;
@@ -722,6 +732,9 @@ message CranedInfo {
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
+
+  // Physical CPU topology of this node.
+  CpuTopology cpu_topology = 17;
 }
 
 message ReservationInfo {
@@ -1045,6 +1058,7 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+  CpuTopology cpu_topology = 10;
 }
 
 enum TxnAction {

@@ -60,6 +60,18 @@ void CranedMetaContainer::CranedUp(
   node_meta->alive = true;
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
+  if (remote_meta.has_cpu_topology() &&
+      remote_meta.cpu_topology().has_sockets()) {
+    uint32_t reported = remote_meta.cpu_topology().sockets();
+    if (reported != node_meta->static_meta.cpu_topology.sockets) {
+      CRANE_WARN(
+          "Craned {} reports sockets={} but config has sockets={}; "
+          "using reported value.",
+          craned_id, reported,
+          node_meta->static_meta.cpu_topology.sockets);
+    }
+    node_meta->static_meta.cpu_topology.sockets = reported;
+  }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -336,6 +348,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->memory_bytes);
     static_meta.res.GetGres() =
         config.Nodes.at(craned_name)->dedicated_resource;
+    static_meta.cpu_topology.sockets = config.Nodes.at(craned_name)->cpu_topology.sockets;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
@@ -1120,6 +1133,9 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),
       craned_meta.static_meta.partition_ids.end());
+
+  // Set physical CPU socket count from static configuration.
+  craned_info->mutable_cpu_topology()->set_sockets(craned_meta.static_meta.cpu_topology.sockets);
 }
 
 }  // namespace Ctld
