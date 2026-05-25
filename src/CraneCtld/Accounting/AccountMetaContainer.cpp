@@ -500,10 +500,32 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
     return std::unexpected("QosMemResourceLimit");
   }
 
-  if (!(resource_req <= resource_total))
+  if (!CheckGres_(resource_req.GetGresMap(), resource_total.GetGresMap()))
     return std::unexpected("QosGresResourceLimit");
 
   return {};
+}
+
+bool AccountMetaContainer::CheckGres_(const GresMap& device_req,
+                                      const GresMap& device_total) {
+  for (const auto& [name, lhs] : device_req) {
+    auto rhs_it = device_total.find(name);
+    if (rhs_it == device_total.end()) return true;
+
+    const auto& rhs = rhs_it->second;
+
+    // Check total
+    if (lhs.total > rhs.total) return false;
+
+    // Check each specified type
+    for (const auto& [type, lhs_cnt] : lhs.specified) {
+      auto rhs_it = rhs.specified.find(type);
+      if (rhs_it == rhs.specified.end()) return true;
+      if (lhs_cnt > rhs_it->second) return false;
+    }
+  }
+
+  return true;
 }
 
 std::vector<std::unique_lock<std::mutex>>

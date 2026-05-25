@@ -155,6 +155,9 @@ class AccountMetaContainer final {
   static std::expected<void, std::string> CheckTres_(
       const ResourceView& resource_req, const ResourceView& resource_total);
 
+  static bool CheckGres_(const GresMap& device_req,
+                         const GresMap& device_total);
+
   void DoMallocResource_(job_id_t job_id, const std::string& username,
                          const std::list<std::string>& account_chain,
                          const std::string& qos,
