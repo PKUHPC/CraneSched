@@ -666,8 +666,8 @@ void MongodbClient::AppendJobIdSelectorClause_(
       // every materialized child, matching the in-memory expand_array_parents
       // behavior in ResolveJobIdSelectors.
       or_array.append([&](sub_document match_doc) {
-        match_doc.append(kvp("array_job_id",
-                             static_cast<std::int32_t>(selector.job_id())));
+        match_doc.append(
+            kvp("array_job_id", static_cast<std::int32_t>(selector.job_id())));
       });
     }
   }));
@@ -703,8 +703,7 @@ static RequestedStepMaps BuildRequestedStepMaps_(
   RequestedStepMaps maps;
   for (const auto& selector : request->filter_job_ids()) {
     if (selector.has_array_task_id()) {
-      auto key =
-          ArrayTaskStepKey_(selector.job_id(), selector.array_task_id());
+      auto key = ArrayTaskStepKey_(selector.job_id(), selector.array_task_id());
       MergeRequestedSteps_(&maps.by_array_task, key, selector.steps());
     } else {
       MergeRequestedSteps_(&maps.by_job_id, selector.job_id(),
@@ -1054,9 +1053,8 @@ bool MongodbClient::FetchJobRecords(
       }
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
-      auto req_steps =
-          RequestedStepsForJob_(job_id, array_job_id, array_task_id,
-                                req_step_maps);
+      auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
+                                             array_task_id, req_step_maps);
       for (const auto& elem : steps_elem.get_array().value) {
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
@@ -1240,9 +1238,8 @@ bool MongodbClient::FetchJobStepRecords(
 
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
-      auto req_steps =
-          RequestedStepsForJob_(job_id, array_job_id, array_task_id,
-                                req_step_maps);
+      auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
+                                             array_task_id, req_step_maps);
       for (const auto& elem : steps_elem.get_array().value) {
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
