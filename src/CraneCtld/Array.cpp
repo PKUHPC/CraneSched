@@ -797,7 +797,8 @@ ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelectors(
     bool expand_array_parents) const {
   ResolvedJobIdSelectors result;
   for (const auto& selector : selectors) {
-    MergeResolved_(result, ResolveJobIdSelector(selector, expand_array_parents));
+    MergeResolved_(result,
+                   ResolveJobIdSelector(selector, expand_array_parents));
   }
   return result;
 }

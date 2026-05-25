@@ -733,8 +733,8 @@ static std::optional<std::unordered_set<step_id_t>> RequestedStepsForJob_(
       merge(&it->second);
     }
 
-    if (auto it = map.find(
-            {static_cast<job_id_t>(array_job_id), kNoArrayTaskId});
+    if (auto it =
+            map.find({static_cast<job_id_t>(array_job_id), kNoArrayTaskId});
         it != map.end()) {
       merge(&it->second);
     }

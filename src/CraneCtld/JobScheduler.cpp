@@ -3465,8 +3465,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     }
   };
 
-  auto add_cancelled =
-      [&](job_id_t job_id) -> crane::grpc::CancelledJobStep* {
+  auto add_cancelled = [&](job_id_t job_id) -> crane::grpc::CancelledJobStep* {
     auto* entry = reply.add_cancelled();
     fill_user_id(entry, job_id);
     return entry;
@@ -3632,8 +3631,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     // Children that resolved to a job id which is no longer pending/running
     // are reported back under the user's original (job_id, array_task_id)
     // selector via fill_user_id.
-    for (const auto& [child_id, _] :
-         resolved.array_selector_by_child_job_id) {
+    for (const auto& [child_id, _] : resolved.array_selector_by_child_job_id) {
       if (m_pending_job_map_.contains(child_id) ||
           m_running_job_map_.contains(child_id)) {
         continue;
