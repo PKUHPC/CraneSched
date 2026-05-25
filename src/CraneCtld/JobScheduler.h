@@ -471,13 +471,16 @@ class SchedulerAlgo {
                             bool is_release = false) = 0;
 
     virtual NodeState* GetNodeState(const CranedId& craned_id) const = 0;
+    virtual NodeState* GetNodeStateOrNull(const CranedId& craned_id) const = 0;
     virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
         const = 0;
 
-    virtual void UpdateResource(const absl::Time& start_time,
-                                const absl::Time& end_time,
-                                const ResourceV3& res,
-                                bool is_release = false) = 0;
+    virtual void AllocateResource(const absl::Time& start_time,
+                                  const absl::Time& end_time,
+                                  const ResourceV3& res) = 0;
+    virtual void ReleaseResourceIfPresent(const absl::Time& start_time,
+                                          const absl::Time& end_time,
+                                          const ResourceV3& res) = 0;
   };
 
   class NodeSelector : public INodeSelector {
@@ -544,18 +547,36 @@ class SchedulerAlgo {
       return m_node_info_map_.at(craned_id).node_state;
     }
 
+    NodeState* GetNodeStateOrNull(const CranedId& craned_id) const override {
+      auto it = m_node_info_map_.find(craned_id);
+      if (it == m_node_info_map_.end()) return nullptr;
+      return it->second.node_state;
+    }
+
     const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
         const override {
       return m_cost_node_info_set_;
     }
 
-    void UpdateResource(const absl::Time& start_time,
-                        const absl::Time& end_time, const ResourceV3& res,
-                        bool is_release = false) override {
+    void AllocateResource(const absl::Time& start_time,
+                          const absl::Time& end_time,
+                          const ResourceV3& res) override {
       for (const auto& [craned_id, res_in_node] : res.EachNodeResMap()) {
         m_node_info_map_.at(craned_id).node_state->UpdateResourceInNode(
-            start_time, end_time, res_in_node, is_release);
-        UpdateCost(craned_id, start_time, end_time, res_in_node, is_release);
+            start_time, end_time, res_in_node);
+        UpdateCost(craned_id, start_time, end_time, res_in_node);
+      }
+    }
+
+    void ReleaseResourceIfPresent(const absl::Time& start_time,
+                                  const absl::Time& end_time,
+                                  const ResourceV3& res) override {
+      for (const auto& [craned_id, res_in_node] : res.EachNodeResMap()) {
+        if (!m_node_info_map_.contains(craned_id)) continue;
+        m_node_info_map_.at(craned_id).node_state->UpdateResourceInNode(
+            start_time, end_time, res_in_node, /*is_release=*/true);
+        UpdateCost(craned_id, start_time, end_time, res_in_node,
+                   /*is_release=*/true);
       }
     }
 
@@ -605,8 +626,8 @@ class SchedulerAlgo {
 
     void UpdateNodeSelectorWithScheduledJob(const absl::Time& now,
                                             PdJobInScheduler* job) {
-      m_node_selector_->UpdateResource(job->start_time, job->end_time,
-                                       job->allocated_res);
+      m_node_selector_->AllocateResource(job->start_time, job->end_time,
+                                         job->allocated_res);
       if (job->is_scheduled()) {
         for (const CranedId& craned_id : job->craned_ids) {
           m_node_selector_->GetNodeState(craned_id)
@@ -621,22 +642,22 @@ class SchedulerAlgo {
         std::variant<PdJobInScheduler*, RnJobInScheduler*> preempted_job) {
       if (std::holds_alternative<RnJobInScheduler*>(preempted_job)) {
         auto* rn = std::get<RnJobInScheduler*>(preempted_job);
-        m_node_selector_->UpdateResource(now, rn->end_time, rn->allocated_res,
-                                         /*is_release=*/true);
+        m_node_selector_->ReleaseResourceIfPresent(now, rn->end_time,
+                                                   rn->allocated_res);
         for (const auto& [craned_id, _] : rn->allocated_res.EachNodeResMap()) {
-          m_node_selector_->GetNodeState(craned_id)->qos_job_map[rn->qos].erase(
-              rn);
+          auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+          if (!node_state) continue;
+          node_state->qos_job_map[rn->qos].erase(rn);
         }
       } else {
         auto* pd = std::get<PdJobInScheduler*>(preempted_job);
-        m_node_selector_->UpdateResource(pd->start_time, pd->end_time,
-                                         pd->allocated_res,
-                                         /*is_release=*/true);
+        m_node_selector_->ReleaseResourceIfPresent(pd->start_time, pd->end_time,
+                                                   pd->allocated_res);
         if (pd->is_scheduled()) {
           for (const CranedId& craned_id : pd->craned_ids) {
-            m_node_selector_->GetNodeState(craned_id)
-                ->qos_job_map[pd->qos]
-                .erase(pd);
+            auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+            if (!node_state) continue;
+            node_state->qos_job_map[pd->qos].erase(pd);
           }
         }
       }
