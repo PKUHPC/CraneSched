@@ -702,7 +702,8 @@ static RequestedStepMap BuildRequestedStepMap_(
   return map;
 }
 
-// Empty result means "no filter" — match all steps.
+// Empty result means "all steps"; this covers both "no matching step filter"
+// and an explicit empty-step selector.
 static std::unordered_set<step_id_t> RequestedStepsForJob_(
     job_id_t job_id, int64_t array_job_id, int64_t array_task_id,
     const RequestedStepMap& map) {

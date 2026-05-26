@@ -3193,15 +3193,14 @@ void JobScheduler::CollectJobIdsForModify(
   ArrayManager::ResolvedJobIdSelectors resolved;
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
-    ranges::for_each(
-        request.job_ids() | ranges::views::transform(
-                                [this](const auto& selector) {
-                                  return m_array_manager_->ResolveJobIdSelector(
-                                      selector, false);
-                                }),
-        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-          resolved.MergeFrom(std::move(one));
-        });
+    ranges::for_each(request.job_ids() |
+                         ranges::views::transform([this](const auto& selector) {
+                           return m_array_manager_->ResolveJobIdSelector(
+                               selector, false);
+                         }),
+                     [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+                       resolved.MergeFrom(std::move(one));
+                     });
   }
 
   for (const auto& unresolved : resolved.unresolved_selectors) {
@@ -3618,16 +3617,14 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     LockGuard running_guard(&m_running_job_map_mtx_);
 
-    ranges::for_each(
-        request.filter_job_ids() | ranges::views::transform(
-                                       [this](const auto& selector) {
-                                         return m_array_manager_
-                                             ->ResolveJobIdSelector(selector,
-                                                                    false);
-                                       }),
-        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-          resolved.MergeFrom(std::move(one));
-        });
+    ranges::for_each(request.filter_job_ids() |
+                         ranges::views::transform([this](const auto& selector) {
+                           return m_array_manager_->ResolveJobIdSelector(
+                               selector, false);
+                         }),
+                     [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+                       resolved.MergeFrom(std::move(one));
+                     });
     auto& resolved_job_steps = resolved.job_steps;
 
     for (const auto& unresolved : resolved.unresolved_selectors) {
@@ -5573,22 +5570,7 @@ void JobScheduler::QueryJobsInRam(
     return nullptr;
   };
 
-  LockGuard pending_guard(&m_pending_job_map_mtx_);
-  LockGuard running_guard(&m_running_job_map_mtx_);
-
   ArrayManager::ResolvedJobIdSelectors resolved;
-  ranges::for_each(
-      request->filter_job_ids() |
-          ranges::views::transform(
-              [this, expand_array_parents =
-                         request->option_include_completed_jobs()](
-                  const auto& selector) {
-                return m_array_manager_->ResolveJobIdSelector(
-                    selector, expand_array_parents);
-              }),
-      [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-        resolved.MergeFrom(std::move(one));
-      });
   const auto& req_steps = resolved.job_steps;
 
   auto job_rng_filter_array_child = [&](auto* job_ptr) {
@@ -5609,6 +5591,21 @@ void JobScheduler::QueryJobsInRam(
                         ranges::views::filter(job_rng_filter_nodename_list) |
                         ranges::views::filter(job_rng_filter_array_child) |
                         ranges::views::take(num_limit);
+
+  LockGuard pending_guard(&m_pending_job_map_mtx_);
+  LockGuard running_guard(&m_running_job_map_mtx_);
+
+  ranges::for_each(request->filter_job_ids() |
+                       ranges::views::transform(
+                           [this, expand_array_parents =
+                                      request->option_include_completed_jobs()](
+                               const auto& selector) {
+                             return m_array_manager_->ResolveJobIdSelector(
+                                 selector, expand_array_parents);
+                           }),
+                   [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+                     resolved.MergeFrom(std::move(one));
+                   });
 
   auto append_step_fn = [&](auto* step_info_list, StepInCtld* step) {
     if (!step) return;
