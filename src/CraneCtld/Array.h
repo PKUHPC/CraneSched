@@ -224,7 +224,6 @@ class ArrayManager {
   const ArrayMeta* FindMeta_(job_id_t array_job_id) const;
 
   static bool ArrayMaterializationComplete_(const JobInCtld& parent);
-  static bool WasFinalizedBeforeRecovery_(const JobInCtld& parent);
   static void InheritChildAttributesFromParent_(JobInCtld& child);
   static const absl::flat_hash_set<job_id_t>& RunningChildJobIds_(
       const ArrayMeta& meta);

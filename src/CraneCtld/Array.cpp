@@ -320,15 +320,6 @@ bool ArrayManager::ArrayMaterializationComplete_(const JobInCtld& parent) {
   return parent.ArrayMaterializationComplete();
 }
 
-// True iff the parent's persisted state shows it was finalized via
-// FinishForTerminalStatus before a previous crash. Used by RegisterParent
-// to rebuild the transient terminal_status_override_ /
-// parent_start_event_triggered_ cache on startup.
-bool ArrayManager::WasFinalizedBeforeRecovery_(const JobInCtld& parent) {
-  return parent.ArrayMaterializationComplete() &&
-         IsFinishedStepStatus(parent.Status());
-}
-
 std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
     const ArrayMeta& meta, const std::unordered_set<JobInCtld*>& final_jobs) {
   if (auto override_status = meta.TerminalStatusOverride();
@@ -419,8 +410,10 @@ void ArrayManager::RegisterParent(JobInCtld* parent) {
   // and ArrayMaterializationComplete=true, but terminal_status_override_ and
   // parent_start_event_triggered_ are transient. Rebuild them so a later
   // BuildAggregateResult_ doesn't overwrite the persisted terminal status
-  // with a child-aggregate.
-  if (WasFinalizedBeforeRecovery_(*parent)) {
+  // with a child-aggregate. A terminal Status is sufficient: parents stay
+  // Pending while running, and FinishForTerminalStatus is the only path that
+  // sets terminal Status on an array parent.
+  if (IsFinishedStepStatus(parent->Status())) {
     meta->terminal_status_override_ =
         std::pair{parent->Status(), parent->ExitCode()};
     meta->parent_start_event_triggered_ = true;
