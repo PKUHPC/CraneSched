@@ -152,12 +152,12 @@ class CriClient {
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
   // ==== Image Service ====
-  // TODO: Async image pulling?
   std::optional<std::string> GetImageId(const std::string& image_name) const;
+  // NOTE: No `server_addr` here as it is used to identify registry in auth config,
+  // which we already done from submiting side.
   std::optional<std::string> PullImage(const std::string& image_name,
                                        const std::string& username,
                                        const std::string& password,
-                                       const std::string& server_addr,
                                        const std::string& pull_policy) const;
 
   // ==== Helpers ====
