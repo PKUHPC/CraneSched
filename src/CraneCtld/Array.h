@@ -141,6 +141,10 @@ class ArrayManager {
     std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
         array_selector_by_child_job_id;
     std::vector<UnresolvedSelector> unresolved_selectors;
+
+    // Merges `other` into *this, preserving the "empty step set = all steps"
+    // sentinel semantics of job_steps.
+    void MergeFrom(ResolvedJobIdSelectors&& other);
   };
 
   struct ParentMaterializationDecision {
@@ -208,13 +212,6 @@ class ArrayManager {
       const crane::grpc::JobIdSelector& selector,
       bool expand_array_parents) const;
 
-  // Batch wrapper: resolves every selector and merges into one result.
-  // Same locking contract as ResolveJobIdSelector.
-  ResolvedJobIdSelectors ResolveJobIdSelectors(
-      const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
-          selectors,
-      bool expand_array_parents) const;
-
   // Persistence / plugin hooks for final array parents.
   static void ProcessFinalParents(
       const std::vector<FinalizedArrayParent>& parents);
@@ -227,11 +224,6 @@ class ArrayManager {
   static void InheritChildAttributesFromParent_(JobInCtld& child);
   static const absl::flat_hash_set<job_id_t>& RunningChildJobIds_(
       const ArrayMeta& meta);
-
-  // Merges `src` into `dst`, preserving the "empty step set = all steps"
-  // sentinel semantics of job_steps.
-  static void MergeResolved_(ResolvedJobIdSelectors& dst,
-                             ResolvedJobIdSelectors&& src);
 
   CraneExpected<void> AdmitChildNoLock_(ArrayMeta& meta, JobInCtld& child);
 

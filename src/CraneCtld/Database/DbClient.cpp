@@ -682,19 +682,6 @@ using RequestedStepMap =
     absl::flat_hash_map<std::pair<job_id_t, array_task_id_t>,
                         std::unordered_set<step_id_t>>;
 
-static void MergeRequestedSteps_(
-    RequestedStepMap* req_steps, std::pair<job_id_t, array_task_id_t> key,
-    const google::protobuf::RepeatedField<uint32_t>& steps) {
-  // Empty `steps` is the "all steps" sentinel: once a key has been inserted
-  // with an empty set, later non-empty inputs must not narrow it.
-  auto [it, inserted] = req_steps->try_emplace(key);
-  if (steps.empty()) {
-    it->second.clear();
-  } else if (inserted || !it->second.empty()) {
-    it->second.insert(steps.begin(), steps.end());
-  }
-}
-
 static RequestedStepMap BuildRequestedStepMap_(
     const crane::grpc::QueryJobsInfoRequest* request) {
   RequestedStepMap map;
@@ -702,55 +689,47 @@ static RequestedStepMap BuildRequestedStepMap_(
     array_task_id_t task_id = selector.has_array_task_id()
                                   ? selector.array_task_id()
                                   : kNoArrayTaskId;
-    MergeRequestedSteps_(&map, {selector.job_id(), task_id}, selector.steps());
+    const auto& steps = selector.steps();
+    // Empty `steps` is the "all steps" sentinel: once a key has been inserted
+    // with an empty set, later non-empty inputs must not narrow it.
+    auto [it, inserted] = map.try_emplace({selector.job_id(), task_id});
+    if (steps.empty()) {
+      it->second.clear();
+    } else if (inserted || !it->second.empty()) {
+      it->second.insert(steps.begin(), steps.end());
+    }
   }
   return map;
 }
 
-static std::optional<std::unordered_set<step_id_t>> RequestedStepsForJob_(
+// Empty result means "no filter" — match all steps.
+static std::unordered_set<step_id_t> RequestedStepsForJob_(
     job_id_t job_id, int64_t array_job_id, int64_t array_task_id,
     const RequestedStepMap& map) {
-  std::optional<std::unordered_set<step_id_t>> requested_steps;
-
-  auto merge = [&requested_steps](const std::unordered_set<step_id_t>* steps) {
-    if (steps == nullptr) return;
-    if (steps->empty()) {
-      requested_steps.emplace();
-      requested_steps->clear();
-      return;
-    }
-    if (!requested_steps.has_value()) {
-      requested_steps = *steps;
-    } else if (!requested_steps->empty()) {
-      requested_steps->insert(steps->begin(), steps->end());
-    }
-  };
-
+  std::array<std::pair<job_id_t, array_task_id_t>, 3> keys;
+  size_t n = 0;
   if (array_job_id >= 0 && array_task_id >= 0) {
-    if (auto it = map.find({static_cast<job_id_t>(array_job_id),
-                            static_cast<array_task_id_t>(array_task_id)});
-        it != map.end()) {
-      merge(&it->second);
-    }
-
-    if (auto it =
-            map.find({static_cast<job_id_t>(array_job_id), kNoArrayTaskId});
-        it != map.end()) {
-      merge(&it->second);
-    }
+    keys[n++] = {static_cast<job_id_t>(array_job_id),
+                 static_cast<array_task_id_t>(array_task_id)};
+    keys[n++] = {static_cast<job_id_t>(array_job_id), kNoArrayTaskId};
   }
+  keys[n++] = {job_id, kNoArrayTaskId};
 
-  if (auto it = map.find({job_id, kNoArrayTaskId}); it != map.end()) {
-    merge(&it->second);
+  std::unordered_set<step_id_t> result;
+  for (size_t i = 0; i < n; ++i) {
+    auto it = map.find(keys[i]);
+    if (it == map.end()) continue;
+    // Empty set is the "all steps" sentinel; collapse and short-circuit.
+    if (it->second.empty()) return {};
+    result.insert(it->second.begin(), it->second.end());
   }
-  return requested_steps;
+  return result;
 }
 
-static bool ShouldAppendStep_(
-    const std::optional<std::unordered_set<step_id_t>>& req_steps,
-    int64_t step_id) {
-  return !req_steps.has_value() || req_steps->empty() ||
-         (step_id >= 0 && req_steps->contains(static_cast<step_id_t>(step_id)));
+static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
+                              int64_t step_id) {
+  return req_steps.empty() ||
+         (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
 }
 
 bool MongodbClient::FetchJobRecords(

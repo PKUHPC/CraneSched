@@ -771,33 +771,17 @@ void MergeJobSteps_(
 
 }  // namespace
 
-void ArrayManager::MergeResolved_(ResolvedJobIdSelectors& dst,
-                                  ResolvedJobIdSelectors&& src) {
-  for (auto& [job_id, steps] : src.job_steps) {
-    MergeJobSteps_(dst.job_steps, job_id, steps);
+void ArrayManager::ResolvedJobIdSelectors::MergeFrom(
+    ResolvedJobIdSelectors&& other) {
+  for (auto& [job_id, steps] : other.job_steps) {
+    MergeJobSteps_(job_steps, job_id, steps);
   }
-  for (auto& [child_id, selector] : src.array_selector_by_child_job_id) {
-    dst.array_selector_by_child_job_id.try_emplace(child_id, selector);
+  for (auto& [child_id, selector] : other.array_selector_by_child_job_id) {
+    array_selector_by_child_job_id.try_emplace(child_id, selector);
   }
-  for (auto& unresolved : src.unresolved_selectors) {
-    dst.unresolved_selectors.push_back(std::move(unresolved));
+  for (auto& unresolved : other.unresolved_selectors) {
+    unresolved_selectors.push_back(std::move(unresolved));
   }
-}
-
-ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelectors(
-    const google::protobuf::RepeatedPtrField<crane::grpc::JobIdSelector>&
-        selectors,
-    bool expand_array_parents) const {
-  ResolvedJobIdSelectors result;
-  ranges::for_each(
-      selectors | ranges::views::transform([this, expand_array_parents](
-                                               const auto& selector) {
-        return ResolveJobIdSelector(selector, expand_array_parents);
-      }),
-      [&result](ResolvedJobIdSelectors resolved) {
-        MergeResolved_(result, std::move(resolved));
-      });
-  return result;
 }
 
 ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelector(
