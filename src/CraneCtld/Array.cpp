@@ -796,10 +796,14 @@ ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelectors(
         selectors,
     bool expand_array_parents) const {
   ResolvedJobIdSelectors result;
-  for (const auto& selector : selectors) {
-    MergeResolved_(result,
-                   ResolveJobIdSelector(selector, expand_array_parents));
-  }
+  ranges::for_each(
+      selectors | ranges::views::transform([this, expand_array_parents](
+                                               const auto& selector) {
+        return ResolveJobIdSelector(selector, expand_array_parents);
+      }),
+      [&result](ResolvedJobIdSelectors resolved) {
+        MergeResolved_(result, std::move(resolved));
+      });
   return result;
 }
 

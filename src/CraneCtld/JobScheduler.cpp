@@ -5629,18 +5629,12 @@ void JobScheduler::QueryJobsInRam(
     job_info_map->emplace(job.JobId(), std::move(job_info));
   };
 
-  std::vector<job_id_t> filtered_job_ids;
-  filtered_job_ids.reserve(req_steps.size());
-  for (const auto& job_id : req_steps | std::views::keys) {
-    filtered_job_ids.push_back(job_id);
-  }
-
   auto pending_rng = m_pending_job_map_ | ranges::views::all;
   auto running_rng = m_running_job_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
   ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng =
-      filtered_job_ids | ranges::views::all |
+      req_steps | ranges::views::keys |
       ranges::views::transform(get_job_ptr_by_id) |
       ranges::views::filter([](auto* job_ptr) { return job_ptr != nullptr; }) |
       joined_filters;
