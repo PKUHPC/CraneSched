@@ -121,6 +121,7 @@ class AccountManager {
 
   std::vector<CraneExpectedRich<void>> ModifyAccount(
       uint32_t uid, const std::string& account_name,
+      const std::string& partition,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
       bool force);
 
@@ -199,7 +200,7 @@ class AccountManager {
    */
 
   std::vector<CraneExpectedRich<void>> CheckModifyAccountOperations(
-      Account* account,
+      Account* account, const std::string& partition,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
       std::string* log, std::vector<ModifyRecord>* modify_record, bool force);
   std::vector<CraneExpectedRich<void>> CheckModifyUserOperations(
@@ -228,6 +229,15 @@ class AccountManager {
   CraneExpected<void> CheckDeleteUserAllowedQosNoLock_(
       const User& user, const std::string& account,
       const std::string& partition, const std::string& qos, bool force);
+  CraneExpectedRich<int64_t> CheckSetUserJobsLimitNoLock_(
+      const std::string& account, const std::string& partition,
+      const std::string& value, User* res_user);
+  CraneExpectedRich<int64_t> CheckSetUserWallLimitNoLock_(
+      const std::string& account, const std::string& partition,
+      const std::string& value, User* res_user);
+  CraneExpectedRich<void> CheckSetUserTresLimitNoLock_(
+      const std::string& account, const std::string& partition,
+      const std::string& value, User* res_user);
 
   /* ---------------------------------------------------------------------------
    * ModifyAccount-related functions(no lock)
@@ -253,6 +263,15 @@ class AccountManager {
       const Account* account, const std::string& partition, bool force);
   CraneExpectedRich<void> CheckDeleteAccountAllowedQosNoLock_(
       const Account* account, const std::string& qos, bool force);
+  CraneExpectedRich<int64_t> CheckSetAccountJobsLimitNoLock_(
+      const std::string& partition, const std::string& value,
+      Account* res_account);
+  CraneExpectedRich<int64_t> CheckSetAccountWallLimitNoLock_(
+      const std::string& partition, const std::string& value,
+      Account* res_account);
+  CraneExpectedRich<void> CheckSetAccountTresLimitNoLock_(
+      const std::string& partition, const std::string& value,
+      Account* res_account);
 
   // Compare the user's permission levels for operations.
   CraneExpectedRich<void> CheckIfUserHasHigherPrivThan_(
@@ -350,6 +369,9 @@ class AccountManager {
   CraneExpectedRich<void> BlockAccountNoLock_(const std::string& actor_name,
                                               const std::string& name,
                                               bool block);
+
+  void EmplacePartitionResource_(const std::string& partition,
+                                 PartitionToLimitMap* partition_to_limit_map);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,

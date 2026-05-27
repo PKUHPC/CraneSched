@@ -78,6 +78,7 @@ nav:
       - Keepalived Guide: deployment/configuration/keepalived.md
       - Lua Guide: deployment/configuration/lua_guide.md
       - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
+      - Resource Limit Guide: deployment/configuration/partition_resource_limit_guide.md
   - Commands:
       - Job Submission:
           - cbatch: command/cbatch.md
@@ -158,6 +159,7 @@ plugins:
             Keepalived Guide: Keepalived 配置指南
             Lua Guide: Lua 脚本配置指南
             Prolog & Epilog Guide: Prolog/Epilog 配置指南
+            Resource Limit Guide: 资源限制配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练

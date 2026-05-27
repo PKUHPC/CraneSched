@@ -170,6 +170,12 @@ Extend CraneSched with plugins for monitoring, notifications, and more.
 
 - **[Plugins Guide](./frontend/plugins.md)** - Email notifications, resource monitoring, energy tracking
 
+### Resource Limit Management
+
+Configure QoS and partition-level resource usage limits for accounts and users.
+
+- **[Resource Limit Configuration Guide](./configuration/partition_resource_limit_guide.md)** - Configure QoS resource limits and partition resource limits
+
 ### Access Control
 
 Restrict SSH access to compute nodes for authorized jobs only.

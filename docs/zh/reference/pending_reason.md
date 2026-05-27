@@ -52,3 +52,40 @@ Reason=Priority
 | `Resource` | 资源不足 | 集群当前没有足够的资源（CPU、内存、GPU等）满足作业需求 |
 | `Resource Reserved` | 资源已被预留 | 作业需要的资源在未来时间段已被其他预留占用 |
 | `Priority` | 优先级不足 | 作业优先级低于其他排队作业，或达到并发作业数限制 |
+
+## 资源限制排队原因
+
+当作业因 QoS 或 Partition 的资源限制无法调度时，会显示以下排队原因。这些原因在调度阶段（作业已提交但等待运行）出现。
+
+### QoS 资源限制
+
+| 原因 | 说明 | 对应限制 |
+|------|------|---------|
+| `QosEntryNotFound` | QoS 统计条目未找到（内部错误） | 调度时 QoS 统计状态异常，联系管理员 |
+| `QosCpuResourceLimit` | CPU 使用量超过 QoS 的用户 CPU 限制 | QoS `max_cpus_per_user` 超限 |
+| `QosJobsResourceLimit` | 运行作业数超过 QoS 限制 | QoS `max_jobs_per_user` 或 `max_jobs_per_account` 超限 |
+| `QosWallTimeLimit` | 累计墙钟时间超过 QoS 限制 | QoS `max_wall` 超限 |
+| `QosCpuResourceLimit` | CPU 使用量超过 QoS 的 TRES 限制 | QoS `max_tres_per_user` 或 `max_tres_per_account` 中 CPU 超限 |
+| `QosMemResourceLimit` | 内存使用量超过 QoS 的 TRES 限制 | QoS `max_tres_per_user` 或 `max_tres_per_account` 中 Mem 超限 |
+| `QosGresResourceLimit` | GRES 使用量超过 QoS 的 TRES 限制 | QoS `max_tres_per_user` 或 `max_tres_per_account` 中 GRES 超限 |
+
+### Partition 资源限制
+
+| 原因 | 说明 | 对应限制 |
+|------|------|---------|
+| `PartitionCpuResourceLimit` | CPU 使用量超过 Partition 的 TRES 限制 | Partition `max_tres` 中 CPU 超限 |
+| `PartitionMemResourceLimit` | 内存使用量超过 Partition 的 TRES 限制 | Partition `max_tres` 中 Mem 超限 |
+| `PartitionGresResourceLimit` | GRES 使用量超过 Partition 的 TRES 限制 | Partition `max_tres` 中 GRES 超限 |
+| `UserPartitionJobsLimit` | 用户在该 Partition 的运行作业数超限 | Partition `max_jobs` 超限（用户维度） |
+| `AccPartitionJobsLimit` | 账号在该 Partition 的运行作业数超限 | Partition `max_jobs` 超限（账号维度） |
+| `UserPartitionWallTimeLimit` | 用户在该 Partition 的累计墙钟时间超限 | Partition `max_wall` 超限（用户维度） |
+| `AccPartitionWallTimeLimit` | 账号在该 Partition 的累计墙钟时间超限 | Partition `max_wall` 超限（账号维度） |
+| `PartitionEntryNotFound` | Partition 统计条目未找到（内部错误） | 调度时 Partition 统计状态异常，联系管理员 |
+
+### 内部状态错误
+
+| 原因 | 说明 |
+|------|------|
+| `UserMetaNotFound` | 用户统计条目未找到（内部错误），联系管理员 |
+| `AccountMetaNotFound` | 账号统计条目未找到（内部错误），联系管理员 |
+| `QosMetaNotFound` | QoS 统计条目未找到（内部错误），联系管理员 |
