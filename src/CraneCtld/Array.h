@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "protos/Crane.pb.h"
@@ -129,27 +130,28 @@ class ArrayManager {
     job_id_t array_job_id{0};
   };
 
-  struct ResolvedJobIdSelectors {
-    // Only array-task selectors can fail to resolve; plain job_id selectors
-    // pass through unconditionally. So an unresolved entry always carries the
-    // array_task_id the user asked for.
-    struct UnresolvedSelector {
+  // Only array-task selectors can fail to resolve; plain job_id selectors
+  // pass through unconditionally. So an unresolved entry always carries the
+  // array_task_id the user asked for.
+  struct UnresolvedSelector {
+    job_id_t job_id{0};
+    array_task_id_t array_task_id{0};
+    std::string reason;
+  };
+
+  // Per-selector resolution result. Callers compose a range of these via
+  // views (transform / filter / for_each) to derive the maps they need; no
+  // aggregate type is exposed by ArrayManager.
+  struct JobIdSelectorResolution {
+    struct Resolved {
+      // Child job id for resolved array tasks, otherwise the plain job_id.
       job_id_t job_id{0};
-      array_task_id_t array_task_id{0};
-      std::string reason;
+      std::unordered_set<step_id_t> steps;
+      // Set only for resolved array tasks: maps the child job back to the
+      // (array_parent_id, array_task_id) the user originally asked for.
+      std::optional<std::pair<job_id_t, array_task_id_t>> array_origin;
     };
-
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
-    // Reverse lookup: child_job_id -> (array_parent_id, array_task_id).
-    // Lets downstream code surface a failure on a materialized child back to
-    // the user as the array task they originally asked for.
-    std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
-        array_selector_by_child_job_id;
-    std::vector<UnresolvedSelector> unresolved_selectors;
-
-    // Merges `other` into *this, preserving the "empty step set = all steps"
-    // sentinel semantics of job_steps.
-    void MergeFrom(ResolvedJobIdSelectors&& other);
+    std::variant<Resolved, UnresolvedSelector> outcome;
   };
 
   struct ParentMaterializationDecision {
@@ -213,7 +215,7 @@ class ArrayManager {
 
   // Resolves a single JobIdSelector. Requires the scheduler's
   // pending-job-map mutex held by the caller (reads m_metas_).
-  ResolvedJobIdSelectors ResolveJobIdSelector(
+  JobIdSelectorResolution ResolveJobIdSelector(
       const crane::grpc::JobIdSelector& selector) const;
 
   // Persistence / plugin hooks for final array parents.

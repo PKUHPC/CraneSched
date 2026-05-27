@@ -111,6 +111,36 @@ uint32_t QosSubmitReserveCount(const JobInCtld& job) {
   return ArrayUtil::EffectiveRunLimit(job.JobToCtld().array_spec());
 }
 
+using Resolution = ArrayManager::JobIdSelectorResolution;
+using Resolved = Resolution::Resolved;
+using Unresolved = ArrayManager::UnresolvedSelector;
+
+constexpr auto is_resolved = [](const Resolution& r) {
+  return std::holds_alternative<Resolved>(r.outcome);
+};
+constexpr auto is_unresolved = [](const Resolution& r) {
+  return std::holds_alternative<Unresolved>(r.outcome);
+};
+constexpr auto to_resolved = [](const Resolution& r) -> const Resolved& {
+  return std::get<Resolved>(r.outcome);
+};
+constexpr auto to_unresolved = [](const Resolution& r) -> const Unresolved& {
+  return std::get<Unresolved>(r.outcome);
+};
+
+// Empty `steps` is the "all steps" sentinel: once a key has been inserted
+// with an empty set, later non-empty inputs must not narrow it.
+void MergeJobSteps(
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& job_steps,
+    job_id_t job_id, const std::unordered_set<step_id_t>& steps) {
+  auto [it, inserted] = job_steps.try_emplace(job_id);
+  if (steps.empty()) {
+    it->second.clear();
+  } else if (inserted || !it->second.empty()) {
+    it->second.insert(steps.begin(), steps.end());
+  }
+}
+
 }  // namespace
 
 JobScheduler::JobScheduler() {
@@ -3190,43 +3220,46 @@ void JobScheduler::CollectJobIdsForModify(
     crane::grpc::ModifyJobReply* response, std::vector<job_id_t>* job_ids) {
   if (request.job_ids().empty()) return;
 
-  ArrayManager::ResolvedJobIdSelectors resolved;
+  std::vector<Resolution> resolutions;
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
+
+  auto resolution_view =
+      request.job_ids() | ranges::views::transform([this](const auto& sel) {
+        return m_array_manager_->ResolveJobIdSelector(sel);
+      });
+  auto resolved_view = resolutions | ranges::views::filter(is_resolved) |
+                       ranges::views::transform(to_resolved);
+  auto unresolved_view = resolutions | ranges::views::filter(is_unresolved) |
+                         ranges::views::transform(to_unresolved);
+
+  auto is_array_parent_with_steps = [this](const auto& kv) {
+    return !kv.second.empty() && m_array_manager_->IsRegisteredParent(kv.first);
+  };
+  auto rejected_parent_view =
+      job_steps | ranges::views::filter(is_array_parent_with_steps);
+
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
-    ranges::for_each(
-        request.job_ids() |
-            ranges::views::transform([this](const auto& selector) {
-              return m_array_manager_->ResolveJobIdSelector(selector);
-            }),
-        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-          resolved.MergeFrom(std::move(one));
-        });
+    resolutions = resolution_view | ranges::to<std::vector>();
 
-    for (auto it = resolved.job_steps.begin();
-         it != resolved.job_steps.end();) {
-      if (!it->second.empty() &&
-          m_array_manager_->IsRegisteredParent(it->first)) {
-        response->add_not_modified_jobs(it->first);
-        response->add_not_modified_reasons("Array parent has no steps");
-        it = resolved.job_steps.erase(it);
-      } else {
-        ++it;
-      }
-    }
+    ranges::for_each(resolved_view, [&](const Resolved& r) {
+      MergeJobSteps(job_steps, r.job_id, r.steps);
+    });
+    ranges::for_each(rejected_parent_view, [&](const auto& kv) {
+      response->add_not_modified_jobs(kv.first);
+      response->add_not_modified_reasons("Array parent has no steps");
+    });
+    std::erase_if(job_steps, is_array_parent_with_steps);
+
+    ranges::for_each(unresolved_view, [&](const Unresolved& u) {
+      response->add_not_modified_jobs(u.job_id);
+      response->add_not_modified_reasons(fmt::format(
+          "Array task {}_{}: {}", u.job_id, u.array_task_id, u.reason));
+    });
   }
 
-  for (const auto& unresolved : resolved.unresolved_selectors) {
-    response->add_not_modified_jobs(unresolved.job_id);
-    response->add_not_modified_reasons(
-        fmt::format("Array task {}_{}: {}", unresolved.job_id,
-                    unresolved.array_task_id, unresolved.reason));
-  }
-
-  std::vector<job_id_t> resolved_ids;
-  resolved_ids.reserve(resolved.job_steps.size());
-  for (job_id_t job_id : resolved.job_steps | std::views::keys) {
-    resolved_ids.push_back(job_id);
-  }
+  auto resolved_ids =
+      job_steps | std::views::keys | ranges::to<std::vector<job_id_t>>();
 
   if (g_config.JobSubmitLuaScript.empty()) {
     *job_ids = std::move(resolved_ids);
@@ -3453,7 +3486,9 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     return filter_uname.empty() || job->Username() == filter_uname;
   };
 
-  ArrayManager::ResolvedJobIdSelectors resolved;
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
+  std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
+      array_selector_by_child_job_id;
   bool has_explicit_job_filter = !request.filter_job_ids().empty();
   std::unordered_set<job_id_t> not_found_job_ids;
 
@@ -3474,8 +3509,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
   // (job_id [+ array_task_id]) before writing it into a reply entry. Plain
   // jobs pass through unchanged.
   auto fill_user_id = [&](auto* entry, job_id_t job_id) {
-    auto it = resolved.array_selector_by_child_job_id.find(job_id);
-    if (it != resolved.array_selector_by_child_job_id.end()) {
+    auto it = array_selector_by_child_job_id.find(job_id);
+    if (it != array_selector_by_child_job_id.end()) {
       entry->set_job_id(it->second.first);
       entry->set_array_task_id(it->second.second);
     } else {
@@ -3527,8 +3562,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
         return;
       }
 
-      auto step_it = resolved.job_steps.find(job_id);
-      if (step_it != resolved.job_steps.end() && !step_it->second.empty()) {
+      auto step_it = job_steps.find(job_id);
+      if (step_it != job_steps.end() && !step_it->second.empty()) {
         for (step_id_t step_id : step_it->second) {
           add_not_cancelled_step(job_id, step_id, "Array parent has no steps");
         }
@@ -3555,7 +3590,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
           // not-found tracking. The async CancelArrayParentQueueElem handler
           // terminates running children; letting fn_cancel_running_job touch
           // them again would double-cancel.
-          resolved.job_steps.erase(child_id);
+          job_steps.erase(child_id);
           not_found_job_ids.erase(child_id);
         }
       }
@@ -3592,16 +3627,14 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       return;
     }
 
-    auto& resolved_job_steps = resolved.job_steps;
-    if (!resolved_job_steps.contains(job_id) ||
-        resolved_job_steps[job_id].empty()) {
+    if (!job_steps.contains(job_id) || job_steps[job_id].empty()) {
       add_cancelled(job_id);
       CancelRunningJobNoLock_(job, crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
       return;
     }
 
     std::vector<CommonStepInCtld*> cancel_steps;
-    for (step_id_t step_id : resolved_job_steps[job_id]) {
+    for (step_id_t step_id : job_steps[job_id]) {
       StepInCtld* step = job->GetStep(step_id);
       if (!step) {
         add_not_cancelled_step(job_id, step_id, "Step not found");
@@ -3634,44 +3667,59 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
                         ranges::views::filter(rng_filter_job_name) |
                         ranges::views::filter(rng_filter_nodes);
 
+  auto resolution_view = request.filter_job_ids() |
+                         ranges::views::transform([this](const auto& sel) {
+                           return m_array_manager_->ResolveJobIdSelector(sel);
+                         });
+
+  std::vector<Resolution> resolutions;
+  auto resolved_view = resolutions | ranges::views::filter(is_resolved) |
+                       ranges::views::transform(to_resolved);
+  auto unresolved_view = resolutions | ranges::views::filter(is_unresolved) |
+                         ranges::views::transform(to_unresolved);
+  auto array_resolved_view =
+      resolved_view |
+      ranges::views::filter([](const Resolved& r) { return !!r.array_origin; });
+
+  auto child_not_in_maps = [this](const auto& kv) {
+    return !m_pending_job_map_.contains(kv.first) &&
+           !m_running_job_map_.contains(kv.first);
+  };
+  auto missing_child_view =
+      array_selector_by_child_job_id | ranges::views::filter(child_not_in_maps);
+
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     LockGuard running_guard(&m_running_job_map_mtx_);
 
-    ranges::for_each(
-        request.filter_job_ids() |
-            ranges::views::transform([this](const auto& selector) {
-              return m_array_manager_->ResolveJobIdSelector(selector);
-            }),
-        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-          resolved.MergeFrom(std::move(one));
-        });
-    auto& resolved_job_steps = resolved.job_steps;
+    resolutions = resolution_view | ranges::to<std::vector>();
 
-    for (const auto& unresolved : resolved.unresolved_selectors) {
+    ranges::for_each(resolved_view, [&](const Resolved& r) {
+      MergeJobSteps(job_steps, r.job_id, r.steps);
+    });
+    ranges::for_each(array_resolved_view, [&](const Resolved& r) {
+      array_selector_by_child_job_id.try_emplace(r.job_id, *r.array_origin);
+    });
+    ranges::for_each(unresolved_view, [&](const Unresolved& u) {
       auto* entry = reply.add_not_cancelled();
-      entry->set_job_id(unresolved.job_id);
-      entry->set_array_task_id(unresolved.array_task_id);
-      entry->set_reason(unresolved.reason);
-    }
+      entry->set_job_id(u.job_id);
+      entry->set_array_task_id(u.array_task_id);
+      entry->set_reason(u.reason);
+    });
 
     if (has_explicit_job_filter) {
-      for (job_id_t job_id : resolved_job_steps | std::views::keys) {
+      ranges::for_each(job_steps | std::views::keys, [&](job_id_t job_id) {
         not_found_job_ids.insert(job_id);
-      }
+      });
     }
 
     // Children that resolved to a job id which is no longer pending/running
     // are reported back under the user's original (job_id, array_task_id)
     // selector via fill_user_id.
-    for (const auto& [child_id, _] : resolved.array_selector_by_child_job_id) {
-      if (m_pending_job_map_.contains(child_id) ||
-          m_running_job_map_.contains(child_id)) {
-        continue;
-      }
-      add_not_cancelled(child_id, "No such job");
-      not_found_job_ids.erase(child_id);
-    }
+    ranges::for_each(missing_child_view, [&](const auto& kv) {
+      add_not_cancelled(kv.first, "No such job");
+      not_found_job_ids.erase(kv.first);
+    });
 
     ranges::any_view<JobInCtld*, ranges::category::forward> pd_input_rng;
     ranges::any_view<JobInCtld*, ranges::category::forward> rn_input_rng;
@@ -3684,7 +3732,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     } else {
       auto filter_nullptr = [](auto task_ptr) { return task_ptr != nullptr; };
       pd_input_rng =
-          resolved_job_steps | ranges::views::keys |
+          job_steps | ranges::views::keys |
           ranges::views::transform(
               [this, &not_found_job_ids](job_id_t job_id) -> JobInCtld* {
                 auto pd_it = m_pending_job_map_.find(job_id);
@@ -3697,7 +3745,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
           ranges::views::filter(filter_nullptr);
 
       rn_input_rng =
-          resolved_job_steps | ranges::views::keys |
+          job_steps | ranges::views::keys |
           ranges::views::transform(
               [this, &not_found_job_ids](job_id_t job_id) -> JobInCtld* {
                 auto rn_it = m_running_job_map_.find(job_id);
@@ -5591,13 +5639,15 @@ void JobScheduler::QueryJobsInRam(
     return nullptr;
   };
 
-  ArrayManager::ResolvedJobIdSelectors resolved;
-  const auto& req_steps = resolved.job_steps;
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
+  std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
+      array_selector_by_child_job_id;
+  const auto& req_steps = job_steps;
 
   auto job_rng_filter_array_child = [&](auto* job_ptr) {
     return request->option_include_completed_jobs() ||
            !job_ptr->IsArrayChild() ||
-           resolved.array_selector_by_child_job_id.contains(job_ptr->JobId());
+           array_selector_by_child_job_id.contains(job_ptr->JobId());
   };
 
   auto joined_filters = ranges::views::filter(job_rng_filter_account) |
@@ -5613,17 +5663,28 @@ void JobScheduler::QueryJobsInRam(
                         ranges::views::filter(job_rng_filter_array_child) |
                         ranges::views::take(num_limit);
 
+  auto resolution_view = request->filter_job_ids() |
+                         ranges::views::transform([this](const auto& sel) {
+                           return m_array_manager_->ResolveJobIdSelector(sel);
+                         });
+
+  std::vector<Resolution> resolutions;
+  auto resolved_view = resolutions | ranges::views::filter(is_resolved) |
+                       ranges::views::transform(to_resolved);
+  auto array_resolved_view =
+      resolved_view |
+      ranges::views::filter([](const Resolved& r) { return !!r.array_origin; });
+
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
 
-  ranges::for_each(
-      request->filter_job_ids() |
-          ranges::views::transform([this](const auto& selector) {
-            return m_array_manager_->ResolveJobIdSelector(selector);
-          }),
-      [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-        resolved.MergeFrom(std::move(one));
-      });
+  resolutions = resolution_view | ranges::to<std::vector>();
+  ranges::for_each(resolved_view, [&](const Resolved& r) {
+    MergeJobSteps(job_steps, r.job_id, r.steps);
+  });
+  ranges::for_each(array_resolved_view, [&](const Resolved& r) {
+    array_selector_by_child_job_id.try_emplace(r.job_id, *r.array_origin);
+  });
 
   auto append_step_fn = [&](auto* step_info_list, StepInCtld* step) {
     if (!step) return;

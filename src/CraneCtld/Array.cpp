@@ -736,83 +736,41 @@ bool ArrayManager::OnChildStarted(JobInCtld* child) {
 // ArrayManager: resolve
 // ----------------------------------------------------------------------------
 
-namespace {
-
-// Empty `steps` is the "all steps" sentinel: once a key has been inserted
-// with an empty set, later non-empty inputs must not narrow it.
-void MergeJobSteps_(
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& job_steps,
-    job_id_t job_id, const std::unordered_set<step_id_t>& steps) {
-  auto [it, inserted] = job_steps.try_emplace(job_id);
-  if (steps.empty()) {
-    it->second.clear();
-  } else if (inserted || !it->second.empty()) {
-    it->second.insert(steps.begin(), steps.end());
-  }
-}
-
-}  // namespace
-
-void ArrayManager::ResolvedJobIdSelectors::MergeFrom(
-    ResolvedJobIdSelectors&& other) {
-  for (auto& [job_id, steps] : other.job_steps) {
-    MergeJobSteps_(job_steps, job_id, steps);
-  }
-  for (auto& [child_id, selector] : other.array_selector_by_child_job_id) {
-    array_selector_by_child_job_id.try_emplace(child_id, selector);
-  }
-  for (auto& unresolved : other.unresolved_selectors) {
-    unresolved_selectors.push_back(std::move(unresolved));
-  }
-}
-
-ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelector(
+ArrayManager::JobIdSelectorResolution ArrayManager::ResolveJobIdSelector(
     const crane::grpc::JobIdSelector& selector) const {
-  ResolvedJobIdSelectors result;
   std::unordered_set<step_id_t> steps(selector.steps().begin(),
                                       selector.steps().end());
   job_id_t job_id = selector.job_id();
 
   if (!selector.has_array_task_id()) {
-    MergeJobSteps_(result.job_steps, job_id, steps);
-    return result;
-  }
-
-  const auto* meta = FindMeta_(job_id);
-  if (meta == nullptr || meta->ParentPtr() == nullptr) {
-    result.unresolved_selectors.push_back({
-        .job_id = job_id,
-        .array_task_id = selector.array_task_id(),
-        .reason = "No such job",
-    });
-    return result;
+    return {JobIdSelectorResolution::Resolved{.job_id = job_id,
+                                              .steps = std::move(steps)}};
   }
 
   array_task_id_t array_task_id = selector.array_task_id();
-  const auto& array_spec = meta->Parent().JobToCtld().array_spec();
-  if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
-    result.unresolved_selectors.push_back({
+  auto unresolved = [&] {
+    return JobIdSelectorResolution{UnresolvedSelector{
         .job_id = job_id,
         .array_task_id = array_task_id,
         .reason = "No such job",
-    });
-    return result;
+    }};
+  };
+
+  const auto* meta = FindMeta_(job_id);
+  if (meta == nullptr || meta->ParentPtr() == nullptr) return unresolved();
+
+  const auto& array_spec = meta->Parent().JobToCtld().array_spec();
+  if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
+    return unresolved();
   }
 
   auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
-  if (!child_job_id.has_value()) {
-    result.unresolved_selectors.push_back({
-        .job_id = job_id,
-        .array_task_id = array_task_id,
-        .reason = "No such job",
-    });
-    return result;
-  }
+  if (!child_job_id.has_value()) return unresolved();
 
-  MergeJobSteps_(result.job_steps, *child_job_id, steps);
-  result.array_selector_by_child_job_id.try_emplace(*child_job_id, job_id,
-                                                    array_task_id);
-  return result;
+  return {JobIdSelectorResolution::Resolved{
+      .job_id = *child_job_id,
+      .steps = std::move(steps),
+      .array_origin = std::pair{job_id, array_task_id}}};
 }
 
 // ----------------------------------------------------------------------------
