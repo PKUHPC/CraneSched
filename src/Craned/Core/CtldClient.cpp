@@ -880,6 +880,14 @@ bool CtldClient::CranedRegister_(
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
 
+  const auto& topo = g_config.node_topo_info;
+  auto* grpc_topo = grpc_meta->mutable_node_topo_info();
+  grpc_topo->set_boards(topo.boards);
+  grpc_topo->set_sockets(topo.sockets);
+  grpc_topo->set_cores_per_socket(topo.cores_per_socket);
+  grpc_topo->set_threads_per_core(topo.threads_per_core);
+  grpc_topo->set_total_cpus(topo.total_cpus);
+
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
   grpc_sys_rel_info->set_name(sys_info.name);

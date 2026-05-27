@@ -75,6 +75,8 @@ option(CRANE_USE_SYSTEM_LIBBPF "Use libbpf from system instead of building from 
 option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" ON)
 option(CRANE_ENABLE_BPF "Enable eBPF support for Cgroup V2 device management" OFF)
 
+option(CRANE_ENABLE_HWLOC "Enable hwloc hardware topology detection" ON)
+
 option(CRANE_FULL_DYNAMIC "Enable dynamic linking for most libraries" OFF)
 option(CRANE_USE_LIBCXX "Force libc++ when using the Clang toolchain" OFF)
 
@@ -366,6 +368,16 @@ if (PAM_FOUND)
     message(STATUS "PAM library found. Include: ${PAM_INCLUDE_DIR}; Libs: ${PAM_LIBRARIES}")
 else ()
     message(FATAL_ERROR "PAM library was not found.")
+endif ()
+
+if (CRANE_ENABLE_HWLOC)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HWLOC hwloc)
+    if (HWLOC_FOUND)
+        message(STATUS "hwloc found: version ${HWLOC_VERSION}")
+    else ()
+        message(FATAL_ERROR "hwloc not found. Install hwloc-devel (or libhwloc-dev), or disable with -DCRANE_ENABLE_HWLOC=OFF")
+    endif ()
 endif ()
 
 find_package(LibAIO REQUIRED)

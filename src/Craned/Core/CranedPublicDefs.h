@@ -171,6 +171,8 @@ struct Config {
   std::string CraneClusterName;
   uint32_t ConfigCrcVal;
 
+  NodeTopoInfo node_topo_info;
+
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CranedLogFile;
   std::filesystem::path CranedMutexFilePath;

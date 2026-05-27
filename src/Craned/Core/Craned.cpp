@@ -34,6 +34,7 @@
 #include <cxxopts.hpp>
 
 #include "CgroupManager.h"
+#include "CpuTopoDetector.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
@@ -580,6 +581,8 @@ void ParseConfig(int argc, char** argv) {
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
+  std::unordered_map<std::string, std::tuple<uint32_t, uint32_t, uint32_t>>
+      each_node_topo_config;  // per-node: {sockets, cores_per_socket, threads_per_core}
   if (std::filesystem::exists(config_path)) {
     try {
       using util::YamlValueOr;
@@ -786,6 +789,45 @@ void ParseConfig(int argc, char** argv) {
               node_res->GetCpuSet().core_ids.insert(i);
           } else
             std::exit(1);
+
+          uint32_t cfg_sockets = 0, cfg_cores = 0, cfg_threads = 0;
+          if (node["sockets"]) {
+            uint32_t val = node["sockets"].as<uint32_t>(0);
+            uint32_t cpu_count =
+                static_cast<uint32_t>(node_res->GetCpuSet().core_ids.size());
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid sockets=0 for node '{}'. Treating as unset.",
+                  node["name"].Scalar());
+            } else if (val > cpu_count) {
+              CRANE_WARN(
+                  "Sockets={} for node '{}' exceeds cpu={}. Treating as "
+                  "unset.",
+                  val, node["name"].Scalar(), cpu_count);
+              val = 0;
+            }
+            cfg_sockets = val;
+          }
+          if (node["cores_per_socket"]) {
+            uint32_t val = node["cores_per_socket"].as<uint32_t>(0);
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid cores_per_socket=0 for node '{}'. Treating as "
+                  "unset.",
+                  node["name"].Scalar());
+            }
+            cfg_cores = val;
+          }
+          if (node["threads_per_core"]) {
+            uint32_t val = node["threads_per_core"].as<uint32_t>(0);
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid threads_per_core=0 for node '{}'. Treating as "
+                  "unset.",
+                  node["name"].Scalar());
+            }
+            cfg_threads = val;
+          }
 
           if (node["memory"]) {
             auto memory_bytes =
@@ -1006,6 +1048,8 @@ void ParseConfig(int argc, char** argv) {
               ABSL_UNREACHABLE();
             }
             g_config.CranedRes[name] = node_res;
+            each_node_topo_config[name] = {cfg_sockets, cfg_cores,
+                                           cfg_threads};
           }
         }
       }
@@ -1279,6 +1323,15 @@ void ParseConfig(int argc, char** argv) {
 
   g_config.CranedIdOfThisNode = g_config.Hostname;
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
+
+  auto topo_it = each_node_topo_config.find(g_config.Hostname);
+  uint32_t cfg_sockets = 0, cfg_cores = 0, cfg_threads = 0;
+  if (topo_it != each_node_topo_config.end()) {
+    std::tie(cfg_sockets, cfg_cores, cfg_threads) = topo_it->second;
+  }
+  g_config.node_topo_info = Craned::Common::CpuTopoDetector::Detect(
+      cfg_sockets, cfg_cores, cfg_threads);
+  each_node_topo_config.clear();
 
   auto& meta = g_config.CranedMeta;
   if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {

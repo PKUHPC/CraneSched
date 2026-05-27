@@ -722,6 +722,18 @@ message CranedInfo {
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
+
+  // Physical CPU topology of this node, populated from hwloc detection
+  // or config.yaml manual override.
+  NodeTopoInfo node_topo_info = 17;
+}
+
+message NodeTopoInfo {
+  uint32 boards           = 1;
+  uint32 sockets          = 2;
+  uint32 cores_per_socket = 3;
+  uint32 threads_per_core = 4;
+  uint32 total_cpus       = 5;
 }
 
 message ReservationInfo {
@@ -1045,6 +1057,8 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+  // Physical CPU topology reported by this Craned node at registration.
+  NodeTopoInfo node_topo_info = 10;
 }
 
 enum TxnAction {

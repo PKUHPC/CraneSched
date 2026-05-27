@@ -5,6 +5,8 @@ add_library(craned_common STATIC
     DeviceManager.cpp
     CgroupManager.h
     CgroupManager.cpp
+    CpuTopoDetector.h
+    CpuTopoDetector.cpp
 )
 
 # Set the precompiled header for the common library
@@ -26,32 +28,32 @@ target_link_libraries(craned_common
     PUBLIC
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
         concurrentqueue
-        
+
         ${LIBCGROUP_BUILD_PRODUCTS}
-        
+
         Utility_PublicHeader
         Utility_PasswordEntry
         Utility_PluginClient
-        
+
         crane_proto_lib
         cri_proto_lib
-        
+
         bs_thread_pool
-        
+
         cxxopts
         Threads::Threads
         ${LIBUTIL_LIBRARY}
         nlohmann_json::nlohmann_json
-        
+
         absl::flat_hash_map
         absl::synchronization
-        
+
         uvw
         yaml-cpp
         subprocess
-        
+
         Backward::Interface
-        
+
         $<$<BOOL:${CRANE_ENABLE_BPF}>:${LIBBPF_BUILD_PRODUCTS}>
         $<$<BOOL:${CRANE_ENABLE_BPF}>:${LIBBPF_EXTRA_LIBS}>
 )
@@ -63,6 +65,12 @@ endif ()
 
 if (CRANE_ENABLE_BPF)
     target_compile_definitions(craned_common PUBLIC -DCRANE_ENABLE_BPF)
+endif ()
+
+if (CRANE_ENABLE_HWLOC AND HWLOC_FOUND)
+    target_compile_definitions(craned_common PUBLIC CRANE_ENABLE_HWLOC)
+    target_link_libraries(craned_common PUBLIC ${HWLOC_LIBRARIES})
+    target_include_directories(craned_common PUBLIC ${HWLOC_INCLUDE_DIRS})
 endif ()
 
 # Dependencies

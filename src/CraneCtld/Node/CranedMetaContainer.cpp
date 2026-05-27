@@ -60,6 +60,16 @@ void CranedMetaContainer::CranedUp(
   node_meta->alive = true;
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
+  if (remote_meta.has_node_topo_info() &&
+      remote_meta.node_topo_info().sockets() != 0) {
+    const auto& grpc_topo = remote_meta.node_topo_info();
+    auto& topo = node_meta->static_meta.node_topo_info;
+    topo.boards = grpc_topo.boards();
+    topo.sockets = grpc_topo.sockets();
+    topo.cores_per_socket = grpc_topo.cores_per_socket();
+    topo.threads_per_core = grpc_topo.threads_per_core();
+    topo.total_cpus = grpc_topo.total_cpus();
+  }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -336,6 +346,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->memory_bytes);
     static_meta.res.GetGres() =
         config.Nodes.at(craned_name)->dedicated_resource;
+    static_meta.node_topo_info = config.Nodes.at(craned_name)->node_topo_info;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
@@ -1120,6 +1131,14 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),
       craned_meta.static_meta.partition_ids.end());
+
+  const auto& topo = craned_meta.static_meta.node_topo_info;
+  auto* grpc_topo = craned_info->mutable_node_topo_info();
+  grpc_topo->set_boards(topo.boards);
+  grpc_topo->set_sockets(topo.sockets);
+  grpc_topo->set_cores_per_socket(topo.cores_per_socket);
+  grpc_topo->set_threads_per_core(topo.threads_per_core);
+  grpc_topo->set_total_cpus(topo.total_cpus);
 }
 
 }  // namespace Ctld

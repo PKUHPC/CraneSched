@@ -481,6 +481,42 @@ void ParseConfig(int argc, char** argv) {
           else
             std::exit(1);
 
+          if (node["sockets"]) {
+            uint32_t val = node["sockets"].as<uint32_t>(1);
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid sockets=0 for node '{}'. Resetting to 1.",
+                  node["name"].Scalar());
+              val = 1;
+            } else if (val > node_ptr->cpu) {
+              CRANE_WARN(
+                  "Sockets={} for node '{}' exceeds cpu={}. Resetting to 1.",
+                  val, node["name"].Scalar(), node_ptr->cpu);
+              val = 1;
+            }
+            node_ptr->node_topo_info.sockets = val;
+          }
+          if (node["cores_per_socket"]) {
+            uint32_t val = node["cores_per_socket"].as<uint32_t>(1);
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid cores_per_socket=0 for node '{}'. Resetting to 1.",
+                  node["name"].Scalar());
+              val = 1;
+            }
+            node_ptr->node_topo_info.cores_per_socket = val;
+          }
+          if (node["threads_per_core"]) {
+            uint32_t val = node["threads_per_core"].as<uint32_t>(1);
+            if (val == 0) {
+              CRANE_ERROR(
+                  "Invalid threads_per_core=0 for node '{}'. Resetting to 1.",
+                  node["name"].Scalar());
+              val = 1;
+            }
+            node_ptr->node_topo_info.threads_per_core = val;
+          }
+
           if (node["memory"]) {
             auto mem = util::ParseMemory(node["memory"].as<std::string>());
             if (mem.has_value()) {
