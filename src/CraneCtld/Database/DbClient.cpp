@@ -661,14 +661,6 @@ void MongodbClient::AppendJobIdSelectorClause_(
         match_doc.append(
             kvp("job_id", static_cast<std::int32_t>(selector.job_id())));
       });
-
-      // Querying a plain selector against an array parent should also surface
-      // every materialized child, matching the in-memory expand_array_parents
-      // behavior in ResolveJobIdSelector.
-      or_array.append([&](sub_document match_doc) {
-        match_doc.append(
-            kvp("array_job_id", static_cast<std::int32_t>(selector.job_id())));
-      });
     }
   }));
 }

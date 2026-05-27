@@ -612,7 +612,7 @@ bool JobScheduler::Init() {
       }
       if (children.empty()) continue;
 
-      if (auto bind = m_array_manager_->BindRecoveredChildrenForParent(
+      if (auto bind = m_array_manager_->BindRecoveredRunningChildrenForParent(
               parent_id, children);
           !bind.has_value()) {
         CRANE_ERROR("Failed to bind recovered array children to parent #{}",
@@ -3193,14 +3193,26 @@ void JobScheduler::CollectJobIdsForModify(
   ArrayManager::ResolvedJobIdSelectors resolved;
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
-    ranges::for_each(request.job_ids() |
-                         ranges::views::transform([this](const auto& selector) {
-                           return m_array_manager_->ResolveJobIdSelector(
-                               selector, false);
-                         }),
-                     [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-                       resolved.MergeFrom(std::move(one));
-                     });
+    ranges::for_each(
+        request.job_ids() |
+            ranges::views::transform([this](const auto& selector) {
+              return m_array_manager_->ResolveJobIdSelector(selector);
+            }),
+        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+          resolved.MergeFrom(std::move(one));
+        });
+
+    for (auto it = resolved.job_steps.begin();
+         it != resolved.job_steps.end();) {
+      if (!it->second.empty() &&
+          m_array_manager_->IsRegisteredParent(it->first)) {
+        response->add_not_modified_jobs(it->first);
+        response->add_not_modified_reasons("Array parent has no steps");
+        it = resolved.job_steps.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 
   for (const auto& unresolved : resolved.unresolved_selectors) {
@@ -3515,11 +3527,20 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
         return;
       }
 
+      auto step_it = resolved.job_steps.find(job_id);
+      if (step_it != resolved.job_steps.end() && !step_it->second.empty()) {
+        for (step_id_t step_id : step_it->second) {
+          add_not_cancelled_step(job_id, step_id, "Array parent has no steps");
+        }
+        not_found_job_ids.erase(job_id);
+        return;
+      }
+
       add_cancelled(job_id);
       not_found_job_ids.erase(job_id);
 
       // Close the spawn window between this enqueue and the async
-      // CancelArrayParentQueueElem handler. ArrayMeta::CanSpawnMore reads
+      // CancelArrayParentQueueElem handler. ArrayMeta::SpawnBlockReason reads
       // parent_job_->CancelRequested(); setting it synchronously under
       // m_pending_job_map_mtx_ guarantees the scheduler's next iteration sees
       // the cancel and won't materialize another child in the gap.
@@ -3617,14 +3638,14 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     LockGuard running_guard(&m_running_job_map_mtx_);
 
-    ranges::for_each(request.filter_job_ids() |
-                         ranges::views::transform([this](const auto& selector) {
-                           return m_array_manager_->ResolveJobIdSelector(
-                               selector, false);
-                         }),
-                     [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-                       resolved.MergeFrom(std::move(one));
-                     });
+    ranges::for_each(
+        request.filter_job_ids() |
+            ranges::views::transform([this](const auto& selector) {
+              return m_array_manager_->ResolveJobIdSelector(selector);
+            }),
+        [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+          resolved.MergeFrom(std::move(one));
+        });
     auto& resolved_job_steps = resolved.job_steps;
 
     for (const auto& unresolved : resolved.unresolved_selectors) {
@@ -5595,17 +5616,14 @@ void JobScheduler::QueryJobsInRam(
   LockGuard pending_guard(&m_pending_job_map_mtx_);
   LockGuard running_guard(&m_running_job_map_mtx_);
 
-  ranges::for_each(request->filter_job_ids() |
-                       ranges::views::transform(
-                           [this, expand_array_parents =
-                                      request->option_include_completed_jobs()](
-                               const auto& selector) {
-                             return m_array_manager_->ResolveJobIdSelector(
-                                 selector, expand_array_parents);
-                           }),
-                   [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
-                     resolved.MergeFrom(std::move(one));
-                   });
+  ranges::for_each(
+      request->filter_job_ids() |
+          ranges::views::transform([this](const auto& selector) {
+            return m_array_manager_->ResolveJobIdSelector(selector);
+          }),
+      [&resolved](ArrayManager::ResolvedJobIdSelectors one) {
+        resolved.MergeFrom(std::move(one));
+      });
 
   auto append_step_fn = [&](auto* step_info_list, StepInCtld* step) {
     if (!step) return;

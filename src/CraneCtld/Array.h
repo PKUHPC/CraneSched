@@ -79,14 +79,19 @@ class ArrayMeta {
     return terminal_status_override_;
   }
 
+  // Returns true if this child completes materialization for the array parent.
   bool TrackMaterialized(JobInCtld* child);
+  // Returns true if this task completes materialization for the array parent.
   bool TrackMaterialized(array_task_id_t task_id, job_id_t child_job_id);
   void OnChildRunning(job_id_t child_job_id);
   void OnChildTerminal(job_id_t child_job_id);
+  // Returns true if the parent start event is triggered by this call.
   bool MarkParentStarted(absl::Time start_time);
   void FinishForTerminalStatus(crane::grpc::JobStatus status,
                                uint32_t exit_code, absl::Time end_time);
-  bool CanSpawnMore(absl::Time now, std::string* reason) const;
+  // Returns nullopt if another child can spawn; otherwise returns the pending
+  // reason, which may be empty when no user-facing reason should be shown.
+  std::optional<std::string> SpawnBlockReason(absl::Time now) const;
 
   JobInCtld* parent_job_{nullptr};
   // Greatest task id that has ever been materialized (in task-id space, not
@@ -161,7 +166,7 @@ class ArrayManager {
   ArrayManager() = default;
 
   void RegisterParent(JobInCtld* parent);
-  CraneExpected<void> BindRecoveredChildrenForParent(
+  CraneExpected<void> BindRecoveredRunningChildrenForParent(
       job_id_t array_job_id, const std::vector<JobInCtld*>& children);
   CraneExpected<void> TrackRecoveredTerminalChild(JobInCtld* child);
   CraneExpected<void> TrackRecoveredTerminalChild(job_id_t array_job_id,
@@ -209,8 +214,7 @@ class ArrayManager {
   // Resolves a single JobIdSelector. Requires the scheduler's
   // pending-job-map mutex held by the caller (reads m_metas_).
   ResolvedJobIdSelectors ResolveJobIdSelector(
-      const crane::grpc::JobIdSelector& selector,
-      bool expand_array_parents) const;
+      const crane::grpc::JobIdSelector& selector) const;
 
   // Persistence / plugin hooks for final array parents.
   static void ProcessFinalParents(
@@ -221,9 +225,6 @@ class ArrayManager {
   const ArrayMeta* FindMeta_(job_id_t array_job_id) const;
 
   static bool ArrayMaterializationComplete_(const JobInCtld& parent);
-  static void InheritChildAttributesFromParent_(JobInCtld& child);
-  static const absl::flat_hash_set<job_id_t>& RunningChildJobIds_(
-      const ArrayMeta& meta);
 
   CraneExpected<void> AdmitChildNoLock_(ArrayMeta& meta, JobInCtld& child);
 

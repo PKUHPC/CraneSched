@@ -132,6 +132,9 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->SetUsername(parent_job_->Username());
   child->qos = parent_job_->qos;
   child->time_limit = parent_job_->time_limit;
+  child->MutableJobToCtld()->set_qos(child->qos);
+  child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
+      ToInt64Seconds(child->time_limit));
   child->account_chain = parent_job_->account_chain;
   child->req_total_res_view = parent_job_->req_total_res_view;
 
@@ -228,35 +231,29 @@ bool ArrayMeta::MarkParentStarted(absl::Time start_time) {
   return true;
 }
 
-bool ArrayMeta::CanSpawnMore(absl::Time now, std::string* reason) const {
+std::optional<std::string> ArrayMeta::SpawnBlockReason(absl::Time now) const {
   if (parent_job_ == nullptr) {
-    if (reason != nullptr) *reason = "";
-    return false;
+    return "";
   }
   if (parent_job_->ArrayMaterializationComplete()) {
-    if (reason != nullptr) *reason = "ArrayMaterializationComplete";
-    return false;
+    return "ArrayMaterializationComplete";
   }
   if (parent_job_->CancelRequested()) {
-    if (reason != nullptr) *reason = "Cancelled";
-    return false;
+    return "Cancelled";
   }
   if (parent_job_->deadline_time <= now) {
-    if (reason != nullptr) *reason = "Deadline";
-    return false;
+    return "Deadline";
   }
   if (!NextMaterializableTaskId().has_value()) {
-    if (reason != nullptr) *reason = "";
-    return false;
+    return "";
   }
 
   size_t limit =
       ArrayUtil::EffectiveRunLimit(parent_job_->JobToCtld().array_spec());
   if (RunningChildCount() >= limit) {
-    if (reason != nullptr) *reason = "ArrayTaskLimit";
-    return false;
+    return "ArrayTaskLimit";
   }
-  return true;
+  return std::nullopt;
 }
 
 // ----------------------------------------------------------------------------
@@ -363,21 +360,6 @@ std::pair<crane::grpc::JobStatus, uint32_t> ArrayManager::BuildAggregateResult_(
           max_exit_code};
 }
 
-// The array parent owns submit-slot accounting for the effective concurrent
-// task limit. Child materialization owes no independent QoS submit check.
-// BuildChild copies effective parent fields into the child, and this mirrors
-// them into the child proto before persistence.
-void ArrayManager::InheritChildAttributesFromParent_(JobInCtld& child) {
-  child.MutableJobToCtld()->set_qos(child.qos);
-  child.MutableJobToCtld()->mutable_time_limit()->set_seconds(
-      ToInt64Seconds(child.time_limit));
-}
-
-const absl::flat_hash_set<job_id_t>& ArrayManager::RunningChildJobIds_(
-    const ArrayMeta& meta) {
-  return meta.RunningChildJobIds();
-}
-
 // ----------------------------------------------------------------------------
 // ArrayManager: lookup + per-meta projections
 // ----------------------------------------------------------------------------
@@ -423,7 +405,7 @@ void ArrayManager::RegisterParent(JobInCtld* parent) {
   m_metas_[parent_id] = std::move(meta);
 }
 
-CraneExpected<void> ArrayManager::BindRecoveredChildrenForParent(
+CraneExpected<void> ArrayManager::BindRecoveredRunningChildrenForParent(
     job_id_t array_job_id, const std::vector<JobInCtld*>& children) {
   auto* meta = FindMeta_(array_job_id);
   if (meta == nullptr || meta->ParentPtr() == nullptr) {
@@ -435,6 +417,7 @@ CraneExpected<void> ArrayManager::BindRecoveredChildrenForParent(
         !child->ArrayJobId().has_value() ||
         child->ArrayJobId().value() != array_job_id ||
         !child->ArrayTaskId().has_value() ||
+        child->Status() == crane::grpc::JobStatus::Pending ||
         !ArrayUtil::ContainsTaskId(meta->Parent().JobToCtld().array_spec(),
                                    child->ArrayTaskId().value())) {
       return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
@@ -499,6 +482,8 @@ void ArrayManager::RecoverAccountingForRegisteredParents() {
   for (const auto& [array_job_id, meta] : m_metas_) {
     if (meta == nullptr || meta->ParentPtr() == nullptr) continue;
     JobInCtld& parent = meta->MutableParent();
+    // Array parents own submit-slot accounting for their effective concurrent
+    // task limit. Array children do not allocate or release submit slots.
     uint32_t reserve_count =
         ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec());
     g_account_meta_container->MallocQosSubmitResource(parent, reserve_count);
@@ -516,7 +501,6 @@ CraneExpected<void> ArrayManager::AdmitChildNoLock_(ArrayMeta& meta,
   CRANE_ASSERT(child.IsArrayChild() && child.ArrayJobId().has_value() &&
                child.ArrayJobId().value() == meta.Parent().JobId());
   auto& parent = meta.MutableParent();
-  InheritChildAttributesFromParent_(child);
 
   auto child_task_id = child.ArrayTaskId();
   bool mark_materialization_complete =
@@ -579,10 +563,8 @@ void ArrayManager::TryFinalizeParentNoLock_(
 
   parent.TriggerTerminalDependencyEvents(end_time);
 
-  // TODO: Revisit array submit-slot accounting. Currently the parent reserves
-  // EffectiveRunLimit(array_spec) submit slots and releases them at parent
-  // finalization. If we switch to per-child submit accounting later, release
-  // one slot when each child reaches a terminal state.
+  // Array children do not own submit slots; release the parent's reservation
+  // only when the whole array parent finalizes.
   g_account_meta_container->FreeQosSubmitResource(
       parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
 
@@ -608,7 +590,7 @@ ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
     return result;
   }
   result.parent_found = true;
-  const auto& running_child_job_ids = RunningChildJobIds_(*meta);
+  const auto& running_child_job_ids = meta->RunningChildJobIds();
   result.running_child_job_ids.assign(running_child_job_ids.begin(),
                                       running_child_job_ids.end());
 
@@ -648,7 +630,7 @@ std::vector<job_id_t> ArrayManager::RunningChildJobIdsForParent(
     job_id_t parent_job_id) const {
   const auto* meta = FindMeta_(parent_job_id);
   if (meta == nullptr) return {};
-  const auto& running_child_job_ids = RunningChildJobIds_(*meta);
+  const auto& running_child_job_ids = meta->RunningChildJobIds();
   return {running_child_job_ids.begin(), running_child_job_ids.end()};
 }
 
@@ -705,11 +687,11 @@ ArrayManager::PrepareParentForMaterialization(const JobInCtld& parent,
     return decision;
   }
 
-  std::string reason;
-  if (meta->CanSpawnMore(now, &reason)) {
+  auto reason = meta->SpawnBlockReason(now);
+  if (!reason.has_value()) {
     decision.can_materialize = true;
   } else {
-    decision.pending_reason = std::move(reason);
+    decision.pending_reason = std::move(*reason);
   }
   return decision;
 }
@@ -719,7 +701,7 @@ std::unique_ptr<JobInCtld> ArrayManager::MaterializeChildForAllocation(
   if (parent == nullptr || !parent->IsArrayParent()) return nullptr;
   auto* meta = FindMeta_(parent->JobId());
   if (meta == nullptr || meta->ParentPtr() == nullptr) return nullptr;
-  if (!meta->CanSpawnMore(now, nullptr)) return nullptr;
+  if (meta->SpawnBlockReason(now).has_value()) return nullptr;
 
   auto next_task_id = meta->NextMaterializableTaskId();
   if (!next_task_id.has_value()) return nullptr;
@@ -785,35 +767,13 @@ void ArrayManager::ResolvedJobIdSelectors::MergeFrom(
 }
 
 ArrayManager::ResolvedJobIdSelectors ArrayManager::ResolveJobIdSelector(
-    const crane::grpc::JobIdSelector& selector,
-    bool expand_array_parents) const {
+    const crane::grpc::JobIdSelector& selector) const {
   ResolvedJobIdSelectors result;
   std::unordered_set<step_id_t> steps(selector.steps().begin(),
                                       selector.steps().end());
   job_id_t job_id = selector.job_id();
 
   if (!selector.has_array_task_id()) {
-    const auto* meta = FindMeta_(job_id);
-    if (meta != nullptr && meta->ParentPtr() != nullptr) {
-      // Targeting an array parent with explicit step ids is meaningless: array
-      // parents have no steps of their own. Surface it as unresolved.
-      if (!steps.empty()) {
-        result.unresolved_selectors.push_back({
-            .job_id = job_id,
-            .array_task_id = 0,
-            .reason = "Array parent has no steps",
-        });
-        return result;
-      }
-      if (expand_array_parents) {
-        MergeJobSteps_(result.job_steps, job_id, steps);
-        for (const auto& [_, child_id] : meta->child_job_id_by_task_id_) {
-          MergeJobSteps_(result.job_steps, child_id, steps);
-        }
-        return result;
-      }
-    }
-
     MergeJobSteps_(result.job_steps, job_id, steps);
     return result;
   }
