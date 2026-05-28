@@ -19,25 +19,23 @@
 #include "CpuTopoDetector.h"
 
 #include "PreCompiledHeader.h"
+#include "crane/NodeTopology.h"
 
 namespace Craned::Common {
 
-NodeTopoInfo CpuTopoDetector::Detect(uint32_t cfg_sockets, uint32_t cfg_cores,
-                                     uint32_t cfg_threads) {
+NodeTopoInfo CpuTopoDetector::DetectActual() {
 #ifdef CRANE_ENABLE_HWLOC
   hwloc_topology_t topology;
   if (hwloc_topology_init(&topology) != 0) {
     CRANE_WARN(
         "hwloc_topology_init() failed, falling back to /proc/cpuinfo");
-    return ReconcileWithConfig_(ParseFromProcCpuinfo_(), cfg_sockets,
-                                cfg_cores, cfg_threads);
+    return ParseFromProcCpuinfo_();
   }
 
   if (!LoadTopology_(&topology)) {
     hwloc_topology_destroy(topology);
     CRANE_WARN("hwloc topology load failed, falling back to /proc/cpuinfo");
-    return ReconcileWithConfig_(ParseFromProcCpuinfo_(), cfg_sockets,
-                                cfg_cores, cfg_threads);
+    return ParseFromProcCpuinfo_();
   }
 
   NodeTopoInfo result = BuildFromHwloc_(topology);
@@ -49,12 +47,81 @@ NodeTopoInfo CpuTopoDetector::Detect(uint32_t cfg_sockets, uint32_t cfg_cores,
       result.boards, result.sockets, result.cores_per_socket,
       result.threads_per_core, result.total_cpus);
 
-  return ReconcileWithConfig_(result, cfg_sockets, cfg_cores, cfg_threads);
+  return result;
 #else
   CRANE_WARN("hwloc disabled at compile time, using /proc/cpuinfo");
-  return ReconcileWithConfig_(ParseFromProcCpuinfo_(), cfg_sockets, cfg_cores,
-                              cfg_threads);
+  return ParseFromProcCpuinfo_();
 #endif
+}
+
+ConfiguredNodeTopology CpuTopoDetector::NormalizeConfiguredTopology(
+    ConfiguredNodeTopology config, const std::string& node_name) {
+  return NormalizeConfiguredNodeTopology(std::move(config), node_name);
+}
+
+NodeTopoInfo CpuTopoDetector::SelectNodeTopology(
+    const ConfiguredNodeTopology& configured, const NodeTopoInfo& actual,
+    bool config_overrides) {
+  const auto& conf = configured.topology;
+
+  CRANE_INFO(
+      "Configured topology: boards={} sockets={} cores_per_socket={} "
+      "threads_per_core={} total_cpus={}",
+      conf.boards, conf.sockets, conf.cores_per_socket, conf.threads_per_core,
+      conf.total_cpus);
+
+  if (actual.boards != conf.boards || actual.sockets != conf.sockets ||
+      actual.cores_per_socket != conf.cores_per_socket ||
+      actual.threads_per_core != conf.threads_per_core ||
+      actual.total_cpus != conf.total_cpus) {
+    CRANE_WARN(
+        "Detected CPU topology differs from config: actual "
+        "boards={} sockets={} cores_per_socket={} threads_per_core={} "
+        "total_cpus={}, configured boards={} sockets={} cores_per_socket={} "
+        "threads_per_core={} total_cpus={}",
+        actual.boards, actual.sockets, actual.cores_per_socket,
+        actual.threads_per_core, actual.total_cpus, conf.boards, conf.sockets,
+        conf.cores_per_socket, conf.threads_per_core, conf.total_cpus);
+  }
+
+  // After config normalization, "cpu: N" with no explicit socket/core/thread 
+  // fields becomes sockets=N, cores=1, threads=1. If hardware reports N logical CPUs, 
+  // keep that CPU-as-socket shape instead of replacing it with hwloc details.
+  if (conf.sockets == actual.total_cpus && conf.total_cpus == actual.total_cpus &&
+      conf.cores_per_socket == 1 && conf.threads_per_core == 1) {
+    NodeTopoInfo selected = conf;
+    selected.boards = std::max(1u, selected.boards);
+    selected.sockets = actual.total_cpus;
+    selected.cores_per_socket = 1;
+    selected.threads_per_core = 1;
+    selected.total_cpus = actual.total_cpus;
+    CRANE_INFO(
+        "Using CPU-only compatible topology: boards={} sockets={} "
+        "cores_per_socket={} threads_per_core={} total_cpus={}",
+        selected.boards, selected.sockets, selected.cores_per_socket,
+        selected.threads_per_core, selected.total_cpus);
+    return selected;
+  }
+
+  // when the machine exposes fewer logical CPUs than configured,
+  // register the actual topology so the controller can observe 
+  // the reduced final resource shape.
+  if (!config_overrides && actual.total_cpus < conf.total_cpus) {
+    CRANE_ERROR(
+        "Actual CPU count {} is less than configured CPU count {}. Using "
+        "actual topology because ConfigOverrides is disabled.",
+        actual.total_cpus, conf.total_cpus);
+    return actual;
+  }
+
+  if (config_overrides && actual.total_cpus < conf.total_cpus) {
+    CRANE_INFO(
+        "Actual CPU count {} is less than configured CPU count {}, but "
+        "ConfigOverrides is enabled. Using configured topology.",
+        actual.total_cpus, conf.total_cpus);
+  }
+
+  return conf;
 }
 
 #ifdef CRANE_ENABLE_HWLOC
@@ -206,29 +273,6 @@ NodeTopoInfo CpuTopoDetector::ParseFromProcCpuinfo_() {
       "threads_per_core={} total_cpus={}",
       result.boards, result.sockets, result.cores_per_socket,
       result.threads_per_core, result.total_cpus);
-
-  return result;
-}
-
-NodeTopoInfo CpuTopoDetector::ReconcileWithConfig_(
-    const NodeTopoInfo& detected, uint32_t cfg_sockets, uint32_t cfg_cores,
-    uint32_t cfg_threads) {
-  if (cfg_sockets == 0 && cfg_cores == 0 && cfg_threads == 0)
-    return detected;
-
-  NodeTopoInfo result = detected;
-  if (cfg_sockets > 0) result.sockets = cfg_sockets;
-  if (cfg_cores > 0) result.cores_per_socket = cfg_cores;
-  if (cfg_threads > 0) result.threads_per_core = cfg_threads;
-
-  uint32_t expected = result.sockets * result.cores_per_socket *
-                      result.threads_per_core;
-  if (expected != detected.total_cpus && detected.total_cpus > 0) {
-    CRANE_WARN(
-        "Config topology ({}×{}×{}={}) differs from detected ({} cpus)",
-        result.sockets, result.cores_per_socket, result.threads_per_core,
-        expected, detected.total_cpus);
-  }
 
   return result;
 }

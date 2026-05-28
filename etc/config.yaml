@@ -86,6 +86,9 @@ Craned:
   NodeHealthCheckInterval: 0
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
+  # false means Craned registers the
+  # detected topology if actual CPUs are fewer than configured CPUs.
+  ConfigOverrides: false
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -129,6 +132,13 @@ Nodes:
   # the hostname of computing node
   - name: "cn[15-16]"
     cpu: 2
+    # Optional CPU topology fields. Missing fields are normalized from config
+    # only and are not back-filled by hwloc.
+    # boards: 1
+    # sockets: 2
+    # sockets_per_board: 2
+    # cores_per_socket: 1
+    # threads_per_core: 1
     memory: 2G
 
   - name: "cn[17-18]"

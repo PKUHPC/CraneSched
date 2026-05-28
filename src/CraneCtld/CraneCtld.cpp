@@ -38,6 +38,7 @@
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
+#include "crane/NodeTopology.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
@@ -476,46 +477,40 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
-          else
+          ConfiguredNodeTopology configured_topology;
+          if (node["cpu"]) {
+            configured_topology.topology.total_cpus =
+                std::stoul(node["cpu"].as<std::string>());
+            configured_topology.cpu_configured = true;
+          } else
             std::exit(1);
 
+          if (node["boards"])
+            configured_topology.topology.boards = node["boards"].as<uint32_t>();
           if (node["sockets"]) {
-            uint32_t val = node["sockets"].as<uint32_t>(1);
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid sockets=0 for node '{}'. Resetting to 1.",
-                  node["name"].Scalar());
-              val = 1;
-            } else if (val > node_ptr->cpu) {
-              CRANE_WARN(
-                  "Sockets={} for node '{}' exceeds cpu={}. Resetting to 1.",
-                  val, node["name"].Scalar(), node_ptr->cpu);
-              val = 1;
-            }
-            node_ptr->node_topo_info.sockets = val;
+            configured_topology.topology.sockets =
+                node["sockets"].as<uint32_t>();
+            configured_topology.sockets_configured = true;
+          }
+          if (node["sockets_per_board"]) {
+            configured_topology.sockets_per_board =
+                node["sockets_per_board"].as<uint32_t>();
+            configured_topology.sockets_per_board_configured = true;
           }
           if (node["cores_per_socket"]) {
-            uint32_t val = node["cores_per_socket"].as<uint32_t>(1);
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid cores_per_socket=0 for node '{}'. Resetting to 1.",
-                  node["name"].Scalar());
-              val = 1;
-            }
-            node_ptr->node_topo_info.cores_per_socket = val;
+            configured_topology.topology.cores_per_socket =
+                node["cores_per_socket"].as<uint32_t>();
           }
           if (node["threads_per_core"]) {
-            uint32_t val = node["threads_per_core"].as<uint32_t>(1);
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid threads_per_core=0 for node '{}'. Resetting to 1.",
-                  node["name"].Scalar());
-              val = 1;
-            }
-            node_ptr->node_topo_info.threads_per_core = val;
+            configured_topology.topology.threads_per_core =
+                node["threads_per_core"].as<uint32_t>();
           }
+
+          configured_topology = NormalizeConfiguredNodeTopology(
+              std::move(configured_topology), node["name"].Scalar());
+
+          node_ptr->cpu = configured_topology.topology.total_cpus;
+          node_ptr->node_topo_info = configured_topology.topology;
 
           if (node["memory"]) {
             auto mem = util::ParseMemory(node["memory"].as<std::string>());

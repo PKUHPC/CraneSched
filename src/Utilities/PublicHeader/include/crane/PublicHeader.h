@@ -557,6 +557,14 @@ struct NodeTopoInfo {
   uint32_t total_cpus{0};
 };
 
+struct ConfiguredNodeTopology {
+  NodeTopoInfo topology;
+  bool cpu_configured{false};
+  bool sockets_configured{false};
+  bool sockets_per_board_configured{false};
+  uint32_t sockets_per_board{1};
+};
+
 // ResourceInNodeV3: Execution phase resource tracking for a single node
 // Tracks actual hardware resources with specific slot IDs for affinity
 class ResourceInNodeV3 {

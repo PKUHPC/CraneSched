@@ -262,6 +262,8 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
     conf.ThreadPoolSize =
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
+    conf.ConfigOverrides =
+        YamlValueOr<bool>(craned_config["ConfigOverrides"], false);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -581,8 +583,8 @@ void ParseConfig(int argc, char** argv) {
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
-  std::unordered_map<std::string, std::tuple<uint32_t, uint32_t, uint32_t>>
-      each_node_topo_config;  // per-node: {sockets, cores_per_socket, threads_per_core}
+  std::unordered_map<std::string, ConfiguredNodeTopology>
+      each_node_topo_config;
   if (std::filesystem::exists(config_path)) {
     try {
       using util::YamlValueOr;
@@ -783,51 +785,38 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          ConfiguredNodeTopology configured_topology;
           if (node["cpu"]) {
-            uint32_t cpu_count = std::stoul(node["cpu"].as<std::string>());
-            for (uint32_t i = 0; i < cpu_count; ++i)
-              node_res->GetCpuSet().core_ids.insert(i);
+            configured_topology.topology.total_cpus =
+                std::stoul(node["cpu"].as<std::string>());
+            configured_topology.cpu_configured = true;
           } else
             std::exit(1);
 
-          uint32_t cfg_sockets = 0, cfg_cores = 0, cfg_threads = 0;
+          if (node["boards"])
+            configured_topology.topology.boards = node["boards"].as<uint32_t>();
           if (node["sockets"]) {
-            uint32_t val = node["sockets"].as<uint32_t>(0);
-            uint32_t cpu_count =
-                static_cast<uint32_t>(node_res->GetCpuSet().core_ids.size());
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid sockets=0 for node '{}'. Treating as unset.",
-                  node["name"].Scalar());
-            } else if (val > cpu_count) {
-              CRANE_WARN(
-                  "Sockets={} for node '{}' exceeds cpu={}. Treating as "
-                  "unset.",
-                  val, node["name"].Scalar(), cpu_count);
-              val = 0;
-            }
-            cfg_sockets = val;
+            configured_topology.topology.sockets =
+                node["sockets"].as<uint32_t>();
+            configured_topology.sockets_configured = true;
+          }
+          if (node["sockets_per_board"]) {
+            configured_topology.sockets_per_board =
+                node["sockets_per_board"].as<uint32_t>();
+            configured_topology.sockets_per_board_configured = true;
           }
           if (node["cores_per_socket"]) {
-            uint32_t val = node["cores_per_socket"].as<uint32_t>(0);
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid cores_per_socket=0 for node '{}'. Treating as "
-                  "unset.",
-                  node["name"].Scalar());
-            }
-            cfg_cores = val;
+            configured_topology.topology.cores_per_socket =
+                node["cores_per_socket"].as<uint32_t>();
           }
           if (node["threads_per_core"]) {
-            uint32_t val = node["threads_per_core"].as<uint32_t>(0);
-            if (val == 0) {
-              CRANE_ERROR(
-                  "Invalid threads_per_core=0 for node '{}'. Treating as "
-                  "unset.",
-                  node["name"].Scalar());
-            }
-            cfg_threads = val;
+            configured_topology.topology.threads_per_core =
+                node["threads_per_core"].as<uint32_t>();
           }
+
+          configured_topology =
+              CpuTopoDetector::NormalizeConfiguredTopology(
+                  configured_topology, node["name"].Scalar());
 
           if (node["memory"]) {
             auto memory_bytes =
@@ -1048,8 +1037,7 @@ void ParseConfig(int argc, char** argv) {
               ABSL_UNREACHABLE();
             }
             g_config.CranedRes[name] = node_res;
-            each_node_topo_config[name] = {cfg_sockets, cfg_cores,
-                                           cfg_threads};
+            each_node_topo_config[name] = configured_topology;
           }
         }
       }
@@ -1325,12 +1313,20 @@ void ParseConfig(int argc, char** argv) {
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 
   auto topo_it = each_node_topo_config.find(g_config.Hostname);
-  uint32_t cfg_sockets = 0, cfg_cores = 0, cfg_threads = 0;
-  if (topo_it != each_node_topo_config.end()) {
-    std::tie(cfg_sockets, cfg_cores, cfg_threads) = topo_it->second;
+  if (topo_it == each_node_topo_config.end()) {
+    CRANE_ERROR("No topology configuration found for node {}",
+                g_config.Hostname);
+    std::exit(1);
   }
-  g_config.node_topo_info = Craned::Common::CpuTopoDetector::Detect(
-      cfg_sockets, cfg_cores, cfg_threads);
+  NodeTopoInfo actual_topology =
+      Craned::Common::CpuTopoDetector::DetectActual();
+  g_config.node_topo_info = Craned::Common::CpuTopoDetector::SelectNodeTopology(
+      topo_it->second, actual_topology, g_config.CranedConf.ConfigOverrides);
+  auto& local_cpu_set = g_config.CranedRes[g_config.Hostname]->GetCpuSet();
+  local_cpu_set.SetToZero();
+  local_cpu_set.cpu_count = cpu_t(g_config.node_topo_info.total_cpus);
+  for (uint32_t i = 0; i < g_config.node_topo_info.total_cpus; ++i)
+    local_cpu_set.core_ids.insert(i);
   each_node_topo_config.clear();
 
   auto& meta = g_config.CranedMeta;

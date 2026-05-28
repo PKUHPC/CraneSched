@@ -64,11 +64,34 @@ void CranedMetaContainer::CranedUp(
       remote_meta.node_topo_info().sockets() != 0) {
     const auto& grpc_topo = remote_meta.node_topo_info();
     auto& topo = node_meta->static_meta.node_topo_info;
+    // TODO: 当不一致时，使用注册值？
+    const NodeTopoInfo configured_topo = topo;
     topo.boards = grpc_topo.boards();
     topo.sockets = grpc_topo.sockets();
     topo.cores_per_socket = grpc_topo.cores_per_socket();
     topo.threads_per_core = grpc_topo.threads_per_core();
     topo.total_cpus = grpc_topo.total_cpus();
+
+    std::vector<std::string> invalid_reasons;
+    const uint32_t registered_threads =
+        topo.sockets * topo.cores_per_socket * topo.threads_per_core;
+    const uint32_t configured_threads =
+        configured_topo.sockets * configured_topo.cores_per_socket *
+        configured_topo.threads_per_core;
+    if (registered_threads < configured_threads)
+      invalid_reasons.emplace_back("Low socket*core*thread count");
+    if (topo.total_cpus < configured_topo.total_cpus)
+      invalid_reasons.emplace_back("Low CPUs");
+
+    if (!invalid_reasons.empty()) {
+      node_meta->drain = true;
+      node_meta->state_reason = fmt::format(
+          "{} (registered: CPUs={} SCT={}, configured: CPUs={} SCT={})",
+          fmt::join(invalid_reasons, ", "), topo.total_cpus,
+          registered_threads, configured_topo.total_cpus, configured_threads);
+      CRANE_ERROR("Craned {} registered with invalid topology: {}", craned_id,
+                  node_meta->state_reason);
+    }
   }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =

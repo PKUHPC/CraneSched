@@ -26,16 +26,14 @@
 
 namespace Craned::Common {
 
-// Detects hardware CPU topology using hwloc (if enabled) or /proc/cpuinfo
-// as a fallback. Config values from config.yaml override detected values
-// when non-zero.
 class CpuTopoDetector {
  public:
-  // Main entry: detect topology and reconcile with config.yaml overrides.
-  // cfg_sockets/cores/threads: values from config.yaml; 0 means "not set".
-  static NodeTopoInfo Detect(uint32_t cfg_sockets = 0,
-                             uint32_t cfg_cores = 0,
-                             uint32_t cfg_threads = 0);
+  static NodeTopoInfo DetectActual();
+  static ConfiguredNodeTopology NormalizeConfiguredTopology(
+      ConfiguredNodeTopology config, const std::string& node_name);
+  static NodeTopoInfo SelectNodeTopology(
+      const ConfiguredNodeTopology& configured, const NodeTopoInfo& actual,
+      bool config_overrides);
 
  private:
 #ifdef CRANE_ENABLE_HWLOC
@@ -43,10 +41,6 @@ class CpuTopoDetector {
   static NodeTopoInfo BuildFromHwloc_(hwloc_topology_t topology);
 #endif
   static NodeTopoInfo ParseFromProcCpuinfo_();
-  static NodeTopoInfo ReconcileWithConfig_(const NodeTopoInfo& detected,
-                                           uint32_t cfg_sockets,
-                                           uint32_t cfg_cores,
-                                           uint32_t cfg_threads);
 };
 
 }  // namespace Craned::Common
