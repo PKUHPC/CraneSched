@@ -748,24 +748,20 @@ ArrayManager::JobIdSelectorResolution ArrayManager::ResolveJobIdSelector(
   }
 
   array_task_id_t array_task_id = selector.array_task_id();
-  auto unresolved = [&] {
-    return JobIdSelectorResolution{UnresolvedSelector{
-        .job_id = job_id,
-        .array_task_id = array_task_id,
-        .reason = "No such job",
-    }};
-  };
+  JobIdSelectorResolution unresolved{UnresolvedSelector{
+      .job_id = job_id,
+      .array_task_id = array_task_id,
+      .reason = "Job not found",
+  }};
 
   const auto* meta = FindMeta_(job_id);
-  if (meta == nullptr || meta->ParentPtr() == nullptr) return unresolved();
+  if (meta == nullptr || meta->ParentPtr() == nullptr) return unresolved;
 
   const auto& array_spec = meta->Parent().JobToCtld().array_spec();
-  if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) {
-    return unresolved();
-  }
+  if (!ArrayUtil::ContainsTaskId(array_spec, array_task_id)) return unresolved;
 
   auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
-  if (!child_job_id.has_value()) return unresolved();
+  if (!child_job_id.has_value()) return unresolved;
 
   return {JobIdSelectorResolution::Resolved{
       .job_id = *child_job_id,
