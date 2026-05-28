@@ -104,6 +104,7 @@ nav:
     - Job Steps: reference/job_steps.md
     - Job Dependency: reference/job_dependency.md
     - Pending Reason: reference/pending_reason.md
+    - Job Preemption: reference/preemption.md
     - Container Support:
         - Overview: reference/container/index.md
         - Concepts: reference/container/concepts.md
@@ -154,6 +155,7 @@ plugins:
             Job Steps: 作业步
             Job Dependency: 作业依赖
             Pending Reason: 作业排队原因
+            Job Preemption: 作业抢占
             License Usage Guide: 许可证功能配置指南
             Keepalived Guide: Keepalived 配置指南
             Lua Guide: Lua 脚本配置指南

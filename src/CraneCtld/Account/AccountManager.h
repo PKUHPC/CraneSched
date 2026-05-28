@@ -192,6 +192,7 @@ class AccountManager {
 
   const Qos* GetQosInfoNoLock_(const std::string& name);
   const Qos* GetExistedQosInfoNoLock_(const std::string& name);
+  CraneExpectedRich<void> CheckQosPreemptAcyclicNoLock_(const Qos& qos);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions(no lock)
@@ -410,6 +411,8 @@ class AccountManager {
       m_user_map_;
   util::rw_mutex m_rw_user_mutex_;
   std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Qos>> m_qos_map_;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>
+      m_qos_preempted_by_map_;
   util::rw_mutex m_rw_qos_mutex_;
   std::unordered_map<WckeyKey, std::unique_ptr<Wckey>, WcKeyHash> m_wckey_map_;
   util::rw_mutex m_rw_wckey_mutex_;

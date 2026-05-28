@@ -2838,7 +2838,7 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   try {
     bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
-            doc.view());
+            *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
   } catch (const std::exception& e) {
@@ -3033,7 +3033,7 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
-            filter.view(), set_document.view());
+            *GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -3715,6 +3715,17 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(),
                            &qos->max_tres_per_account);
 
+    qos->preempt.clear();
+    if (auto preempt_it = qos_view.find(Qos::FieldStringOfPreempt());
+        preempt_it != qos_view.end()) {
+      for (auto&& preempt_qos : preempt_it->get_array().value) {
+        qos->preempt.emplace(preempt_qos.get_string().value);
+      }
+    }
+    qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(
+        ViewValueOr_(qos_view[Qos::FieldStringOfPreemptMode()],
+                     int64_t(crane::grpc::PreemptMode::PREEMPT_MODE_OFF)));
+
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -3722,7 +3733,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 18> fields{
+  std::array<std::string, 20> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -3740,10 +3751,13 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxTres(),
       Qos::FieldStringOfMaxTresPerUser(),
       Qos::FieldStringOfMaxTresPerAccount(),
-      Qos::FieldStringOfFlags()};
+      Qos::FieldStringOfFlags(),
+      Qos::FieldStringOfPreempt(),
+      Qos::FieldStringOfPreemptMode()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
              int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-             ResourceView, ResourceView, ResourceView, int64_t>
+             ResourceView, ResourceView, ResourceView, int64_t,
+             absl::flat_hash_set<std::string>, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -3761,7 +3775,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_tres,
              qos.max_tres_per_user,
              qos.max_tres_per_account,
-             qos.flags.ToInt64()};
+             qos.flags.ToInt64(),
+             qos.preempt,
+             static_cast<int64_t>(qos.preempt_mode)};
 
   return DocumentConstructor_(fields, values);
 }

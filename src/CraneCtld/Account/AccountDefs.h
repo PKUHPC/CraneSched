@@ -44,6 +44,9 @@ struct Qos {
   ResourceView max_tres_per_user;
   ResourceView max_tres_per_account;
   FlagSet<QosFlags> flags;
+  absl::flat_hash_set<std::string> preempt;
+  crane::grpc::PreemptMode preempt_mode{
+      crane::grpc::PreemptMode::PREEMPT_MODE_OFF};
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -85,6 +88,10 @@ struct Qos {
   }
   static constexpr const char* FieldStringOfMaxWall() { return "max_wall"; }
   static constexpr const char* FieldStringOfFlags() { return "flags"; }
+  static constexpr const char* FieldStringOfPreempt() { return "preempt"; }
+  static constexpr const char* FieldStringOfPreemptMode() {
+    return "preempt_mode";
+  }
 
   std::string QosToString() const {
     return fmt::format(
@@ -94,7 +101,8 @@ struct Qos {
         "max_jobs_per_account: {}, "
         "max_submit_jobs_per_user: {}, max_submit_jobs_per_account: {}, "
         "max_jobs: {}, max_submit_jobs: {}, max_wall: {}, flags: {}, max_tres: "
-        "{}, max_tres_per_user: {}, max_tres_per_account: {}",
+        "{}, max_tres_per_user: {}, max_tres_per_account: {}, "
+        "preempt: [{}], preempt_mode: {}",
         name, description, reference_count, priority, max_jobs_per_user,
         max_running_jobs_per_user, absl::FormatDuration(max_time_limit_per_job),
         max_cpus_per_user, max_jobs_per_account, max_submit_jobs_per_user,
@@ -102,7 +110,8 @@ struct Qos {
         absl::FormatDuration(max_wall), flags.ToString(),
         util::ReadableResourceView(max_tres),
         util::ReadableResourceView(max_tres_per_user),
-        util::ReadableResourceView(max_tres_per_account));
+        util::ReadableResourceView(max_tres_per_account),
+        fmt::join(preempt, ", "), crane::grpc::PreemptMode_Name(preempt_mode));
   }
 
   static const std::string GetModifyFieldStr(
@@ -138,6 +147,10 @@ struct Qos {
       return "max_wall";
     case crane::grpc::ModifyField::Flags:
       return "flags";
+    case crane::grpc::ModifyField::Preempt:
+      return "preempt";
+    case crane::grpc::ModifyField::ModifyPreemptMode:
+      return "preempt_mode";
     default:
       std::unreachable();
     }
