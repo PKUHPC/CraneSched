@@ -277,12 +277,10 @@ Preempt:
   #   none       disables preemption
   #   qos        a higher-priority QoS may preempt jobs from QoSes listed in its
   #              Preempt= field (cacctmgr modify qos ... set preempt=)
-  # TODO(preempt): add 'partition' once partition-based preemption is implemented.
   PreemptType: none
   # PreemptMode selects how preempted jobs are handled:
   #   OFF        no preemption
   #   CANCEL     kill the preempted job
-  # TODO(preempt): add REQUEUE and SUSPEND once the scheduler supports them.
   PreemptMode: OFF
 
 
