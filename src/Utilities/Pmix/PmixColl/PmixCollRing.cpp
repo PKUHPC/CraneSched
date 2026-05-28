@@ -226,9 +226,9 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
       // Guard against a ctx that was reset (or recycled) between the time the
       // async send was issued and when the completion callback fires.
       // ResetCollRing_() sets in_use=false but does NOT change seq, so we must
-      // check both: seq mismatch catches a *recycled* slot, in_use=false catches
-      // a *reset-but-not-yet-recycled* slot (e.g. reset by AbortOnTimeout while
-      // the send was still in flight).
+      // check both: seq mismatch catches a *recycled* slot, in_use=false
+      // catches a *reset-but-not-yet-recycled* slot (e.g. reset by
+      // AbortOnTimeout while the send was still in flight).
       if (seq != coll_ring_ctx.seq || !coll_ring_ctx.in_use) {
         CRANE_DEBUG("{:p}: collective was reset!",
                     static_cast<void*>(&coll_ring_ctx));
@@ -404,7 +404,8 @@ bool PmixCollRing::ProcessRingRequest(
   }
 
   CRANE_DEBUG(
-      "collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}",
+      "collective message from nodeid={}, contrib_id={}, seq={}, hop={}, "
+      "msgsize={}",
       hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(),
       hdr.msgsize());
 

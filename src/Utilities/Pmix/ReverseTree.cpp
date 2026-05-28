@@ -141,7 +141,7 @@ void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
     return;
   }
 
-    /*
+  /*
    * When width >= num_nodes the regular tree formula breaks down:
    * Dep() returns 0, which causes integer underflow (max_children/width - 1 ==
    * -1) in SearchTree and produces wrong parent/child counts.

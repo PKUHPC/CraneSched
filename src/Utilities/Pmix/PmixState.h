@@ -62,8 +62,8 @@ class PmixState {
   // new collective objects after the step has been aborted.  Without this,
   // racing peer ring messages that arrive after AbortAllColls() clears
   // m_coll_list_ would cause PmixStateCollGet() to create a brand-new
-  // PmixCollRing (with m_aborted_=false) that then hits the "unexpected contrib"
-  // path, triggering a spurious extra TerminateSteps() call.
+  // PmixCollRing (with m_aborted_=false) that then hits the "unexpected
+  // contrib" path, triggering a spurious extra TerminateSteps() call.
   bool m_aborted_{false};
 #endif
 };
