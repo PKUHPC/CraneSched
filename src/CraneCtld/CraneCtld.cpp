@@ -492,6 +492,24 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          // Parse optional sockets field (number of physical CPU sockets).
+          // Default value is 1 when not specified.
+          if (node["sockets"]) {
+            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
+            if (sockets_val == 0) {
+              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
+                          node["name"].Scalar());
+              sockets_val = 1;
+            } else if (sockets_val > node_ptr->cpu) {
+              CRANE_WARN(
+                  "Sockets={} for node '{}' exceeds cpu count={}. "
+                  "Resetting to 1.",
+                  sockets_val, node["name"].Scalar(), node_ptr->cpu);
+              sockets_val = 1;
+            }
+            node_ptr->node_topo_info.sockets = sockets_val;
+          }
+
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
