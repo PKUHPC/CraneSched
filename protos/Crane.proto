@@ -779,6 +779,7 @@ message StreamCforedRequest {
     STEP_REQUEST = 4;
     JOB_COMPLETION_REQUEST = 2;
     CFORED_GRACEFUL_EXIT = 3;
+    STEP_META_REQUEST = 5;
   }
   CforedRequestType type = 1;
 
@@ -810,13 +811,33 @@ message StreamCforedRequest {
     string cfored_name = 1;
   }
 
+  message StepMetaReq {
+    uint32 uid = 1;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    int32 cattach_pid = 4;
+  }
+
   oneof payload {
     CforedReg payload_cfored_reg = 2;
     JobReq payload_job_req = 3;
     StepReq payload_step_req = 6;
     JobCompleteReq payload_job_complete_req = 4;
     GracefulExitReq payload_graceful_exit_req = 5;
+    StepMetaReq payload_step_meta_req = 7;
   }
+}
+
+message CattachStepInfo {
+  bool pty = 1;                       // from InteractiveMeta.Pty
+  optional uint32 input_task_id = 2;  // set when crun used --input=<task_id>
+  uint32 ntasks = 3;                  // for --layout
+  uint32 node_num = 4;                // for --layout
+  string nodelist = 5;                // for --layout and execCranedIds parsing
+  message NodeTasks {
+    repeated uint32 task_ids = 1;
+  }
+  map<string, NodeTasks> craned_task_map = 6;
 }
 
 message StreamCtldReply {
@@ -827,6 +848,7 @@ message StreamCtldReply {
     JOB_COMPLETION_ACK_REPLY = 3;
     CFORED_REGISTRATION_ACK = 4;
     CFORED_GRACEFUL_EXIT_ACK = 5;
+    STEP_META_REPLY = 6;
   }
 
   message JobIdReply {
@@ -870,6 +892,13 @@ message StreamCtldReply {
     bool ok = 1;
   }
 
+  message StepMetaReply {
+    bool ok = 1;
+    string failure_reason = 2;
+    CattachStepInfo step_info = 3;
+    int32 cattach_pid = 4;
+  }
+
   CtldReplyType type = 1;
 
   oneof payload {
@@ -879,6 +908,7 @@ message StreamCtldReply {
     JobCompletionAckReply payload_job_completion_ack = 5;
     JobIdReply payload_job_id_reply = 6;
     CforedGracefulExitAck payload_graceful_exit_ack = 7;
+    StepMetaReply payload_step_meta_reply = 8;
   }
 }
 
@@ -1039,6 +1069,7 @@ message StreamStepIORequest {
 
   message TaskOutputReq {
     bytes msg = 1;
+    uint32 task_id = 2;  // The rank/id of the task that produced this output.
   }
 
   message TaskErrOutputReq {
@@ -1098,7 +1129,7 @@ message StreamStepIOReply {
   message TaskInputReq {
     bytes msg = 1;
     bool eof = 2;
-    optional uint32 task_id = 3;
+    optional uint32 task_id = 3;  // If set, deliver stdin only to the specified task; otherwise broadcast.
   }
 
   message SupervisorUnregisterReply {
