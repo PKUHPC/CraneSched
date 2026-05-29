@@ -153,8 +153,8 @@ class CriClient {
 
   // ==== Image Service ====
   std::optional<std::string> GetImageId(const std::string& image_name) const;
-  // NOTE: No `server_addr` here as it is used to identify registry in auth config,
-  // which we already done from submiting side.
+  // NOTE: No `server_addr` here as it is used to identify registry in auth
+  // config, which we already done from submiting side.
   std::optional<std::string> PullImage(const std::string& image_name,
                                        const std::string& username,
                                        const std::string& password,
