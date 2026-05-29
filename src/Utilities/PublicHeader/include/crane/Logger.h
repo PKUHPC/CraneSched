@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <absl/time/time.h>
 #include <spdlog/fmt/bundled/format.h>
 
 #include <source_location>
@@ -210,6 +211,32 @@ struct formatter<crane::grpc::JobStatus> {
     return fmt::format_to(
         ctx.out(), "{}",
         util::Internal::CraneStepStatusStrArr[static_cast<int>(v)]);
+  }
+};
+
+template <>
+struct formatter<absl::Time> {
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto format(const absl::Time& t, FormatContext& ctx) const {
+    return fmt::format_to(ctx.out(), "{}", absl::FormatTime(t));
+  }
+};
+
+template <>
+struct formatter<absl::Duration> {
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto format(const absl::Duration& t, FormatContext& ctx) const {
+    return fmt::format_to(ctx.out(), "{}", absl::FormatDuration(t));
   }
 };
 

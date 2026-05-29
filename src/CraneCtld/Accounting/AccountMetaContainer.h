@@ -88,6 +88,9 @@ class AccountMetaContainer final {
 
   void FreeQosResource(const JobInCtld& job);
 
+  // Free only running resource (not submit count) — used for requeue.
+  void FreeQosRunningResource(const JobInCtld& job);
+
   // When a user/account object is deleted, resources need to be reset.
   void DeleteUserMeta(const std::string& username);
 
@@ -165,7 +168,8 @@ class AccountMetaContainer final {
   void DoFreeResource_(job_id_t job_id, const std::string& username,
                        const std::list<std::string>& account_chain,
                        const std::string& qos,
-                       const MetaResource& meta_resource);
+                       const MetaResource& meta_resource,
+                       bool reduce_user_job = true);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:

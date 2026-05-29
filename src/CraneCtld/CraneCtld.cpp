@@ -77,6 +77,10 @@ void ParseCtldConfig(const YAML::Node& config) {
                               Ctld::kJobStatusChangeTimeoutMS);
     ctld_config.StatusChangeBatchNum = YamlValueOr<uint32_t>(
         ctld_cfg["StatusChangeBatchNum"], Ctld::kJobStatusChangeBatchNum);
+
+    if (ctld_cfg["MaxRequeueCount"]) {
+      ctld_config.MaxRequeueCount = ctld_cfg["MaxRequeueCount"].as<int32_t>();
+    }
   }
 
   g_config.CtldConf = std::move(ctld_config);
