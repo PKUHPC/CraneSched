@@ -150,8 +150,7 @@ std::optional<std::string> CriClient::GetImageId(
 
 std::optional<std::string> CriClient::PullImage(
     const std::string& image_name, const std::string& username,
-    const std::string& password, const std::string& server_addr,
-    const std::string& pull_policy) const {
+    const std::string& password, const std::string& pull_policy) const {
   using api::PullImageRequest;
   using api::PullImageResponse;
 
@@ -235,7 +234,6 @@ std::optional<std::string> CriClient::PullImage(
   auto* auth = request.mutable_auth();
   auth->set_username(username);
   auth->set_password(password);
-  auth->set_server_address(server_addr);
 
   auto status = m_is_stub_->PullImage(&context, request, &response);
   if (!status.ok()) {
