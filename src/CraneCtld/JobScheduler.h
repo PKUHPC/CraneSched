@@ -1222,29 +1222,6 @@ class JobScheduler {
 
   PmixPortsMetaMap& GetPmixPortsMetaMap() { return m_pmix_ports_meta_; }
 
-  // Convenience wrappers that forward to the ArrayManager after taking the
-  // scheduler's pending-map mutex. Query is a pure read and must NEVER
-  // materialize children; modify reports explicit rejections for
-  // unmaterialized tasks.
-  ArrayTaskResolveResult ResolveArrayTaskIdsForQuery(
-      job_id_t array_job_id,
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) {
-    std::unordered_set<uint32_t> task_ids(array_task_ids.begin(),
-                                          array_task_ids.end());
-    LockGuard pending_guard(&m_pending_job_map_mtx_);
-    return m_array_manager_->ResolveForQueryNoLock(array_job_id, task_ids);
-  }
-
-  ArrayTaskResolveMutationResult ResolveArrayTaskIdsForModify(
-      job_id_t array_job_id,
-      const google::protobuf::RepeatedField<uint32_t>& array_task_ids) {
-    std::unordered_set<uint32_t> task_ids(array_task_ids.begin(),
-                                          array_task_ids.end());
-    LockGuard pending_guard(&m_pending_job_map_mtx_);
-    return m_array_manager_->ResolveForMutationNoLock(array_job_id, task_ids,
-                                                      ArrayMutationKind::kModify);
-  }
-
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
