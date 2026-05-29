@@ -4,7 +4,7 @@ file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/ProtobufGenerate.cmake)
 
-set(proto_src PublicDefs.proto Crane.proto Supervisor.proto Plugin.proto)
+set(proto_src PublicDefs.proto Crane.proto Supervisor.proto Pmix.proto Plugin.proto)
 PROTOBUF_GENERATE_GRPC_CPP(ProtoCxxSources ProtoCxxHeaders ${GENERATED_FILE_PATH}/protos
         ${protobuf_SOURCE_DIR}/src ${proto_src})
 

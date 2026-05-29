@@ -30,6 +30,13 @@ Path to configuration file. Default: "/etc/crane/config.yaml".
 **--deadline string**
 
 :   Deadline time of the job
+
+**--mpi=<type>**
+
+:   **Applies to:** `job`, `step`  
+Select MPI integration. Currently supported: `pmix`. When set to `pmix`, CraneSched acts as the process manager via the built-in PMIx server (rank/namespace assignment, modex/fence) and no `mpirun` is required.  
+Note: If PMIx is not enabled in this build, you will see “PMIx support is not compiled in.”  
+See PMIx Guide: ../deployment/configuration/pmix.md
 **-d, --dependency=&lt;string&gt;**
 
 :   **Applies to:** `job`  
@@ -50,6 +57,14 @@ Number of nodes on which to run. Default: 1.
 :  **Applies to:** `job`, `step`  
 Number of CPUs required per task. This may be useful if the task is multithreaded and requires more than one CPU per
 task for optimal performance. Default: 1.
+
+**--ntasks=<ntasks>**
+
+:   **Applies to:** `job`, `step`  
+Total number of tasks (processes/ranks). Default: 1. Relationship with `--nodes`/`--ntasks-per-node`:  
+- Only `--ntasks` specified: scheduler determines node and task distribution.  
+- `--nodes` and `--ntasks-per-node` specified: total tasks = `nodes × ntasks-per-node`.  
+- If `--ntasks` is also specified: `--ntasks` acts as an upper bound; actual tasks = `min(--ntasks, nodes × ntasks-per-node)`.
 
 **--ntasks-per-node=&lt;ntasks&gt;**
 
@@ -441,6 +456,24 @@ crun -c 1 -- your_program --your_args
 # Using quotes
 crun -c 1 "your_program --your_args"
 ```
+
+## MPI/PMIx-related Environment Variables
+
+- `CRANE_PMIX_FENCE=ring|tree`  
+  Select the PMIx fence (barrier) algorithm. `ring` is suitable for small scale (lower latency); `tree` for large scale (default). Example:
+  ```bash
+  export CRANE_PMIX_FENCE=ring
+  crun --nodes=4 --ntasks-per-node=4 --mpi=pmix ./my_program
+  ```
+
+- `CRANE_PMIX_DIRECT_CONN_UCX=true|false`  
+  Enable UCX-based PMIx direct connection so that PMIx metadata exchanges (modex, fence) are transported via UCX to reduce latency. Requires UCX support compiled into CraneSched (detectable via `pkg-config --libs ucx`). Example:
+  ```bash
+  export CRANE_PMIX_DIRECT_CONN_UCX=true
+  crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
+  ```
+
+See PMIx Guide for more details and large-scale examples: ../deployment/configuration/pmix.md
 
 ## Related Commands
 

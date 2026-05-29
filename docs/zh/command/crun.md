@@ -34,6 +34,13 @@ crun可以运行在两种模式下：
 **--deadline string**
 
 :   作业的截止时间
+ 
+**--mpi=<type>**
+
+:   **适用于：** `作业`, `作业步`  
+选择 MPI 集成方式。当前支持的取值：`pmix`。设置为 `pmix` 时，CraneSched 将作为进程管理器，通过内置 PMIx 服务端为 MPI 进程分配 rank/namespace 并完成 modex/fence，无需 `mpirun`。  
+注意：若本集群未启用 PMIx 支持，将报错 “PMIx support is not compiled in.”  
+详见《PMIx 使用指南》：../deployment/configuration/pmix.md
 **-N, --nodes=&lt;num&gt;**
 
 :   **适用于：** `作业`, `作业步`  
@@ -425,6 +432,24 @@ crun -c 1 -- your_program --your_args
 # 使用引号
 crun -c 1 "your_program --your_args"
 ```
+
+## MPI/PMIx 相关环境变量
+
+- `CRANE_PMIX_FENCE=ring|tree`  
+  选择 PMIx fence（屏障同步）算法。`ring` 适合小规模（低延迟），`tree` 适合大规模（默认）。例如：
+  ```bash
+  export CRANE_PMIX_FENCE=ring
+  crun --nodes=4 --ntasks-per-node=4 --mpi=pmix ./my_program
+  ```
+
+- `CRANE_PMIX_DIRECT_CONN_UCX=true|false`  
+  启用基于 UCX 的 PMIx 直连模式，让 PMIx 元数据交换（modex、fence）经由 UCX 传输以降低延迟。需要 CraneSched 在编译期启用 UCX（`pkg-config --libs ucx` 可检测）。例如：
+  ```bash
+  export CRANE_PMIX_DIRECT_CONN_UCX=true
+  crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
+  ```
+
+更多说明与规模化示例参见《PMIx 使用指南》：../deployment/configuration/pmix.md
 
 ## 相关命令
 
