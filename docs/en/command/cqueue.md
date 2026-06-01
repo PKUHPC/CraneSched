@@ -59,15 +59,15 @@ Output command execution results in JSON format instead of table format.
 **-s, --step[=&lt;stepid1,stepid2,...&gt;]**
 
 :   **Applies to:** `step`  
-Query step information instead of job information. Accepts optional comma-separated list of step IDs in format
-`jobid.stepid` (e.g., `123.1,123.2,456.3`). If no argument is provided, shows all steps. This option switches the query
-mode from jobs to steps.
+Query step information instead of job information. Accepts optional comma-separated list of step IDs: regular jobs use
+`jobid.stepid`, array jobs use `jobid_arraytaskid.stepid` (e.g., `123.1,123.2,456.3,229_0.1`). If no argument is
+provided, shows all steps. This option switches the query mode from jobs to steps.
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `job`, `step`  
-Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When used with `--step`, filters steps
-belonging to the specified jobs.
+Specify job IDs to query (comma-separated list). Supports `jobid` and `jobid_arraytaskid` (for example, `-j=229,229_0`).
+When used with `--step`, filters steps belonging to the specified jobs (or array tasks).
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -136,10 +136,13 @@ When querying jobs (default mode), the following fields are displayed:
 - **NodeList**: Names of nodes where the job is running
 - **Deadline**： Deadline of the job
 
+For array jobs, `JobId` is shown as `jobid_arraytaskid`; in the default table output an additional array summary row
+(`anchorJobId_[start-end]`) is displayed.
+
 When querying steps (using `--step`), the following fields are displayed:
 
-- **StepId**: Step identification in format jobid.stepid
-- **JobId**: Parent job identification number
+- **StepId**: Step identification; array jobs use `jobid_arraytaskid.stepid`, regular jobs use `jobid.stepid`
+- **JobId**: Parent job identification number (array jobs use `jobid_arraytaskid`)
 - **Name**: Step name
 - **Partition**: Partition (inherited from parent job)
 - **User**: Username (inherited from parent job)
@@ -159,7 +162,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 | %deadline  | Deadline        | Deadline time of the job                                    |
 | %e         | ElapsedTime     | Elapsed time since job started                              |
 | %h         | Held            | Hold state of the job                                       |
-| %j         | JobID           | Job ID                                                      |
+| %j         | JobID           | Job ID (array jobs use `jobid_arraytaskid`)                |
 | %k         | Comment         | Comment of the job                                          |
 | %l         | TimeLimit       | Time limit for the job                                      |
 | %L         | NodeList        | List of nodes the job is running on (or reason for pending) |
@@ -189,8 +192,8 @@ When querying steps (using `--step`), the following format identifiers are suppo
 
 | Identifier | Full Name   | Description                                    |
 |------------|-------------|------------------------------------------------|
-| %i         | StepId      | Step ID in format jobid.stepid                 |
-| %j         | JobId       | Parent job ID                                  |
+| %i         | StepId      | Step ID; array jobs use `jobid_arraytaskid.stepid`         |
+| %j         | JobId       | Parent job ID (array jobs use `jobid_arraytaskid`)         |
 | %n         | Name        | Step name                                      |
 | %P         | Partition   | Partition (inherited from parent job)          |
 | %u         | User        | Username (inherited from parent job)           |
@@ -254,8 +257,8 @@ Flags:
                                 %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
                                 %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
-                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
-                                %j/%JobID              - Display the ID of the job (or parent job ID for steps).
+                                %i/%StepId             - Display the ID of the step (format: jobId_arrayTaskId.stepId for array jobs, jobId.stepId otherwise). (For steps only)
+                                %j/%JobID              - Display the ID of the job (array jobs use jobId_arrayTaskId).
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
                                 %L/%NodeList           - Display the list of nodes the job/step is running on.
@@ -291,7 +294,7 @@ Flags:
   -F, --full                  Display full information (If not set, only display 30 characters per cell)
   -h, --help                  help for cqueue
   -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
-  -j, --job string            Specify job ids to view (comma separated list), default is all
+  -j, --job string            Specify job ids to view (comma separated list, supports jobid or jobid_arraytaskid), default is all
       --json                  Output in JSON format
   -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
   -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 1000)

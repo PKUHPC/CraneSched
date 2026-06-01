@@ -18,6 +18,7 @@
 
 #include "CtldPublicDefs.h"
 
+#include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
@@ -544,6 +545,11 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.At(craned_id));
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = job_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
   return job_to_d;
 }
 
@@ -593,6 +599,11 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->job->req_task_res_view.CpuCountDouble());
   step_to_d.set_submit_dir(this->job->JobToCtld().submit_dir());
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   return step_to_d;
 }
@@ -1169,6 +1180,11 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = step_to_d.mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   return step_to_d;
 }
@@ -1586,6 +1602,34 @@ void JobInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+bool JobInCtld::ArrayMaterializationComplete() const {
+  return runtime_attr.has_array_children_expanded() &&
+         runtime_attr.array_children_expanded();
+}
+
+void JobInCtld::SetArrayMaterializationComplete(bool complete) {
+  if (complete) {
+    runtime_attr.set_array_children_expanded(true);
+  } else {
+    runtime_attr.clear_array_children_expanded();
+  }
+}
+
+void JobInCtld::SetArrayTaskIdentity(job_id_t val, array_task_id_t task_id) {
+  auto* array_task = runtime_attr.mutable_array_task();
+  array_task->set_array_job_id(val);
+  array_task->set_task_id(task_id);
+}
+
+std::optional<JobInCtld::ArrayTaskIdentity> JobInCtld::GetArrayTaskIdentity()
+    const {
+  if (!runtime_attr.has_array_task()) {
+    return std::nullopt;
+  }
+  return ArrayTaskIdentity{runtime_attr.array_task().array_job_id(),
+                           runtime_attr.array_task().task_id()};
+}
+
 void JobInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -1630,6 +1674,15 @@ void JobInCtld::TriggerDependencyEvents(
   for (job_id_t dependent_id : dependents[dep_type]) {
     g_job_scheduler->AddDependencyEvent(dependent_id, job_id, event_time);
   }
+}
+
+void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
+  uint32_t exit_code = ExitCode();
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY, end_time);
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_OK,
+                          exit_code == 0 ? end_time : absl::InfiniteFuture());
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_NOT_OK,
+                          exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
@@ -1773,7 +1826,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   }
 }
 
-void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
+void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_type(type);
   job_info->set_job_id(job_id);
   job_info->set_name(name);
@@ -1802,6 +1855,16 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   job_info->set_reservation(reservation);
 
   job_info->set_submit_hostname(submit_hostname);
+
+  if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
+    *job_info->mutable_array_spec() = *array_spec;
+  }
+
+  if (auto identity = GetArrayTaskIdentity(); identity.has_value()) {
+    auto* array_task = job_info->mutable_array_task();
+    array_task->set_array_job_id(identity->array_job_id);
+    array_task->set_task_id(identity->task_id);
+  }
 
   // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
@@ -1848,8 +1911,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) {
   job_info->set_exit_code(runtime_attr.exit_code());
   job_info->set_priority(cached_priority);  // FIXME: A BUG?
 
-  job_info->set_status(status);
-  if (Status() == crane::grpc::Pending) {
+  auto job_status = EffectiveDisplayStatus();
+  job_info->set_status(job_status);
+  if (job_status == crane::grpc::Pending) {
     job_info->set_pending_reason(pending_reason);
   } else {
     job_info->set_craned_list(allocated_craneds_regex);

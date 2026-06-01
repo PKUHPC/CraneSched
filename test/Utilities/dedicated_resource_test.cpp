@@ -249,4 +249,3 @@ TEST(DEDICATED_RES_NODE, req_map5) {
   ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
                req, resourceInNode);
 }
-

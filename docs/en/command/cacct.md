@@ -31,7 +31,8 @@ Configuration file path. Default: "/etc/crane/config.yaml".
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `Job`, `Step`  
-Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When querying jobs, results will be filtered by job ID. The output will include matching jobs and their associated steps. Supports using job step ID format `jobid.stepid` to query specific steps.
+Specify job IDs to query (comma-separated list). Supports `jobid`, `jobid_arraytaskid`, `jobid.stepid`, and
+`jobid_arraytaskid.stepid` (for example, `-j=2,2_0,2.1,2_0.1`). Results are filtered by the specified job or step IDs.
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -117,13 +118,15 @@ Customize output format using format specifiers. Fields are identified by a perc
 
 When displaying default format, the following fields are shown:
 
-- **JobId**: Job or job step identifier (format: jobid for jobs, jobid.stepid for steps)
+- **JobId**: Job or job step identifier (`jobid`/`jobid.stepid` for regular jobs, `jobid_arraytaskid`/`jobid_arraytaskid.stepid` for array jobs)
 - **JobName**: Job or job step name
 - **Partition**: Partition where job/job step runs
 - **Account**: Account billed for job/job step
 - **AllocCPUs**: Number of allocated CPUs
 - **State**: Job/job step state (e.g., COMPLETED, FAILED, CANCELLED)
 - **ExitCode**: Exit code (format: exitcode:signal, see [Exit Code Reference](../reference/exit_code.md))
+
+For array jobs, the default table output also includes an array summary row (`anchorJobId_[start-end]`).
 
 ## Format Specifiers
 
@@ -138,7 +141,7 @@ The following format identifiers are supported (case-insensitive):
 | %E / %EndTime         | End time of job/job step                            |
 | %e / %ExitCode        | Exit code (format: exitcode:signal)                 |
 | %h / %Held            | Hold state of job                                   |
-| %j / %JobID           | Job ID (or job step ID in format jobid.stepid)      |
+| %j / %JobID           | Job ID (`jobid`, `jobid_arraytaskid`, `jobid.stepid`, or `jobid_arraytaskid.stepid`) |
 | %K / %Wckey           | Workload characterization key                       |
 | %k / %Comment         | Comment for job                                     |
 | %L / %NodeList        | List of nodes where job/job step runs               |
