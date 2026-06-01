@@ -63,9 +63,9 @@ bool TracerManager::Initialize(
 
   if (extra_exporter) {
     trace_sdk::BatchSpanProcessorOptions batch_opts;
-    batch_opts.max_queue_size = 2048;
-    batch_opts.schedule_delay_millis = std::chrono::milliseconds(5000);
-    batch_opts.max_export_batch_size = 512;
+    batch_opts.max_queue_size = 65536;
+    batch_opts.schedule_delay_millis = std::chrono::milliseconds(100);
+    batch_opts.max_export_batch_size = 2048;
 
     auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
         std::move(extra_exporter), batch_opts);
