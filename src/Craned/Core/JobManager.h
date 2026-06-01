@@ -304,6 +304,7 @@ class JobManager {
   ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_step_status_change_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_step_status_change_timer_handle_;
   ConcurrentQueue<StepStatusChangeQueueElem> m_step_status_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;

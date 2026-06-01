@@ -326,6 +326,15 @@ JobManager::JobManager() {
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanStepStatusChangeQueueCb_();
       });
+  m_step_status_change_timer_handle_ =
+      m_uvw_loop_->resource<uvw::timer_handle>();
+  m_step_status_change_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        EvCleanStepStatusChangeQueueCb_();
+      });
+  m_step_status_change_timer_handle_->start(
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs},
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
@@ -1340,6 +1349,13 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
           status_change.final_status.has_value()) {
         step->pending_terminal_status = StepInstance::PendingTerminalStatus{
             .final_status = status_change.final_status.value(),
+            .exit_code = status_change.exit_code,
+            .reason = status_change.reason.value_or(""),
+            .timestamp = status_change.timestamp};
+      } else if (step->err_before_supv_start && !step->IsDaemonStep() &&
+                 IsFinishedStepStatus(status_change.new_status)) {
+        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+            .final_status = status_change.new_status,
             .exit_code = status_change.exit_code,
             .reason = status_change.reason.value_or(""),
             .timestamp = status_change.timestamp};

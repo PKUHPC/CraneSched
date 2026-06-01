@@ -1046,10 +1046,16 @@ void JobScheduler::ScheduleThread_() {
 
       CRANE_TRACE_SCOPE_NAMED(sched_cycle, "scheduling/cycle");
       sched_cycle.SetAttribute("crane.dimension", "scheduling");
+      size_t pending_queue_depth = m_pending_job_map_.size();
+      size_t running_job_count = 0;
+      {
+        LockGuard running_guard(&m_running_job_map_mtx_);
+        running_job_count = m_running_job_map_.size();
+      }
       sched_cycle.SetAttribute("pending_queue_depth",
-                               static_cast<int64_t>(m_pending_job_map_.size()));
+                               static_cast<int64_t>(pending_queue_depth));
       sched_cycle.SetAttribute("running_job_count",
-                               static_cast<int64_t>(m_running_job_map_.size()));
+                               static_cast<int64_t>(running_job_count));
 
       std::vector<DependencyEvent> dep_events;
       size_t approx_size = m_dependency_event_queue_.size_approx();
@@ -1113,7 +1119,7 @@ void JobScheduler::ScheduleThread_() {
 
       schedule_begin = std::chrono::steady_clock::now();
       num_jobs_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
-                                          m_pending_job_map_.size());
+                                          pending_queue_depth);
 
       g_meta_container->StartLogging();
 
