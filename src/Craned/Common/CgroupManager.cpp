@@ -2285,13 +2285,13 @@ bool ResourceInNodeV3Allocator::Allocate(const ResourceInNodeV3& resource,
       all_request_slots.insert(slots.cbegin(), slots.cend());
   }
 
-  if (!all_request_slots.empty()) {
-    if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
-                             CgConstant::kCgLimitDeviceWrite,
-                             CgConstant::kCgLimitDeviceMknod)) {
-      CRANE_WARN("Allocate devices access failed.");
-      return false;
-    }
+  if (g_this_node_device.empty()) return true;
+
+  if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
+                           CgConstant::kCgLimitDeviceWrite,
+                           CgConstant::kCgLimitDeviceMknod)) {
+    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    return false;
   }
 
   return ok;
