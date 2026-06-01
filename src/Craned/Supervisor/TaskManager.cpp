@@ -546,7 +546,8 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
   // Pattern with following format specifiers will be created on compute node.
   // For crun, will redirect io to local file instead of forwarding from/to
   // cfored and crun , otherwise will be forwarded from/to cfored and crun.
-  const std::unordered_set<char> local_file_replacement{'N', 'n', 't'};
+  const std::unordered_set<char> local_file_replacement{'A', 'a', 'N', 'n',
+                                                        't'};
   // Sentinel for "%a" when the step is not an array task. Matches Slurm's
   // NO_VAL (UINT32_MAX - 1) so filenames stay compatible with Slurm tooling.
   constexpr uint32_t kNoArrayTaskIdSentinel =
