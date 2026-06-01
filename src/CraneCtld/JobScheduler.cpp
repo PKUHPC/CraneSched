@@ -1046,6 +1046,8 @@ void JobScheduler::ScheduleThread_() {
 
       CRANE_TRACE_SCOPE_NAMED(sched_cycle, "scheduling/cycle");
       sched_cycle.SetAttribute("crane.dimension", "scheduling");
+      sched_cycle.SetAttribute("schedule_interval_ms",
+                               static_cast<int64_t>(kJobScheduleIntervalMs));
       size_t pending_queue_depth = m_pending_job_map_.size();
       size_t running_job_count = 0;
       {
@@ -1054,7 +1056,11 @@ void JobScheduler::ScheduleThread_() {
       }
       sched_cycle.SetAttribute("pending_queue_depth",
                                static_cast<int64_t>(pending_queue_depth));
+      sched_cycle.SetAttribute("pending_queue_depth_begin",
+                               static_cast<int64_t>(pending_queue_depth));
       sched_cycle.SetAttribute("running_job_count",
+                               static_cast<int64_t>(running_job_count));
+      sched_cycle.SetAttribute("running_job_count_begin",
                                static_cast<int64_t>(running_job_count));
 
       std::vector<DependencyEvent> dep_events;
@@ -1120,6 +1126,10 @@ void JobScheduler::ScheduleThread_() {
       schedule_begin = std::chrono::steady_clock::now();
       num_jobs_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
                                           pending_queue_depth);
+      sched_cycle.SetAttribute("attempted_count",
+                               static_cast<int64_t>(num_jobs_single_schedule));
+      sched_cycle.SetAttribute("eligible_pending_count",
+                               static_cast<int64_t>(pending_jobs.size()));
 
       g_meta_container->StartLogging();
 
@@ -1315,6 +1325,10 @@ void JobScheduler::ScheduleThread_() {
 
       rv_span.SetAttribute("allocated_count",
                            static_cast<int64_t>(jobs_to_run.size()));
+      sched_cycle.SetAttribute("allocated_count",
+                               static_cast<int64_t>(jobs_to_run.size()));
+      sched_cycle.SetAttribute("pending_queue_depth_end",
+                               static_cast<int64_t>(m_pending_job_map_.size()));
       rv_span.End();
 
       num_jobs_single_execution = jobs_to_run.size();
@@ -1577,6 +1591,13 @@ void JobScheduler::ScheduleThread_() {
         // The ownership of JobInCtld is transferred to the running queue.
         m_running_job_map_.emplace(job->JobId(), std::move(job));
       }
+
+      sched_cycle.SetAttribute("running_job_count_end",
+                               static_cast<int64_t>(m_running_job_map_.size()));
+      sched_cycle.SetAttribute("allocated_success_count",
+                               static_cast<int64_t>(jobs_created.size()));
+      sched_cycle.SetAttribute("allocated_failed_count",
+                               static_cast<int64_t>(jobs_failed.size()));
 
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
@@ -4518,6 +4539,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE_SCOPE_NAMED(sc_span, "status_change/process");
   sc_span.SetAttribute("crane.dimension", "lifecycle");
   sc_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
+  size_t running_transition_count = 0;
+  size_t terminal_step_count = 0;
+  size_t finished_job_count = 0;
+  size_t resource_released_job_count = 0;
 
   StepStatusChangeContext context{};
   context.rn_step_raw_ptrs.reserve(actual_size);
@@ -4533,6 +4558,13 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   for (const auto& [job_id, step_id, exit_code, new_status, craned_index,
                     reason, timestamp] : args) {
+    if (new_status == crane::grpc::JobStatus::Running) {
+      ++running_transition_count;
+    }
+    if (IsFinishedStepStatus(new_status)) {
+      ++terminal_step_count;
+    }
+
     auto iter = m_running_job_map_.find(job_id);
     if (iter == m_running_job_map_.end()) {
       CRANE_WARN(
@@ -4577,6 +4609,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     }
 
     if (job_finished_status.has_value()) {
+      ++finished_job_count;
       CRANE_TRACE("[Job #{}] Completed with status {}.", job_id,
                   job_finished_status.value());
       CRANE_TRACE_SCOPE_FROM_REMOTE(end_span, "job/end", job->Traceparent());
@@ -4619,27 +4652,42 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           crane::grpc::DependencyType::AFTER_NOT_OK,
           job_exit_code != 0 ? end_time : absl::InfiniteFuture());
 
-      for (CranedId const& craned_id : job->CranedIds()) {
-        auto node_to_job_map_it = m_node_to_jobs_map_.find(craned_id);
-        if (node_to_job_map_it == m_node_to_jobs_map_.end()) [[unlikely]] {
-          CRANE_ERROR("Failed to find craned_id {} in m_node_to_jobs_map_",
-                      craned_id);
-        } else {
-          node_to_job_map_it->second.erase(job_id);
-          if (node_to_job_map_it->second.empty()) {
-            m_node_to_jobs_map_.erase(node_to_job_map_it);
+      {
+        CRANE_TRACE_CHILD_NAMED(resource_release_span, sc_span,
+                                "status_change/resource_release");
+        resource_release_span.SetAttribute("job_id", job->JobId());
+        resource_release_span.SetAttribute(
+            "node_count", static_cast<int64_t>(job->CranedIds().size()));
+        resource_release_span.SetAttribute(
+            "has_reservation", static_cast<bool>(job->reservation != ""));
+        resource_release_span.SetAttribute(
+            "license_count",
+            static_cast<int64_t>(job->licenses_count.size()));
+
+        for (CranedId const& craned_id : job->CranedIds()) {
+          auto node_to_job_map_it = m_node_to_jobs_map_.find(craned_id);
+          if (node_to_job_map_it == m_node_to_jobs_map_.end()) [[unlikely]] {
+            CRANE_ERROR("Failed to find craned_id {} in m_node_to_jobs_map_",
+                        craned_id);
+          } else {
+            node_to_job_map_it->second.erase(job_id);
+            if (node_to_job_map_it->second.empty()) {
+              m_node_to_jobs_map_.erase(node_to_job_map_it);
+            }
           }
         }
-      }
 
-      for (CranedId const& craned_id : job->CranedIds()) {
-        g_meta_container->FreeResourceFromNode(craned_id, job_id);
+        for (CranedId const& craned_id : job->CranedIds()) {
+          g_meta_container->FreeResourceFromNode(craned_id, job_id);
+        }
+        if (job->reservation != "")
+          g_meta_container->FreeResourceFromResv(job->reservation,
+                                                 job->JobId());
+        g_account_meta_container->FreeQosResource(*job);
+        if (!job->licenses_count.empty())
+          g_license_manager->FreeLicense(job->licenses_count);
       }
-      if (job->reservation != "")
-        g_meta_container->FreeResourceFromResv(job->reservation, job->JobId());
-      g_account_meta_container->FreeQosResource(*job);
-      if (!job->licenses_count.empty())
-        g_license_manager->FreeLicense(job->licenses_count);
+      ++resource_released_job_count;
 
       if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
         g_thread_pool->detach_task(
@@ -4679,6 +4727,15 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       m_running_job_map_.erase(iter);
     }
   }
+
+  sc_span.SetAttribute("running_transition_count",
+                       static_cast<int64_t>(running_transition_count));
+  sc_span.SetAttribute("terminal_step_count",
+                       static_cast<int64_t>(terminal_step_count));
+  sc_span.SetAttribute("finished_job_count",
+                       static_cast<int64_t>(finished_job_count));
+  sc_span.SetAttribute("resource_released_job_count",
+                       static_cast<int64_t>(resource_released_job_count));
 
   // Populate traceparent lookup for RPC worker threads
   for (auto* job : context.rn_job_raw_ptrs)
