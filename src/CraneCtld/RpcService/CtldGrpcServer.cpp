@@ -523,6 +523,12 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 !g_account_manager->CheckUidIsAdmin(payload.uid())) {
               step_ok = false;
               failure_reason = "permission denied";
+            } else if (step.type() != crane::grpc::JobType::Interactive ||
+                       !step.has_interactive_meta() ||
+                       step.interactive_meta().interactive_type() !=
+                           crane::grpc::InteractiveJobType::Crun) {
+              step_ok = false;
+              failure_reason = "cattach only supports crun steps";
             }
           }
           if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
