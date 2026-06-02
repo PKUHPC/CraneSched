@@ -24,6 +24,10 @@ on:
       - 'test/**'
       - 'CMakeLists.txt'
       - 'VERSION'
+  # GitHub Actions emits PR conversation comments as issue_comment events.
+  issue_comment:
+    types:
+      - created
   workflow_dispatch:
     inputs:
       backend_ref:
@@ -43,6 +47,9 @@ concurrency:
   group: >-
     ${{ github.event_name == 'pull_request'
         && format('pr-{0}', github.event.pull_request.number)
+        || github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && format('pr-{0}', github.event.issue.number)
         || github.event_name == 'workflow_dispatch'
         && format('manual-{0}-{1}', inputs.backend_ref,inputs.frontend_ref)
         || format('{0}-{1}', github.event_name, github.ref)}}
@@ -63,7 +70,12 @@ env:
 jobs:
 
   prepare:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: >-
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+      && (github.event_name != 'issue_comment'
+        || (github.event.issue.pull_request
+          && contains(github.event.comment.body, 'frontend_ref')
+          && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
     runs-on: ubuntu-latest
     outputs:
       backend_ref: ${{ steps.set_ref.outputs.backend_ref }}
@@ -77,12 +89,64 @@ jobs:
         run: |
           set -euo pipefail
           DEFAULT_BRANCH="master"
+          FRONTEND_REPO_URL="https://github.com/PKUHPC/CraneSched-FrontEnd.git"
+
+          validate_frontend_ref() {
+            local frontend_ref="$1"
+
+            if ! [[ "$frontend_ref" =~ ^[A-Za-z0-9._/\-]+$ ]]; then
+              echo "Invalid frontend_ref format: $frontend_ref" >&2
+              exit 1
+            fi
+
+            if [[ "$frontend_ref" == /* ]] || [[ "$frontend_ref" == *".."* ]] || [[ "$frontend_ref" == *"@{"* ]]; then
+              echo "Invalid frontend_ref format: $frontend_ref" >&2
+              exit 1
+            fi
+
+            if [[ "$frontend_ref" == refs/* ]]; then
+              if ! git check-ref-format "$frontend_ref" >/dev/null 2>&1; then
+                echo "Invalid frontend_ref format: $frontend_ref" >&2
+                exit 1
+              fi
+
+              if ! git ls-remote --exit-code "$FRONTEND_REPO_URL" "$frontend_ref" >/dev/null 2>&1; then
+                echo "frontend_ref not found in CraneSched-FrontEnd: $frontend_ref" >&2
+                exit 1
+              fi
+              return
+            fi
+
+            if ! git check-ref-format --allow-onelevel "refs/heads/$frontend_ref" >/dev/null 2>&1; then
+              echo "Invalid frontend_ref format: $frontend_ref" >&2
+              exit 1
+            fi
+
+            local ref_list
+            ref_list="$(git ls-remote --heads --tags "$FRONTEND_REPO_URL" 2>/dev/null)"
+            if echo "$ref_list" | awk '{print $2}' | grep -Fxq "refs/heads/$frontend_ref" \
+              || echo "$ref_list" | awk '{print $2}' | grep -Fxq "refs/tags/$frontend_ref"; then
+              return
+            fi
+
+            if [[ "$frontend_ref" =~ ^[0-9a-fA-F]{7,40}$ ]] \
+              && echo "$ref_list" | awk '{print $1}' | grep -qi "^$frontend_ref"; then
+              return
+            fi
+
+            echo "frontend_ref not found in CraneSched-FrontEnd: $frontend_ref" >&2
+            exit 1
+          }
           
           # Determine backend ref
           BACKEND_REF=""
           if [ -n "${{ github.event.inputs.backend_ref || '' }}" ]; then
             BACKEND_REF="${{ github.event.inputs.backend_ref }}"
             echo "Using backend ref: $BACKEND_REF"
+          elif [ "${GITHUB_EVENT_NAME}" = "issue_comment" ]; then
+            PR_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+            BACKEND_REF="refs/pull/${PR_NUMBER}/head"
+            echo "Using PR head for backend: $BACKEND_REF"
           fi
           # If empty, actions/checkout will use the default ref
           
@@ -90,11 +154,24 @@ jobs:
           FRONTEND_REF="$DEFAULT_BRANCH"
           if [ -n "${{ github.event.inputs.frontend_ref || '' }}" ]; then
             FRONTEND_REF="${{ github.event.inputs.frontend_ref }}"
+            validate_frontend_ref "$FRONTEND_REF"
             echo "Using frontend ref: $FRONTEND_REF"
+          elif [ "${GITHUB_EVENT_NAME}" = "issue_comment" ]; then
+            COMMENT_FRONTEND_REF="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH" \
+              | sed -nE 's/^[[:space:]]*(\/[A-Za-z0-9_-]+[[:space:]]+)?frontend_ref[[:space:]]*[:=][[:space:]]*([^[:space:]#]+).*$/\2/p' \
+              | head -n1)"
+            if [ -z "$COMMENT_FRONTEND_REF" ]; then
+              echo "No frontend_ref found in PR comment." >&2
+              exit 1
+            fi
+
+            validate_frontend_ref "$COMMENT_FRONTEND_REF"
+            FRONTEND_REF="$COMMENT_FRONTEND_REF"
+            echo "Using frontend ref from PR comment: $FRONTEND_REF"
           elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             CANDIDATE="${GITHUB_HEAD_REF}"
             echo "Checking if FrontEnd has branch: $CANDIDATE"
-            if git ls-remote --exit-code --heads https://github.com/PKUHPC/CraneSched-FrontEnd.git "$CANDIDATE"; then
+            if git ls-remote --exit-code --heads "$FRONTEND_REPO_URL" "$CANDIDATE"; then
               FRONTEND_REF="$CANDIDATE"
               echo "Found matching FrontEnd branch: $FRONTEND_REF"
             fi
