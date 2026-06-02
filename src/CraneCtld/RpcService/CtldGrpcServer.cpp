@@ -529,6 +529,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                            crane::grpc::InteractiveJobType::Crun) {
               step_ok = false;
               failure_reason = "cattach only supports crun steps";
+            } else if (step.interactive_meta().cfored_name() != cfored_name) {
+              step_ok = false;
+              failure_reason =
+                  "cattach must run on the same node where the crun step was "
+                  "started";
             }
           }
           if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
