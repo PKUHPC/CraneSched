@@ -129,6 +129,9 @@ inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
+constexpr uint32_t kUserNsMinKernelMajor = 5;
+constexpr uint32_t kUserNsMinKernelMinor = 12;
+
 inline const char* const kResourceTypeGpu = "gpu";
 
 constexpr uint64_t kJobMinTimeLimitSec = 11;

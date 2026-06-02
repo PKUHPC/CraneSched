@@ -1283,6 +1283,21 @@ void ParseConfig(int argc, char** argv) {
   auto& meta = g_config.CranedMeta;
   if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {
     CRANE_ERROR("Error when get system release info");
+  } else if (g_config.Container.Enabled) {
+    auto kernel_version =
+        util::os::ParseKernelReleaseMajorMinor(meta.SysInfo.release);
+    if (kernel_version.has_value()) {
+      const auto [major, minor] = kernel_version.value();
+      if (major < kUserNsMinKernelMajor ||
+          (major == kUserNsMinKernelMajor && minor < kUserNsMinKernelMinor)) {
+        CRANE_WARN(
+            "Container support is enabled, but current kernel version '{}' is "
+            "lower than {}.{}. UserNS may be unavailable and Rootless "
+            "container startup may fail. Administrators should upgrade the "
+            "kernel before running Rootless container workloads.",
+            meta.SysInfo.release, kUserNsMinKernelMajor, kUserNsMinKernelMinor);
+      }
+    }
   }
 
   g_config.CranedMeta.CranedStartTime = absl::Now();
