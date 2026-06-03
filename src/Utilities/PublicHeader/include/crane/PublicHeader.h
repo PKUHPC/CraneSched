@@ -204,7 +204,7 @@ enum ExitCodeEnum : uint16_t {
 
 namespace Internal {
 // clang-format off
-constexpr std::array<std::string_view, 110>
+constexpr std::array<std::string_view, 111>
     kCraneErrStrArr = {
         // 0 - 4
         "Success",

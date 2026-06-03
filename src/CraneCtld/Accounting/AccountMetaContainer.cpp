@@ -676,22 +676,6 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   return result;
 }
 
-std::expected<void, std::string> AccountMetaContainer::CheckTres_(
-    const ResourceView& resource_req, const ResourceView& resource_total) {
-  if (resource_req.GetCpuCount() > resource_total.GetCpuCount()) {
-    return std::unexpected("QosCpuResourceLimit");
-  }
-
-  if (resource_req.GetMemoryBytes() > resource_total.GetMemoryBytes()) {
-    return std::unexpected("QosMemResourceLimit");
-  }
-
-  if (!CheckGres_(resource_req.GetGresMap(), resource_total.GetGresMap()))
-    return std::unexpected("QosGresResourceLimit");
-
-  return {};
-}
-
 bool AccountMetaContainer::CheckGres_(const GresMap& device_req,
                                       const GresMap& device_total) {
   for (const auto& [name, lhs] : device_req) {
