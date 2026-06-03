@@ -70,11 +70,14 @@ class AccountMetaContainer final {
   /*
    * Validate QoS and partition submit-slot limits and reserve resources.
    * IN/OUT: job - job to be submitted; qos_priority field is set on success
+   * IN: user - locked user object for job.Username()
    * RET: CraneErrCode::SUCCESS on success, error code on limit exceeded
    *
-   * NOTE: Acquires internal stripe locks. Do not hold AccountManager locks.
+   * NOTE: Caller must hold AccountManager user lock for user. This function
+   *       acquires AccountManager account and QoS locks in that order, then
+   *       acquires internal stripe locks.
    */
-  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job);
+  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job, const User& user);
 
   /*
    * Unconditionally reserve submit-slot resources without validation.
@@ -138,6 +141,8 @@ class AccountMetaContainer final {
 
  private:
   const static int kNumStripes = 128;
+  using AccountRawMap =
+      std::unordered_map<std::string, std::unique_ptr<Account>>;
 
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
@@ -195,11 +200,15 @@ class AccountMetaContainer final {
 
   // Submit-time aggregated check across all entities.
   // Replaces the old CheckMetaSubmitResourceUsage_.
-  CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const Qos& qos);
+  CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const User& user,
+                                  const AccountRawMap& account_map,
+                                  const Qos& qos);
 
   // Schedule-time aggregated check across all entities.
   // Replaces the old CheckMetaResource_.
   std::expected<void, std::string> CheckRunLimits_(const PdJobInScheduler& job,
+                                                   const User& user,
+                                                   const AccountRawMap& account_map,
                                                    const Qos& qos);
 
   // Atomically increments both QoS and partition counters for user, every

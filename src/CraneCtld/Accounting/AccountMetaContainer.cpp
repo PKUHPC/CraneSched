@@ -72,13 +72,17 @@ std::string MetaResource::DebugString() const {
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job) {
+CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
+    JobInCtld& job, const User& user) {
   CRANE_TRACE(
-      "TryMallocMetaSubmitResource for job of user {} and account {}, "
-      "count={}.",
-      job.Username(), job.account, count);
+      "TryMallocMetaSubmitResource for job of user {} and account {}.....",
+      job.Username(), job.account);
 
-  if (count == 0) return CraneErrCode::SUCCESS;
+  auto account_map = g_account_manager->GetAllAccountInfo();
+  if (!account_map) {
+    CRANE_ERROR("No account found in AccountManager during submit check.");
+    return CraneErrCode::ERR_INVALID_ACCOUNT;
+  }
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) {
@@ -120,7 +124,7 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job) {
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  CraneErrCode result = CheckSubmitLimits_(job, *qos, count);
+  CraneErrCode result = CheckSubmitLimits_(job, user, *account_map, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
   MallocMetaSubmitResource(job);
@@ -169,6 +173,22 @@ AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
   CRANE_TRACE("Check meta resource for job {} of user {} and account {}.",
               job.job_id, job.username, job.account);
 
+  auto user = g_account_manager->GetExistedUserInfo(job.username);
+  if (!user) {
+    CRANE_ERROR(
+        "[job #{}]: User '{}' not found in AccountManager during run check.",
+        job.job_id, job.username);
+    return std::unexpected("InvalidUser");
+  }
+
+  auto account_map = g_account_manager->GetAllAccountInfo();
+  if (!account_map) {
+    CRANE_ERROR(
+        "[job #{}]: No account found in AccountManager during run check.",
+        job.job_id);
+    return std::unexpected("InvalidAccount");
+  }
+
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) return std::unexpected("InvalidQOS");
 
@@ -177,7 +197,7 @@ AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  auto result = CheckRunLimits_(job, *qos);
+  auto result = CheckRunLimits_(job, *user, *account_map, *qos);
   if (!result) return result;
 
   CRANE_DEBUG("Malloc meta resource for job {} of user {} and account {}.",
@@ -490,26 +510,24 @@ std::expected<void, std::string> AccountMetaContainer::CheckEntityRunLimits_(
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
-                                                      const Qos& qos) {
+CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
+    const JobInCtld& job, const User& user, const AccountRawMap& account_map,
+    const Qos& qos) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   // ---- User entity ----
   {
     const PartitionResourceLimit* user_part_limit = nullptr;
-    auto user_ptr = g_account_manager->GetExistedUserInfo(job.Username());
-    if (!user_ptr) {
-      CRANE_ERROR("User '{}' not found in AccountManager during submit check.",
-                  job.Username());
-      return CraneErrCode::ERR_INVALID_USER;
+    auto acct_it = user.account_to_attrs_map.find(job.account);
+    if (acct_it == user.account_to_attrs_map.end()) {
+      CRANE_ERROR("Account '{}' is not in user '{}' account list during "
+                  "submit check.",
+                  job.account, job.Username());
+      return CraneErrCode::ERR_USER_ACCOUNT_MISMATCH;
     }
-    auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
-    if (acct_it != user_ptr->account_to_attrs_map.end()) {
-      auto part_it =
-          acct_it->second.partition_to_limit_map.find(job.partition_id);
-      if (part_it != acct_it->second.partition_to_limit_map.end())
-        user_part_limit = &part_it->second;
-    }
+    auto part_it = acct_it->second.partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_it->second.partition_to_limit_map.end())
+      user_part_limit = &part_it->second;
 
     m_user_meta_map_.if_contains(
         job.Username(),
@@ -524,15 +542,16 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
   // ---- Account chain ----
   for (const auto& account_name : job.account_chain) {
     const PartitionResourceLimit* acct_part_limit = nullptr;
-    auto acct_ptr = g_account_manager->GetExistedAccountInfo(account_name);
-    if (!acct_ptr) {
+    auto acct_it = account_map.find(account_name);
+    if (acct_it == account_map.end() || !acct_it->second) {
       CRANE_ERROR(
           "Account '{}' not found in AccountManager during submit check.",
           account_name);
       return CraneErrCode::ERR_INVALID_ACCOUNT;
     }
-    auto part_it = acct_ptr->partition_to_limit_map.find(job.partition_id);
-    if (part_it != acct_ptr->partition_to_limit_map.end())
+    auto part_it =
+        acct_it->second->partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_it->second->partition_to_limit_map.end())
       acct_part_limit = &part_it->second;
 
     m_account_meta_map_.if_contains(
@@ -575,7 +594,8 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(const JobInCtld& job,
 }
 
 std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
-    const PdJobInScheduler& job, const Qos& qos) {
+    const PdJobInScheduler& job, const User& user,
+    const AccountRawMap& account_map, const Qos& qos) {
   // Verify that all required entries exist before checking limits.
   if (!m_user_meta_map_.contains(job.username)) {
     CRANE_ERROR("[job #{}]: User '{}' not found in m_user_meta_map_.",
@@ -603,21 +623,17 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   // ---- User entity ----
   {
     const PartitionResourceLimit* user_part_limit = nullptr;
-    auto user_ptr = g_account_manager->GetExistedUserInfo(job.username);
-    if (!user_ptr) {
+    auto acct_it = user.account_to_attrs_map.find(job.account);
+    if (acct_it == user.account_to_attrs_map.end()) {
       CRANE_ERROR(
-          "[job #{}]: User '{}' not found in AccountManager during "
-          "run check.",
-          job.job_id, job.username);
-      return std::unexpected("InvalidUser");
+          "[job #{}]: Account '{}' is not in user '{}' account list during run "
+          "check.",
+          job.job_id, job.account, job.username);
+      return std::unexpected("UserAccountMismatch");
     }
-    auto acct_it = user_ptr->account_to_attrs_map.find(job.account);
-    if (acct_it != user_ptr->account_to_attrs_map.end()) {
-      auto part_it =
-          acct_it->second.partition_to_limit_map.find(job.partition_id);
-      if (part_it != acct_it->second.partition_to_limit_map.end())
-        user_part_limit = &part_it->second;
-    }
+    auto part_it = acct_it->second.partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_it->second.partition_to_limit_map.end())
+      user_part_limit = &part_it->second;
 
     m_user_meta_map_.if_contains(
         job.username,
@@ -632,16 +648,17 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   // ---- Account chain ----
   for (const auto& account_name : job.account_chain) {
     const PartitionResourceLimit* acct_part_limit = nullptr;
-    auto acct_ptr = g_account_manager->GetExistedAccountInfo(account_name);
-    if (!acct_ptr) {
+    auto acct_it = account_map.find(account_name);
+    if (acct_it == account_map.end() || !acct_it->second) {
       CRANE_ERROR(
           "[job #{}]: Account '{}' not found in AccountManager during "
           "run check.",
           job.job_id, account_name);
       return std::unexpected("InvalidAccount");
     }
-    auto part_it = acct_ptr->partition_to_limit_map.find(job.partition_id);
-    if (part_it != acct_ptr->partition_to_limit_map.end())
+    auto part_it =
+        acct_it->second->partition_to_limit_map.find(job.partition_id);
+    if (part_it != acct_it->second->partition_to_limit_map.end())
       acct_part_limit = &part_it->second;
 
     m_account_meta_map_.if_contains(
