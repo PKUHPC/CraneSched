@@ -370,18 +370,17 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, const ResourceView& req_res,
-    absl::Duration time_limit, bool is_user) const {
+    absl::Duration time_limit, const Qos& qos, bool is_user) const {
+      
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
-  if (!CheckTres_(req_res, partition_limit->max_tres_per_job))
-    return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
-
-  if (time_limit > partition_limit->max_wall_duration_per_job)
-    return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
-
-  if (partition_limit->max_submit_jobs == 0)
-    return is_user ? CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER
-                   : CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+  if (is_user) {
+    if (qos.max_submit_jobs_per_user != std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max())
+      return CraneErrCode::SUCCESS;
+  } else {
+    if (qos.max_submit_jobs_per_account != std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max())
+      return CraneErrCode::SUCCESS;
+  }
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit != stat.partition_to_resource_map.end()) {
@@ -405,7 +404,7 @@ CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
 
   // Partition dimension (peer-level with QoS).
   return CheckPartitionSubmitLimitsForEntity_(
-      stat, partition_id, partition_limit, req_res, time_limit, is_user);
+      stat, partition_id, partition_limit, req_res, time_limit, qos, is_user);
 }
 
 std::expected<void, std::string>
@@ -459,8 +458,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
   // max_jobs: only enforced when QoS does not already cap running jobs.
   const uint32_t qos_max_jobs =
       is_user ? qos.max_jobs_per_user : qos.max_jobs_per_account;
-  if (qos.max_jobs == std::numeric_limits<uint32_t>::max() &&
-      qos_max_jobs == std::numeric_limits<uint32_t>::max()) {
+  if (qos.max_jobs == std::numeric_limits<uint32_t>::max()) {
     if (val.jobs_count + 1 > partition_limit->max_jobs) {
       return std::unexpected(is_user ? "UserPartitionJobsLimit"
                                      : "AccPartitionJobsLimit");
@@ -478,7 +476,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
 
   const ResourceView& qos_max_tres =
       is_user ? qos.max_tres_per_user : qos.max_tres_per_account;
-  if (IsUnlimitedTres_(qos.max_tres) && IsUnlimitedTres_(qos_max_tres)) {
+  if (IsUnlimitedTres_(qos.max_tres)) {
     ResourceView resource_use{allocated_res};
     resource_use += val.resource;
     auto tres_result =
@@ -529,6 +527,19 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
     if (part_it != acct_it->second.partition_to_limit_map.end())
       user_part_limit = &part_it->second;
 
+    if (user_part_limit) {  // first check partition limits
+      if (!CheckTres_(job.req_total_res_view, user_part_limit->max_tres_per_job))
+        return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+      if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
+        if (job.time_limit > user_part_limit->max_wall_duration_per_job)
+          return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+      }
+      if (qos.max_submit_jobs_per_user != std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
+        if (user_part_limit->max_submit_jobs == 0)
+          return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
+      }
+    }
+
     m_user_meta_map_.if_contains(
         job.Username(),
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
@@ -553,6 +564,19 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
         acct_it->second->partition_to_limit_map.find(job.partition_id);
     if (part_it != acct_it->second->partition_to_limit_map.end())
       acct_part_limit = &part_it->second;
+
+    if (acct_part_limit) {  // first check partition limits
+      if (!CheckTres_(job.req_total_res_view, acct_part_limit->max_tres_per_job))
+        return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+      if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
+        if (job.time_limit > acct_part_limit->max_wall_duration_per_job)
+          return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+      }
+      if (qos.max_submit_jobs_per_account != std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max()) {
+        if (acct_part_limit->max_submit_jobs == 0)
+          return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+      }
+    }
 
     m_account_meta_map_.if_contains(
         account_name,
