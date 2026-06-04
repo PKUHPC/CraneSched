@@ -15,6 +15,8 @@
 #  include "opentelemetry/sdk/trace/span_data.h"
 #  include "protos/Plugin.pb.h"
 
+#  include <chrono>
+
 namespace crane {
 
 class CraneSpanExporter : public opentelemetry::sdk::trace::SpanExporter {
@@ -29,8 +31,8 @@ class CraneSpanExporter : public opentelemetry::sdk::trace::SpanExporter {
           std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
           spans) noexcept override;
 
-  bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
-  bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
+  bool Shutdown(std::chrono::microseconds timeout) noexcept override;
+  bool ForceFlush(std::chrono::microseconds timeout) noexcept override;
 
  private:
   plugin::PluginClient& client_;

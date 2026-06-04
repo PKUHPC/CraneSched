@@ -25,9 +25,11 @@
 #include <grpcpp/support/channel_arguments.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <iterator>
+#include <list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -56,6 +58,35 @@ void PluginClient::InitChannelAndStub(const std::string& endpoint) {
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CranePluginD::NewStub(m_channel_);
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
+}
+
+bool PluginClient::DrainTraceHooks(std::chrono::microseconds timeout) noexcept {
+  auto target = m_trace_hooks_enqueued_.load(std::memory_order_acquire);
+  if (m_trace_hooks_completed_.load(std::memory_order_acquire) >= target)
+    return true;
+
+  std::unique_lock lock(m_trace_drain_mutex_);
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  return m_trace_drain_cv_.wait_until(lock, deadline, [&] {
+    return m_trace_hooks_completed_.load(std::memory_order_acquire) >= target;
+  });
+}
+
+void PluginClient::MarkTraceHookCompleted_(const HookEvent& event) {
+  if (event.type != HookType::TRACE) return;
+  MarkTraceHooksCompleted_(1);
+}
+
+void PluginClient::MarkTraceHooksCompleted_(size_t count) {
+  if (count == 0) return;
+  m_trace_hooks_completed_.fetch_add(count, std::memory_order_release);
+  m_trace_drain_cv_.notify_all();
+}
+
+size_t PluginClient::CountTraceHookEvents_(const std::list<HookEvent>& events) {
+  return std::count_if(events.begin(), events.end(), [](const HookEvent& event) {
+    return event.type == HookType::TRACE;
+  });
 }
 
 void PluginClient::AsyncSendThread_() {
@@ -116,7 +147,10 @@ void PluginClient::AsyncSendThread_() {
 
         if (status.error_code() == grpc::UNAVAILABLE) {
           // During shutdown, drop unsent events instead of retrying
-          if (stopping) break;
+          if (stopping) {
+            MarkTraceHooksCompleted_(CountTraceHookEvents_(events));
+            break;
+          }
           if (!events.empty()) {
             m_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
                                         events.size());
@@ -127,6 +161,7 @@ void PluginClient::AsyncSendThread_() {
         CRANE_TRACE("[Plugin] Hook event sent: hook type: {}", int(e.type));
       }
 
+      MarkTraceHookCompleted_(e);
       events.pop_front();
     }
   }
@@ -386,6 +421,7 @@ void PluginClient::TraceHookAsync(
 
   HookEvent e{HookType::TRACE,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  m_trace_hooks_enqueued_.fetch_add(1, std::memory_order_release);
+  if (!m_event_queue_.enqueue(std::move(e))) MarkTraceHooksCompleted_(1);
 }
 }  // namespace plugin

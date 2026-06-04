@@ -40,6 +40,14 @@ opentelemetry::sdk::common::ExportResult CraneSpanExporter::Export(
   return opentelemetry::sdk::common::ExportResult::kSuccess;
 }
 
+bool CraneSpanExporter::Shutdown(std::chrono::microseconds timeout) noexcept {
+  return ForceFlush(timeout);
+}
+
+bool CraneSpanExporter::ForceFlush(std::chrono::microseconds timeout) noexcept {
+  return client_.DrainTraceHooks(timeout);
+}
+
 // ---- helpers ----
 
 std::string CraneSpanExporter::HexFromTraceId(

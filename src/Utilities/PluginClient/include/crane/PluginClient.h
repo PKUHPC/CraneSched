@@ -25,7 +25,12 @@
 #include <grpcpp/support/status.h>
 
 #include <array>
+#include <atomic>
+#include <condition_variable>
+#include <chrono>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -67,6 +72,7 @@ class PluginClient {
   };
 
   void InitChannelAndStub(const std::string& endpoint);
+  bool DrainTraceHooks(std::chrono::microseconds timeout) noexcept;
 
   // These functions are used to add HookEvent into the event queue.
   // Launched by Ctld
@@ -118,6 +124,9 @@ class PluginClient {
                               google::protobuf::Message* msg);
 
   void AsyncSendThread_();
+  void MarkTraceHookCompleted_(const HookEvent& event);
+  void MarkTraceHooksCompleted_(size_t count);
+  static size_t CountTraceHookEvents_(const std::list<HookEvent>& events);
 
   std::shared_ptr<Channel> m_channel_;
   std::unique_ptr<CranePluginD::Stub> m_stub_;
@@ -126,6 +135,10 @@ class PluginClient {
   std::atomic<bool> m_thread_stop_{false};
 
   ConcurrentQueue<HookEvent> m_event_queue_;
+  std::atomic<uint64_t> m_trace_hooks_enqueued_{0};
+  std::atomic<uint64_t> m_trace_hooks_completed_{0};
+  std::mutex m_trace_drain_mutex_;
+  std::condition_variable m_trace_drain_cv_;
 
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.

@@ -24,8 +24,7 @@
 #  include "crane/Tracing.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
-#  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
-#  include "opentelemetry/sdk/trace/batch_span_processor_options.h"
+#  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
 #endif
 
@@ -62,13 +61,8 @@ bool TracerManager::Initialize(
   std::shared_ptr<trace_sdk::TracerProvider> provider;
 
   if (extra_exporter) {
-    trace_sdk::BatchSpanProcessorOptions batch_opts;
-    batch_opts.max_queue_size = 65536;
-    batch_opts.schedule_delay_millis = std::chrono::milliseconds(100);
-    batch_opts.max_export_batch_size = 2048;
-
-    auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
-        std::move(extra_exporter), batch_opts);
+    auto processor =
+        trace_sdk::SimpleSpanProcessorFactory::Create(std::move(extra_exporter));
     provider = std::make_shared<trace_sdk::TracerProvider>(std::move(processor),
                                                            resource_ptr);
   } else {
