@@ -685,6 +685,15 @@ message StepInfo {
   google.protobuf.Timestamp deadline_time = 41;
 }
 
+// Physical CPU topology of a node or job topology constraint.
+message NodeTopoInfo {
+  uint32 boards = 1;
+  uint32 sockets = 2;
+  uint32 cores_per_socket = 3;
+  uint32 threads_per_core = 4;
+  uint32 total_cpus = 5;
+}
+
 message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;
@@ -724,6 +733,9 @@ message CranedInfo {
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
+
+  // Physical CPU topology of this node.
+  NodeTopoInfo node_topo_info = 17;
 }
 
 message ReservationInfo {
@@ -1066,6 +1078,7 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+  NodeTopoInfo node_topo_info = 10;
 }
 
 enum TxnAction {

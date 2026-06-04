@@ -197,6 +197,7 @@ struct Config {
   std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
       Ipv6ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<ResourceInNodeV3>> CranedRes;
+  NodeTopoInfo node_topo_info;
   std::unordered_map<std::string, Partition> Partitions;
 
   struct JobLifecycleHookConfig {
