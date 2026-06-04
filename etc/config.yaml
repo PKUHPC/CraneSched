@@ -248,6 +248,8 @@ Container:
   RuntimeEndpoint: /run/containerd/containerd.sock
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   ImageEndpoint: /run/containerd/containerd.sock
+  # Toggle whether to enable user namespace by default when submitting containers
+  UserNsEnabledByDefault: true
   # DNS configuration for containers
   Dns:
     ClusterDomain: "cluster.local"
