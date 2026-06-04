@@ -1913,9 +1913,13 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
 
   auto job_status = EffectiveDisplayStatus();
   job_info->set_status(job_status);
-  if (job_status == crane::grpc::Pending) {
+  bool show_pending_reason =
+      job_status == crane::grpc::Pending ||
+      (IsArrayParent() && job_status == crane::grpc::Running &&
+       !pending_reason.empty());
+  if (show_pending_reason) {
     job_info->set_pending_reason(pending_reason);
-  } else {
+  } else if (job_status != crane::grpc::Pending) {
     job_info->set_craned_list(allocated_craneds_regex);
   }
   job_info->set_exclusive(job_to_ctld.exclusive());

@@ -1298,6 +1298,7 @@ void JobScheduler::ScheduleThread_() {
             job->pending_reason = decision.pending_reason;
             continue;
           }
+          job->pending_reason.clear();
           auto pd = std::make_unique<PdJobInScheduler>(job.get());
           pd->materializes_array_child = true;
           pending_jobs.emplace_back(std::move(pd));
@@ -1396,7 +1397,10 @@ void JobScheduler::ScheduleThread_() {
         }
         auto& job = it->second;
         job->SetCachedPriority(job_in_scheduler->priority);
-        job->SetStartTime(job_in_scheduler->start_time);
+        if (!job_in_scheduler->materializes_array_child ||
+            !job->IsArrayParentStarted()) {
+          job->SetStartTime(job_in_scheduler->start_time);
+        }
         if (!job_in_scheduler->reason.empty()) {
           job->pending_reason = job_in_scheduler->reason;
           continue;

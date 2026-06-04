@@ -160,9 +160,9 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->using_default_wckey = parent_job_->using_default_wckey;
   child->wckey = parent_job_->wckey;
   child->SetSubmitTime(parent_job_->SubmitTime());
-  child->deadline_time = parent_job_->deadline_time;
+  child->deadline_time = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   child->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
-      ToUnixSeconds(parent_job_->deadline_time));
+      ToUnixSeconds(child->deadline_time));
   return child;
 }
 
