@@ -26,8 +26,11 @@
 #include <expected>
 #include <filesystem>
 #include <future>
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include "crane/Logger.h"
 
@@ -123,6 +126,9 @@ void SetCloseOnExecFromFd(int fd_begin);
 bool SetMaxFileDescriptorNumber(uint64_t num);
 
 bool GetSystemReleaseInfo(SystemRelInfo* info);
+
+std::optional<std::pair<uint32_t, uint32_t>> ParseKernelReleaseMajorMinor(
+    std::string_view release);
 
 bool CheckProxyEnvironmentVariable();
 
