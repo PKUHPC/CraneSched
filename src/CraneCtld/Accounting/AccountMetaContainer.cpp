@@ -534,11 +534,11 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       if (!CheckTres_(job.req_total_res_view,
                       user_part_limit->max_tres_per_job))
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
-      if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
+      if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > user_part_limit->max_wall_duration_per_job)
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
       }
-      if (qos.max_submit_jobs_per_user !=
+      if (qos.max_submit_jobs_per_user ==
           std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
         if (user_part_limit->max_submit_jobs == 0)
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
@@ -574,11 +574,11 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       if (!CheckTres_(job.req_total_res_view,
                       acct_part_limit->max_tres_per_job))
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
-      if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
+      if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > acct_part_limit->max_wall_duration_per_job)
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
       }
-      if (qos.max_submit_jobs_per_account !=
+      if (qos.max_submit_jobs_per_account ==
           std::numeric_limits<
               decltype(qos.max_submit_jobs_per_account)>::max()) {
         if (acct_part_limit->max_submit_jobs == 0)

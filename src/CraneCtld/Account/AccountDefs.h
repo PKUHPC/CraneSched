@@ -169,7 +169,7 @@ struct PartitionResourceLimit {
   uint32_t max_submit_jobs{
       std::numeric_limits<uint32_t>::max()}; /* max submit jobs; UINT32_MAX =
                                                 unlimited */
-  absl::Duration max_wall; /* max total wall time; ZeroDuration = unlimited */
+  absl::Duration max_wall{absl::ZeroDuration()}; /* max total wall time; ZeroDuration = unlimited */
   absl::Duration max_wall_duration_per_job; /* max wall time per job */
 };
 
