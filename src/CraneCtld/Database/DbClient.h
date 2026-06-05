@@ -120,6 +120,14 @@ class MongodbClient {
     RESOURCE = 4,
   };
 
+  struct ArrayTaskAggregateInfo {
+    uint32_t max_exit_code{0};
+    bool any_cancelled{false};
+    bool any_exceed_time_limit{false};
+    bool any_out_of_memory{false};
+    bool any_failed{false};
+  };
+
   MongodbClient();  // Mongodb-c++ don't need to close the connection
   ~MongodbClient();
   bool Init();
@@ -154,6 +162,9 @@ class MongodbClient {
   std::unordered_map<
       job_id_t, std::tuple<crane::grpc::JobStatus, uint32_t, int64_t, int64_t>>
   FetchJobStatus(const std::unordered_set<job_id_t>& job_ids);
+
+  std::optional<ArrayTaskAggregateInfo> FetchArrayTaskAggregateInfo(
+      job_id_t array_job_id);
 
   /* ----- Method of operating the step table ----------- */
   bool InsertRecoveredStep(
@@ -602,6 +613,9 @@ class MongodbClient {
     }
   }
 
+  std::optional<crane::grpc::ArraySpec> ViewToArraySpec_(
+      const bsoncxx::document::view& view);
+
   bool ViewValueOr_(const bsoncxx::document::element& view_value,
                     const bool& default_value) {
     if (!view_value) {
@@ -644,6 +658,9 @@ class MongodbClient {
   document JobInCtldToDocument_(JobInCtld* job);
   document JobInEmbeddedDbToDocument_(
       crane::grpc::JobInEmbeddedDb const& job_in_db);
+
+  void AppendJobIdSelectorClause_(
+      const crane::grpc::QueryJobsInfoRequest* request, document& filter);
 
   document StepInCtldToDocument_(StepInCtld* step);
   document StepInEmbeddedDbToDocument_(

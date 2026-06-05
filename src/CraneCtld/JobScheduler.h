@@ -22,6 +22,7 @@
 // Precompiled header comes first!
 
 #include "Account/AccountDefs.h"
+#include "Array.h"
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
@@ -135,6 +136,11 @@ struct PdJobInScheduler {
   std::list<std::string> account_chain;
 
   bool is_scheduled() const { return reason.empty(); }
+
+  // True iff this candidate represents an array parent template. On successful
+  // allocation the scheduler asks ArrayManager to materialize a child
+  // inheriting this allocation, rather than running the parent itself.
+  bool materializes_array_child{false};
 
   PdJobInScheduler(JobInCtld* job)
       : job_id(job->JobId()),
@@ -1039,7 +1045,11 @@ class JobScheduler {
 
   void JobModifyLuaCheck(const crane::grpc::ModifyJobRequest& request,
                          crane::grpc::ModifyJobReply* response,
-                         std::list<job_id_t>* job_ids);
+                         std::vector<job_id_t>* job_ids);
+
+  void CollectJobIdsForModify(const crane::grpc::ModifyJobRequest& request,
+                              crane::grpc::ModifyJobReply* response,
+                              std::vector<job_id_t>* job_ids);
 
   CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
@@ -1224,6 +1234,13 @@ class JobScheduler {
 
   static void ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
 
+  // Move the parent unique_ptr out of m_pending_job_map_ into each
+  // bundle.parent_job. Must be called with m_pending_job_map_mtx_ held.
+  // Caller guarantees every bundle.array_job_id is present in the pending map.
+  void SpliceFinalArrayParentsFromPendingMapNoLock_(
+      std::vector<ArrayManager::FinalizedArrayParent>& parents)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
+
   static void CallPluginHookForFinalJobs_(
       std::unordered_set<JobInCtld*> const& jobs);
 
@@ -1233,6 +1250,9 @@ class JobScheduler {
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
                                   crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
+  void CancelRunningJobNoLock_(JobInCtld* job,
+                               crane::grpc::TerminateSource terminate_source =
+                                   crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
@@ -1254,6 +1274,12 @@ class JobScheduler {
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
   Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
+
+  // Owns all array metas and drives child materialization/lifecycle.
+  // Uses references to the above pending/running maps and must be
+  // constructed after them. Accesses require m_pending_job_map_mtx_
+  // (and for some entry points m_running_job_map_mtx_).
+  std::unique_ptr<ArrayManager> m_array_manager_;
 
   // Job Indexes
   HashMap<CranedId, HashSet<uint32_t /* Job ID*/>> m_node_to_jobs_map_
@@ -1335,7 +1361,7 @@ class JobScheduler {
   struct CancelPendingJobQueueElem {
     std::unique_ptr<JobInCtld> job;
     std::string reason;
-    crane::grpc::JobStatus finish_status;
+    crane::grpc::JobStatus finish_status{crane::grpc::JobStatus::Cancelled};
   };
 
   struct CancelPendingStepQueueElem {
@@ -1356,9 +1382,17 @@ class JobScheduler {
         crane::grpc::TERMINATE_SOURCE_USER_CANCEL};
   };
 
+  struct CancelArrayParentQueueElem {
+    job_id_t parent_job_id;
+    uint32_t exit_code;
+    crane::grpc::JobStatus finish_status;
+    bool terminate_running_children;
+  };
+
   using CancelJobQueueElem =
       std::variant<CancelPendingJobQueueElem, CancelPendingStepQueueElem,
-                   CancelRunningJobQueueElem, CancelRunningJobByIdElem>;
+                   CancelRunningJobQueueElem, CancelRunningJobByIdElem,
+                   CancelArrayParentQueueElem>;
 
   std::shared_ptr<uvw::async_handle> m_cancel_job_async_handle_;
   ConcurrentQueue<CancelJobQueueElem> m_cancel_job_queue_;
@@ -1440,12 +1474,19 @@ class JobScheduler {
   std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
   ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_del_async_handle_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_del_queue_;
+
   TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
 
   void CancelDeadlineJobCb_();
 
   void CreateDeadlineTimerCb_();
 
+  void DelDeadlineTimerCb_();
+
+  // Must only be invoked on the uvw_deadline_loop thread. Other threads should
+  // enqueue into m_job_deadline_timer_del_queue_ and send the async handle.
   void DelDeadlineTimer_(job_id_t job_id);
 
   PmixPortsMetaMap m_pmix_ports_meta_;

@@ -23,8 +23,8 @@ Create `param_sweep.sh`:
 learning_rates=(0.001 0.005 0.01 0.05 0.1 0.5 1.0 2.0 5.0 10.0)
 
 # Get parameter for this task
-# Note: Job array implementation may vary
-param_index=$(( ($CRANE_JOB_ID % 10) ))
+# The array task index is exported explicitly.
+param_index=${CRANE_ARRAY_TASK_ID}
 learning_rate=${learning_rates[$param_index]}
 
 echo "Testing with learning_rate=$learning_rate"
