@@ -206,10 +206,9 @@ class AccountMetaContainer final {
 
   // Schedule-time aggregated check across all entities.
   // Replaces the old CheckMetaResource_.
-  std::expected<void, std::string> CheckRunLimits_(const PdJobInScheduler& job,
-                                                   const User& user,
-                                                   const AccountRawMap& account_map,
-                                                   const Qos& qos);
+  std::expected<void, std::string> CheckRunLimits_(
+      const PdJobInScheduler& job, const User& user,
+      const AccountRawMap& account_map, const Qos& qos);
 
   // Atomically increments both QoS and partition counters for user, every
   // account in the chain, and the global QoS map.

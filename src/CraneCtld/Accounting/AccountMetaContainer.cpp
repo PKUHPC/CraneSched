@@ -371,14 +371,15 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, const ResourceView& req_res,
     absl::Duration time_limit, const Qos& qos, bool is_user) const {
-      
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
   if (is_user) {
-    if (qos.max_submit_jobs_per_user != std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max())
+    if (qos.max_submit_jobs_per_user !=
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max())
       return CraneErrCode::SUCCESS;
   } else {
-    if (qos.max_submit_jobs_per_account != std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max())
+    if (qos.max_submit_jobs_per_account !=
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max())
       return CraneErrCode::SUCCESS;
   }
 
@@ -518,23 +519,27 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
     const PartitionResourceLimit* user_part_limit = nullptr;
     auto acct_it = user.account_to_attrs_map.find(job.account);
     if (acct_it == user.account_to_attrs_map.end()) {
-      CRANE_ERROR("Account '{}' is not in user '{}' account list during "
-                  "submit check.",
-                  job.account, job.Username());
+      CRANE_ERROR(
+          "Account '{}' is not in user '{}' account list during "
+          "submit check.",
+          job.account, job.Username());
       return CraneErrCode::ERR_USER_ACCOUNT_MISMATCH;
     }
-    auto part_it = acct_it->second.partition_to_limit_map.find(job.partition_id);
+    auto part_it =
+        acct_it->second.partition_to_limit_map.find(job.partition_id);
     if (part_it != acct_it->second.partition_to_limit_map.end())
       user_part_limit = &part_it->second;
 
     if (user_part_limit) {  // first check partition limits
-      if (!CheckTres_(job.req_total_res_view, user_part_limit->max_tres_per_job))
+      if (!CheckTres_(job.req_total_res_view,
+                      user_part_limit->max_tres_per_job))
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
       if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > user_part_limit->max_wall_duration_per_job)
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
       }
-      if (qos.max_submit_jobs_per_user != std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
+      if (qos.max_submit_jobs_per_user !=
+          std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
         if (user_part_limit->max_submit_jobs == 0)
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
       }
@@ -566,13 +571,16 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       acct_part_limit = &part_it->second;
 
     if (acct_part_limit) {  // first check partition limits
-      if (!CheckTres_(job.req_total_res_view, acct_part_limit->max_tres_per_job))
+      if (!CheckTres_(job.req_total_res_view,
+                      acct_part_limit->max_tres_per_job))
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
       if (qos.max_time_limit_per_job != absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > acct_part_limit->max_wall_duration_per_job)
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
       }
-      if (qos.max_submit_jobs_per_account != std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max()) {
+      if (qos.max_submit_jobs_per_account !=
+          std::numeric_limits<
+              decltype(qos.max_submit_jobs_per_account)>::max()) {
         if (acct_part_limit->max_submit_jobs == 0)
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
       }
@@ -655,7 +663,8 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
           job.job_id, job.account, job.username);
       return std::unexpected("UserAccountMismatch");
     }
-    auto part_it = acct_it->second.partition_to_limit_map.find(job.partition_id);
+    auto part_it =
+        acct_it->second.partition_to_limit_map.find(job.partition_id);
     if (part_it != acct_it->second.partition_to_limit_map.end())
       user_part_limit = &part_it->second;
 

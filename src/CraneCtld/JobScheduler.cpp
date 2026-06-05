@@ -3330,8 +3330,8 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
         return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
       }
 
-      auto res =
-          g_account_meta_container->TryMallocMetaSubmitResource(
+      auto res = g_account_meta_container->TryMallocMetaSubmitResource(
+          
           *job, *user_ptr, reserve_count);
       if (res != CraneErrCode::SUCCESS) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
