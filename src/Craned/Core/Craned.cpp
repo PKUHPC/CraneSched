@@ -314,6 +314,9 @@ void ParseContainerConfig(const YAML::Node& container_config) {
       YamlValueOr<bool>(container_config["Enabled"], false);
   if (!g_config.Container.Enabled) return;
 
+  g_config.Container.UserNsEnabledByDefault =
+      YamlValueOr<bool>(container_config["UserNsEnabledByDefault"], true);
+
   g_config.Container.TempDir =
       g_config.CraneBaseDir /
       YamlValueOr(container_config["TempDir"], kDefaultContainerTempDir);
@@ -580,6 +583,7 @@ void ParseConfig(int argc, char** argv) {
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
+  std::unordered_map<std::string, NodeTopoInfo> node_topologies;
   if (std::filesystem::exists(config_path)) {
     try {
       using util::YamlValueOr;
@@ -800,6 +804,24 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          NodeTopoInfo node_topo;
+          if (node["sockets"]) {
+            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
+            uint32_t cpu_count =
+                static_cast<uint32_t>(node_res->GetCpuSet().core_ids.size());
+            if (sockets_val == 0) {
+              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
+                          node["name"].Scalar());
+              sockets_val = 1;
+            } else if (sockets_val > cpu_count) {
+              CRANE_WARN(
+                  "Sockets {} > cpu count {} for node '{}'. Resetting to 1.",
+                  sockets_val, cpu_count, node["name"].Scalar());
+              sockets_val = 1;
+            }
+            node_topo.sockets = sockets_val;
+          }
+
           std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
             std::set<std::pair<std::string, std::string>> seen_gres_types;
@@ -1006,6 +1028,7 @@ void ParseConfig(int argc, char** argv) {
               ABSL_UNREACHABLE();
             }
             g_config.CranedRes[name] = node_res;
+            node_topologies[name] = node_topo;
           }
         }
       }
@@ -1179,6 +1202,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
+  g_config.node_topo_info = node_topologies.at(g_config.Hostname);
   // get this node device info
   // Todo: Auto detect device
   {
@@ -1283,6 +1307,23 @@ void ParseConfig(int argc, char** argv) {
   auto& meta = g_config.CranedMeta;
   if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {
     CRANE_ERROR("Error when get system release info");
+  } else if (g_config.Container.Enabled &&
+             g_config.Container.UserNsEnabledByDefault) {
+    auto kernel_version =
+        util::os::ParseKernelReleaseMajorMinor(meta.SysInfo.release);
+    if (kernel_version.has_value()) {
+      const auto [major, minor] = kernel_version.value();
+      if (major < kUserNsMinKernelMajor ||
+          (major == kUserNsMinKernelMajor && minor < kUserNsMinKernelMinor)) {
+        CRANE_ERROR(
+            "Container.UserNsEnabledByDefault is true, but current kernel "
+            "version '{}' is lower than {}.{}. UserNS may be unavailable and "
+            "Rootless container startup may fail. Administrators should "
+            "upgrade the kernel or set Container.UserNsEnabledByDefault to "
+            "false before running container workloads.",
+            meta.SysInfo.release, kUserNsMinKernelMajor, kUserNsMinKernelMinor);
+      }
+    }
   }
 
   g_config.CranedMeta.CranedStartTime = absl::Now();

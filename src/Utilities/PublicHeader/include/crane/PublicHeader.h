@@ -129,6 +129,9 @@ inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
+constexpr uint32_t kUserNsMinKernelMajor = 5;
+constexpr uint32_t kUserNsMinKernelMinor = 12;
+
 inline const char* const kResourceTypeGpu = "gpu";
 
 constexpr uint64_t kJobMinTimeLimitSec = 11;
@@ -555,6 +558,15 @@ struct CpuSet {
 
   // True if this is an integer-core allocation (core_ids non-empty)
   bool IsInteger() const;
+};
+
+/// @brief Physical CPU topology of a node, shared between CraneCtld and Craned.
+struct NodeTopoInfo {
+  uint32_t boards{1};
+  uint32_t sockets{1};
+  uint32_t cores_per_socket{1};
+  uint32_t threads_per_core{1};
+  uint32_t total_cpus{0};
 };
 
 // ResourceInNodeV3: Execution phase resource tracking for a single node
