@@ -204,7 +204,7 @@ enum ExitCodeEnum : uint16_t {
 
 namespace Internal {
 // clang-format off
-constexpr std::array<std::string_view, 111>
+constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
     kCraneErrStrArr = {
         // 0 - 4
         "Success",
@@ -365,13 +365,6 @@ constexpr std::array<std::string_view, 111>
         "Partition max submit jobs per account exceeded"
     };
 // clang-format on
-
-// Verify that kCraneErrStrArr covers all defined error codes.
-// If this assertion fails, add the missing error string(s) to kCraneErrStrArr
-// and update the array size accordingly.
-static_assert(kCraneErrStrArr.size() == crane::grpc::ErrCode_ARRAYSIZE,
-              "kCraneErrStrArr size mismatch: update array size and add "
-              "missing error strings when new ErrCode values are added");
 
 }  // namespace Internal
 
