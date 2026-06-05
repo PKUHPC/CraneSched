@@ -171,9 +171,11 @@ class AccountMetaContainer final {
   static bool IsUnlimitedTres_(const ResourceView& res);
 
   // Submit-time QoS dimension check for a single entity.
-  CraneErrCode CheckQosSubmitLimitsForEntity_(
-      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
-      bool is_user, const ResourceView& req_res, uint32_t count) const;
+  CraneErrCode CheckQosSubmitLimitsForEntity_(const MetaResourceStat& stat,
+                                              const std::string& qos_name,
+                                              const Qos& qos, bool is_user,
+                                              const ResourceView& req_res,
+                                              uint32_t count) const;
 
   // Submit-time Partition dimension check for a single entity.
   // Returns SUCCESS when partition_limit is nullptr (no limit configured).
