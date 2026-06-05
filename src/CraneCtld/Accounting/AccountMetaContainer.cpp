@@ -310,8 +310,8 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
     return std::unexpected(prefix + "MemResourceLimit");
   }
 
-  if (!(resource_req <= resource_total))
-    return std::unexpected(prefix + "GresResourceLimit");
+  if (!CheckGres_(resource_req.GetGresMap(), resource_total.GetGresMap()))
+    return std::unexpected("QosGresResourceLimit");
 
   return {};
 }
