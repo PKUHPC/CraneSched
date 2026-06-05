@@ -73,10 +73,13 @@ std::string MetaResource::DebugString() const {
  */
 
 CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
-    JobInCtld& job, const User& user) {
+    JobInCtld& job, const User& user, uint32_t count) {
   CRANE_TRACE(
-      "TryMallocMetaSubmitResource for job of user {} and account {}.....",
-      job.Username(), job.account);
+      "TryMallocMetaSubmitResource for job of user {} and account {}, "
+      "count={}.",
+      job.Username(), job.account, count);
+
+  if (count == 0) return CraneErrCode::SUCCESS;
 
   auto account_map = g_account_manager->GetAllAccountInfo();
   if (!account_map) {
@@ -124,20 +127,25 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  CraneErrCode result = CheckSubmitLimits_(job, user, *account_map, *qos);
+  CraneErrCode result =
+      CheckSubmitLimits_(job, user, *account_map, *qos, count);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  MallocMetaSubmitResource(job);
+  MallocMetaSubmitResource(job, count);
   return CraneErrCode::SUCCESS;
 }
 
-void AccountMetaContainer::MallocMetaSubmitResource(const JobInCtld& job) {
-  CRANE_DEBUG("Malloc meta submit resource for job of user {} and account {}.",
-              job.Username(), job.account);
+void AccountMetaContainer::MallocMetaSubmitResource(const JobInCtld& job,
+                                                    uint32_t count) {
+  if (count == 0) return;
+  CRANE_DEBUG(
+      "Malloc meta submit resource for job of user {} and account {}, "
+      "count={}.",
+      job.Username(), job.account, count);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = count,
                              .wall_time = absl::ZeroDuration()};
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                     job.partition_id, meta_resource);
@@ -161,7 +169,7 @@ void AccountMetaContainer::MallocMetaResourceToRecoveredRunningJob(
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = submit_jobs_count,
                              .wall_time = job.time_limit};
 
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -214,13 +222,17 @@ AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
   return {};
 }
 
-void AccountMetaContainer::FreeMetaSubmitResource(const JobInCtld& job) {
-  CRANE_DEBUG("Free meta submit resource for job {} of user {} and account {}.",
-              job.JobId(), job.Username(), job.account);
+void AccountMetaContainer::FreeMetaSubmitResource(const JobInCtld& job,
+                                                  uint32_t count) {
+  if (count == 0) return;
+  CRANE_DEBUG(
+      "Free meta submit resource for job {} of user {} and account {}, "
+      "count={}.",
+      job.JobId(), job.Username(), job.account, count);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = count,
                              .wall_time = absl::ZeroDuration()};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -233,14 +245,29 @@ void AccountMetaContainer::FreeMetaResource(const JobInCtld& job) {
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = job.IsArrayChild() ? 0u : 1u,
                              .wall_time = job.time_limit};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   job.partition_id, meta_resource);
 }
 
-void AccountMetaContainer::UserAddJob(const std::string& username) {
+void AccountMetaContainer::FreeMetaResource(const PdJobInScheduler& job) {
+  CRANE_DEBUG("Free meta resource for job {} of user {} and account {}.",
+              job.job_id, job.username, job.account);
+
+  MetaResource meta_resource{.resource = job.allocated_res.View(),
+                             .jobs_count = 1,
+                             .submit_jobs_count = 0,
+                             .wall_time = job.time_limit};
+
+  DoFreeResource_(job.job_id, job.username, job.account_chain, job.qos,
+                  job.partition_id, meta_resource);
+}
+
+void AccountMetaContainer::UserAddJob(const std::string& username,
+                                      uint32_t count) {
+  if (count == 0) return;
   m_user_to_job_map_.try_emplace_l(
       username,
       [&](std::pair<const std::string, uint32_t>& pair) {
@@ -330,14 +357,15 @@ bool AccountMetaContainer::IsUnlimitedTres_(const ResourceView& res) {
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
-    bool is_user, const ResourceView& req_res) const {
+    bool is_user, const ResourceView& req_res, uint32_t count) const {
   auto it = stat.qos_to_resource_map.find(qos_name);
-  if (it == stat.qos_to_resource_map.end()) return CraneErrCode::SUCCESS;
-  const MetaResource& val = it->second;
+  const MetaResource empty{};
+  const MetaResource& val = it == stat.qos_to_resource_map.end() ? empty
+                                                                 : it->second;
 
   const uint32_t max_submit =
       is_user ? qos.max_submit_jobs_per_user : qos.max_submit_jobs_per_account;
-  if (val.submit_jobs_count + 1 > max_submit) {
+  if (static_cast<uint64_t>(val.submit_jobs_count) + count > max_submit) {
     return is_user ? CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER
                    : CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
   }
@@ -369,8 +397,10 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
 
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& partition_id,
-    const PartitionResourceLimit* partition_limit, const ResourceView& req_res,
-    absl::Duration time_limit, const Qos& qos, bool is_user) const {
+    const PartitionResourceLimit* partition_limit,
+    const ResourceView& /*req_res*/, absl::Duration /*time_limit*/,
+    const Qos& qos, bool is_user,
+    uint32_t count) const {
   if (!partition_limit) return CraneErrCode::SUCCESS;
 
   if (is_user) {
@@ -385,9 +415,9 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
 
   auto pit = stat.partition_to_resource_map.find(partition_id);
   if (pit != stat.partition_to_resource_map.end()) {
-    if (pit->second.submit_jobs_count + 1 > partition_limit->max_submit_jobs)
-      return is_user ? CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER
-                     : CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+    if (pit->second.submit_jobs_count + count > partition_limit->max_submit_jobs)
+    return is_user ? CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER
+                   : CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
   }
 
   return CraneErrCode::SUCCESS;
@@ -397,15 +427,18 @@ CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
     const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
     const std::string& partition_id,
     const PartitionResourceLimit* partition_limit, bool is_user,
-    const ResourceView& req_res, absl::Duration time_limit) const {
+    const ResourceView& req_res, absl::Duration time_limit,
+    uint32_t count) const {
   // QoS dimension (peer-level with Partition).
   CraneErrCode result =
-      CheckQosSubmitLimitsForEntity_(stat, qos_name, qos, is_user, req_res);
+      CheckQosSubmitLimitsForEntity_(stat, qos_name, qos, is_user, req_res,
+                                     count);
   if (result != CraneErrCode::SUCCESS) return result;
 
   // Partition dimension (peer-level with QoS).
   return CheckPartitionSubmitLimitsForEntity_(
-      stat, partition_id, partition_limit, req_res, time_limit, qos, is_user);
+      stat, partition_id, partition_limit, req_res, time_limit, qos, is_user,
+      count);
 }
 
 std::expected<void, std::string>
@@ -459,7 +492,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
   // max_jobs: only enforced when QoS does not already cap running jobs.
   const uint32_t qos_max_jobs =
       is_user ? qos.max_jobs_per_user : qos.max_jobs_per_account;
-  if (qos.max_jobs == std::numeric_limits<uint32_t>::max()) {
+  if (qos_max_jobs == std::numeric_limits<uint32_t>::max()) {
     if (val.jobs_count + 1 > partition_limit->max_jobs) {
       return std::unexpected(is_user ? "UserPartitionJobsLimit"
                                      : "AccPartitionJobsLimit");
@@ -477,7 +510,7 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
 
   const ResourceView& qos_max_tres =
       is_user ? qos.max_tres_per_user : qos.max_tres_per_account;
-  if (IsUnlimitedTres_(qos.max_tres)) {
+  if (IsUnlimitedTres_(qos_max_tres)) {
     ResourceView resource_use{allocated_res};
     resource_use += val.resource;
     auto tres_result =
@@ -511,7 +544,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckEntityRunLimits_(
 
 CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
     const JobInCtld& job, const User& user, const AccountRawMap& account_map,
-    const Qos& qos) {
+    const Qos& qos, uint32_t count) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   // ---- User entity ----
@@ -550,7 +583,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
           result = CheckEntitySubmitLimits_(
               pair.second, job.qos, qos, job.partition_id, user_part_limit,
-              /*is_user=*/true, job.req_total_res_view, job.time_limit);
+              /*is_user=*/true, job.req_total_res_view, job.time_limit, count);
         });
     if (result != CraneErrCode::SUCCESS) return result;
   }
@@ -591,7 +624,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
           result = CheckEntitySubmitLimits_(
               pair.second, job.qos, qos, job.partition_id, acct_part_limit,
-              /*is_user=*/false, job.req_total_res_view, job.time_limit);
+              /*is_user=*/false, job.req_total_res_view, job.time_limit, count);
         });
     if (result != CraneErrCode::SUCCESS) return result;
   }
@@ -600,26 +633,26 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
   m_qos_meta_map_.if_contains(
       job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         const MetaResource& val = pair.second;
-        if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
+        if (val.submit_jobs_count + count > qos.max_submit_jobs) {
           result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
           return;
-        }
-        if (qos.flags[QosFlags::DenyOnLimit]) {
+  }
+  if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs) {
             result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
             return;
-          }
-          if (qos.max_wall > absl::ZeroDuration() &&
+    }
+    if (qos.max_wall > absl::ZeroDuration() &&
               val.wall_time + job.time_limit > qos.max_wall) {
             result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
             return;
-          }
-          ResourceView resource_use{job.req_total_res_view};
+    }
+    ResourceView resource_use{job.req_total_res_view};
           resource_use += val.resource;
-          if (!CheckTres_(resource_use, qos.max_tres)) {
+    if (!CheckTres_(resource_use, qos.max_tres)) {
             result = CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
-          }
-        }
+    }
+  }
       });
 
   return result;
@@ -874,4 +907,3 @@ void AccountMetaContainer::DoFreeResource_(
 }
 
 }  // namespace Ctld
-

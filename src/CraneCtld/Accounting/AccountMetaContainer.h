@@ -71,22 +71,25 @@ class AccountMetaContainer final {
    * Validate QoS and partition submit-slot limits and reserve resources.
    * IN/OUT: job - job to be submitted; qos_priority field is set on success
    * IN: user - locked user object for job.Username()
+   * IN: count - submit slots to reserve; array parents pass effective run limit
    * RET: CraneErrCode::SUCCESS on success, error code on limit exceeded
    *
    * NOTE: Caller must hold AccountManager user lock for user. This function
    *       acquires AccountManager account and QoS locks in that order, then
    *       acquires internal stripe locks.
    */
-  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job, const User& user);
+  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job, const User& user,
+                                           uint32_t count = 1);
 
   /*
    * Unconditionally reserve submit-slot resources without validation.
    * IN: job - job whose submit-slot resources should be reserved
+   * IN: count - submit slots to reserve
    * RET: none
    *
    * NOTE: Call only after TryMallocMetaSubmitResource succeeds.
    */
-  void MallocMetaSubmitResource(const JobInCtld& job);
+  void MallocMetaSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
   /*
    * Reserve running resources for a job recovered from the embedded DB.
@@ -108,9 +111,10 @@ class AccountMetaContainer final {
   /*
    * Release submit-slot resources when a pending job is cancelled or rejected.
    * IN: job - job whose submit-slot resources should be released
+   * IN: count - submit slots to release
    * RET: none
    */
-  void FreeMetaSubmitResource(const JobInCtld& job);
+  void FreeMetaSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
   /*
    * Release running-slot resources when a running job finishes.
@@ -118,6 +122,13 @@ class AccountMetaContainer final {
    * RET: none
    */
   void FreeMetaResource(const JobInCtld& job);
+
+  /*
+   * Roll back running-slot resources reserved for a scheduler candidate.
+   * IN: job - scheduler candidate whose running resource should be released
+   * RET: none
+   */
+  void FreeMetaResource(const PdJobInScheduler& job);
 
   /*
    * Remove all cached meta entries for a deleted user/account/qos object.
@@ -128,10 +139,10 @@ class AccountMetaContainer final {
   void DeleteAccountMeta(const std::string& account);
   void DeleteQosMeta(const std::string& qos);
 
-  /* Increment the running job counter for a user */
-  void UserAddJob(const std::string& username);
-  /* Decrement the running job counter for a user */
-  void UserReduceJob(const std::string& username);
+  /* Increment the running or submit-reserved job counter for a user */
+  void UserAddJob(const std::string& username, uint32_t count = 1);
+  /* Decrement the running or submit-reserved job counter for a user */
+  void UserReduceJob(const std::string& username, uint32_t count = 1);
   /*
    * Check whether a user has any jobs.
    * IN:  username - name of the user to check
@@ -162,7 +173,7 @@ class AccountMetaContainer final {
   // Submit-time QoS dimension check for a single entity.
   CraneErrCode CheckQosSubmitLimitsForEntity_(
       const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
-      bool is_user, const ResourceView& req_res) const;
+      bool is_user, const ResourceView& req_res, uint32_t count) const;
 
   // Submit-time Partition dimension check for a single entity.
   // Returns SUCCESS when partition_limit is nullptr (no limit configured).
@@ -170,14 +181,15 @@ class AccountMetaContainer final {
       const MetaResourceStat& stat, const std::string& partition_id,
       const PartitionResourceLimit* partition_limit,
       const ResourceView& req_res, absl::Duration time_limit, const Qos& qos,
-      bool is_user) const;
+      bool is_user, uint32_t count) const;
 
   // Submit-time combined check for a single entity (QoS + Partition).
   CraneErrCode CheckEntitySubmitLimits_(
       const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
       const std::string& partition_id,
       const PartitionResourceLimit* partition_limit, bool is_user,
-      const ResourceView& req_res, absl::Duration time_limit) const;
+      const ResourceView& req_res, absl::Duration time_limit,
+      uint32_t count) const;
 
   // Schedule-time QoS dimension check for a single entity.
   std::expected<void, std::string> CheckQosRunLimitsForEntity_(
@@ -202,7 +214,7 @@ class AccountMetaContainer final {
   // Replaces the old CheckMetaSubmitResourceUsage_.
   CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const User& user,
                                   const AccountRawMap& account_map,
-                                  const Qos& qos);
+                                  const Qos& qos, uint32_t count);
 
   // Schedule-time aggregated check across all entities.
   // Replaces the old CheckMetaResource_.
@@ -266,4 +278,3 @@ class AccountMetaContainer final {
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
-

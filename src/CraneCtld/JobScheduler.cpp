@@ -1461,7 +1461,7 @@ void JobScheduler::ScheduleThread_() {
         }
 
         if (auto result =
-                  g_account_meta_container->CheckAndMallocMetaResource(
+                g_account_meta_container->CheckAndMallocMetaResource(
                     *job_in_scheduler);
             !result) {
           if (!job_in_scheduler->actual_licenses.empty()) {
@@ -1480,7 +1480,7 @@ void JobScheduler::ScheduleThread_() {
             if (!job_in_scheduler->actual_licenses.empty()) {
               g_license_manager->FreeLicense(job_in_scheduler->actual_licenses);
             }
-            g_account_meta_container->FreeQosResource(*job_in_scheduler);
+            g_account_meta_container->FreeMetaResource(*job_in_scheduler);
             continue;
           }
           launch_job = child_holder.get();
@@ -3331,7 +3331,6 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
       }
 
       auto res = g_account_meta_container->TryMallocMetaSubmitResource(
-          
           *job, *user_ptr, reserve_count);
       if (res != CraneErrCode::SUCCESS) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
