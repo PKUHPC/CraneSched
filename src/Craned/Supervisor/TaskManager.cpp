@@ -2848,9 +2848,9 @@ std::future<CraneErrCode> TaskManager::ExecuteStepAsync() {
   std::future ok_future = ok_promise.get_future();
 
   auto elem = ExecuteStepElem{.ok_prom = std::move(ok_promise)};
-
   m_grpc_execute_step_queue_.enqueue(std::move(elem));
   m_grpc_execute_step_async_handle_->send();
+
   return ok_future;
 }
 
@@ -3643,13 +3643,13 @@ void TaskManager::EvGrpcExecuteStepCb_() {
           "Container step #{}.{} has {} tasks, but container steps only "
           "support exactly one task. Rejecting.",
           m_step_.job_id, m_step_.step_id, m_step_.task_ids.size());
-      for (auto task_id : m_step_.task_ids)
-        g_task_mgr->FinalizeTaskAsync(
-            task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
-            "Container steps only support exactly one task");
       elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;
     }
+
+    // Admission checks passed. Return to the ExecuteStep RPC caller before any
+    // potentially slow pwd/prepare/cgroup/container image pull/spawn work.
+    elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
     m_step_.GotNewStatus(StepStatus::Running);
 
@@ -3678,7 +3678,6 @@ void TaskManager::EvGrpcExecuteStepCb_() {
             task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
             fmt::format("Failed to look up password entry for uid {}",
                         m_step_.uid));
-      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
 
@@ -3693,7 +3692,6 @@ void TaskManager::EvGrpcExecuteStepCb_() {
               std::format("Failed to prepare step, code: {}",
                           static_cast<int>(err)));
         }
-        elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
         continue;
       }
     }
@@ -3741,7 +3739,6 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       // get short-circuited by the "no running task" fast path before the
       // interactive no-process finalization logic can run.
       m_exec_id_task_id_map_[0] = 0;
-      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
@@ -3756,7 +3753,6 @@ void TaskManager::EvGrpcExecuteStepCb_() {
                                       TaskFinalizeCause::STEP_CGROUP_FAILED,
                                       "Failed to allocate cgroup");
       }
-      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
     m_step_.step_user_cg = std::move(cg_expt.value());
@@ -3764,14 +3760,17 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    CraneErrCode err = CraneErrCode::SUCCESS;
+    // Per-task launch failures are reported by LaunchExecution_ itself via
+    // FinalizeTaskAsync(TASK_PREPARE_FAILED / TASK_SPAWN_FAILED), which
+    // routes through ResolveFinishedTask_ -> StepStatusChangeAsync.
+    // Surviving siblings keep running; the step terminal is emitted when
+    // the last survivor finishes.
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
       // TODO: Maybe we can launch tasks in parallel
       auto task_err = LaunchExecution_(task);
       if (task_err != CraneErrCode::SUCCESS) {
         CRANE_WARN("[task #{}] Failed to launch process.", task_id);
-        err = task_err;
       } else {
         auto exec_id = task->GetExecId().value();
         CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
@@ -3780,8 +3779,6 @@ void TaskManager::EvGrpcExecuteStepCb_() {
         m_exec_id_task_id_map_[exec_id] = task_id;
       }
     }
-
-    elem.ok_prom.set_value(err);
   }
 }
 

@@ -637,6 +637,8 @@ class TaskManager {
   void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
                          std::optional<std::string> reason = std::nullopt);
 
+  // Returns after lightweight admission checks. Slow execution failures
+  // after admission are reported asynchronously via StepStatusChange.
   std::future<CraneErrCode> ExecuteStepAsync();
 
   std::future<CraneErrCode> ExecutePodInDaemonStepAsync();
