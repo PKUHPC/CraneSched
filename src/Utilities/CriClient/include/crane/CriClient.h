@@ -64,8 +64,9 @@ inline constexpr std::string_view kCriAnnotationPrefix = "cranesched.internal/";
 
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
+// TODO: Make this configurable.
 inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
-    std::chrono::seconds(60);
+    std::chrono::seconds(600);
 
 using ContainerEventCallback =
     std::function<void(const api::ContainerEventResponse&)>;
