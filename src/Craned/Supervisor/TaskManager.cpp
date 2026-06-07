@@ -2900,8 +2900,9 @@ void TaskManager::AbortTasksAfterLaunchFailure_(task_id_t failed_task_id,
     final_info->reason = reason;
 
     if (task->GetExecId().has_value()) {
-      // Process-backed tasks must be finalized by their exit event after Kill();
-      // finalizing here would race the SIGCHLD/CRI/cfored completion path.
+      // Process-backed tasks must be finalized by their exit event after
+      // Kill(); finalizing here would race the SIGCHLD/CRI/cfored completion
+      // path.
       auto err = task->Kill(SIGKILL);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_WARN("[task #{}] Failed to kill after launch failure: {}",
@@ -3301,6 +3302,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
                            ExitCode::EC_SPAWN_FAILED, fi->reason);
       continue;
     case TaskFinalizeCause::STEP_LAUNCH_ABORTED:
+      // Do not let sibling aborts override the root launch failure exit code.
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed, 0,
                            fi->reason);
       continue;
