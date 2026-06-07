@@ -2881,6 +2881,39 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   return CraneErrCode::SUCCESS;
 }
 
+void TaskManager::AbortTasksAfterLaunchFailure_(task_id_t failed_task_id,
+                                                const std::string& reason) {
+  CRANE_ASSERT_MSG(
+      !m_step_.IsDaemon(),
+      "Daemon step should not use this fail-fast path for multiple tasks.");
+
+  for (auto task_id : m_step_.GetTaskIds()) {
+    // The failed task was already finalized by LaunchExecution_; keep its root
+    // failure cause instead of rewriting it as a sibling launch abort.
+    if (task_id == failed_task_id) continue;
+
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task == nullptr) continue;
+
+    auto* final_info = task->GetFinalInfo();
+    final_info->cause = TaskFinalizeCause::STEP_LAUNCH_ABORTED;
+    final_info->reason = reason;
+
+    if (task->GetExecId().has_value()) {
+      // Process-backed tasks must be finalized by their exit event after Kill();
+      // finalizing here would race the SIGCHLD/CRI/cfored completion path.
+      auto err = task->Kill(SIGKILL);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_WARN("[task #{}] Failed to kill after launch failure: {}",
+                   task_id, static_cast<int>(err));
+      }
+      continue;
+    }
+
+    FinalizeTaskAsync(task_id, TaskFinalizeCause::STEP_LAUNCH_ABORTED, reason);
+  }
+}
+
 void TaskManager::EvExecuteDaemonPodCb_() {
   // This method is only for pod in daemon step.
   CRANE_ASSERT_MSG(m_step_.IsPod(), "PreparePodTask is called in other cases!");
@@ -3266,6 +3299,10 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
     case TaskFinalizeCause::TASK_SPAWN_FAILED:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
                            ExitCode::EC_SPAWN_FAILED, fi->reason);
+      continue;
+    case TaskFinalizeCause::STEP_LAUNCH_ABORTED:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed, 0,
+                           fi->reason);
       continue;
     case TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
@@ -3696,8 +3733,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       }
     }
 
-    // TODO: We dont need to exec task for a calloc job
-
+    // TODO: We don't need to exec task for a calloc job
     if (!m_step_.IsDaemon()) {
       // Add a timer to limit the execution time of a task.
 
@@ -3708,7 +3744,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
       std::string log_timer =
           deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
-      bool is_deadline = deadline_sec <= time_limit_sec ? true : false;
+      bool is_deadline = deadline_sec <= time_limit_sec;
 
       AddTerminationTimer_(sec, is_deadline);
       CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
@@ -3760,24 +3796,23 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    // Per-task launch failures are reported by LaunchExecution_ itself via
-    // FinalizeTaskAsync(TASK_PREPARE_FAILED / TASK_SPAWN_FAILED), which
-    // routes through ResolveFinishedTask_ -> StepStatusChangeAsync.
-    // Surviving siblings keep running; the step terminal is emitted when
-    // the last survivor finishes.
+    // TODO: Maybe we can launch tasks in parallel?
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
-      // TODO: Maybe we can launch tasks in parallel
-      auto task_err = LaunchExecution_(task);
-      if (task_err != CraneErrCode::SUCCESS) {
+      auto err = LaunchExecution_(task);
+      if (err != CraneErrCode::SUCCESS) {
         CRANE_WARN("[task #{}] Failed to launch process.", task_id);
-      } else {
-        auto exec_id = task->GetExecId().value();
-        CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
-                   std::visit([](auto&& arg) { return std::format("{}", arg); },
-                              exec_id));
-        m_exec_id_task_id_map_[exec_id] = task_id;
+        AbortTasksAfterLaunchFailure_(
+            task_id, std::format("Task #{} failed to launch, code: {}", task_id,
+                                 static_cast<int>(err)));
+        break;
       }
+
+      auto exec_id = task->GetExecId().value();
+      CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+                 std::visit([](auto&& arg) { return std::format("{}", arg); },
+                            exec_id));
+      m_exec_id_task_id_map_[exec_id] = task_id;
     }
   }
 }

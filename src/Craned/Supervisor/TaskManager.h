@@ -43,6 +43,7 @@ enum class TaskFinalizeCause : uint8_t {
   STEP_PWD_LOOKUP_FAILED,
   STEP_PREPARE_FAILED,
   STEP_CGROUP_FAILED,
+  STEP_LAUNCH_ABORTED,
   CANCELLED_BY_USER,
   CFORED_DISCONNECTED,
   DAEMON_POD_SHUTDOWN_REQUESTED,
@@ -618,6 +619,8 @@ class TaskManager {
   }
 
   CraneErrCode LaunchExecution_(ITaskInstance* task);
+  void AbortTasksAfterLaunchFailure_(task_id_t failed_task_id,
+                                     const std::string& reason);
   // NOLINTEND(readability-identifier-naming)
 
   // Just like a SIGCHLD sig handler (implictly set by uvw).
