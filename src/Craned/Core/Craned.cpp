@@ -334,6 +334,18 @@ void ParseContainerConfig(const YAML::Node& container_config) {
       YamlValueOr(container_config["ImageEndpoint"],
                   g_config.Container.RuntimeEndpoint.string());
 
+  auto image_pulling_timeout_sec =
+      YamlValueOr<int64_t>(container_config["ImagePullingTimeout"],
+                           cri::kCriDefaultImagePullingTimeout.count());
+  if (image_pulling_timeout_sec <= 0) {
+    CRANE_WARN(
+        "Container.ImagePullingTimeout is {}, fallback to default {} seconds.",
+        image_pulling_timeout_sec, cri::kCriDefaultImagePullingTimeout.count());
+    image_pulling_timeout_sec = cri::kCriDefaultImagePullingTimeout.count();
+  }
+  g_config.Container.ImagePullingTimeout =
+      std::chrono::seconds(image_pulling_timeout_sec);
+
   // Prepend unix protocol
   g_config.Container.RuntimeEndpoint =
       fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);

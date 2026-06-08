@@ -64,7 +64,6 @@ inline constexpr std::string_view kCriAnnotationPrefix = "cranesched.internal/";
 
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
-// TODO: Make this configurable.
 inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
     std::chrono::seconds(600);
 
@@ -156,10 +155,10 @@ class CriClient {
   std::optional<std::string> GetImageId(const std::string& image_name) const;
   // NOTE: No `server_addr` here as it is used to identify registry in auth
   // config, which we already done from submiting side.
-  std::optional<std::string> PullImage(const std::string& image_name,
-                                       const std::string& username,
-                                       const std::string& password,
-                                       const std::string& pull_policy) const;
+  std::optional<std::string> PullImage(
+      const std::string& image_name, const std::string& username,
+      const std::string& password, const std::string& pull_policy,
+      std::chrono::seconds timeout = kCriDefaultImagePullingTimeout) const;
 
   // ==== Helpers ====
 

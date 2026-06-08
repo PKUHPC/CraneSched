@@ -150,7 +150,8 @@ std::optional<std::string> CriClient::GetImageId(
 
 std::optional<std::string> CriClient::PullImage(
     const std::string& image_name, const std::string& username,
-    const std::string& password, const std::string& pull_policy) const {
+    const std::string& password, const std::string& pull_policy,
+    std::chrono::seconds timeout) const {
   using api::PullImageRequest;
   using api::PullImageResponse;
 
@@ -223,10 +224,14 @@ std::optional<std::string> CriClient::PullImage(
   PullImageRequest request{};
   PullImageResponse response{};
 
-  // TODO: Make it configurable in config files, now setting to 1 minutes
+  if (timeout <= std::chrono::seconds::zero()) {
+    CRANE_WARN("Invalid image pulling timeout {}s, fallback to {}s",
+               timeout.count(), kCriDefaultImagePullingTimeout.count());
+    timeout = kCriDefaultImagePullingTimeout;
+  }
+
   grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultImagePullingTimeout);
+  context.set_deadline(std::chrono::system_clock::now() + timeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_name);

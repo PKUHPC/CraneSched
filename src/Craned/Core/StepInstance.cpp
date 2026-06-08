@@ -253,6 +253,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
+      container_conf->set_image_pulling_timeout_seconds(
+          g_config.Container.ImagePullingTimeout.count());
       auto* dns_conf = container_conf->mutable_dns_config();
       dns_conf->set_cluster_domain(g_config.Container.Dns.ClusterDomain);
       for (const auto& s : g_config.Container.Dns.Servers)

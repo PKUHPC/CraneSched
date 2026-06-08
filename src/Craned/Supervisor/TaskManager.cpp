@@ -1704,7 +1704,8 @@ CraneErrCode ContainerInstance::Prepare() {
   // Pull image according to pull policy
   auto image_id_opt = cri_client->PullImage(
       ca_meta->image().image(), ca_meta->image().username(),
-      ca_meta->image().password(), ca_meta->image().pull_policy());
+      ca_meta->image().password(), ca_meta->image().pull_policy(),
+      g_config.Container.ImagePullingTimeout);
 
   if (!image_id_opt.has_value()) {
     CRANE_ERROR("Failed to pull image {} for container step #{}.{}",

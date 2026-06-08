@@ -25,6 +25,7 @@
 #include "CranedClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"
+#include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -136,6 +137,21 @@ int InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
+    g_config.Container.ImagePullingTimeout =
+        msg.container_config().has_image_pulling_timeout_seconds()
+            ? std::chrono::seconds(
+                  msg.container_config().image_pulling_timeout_seconds())
+            : cri::kCriDefaultImagePullingTimeout;
+    if (g_config.Container.ImagePullingTimeout <=
+        std::chrono::seconds::zero()) {
+      CRANE_WARN(
+          "Container.ImagePullingTimeout is {}, fallback to default {} "
+          "seconds.",
+          g_config.Container.ImagePullingTimeout.count(),
+          cri::kCriDefaultImagePullingTimeout.count());
+      g_config.Container.ImagePullingTimeout =
+          cri::kCriDefaultImagePullingTimeout;
+    }
 
     if (msg.container_config().has_dns_config()) {
       const auto& dc = msg.container_config().dns_config();

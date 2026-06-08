@@ -423,6 +423,12 @@ Container:
   # CRI image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # Image pulling timeout in seconds
+  ImagePullingTimeout: 600
+
+  # Whether to enable user namespace by default when submitting containers
+  UserNsEnabledByDefault: true
+
   # DNS configuration
   Dns:
     ClusterDomain: "cluster.local"
@@ -454,6 +460,8 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | Temporary data directory during container runtime, relative to `CraneBaseDir`. Stores container metadata, logs, etc. |
 | `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
 | `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
+| `ImagePullingTimeout` | integer | `600` | Image pulling RPC timeout in seconds |
+| `UserNsEnabledByDefault` | bool | `true` | Whether to enable user namespace by default when submitting containers. Affects the default of `ccon run --userns` and `cbatch --pod --pod-userns`; explicit CLI flags still take priority |
 
 ### DNS Configuration
 
