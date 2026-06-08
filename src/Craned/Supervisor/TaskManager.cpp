@@ -2195,7 +2195,7 @@ CraneErrCode ProcInstance::Prepare() {
       auto [path, fwd] =
           CrunParseFilePattern_(GetParentStep().io_meta().input_file_pattern());
       meta->fwd_stdin = fwd;
-      meta->parsed_output_file_pattern = path;
+      meta->parsed_input_file_pattern = path;
     }
     {
       auto [path, fwd] =

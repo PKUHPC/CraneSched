@@ -247,7 +247,15 @@ def _main():
     if args.mode in ["mongo", "all"]:
         db = connect_to_mongo(username, password, host, port, dbname)
         to_wipe = []
-        if not any([args.acct_table, args.qos_table, args.job_table, args.user_table, args.wckey_table, args.resource_table]):
+        if not any([
+            args.acct_table,
+            args.qos_table,
+            args.job_table,
+            args.user_table,
+            args.wckey_table,
+            args.resource_table,
+            args.summary_table,
+        ]):
             to_wipe = [
                 Collection.ACCT,
                 Collection.QOS,

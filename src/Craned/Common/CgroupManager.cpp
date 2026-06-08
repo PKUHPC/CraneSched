@@ -1416,7 +1416,8 @@ bool CgroupV1::KillAllProcesses(int signum) {
 
     if (rc == 0) {
       for (int j = 0; j < size; ++j) {
-        kill(-pids[j], signum);
+        // cgroup_get_procs returns PIDs, not process group IDs.
+        kill(pids[j], signum);
       }
       free(pids);
     } else {
@@ -1919,8 +1920,8 @@ bool CgroupV2::KillAllProcesses(int signum) {
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
-      // Kill the process group
-      kill(-pids[i], signum);
+      // cgroup_get_procs returns PIDs, not process group IDs.
+      kill(pids[i], signum);
     }
     free(pids);
     return true;
