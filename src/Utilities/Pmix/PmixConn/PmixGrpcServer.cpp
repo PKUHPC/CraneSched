@@ -157,6 +157,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
 
   m_dmodex_mgr_->PmixProcessRequest(request->seq_num(), request->craned_id(),
                                     proc, request->local_namespace());
+  response->set_ok(true);
 
   reactor->Finish(Status::OK);
   return reactor;
@@ -176,6 +177,7 @@ grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
 
   m_dmodex_mgr_->PmixProcessResponse(request->seq_num(), request->craned_id(),
                                      request->data(), request->status());
+  response->set_ok(true);
 
   reactor->Finish(Status::OK);
   return reactor;
