@@ -144,11 +144,8 @@ int InitFromStdin(int argc, char** argv) {
             : cri::kCriDefaultImagePullingTimeout;
     if (g_config.Container.ImagePullingTimeout <=
         std::chrono::seconds::zero()) {
-      CRANE_WARN(
-          "Container.ImagePullingTimeout is {}, fallback to default {} "
-          "seconds.",
-          g_config.Container.ImagePullingTimeout.count(),
-          cri::kCriDefaultImagePullingTimeout.count());
+      // Sliently reset to default if the configured timeout is invalid.
+      // No log because supervisor is not ready yet.
       g_config.Container.ImagePullingTimeout =
           cri::kCriDefaultImagePullingTimeout;
     }
