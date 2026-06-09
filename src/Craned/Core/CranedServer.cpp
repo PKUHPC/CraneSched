@@ -18,6 +18,8 @@
 
 #include "CranedServer.h"
 
+#include <chrono>
+
 #include <yaml-cpp/yaml.h>
 
 #include "CgroupManager.h"
@@ -221,15 +223,63 @@ grpc::Status CranedServiceImpl::AllocJobs(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
+  const auto handler_begin = std::chrono::steady_clock::now();
+  const int job_count = request->jobs_size();
+  const job_id_t first_job_id =
+      job_count == 0 ? 0 : request->jobs(0).job_id();
+  const job_id_t last_job_id =
+      job_count == 0 ? 0 : request->jobs(job_count - 1).job_id();
+  const auto deadline_remaining_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          context->deadline() - std::chrono::system_clock::now())
+          .count();
+  CRANE_DEBUG(
+      "AllocJobsServerDiag event=handler_enter job_count={} first_job_id={} "
+      "last_job_id={} deadline_remaining_ms={}",
+      job_count, first_job_id, last_job_id, deadline_remaining_ms);
+
   std::vector<JobInD> jobs;
+  const auto vector_begin = std::chrono::steady_clock::now();
   for (const auto &job_to_d : request->jobs()) {
     CRANE_INFO("Allocating job #{}, uid {}", job_to_d.job_id(), job_to_d.uid());
     jobs.emplace_back(job_to_d);
   }
+  const auto vector_end = std::chrono::steady_clock::now();
 
+  const auto job_mgr_begin = std::chrono::steady_clock::now();
   bool ok = g_job_mgr->AllocJobs(std::move(jobs));
+  const auto job_mgr_end = std::chrono::steady_clock::now();
   if (!ok) {
     CRANE_ERROR("Failed to alloc some jobs.");
+  }
+
+  const auto handler_end = std::chrono::steady_clock::now();
+  const auto vector_build_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(vector_end -
+                                                            vector_begin)
+          .count();
+  const auto job_mgr_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(job_mgr_end -
+                                                            job_mgr_begin)
+          .count();
+  const auto total_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(handler_end -
+                                                            handler_begin)
+          .count();
+  if (total_ms > 1000 || job_mgr_ms > 1000) {
+    CRANE_WARN(
+        "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
+        "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
+        "job_mgr_ms={} total_ms={} ok={}",
+        job_count, first_job_id, last_job_id, deadline_remaining_ms,
+        vector_build_ms, job_mgr_ms, total_ms, ok);
+  } else {
+    CRANE_DEBUG(
+        "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
+        "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
+        "job_mgr_ms={} total_ms={} ok={}",
+        job_count, first_job_id, last_job_id, deadline_remaining_ms,
+        vector_build_ms, job_mgr_ms, total_ms, ok);
   }
 
   return Status::OK;

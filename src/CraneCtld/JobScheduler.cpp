@@ -1449,10 +1449,28 @@ void JobScheduler::ScheduleThread_() {
       for (auto&& iter : craned_alloc_job_map) {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
+        const auto task_enqueue_time = std::chrono::steady_clock::now();
+        const size_t job_count = jobs.size();
+        const CranedId diag_craned_id = craned_id;
+        const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id();
+        const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id();
 
-        m_rpc_worker_pool_->detach_task([&] {
+        m_rpc_worker_pool_->detach_task(
+            [&, diag_craned_id, task_enqueue_time, job_count, first_job_id,
+             last_job_id] {
+          const auto task_start_time = std::chrono::steady_clock::now();
+          const auto task_wait_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  task_start_time - task_enqueue_time)
+                  .count();
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           if (stub == nullptr || stub->Invalid()) {
+            CRANE_ERROR(
+                "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
+                "last_job_id={} task_wait_ms={} rpc_status=craned_down "
+                "failed_job_count={}",
+                diag_craned_id, job_count, first_job_id, last_job_id,
+                task_wait_ms, job_count);
             CRANE_TRACE(
                 "AllocJobs for jobs [{}] to {} failed: Craned down.",
                 absl::StrJoin(
@@ -1470,9 +1488,31 @@ void JobScheduler::ScheduleThread_() {
           }
           auto err = stub->AllocJobs(jobs);
           if (err == CraneErrCode::SUCCESS) {
+            const char* log_status = "success";
+            if (task_wait_ms > 1000) {
+              CRANE_WARN(
+                  "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
+                  "last_job_id={} task_wait_ms={} rpc_status={} "
+                  "failed_job_count=0",
+                  diag_craned_id, job_count, first_job_id, last_job_id,
+                  task_wait_ms, log_status);
+            } else {
+              CRANE_DEBUG(
+                  "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
+                  "last_job_id={} task_wait_ms={} rpc_status={} "
+                  "failed_job_count=0",
+                  diag_craned_id, job_count, first_job_id, last_job_id,
+                  task_wait_ms, log_status);
+            }
             alloc_job_latch.count_down();
             return;
           }
+          CRANE_ERROR(
+              "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
+              "last_job_id={} task_wait_ms={} rpc_status=rpc_failure "
+              "failed_job_count={}",
+              diag_craned_id, job_count, first_job_id, last_job_id,
+              task_wait_ms, job_count);
           CRANE_TRACE("AllocJobs for jobs [{}] to {} failed: Rpc failure.",
                       absl::StrJoin(
                           jobs | std::views::transform(
@@ -1497,7 +1537,20 @@ void JobScheduler::ScheduleThread_() {
           alloc_job_latch.count_down();
         });
       }
+      const auto latch_wait_begin = std::chrono::steady_clock::now();
       alloc_job_latch.wait();
+      const auto latch_wait_end = std::chrono::steady_clock::now();
+      const auto latch_wait_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              latch_wait_end - latch_wait_begin)
+              .count();
+      if (latch_wait_ms > 1000) {
+        CRANE_WARN("AllocJobsDiag latch_wait_ms={} craned_count={}",
+                   latch_wait_ms, craned_alloc_job_map.size());
+      } else {
+        CRANE_DEBUG("AllocJobsDiag latch_wait_ms={} craned_count={}",
+                    latch_wait_ms, craned_alloc_job_map.size());
+      }
       rpc_aj_span.End();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(

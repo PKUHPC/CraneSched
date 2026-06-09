@@ -18,6 +18,7 @@
 
 #include "JobManager.h"
 
+#include <chrono>
 #include <pty.h>
 #include <sys/wait.h>
 
@@ -429,9 +430,19 @@ JobManager::~JobManager() {
 }
 
 bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
-  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
-  auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+  const auto total_begin = std::chrono::steady_clock::now();
+  const size_t job_count = jobs.size();
+  const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id;
+  const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id;
 
+  const auto job_map_lock_begin = std::chrono::steady_clock::now();
+  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  const auto job_map_lock_end = std::chrono::steady_clock::now();
+  const auto uid_map_lock_begin = std::chrono::steady_clock::now();
+  auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+  const auto uid_map_lock_end = std::chrono::steady_clock::now();
+
+  const auto insert_begin = std::chrono::steady_clock::now();
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
 
@@ -447,6 +458,41 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     } else {
       uid_map_ptr->emplace(uid, absl::flat_hash_set<job_id_t>({job_id}));
     }
+  }
+  const auto insert_end = std::chrono::steady_clock::now();
+  const auto total_end = std::chrono::steady_clock::now();
+
+  const auto job_map_lock_wait_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          job_map_lock_end - job_map_lock_begin)
+          .count();
+  const auto uid_map_lock_wait_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          uid_map_lock_end - uid_map_lock_begin)
+          .count();
+  const auto insert_loop_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(insert_end -
+                                                            insert_begin)
+          .count();
+  const auto total_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(total_end -
+                                                            total_begin)
+          .count();
+  if (job_map_lock_wait_ms > 1000 || uid_map_lock_wait_ms > 1000 ||
+      total_ms > 1000) {
+    CRANE_WARN(
+        "JobManagerAllocJobsDiag job_count={} first_job_id={} "
+        "last_job_id={} job_map_lock_wait_ms={} uid_map_lock_wait_ms={} "
+        "insert_loop_ms={} total_ms={}",
+        job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
+        uid_map_lock_wait_ms, insert_loop_ms, total_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerAllocJobsDiag job_count={} first_job_id={} "
+        "last_job_id={} job_map_lock_wait_ms={} uid_map_lock_wait_ms={} "
+        "insert_loop_ms={} total_ms={}",
+        job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
+        uid_map_lock_wait_ms, insert_loop_ms, total_ms);
   }
 
   return true;

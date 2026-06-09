@@ -18,6 +18,8 @@
 
 #include "CranedKeeper.h"
 
+#include <chrono>
+
 #include "JobScheduler.h"
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
@@ -110,19 +112,48 @@ CraneErrCode CranedStub::AllocJobs(
   AllocJobsReply reply;
 
   ClientContext context;
+  const auto timeout_sec = g_config.CtldConf.SchedulerAllocJobsRpcTimeoutSeconds;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(timeout_sec));
 
   for (auto &&job : jobs) {
     *request.add_jobs() = job;
   }
 
+  const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id();
+  const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id();
+  const auto rpc_begin = std::chrono::steady_clock::now();
   status = m_stub_->AllocJobs(&context, request, &reply);
+  const auto rpc_end = std::chrono::steady_clock::now();
+  const auto elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(rpc_end -
+                                                            rpc_begin)
+          .count();
   if (!status.ok()) {
-    CRANE_ERROR("AllocJobs RPC for Node {} returned with status not ok: {}",
-                m_craned_id_, status.error_message());
+    CRANE_ERROR(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code={} "
+        "error_message={}",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms, static_cast<int>(status.error_code()),
+        status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (elapsed_ms > 1000) {
+    CRANE_WARN(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
   }
   UpdateLastActiveTime();
 
