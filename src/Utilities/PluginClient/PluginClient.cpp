@@ -47,7 +47,7 @@
 namespace plugin {
 namespace {
 
-constexpr size_t kTraceHookMaxRequestBytes = 3 * 1024 * 1024 + 512 * 1024;
+constexpr size_t kPluginHookMaxRequestBytes = 3 * 1024 * 1024;
 
 std::unique_ptr<crane::grpc::plugin::TraceHookRequest> MakeTraceHookRequest() {
   return std::make_unique<crane::grpc::plugin::TraceHookRequest>();
@@ -307,33 +307,85 @@ grpc::Status PluginClient::SendUpdateLicensesHook_(
 }
 
 void PluginClient::StartHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
+  if (jobs.empty()) return;
+
+  std::vector<HookEvent> events;
   auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
-  auto* job_list = request->mutable_job_info_list();
   for (auto& job : jobs) {
-    auto* job_it = job_list->Add();
+    auto* job_it = request->mutable_job_info_list()->Add();
     job_it->CopyFrom(job);
+
+    if (request->ByteSizeLong() > kPluginHookMaxRequestBytes) {
+      if (request->job_info_list_size() == 1) {
+        CRANE_WARN(
+            "[Plugin] Single StartHook JobInfo is too large: job_id={}, "
+            "request_bytes={}, limit_bytes={}",
+            job.job_id(), request->ByteSizeLong(), kPluginHookMaxRequestBytes);
+        continue;
+      }
+
+      request->mutable_job_info_list()->RemoveLast();
+      events.push_back(HookEvent{
+          HookType::START,
+          std::unique_ptr<google::protobuf::Message>(std::move(request))});
+      request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
+      request->mutable_job_info_list()->Add()->CopyFrom(job);
+    }
   }
 
-  HookEvent e{HookType::START,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  if (request->job_info_list_size() > 0) {
+    events.push_back(HookEvent{
+        HookType::START,
+        std::unique_ptr<google::protobuf::Message>(std::move(request))});
+  }
+
+  for (auto& event : events) {
+    m_event_queue_.enqueue(std::move(event));
+  }
 }
 
 void PluginClient::EndHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
-  auto request = std::make_unique<crane::grpc::plugin::EndHookRequest>();
-  auto* job_list = request->mutable_job_info_list();
+  if (jobs.empty()) return;
 
+  std::vector<HookEvent> events;
+  auto request = std::make_unique<crane::grpc::plugin::EndHookRequest>();
   auto now = absl::ToUnixSeconds(absl::Now());
   for (auto& job : jobs) {
-    auto* job_it = job_list->Add();
+    auto* job_it = request->mutable_job_info_list()->Add();
     job_it->CopyFrom(job);
     job_it->mutable_elapsed_time()->set_seconds(now -
                                                 job.start_time().seconds());
+
+    if (request->ByteSizeLong() > kPluginHookMaxRequestBytes) {
+      if (request->job_info_list_size() == 1) {
+        CRANE_WARN(
+            "[Plugin] Single EndHook JobInfo is too large: job_id={}, "
+            "request_bytes={}, limit_bytes={}",
+            job.job_id(), request->ByteSizeLong(), kPluginHookMaxRequestBytes);
+        continue;
+      }
+
+      request->mutable_job_info_list()->RemoveLast();
+      events.push_back(HookEvent{
+          HookType::END,
+          std::unique_ptr<google::protobuf::Message>(std::move(request))});
+      request = std::make_unique<crane::grpc::plugin::EndHookRequest>();
+      auto* next_job_it = request->mutable_job_info_list()->Add();
+      next_job_it->CopyFrom(job);
+      next_job_it->mutable_elapsed_time()->set_seconds(
+          now - job.start_time().seconds());
+    }
   }
 
-  HookEvent e{HookType::END,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  if (request->job_info_list_size() > 0) {
+    events.push_back(HookEvent{
+        HookType::END,
+        std::unique_ptr<google::protobuf::Message>(std::move(request))});
+  }
+
+  for (auto& event : events) {
+    m_event_queue_.enqueue(std::move(event));
+  }
 }
 
 void PluginClient::CreateCgroupHookAsync(
@@ -431,7 +483,7 @@ void PluginClient::TraceHookAsync(
   for (auto& span : spans) {
     size_t span_bytes = span.ByteSizeLong();
     if (request->spans_size() > 0 &&
-        request_bytes + span_bytes > kTraceHookMaxRequestBytes) {
+        request_bytes + span_bytes > kPluginHookMaxRequestBytes) {
       events.push_back(HookEvent{
           HookType::TRACE,
           std::unique_ptr<google::protobuf::Message>(std::move(request))});
