@@ -2792,6 +2792,35 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
   }
 }
 
+void TaskManager::CompleteStepBeforeTaskStart_(uint32_t exit_code,
+                                               std::string reason) {
+  auto step_status = m_step_.GetStatus();
+  if (step_status == StepStatus::Completing ||
+      IsFinishedStepStatus(step_status)) {
+    CRANE_DEBUG("[Step #{}.{}] Pre-start failure ignored because status is {}.",
+                m_step_.job_id, m_step_.step_id, step_status);
+    return;
+  }
+
+  if (step_status == StepStatus::Configuring)
+    m_step_.GotNewStatus(StepStatus::Starting);
+  m_step_.GotNewStatus(StepStatus::Completing);
+
+  auto& final_status = m_step_.final_termination_status;
+  final_status.max_exit_code = exit_code;
+  final_status.final_status_on_termination = StepStatus::Failed;
+  final_status.final_reason_on_termination = reason;
+
+  if (m_step_.ExecuteSpan().IsActive()) {
+    m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError, reason);
+    m_step_.ExecuteSpan().End();
+  }
+
+  g_craned_client->StepStatusChangeAsync(
+      StepStatus::Completing, exit_code, reason, StepStatus::Failed);
+  ShutdownSupervisorAsync(StepStatus::Failed, exit_code, std::move(reason));
+}
+
 std::future<CraneErrCode> TaskManager::ExecuteStepAsync() {
   CRANE_INFO("[Job #{}.{}] Executing step.", m_step_.job_id, m_step_.step_id);
 
@@ -3596,21 +3625,23 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {
-      CRANE_ERROR("No task ids assigned for executable step #{}.{}",
-                  m_step_.job_id, m_step_.step_id);
+      std::string reason = fmt::format(
+          "No task ids assigned for executable step #{}.{}", m_step_.job_id,
+          m_step_.step_id);
+      CRANE_ERROR("{}", reason);
+      CompleteStepBeforeTaskStart_(ExitCode::EC_EXEC_ERR, std::move(reason));
       elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;
     }
 
     if (m_step_.IsContainer() && m_step_.task_ids.size() > 1) {
-      CRANE_ERROR(
+      std::string reason = fmt::format(
           "Container step #{}.{} has {} tasks, but container steps only "
-          "support exactly one task. Rejecting.",
+          "support exactly one task",
           m_step_.job_id, m_step_.step_id, m_step_.task_ids.size());
-      for (auto task_id : m_step_.task_ids)
-        g_task_mgr->FinalizeTaskAsync(
-            task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
-            "Container steps only support exactly one task");
+      CRANE_ERROR("{}", reason);
+      CompleteStepBeforeTaskStart_(ExitCode::EC_FILE_NOT_FOUND,
+                                   std::move(reason));
       elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;
     }

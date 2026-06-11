@@ -600,10 +600,55 @@ void StepInstance::ExecuteStepAsync() {
 
   g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
                               stub = supervisor_stub] {
-    auto code = stub->ExecuteStep();
-    if (code != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute step, code:{}.",
-                  job_id, step_id, static_cast<int>(code));
+    auto result = stub->ExecuteStepWithStatus();
+    if (result.Ok()) return;
+
+    if (result.grpc_status == grpc::StatusCode::DEADLINE_EXCEEDED) {
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor ExecuteStep ack deadline exceeded; "
+          "checking supervisor status before marking RPC failure.",
+          job_id, step_id);
+
+      for (int attempt = 1; attempt <= kCranedRpcTimeoutSeconds; ++attempt) {
+        std::this_thread::sleep_for(1s);
+        auto status = stub->CheckStatus();
+        if (status.has_value()) {
+          auto step_status = std::get<3>(*status);
+          if (step_status == StepStatus::Running ||
+              step_status == StepStatus::Completing ||
+              IsFinishedStepStatus(step_status)) {
+            CRANE_WARN(
+                "[Step #{}.{}] ExecuteStep ack deadline treated as accepted; "
+                "supervisor status is {}.",
+                job_id, step_id, step_status);
+            return;
+          }
+          CRANE_WARN(
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt {}/{}; "
+              "supervisor status is {}.",
+              job_id, step_id, attempt, kCranedRpcTimeoutSeconds, step_status);
+        } else {
+          CRANE_WARN(
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt {}/{}; "
+              "supervisor status query failed.",
+              job_id, step_id, attempt, kCranedRpcTimeoutSeconds);
+        }
+      }
+
+      CRANE_ERROR(
+          "[Step #{}.{}] ExecuteStep ack was not confirmed within {}s grace, "
+          "marking step failed.",
+          job_id, step_id, kCranedRpcTimeoutSeconds);
+    } else {
+      CRANE_ERROR(
+          "[Step #{}.{}] Supervisor failed to accept ExecuteStep, code:{}, "
+          "grpc_status:{}, error:{}.",
+          job_id, step_id, static_cast<int>(result.code),
+          static_cast<int>(result.grpc_status), result.error_message);
+    }
+
+    if (result.code != CraneErrCode::SUCCESS ||
+        result.grpc_status != grpc::StatusCode::OK) {
       g_job_mgr->SendCompletingAndTerminal_(
           job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
           "Supervisor not responding when execute step");

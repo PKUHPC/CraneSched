@@ -703,6 +703,8 @@ class TaskManager {
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
 
+  void CompleteStepBeforeTaskStart_(uint32_t exit_code, std::string reason);
+
   // Task sink for finalized tasks. Task will be removed here.
   // Should called in uvw thread, otherwise data race may happen.
   void ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
