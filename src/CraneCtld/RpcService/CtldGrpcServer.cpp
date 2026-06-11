@@ -1329,6 +1329,18 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryQueueStateSummary(
+    grpc::ServerContext* context,
+    const crane::grpc::QueryQueueStateSummaryRequest* request,
+    crane::grpc::QueryQueueStateSummaryReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  g_job_scheduler->QueryQueueStateSummary(request, response);
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext* context, const crane::grpc::AddAccountRequest* request,
     crane::grpc::AddAccountReply* response) {

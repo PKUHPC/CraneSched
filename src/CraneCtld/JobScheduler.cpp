@@ -18,6 +18,8 @@
 
 #include "JobScheduler.h"
 
+#include <map>
+
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
@@ -5289,6 +5291,42 @@ void JobScheduler::QueryJobsInRam(
   LockGuard running_guard(&m_running_job_map_mtx_);
 
   ranges::for_each(id_filtered_job_rng, append_fn);
+}
+
+void JobScheduler::QueryQueueStateSummary(
+    const crane::grpc::QueryQueueStateSummaryRequest* request,
+    crane::grpc::QueryQueueStateSummaryReply* response) {
+  std::unordered_set<int> req_job_states(request->filter_states().begin(),
+                                         request->filter_states().end());
+  const bool no_job_states_constraint = req_job_states.empty();
+
+  std::map<int, uint64_t> counts;
+  uint64_t total = 0;
+
+  auto count_job = [&](const JobInCtld& job) {
+    const int status = job.Status();
+    if (!no_job_states_constraint && !req_job_states.contains(status)) return;
+    ++counts[status];
+    ++total;
+  };
+
+  LockGuard pending_guard(&m_pending_job_map_mtx_);
+  LockGuard running_guard(&m_running_job_map_mtx_);
+
+  for (const auto& [_, job] : m_pending_job_map_) {
+    count_job(*job);
+  }
+  for (const auto& [_, job] : m_running_job_map_) {
+    count_job(*job);
+  }
+
+  response->set_ok(true);
+  response->set_total_count(total);
+  for (const auto& [status, count] : counts) {
+    auto* state_count = response->add_state_counts();
+    state_count->set_state(static_cast<crane::grpc::JobStatus>(status));
+    state_count->set_count(count);
+  }
 }
 
 void JobScheduler::QueryRnJobOnCtldForNodeConfig(

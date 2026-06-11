@@ -630,6 +630,21 @@ message QueryJobsInfoReply {
   repeated JobInfo job_info_list = 2;
 }
 
+message QueueStateCount {
+  JobStatus state = 1;
+  uint64 count = 2;
+}
+
+message QueryQueueStateSummaryRequest {
+  repeated JobStatus filter_states = 1;
+}
+
+message QueryQueueStateSummaryReply {
+  bool ok = 1;
+  uint64 total_count = 2;
+  repeated QueueStateCount state_counts = 3;
+}
+
 message QueryJobEfficiencyRequest {
   repeated uint32 job_ids = 1;
   uint32 uid = 2;  // User ID for authorization
@@ -1499,6 +1514,8 @@ service CraneCtld {
   /* common RPCs */
 
   rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
+
+  rpc QueryQueueStateSummary(QueryQueueStateSummaryRequest) returns (QueryQueueStateSummaryReply);
 
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
 

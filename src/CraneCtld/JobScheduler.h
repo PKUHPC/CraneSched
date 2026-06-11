@@ -839,6 +839,10 @@ class JobScheduler {
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
+  void QueryQueueStateSummary(
+      const crane::grpc::QueryQueueStateSummaryRequest* request,
+      crane::grpc::QueryQueueStateSummaryReply* response);
+
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
