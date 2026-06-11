@@ -24,6 +24,7 @@
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
 #include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 
 namespace Craned::Supervisor {
 
@@ -97,6 +98,7 @@ struct Config {
 
   struct TracingConfig {
     bool Enabled{false};
+    crane::TraceLevel Level{crane::TraceLevel::Debug};
     std::string Traceparent;
   };
   TracingConfig Tracing;

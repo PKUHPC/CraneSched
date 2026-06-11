@@ -155,6 +155,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -174,6 +175,105 @@ namespace crane {
 /// Runtime gate: this flag, controlled by config.yaml `Tracing.Enabled`.
 /// Both must be true for spans to be created.
 inline std::atomic<bool> g_tracing_enabled{false};
+
+enum class TraceLevel : uint8_t { Basic = 0, Detailed = 1, Debug = 2 };
+enum class TraceSpanClass : uint8_t { Other = 0, Core = 1, Detailed = 2 };
+
+inline std::atomic<TraceLevel> g_trace_level{TraceLevel::Debug};
+
+inline TraceLevel TraceLevelFromString(std::string_view level) {
+  if (level == "basic" || level == "Basic" || level == "BASIC")
+    return TraceLevel::Basic;
+  if (level == "detailed" || level == "Detailed" || level == "detail" ||
+      level == "Detail" || level == "DETAILED" || level == "DETAIL")
+    return TraceLevel::Detailed;
+  return TraceLevel::Debug;
+}
+
+inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
+  switch (name.size()) {
+  case 7:
+    if (name == "job/end") return TraceSpanClass::Core;
+    break;
+  case 8:
+    if (name == "job/free") return TraceSpanClass::Detailed;
+    break;
+  case 9:
+    if (name == "job/alloc") return TraceSpanClass::Detailed;
+    break;
+  case 10:
+    if (name == "job/commit") return TraceSpanClass::Detailed;
+    break;
+  case 11:
+    if (name == "job/pending") return TraceSpanClass::Core;
+    if (name == "step/prolog" || name == "step/finish")
+      return TraceSpanClass::Detailed;
+    break;
+  case 12:
+    if (name == "step/execute") return TraceSpanClass::Core;
+    if (name == "step/prepare") return TraceSpanClass::Detailed;
+    break;
+  case 13:
+    if (name == "job/lifecycle") return TraceSpanClass::Core;
+    if (name == "step/schedule") return TraceSpanClass::Detailed;
+    break;
+  case 14:
+    if (name == "step/send_init") return TraceSpanClass::Detailed;
+    break;
+  case 15:
+    if (name == "job/rpc_execute" || name == "submit/validate")
+      return TraceSpanClass::Detailed;
+    break;
+  case 16:
+    if (name == "step/rpc_receive" || name == "step/task_launch" ||
+        name == "step/task_epilog")
+      return TraceSpanClass::Detailed;
+    break;
+  case 17:
+    if (name == "job/status_change" || name == "step/wait_execute" ||
+        name == "step/cgroup_alloc" || name == "step/task_cleanup")
+      return TraceSpanClass::Detailed;
+    break;
+  case 18:
+    if (name == "job/finish_release") return TraceSpanClass::Detailed;
+    break;
+  case 19:
+    if (name == "step/queue_dispatch") return TraceSpanClass::Detailed;
+    break;
+  case 21:
+    if (name == "step/supervisor_spawn" ||
+        name == "step/supervisor_ready")
+      return TraceSpanClass::Detailed;
+    break;
+  case 22:
+    if (name == "step/supervisor_epilog")
+      return TraceSpanClass::Detailed;
+    break;
+  case 23:
+    if (name == "step/config_task_epilog")
+      return TraceSpanClass::Detailed;
+    break;
+  default:
+    break;
+  }
+
+  if (name.starts_with("scheduling/") ||
+      name.starts_with("status_change/"))
+    return TraceSpanClass::Detailed;
+  return TraceSpanClass::Other;
+}
+
+inline bool ShouldExportTraceSpan(std::string_view name, bool is_error) {
+  if (is_error) return true;
+  TraceLevel level = g_trace_level.load(std::memory_order_relaxed);
+  if (level == TraceLevel::Debug) return true;
+  TraceSpanClass span_class = ClassifyTraceSpanName(name);
+  if (span_class == TraceSpanClass::Core) return true;
+  if (level == TraceLevel::Detailed &&
+      span_class == TraceSpanClass::Detailed)
+    return true;
+  return false;
+}
 
 #ifdef CRANE_ENABLE_TRACING
 

@@ -196,6 +196,7 @@ int InitFromStdin(int argc, char** argv) {
 
   // Tracing config
   g_config.Tracing.Enabled = msg.tracing_enabled();
+  g_config.Tracing.Level = crane::TraceLevel::Debug;
   g_config.Tracing.Traceparent = msg.traceparent();
 
   g_config.SupervisorLogFile =
@@ -394,6 +395,8 @@ void GlobalVariableInit(int grpc_output_fd) {
   }
   crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
                                  std::memory_order_release);
+  crane::g_trace_level.store(g_config.Tracing.Level,
+                             std::memory_order_release);
 #endif
 
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();

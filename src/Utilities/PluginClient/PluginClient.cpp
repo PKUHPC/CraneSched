@@ -45,6 +45,15 @@
 #include "protos/PublicDefs.pb.h"
 
 namespace plugin {
+namespace {
+
+constexpr size_t kTraceHookMaxRequestBytes = 3 * 1024 * 1024 + 512 * 1024;
+
+std::unique_ptr<crane::grpc::plugin::TraceHookRequest> MakeTraceHookRequest() {
+  return std::make_unique<crane::grpc::plugin::TraceHookRequest>();
+}
+
+}  // namespace
 
 PluginClient::~PluginClient() {
   m_thread_stop_.store(true);
@@ -413,15 +422,38 @@ void PluginClient::UpdateLicensesHookAsync(
 
 void PluginClient::TraceHookAsync(
     std::vector<crane::grpc::plugin::SpanInfo> spans) {
-  auto request = std::make_unique<crane::grpc::plugin::TraceHookRequest>();
-  auto* mutable_spans = request->mutable_spans();
+  if (spans.empty()) return;
+
+  std::vector<HookEvent> events;
+  auto request = MakeTraceHookRequest();
+  size_t request_bytes = request->ByteSizeLong();
+
   for (auto& span : spans) {
-    mutable_spans->Add()->CopyFrom(span);
+    size_t span_bytes = span.ByteSizeLong();
+    if (request->spans_size() > 0 &&
+        request_bytes + span_bytes > kTraceHookMaxRequestBytes) {
+      events.push_back(HookEvent{
+          HookType::TRACE,
+          std::unique_ptr<google::protobuf::Message>(std::move(request))});
+      request = MakeTraceHookRequest();
+      request_bytes = request->ByteSizeLong();
+    }
+
+    request_bytes += span_bytes;
+    request->mutable_spans()->Add()->CopyFrom(span);
   }
 
-  HookEvent e{HookType::TRACE,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_trace_hooks_enqueued_.fetch_add(1, std::memory_order_release);
-  if (!m_event_queue_.enqueue(std::move(e))) MarkTraceHooksCompleted_(1);
+  if (request->spans_size() > 0) {
+    events.push_back(HookEvent{
+        HookType::TRACE,
+        std::unique_ptr<google::protobuf::Message>(std::move(request))});
+  }
+
+  m_trace_hooks_enqueued_.fetch_add(events.size(), std::memory_order_release);
+  size_t enqueued = 0;
+  for (auto& event : events) {
+    if (m_event_queue_.enqueue(std::move(event))) ++enqueued;
+  }
+  MarkTraceHooksCompleted_(events.size() - enqueued);
 }
 }  // namespace plugin

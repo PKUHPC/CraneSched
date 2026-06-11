@@ -173,6 +173,7 @@ struct Config {
 
   struct TracingConfig {
     bool Enabled{false};
+    crane::TraceLevel Level{crane::TraceLevel::Debug};
   };
   TracingConfig Tracing;
 

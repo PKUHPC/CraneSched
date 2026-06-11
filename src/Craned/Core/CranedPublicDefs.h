@@ -26,6 +26,7 @@
 #include "crane/Network.h"
 #include "crane/OS.h"
 #include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 
@@ -155,6 +156,7 @@ struct Config {
 
   struct TracingConfig {
     bool Enabled{false};
+    crane::TraceLevel Level{crane::TraceLevel::Debug};
   };
   TracingConfig Tracing;
 

@@ -14,6 +14,7 @@
 
 #  include "crane/Logger.h"
 #  include "crane/TracerManager.h"
+#  include "crane/Tracing.h"
 
 namespace crane {
 
@@ -32,10 +33,14 @@ opentelemetry::sdk::common::ExportResult CraneSpanExporter::Export(
   std::vector<crane::grpc::plugin::SpanInfo> infos;
   infos.reserve(spans.size());
   for (auto& recordable : spans) {
-    infos.emplace_back(
-        ConvertSpan(static_cast<const trace_sdk::SpanData&>(*recordable)));
+    const auto& span = static_cast<const trace_sdk::SpanData&>(*recordable);
+    bool is_error =
+        span.GetStatus() == opentelemetry::trace::StatusCode::kError;
+    if (!ShouldExportTraceSpan(span.GetName(), is_error)) continue;
+    infos.emplace_back(ConvertSpan(span));
   }
 
+  if (infos.empty()) return opentelemetry::sdk::common::ExportResult::kSuccess;
   client_.TraceHookAsync(std::move(infos));
   return opentelemetry::sdk::common::ExportResult::kSuccess;
 }
