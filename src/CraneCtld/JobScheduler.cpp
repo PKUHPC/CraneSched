@@ -5276,8 +5276,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   std::vector<JobStatusChangeArg> args;
   args.resize(drain_size);
 
-  size_t actual_size = m_job_status_change_queue_.try_dequeue_bulk(
-      args.begin(), drain_size);
+  size_t actual_size =
+      m_job_status_change_queue_.try_dequeue_bulk(args.begin(), drain_size);
   if (actual_size == 0) return;
   args.resize(actual_size);
   auto begin_time = std::chrono::steady_clock::now();
@@ -5708,7 +5708,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   db_commit_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
   db_commit_span.SetAttribute(
-      "step_update_count", static_cast<int64_t>(context.rn_step_raw_ptrs.size()));
+      "step_update_count",
+      static_cast<int64_t>(context.rn_step_raw_ptrs.size()));
   db_commit_span.SetAttribute(
       "job_update_count", static_cast<int64_t>(context.rn_job_raw_ptrs.size()));
   db_commit_span.SetAttribute("finished_job_count",
@@ -5726,14 +5727,14 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     {
       CRANE_TRACE_CHILD_NAMED(begin_span, db_commit_span,
                               "status_change/db_commit_step_begin");
-      begin_span.SetAttribute("chunk_size",
-                              static_cast<int64_t>(end - begin));
+      begin_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
       if (!ok) {
         CRANE_ERROR(
             "JobScheduler failed to start step transaction when clean step "
             "status change");
-        begin_span.SetStatus(crane::StatusCode::kError, "step_txn_begin_failed");
+        begin_span.SetStatus(crane::StatusCode::kError,
+                             "step_txn_begin_failed");
       }
     }
     {
@@ -5755,8 +5756,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     {
       CRANE_TRACE_CHILD_NAMED(commit_span, db_commit_span,
                               "status_change/db_commit_step_commit");
-      commit_span.SetAttribute("chunk_size",
-                               static_cast<int64_t>(end - begin));
+      commit_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
       if (!ok) {
         CRANE_ERROR(
@@ -5794,8 +5794,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     {
       CRANE_TRACE_CHILD_NAMED(begin_span, db_commit_span,
                               "status_change/db_commit_job_begin");
-      begin_span.SetAttribute("chunk_size",
-                              static_cast<int64_t>(end - begin));
+      begin_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
       if (!ok) {
         CRANE_ERROR(
@@ -5826,8 +5825,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     {
       CRANE_TRACE_CHILD_NAMED(commit_span, db_commit_span,
                               "status_change/db_commit_job_commit");
-      commit_span.SetAttribute("chunk_size",
-                               static_cast<int64_t>(end - begin));
+      commit_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
       if (!ok) {
         CRANE_ERROR(
@@ -5841,9 +5839,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   auto job_txn_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - job_txn_begin)
                         .count();
-  CRANE_TRACE(
-      "Persist job status changes to embedded db cost {} ms",
-      job_txn_ms);
+  CRANE_TRACE("Persist job status changes to embedded db cost {} ms",
+              job_txn_ms);
   db_commit_span.SetAttribute("step_txn_ms", step_txn_ms);
   db_commit_span.SetAttribute("job_txn_ms", job_txn_ms);
   now = std::chrono::steady_clock::now();
@@ -7163,10 +7160,10 @@ int64_t JobScheduler::PersistAndTransferJobsToMongodb_(
                std::chrono::steady_clock::now() - mongo_insert_begin)
         .count();
   }
-  auto mongo_insert_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() -
-                             mongo_insert_begin)
-                             .count();
+  auto mongo_insert_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - mongo_insert_begin)
+          .count();
 
   // Remove jobs in final queue.
   std::unordered_map<job_id_t, job_db_id_t> db_ids;

@@ -84,12 +84,12 @@ void ParseCtldConfig(const YAML::Node& config) {
                               Ctld::kJobStatusChangeTimeoutMS);
     ctld_config.StatusChangeBatchNum = YamlValueOr<uint32_t>(
         ctld_cfg["StatusChangeBatchNum"], Ctld::kJobStatusChangeBatchNum);
-    ctld_config.StatusChangeMaxDrainPerTick = YamlValueOr<uint32_t>(
-        ctld_cfg["StatusChangeMaxDrainPerTick"],
-        Ctld::kJobStatusChangeMaxDrainPerTick);
-    ctld_config.StatusChangeDbCommitChunkSize = YamlValueOr<uint32_t>(
-        ctld_cfg["StatusChangeDbCommitChunkSize"],
-        Ctld::kJobStatusChangeDbCommitChunkSize);
+    ctld_config.StatusChangeMaxDrainPerTick =
+        YamlValueOr<uint32_t>(ctld_cfg["StatusChangeMaxDrainPerTick"],
+                              Ctld::kJobStatusChangeMaxDrainPerTick);
+    ctld_config.StatusChangeDbCommitChunkSize =
+        YamlValueOr<uint32_t>(ctld_cfg["StatusChangeDbCommitChunkSize"],
+                              Ctld::kJobStatusChangeDbCommitChunkSize);
   }
 
   g_config.CtldConf = std::move(ctld_config);

@@ -2170,10 +2170,9 @@ CraneErrCode ProcInstance::Prepare() {
     task_cg_span.SetAttribute("job_id", g_config.JobId);
     task_cg_span.SetAttribute("step_id", g_config.StepId);
     task_cg_span.SetAttribute("task_id", static_cast<int64_t>(task_id));
-    task_cg_span.SetAttribute(
-        "cgroup_name",
-        CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
-                                         task_id));
+    task_cg_span.SetAttribute("cgroup_name",
+                              CgroupManager::CgroupStrByTaskId(
+                                  g_config.JobCgStr, g_config.StepId, task_id));
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
         CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
                                          task_id),
@@ -2944,10 +2943,9 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
     err = task->Prepare();
     if (err != CraneErrCode::SUCCESS) {
       prepare_span.SetStatus(crane::StatusCode::kError, "task_prepare_failed");
-      FinalizeTaskAsync(
-          task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
-          std::format("Failed to prepare task, code: {}",
-                      static_cast<int>(err)));
+      FinalizeTaskAsync(task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
+                        std::format("Failed to prepare task, code: {}",
+                                    static_cast<int>(err)));
       return err;
     }
   }

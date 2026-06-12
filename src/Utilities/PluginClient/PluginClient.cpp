@@ -521,9 +521,8 @@ void PluginClient::TraceHookAsync(
 
   auto flush_request = [&] {
     if (request->spans_size() == 0) return;
-    max_request_bytes =
-        std::max(max_request_bytes,
-                 static_cast<size_t>(request->ByteSizeLong()));
+    max_request_bytes = std::max(max_request_bytes,
+                                 static_cast<size_t>(request->ByteSizeLong()));
     events.push_back(HookEvent{
         HookType::TRACE,
         std::unique_ptr<google::protobuf::Message>(std::move(request))});

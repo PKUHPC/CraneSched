@@ -23,9 +23,10 @@
 
 #include "CgroupManager.h"
 
+#include <fcntl.h>
+
 #include <bit>
 #include <cctype>
-#include <fcntl.h>
 
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/bpf.h>
@@ -64,8 +65,7 @@ int64_t CountControllers(ControllerFlags flags) {
   return static_cast<int64_t>(std::popcount(flags.Raw()));
 }
 
-bool CgroupNameHasPart(const std::string& cgroup_name,
-                       std::string_view part) {
+bool CgroupNameHasPart(const std::string& cgroup_name, std::string_view part) {
   return cgroup_name.find(part) != std::string::npos;
 }
 
@@ -87,13 +87,17 @@ void SetCgroupSpanAttrs(SpanT& span, const std::string& cgroup_name,
   span.SetAttribute("cgroup_name", cgroup_name);
   span.SetAttribute("cgroup_version", CgroupVersionInt());
   span.SetAttribute("controller_count", CountControllers(controllers));
-  span.SetAttribute("is_job_cgroup",
-                    CgroupNameHasPart(cgroup_name, CgConstant::kJobCgNamePrefix));
-  span.SetAttribute("is_step_cgroup",
-                    CgroupNameHasPart(cgroup_name, CgConstant::kStepCgNamePrefix));
-  span.SetAttribute("is_task_cgroup",
-                    CgroupNameHasPart(cgroup_name, CgConstant::kTaskCgNamePrefix));
-  if (auto job_id = ParseIdAfterPrefix(cgroup_name, CgConstant::kJobCgNamePrefix))
+  span.SetAttribute(
+      "is_job_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kJobCgNamePrefix));
+  span.SetAttribute(
+      "is_step_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kStepCgNamePrefix));
+  span.SetAttribute(
+      "is_task_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kTaskCgNamePrefix));
+  if (auto job_id =
+          ParseIdAfterPrefix(cgroup_name, CgConstant::kJobCgNamePrefix))
     span.SetAttribute("job_id", *job_id);
   if (auto step_id =
           ParseIdAfterPrefix(cgroup_name, CgConstant::kStepCgNamePrefix))
@@ -144,8 +148,8 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   log_level = debug_level;
   if (const char* concurrency_env = getenv(kCgroupOpConcurrencyEnv);
       concurrency_env != nullptr) {
-    m_cgroup_op_concurrency_ = static_cast<uint32_t>(
-        std::strtoul(concurrency_env, nullptr, 10));
+    m_cgroup_op_concurrency_ =
+        static_cast<uint32_t>(std::strtoul(concurrency_env, nullptr, 10));
   }
   if (m_cgroup_op_concurrency_ > 0) {
     if (const char* sem_name_env = getenv(kCgroupOpSemaphoreEnv);
@@ -319,13 +323,13 @@ void CgroupManager::ConfigureCgroupOpConcurrency(uint32_t concurrency) {
   }
 
   auto hostname_expt = util::os::GetHostname();
-  std::string host_key =
-      hostname_expt.has_value() ? hostname_expt.value() : std::to_string(getpid());
+  std::string host_key = hostname_expt.has_value() ? hostname_expt.value()
+                                                   : std::to_string(getpid());
   std::ranges::replace(host_key, '/', '_');
   m_cgroup_op_sem_name_ =
       fmt::format("/crane_cgroup_ops_{}_{}", host_key, getuid());
-  m_cgroup_op_sem_ = sem_open(m_cgroup_op_sem_name_.c_str(), O_CREAT, 0600,
-                              concurrency);
+  m_cgroup_op_sem_ =
+      sem_open(m_cgroup_op_sem_name_.c_str(), O_CREAT, 0600, concurrency);
   if (m_cgroup_op_sem_ == SEM_FAILED) {
     CRANE_WARN("Failed to create cgroup semaphore {} concurrency={}: {}",
                m_cgroup_op_sem_name_, concurrency, strerror(errno));
@@ -337,8 +341,9 @@ void CgroupManager::ConfigureCgroupOpConcurrency(uint32_t concurrency) {
 
   setenv(kCgroupOpConcurrencyEnv, std::to_string(concurrency).c_str(), 1);
   setenv(kCgroupOpSemaphoreEnv, m_cgroup_op_sem_name_.c_str(), 1);
-  CRANE_INFO("Cgroup operation concurrency limit enabled: concurrency={} sem={}",
-             concurrency, m_cgroup_op_sem_name_);
+  CRANE_INFO(
+      "Cgroup operation concurrency limit enabled: concurrency={} sem={}",
+      concurrency, m_cgroup_op_sem_name_);
 }
 
 sem_t* CgroupManager::CgroupOpSemaphore() {
@@ -692,7 +697,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
              full_cg_name);
   create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
-  create_span.SetStatus(crane::StatusCode::kError, "unsupported_cgroup_version");
+  create_span.SetStatus(crane::StatusCode::kError,
+                        "unsupported_cgroup_version");
   return nullptr;
 }
 
@@ -758,7 +764,8 @@ CgroupManager::AllocateAndGetCgroup(
                              static_cast<int64_t>(res_v3.GetMemoryBytes()));
   bool ok = ResourceInNodeV3Allocator::Allocate(res_v3, cg_unique_ptr.get());
   resource_span.SetAttribute("elapsed_ms", MsSince(set_resource_begin));
-  if (!ok) resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
+  if (!ok)
+    resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
 
   if (ok) return std::move(cg_unique_ptr);
   return std::unexpected(CraneErrCode::ERR_CGROUP);
