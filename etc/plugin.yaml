@@ -7,6 +7,9 @@ Enabled: false
 # Socket path relative to CraneBaseDir
 PlugindSockPath: "cplugind/cplugind.sock"
 
+# Max serialized TraceHook request bytes. Keep below gRPC's default 4 MiB cap.
+TraceHookMaxRequestBytes: 3670016
+
 # Debug level of Plugind
 PlugindDebugLevel: "trace"
 

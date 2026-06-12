@@ -101,6 +101,8 @@ struct Config {
     uint32_t SchedulerAllocJobsRpcTimeoutSeconds{kCtldRpcTimeoutSeconds};
     uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
+    uint32_t StatusChangeMaxDrainPerTick{kJobStatusChangeMaxDrainPerTick};
+    uint32_t StatusChangeDbCommitChunkSize{kJobStatusChangeDbCommitChunkSize};
   };
   CraneCtldConf CtldConf;
 
@@ -177,6 +179,7 @@ struct Config {
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
+    size_t TraceHookMaxRequestBytes{kDefaultTraceHookMaxRequestBytes};
   };
   PluginConfig Plugin;
 

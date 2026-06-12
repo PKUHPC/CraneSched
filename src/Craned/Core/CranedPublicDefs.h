@@ -156,6 +156,7 @@ struct Config {
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
+    size_t TraceHookMaxRequestBytes{kDefaultTraceHookMaxRequestBytes};
   };
   PluginConfig Plugin;
 

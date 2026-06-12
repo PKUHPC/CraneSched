@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <iterator>
 #include <list>
 #include <memory>
@@ -48,6 +49,8 @@ namespace plugin {
 namespace {
 
 constexpr size_t kPluginHookMaxRequestBytes = 3 * 1024 * 1024;
+constexpr char kTraceHookMaxRequestBytesEnv[] =
+    "CRANE_TRACE_HOOK_MAX_REQUEST_BYTES";
 
 std::unique_ptr<crane::grpc::plugin::TraceHookRequest> MakeTraceHookRequest() {
   return std::make_unique<crane::grpc::plugin::TraceHookRequest>();
@@ -62,11 +65,26 @@ PluginClient::~PluginClient() {
 }
 
 // Note that we do not support TLS in plugin yet.
-void PluginClient::InitChannelAndStub(const std::string& endpoint) {
+void PluginClient::InitChannelAndStub(const std::string& endpoint,
+                                      size_t trace_hook_max_request_bytes) {
+  if (const char* env = std::getenv(kTraceHookMaxRequestBytesEnv);
+      env != nullptr && env[0] != '\0') {
+    char* end = nullptr;
+    unsigned long long value = std::strtoull(env, &end, 10);
+    if (end != env && value > 0)
+      trace_hook_max_request_bytes = static_cast<size_t>(value);
+  }
+  m_trace_hook_max_request_bytes_ =
+      std::max<size_t>(1024, trace_hook_max_request_bytes);
+  setenv(kTraceHookMaxRequestBytesEnv,
+         std::to_string(m_trace_hook_max_request_bytes_).c_str(), 1);
+
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CranePluginD::NewStub(m_channel_);
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
+  CRANE_INFO("[Plugin] TraceHook max request bytes: {}",
+             m_trace_hook_max_request_bytes_);
 }
 
 bool PluginClient::DrainTraceHooks(std::chrono::microseconds timeout) noexcept {
@@ -284,10 +302,29 @@ grpc::Status PluginClient::SendTraceHook_(grpc::ClientContext* context,
 
   TraceHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending TraceHook.");
+  auto begin = std::chrono::steady_clock::now();
   /* We don't want to trace the TraceHook itself, it will cause infinite loop if
    * not handled carefully. */
-  return m_stub_->TraceHook(context, *request, &reply);
+  auto status = m_stub_->TraceHook(context, *request, &reply);
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin)
+                        .count();
+  if (!status.ok() || elapsed_ms > 1000) {
+    CRANE_WARN(
+        "[Plugin] TraceHookSendDiag trace_hook_request_bytes={} span_count={} "
+        "grpc_status_code={} elapsed_ms={} error_message={}",
+        request->ByteSizeLong(), request->spans_size(),
+        static_cast<int>(status.error_code()), elapsed_ms,
+        status.error_message());
+  } else {
+    CRANE_DEBUG(
+        "[Plugin] TraceHookSendDiag trace_hook_request_bytes={} span_count={} "
+        "grpc_status_code={} elapsed_ms={} error_message={}",
+        request->ByteSizeLong(), request->spans_size(),
+        static_cast<int>(status.error_code()), elapsed_ms,
+        status.error_message());
+  }
+  return status;
 }
 
 grpc::Status PluginClient::SendUpdateLicensesHook_(
@@ -478,27 +515,71 @@ void PluginClient::TraceHookAsync(
 
   std::vector<HookEvent> events;
   auto request = MakeTraceHookRequest();
-  size_t request_bytes = request->ByteSizeLong();
+  size_t split_count{0};
+  size_t max_request_bytes{0};
+  size_t oversize_span_count{0};
 
-  for (auto& span : spans) {
-    size_t span_bytes = span.ByteSizeLong();
-    if (request->spans_size() > 0 &&
-        request_bytes + span_bytes > kPluginHookMaxRequestBytes) {
-      events.push_back(HookEvent{
-          HookType::TRACE,
-          std::unique_ptr<google::protobuf::Message>(std::move(request))});
-      request = MakeTraceHookRequest();
-      request_bytes = request->ByteSizeLong();
-    }
-
-    request_bytes += span_bytes;
-    request->mutable_spans()->Add()->CopyFrom(span);
-  }
-
-  if (request->spans_size() > 0) {
+  auto flush_request = [&] {
+    if (request->spans_size() == 0) return;
+    max_request_bytes =
+        std::max(max_request_bytes,
+                 static_cast<size_t>(request->ByteSizeLong()));
     events.push_back(HookEvent{
         HookType::TRACE,
         std::unique_ptr<google::protobuf::Message>(std::move(request))});
+    request = MakeTraceHookRequest();
+  };
+
+  for (auto& span : spans) {
+    request->mutable_spans()->Add()->CopyFrom(span);
+    size_t request_bytes = request->ByteSizeLong();
+    if (request_bytes <= m_trace_hook_max_request_bytes_) continue;
+
+    if (request->spans_size() == 1) {
+      ++oversize_span_count;
+      CRANE_WARN(
+          "[Plugin] TraceHookOversizeSpanDiag trace_hook_request_bytes={} "
+          "span_count=1 span_name={} trace_id={} limit_bytes={}",
+          request_bytes, span.name(), span.trace_id(),
+          m_trace_hook_max_request_bytes_);
+      flush_request();
+      ++split_count;
+      continue;
+    }
+
+    request->mutable_spans()->RemoveLast();
+    flush_request();
+    ++split_count;
+    request->mutable_spans()->Add()->CopyFrom(span);
+    request_bytes = request->ByteSizeLong();
+    if (request_bytes > m_trace_hook_max_request_bytes_) {
+      ++oversize_span_count;
+      CRANE_WARN(
+          "[Plugin] TraceHookOversizeSpanDiag trace_hook_request_bytes={} "
+          "span_count=1 span_name={} trace_id={} limit_bytes={}",
+          request_bytes, span.name(), span.trace_id(),
+          m_trace_hook_max_request_bytes_);
+      flush_request();
+      ++split_count;
+    }
+  }
+
+  flush_request();
+
+  if (split_count > 0 || oversize_span_count > 0) {
+    CRANE_WARN(
+        "[Plugin] TraceHookSplitDiag span_count={} enqueue_count={} "
+        "split_count={} oversize_span_count={} max_request_bytes={} "
+        "limit_bytes={}",
+        spans.size(), events.size(), split_count, oversize_span_count,
+        max_request_bytes, m_trace_hook_max_request_bytes_);
+  } else {
+    CRANE_DEBUG(
+        "[Plugin] TraceHookSplitDiag span_count={} enqueue_count={} "
+        "split_count={} oversize_span_count={} max_request_bytes={} "
+        "limit_bytes={}",
+        spans.size(), events.size(), split_count, oversize_span_count,
+        max_request_bytes, m_trace_hook_max_request_bytes_);
   }
 
   m_trace_hooks_enqueued_.fetch_add(events.size(), std::memory_order_release);

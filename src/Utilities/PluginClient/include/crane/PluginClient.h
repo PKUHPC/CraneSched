@@ -71,7 +71,9 @@ class PluginClient {
     std::unique_ptr<google::protobuf::Message> msg;
   };
 
-  void InitChannelAndStub(const std::string& endpoint);
+  void InitChannelAndStub(const std::string& endpoint,
+                          size_t trace_hook_max_request_bytes =
+                              kDefaultTraceHookMaxRequestBytes);
   bool DrainTraceHooks(std::chrono::microseconds timeout) noexcept;
 
   // These functions are used to add HookEvent into the event queue.
@@ -135,6 +137,7 @@ class PluginClient {
   std::atomic<bool> m_thread_stop_{false};
 
   ConcurrentQueue<HookEvent> m_event_queue_;
+  size_t m_trace_hook_max_request_bytes_{kDefaultTraceHookMaxRequestBytes};
   std::atomic<uint64_t> m_trace_hooks_enqueued_{0};
   std::atomic<uint64_t> m_trace_hooks_completed_{0};
   std::mutex m_trace_drain_mutex_;

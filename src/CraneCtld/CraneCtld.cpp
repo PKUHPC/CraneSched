@@ -977,6 +977,9 @@ void ParseConfig(int argc, char** argv) {
           fmt::format("unix://{}{}", g_config.CraneBaseDir,
                       YamlValueOr(plugin_config["PlugindSockPath"],
                                   kDefaultPlugindUnixSockPath));
+      g_config.Plugin.TraceHookMaxRequestBytes =
+          YamlValueOr<size_t>(plugin_config["TraceHookMaxRequestBytes"],
+                              kDefaultTraceHookMaxRequestBytes);
 
       CRANE_INFO("Plugin config loaded from {}", plugin_config_path);
     } catch (YAML::BadFile& e) {
@@ -1071,7 +1074,9 @@ void InitializeCtldGlobalVariables() {
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
-    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+    g_plugin_client->InitChannelAndStub(
+        g_config.Plugin.PlugindSockPath,
+        g_config.Plugin.TraceHookMaxRequestBytes);
   }
 
 #ifdef CRANE_ENABLE_TRACING
