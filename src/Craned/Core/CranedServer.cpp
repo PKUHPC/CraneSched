@@ -316,6 +316,11 @@ grpc::Status CranedServiceImpl::FreeSteps(
 grpc::Status CranedServiceImpl::FreeJobs(
     grpc::ServerContext *context, const crane::grpc::FreeJobsRequest *request,
     crane::grpc::FreeJobsReply *response) {
+  auto handler_begin = std::chrono::steady_clock::now();
+  auto deadline_remaining_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          context->deadline() - std::chrono::system_clock::now())
+          .count();
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -324,8 +329,31 @@ grpc::Status CranedServiceImpl::FreeJobs(
   CRANE_TRACE("Receive FreeJobs RPC for Job [{}]",
               absl::StrJoin(request->job_id_list(), ","));
 
+  auto enqueue_begin = std::chrono::steady_clock::now();
   g_job_mgr->FreeJobs(
       std::set(request->job_id_list().begin(), request->job_id_list().end()));
+  auto enqueue_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - enqueue_begin)
+          .count();
+  auto handler_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - handler_begin)
+          .count();
+  if (deadline_remaining_ms < 1000 || handler_elapsed_ms > 1000 ||
+      enqueue_elapsed_ms > 1000) {
+    CRANE_WARN(
+        "FreeJobsServerDiag job_count={} deadline_remaining_ms={} "
+        "handler_elapsed_ms={} enqueue_elapsed_ms={}",
+        request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
+        enqueue_elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "FreeJobsServerDiag job_count={} deadline_remaining_ms={} "
+        "handler_elapsed_ms={} enqueue_elapsed_ms={}",
+        request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
+        enqueue_elapsed_ms);
+  }
 
   return Status::OK;
 }

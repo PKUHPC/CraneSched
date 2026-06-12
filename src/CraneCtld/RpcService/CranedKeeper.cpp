@@ -164,22 +164,42 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
   using crane::grpc::FreeJobsReply;
   using crane::grpc::FreeJobsRequest;
 
+  auto begin_time = std::chrono::steady_clock::now();
   Status status;
   FreeJobsRequest request;
   FreeJobsReply reply;
 
+  constexpr int64_t timeout_sec = kCtldRpcTimeoutSeconds;
+  job_id_t first_job_id = jobs.empty() ? 0 : jobs.front();
+  job_id_t last_job_id = jobs.empty() ? 0 : jobs.back();
+
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(timeout_sec));
 
   request.mutable_job_id_list()->Assign(jobs.begin(), jobs.end());
 
   status = m_stub_->FreeJobs(&context, request, &reply);
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin_time)
+                        .count();
   if (!status.ok()) {
-    CRANE_DEBUG("FreeJobs gRPC for Node {} returned with status not ok: {}",
-                m_craned_id_, status.error_message());
+    CRANE_WARN(
+        "FreeJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code={} "
+        "error_message={}",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms, static_cast<int>(status.error_code()),
+        status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
+  } else {
+    CRANE_DEBUG(
+        "FreeJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
   }
   UpdateLastActiveTime();
 

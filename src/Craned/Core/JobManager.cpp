@@ -518,9 +518,16 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
     return false;
   }
 
+  auto begin_time = std::chrono::steady_clock::now();
+  int64_t free_job_info_ms = 0;
+  int64_t queue_len = 0;
   bool any_freed = false;
   for (job_id_t job_id : job_ids) {
+    auto free_info_begin = std::chrono::steady_clock::now();
     auto job = FreeJobInfo_(job_id);
+    free_job_info_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - free_info_begin)
+                            .count();
     if (!job.has_value()) {
       CRANE_INFO(
           "Try to free non-existent job #{}, sending a status change as "
@@ -538,11 +545,30 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
       span.SetAttribute("job_id", job_id);
     }
 
-    m_free_jobs_queue_.enqueue(std::move(job.value()));
+    m_free_jobs_queue_.enqueue(FreeJobElem{
+        .job = std::move(job.value()),
+        .enqueue_time = std::chrono::steady_clock::now(),
+        .queue_len_at_enqueue =
+            static_cast<int64_t>(m_free_jobs_queue_.size_approx() + 1)});
+    queue_len = static_cast<int64_t>(m_free_jobs_queue_.size_approx());
     any_freed = true;
   }
 
   if (any_freed) m_free_jobs_async_handle_->send();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin_time)
+                        .count();
+  if (elapsed_ms > 1000 || free_job_info_ms > 1000 || queue_len > 1000) {
+    CRANE_WARN(
+        "JobManagerFreeJobsDiag phase=enqueue request_job_count={} "
+        "free_job_info_ms={} queue_len={} elapsed_ms={}",
+        job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerFreeJobsDiag phase=enqueue request_job_count={} "
+        "free_job_info_ms={} queue_len={} elapsed_ms={}",
+        job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
+  }
   return true;
 }
 
@@ -1868,11 +1894,21 @@ void JobManager::MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id) {
 }
 
 void JobManager::EvCleanFreeJobsQueueCb_() {
-  JobInD job;
+  auto begin_time = std::chrono::steady_clock::now();
+  FreeJobElem elem;
   std::vector<JobInD> jobs_to_free;
   std::vector<StepInstance*> steps_to_free;
+  int64_t max_queue_wait_ms = 0;
+  int64_t max_queue_len = 0;
 
-  while (m_free_jobs_queue_.try_dequeue(job)) {
+  while (m_free_jobs_queue_.try_dequeue(elem)) {
+    auto queue_wait_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - elem.enqueue_time)
+            .count();
+    max_queue_wait_ms = std::max(max_queue_wait_ms, queue_wait_ms);
+    max_queue_len = std::max(max_queue_len, elem.queue_len_at_enqueue);
+    JobInD& job = elem.job;
     for (auto& step : job.step_map | std::views::values) {
       steps_to_free.emplace_back(step.get());
     }
@@ -1880,7 +1916,7 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
     if (job.step_map.size() != 1)
       CRANE_DEBUG("Job #{} to free has more than one step.", job.job_id);
 
-    jobs_to_free.emplace_back(std::move(job));
+    jobs_to_free.emplace_back(std::move(elem.job));
   }
 
   if (steps_to_free.empty() && jobs_to_free.empty()) return;
@@ -1973,6 +2009,23 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
                         step_id);
           }
         });
+  }
+  auto evclean_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - begin_time)
+          .count();
+  if (max_queue_wait_ms > 1000 || evclean_elapsed_ms > 1000) {
+    CRANE_WARN(
+        "JobManagerFreeJobsDiag phase=evclean cleanup_batch_size={} "
+        "step_count={} queue_wait_ms={} queue_len={} evclean_elapsed_ms={}",
+        jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,
+        max_queue_len, evclean_elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerFreeJobsDiag phase=evclean cleanup_batch_size={} "
+        "step_count={} queue_wait_ms={} queue_len={} evclean_elapsed_ms={}",
+        jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,
+        max_queue_len, evclean_elapsed_ms);
   }
 }
 

@@ -5647,7 +5647,16 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   for (auto& [craned_id, jobs] : context.craned_jobs_to_free) {
-    m_rpc_worker_pool_->detach_task([this, craned_id, jobs = std::move(jobs)] {
+    auto enqueue_time = std::chrono::steady_clock::now();
+    size_t job_count = jobs.size();
+    size_t craned_count = context.craned_jobs_to_free.size();
+    m_rpc_worker_pool_->detach_task([this, craned_id, jobs = std::move(jobs),
+                                     enqueue_time, job_count, craned_count] {
+      auto task_begin = std::chrono::steady_clock::now();
+      auto task_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              task_begin - enqueue_time)
+                              .count();
+      auto rpc_begin = std::chrono::steady_clock::now();
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       bool success{false};
       if (stub && !stub->Invalid()) {
@@ -5657,6 +5666,23 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                       absl::StrJoin(jobs, ","), craned_id);
         } else
           success = true;
+      }
+      auto rpc_elapsed_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - rpc_begin)
+              .count();
+      if (!success || task_wait_ms > 1000 || rpc_elapsed_ms > 1000) {
+        CRANE_WARN(
+            "FreeJobsFanoutDiag craned_id={} craned_count={} job_count={} "
+            "rpc_worker_task_wait_ms={} rpc_elapsed_ms={} success={}",
+            craned_id, craned_count, job_count, task_wait_ms, rpc_elapsed_ms,
+            success);
+      } else {
+        CRANE_DEBUG(
+            "FreeJobsFanoutDiag craned_id={} craned_count={} job_count={} "
+            "rpc_worker_task_wait_ms={} rpc_elapsed_ms={} success={}",
+            craned_id, craned_count, job_count, task_wait_ms, rpc_elapsed_ms,
+            success);
       }
       if (!success) {
         auto now = google::protobuf::util::TimeUtil::GetCurrentTime();

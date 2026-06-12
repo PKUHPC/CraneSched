@@ -320,8 +320,14 @@ class JobManager {
     step_id_t step_id;
   };
 
+  struct FreeJobElem {
+    JobInD job;
+    std::chrono::steady_clock::time_point enqueue_time;
+    int64_t queue_len_at_enqueue{};
+  };
+
   std::shared_ptr<uvw::async_handle> m_free_jobs_async_handle_;
-  ConcurrentQueue<JobInD> m_free_jobs_queue_;
+  ConcurrentQueue<FreeJobElem> m_free_jobs_queue_;
   void EvCleanFreeJobsQueueCb_();
 
   std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
