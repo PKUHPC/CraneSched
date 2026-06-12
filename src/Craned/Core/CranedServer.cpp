@@ -610,7 +610,8 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   recv_span.SetAttribute("step_id", request->step_id());
   recv_span.SetAttribute("new_status",
                          static_cast<int64_t>(request->new_status()));
-  recv_span.SetAttribute("exit_code", static_cast<int64_t>(request->exit_code()));
+  recv_span.SetAttribute("exit_code",
+                         static_cast<int64_t>(request->exit_code()));
   recv_span.SetAttribute("has_final_status", request->has_final_status());
   if (request->has_final_status()) {
     recv_span.SetAttribute("final_status",
