@@ -60,6 +60,8 @@ constexpr uint32_t kSubmitJobBatchNum = 1000;
 // Clean JobStatusChangeQueue when timeout or exceeding batch num
 constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
 constexpr uint32_t kJobStatusChangeBatchNum = 1000;
+constexpr uint32_t kJobStatusChangeMaxDrainPerTick = 200;
+constexpr uint32_t kJobStatusChangeDbCommitChunkSize = 200;
 
 // Validate and adjust end_time to prevent it from exceeding time_limit
 // by too much. Allow 5 seconds of floating tolerance.

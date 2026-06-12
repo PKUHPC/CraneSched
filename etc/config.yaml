@@ -50,6 +50,10 @@ CraneCtld:
   StatusChangeFlushTimeoutMs: 100
   # Batch size threshold for status change processing (default: 1000)
   StatusChangeBatchNum: 1000
+  # Max status changes drained in one event-loop tick (default: 200)
+  StatusChangeMaxDrainPerTick: 200
+  # Max runtime DB updates per transaction chunk (default: 200)
+  StatusChangeDbCommitChunkSize: 200
 
 Keepalived:
   # the base directory of NFS storage

@@ -1257,7 +1257,7 @@ class JobScheduler {
   static void PersistAndTransferStepsToMongodb_(
       std::unordered_set<StepInCtld*> const& steps);
 
-  static void ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
+  static int64_t ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
 
   // Move the parent unique_ptr out of m_pending_job_map_ into each
   // bundle.parent_job. Must be called with m_pending_job_map_mtx_ held.
@@ -1269,7 +1269,7 @@ class JobScheduler {
   static void CallPluginHookForFinalJobs_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  static void PersistAndTransferJobsToMongodb_(
+  static int64_t PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
   CraneErrCode TerminateRunningStepNoLock_(
