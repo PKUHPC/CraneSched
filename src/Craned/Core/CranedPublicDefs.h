@@ -87,6 +87,7 @@ struct Config {
     uint64_t MaxLogFileNum;
     uint32_t NodeHealthCheckInterval;
     uint32_t ThreadPoolSize{0};
+    uint32_t CgroupOpConcurrency{0};
   };
   CranedConfig CranedConf;
   struct CranedListenConf {

@@ -265,6 +265,8 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
     conf.ThreadPoolSize =
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
+    conf.CgroupOpConcurrency =
+        YamlValueOr<uint32_t>(craned_config["CgroupOpConcurrency"], 0);
   }
   g_config.CranedConf = std::move(conf);
 }

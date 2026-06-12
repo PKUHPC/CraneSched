@@ -86,6 +86,8 @@ Craned:
   NodeHealthCheckInterval: 0
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
+  # Optional worker-local cgroup operation concurrency limit (0 = disabled)
+  CgroupOpConcurrency: 0
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:

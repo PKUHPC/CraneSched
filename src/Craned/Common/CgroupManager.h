@@ -28,6 +28,7 @@
 // Precompiled header comes first.
 
 #include <libcgroup.h>
+#include <semaphore.h>
 
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>
@@ -248,6 +249,8 @@ class ControllerFlags {
 
   // NOLINTNEXTLINE(google-explicit-constructor, hicpp-explicit-conversions)
   operator bool() const noexcept { return static_cast<bool>(m_flags_); }
+
+  constexpr uint64_t Raw() const noexcept { return m_flags_; }
 
  private:
   friend constexpr ControllerFlags operator|(
@@ -632,6 +635,9 @@ class CgroupManager {
                              const crane::grpc::ResourceInNodeV3& resource,
                              bool recover, std::uint64_t min_mem = 0U);
 
+  static void ConfigureCgroupOpConcurrency(uint32_t concurrency);
+  static sem_t* CgroupOpSemaphore();
+
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNodeV3& res_in_node);
 
@@ -744,6 +750,9 @@ class CgroupManager {
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 
   inline static CgConstant::CgroupVersion m_cg_version_;
+  inline static uint32_t m_cgroup_op_concurrency_{0};
+  inline static std::string m_cgroup_op_sem_name_;
+  inline static sem_t* m_cgroup_op_sem_{SEM_FAILED};
 
   // Overflow pool — modified only from event loop (single-threaded).
   inline static std::vector<bool> m_overflow_bits_;

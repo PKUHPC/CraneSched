@@ -2164,17 +2164,29 @@ CraneErrCode ContainerInstance::SetupIdMappedMounts_(
 
 CraneErrCode ProcInstance::Prepare() {
   // Create cgroup for task.
-  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
-                                       task_id),
-      m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
-  if (!cg_expt.has_value()) {
-    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
-               g_config.JobId, g_config.StepId, task_id,
-               static_cast<int>(cg_expt.error()));
-    return cg_expt.error();
+  {
+    CRANE_TRACE_SCOPE_FROM_REMOTE(task_cg_span, "cgroup/task_create",
+                                  g_config.Tracing.Traceparent);
+    task_cg_span.SetAttribute("job_id", g_config.JobId);
+    task_cg_span.SetAttribute("step_id", g_config.StepId);
+    task_cg_span.SetAttribute("task_id", static_cast<int64_t>(task_id));
+    task_cg_span.SetAttribute(
+        "cgroup_name",
+        CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
+                                         task_id));
+    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+        CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
+                                         task_id),
+        m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
+    if (!cg_expt.has_value()) {
+      CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+                 g_config.JobId, g_config.StepId, task_id,
+                 static_cast<int>(cg_expt.error()));
+      task_cg_span.SetStatus(crane::StatusCode::kError, "task_cgroup_failed");
+      return cg_expt.error();
+    }
+    m_task_cg_ = std::move(cg_expt.value());
   }
-  m_task_cg_ = std::move(cg_expt.value());
 
   // Write m_meta_
   if (m_parent_step_inst_->IsCrun()) {
@@ -2922,22 +2934,39 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
 
   // Prepare for execution
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
-  CraneErrCode err = task->Prepare();
-  if (err != CraneErrCode::SUCCESS) {
-    FinalizeTaskAsync(
-        task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
-        std::format("Failed to prepare task, code: {}", static_cast<int>(err)));
-    return err;
+  CraneErrCode err = CraneErrCode::SUCCESS;
+  {
+    CRANE_TRACE_CHILD_NAMED(prepare_span, m_step_.ExecuteSpan(),
+                            "task/prepare");
+    prepare_span.SetAttribute("job_id", m_step_.job_id);
+    prepare_span.SetAttribute("step_id", m_step_.step_id);
+    prepare_span.SetAttribute("task_id", static_cast<int64_t>(task->task_id));
+    err = task->Prepare();
+    if (err != CraneErrCode::SUCCESS) {
+      prepare_span.SetStatus(crane::StatusCode::kError, "task_prepare_failed");
+      FinalizeTaskAsync(
+          task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
+          std::format("Failed to prepare task, code: {}",
+                      static_cast<int>(err)));
+      return err;
+    }
   }
 
   CRANE_INFO("[Task #{}] Spawning in task", task->task_id);
-  err = task->Spawn();
-  if (err != CraneErrCode::SUCCESS) {
-    FinalizeTaskAsync(
-        task->task_id, TaskFinalizeCause::TASK_SPAWN_FAILED,
-        std::format("Cannot spawn child process in task, code: {}",
-                    static_cast<int>(err)));
-    return err;
+  {
+    CRANE_TRACE_CHILD_NAMED(spawn_span, m_step_.ExecuteSpan(), "task/spawn");
+    spawn_span.SetAttribute("job_id", m_step_.job_id);
+    spawn_span.SetAttribute("step_id", m_step_.step_id);
+    spawn_span.SetAttribute("task_id", static_cast<int64_t>(task->task_id));
+    err = task->Spawn();
+    if (err != CraneErrCode::SUCCESS) {
+      spawn_span.SetStatus(crane::StatusCode::kError, "task_spawn_failed");
+      FinalizeTaskAsync(
+          task->task_id, TaskFinalizeCause::TASK_SPAWN_FAILED,
+          std::format("Cannot spawn child process in task, code: {}",
+                      static_cast<int>(err)));
+      return err;
+    }
   }
 
   return CraneErrCode::SUCCESS;

@@ -202,7 +202,8 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
     if (name == "job/alloc") return TraceSpanClass::Detailed;
     break;
   case 10:
-    if (name == "job/commit") return TraceSpanClass::Detailed;
+    if (name == "job/commit" || name == "task/spawn")
+      return TraceSpanClass::Detailed;
     break;
   case 11:
     if (name == "job/pending") return TraceSpanClass::Core;
@@ -211,7 +212,8 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
     break;
   case 12:
     if (name == "step/execute") return TraceSpanClass::Core;
-    if (name == "step/prepare") return TraceSpanClass::Detailed;
+    if (name == "step/prepare" || name == "task/prepare")
+      return TraceSpanClass::Detailed;
     break;
   case 13:
     if (name == "job/lifecycle") return TraceSpanClass::Core;
@@ -255,6 +257,8 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
   }
 
   if (name.starts_with("scheduling/") || name.starts_with("status_change/"))
+    return TraceSpanClass::Detailed;
+  if (name.starts_with("cgroup/") || name.starts_with("task/"))
     return TraceSpanClass::Detailed;
   return TraceSpanClass::Other;
 }
