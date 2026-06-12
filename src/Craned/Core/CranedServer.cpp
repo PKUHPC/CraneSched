@@ -605,6 +605,17 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::StepStatusChangeRequest *request,
     crane::grpc::StepStatusChangeReply *response) {
+  CRANE_TRACE_SCOPE_NAMED(recv_span, "status_change/craned_receive");
+  recv_span.SetAttribute("job_id", request->job_id());
+  recv_span.SetAttribute("step_id", request->step_id());
+  recv_span.SetAttribute("new_status",
+                         static_cast<int64_t>(request->new_status()));
+  recv_span.SetAttribute("exit_code", static_cast<int64_t>(request->exit_code()));
+  recv_span.SetAttribute("has_final_status", request->has_final_status());
+  if (request->has_final_status()) {
+    recv_span.SetAttribute("final_status",
+                           static_cast<int64_t>(request->final_status()));
+  }
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
