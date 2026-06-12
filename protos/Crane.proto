@@ -1073,6 +1073,86 @@ message StreamCrunReply {
   }
 }
 
+message StreamCattachRequest {
+  enum CattachRequestType {
+    STEP_CONNECT_REQUEST = 0;
+    STEP_COMPLETION_REQUEST = 1;
+    TASK_IO_FORWARD = 2;
+  }
+
+  message StepConnectReq {
+    int32 cattach_pid = 1;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    uint32 uid = 4;
+  }
+
+  message StepCompleteReq {
+    JobStatus status = 1;
+  }
+
+  message TaskIOForwardReq {
+    bytes msg = 1;
+    bool eof = 2;
+    optional uint32 task_id = 3;  // If set, forward stdin only to the specified task; otherwise broadcast.
+  }
+
+  CattachRequestType type = 1;
+
+  oneof payload {
+    StepConnectReq payload_step_connect_req = 2;
+    StepCompleteReq payload_step_complete_req = 3;
+    TaskIOForwardReq payload_task_io_forward_req = 4;
+  }
+}
+
+message StreamCattachReply {
+  enum CforedCattachReplyType {
+    STEP_CONNECT_REPLY = 0;
+    STEP_CANCEL_REQUEST = 1;
+    STEP_COMPLETION_ACK_REPLY = 2;
+    TASK_IO_FORWARD = 3;
+    TASK_IO_FORWARD_READY = 4;
+    TASK_ERR_OUTPUT_FORWARD = 9;
+  }
+
+  message StepConnectReply {
+    bool ok = 1;
+    CattachStepInfo step_info = 2;
+    string failure_reason = 3;
+  }
+
+  message StepCancelRequest {}
+
+  message StepCompletionAckReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReadyReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReply {
+    bytes msg = 1;
+    uint32 task_id = 2;
+  }
+
+  message TaskIOErrOutputForwardReply {
+    bytes msg = 1;
+  }
+
+  CforedCattachReplyType type = 1;
+
+  oneof payload {
+    StepConnectReply payload_step_connect_reply = 2;
+    StepCancelRequest payload_step_cancel_request = 3;
+    StepCompletionAckReply payload_step_completion_ack_reply = 4;
+    TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 5;
+    TaskIOForwardReply payload_task_io_forward_reply = 6;
+    TaskIOErrOutputForwardReply payload_task_io_err_output_forward_reply = 11;
+  }
+}
+
 message StreamStepIORequest {
   enum SupervisorRequestType {
     SUPERVISOR_REGISTER = 0;
@@ -1683,6 +1763,7 @@ service CranedForPam {
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
+  rpc CattachStream(stream StreamCattachRequest) returns (stream StreamCattachReply);
   rpc StepIOStream(stream StreamStepIORequest) returns (stream StreamStepIOReply);
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }
