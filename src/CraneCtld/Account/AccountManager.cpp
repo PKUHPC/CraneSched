@@ -928,7 +928,7 @@ AccountManager::CheckModifyAccountOperations(
           break;
         }
         case ModifyField::MaxTres: {
-          const auto& val = operation.value_list()[0];
+          auto val = absl::StrJoin(operation.value_list(), ",");
           auto rich_result =
               CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
@@ -945,7 +945,7 @@ AccountManager::CheckModifyAccountOperations(
           break;
         }
         case ModifyField::MaxTresPerJob: {
-          const auto& val = operation.value_list()[0];
+          auto val = absl::StrJoin(operation.value_list(), ",");
           auto rich_result =
               CheckSetAccountTresLimitNoLock_(partition, val, account);
           if (!rich_result) {
@@ -1304,7 +1304,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
         break;
       }
       case ModifyField::MaxTres: {
-        const auto& val = operation.value_list()[0];
+        auto val = absl::StrJoin(operation.value_list(), ",");
         auto rich_result = CheckSetUserTresLimitNoLock_(account_name, partition,
                                                         val, res_user);
         if (!rich_result) {
@@ -1325,7 +1325,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
         break;
       }
       case ModifyField::MaxTresPerJob: {
-        const auto& val = operation.value_list()[0];
+        auto val = absl::StrJoin(operation.value_list(), ",");
         auto rich_result = CheckSetUserTresLimitNoLock_(account_name, partition,
                                                         val, res_user);
         if (!rich_result) {
