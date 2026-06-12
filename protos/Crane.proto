@@ -191,7 +191,7 @@ message CancelJobRequest {
   uint32 operator_uid = 1;
 
   // Filters
-  map<uint32, JobStepIds> filter_ids = 2;
+  repeated JobIdSelector filter_job_ids = 2;
   string filter_partition = 3;
   string filter_account = 4;
   JobStatus filter_state = 5;
@@ -200,14 +200,22 @@ message CancelJobRequest {
   string filter_username = 8;
 }
 
+message CancelledJobStep {
+  uint32 job_id = 1;
+  optional uint32 array_task_id = 2;
+  repeated uint32 steps = 3;
+}
+
+message NotCancelledJobStep {
+  uint32 job_id = 1;
+  optional uint32 array_task_id = 2;
+  optional uint32 step_id = 3;
+  string reason = 4;
+}
+
 message CancelJobReply {
-  map<uint32, JobStepIds> cancelled_steps = 1;
-  message NotCancelledJobSteps {
-    string reason = 1;
-    repeated uint32 step_ids = 2;
-    repeated string step_reasons = 3;
-  }
-  map<uint32, NotCancelledJobSteps> not_cancelled_job_steps = 2;
+  repeated CancelledJobStep cancelled = 1;
+  repeated NotCancelledJobStep not_cancelled = 2;
 }
 
 message QueryStepFromPortRequest {
@@ -279,7 +287,7 @@ message ModifyJobRequest {
   }
 
   uint32 uid = 1;
-  repeated uint32 job_ids = 2;
+  repeated JobIdSelector job_ids = 2;
 
   TargetAttributes attribute = 3;
 
@@ -606,7 +614,7 @@ message QueryClusterInfoReply {
 }
 
 message QueryJobsInfoRequest {
-  map<uint32 /*JobId*/, JobStepIds> filter_ids = 1;
+  repeated JobIdSelector filter_job_ids = 1;
   repeated string filter_partitions = 2;
   uint32 num_limit = 3;
   repeated string filter_job_names = 4;
@@ -795,6 +803,7 @@ message StreamCforedRequest {
     STEP_REQUEST = 4;
     JOB_COMPLETION_REQUEST = 2;
     CFORED_GRACEFUL_EXIT = 3;
+    STEP_META_REQUEST = 5;
   }
   CforedRequestType type = 1;
 
@@ -826,13 +835,33 @@ message StreamCforedRequest {
     string cfored_name = 1;
   }
 
+  message StepMetaReq {
+    uint32 uid = 1;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    int32 cattach_pid = 4;
+  }
+
   oneof payload {
     CforedReg payload_cfored_reg = 2;
     JobReq payload_job_req = 3;
     StepReq payload_step_req = 6;
     JobCompleteReq payload_job_complete_req = 4;
     GracefulExitReq payload_graceful_exit_req = 5;
+    StepMetaReq payload_step_meta_req = 7;
   }
+}
+
+message CattachStepInfo {
+  bool pty = 1;                       // from InteractiveMeta.Pty
+  optional uint32 input_task_id = 2;  // set when crun used --input=<task_id>
+  uint32 ntasks = 3;                  // for --layout
+  uint32 node_num = 4;                // for --layout
+  string nodelist = 5;                // for --layout and execCranedIds parsing
+  message NodeTasks {
+    repeated uint32 task_ids = 1;
+  }
+  map<string, NodeTasks> craned_task_map = 6;
 }
 
 message StreamCtldReply {
@@ -843,6 +872,7 @@ message StreamCtldReply {
     JOB_COMPLETION_ACK_REPLY = 3;
     CFORED_REGISTRATION_ACK = 4;
     CFORED_GRACEFUL_EXIT_ACK = 5;
+    STEP_META_REPLY = 6;
   }
 
   message JobIdReply {
@@ -886,6 +916,13 @@ message StreamCtldReply {
     bool ok = 1;
   }
 
+  message StepMetaReply {
+    bool ok = 1;
+    string failure_reason = 2;
+    CattachStepInfo step_info = 3;
+    int32 cattach_pid = 4;
+  }
+
   CtldReplyType type = 1;
 
   oneof payload {
@@ -895,6 +932,7 @@ message StreamCtldReply {
     JobCompletionAckReply payload_job_completion_ack = 5;
     JobIdReply payload_job_id_reply = 6;
     CforedGracefulExitAck payload_graceful_exit_ack = 7;
+    StepMetaReply payload_step_meta_reply = 8;
   }
 }
 
@@ -1055,6 +1093,7 @@ message StreamStepIORequest {
 
   message TaskOutputReq {
     bytes msg = 1;
+    uint32 task_id = 2;  // The rank/id of the task that produced this output.
   }
 
   message TaskErrOutputReq {
@@ -1114,7 +1153,7 @@ message StreamStepIOReply {
   message TaskInputReq {
     bytes msg = 1;
     bool eof = 2;
-    optional uint32 task_id = 3;
+    optional uint32 task_id = 3;  // If set, deliver stdin only to the specified task; otherwise broadcast.
   }
 
   message SupervisorUnregisterReply {
@@ -1335,6 +1374,33 @@ message QueryJobSizeSummaryRequest {
 
 message QueryJobSizeSummaryReply {
   repeated JobSizeSummaryItem item_list = 1;
+}
+
+message BroadcastPmixPortRequest {
+  string craned_id = 1;            //  sender
+  repeated string craned_ids = 2;  // nodes
+  uint32 job_id = 3;
+  uint32 step_id = 4;
+  bytes port = 5;  // grpc port or ucx addr (must bytes)
+}
+
+message BroadcastPmixPortReply {
+  bool ok = 1;
+}
+
+message ReceivePmixPortRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+
+  message PmixPorts {
+    string craned_id = 1;
+    bytes port = 2;  // grpc port or ucx addr (must bytes)
+  }
+  repeated PmixPorts pmix_ports = 3;
+}
+
+message ReceivePmixPortReply {
+  bool ok = 1;
 }
 
 service CraneCtld {
@@ -1561,6 +1627,7 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1578,6 +1645,7 @@ service Craned {
   rpc AllocSteps(AllocStepsRequest) returns (AllocStepsReply);
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
   /*
   If the job is an interactive job, the resource uuid is also revoked.
    If there's no process in this interactive job, just deallocate all the resources.
@@ -1600,6 +1668,8 @@ service Craned {
   rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
+  /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 }
 
 service CranedForPam {

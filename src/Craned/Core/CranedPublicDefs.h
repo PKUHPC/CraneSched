@@ -105,6 +105,7 @@ struct Config {
   };
   struct ContainerConfig {
     bool Enabled{false};
+    bool UserNsEnabledByDefault{true};
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
@@ -191,6 +192,8 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
+  std::set<CranedId> NodeList;
+
   struct CranedMeta {
     SystemRelInfo SysInfo;
     absl::Time CranedStartTime;
@@ -203,6 +206,7 @@ struct Config {
   std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
       Ipv6ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<ResourceInNodeV3>> CranedRes;
+  NodeTopoInfo node_topo_info;
   std::unordered_map<std::string, Partition> Partitions;
 
   struct JobLifecycleHookConfig {

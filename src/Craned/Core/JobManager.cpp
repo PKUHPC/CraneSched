@@ -256,15 +256,30 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::format("{:.2f}", static_cast<double>(cpus_on_node)));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+  if (job_to_d.has_array_task()) {
+    const auto& array_task = job_to_d.array_task();
+    env_map.emplace("CRANE_ARRAY_JOB_ID",
+                    std::to_string(array_task.array_job_id()));
+    env_map.emplace("CRANE_ARRAY_TASK_ID",
+                    std::to_string(array_task.task_id()));
+  }
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     env_map.emplace("SLURM_JOBID", std::to_string(job_id));
+    env_map.emplace("SLURM_JOB_ID", std::to_string(job_id));
     env_map.emplace("SLURM_NODEID", node_id_to_str());
     env_map.emplace("SLURMD_NODENAME", g_config.Hostname);
     env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
     env_map.emplace("SLURM_NODELIST",
                     util::HostNameListToStr(daemon_step_to_d.nodelist()));
+    if (job_to_d.has_array_task()) {
+      const auto& array_task = job_to_d.array_task();
+      env_map.emplace("SLURM_ARRAY_JOB_ID",
+                      std::to_string(array_task.array_job_id()));
+      env_map.emplace("SLURM_ARRAY_TASK_ID",
+                      std::to_string(array_task.task_id()));
+    }
   }
 
   return env_map;
@@ -2034,6 +2049,49 @@ void JobManager::StepStatusChangeAsync(
   ActivateStepStatusChangeAsync_(job_id, step_id, new_status, exit_code,
                                  std::move(reason), std::move(final_status),
                                  std::move(timestamp));
+}
+
+bool JobManager::ReceivePmixPort(
+    const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
+    job_id_t job_id, step_id_t step_id) {
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to find job allocation when receiving PMIx ports",
+        job_id, step_id);
+    return false;
+  }
+
+  absl::MutexLock lk(job->step_map_mtx.get());
+  auto step_it = job->step_map.find(step_id);
+  if (step_it == job->step_map.end()) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to find step allocation when receiving PMIx "
+        "ports",
+        job_id, step_id);
+    return false;
+  }
+
+  auto& stub = step_it->second->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Supervisor stub is null when receiving PMIx ports",
+        job_id, step_id);
+    return false;
+  }
+
+  auto result = stub->ReceivePmixPort(pmix_ports);
+  if (result != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to deliver PMIx ports to supervisor: {}",
+                job_id, step_id, CraneErrStr(result));
+    return false;
+  }
+
+  CRANE_TRACE(
+      "[Step #{}.{}] Successfully delivered {} PMIx ports to supervisor",
+      job_id, step_id, pmix_ports.size());
+
+  return true;
 }
 
 }  // namespace Craned

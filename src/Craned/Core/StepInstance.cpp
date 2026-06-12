@@ -47,7 +47,8 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supervisor_stub(supervisor_stub) {}
 
 void StepInstance::CleanUp() {
-  if (!IsFinishedStepStatus(this->status)) {
+  if (this->status != StepStatus::Completing &&
+      !IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
         "[Step #{}.{}] Cleaning up a step which is not in finished status, "
         "current status: {}.",

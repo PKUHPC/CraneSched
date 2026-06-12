@@ -19,6 +19,7 @@
 #include "crane/OS.h"
 
 #include <absl/cleanup/cleanup.h>
+#include <absl/strings/numbers.h>
 #include <grp.h>
 #include <poll.h>
 #include <pwd.h>
@@ -423,6 +424,26 @@ bool GetSystemReleaseInfo(SystemRelInfo* info) {
 #else
 #  error "Unsupported OS"
 #endif
+}
+
+std::optional<std::pair<uint32_t, uint32_t>> ParseKernelReleaseMajorMinor(
+    std::string_view release) {
+  const std::size_t major_end = release.find('.');
+  if (major_end == std::string_view::npos) return std::nullopt;
+
+  uint32_t major{};
+  if (!absl::SimpleAtoi(release.substr(0, major_end), &major))
+    return std::nullopt;
+
+  const std::size_t minor_begin = major_end + 1;
+  const std::size_t minor_end =
+      release.find_first_not_of("0123456789", minor_begin);
+
+  auto minor_str = release.substr(minor_begin, minor_end - minor_begin);
+  uint32_t minor{};
+  if (!absl::SimpleAtoi(minor_str, &minor)) return std::nullopt;
+
+  return std::pair{major, minor};
 }
 
 absl::Time GetSystemBootTime() {

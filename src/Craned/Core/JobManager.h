@@ -111,6 +111,10 @@ class JobManager {
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
       std::unordered_map<job_id_t, std::string> traceparents = {});
 
+  bool ReceivePmixPort(
+      const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
+      job_id_t job_id, step_id_t step_id);
+
   CraneExpected<void> ChangeStepTimeConstraint(
       job_id_t job_id, step_id_t step_id,
       std::optional<int64_t> time_limit_seconds,

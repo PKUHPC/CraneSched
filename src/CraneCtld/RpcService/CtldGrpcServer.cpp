@@ -239,74 +239,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     kWaitRegReq = 0,
     kWaitMsg,
     kCleanData,
+    kWaitReConnect,
   };
 
   bool ok;
 
   StreamCforedRequest cfored_request;
-
   auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
-  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
-  auto cb_step_res_allocated =
-      [writer_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteJobResAllocReply(arg);
-      };
-  auto cb_step_cancel =
-      [writer_weak_ptr](StepInteractiveMeta::StepCancelArgs const& args) {
-        auto& [job_id, step_id] = args;
-        CRANE_TRACE("[Step #{}.{}] Sending JobCancelRequest in job_cancel",
-                    job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteJobCancelRequest(job_id, step_id);
-      };
-  auto cb_step_completed =
-      [this,
-       writer_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
-        auto& [job_id, step_id, send_completion_ack, cfored_name] = args;
-        CRANE_TRACE("[Step #{}.{}] The completion callback of has been called.",
-                    job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer) {
-          if (send_completion_ack)
-            writer->WriteJobCompletionAckReply(job_id, step_id);
-        } else {
-          CRANE_ERROR(
-              "[Step #{}.{}] Stream writer of has been destroyed. "
-              "JobCompletionAckReply will not be sent.",
-              job_id, step_id);
-        }
+  std::weak_ptr<StreamWriterProxy> proxy_weak_ptr;
 
-        m_ctld_server_->m_mtx_.Lock();
-
-        // If cfored disconnected, the cfored_name should have be
-        // removed from the map and the job completion callback is
-        // generated from cleaning the remaining jobs by calling
-        // g_job_scheduler->TerminateJob(), we should ignore this
-        // callback since the job id has already been cleaned.
-        auto iter = m_ctld_server_->m_cfored_running_jobs_.find(cfored_name);
-        if (iter != m_ctld_server_->m_cfored_running_jobs_.end()) {
-          auto& cfored_job_map = iter->second;
-          auto job_iter = cfored_job_map.find(job_id);
-          if (job_iter != cfored_job_map.end()) {
-            auto& step_set = job_iter->second;
-            bool present = step_set.erase(step_id);
-            if (step_set.empty()) cfored_job_map.erase(job_iter);
-            if (!present) {
-              CRANE_ERROR(
-                  "[Step #{}.{}] not found in cfored {} running job map "
-                  "when handling job completion callback.",
-                  job_id, step_id, cfored_name);
-            }
-          } else {
-            CRANE_ERROR(
-                "Job #{} not found in cfored {} running job map when "
-                "handling job completion callback.",
-                job_id, cfored_name);
-          }
-        }
-        m_ctld_server_->m_mtx_.Unlock();
-      };
+  std::function<void(const StepInteractiveMeta::StepResAllocArgs&)>
+      cb_step_res_allocated;
+  std::function<void(const StepInteractiveMeta::StepCancelArgs& args)>
+      cb_step_cancel;
+  std::function<void(const StepInteractiveMeta::StepCompeteArgs& args)>
+      cb_step_completed;
 
   CRANE_TRACE("CforedStream from {} created.", context->peer());
 
@@ -323,6 +271,91 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         }
 
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+
+        m_ctld_server_->m_stream_proxy_mtx_.Lock();
+        auto iter =
+            m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
+        if (iter != m_ctld_server_->m_cfored_stream_proxy_map_.end()) {
+          iter->second->SetWriter(stream_writer);
+          proxy_weak_ptr = iter->second;
+        } else {
+          auto proxy = std::make_shared<StreamWriterProxy>();
+          proxy->SetWriter(stream_writer);
+          m_ctld_server_->m_cfored_stream_proxy_map_[cfored_name] = proxy;
+          proxy_weak_ptr = proxy;
+        }
+        m_ctld_server_->m_stream_proxy_mtx_.Unlock();
+
+        cb_step_res_allocated =
+            [proxy_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
+              if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  writer.WriteJobResAllocReply(arg);
+                });
+              }
+            };
+        cb_step_cancel = [proxy_weak_ptr](
+                             StepInteractiveMeta::StepCancelArgs const& args) {
+          auto& [job_id, step_id] = args;
+          CRANE_TRACE("[Step #{}.{}] Sending JobCancelRequest in job_cancel",
+                      job_id, step_id);
+          if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+            proxy->WithWriter([&](CforedStreamWriter& writer) {
+              writer.WriteJobCancelRequest(job_id, step_id);
+            });
+          }
+        };
+        cb_step_completed =
+            [this,
+             proxy_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
+              auto& [job_id, step_id, send_completion_ack, cfored_name] = args;
+              CRANE_TRACE(
+                  "[Step #{}.{}] The completion callback of has been called.",
+                  job_id, step_id);
+              if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  if (send_completion_ack)
+                    writer.WriteJobCompletionAckReply(job_id, step_id);
+                });
+              } else {
+                CRANE_ERROR(
+                    "[Step #{}.{}] Stream writer of has been destroyed. "
+                    "JobCompletionAckReply will not be sent.",
+                    job_id, step_id);
+              }
+
+              m_ctld_server_->m_mtx_.Lock();
+
+              // If cfored disconnected, the cfored_name should have be
+              // removed from the map and the job completion callback is
+              // generated from cleaning the remaining jobs by calling
+              // g_job_scheduler->TerminateJob(), we should ignore this
+              // callback since the job id has already been cleaned.
+              auto iter =
+                  m_ctld_server_->m_cfored_running_jobs_.find(cfored_name);
+              if (iter != m_ctld_server_->m_cfored_running_jobs_.end()) {
+                auto& cfored_job_map = iter->second;
+                auto job_iter = cfored_job_map.find(job_id);
+                if (job_iter != cfored_job_map.end()) {
+                  auto& step_set = job_iter->second;
+                  bool present = step_set.erase(step_id);
+                  if (step_set.empty()) cfored_job_map.erase(job_iter);
+                  if (!present) {
+                    CRANE_ERROR(
+                        "[Step #{}.{}] not found in cfored {} running job map "
+                        "when handling job completion callback.",
+                        job_id, step_id, cfored_name);
+                  }
+                } else {
+                  CRANE_ERROR(
+                      "Job #{} not found in cfored {} running job map when "
+                      "handling job completion callback.",
+                      job_id, cfored_name);
+                }
+              }
+              m_ctld_server_->m_mtx_.Unlock();
+            };
+
         CRANE_INFO("Cfored {} registered.", cfored_name);
 
         ok = stream_writer->WriteCforedRegistrationAck({});
@@ -331,13 +364,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         } else {
           CRANE_ERROR(
               "Failed to send msg to cfored {}. Connection is broken. "
-              "Exiting...",
+              "Waiting for reconnection...",
               cfored_name);
-          state = StreamState::kCleanData;
+          state = StreamState::kWaitReConnect;
         }
 
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
 
       break;
@@ -351,6 +384,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto job = std::make_unique<JobInCtld>();
           job->SetFieldsByJobToCtld(payload.job());
 
+          CRANE_TRACE("[Job #{}] Recv JOB_REQUEST.", job->JobId());
+
           InteractiveMeta meta;
           meta.cfored_name = cfored_name;
           meta.cb_step_res_allocated = cb_step_res_allocated;
@@ -359,14 +394,21 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           job->meta = std::move(meta);
 
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
-          if (lua_result) {
-            auto rich_err = lua_result.value().get();
-            if (rich_err.code() != CraneErrCode::SUCCESS) {
-              if (rich_err.description().empty()) {
-                result = std::unexpected(CraneErrStr(rich_err.code()));
-              } else {
-                result = std::unexpected(rich_err.description());
+
+          if (auto check = JobScheduler::PreJobSubmitCheck(job.get()); !check) {
+            result = std::unexpected(check.error());
+          }
+
+          if (result) {
+            auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
+            if (lua_result) {
+              auto rich_err = lua_result.value().get();
+              if (rich_err.code() != CraneErrCode::SUCCESS) {
+                if (rich_err.description().empty()) {
+                  result = std::unexpected(CraneErrStr(rich_err.code()));
+                } else {
+                  result = std::unexpected(rich_err.description());
+                }
               }
             }
           }
@@ -403,9 +445,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
           }
         } break;
         case StreamCforedRequest::STEP_REQUEST: {
@@ -421,16 +463,25 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_step_completed = cb_step_completed;
           step->ia_meta = std::move(meta);
 
-          auto submit_result =
-              g_job_scheduler->SubmitStepAsync(std::move(step));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto submit_expt = submit_result.get();
-          if (submit_expt.has_value()) {
-            step_id_t step_id = submit_expt.value();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, step_id)};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_expt.error()));
+
+          if (auto check = JobScheduler::PreStepSubmitCheck(step.get());
+              !check) {
+            result = std::unexpected(check.error());
+          }
+
+          if (result) {
+            auto submit_result =
+                g_job_scheduler->SubmitStepAsync(std::move(step));
+            auto submit_expt = submit_result.get();
+            if (submit_expt.has_value()) {
+              step_id_t step_id = submit_expt.value();
+              result =
+                  std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                      std::pair(job_id, step_id)};
+            } else {
+              result = std::unexpected(CraneErrStr(submit_expt.error()));
+            }
           }
 
           // Track in map before Write so kCleanData can always find
@@ -448,9 +499,52 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (!ok) {
             CRANE_ERROR(
                 "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
+                "Waiting for reconnection...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
+          }
+        } break;
+
+        case StreamCforedRequest::STEP_META_REQUEST: {
+          auto const& payload = cfored_request.payload_step_meta_req();
+          CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(),
+                      payload.step_id());
+          std::string failure_reason;
+          /* Use step_ok to avoid shadowing the outer bool ok used for
+           * stream-write results throughout the rest of this function. */
+          bool step_ok = true;
+          crane::grpc::StepToCtld step;
+          std::unordered_map<CranedId, std::set<task_id_t>> task_map;
+          if (!g_job_scheduler->QueryStepAndNodeRegex(
+                  payload.job_id(), payload.step_id(), &step, &task_map)) {
+            step_ok = false;
+            failure_reason = "Step not found";
+          } else {
+            if (payload.uid() != step.uid() &&
+                !g_account_manager->CheckUidIsAdmin(payload.uid())) {
+              step_ok = false;
+              failure_reason = "permission denied";
+            } else if (step.type() != crane::grpc::JobType::Interactive ||
+                       !step.has_interactive_meta() ||
+                       step.interactive_meta().interactive_type() !=
+                           crane::grpc::InteractiveJobType::Crun) {
+              step_ok = false;
+              failure_reason = "cattach only supports crun steps";
+            } else if (step.interactive_meta().cfored_name() != cfored_name) {
+              step_ok = false;
+              failure_reason =
+                  "cattach must run on the same node where the crun step was "
+                  "started";
+            }
+          }
+          if (!stream_writer->WriteStepMetaReply(step_ok, failure_reason, step,
+                                                 payload.cattach_pid(),
+                                                 task_map)) {
+            CRANE_ERROR(
+                "Failed to send STEP_META_REPLY to cfored {}. "
+                "Connection is broken.",
+                cfored_name);
+            state = StreamState::kWaitReConnect;
           }
         } break;
 
@@ -486,10 +580,18 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           return Status::CANCELLED;
         }
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
     } break;
 
+    case StreamState::kWaitReConnect: {
+      CRANE_INFO(
+          "Cfored {} unexpectedly disconnected. "
+          "Waiting for it to reconnect.",
+          cfored_name);
+      stream_writer->Invalidate();
+      return Status::OK;
+    }
     case StreamState::kCleanData: {
       CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
       stream_writer->Invalidate();
@@ -503,10 +605,88 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       g_job_scheduler->TerminateRunningStep(
           running_steps, crane::grpc::TERMINATE_SOURCE_FRONTEND_DISCONNECT);
 
+      m_ctld_server_->m_stream_proxy_mtx_.Lock();
+      m_ctld_server_->m_cfored_stream_proxy_map_.erase(cfored_name);
+      m_ctld_server_->m_stream_proxy_mtx_.Unlock();
+
       return Status::OK;
     }
     }
   }
+}
+
+grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
+    grpc::ServerContext* context,
+    const crane::grpc::BroadcastPmixPortRequest* request,
+    crane::grpc::BroadcastPmixPortReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
+
+  using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
+  using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
+
+  PmixPortsMetaMapKey map_key(request->job_id(), request->step_id());
+
+  // Snapshot of the completed port map, populated inside the locked callback.
+  // Empty means not all ports have arrived yet and no broadcast is needed.
+  std::optional<PmixPortsMetaMapValue> ports_to_broadcast;
+
+  pmix_ports_map.lazy_emplace_l(
+      map_key,
+      [&](std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>& pair) {
+        pair.second.emplace(request->craned_id(), request->port());
+
+        if (pair.second.size() == request->craned_ids().size()) {
+          CRANE_TRACE(
+              "[Step#{}.{}] All pmix ports have been collected, start "
+              "broadcasting.",
+              request->job_id(), request->step_id());
+          ports_to_broadcast = pair.second;
+        }
+      },
+      [&](auto&& ctor) {
+        // First time insert
+
+        PmixPortsMetaMapValue value;
+        value.emplace(request->craned_id(), request->port());
+
+        ctor(map_key, std::move(value));
+      });
+
+  // The map lock has been released at this point.  Perform the fanout now.
+  if (ports_to_broadcast.has_value()) {
+    auto ports_shared =
+        std::make_shared<PmixPortsMetaMapValue>(std::move(*ports_to_broadcast));
+
+    job_id_t job_id = request->job_id();
+    step_id_t step_id = request->step_id();
+
+    for (const auto& craned_id : request->craned_ids()) {
+      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
+        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!craned_stub) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Craned {} stub not found when broadcasting "
+              "pmix port.",
+              job_id, step_id, craned_id);
+          return;
+        }
+        auto result =
+            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
+        if (result != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+              job_id, step_id, craned_id);
+        }
+      });
+    }
+  }
+
+  response->set_ok(true);
+  return grpc::Status::OK;
 }
 
 grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
@@ -688,21 +868,28 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
 
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
-  results.reserve(job_count);
 
-  for (int i = 0; i < job_count; i++) {
-    auto job = std::make_unique<JobInCtld>();
-    job->SetFieldsByJobToCtld(job_to_ctld);
-    job->SetSubmitId(submit_id);
-    job->SetSubmitTraceparent(submit_tp);
+  const bool has_array_spec = job_to_ctld.has_array_spec();
 
-    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
-    results.emplace_back(std::move(result));
+  if (has_array_spec && job_count != 1) {
+    response->mutable_job_id_list()->Add(0);
+    response->mutable_code_list()->Add(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
   }
 
-  for (auto& res : results) {
-    if (res.has_value()) {
-      CraneExpected<job_id_t> job_result = res.value().get();
+  if (has_array_spec) {
+    // Array job: submit ONE parent job. Expansion into individual tasks
+    // happens at scheduling time in ScheduleThread_.
+    // Array parameter legality is checked in JobScheduler::CheckJobValidity.
+    auto parent_job = std::make_unique<JobInCtld>();
+    // Do NOT set array_task_id here - the parent represents the whole array.
+    parent_job->SetFieldsByJobToCtld(job_to_ctld);
+    parent_job->SetSubmitId(submit_id);
+    parent_job->SetSubmitTraceparent(submit_tp);
+
+    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(parent_job));
+    if (result.has_value()) {
+      CraneExpected<job_id_t> job_result = result.value().get();
       if (job_result.has_value()) {
         response->mutable_job_id_list()->Add(job_result.value());
       } else {
@@ -711,7 +898,34 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       }
     } else {
       response->mutable_job_id_list()->Add(0);
-      response->mutable_code_list()->Add(res.error());
+      response->mutable_code_list()->Add(result.error());
+    }
+  } else {
+    // Non-array jobs: submit individually (repeat count).
+    results.reserve(job_count);
+    for (uint32_t i = 0; i < job_count; i++) {
+      auto job = std::make_unique<JobInCtld>();
+      job->SetFieldsByJobToCtld(job_to_ctld);
+      job->SetSubmitId(submit_id);
+      job->SetSubmitTraceparent(submit_tp);
+
+      auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
+      results.emplace_back(std::move(result));
+    }
+
+    for (auto& res : results) {
+      if (res.has_value()) {
+        CraneExpected<job_id_t> job_result = res.value().get();
+        if (job_result.has_value()) {
+          response->mutable_job_id_list()->Add(job_result.value());
+        } else {
+          response->mutable_job_id_list()->Add(0);
+          response->mutable_code_list()->Add(job_result.error());
+        }
+      } else {
+        response->mutable_job_id_list()->Add(0);
+        response->mutable_code_list()->Add(res.error());
+      }
     }
   }
 
@@ -914,8 +1128,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
-    for (auto job_id : request->job_ids()) {
-      response->add_not_modified_jobs(job_id);
+    for (const auto& selector : request->job_ids()) {
+      response->add_not_modified_jobs(selector.job_id());
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
         response->add_not_modified_reasons("User is not a user of Crane");
       } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
@@ -925,13 +1139,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     return grpc::Status::OK;
   }
 
-  std::list<job_id_t> job_ids;
-
-  if (g_config.JobSubmitLuaScript.empty()) {
-    job_ids.assign(request->job_ids().begin(), request->job_ids().end());
-  } else {
-    g_job_scheduler->JobModifyLuaCheck(*request, response, &job_ids);
-  }
+  std::vector<job_id_t> job_ids;
+  g_job_scheduler->CollectJobIdsForModify(*request, response, &job_ids);
 
   CraneErrCode err;
   if (request->attribute() == ModifyJobRequest::TimeLimit) {
@@ -939,7 +1148,7 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
         request->has_time_limit_seconds()
             ? std::optional<int64_t>(request->time_limit_seconds())
             : std::nullopt;
-    for (auto job_id : request->job_ids()) {
+    for (auto job_id : job_ids) {
       err = g_job_scheduler->ChangeJobTimeConstraint(job_id, time_limit_seconds,
                                                      std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
@@ -1466,6 +1675,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 
   qos.max_wall = absl::Seconds(qos_info->max_wall());
 
+  qos.preempt.insert(qos_info->preempt().begin(), qos_info->preempt().end());
+  qos.preempt_mode = qos_info->preempt_mode();
+
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
     response->set_ok(true);
@@ -1866,6 +2078,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
     qos_info->set_flags(qos.flags.ToInt64());
+    for (const auto& preempt_name : qos.preempt) {
+      qos_info->add_preempt(preempt_name);
+    }
+    qos_info->set_preempt_mode(qos.preempt_mode);
   }
 
   return grpc::Status::OK;

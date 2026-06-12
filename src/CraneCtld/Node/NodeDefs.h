@@ -35,6 +35,8 @@ struct CranedStaticMeta {
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
   ResourceInNodeV3 res;
+
+  NodeTopoInfo node_topo_info;
 };
 
 struct CranedRemoteMeta {

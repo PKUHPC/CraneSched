@@ -33,6 +33,22 @@ CraneSched automatically sets a series of environment variables when executing j
 
 ---
 
+## Array Job Environment Variables
+
+These variables are set only for expanded array tasks.
+
+### CRANE_ARRAY_JOB_ID
+- **Description**: Parent/anchor job ID of the whole array
+- **Type**: Integer
+- **Example**: `1000`
+
+### CRANE_ARRAY_TASK_ID
+- **Description**: Current array task index
+- **Type**: Integer
+- **Example**: `7`
+
+---
+
 ## Step Environment Variables
 
 When executing within a job step, CraneSched sets additional step-specific environment variables. These variables help scripts and programs distinguish between running as a standalone job versus running as a step within a job.
@@ -148,6 +164,8 @@ When a job is allocated GPU or other accelerator devices, CraneSched sets the co
 #SBATCH --time=01:00:00
 
 echo "Job ID: $CRANE_JOB_ID"
+echo "Array Job ID: ${CRANE_ARRAY_JOB_ID:-N/A}"
+echo "Array Task ID: ${CRANE_ARRAY_TASK_ID:-N/A}"
 echo "Job Name: $CRANE_JOB_NAME"
 echo "Node List: $CRANE_JOB_NODELIST"
 echo "Number of Nodes: $CRANE_JOB_NUM_NODES"

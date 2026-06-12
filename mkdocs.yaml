@@ -78,6 +78,7 @@ nav:
       - Keepalived Guide: deployment/configuration/keepalived.md
       - Lua Guide: deployment/configuration/lua_guide.md
       - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
+      - PMIx Support: deployment/configuration/pmix.md
   - Commands:
       - Job Submission:
           - cbatch: command/cbatch.md
@@ -92,6 +93,7 @@ nav:
       - Job Control:
           - ccancel: command/ccancel.md
           - ccontrol: command/ccontrol.md
+          - cattach: command/cattach.md
       - Container:
           - ccon: command/ccon.md
       - Account Management:
@@ -104,6 +106,7 @@ nav:
     - Job Steps: reference/job_steps.md
     - Job Dependency: reference/job_dependency.md
     - Pending Reason: reference/pending_reason.md
+    - Job Preemption: reference/preemption.md
     - Container Support:
         - Overview: reference/container/index.md
         - Concepts: reference/container/concepts.md
@@ -154,6 +157,7 @@ plugins:
             Job Steps: 作业步
             Job Dependency: 作业依赖
             Pending Reason: 作业排队原因
+            Job Preemption: 作业抢占
             License Usage Guide: 许可证功能配置指南
             Keepalived Guide: Keepalived 配置指南
             Lua Guide: Lua 脚本配置指南
@@ -180,6 +184,7 @@ plugins:
             Container Deployment: 容器功能部署
             PowerControl Deployment: 节能模块部署
             Plugins: 插件部署
+            PMIx Support: PMIx 使用指南
         - locale: en
           name: English
           build: true

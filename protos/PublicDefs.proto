@@ -151,6 +151,18 @@ message Dependencies {
   bool is_or = 2;
 }
 
+message ArraySpec {
+  uint32 start = 1;
+  uint32 end = 2;
+  optional uint32 stride = 3;
+  optional uint32 max_concurrent = 4;
+}
+
+message ArrayTaskIdentity {
+  uint32 array_job_id = 1;
+  uint32 task_id = 2;
+}
+
 message DependencyStatus {
   repeated DependencyCondition pending = 1;
   bool is_or = 2;
@@ -169,7 +181,8 @@ message Signal {
     NONE = 0;
     // (B) Send the signal only to the batch shell, not to other job steps.
     BATCH_ONLY = 1;
-    // (R) Allow this job to overlap with a reservation that has MaxStartDelay set
+    // (R) Allow this job to overlap with a reservation that has MaxStartDelay
+    // set
     RESERVATION_OVERLAP = 2;
   }
   SignalFlag signal_flag = 3;
@@ -244,6 +257,9 @@ message JobToCtld {
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
+
+  // Array submission spec for this job. Child identity is runtime-only.
+  ArraySpec array_spec = 58;
 }
 
 message JobInEmbeddedDb {
@@ -279,6 +295,12 @@ message RuntimeAttrOfJob {
   // Used to extend end_time upon resume so that suspended time
   // does not count toward the execution timeout.
   google.protobuf.Timestamp suspend_time = 24;
+
+  // For array children: the materialized array-task identity.
+  ArrayTaskIdentity array_task = 26;
+
+  // For array parents: whether child jobs have been materialized.
+  optional bool array_children_expanded = 28;
 }
 
 message StepToCtld {
@@ -381,6 +403,7 @@ message JobToD {
   string name = 9;
 
   optional string traceparent = 10;  // W3C traceparent for distributed tracing
+  optional ArrayTaskIdentity array_task = 16;
 }
 
 enum StepType {
@@ -438,12 +461,15 @@ message StepToD {
   repeated Signal signals = 32;
   google.protobuf.Timestamp deadline_time = 33;
 
-  // task_node_list[task_id] = index of the node in nodelist that owns this task.
-  // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
+  // task_node_list[task_id] = index of the node in nodelist that owns this
+  // task. Size equals ntasks. Provides the authoritative task_id -> node_idx
+  // mapping.
   repeated uint32 task_node_list = 34;
 
   IoMeta io_meta = 35;
   string sh_script = 36;
+
+  optional ArrayTaskIdentity array_task = 39;
 }
 
 message JobStepsToD {
@@ -454,6 +480,12 @@ message JobStepsToD {
 
 message JobStepIds {
   repeated uint32 steps = 1;
+}
+
+message JobIdSelector {
+  uint32 job_id = 1;
+  optional uint32 array_task_id = 2;
+  repeated uint32 steps = 3;
 }
 
 message IoMeta {
@@ -492,6 +524,8 @@ message InteractiveJobAdditionalMeta {
 
   // Task ID to forward crun input to
   optional uint32 input_task_id = 8;
+
+  string mpi = 9;
 }
 
 message PodJobAdditionalMeta {
@@ -637,6 +671,9 @@ message JobInfo {
   string submit_hostname = 43;
   uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
+
+  ArraySpec array_spec = 50;
+  ArrayTaskIdentity array_task = 51;
 }
 
 message StepInfo {
@@ -685,6 +722,15 @@ message StepInfo {
   google.protobuf.Timestamp deadline_time = 41;
 }
 
+// Physical CPU topology of a node or job topology constraint.
+message NodeTopoInfo {
+  uint32 boards = 1;
+  uint32 sockets = 2;
+  uint32 cores_per_socket = 3;
+  uint32 threads_per_core = 4;
+  uint32 total_cpus = 5;
+}
+
 message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;
@@ -724,6 +770,9 @@ message CranedInfo {
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
+
+  // Physical CPU topology of this node.
+  NodeTopoInfo node_topo_info = 17;
 }
 
 message ReservationInfo {
@@ -892,6 +941,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
+  ERR_PMIX_ERR = 106;  // PMIx initialization or runtime error
 }
 
 enum EntityType {
@@ -903,12 +953,26 @@ enum TerminateSource {
   TERMINATE_SOURCE_USER_CANCEL = 0;
   TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
   TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
+  TERMINATE_SOURCE_PREEMPT = 3;
 }
 
 enum OperationType {
   Overwrite = 0;
   Add = 1;
   Delete = 2;
+}
+
+enum PreemptType {
+  PREEMPT_NONE = 0;
+  PREEMPT_QOS = 1;
+  PREEMPT_PARTITION = 2;
+}
+
+enum PreemptMode {
+  PREEMPT_MODE_OFF = 0;
+  PREEMPT_MODE_CANCEL = 1;
+  PREEMPT_MODE_REQUEUE = 2;
+  PREEMPT_MODE_SUSPEND = 3;
 }
 
 enum ModifyField {
@@ -935,6 +999,8 @@ enum ModifyField {
   MaxTresPerUser = 17;
   MaxTresPerAccount = 18;
   Flags = 19;
+  Preempt = 20;
+  ModifyPreemptMode = 21;
 
   // wckey
   DefaultWckey = 40;
@@ -1001,6 +1067,8 @@ message QosInfo {
   ResourceView max_tres_per_user = 14;
   ResourceView max_tres_per_account = 15;
   uint32 flags = 16;
+  repeated string preempt = 17;
+  PreemptMode preempt_mode = 18;
 }
 
 message QueryWckeyInfo {
@@ -1047,6 +1115,7 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+  NodeTopoInfo node_topo_info = 10;
 }
 
 enum TxnAction {
@@ -1125,4 +1194,9 @@ message JobSizeSummaryItem {
   uint32 cpus_alloc = 4;
   double total_cpu_time = 5;
   int64 total_count = 6;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }

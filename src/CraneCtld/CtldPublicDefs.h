@@ -23,6 +23,10 @@
 
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
+
+#include <limits>
+#include <memory>
+
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -76,6 +80,8 @@ constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
+// TODO: temporary cap; revisit once array submission limits are settled.
+constexpr uint32_t kMaxArrayTaskCount = 10000;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
 constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
@@ -101,6 +107,8 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+
+    NodeTopoInfo node_topo_info;
   };
 
   struct Partition {
@@ -182,6 +190,14 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct PreemptConfig {
+    crane::grpc::PreemptType PreemptType{
+        crane::grpc::PreemptType::PREEMPT_NONE};
+    crane::grpc::PreemptMode PreemptMode{
+        crane::grpc::PreemptMode::PREEMPT_MODE_OFF};
+  };
+  PreemptConfig Preempt;
+
   struct JobLifecycleHookConfig {
     std::vector<std::string> CranectldPrologs;  // ctld prologs
     std::vector<std::string> CranectldEpilogs;  // ctld epilogs
@@ -252,6 +268,14 @@ struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
   std::shared_ptr<spdlog::async_logger> db_logger;
 };
+
+using array_task_id_t = uint32_t;  // Task index within a job array
+
+// Sentinel value meaning "no array_task_id" (i.e. a plain non-array selector
+// or the array parent itself). Matches Slurm's NO_VAL convention so it can be
+// reused across ctld and craned layers without translation.
+inline constexpr array_task_id_t kNoArrayTaskId =
+    std::numeric_limits<array_task_id_t>::max() - 1;
 
 }  // namespace Ctld
 
@@ -574,6 +598,12 @@ struct StepInCtld {
            m_step_to_ctld_.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveJobType::Crun;
   }
+  bool IsPmix() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           m_step_to_ctld_.interactive_meta().mpi() == kMpiTypePmix;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -788,6 +818,36 @@ struct JobInCtld {
 
   std::string submit_hostname;
 
+  // Array job model:
+  //
+  //   JobToCtld.array_spec carries only submission-time array spec.
+  //   RuntimeAttrOfJob.array_task carries only materialized child identity.
+  //   The array parent has array_spec but no array_task identity.
+  [[nodiscard]] bool HasArraySpec() const {
+    return job_to_ctld.has_array_spec();
+  }
+  [[nodiscard]] const crane::grpc::ArraySpec* GetArraySpec() const {
+    return job_to_ctld.has_array_spec() ? &job_to_ctld.array_spec() : nullptr;
+  }
+  crane::grpc::ArraySpec* MutableArraySpec() {
+    return job_to_ctld.has_array_spec() ? job_to_ctld.mutable_array_spec()
+                                        : nullptr;
+  }
+
+  [[nodiscard]] bool IsArrayParent() const {
+    return HasArraySpec() && !runtime_attr.has_array_task();
+  }
+
+  // Returns true if this is a materialized array child.
+  bool IsArrayChild() const { return runtime_attr.has_array_task(); }
+
+  struct ArrayTaskIdentity {
+    job_id_t array_job_id;
+    uint32_t task_id;
+  };
+
+  std::optional<ArrayTaskIdentity> GetArrayTaskIdentity() const;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this job is accepted.
@@ -894,6 +954,11 @@ struct JobInCtld {
   // Persisted to the database via RuntimeAttr.
   absl::Time suspend_time{absl::InfinitePast()};
 
+  // Mirrors ArrayMeta::parent_start_event_triggered_ for array parents so the
+  // running representation can be synthesized without consulting ArrayManager.
+  // Transient cache — recovery re-populates via ArrayMeta on startup.
+  bool array_parent_started{false};
+
   // Helper function
  public:
   // =================== Get Attr ==================
@@ -909,6 +974,13 @@ struct JobInCtld {
            job_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveJobType::Calloc;
   }
+  bool IsPmix() const {
+    return type == crane::grpc::JobType::Interactive &&
+           job_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           job_to_ctld.interactive_meta().mpi() == kMpiTypePmix;
+  }
+
   bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
@@ -917,7 +989,9 @@ struct JobInCtld {
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
-  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() { return runtime_attr; }
+  crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
+    return runtime_attr;
+  }
 
   // =================== Setter/Getter ===================
 
@@ -973,6 +1047,36 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  // Array job tracking accessors
+  bool ArrayMaterializationComplete() const;
+  void SetArrayMaterializationComplete(bool complete);
+  void SetArrayParentStarted(bool started) { array_parent_started = started; }
+  bool IsArrayParentStarted() const { return array_parent_started; }
+
+  // Effective status for display/filtering. Array parents stay stored as
+  // Pending while running so they don't appear in running maps; surface them
+  // as Running here once at least one child has started.
+  crane::grpc::JobStatus EffectiveDisplayStatus() const {
+    if (IsArrayParent() && status == crane::grpc::Pending &&
+        array_parent_started) {
+      return crane::grpc::Running;
+    }
+    return status;
+  }
+  void SetArrayTaskIdentity(job_id_t array_job_id, array_task_id_t task_id);
+  [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().array_job_id();
+  }
+  [[nodiscard]] std::optional<array_task_id_t> ArrayTaskId() const {
+    if (!runtime_attr.has_array_task()) {
+      return std::nullopt;
+    }
+    return runtime_attr.array_task().task_id();
+  }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
     CRANE_ASSERT(!m_daemon_step_);
@@ -1052,6 +1156,7 @@ struct JobInCtld {
   void AddDependent(crane::grpc::DependencyType dep_type, job_id_t dep_job_id);
   void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
                                absl::Time event_time);
+  void TriggerTerminalDependencyEvents(absl::Time end_time);
 
   void SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val);
 
@@ -1061,7 +1166,7 @@ struct JobInCtld {
   // Helper function to set the fields of JobInfo using info in
   // JobInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info);
+  void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

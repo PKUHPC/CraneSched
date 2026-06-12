@@ -799,6 +799,20 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(step_status_change));
 }
 
+void CtldClient::BroadcastPmixPort(
+    const crane::grpc::BroadcastPmixPortRequest& request,
+    crane::grpc::BroadcastPmixPortReply* response) {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+
+  grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
+  if (!status.ok()) {
+    CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
+                static_cast<int>(status.error_code()), status.error_message());
+  }
+}
+
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                                        crane::grpc::JobStatus new_status,
                                        uint32_t exit_code,
@@ -879,6 +893,8 @@ bool CtldClient::CranedRegister_(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
+  grpc_meta->mutable_node_topo_info()->set_sockets(
+      g_config.node_topo_info.sockets);
 
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();

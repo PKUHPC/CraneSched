@@ -17,4 +17,5 @@ target_link_libraries(csupervisor
         Utility_CriClient
         Utility_BindFs
         crane_tracer
+        Utility_Pmix
 )

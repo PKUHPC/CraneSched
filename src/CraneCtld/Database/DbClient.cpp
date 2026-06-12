@@ -147,6 +147,42 @@ std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
   return result;
 }
 
+std::optional<std::pair<job_id_t, uint32_t>> RuntimeAttrToArrayIdentity_(
+    const crane::grpc::RuntimeAttrOfJob& runtime_attr) {
+  if (runtime_attr.has_array_task()) {
+    return std::pair{runtime_attr.array_task().array_job_id(),
+                     runtime_attr.array_task().task_id()};
+  }
+
+  return std::nullopt;
+}
+
+struct ArraySpecDbFields {
+  int64_t start{-1};
+  int64_t end{-1};
+  int64_t stride{-1};
+  int64_t max_concurrent{-1};
+};
+
+ArraySpecDbFields JobToCtldToArraySpecFields_(
+    const crane::grpc::JobToCtld& job_to_ctld) {
+  ArraySpecDbFields fields;
+  if (!job_to_ctld.has_array_spec()) {
+    return fields;
+  }
+
+  const auto& array_spec = job_to_ctld.array_spec();
+  fields.start = array_spec.start();
+  fields.end = array_spec.end();
+  if (array_spec.has_stride()) {
+    fields.stride = array_spec.stride();
+  }
+  if (array_spec.has_max_concurrent()) {
+    fields.max_concurrent = array_spec.max_concurrent();
+  }
+  return fields;
+}
+
 void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
                            const std::string& coll,
                            const bsoncxx::document::view& match_bson,
@@ -329,6 +365,30 @@ bool MongodbClient::Connect() {
   }
 
   return CheckDefaultRootAccountUserAndInit_();
+}
+
+std::optional<crane::grpc::ArraySpec> MongodbClient::ViewToArraySpec_(
+    const bsoncxx::document::view& view) {
+  auto start = ViewValueOr_(view["array_start"], int64_t{-1});
+  auto end = ViewValueOr_(view["array_end"], int64_t{-1});
+  if (start < 0 || end < 0 || end < start) return std::nullopt;
+
+  crane::grpc::ArraySpec array_spec;
+  array_spec.set_start(static_cast<uint32_t>(start));
+  array_spec.set_end(static_cast<uint32_t>(end));
+
+  if (auto stride = ViewValueOr_(view["array_stride"], int64_t{-1});
+      stride > 0) {
+    array_spec.set_stride(static_cast<uint32_t>(stride));
+  }
+
+  if (auto max_concurrent =
+          ViewValueOr_(view["array_max_concurrent"], int64_t{-1});
+      max_concurrent > 0) {
+    array_spec.set_max_concurrent(static_cast<uint32_t>(max_concurrent));
+  }
+
+  return array_spec;
 }
 
 bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
@@ -581,11 +641,96 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
   return false;
 }
 
+void MongodbClient::AppendJobIdSelectorClause_(
+    const crane::grpc::QueryJobsInfoRequest* request, document& filter) {
+  if (request->filter_job_ids().empty()) return;
+
+  filter.append(kvp("$or", [request](sub_array or_array) {
+    for (const auto& selector : request->filter_job_ids()) {
+      if (selector.has_array_task_id()) {
+        or_array.append([&](sub_document match_doc) {
+          match_doc.append(kvp("array_job_id",
+                               static_cast<std::int32_t>(selector.job_id())));
+          match_doc.append(kvp("array_task_id", static_cast<std::int32_t>(
+                                                    selector.array_task_id())));
+        });
+        continue;
+      }
+
+      or_array.append([&](sub_document match_doc) {
+        match_doc.append(
+            kvp("job_id", static_cast<std::int32_t>(selector.job_id())));
+      });
+    }
+  }));
+}
+
+// Step filter map keyed by (job_id, array_task_id). The sentinel kNoArrayTaskId
+// (UINT32_MAX-1, Slurm NO_VAL) stands for "no array_task_id" — i.e. a plain
+// job_id selector or the array parent itself. CheckJobValidity bounds task
+// counts via kMaxArrayTaskCount, so a real array_task_id never reaches the
+// sentinel value.
+using RequestedStepMap =
+    absl::flat_hash_map<std::pair<job_id_t, array_task_id_t>,
+                        std::unordered_set<step_id_t>>;
+
+static RequestedStepMap BuildRequestedStepMap_(
+    const crane::grpc::QueryJobsInfoRequest* request) {
+  RequestedStepMap map;
+  for (const auto& selector : request->filter_job_ids()) {
+    array_task_id_t task_id = selector.has_array_task_id()
+                                  ? selector.array_task_id()
+                                  : kNoArrayTaskId;
+    const auto& steps = selector.steps();
+    // Empty `steps` is the "all steps" sentinel: once a key has been inserted
+    // with an empty set, later non-empty inputs must not narrow it.
+    auto [it, inserted] = map.try_emplace({selector.job_id(), task_id});
+    if (steps.empty()) {
+      it->second.clear();
+    } else if (inserted || !it->second.empty()) {
+      it->second.insert(steps.begin(), steps.end());
+    }
+  }
+  return map;
+}
+
+// Empty result means "all steps"; this covers both "no matching step filter"
+// and an explicit empty-step selector.
+static std::unordered_set<step_id_t> RequestedStepsForJob_(
+    job_id_t job_id, int64_t array_job_id, int64_t array_task_id,
+    const RequestedStepMap& map) {
+  std::array<std::pair<job_id_t, array_task_id_t>, 3> keys;
+  size_t n = 0;
+  if (array_job_id >= 0 && array_task_id >= 0) {
+    keys[n++] = {static_cast<job_id_t>(array_job_id),
+                 static_cast<array_task_id_t>(array_task_id)};
+    keys[n++] = {static_cast<job_id_t>(array_job_id), kNoArrayTaskId};
+  }
+  keys[n++] = {job_id, kNoArrayTaskId};
+
+  std::unordered_set<step_id_t> result;
+  for (size_t i = 0; i < n; ++i) {
+    auto it = map.find(keys[i]);
+    if (it == map.end()) continue;
+    // Empty set is the "all steps" sentinel; collapse and short-circuit.
+    if (it->second.empty()) return {};
+    result.insert(it->second.begin(), it->second.end());
+  }
+  return result;
+}
+
+static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
+                              int64_t step_id) {
+  return req_steps.empty() ||
+         (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
+}
+
 bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
     size_t limit) {
   document filter;
+  auto req_step_map = BuildRequestedStepMap_(request);
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
   if (has_submit_time_interval) {
@@ -681,16 +826,7 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_job_ids_constraint = !request->filter_ids().empty();
-  if (has_job_ids_constraint) {
-    filter.append(kvp("job_id", [&request](sub_document job_id_doc) {
-      array job_id_array;
-      for (const auto& job_id : request->filter_ids() | std::views::keys) {
-        job_id_array.append(static_cast<std::int32_t>(job_id));
-      }
-      job_id_doc.append(kvp("$in", job_id_array));
-    }));
-  }
+  AppendJobIdSelectorClause_(request, filter);
 
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
@@ -746,9 +882,13 @@ bool MongodbClient::FetchJobRecords(
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
   // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
   // 40 nodename_list wckey          submit_hostname deadline
+  // 44 array_job_id  array_task_id  array_start    array_end      array_stride
+  // 49 array_max_concurrent
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
+      int64_t array_job_id = ViewValueOr_(view["array_job_id"], int64_t{-1});
+      int64_t array_task_id = ViewValueOr_(view["array_task_id"], int64_t{-1});
       crane::grpc::JobInfo* job_info_ptr = nullptr;
       auto in_mem_job_it = job_info_map->find(job_id);
       bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
@@ -823,6 +963,19 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_submit_hostname(
             view["submit_hostname"].get_string().value);
 
+        if (auto array_spec = ViewToArraySpec_(view); array_spec.has_value()) {
+          *job_info.mutable_array_spec() = *array_spec;
+        }
+
+        if (auto value = array_job_id; value >= 0) {
+          job_info.mutable_array_task()->set_array_job_id(
+              static_cast<uint32_t>(value));
+        }
+        if (auto value = array_task_id; value >= 0) {
+          job_info.mutable_array_task()->set_task_id(
+              static_cast<uint32_t>(value));
+        }
+
         if (view["req_nodes"])
           for (auto& craned_id : view["req_nodes"].get_array().value) {
             job_info.add_req_nodes(craned_id.get_string().value.data());
@@ -865,9 +1018,14 @@ bool MongodbClient::FetchJobRecords(
       }
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
+                                             array_task_id, req_step_map);
       for (const auto& elem : steps_elem.get_array().value) {
+        auto step_doc = elem.get_document().value;
+        int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
+        if (!ShouldAppendStep_(req_steps, step_id)) continue;
         auto* step_info = job_info_ptr->add_step_info_list();
-        ViewToStepInfo_(elem.get_document().value, step_info);
+        ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
       }
     }
@@ -883,6 +1041,7 @@ bool MongodbClient::FetchJobStepRecords(
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
   if (job_info_map->empty()) return true;
   document filter;
+  auto req_step_map = BuildRequestedStepMap_(request);
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
   if (has_submit_time_interval) {
@@ -1030,6 +1189,8 @@ bool MongodbClient::FetchJobStepRecords(
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
+      int64_t array_job_id = ViewValueOr_(view["array_job_id"], int64_t{-1});
+      int64_t array_task_id = ViewValueOr_(view["array_task_id"], int64_t{-1});
       auto in_mem_job_it = job_info_map->find(job_id);
       bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
       if (!has_in_mem_job_info) {
@@ -1042,9 +1203,14 @@ bool MongodbClient::FetchJobStepRecords(
 
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
+                                             array_task_id, req_step_map);
       for (const auto& elem : steps_elem.get_array().value) {
+        auto step_doc = elem.get_document().value;
+        int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
+        if (!ShouldAppendStep_(req_steps, step_id)) continue;
         auto* step_info = job_info_ptr->add_step_info_list();
-        ViewToStepInfo_(elem.get_document().value, step_info);
+        ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
       }
 
@@ -1130,6 +1296,58 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
     }
   } catch (const std::exception& e) {
     CRANE_ERROR("Failed to fetch job status by IDs: {}", e.what());
+  }
+
+  return result;
+}
+
+std::optional<MongodbClient::ArrayTaskAggregateInfo>
+MongodbClient::FetchArrayTaskAggregateInfo(job_id_t array_job_id) {
+  ArrayTaskAggregateInfo result;
+
+  try {
+    document filter;
+    filter.append(kvp("array_job_id", static_cast<std::int32_t>(array_job_id)));
+
+    mongocxx::options::find options;
+    document projection;
+    projection.append(kvp("state", 1));
+    projection.append(kvp("exit_code", 1));
+    options.projection(projection.view());
+
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
+                                                                 options);
+
+    for (auto view : cursor) {
+      crane::grpc::JobStatus status =
+          static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value);
+      uint32_t exit_code = view["exit_code"].get_int32().value;
+      result.max_exit_code = std::max(result.max_exit_code, exit_code);
+
+      if (status == crane::grpc::JobStatus::Completed && exit_code == 0) {
+        continue;
+      }
+
+      switch (status) {
+      case crane::grpc::JobStatus::Cancelled:
+        result.any_cancelled = true;
+        break;
+      case crane::grpc::JobStatus::ExceedTimeLimit:
+        result.any_exceed_time_limit = true;
+        break;
+      case crane::grpc::JobStatus::OutOfMemory:
+        result.any_out_of_memory = true;
+        break;
+      default:
+        result.any_failed = true;
+        break;
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to fetch array task aggregate for job #{}: {}",
+                array_job_id, e.what());
+    return std::nullopt;
   }
 
   return result;
@@ -2838,7 +3056,7 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   try {
     bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
-            doc.view());
+            *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
   } catch (const std::exception& e) {
@@ -3033,7 +3251,7 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
-            filter.view(), set_document.view());
+            *GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -3715,6 +3933,17 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(),
                            &qos->max_tres_per_account);
 
+    qos->preempt.clear();
+    if (auto preempt_it = qos_view.find(Qos::FieldStringOfPreempt());
+        preempt_it != qos_view.end()) {
+      for (auto&& preempt_qos : preempt_it->get_array().value) {
+        qos->preempt.emplace(preempt_qos.get_string().value);
+      }
+    }
+    qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(
+        ViewValueOr_(qos_view[Qos::FieldStringOfPreemptMode()],
+                     int64_t(crane::grpc::PreemptMode::PREEMPT_MODE_OFF)));
+
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -3722,7 +3951,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 18> fields{
+  std::array<std::string, 20> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -3740,10 +3969,13 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxTres(),
       Qos::FieldStringOfMaxTresPerUser(),
       Qos::FieldStringOfMaxTresPerAccount(),
-      Qos::FieldStringOfFlags()};
+      Qos::FieldStringOfFlags(),
+      Qos::FieldStringOfPreempt(),
+      Qos::FieldStringOfPreemptMode()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
              int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-             ResourceView, ResourceView, ResourceView, int64_t>
+             ResourceView, ResourceView, ResourceView, int64_t,
+             absl::flat_hash_set<std::string>, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -3761,7 +3993,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_tres,
              qos.max_tres_per_user,
              qos.max_tres_per_account,
-             qos.flags.ToInt64()};
+             qos.flags.ToInt64(),
+             qos.preempt,
+             static_cast<int64_t>(qos.preempt_mode)};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4247,6 +4481,15 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  int64_t array_job_id = -1;
+  int64_t array_task_id = -1;
+  if (auto array_identity = RuntimeAttrToArrayIdentity_(runtime_attr);
+      array_identity.has_value()) {
+    array_job_id = array_identity->first;
+    array_task_id = array_identity->second;
+  }
+  auto array_spec_fields = JobToCtldToArraySpecFields_(job_to_ctld);
+
   bsoncxx::builder::basic::array nodename_list_array;
   for (const auto& nodename : runtime_attr.craned_ids()) {
     nodename_list_array.append(nodename);
@@ -4257,8 +4500,15 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   std::list<std::string> exclude_node_list;
   util::ParseHostList(job_to_ctld.excludes(), &exclude_node_list);
 
+  // Array parents (has_array_spec && !has_array_task) never run on any craned,
+  // so their craned_ids list is empty. Skip per-type extraction for them.
+  const bool is_array_parent =
+      job_to_ctld.has_array_spec() && !runtime_attr.has_array_task();
+
   std::vector<CranedId> execution_nodes;
-  if (job_to_ctld.type() == crane::grpc::JobType::Batch) {
+  if (is_array_parent || runtime_attr.craned_ids().empty()) {
+    // Leave execution_nodes empty.
+  } else if (job_to_ctld.type() == crane::grpc::JobType::Batch) {
     execution_nodes.push_back(runtime_attr.craned_ids(0));
   } else if (job_to_ctld.type() == crane::grpc::JobType::Interactive) {
     const auto& ia_meta = job_to_ctld.interactive_meta();
@@ -4287,9 +4537,11 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 45 submit_hostname req_nodes      exclude_nodes   execution_nodes deadline
+  // 50 array_job_id  array_task_id  array_start   array_end      array_stride
+  // 55 array_max_concurrent
   // clang-format off
-  std::array<std::string, 50> fields{
+  std::array<std::string, 56> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4309,7 +4561,10 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 49
-    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes", "deadline"
+    "submit_hostname", "req_nodes","exclude_nodes", "execution_nodes", "deadline",
+    // 50 - 55
+    "array_job_id", "array_task_id", "array_start", "array_end", "array_stride",
+    "array_max_concurrent"
   };
   // clang-format on
 
@@ -4325,7 +4580,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
-             std::vector<CranedId>, int64_t>                        /*48-49*/
+             std::vector<CranedId>, int64_t,                        /*48-49*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
+             int64_t>                                               /*55*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4365,7 +4622,11 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
           // 45-49
           job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
-          execution_nodes, job_to_ctld.deadline_time().seconds()};
+          execution_nodes, job_to_ctld.deadline_time().seconds(),
+          // 50-55
+          array_job_id, array_task_id, array_spec_fields.start,
+          array_spec_fields.end, array_spec_fields.stride,
+          array_spec_fields.max_concurrent};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4433,6 +4694,14 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  int64_t array_job_id = -1;
+  int64_t array_task_id = -1;
+  if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
+    array_job_id = identity->array_job_id;
+    array_task_id = identity->task_id;
+  }
+  auto array_spec_fields = JobToCtldToArraySpecFields_(job->JobToCtld());
+
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
@@ -4443,9 +4712,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 array_job_id  array_task_id  array_start  array_end      array_stride
+  // 55 array_max_concurrent
 
   // clang-format off
-  std::array<std::string, 50> fields{
+  std::array<std::string, 56> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4465,7 +4736,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       // 40 - 44
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 49
-      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline"
+      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline",
+      // 50 - 55
+      "array_job_id", "array_task_id", "array_start", "array_end", "array_stride",
+      "array_max_concurrent",
   };
   // clang-format on
 
@@ -4481,9 +4755,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::unordered_map<std::string, uint32_t>,             /*40*/
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
              std::string, std::unordered_set<CranedId>,             /*45-46*/
-             std::unordered_set<CranedId>, std::vector<CranedId>,
-             int64_t> /*47-49*/
-      values{         // 0-4
+             std::unordered_set<CranedId>, std::vector<CranedId>,   /*47-48*/
+             int64_t,                                               /*49*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
+             int64_t>                                               /*55*/
+      values{                                                       // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
              // 5-9
@@ -4515,8 +4791,11 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->using_default_wckey, g_config.CraneClusterName,
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids,
-             absl::ToUnixSeconds(job->deadline_time)};
+             job->executing_craned_ids, absl::ToUnixSeconds(job->deadline_time),
+             // 50-55
+             array_job_id, array_task_id, array_spec_fields.start,
+             array_spec_fields.end, array_spec_fields.stride,
+             array_spec_fields.max_concurrent};
 
   return DocumentConstructor_(fields, values);
 }

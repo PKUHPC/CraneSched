@@ -62,12 +62,16 @@ std::string MetaResource::DebugString() const {
       util::ReadableResourceView(resource));
 }
 
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
+CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job,
+                                                              uint32_t count) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   CRANE_TRACE(
-      "TryMallocQosSubmitResource for job of user {} and account {}.....",
-      job.Username(), job.account);
+      "TryMallocQosSubmitResource for job of user {} and account {}, "
+      "count={}.",
+      job.Username(), job.account, count);
+
+  if (count == 0) return CraneErrCode::SUCCESS;
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) {
@@ -109,28 +113,31 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(JobInCtld& job) {
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  result = CheckUserQosSubmitResourceUsage_(job, *qos);
+  result = CheckUserQosSubmitResourceUsage_(job, *qos, count);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckAccountQosSubmitResourceUsage_(job, *qos);
+  result = CheckAccountQosSubmitResourceUsage_(job, *qos, count);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceUsage_(job, *qos);
+  result = CheckQosSubmitResourceUsage_(job, *qos, count);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  MallocQosSubmitResource(job);
+  MallocQosSubmitResource(job, count);
 
   return result;
 }
 
-void AccountMetaContainer::MallocQosSubmitResource(const JobInCtld& job) {
+void AccountMetaContainer::MallocQosSubmitResource(const JobInCtld& job,
+                                                   uint32_t count) {
+  if (count == 0) return;
   CRANE_DEBUG(
-      "Malloc QOS {} submit resource for job of user {} and account {}.",
-      job.qos, job.Username(), job.account);
+      "Malloc QOS {} submit resource for job of user {} and account {}, "
+      "count={}.",
+      job.qos, job.Username(), job.account, count);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = count,
                              .wall_time = absl::ZeroDuration()};
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                     meta_resource);
@@ -149,11 +156,12 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningJob(
       "Malloc QOS {} resource for recover job {} of user {} and account {}.",
       job.qos, job.JobId(), job.Username(), job.account);
 
-  g_account_meta_container->UserAddJob(job.Username());
+  uint32_t submit_jobs_count = job.IsArrayChild() ? 0u : 1u;
+  g_account_meta_container->UserAddJob(job.Username(), submit_jobs_count);
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = submit_jobs_count,
                              .wall_time = job.time_limit};
 
   DoMallocResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -190,14 +198,17 @@ AccountMetaContainer::CheckAndMallocQosResource(const PdJobInScheduler& job) {
   return {};
 }
 
-void AccountMetaContainer::FreeQosSubmitResource(const JobInCtld& job) {
+void AccountMetaContainer::FreeQosSubmitResource(const JobInCtld& job,
+                                                 uint32_t count) {
+  if (count == 0) return;
   CRANE_DEBUG(
-      "Free QOS {} submit resource for job {} of user {} and account {}.",
-      job.qos, job.JobId(), job.Username(), job.account);
+      "Free QOS {} submit resource for job {} of user {} and account {}, "
+      "count={}.",
+      job.qos, job.JobId(), job.Username(), job.account, count);
 
   MetaResource meta_resource{.resource = ResourceView{},
                              .jobs_count = 0,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = count,
                              .wall_time = absl::ZeroDuration()};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
@@ -210,30 +221,53 @@ void AccountMetaContainer::FreeQosResource(const JobInCtld& job) {
 
   MetaResource meta_resource{.resource = job.allocated_res_view,
                              .jobs_count = 1,
-                             .submit_jobs_count = 1,
+                             .submit_jobs_count = job.IsArrayChild() ? 0u : 1u,
                              .wall_time = job.time_limit};
 
   DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
                   meta_resource);
 }
 
-void AccountMetaContainer::UserAddJob(const std::string& username) {
-  m_user_to_job_map_.try_emplace_l(
-      username,
-      [&](std::pair<const std::string, uint32_t>& pair) { ++pair.second; }, 1);
+void AccountMetaContainer::FreeQosResource(const PdJobInScheduler& job) {
+  CRANE_DEBUG("Free QOS {} resource for job {} of user {} and account {}.",
+              job.qos, job.job_id, job.username, job.account);
+
+  MetaResource meta_resource{.resource = job.allocated_res.View(),
+                             .jobs_count = 1,
+                             .submit_jobs_count = 0,
+                             .wall_time = job.time_limit};
+
+  DoFreeResource_(job.job_id, job.username, job.account_chain, job.qos,
+                  meta_resource);
 }
 
-void AccountMetaContainer::UserReduceJob(const std::string& username) {
+void AccountMetaContainer::UserAddJob(const std::string& username,
+                                      uint32_t count) {
+  if (count == 0) return;
+  m_user_to_job_map_.try_emplace_l(
+      username,
+      [&](std::pair<const std::string, uint32_t>& pair) {
+        pair.second += count;
+      },
+      count);
+}
+
+void AccountMetaContainer::UserReduceJob(const std::string& username,
+                                         uint32_t count) {
+  if (count == 0) return;
   bool is_contains = false;
 
   m_user_to_job_map_.if_contains(
       username, [&](std::pair<const std::string, uint32_t>& pair) {
         is_contains = true;
-        if (pair.second == 0) {
-          CRANE_ERROR("job_num == 0 when reduce user {} job", username);
+        if (pair.second < count) {
+          CRANE_ERROR(
+              "job_num ({}) < count ({}) when reduce user {} job; clamping.",
+              pair.second, count, username);
+          pair.second = 0;
           return;
         }
-        --pair.second;
+        pair.second -= count;
       });
 
   if (!is_contains)
@@ -269,7 +303,7 @@ void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
  */
 
 CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
-    const JobInCtld& job, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos, uint32_t count) {
   auto result = CraneErrCode::SUCCESS;
 
   m_user_meta_map_.if_contains(
@@ -281,11 +315,13 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
 
         auto& val = iter->second;
 
-        if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user) {
+        if (val.submit_jobs_count + count > qos.max_submit_jobs_per_user) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
           return;
         }
 
+        // DenyOnLimit validates one prospective task here. Array children are
+        // still checked individually when materialized and scheduled.
         if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs_per_user) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
@@ -309,7 +345,7 @@ CraneErrCode AccountMetaContainer::CheckUserQosSubmitResourceUsage_(
 }
 
 CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
-    const JobInCtld& job, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos, uint32_t count) {
   auto result = CraneErrCode::SUCCESS;
 
   for (const auto& account_name : job.account_chain) {
@@ -322,7 +358,7 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
 
           auto& val = iter->second;
 
-          if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account) {
+          if (val.submit_jobs_count + count > qos.max_submit_jobs_per_account) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
             return;
           }
@@ -346,12 +382,12 @@ CraneErrCode AccountMetaContainer::CheckAccountQosSubmitResourceUsage_(
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceUsage_(
-    const JobInCtld& job, const Qos& qos) {
+    const JobInCtld& job, const Qos& qos, uint32_t count) {
   auto result = CraneErrCode::SUCCESS;
   m_qos_meta_map_.if_contains(
       job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         auto& val = pair.second;
-        if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
+        if (val.submit_jobs_count + count > qos.max_submit_jobs) {
           result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
           return;
         }
@@ -500,10 +536,32 @@ std::expected<void, std::string> AccountMetaContainer::CheckTres_(
     return std::unexpected("QosMemResourceLimit");
   }
 
-  if (!(resource_req <= resource_total))
+  if (!CheckGres_(resource_req.GetGresMap(), resource_total.GetGresMap()))
     return std::unexpected("QosGresResourceLimit");
 
   return {};
+}
+
+bool AccountMetaContainer::CheckGres_(const GresMap& device_req,
+                                      const GresMap& device_total) {
+  for (const auto& [name, lhs] : device_req) {
+    auto rhs_it = device_total.find(name);
+    if (rhs_it == device_total.end()) return true;
+
+    const auto& rhs = rhs_it->second;
+
+    // Check total
+    if (lhs.total > rhs.total) return false;
+
+    // Check each specified type
+    for (const auto& [type, lhs_cnt] : lhs.specified) {
+      auto rhs_it = rhs.specified.find(type);
+      if (rhs_it == rhs.specified.end()) return true;
+      if (lhs_cnt > rhs_it->second) return false;
+    }
+  }
+
+  return true;
 }
 
 std::vector<std::unique_lock<std::mutex>>
@@ -634,7 +692,10 @@ void AccountMetaContainer::DoFreeResource_(
         }
       });
 
-  UserReduceJob(username);
+  // UserReduceJob mirrors the submit_jobs_count freed here so that
+  // UserHasJob bookkeeping matches bulk allocations (e.g. array parent
+  // reserving N slots at submit time).
+  UserReduceJob(username, meta_resource.submit_jobs_count);
 }
 
 }  // namespace Ctld
