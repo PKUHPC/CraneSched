@@ -18,10 +18,10 @@
 
 #include "JobManager.h"
 
-#include <chrono>
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -478,21 +478,20 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   const auto total_end = std::chrono::steady_clock::now();
 
   const auto job_map_lock_wait_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          job_map_lock_end - job_map_lock_begin)
+      std::chrono::duration_cast<std::chrono::milliseconds>(job_map_lock_end -
+                                                            job_map_lock_begin)
           .count();
   const auto uid_map_lock_wait_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          uid_map_lock_end - uid_map_lock_begin)
+      std::chrono::duration_cast<std::chrono::milliseconds>(uid_map_lock_end -
+                                                            uid_map_lock_begin)
           .count();
   const auto insert_loop_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(insert_end -
                                                             insert_begin)
           .count();
-  const auto total_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(total_end -
-                                                            total_begin)
-          .count();
+  const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            total_end - total_begin)
+                            .count();
   if (job_map_lock_wait_ms > 1000 || uid_map_lock_wait_ms > 1000 ||
       total_ms > 1000) {
     CRANE_WARN(

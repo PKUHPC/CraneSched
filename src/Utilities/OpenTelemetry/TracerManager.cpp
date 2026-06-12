@@ -61,8 +61,8 @@ bool TracerManager::Initialize(
   std::shared_ptr<trace_sdk::TracerProvider> provider;
 
   if (extra_exporter) {
-    auto processor =
-        trace_sdk::SimpleSpanProcessorFactory::Create(std::move(extra_exporter));
+    auto processor = trace_sdk::SimpleSpanProcessorFactory::Create(
+        std::move(extra_exporter));
     provider = std::make_shared<trace_sdk::TracerProvider>(std::move(processor),
                                                            resource_ptr);
   } else {

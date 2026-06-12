@@ -241,24 +241,20 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
     if (name == "step/queue_dispatch") return TraceSpanClass::Detailed;
     break;
   case 21:
-    if (name == "step/supervisor_spawn" ||
-        name == "step/supervisor_ready")
+    if (name == "step/supervisor_spawn" || name == "step/supervisor_ready")
       return TraceSpanClass::Detailed;
     break;
   case 22:
-    if (name == "step/supervisor_epilog")
-      return TraceSpanClass::Detailed;
+    if (name == "step/supervisor_epilog") return TraceSpanClass::Detailed;
     break;
   case 23:
-    if (name == "step/config_task_epilog")
-      return TraceSpanClass::Detailed;
+    if (name == "step/config_task_epilog") return TraceSpanClass::Detailed;
     break;
   default:
     break;
   }
 
-  if (name.starts_with("scheduling/") ||
-      name.starts_with("status_change/"))
+  if (name.starts_with("scheduling/") || name.starts_with("status_change/"))
     return TraceSpanClass::Detailed;
   return TraceSpanClass::Other;
 }
@@ -269,8 +265,7 @@ inline bool ShouldExportTraceSpan(std::string_view name, bool is_error) {
   if (level == TraceLevel::Debug) return true;
   TraceSpanClass span_class = ClassifyTraceSpanName(name);
   if (span_class == TraceSpanClass::Core) return true;
-  if (level == TraceLevel::Detailed &&
-      span_class == TraceSpanClass::Detailed)
+  if (level == TraceLevel::Detailed && span_class == TraceSpanClass::Detailed)
     return true;
   return false;
 }

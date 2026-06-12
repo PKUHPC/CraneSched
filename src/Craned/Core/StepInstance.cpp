@@ -625,12 +625,14 @@ void StepInstance::ExecuteStepAsync() {
             return;
           }
           CRANE_WARN(
-              "[Step #{}.{}] ExecuteStep ack still unknown after attempt {}/{}; "
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
+              "{}/{}; "
               "supervisor status is {}.",
               job_id, step_id, attempt, kCranedRpcTimeoutSeconds, step_status);
         } else {
           CRANE_WARN(
-              "[Step #{}.{}] ExecuteStep ack still unknown after attempt {}/{}; "
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
+              "{}/{}; "
               "supervisor status query failed.",
               job_id, step_id, attempt, kCranedRpcTimeoutSeconds);
         }

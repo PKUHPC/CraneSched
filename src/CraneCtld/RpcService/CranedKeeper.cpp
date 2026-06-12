@@ -112,7 +112,8 @@ CraneErrCode CranedStub::AllocJobs(
   AllocJobsReply reply;
 
   ClientContext context;
-  const auto timeout_sec = g_config.CtldConf.SchedulerAllocJobsRpcTimeoutSeconds;
+  const auto timeout_sec =
+      g_config.CtldConf.SchedulerAllocJobsRpcTimeoutSeconds;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(timeout_sec));
 
@@ -126,8 +127,7 @@ CraneErrCode CranedStub::AllocJobs(
   status = m_stub_->AllocJobs(&context, request, &reply);
   const auto rpc_end = std::chrono::steady_clock::now();
   const auto elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(rpc_end -
-                                                            rpc_begin)
+      std::chrono::duration_cast<std::chrono::milliseconds>(rpc_end - rpc_begin)
           .count();
   if (!status.ok()) {
     CRANE_ERROR(

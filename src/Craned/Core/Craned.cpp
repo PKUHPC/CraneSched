@@ -1130,8 +1130,8 @@ void ParseConfig(int argc, char** argv) {
         if (tracing_config["Enabled"])
           g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
         if (tracing_config["Level"])
-          g_config.Tracing.Level =
-              crane::TraceLevelFromString(tracing_config["Level"].as<std::string>());
+          g_config.Tracing.Level = crane::TraceLevelFromString(
+              tracing_config["Level"].as<std::string>());
       }
 
     } catch (YAML::BadFile& e) {
@@ -1561,8 +1561,7 @@ void GlobalVariableInit() {
   }
   crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
                                  std::memory_order_release);
-  crane::g_trace_level.store(g_config.Tracing.Level,
-                             std::memory_order_release);
+  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
 #endif
 
   g_craned_for_pam_server =

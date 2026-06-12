@@ -93,9 +93,9 @@ void PluginClient::MarkTraceHooksCompleted_(size_t count) {
 }
 
 size_t PluginClient::CountTraceHookEvents_(const std::list<HookEvent>& events) {
-  return std::count_if(events.begin(), events.end(), [](const HookEvent& event) {
-    return event.type == HookType::TRACE;
-  });
+  return std::count_if(
+      events.begin(), events.end(),
+      [](const HookEvent& event) { return event.type == HookType::TRACE; });
 }
 
 void PluginClient::AsyncSendThread_() {

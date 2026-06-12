@@ -10,12 +10,12 @@
 
 #ifdef CRANE_ENABLE_TRACING
 
+#  include <chrono>
+
 #  include "crane/PluginClient.h"
 #  include "opentelemetry/sdk/trace/exporter.h"
 #  include "opentelemetry/sdk/trace/span_data.h"
 #  include "protos/Plugin.pb.h"
-
-#  include <chrono>
 
 namespace crane {
 

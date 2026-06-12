@@ -31,8 +31,7 @@ struct ExecuteStepRpcResult {
   std::string error_message;
 
   [[nodiscard]] bool Ok() const {
-    return code == CraneErrCode::SUCCESS &&
-           grpc_status == grpc::StatusCode::OK;
+    return code == CraneErrCode::SUCCESS && grpc_status == grpc::StatusCode::OK;
   }
 };
 

@@ -21,12 +21,11 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
-#include "crane/TracerManager.h"
-#include "crane/Tracing.h"
-
 #include <limits>
 #include <memory>
 
+#include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {

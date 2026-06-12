@@ -18,10 +18,10 @@
 
 #include "JobScheduler.h"
 
-#include <map>
-
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
+
+#include <map>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -1350,8 +1350,8 @@ void JobScheduler::ScheduleThread_() {
       m_running_job_map_mtx_.Unlock();
 
       schedule_begin = std::chrono::steady_clock::now();
-      num_jobs_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
-                                          pending_queue_depth);
+      num_jobs_single_schedule =
+          std::min((size_t)g_config.ScheduledBatchSize, pending_queue_depth);
       sched_cycle.SetAttribute("attempted_count",
                                static_cast<int64_t>(num_jobs_single_schedule));
       sched_cycle.SetAttribute("eligible_pending_count",
@@ -1715,9 +1715,8 @@ void JobScheduler::ScheduleThread_() {
         const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id();
         const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id();
 
-        m_rpc_worker_pool_->detach_task(
-            [&, diag_craned_id, task_enqueue_time, job_count, first_job_id,
-             last_job_id] {
+        m_rpc_worker_pool_->detach_task([&, diag_craned_id, task_enqueue_time,
+                                         job_count, first_job_id, last_job_id] {
           const auto task_start_time = std::chrono::steady_clock::now();
           const auto task_wait_ms =
               std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -5596,12 +5595,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     std::unordered_map<job_id_t, std::string> tp_map;
     for (const auto& [job_id, step_ids] : steps) {
       auto it = context.job_traceparents.find(job_id);
-      if (it != context.job_traceparents.end())
-        tp_map[job_id] = it->second;
+      if (it != context.job_traceparents.end()) tp_map[job_id] = it->second;
     }
 
-    m_rpc_worker_pool_->detach_task([this, craned_id,
-                                     steps = std::move(steps),
+    m_rpc_worker_pool_->detach_task([this, craned_id, steps = std::move(steps),
                                      traceparents = std::move(tp_map)] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       auto now = google::protobuf::util::TimeUtil::GetCurrentTime();

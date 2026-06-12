@@ -5365,11 +5365,11 @@ bool MongodbClient::SwapMigratedJobTable_(const std::string& source_collection,
       if (target_exists) {
         // Target collection already has data — merge migrated records by
         // inserting any records whose job_id does not already exist.
-        CRANE_LOGGER_WARN(
-            m_logger_,
-            "Target collection '{}' already exists with data. "
-            "Merging migrated records from '{}'.",
-            m_job_collection_name_, m_migration_temp_collection_name_);
+        CRANE_LOGGER_WARN(m_logger_,
+                          "Target collection '{}' already exists with data. "
+                          "Merging migrated records from '{}'.",
+                          m_job_collection_name_,
+                          m_migration_temp_collection_name_);
         try {
           auto temp_coll =
               (*client)[m_db_name_][m_migration_temp_collection_name_];
@@ -5383,7 +5383,8 @@ bool MongodbClient::SwapMigratedJobTable_(const std::string& source_collection,
               ++skipped;
               continue;
             }
-            auto filter = make_document(kvp("job_id", (*job_id_it).get_value()));
+            auto filter =
+                make_document(kvp("job_id", (*job_id_it).get_value()));
             if (!target_coll.find_one(filter.view())) {
               target_coll.insert_one(doc);
               ++merged;
@@ -5401,8 +5402,8 @@ bool MongodbClient::SwapMigratedJobTable_(const std::string& source_collection,
                              "Failed to merge migrated records: {}. "
                              "Rolling back...",
                              e.what());
-          admin_db.run_command(make_document(
-              kvp("renameCollection", backup_ns), kvp("to", src_ns)));
+          admin_db.run_command(make_document(kvp("renameCollection", backup_ns),
+                                             kvp("to", src_ns)));
           return false;
         }
       } else {
@@ -5415,8 +5416,8 @@ bool MongodbClient::SwapMigratedJobTable_(const std::string& source_collection,
                              "Rolling back...",
                              m_migration_temp_collection_name_,
                              m_job_collection_name_, e.what());
-          admin_db.run_command(make_document(
-              kvp("renameCollection", backup_ns), kvp("to", src_ns)));
+          admin_db.run_command(make_document(kvp("renameCollection", backup_ns),
+                                             kvp("to", src_ns)));
           return false;
         }
       }

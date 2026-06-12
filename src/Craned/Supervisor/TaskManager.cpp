@@ -2898,8 +2898,8 @@ void TaskManager::CompleteStepBeforeTaskStart_(uint32_t exit_code,
     m_step_.ExecuteSpan().End();
   }
 
-  g_craned_client->StepStatusChangeAsync(
-      StepStatus::Completing, exit_code, reason, StepStatus::Failed);
+  g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
+                                         reason, StepStatus::Failed);
   ShutdownSupervisorAsync(StepStatus::Failed, exit_code, std::move(reason));
 }
 
@@ -3707,9 +3707,9 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {
-      std::string reason = fmt::format(
-          "No task ids assigned for executable step #{}.{}", m_step_.job_id,
-          m_step_.step_id);
+      std::string reason =
+          fmt::format("No task ids assigned for executable step #{}.{}",
+                      m_step_.job_id, m_step_.step_id);
       CRANE_ERROR("{}", reason);
       CompleteStepBeforeTaskStart_(ExitCode::EC_EXEC_ERR, std::move(reason));
       elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
