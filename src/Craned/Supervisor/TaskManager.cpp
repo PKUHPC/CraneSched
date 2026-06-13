@@ -3812,7 +3812,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       }
 
       auto exec_id = task->GetExecId().value();
-      CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+      CRANE_INFO("[task #{}] Launched execution, id: {}.", task_id,
                  std::visit([](auto&& arg) { return std::format("{}", arg); },
                             exec_id));
       m_exec_id_task_id_map_[exec_id] = task_id;
