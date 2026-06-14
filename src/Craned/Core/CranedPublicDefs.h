@@ -107,6 +107,7 @@ struct Config {
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    std::chrono::seconds ImagePullingTimeout;
 
     struct DnsConfig {
       std::string ClusterDomain{"cluster.local"};

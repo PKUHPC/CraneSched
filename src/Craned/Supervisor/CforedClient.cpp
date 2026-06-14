@@ -510,7 +510,16 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
         stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
-  FwdRequest fwd_req;
+  FwdRequest fwd_req{
+      .type = StreamStepIORequest::TASK_OUTPUT,
+      .data =
+          IOFwdRequest{
+              .is_stdout = true,
+              .task_id = 0,
+              .data = nullptr,
+              .len = 0,
+          },
+  };
   bool ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
 
   // Make sure before exit all output has been drained.

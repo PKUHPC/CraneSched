@@ -399,6 +399,12 @@ Container:
   # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # 镜像拉取超时时间（秒）
+  ImagePullingTimeout: 600
+
+  # 提交容器时是否默认启用用户命名空间
+  UserNsEnabledByDefault: true
+
   # DNS 配置
   Dns:
     ClusterDomain: "cluster.local"

@@ -401,6 +401,12 @@ Container:
   # Path to image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # Image pulling timeout in seconds
+  ImagePullingTimeout: 600
+
+  # Whether to enable user namespace by default when submitting containers
+  UserNsEnabledByDefault: true
+
   # DNS configuration (optional)
   Dns:
     ClusterDomain: "cluster.local"

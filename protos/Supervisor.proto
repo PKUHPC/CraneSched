@@ -75,6 +75,8 @@ message InitSupervisorRequest {
       repeated string options = 4;
     }
     DnsConfig dns_config = 6;
+
+    optional int64 image_pulling_timeout_seconds = 7;
   }
   ContainerConfig container_config = 15;
 
