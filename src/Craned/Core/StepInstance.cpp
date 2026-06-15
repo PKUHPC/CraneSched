@@ -525,11 +525,14 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
             "receiving new status 'Running', current status: {}.",
             job_id, step_id, this->status);
     } else {
-      if (status != StepStatus::Starting)
+      const bool expected = step_to_d.local_direct_launch()
+                                ? status == StepStatus::Configuring
+                                : status == StepStatus::Starting;
+      if (!expected)
         CRANE_WARN(
-            "[Step {}.{}] Step status is not 'Starting' when receiving new "
-            "status 'Running', current status: {}.",
-            job_id, step_id, this->status);
+            "[Step {}.{}] Step status transition to Running is invalid, "
+            "local_direct={}, current status: {}.",
+            job_id, step_id, step_to_d.local_direct_launch(), this->status);
     }
     break;
   }
@@ -550,12 +553,13 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   }
 
   case StepStatus::Completing: {
-    // Starting -> Completing is used when a termination request reaches the
-    // supervisor before ExecuteStep gets a chance to launch tasks.
-    if (status != StepStatus::Running && status != StepStatus::Starting)
+    // Completing is valid before Running for direct-launch failure or
+    // pre-execute termination.
+    if (status != StepStatus::Running && status != StepStatus::Starting &&
+        status != StepStatus::Configuring)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
-          "new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting/Configuring' "
+          "when receiving new status 'Completing', current status: {}.",
           job_id, step_id, this->status);
     break;
   }

@@ -310,11 +310,15 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
             "receiving new status 'Running', current status: {}.",
             job_id, step_id, m_status_.load());
     } else {
-      if (m_status_ != StepStatus::Starting)
+      const bool expected = m_step_to_supv_.local_direct_launch()
+                                ? m_status_ == StepStatus::Configuring
+                                : m_status_ == StepStatus::Starting;
+      if (!expected)
         CRANE_WARN(
-            "[Step {}.{}] Step status is not 'Starting' when receiving new "
-            "status 'Running', current status: {}.",
-            job_id, step_id, m_status_.load());
+            "[Step {}.{}] Step status transition to Running is invalid, "
+            "local_direct={}, current status: {}.",
+            job_id, step_id, m_step_to_supv_.local_direct_launch(),
+            m_status_.load());
     }
     break;
   }
@@ -333,12 +337,13 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Completing: {
-    // Starting -> Completing is used when a termination request reaches the
-    // supervisor before ExecuteStep gets a chance to launch tasks.
-    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting)
+    // Completing is valid before Running for direct-launch failure or
+    // pre-execute termination.
+    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
-          "new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting/Configuring' "
+          "when receiving new status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
@@ -3669,12 +3674,45 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
 
+    const bool local_direct = m_step_.GetStep().local_direct_launch();
+    auto set_execute_result = [&](CraneErrCode err, std::string reason = "") {
+      elem.ok_prom.set_value(err);
+      if (local_direct && err != CraneErrCode::SUCCESS &&
+          step_status == StepStatus::Configuring) {
+        if (reason.empty())
+          reason = fmt::format("Local direct launch failed, code {}",
+                               static_cast<int>(err));
+        m_step_.GotNewStatus(StepStatus::Completing);
+        g_craned_client->StepStatusChangeAsync(StepStatus::Completing,
+                                               ExitCode::EC_EXEC_ERR, reason,
+                                               StepStatus::Failed);
+        ShutdownSupervisorAsync(StepStatus::Failed, ExitCode::EC_EXEC_ERR,
+                                std::move(reason));
+      }
+    };
+
+    const bool executable = local_direct
+                                ? step_status == StepStatus::Configuring
+                                : step_status == StepStatus::Starting;
+    if (!executable) {
+      CRANE_ERROR(
+          "[Step #{}.{}] ExecuteStep received at invalid status {}, "
+          "local_direct={}.",
+          m_step_.job_id, m_step_.step_id, step_status, local_direct);
+      set_execute_result(
+          CraneErrCode::ERR_INVALID_PARAM,
+          fmt::format("ExecuteStep received at invalid status {}",
+                      step_status));
+      continue;
+    }
+
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {
       CRANE_ERROR("No task ids assigned for executable step #{}.{}",
                   m_step_.job_id, m_step_.step_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      set_execute_result(CraneErrCode::ERR_INVALID_PARAM,
+                         "No task ids assigned for executable step");
       continue;
     }
 
@@ -3683,7 +3721,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
           "Container step #{}.{} has {} tasks, but container steps only "
           "support exactly one task. Rejecting.",
           m_step_.job_id, m_step_.step_id, m_step_.task_ids.size());
-      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      set_execute_result(CraneErrCode::ERR_INVALID_PARAM,
+                         "Container steps only support exactly one task");
       continue;
     }
 
@@ -3692,6 +3731,9 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
     m_step_.GotNewStatus(StepStatus::Running);
+    if (local_direct && step_status == StepStatus::Configuring)
+      g_craned_client->StepStatusChangeAsync(StepStatus::Running, 0,
+                                             std::nullopt);
 
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;

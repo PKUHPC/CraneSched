@@ -467,7 +467,7 @@ message StepToD {
 
   IoMeta io_meta = 35;
   string sh_script = 36;
-
+  bool local_direct_launch = 37;
   optional ArrayTaskIdentity array_task = 39;
 }
 

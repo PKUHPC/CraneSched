@@ -734,6 +734,7 @@ struct CommonStepInCtld : StepInCtld {
 
   void InitPrimaryStepFromJob(JobInCtld& job);
   bool IsPrimaryStep() const noexcept;
+  [[nodiscard]] bool ShouldLocalDirectLaunch() const noexcept;
   void SetFieldsByStepToCtld(const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;

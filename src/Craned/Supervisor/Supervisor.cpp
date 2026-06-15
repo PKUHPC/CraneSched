@@ -412,7 +412,6 @@ void StartServer(int grpc_output_fd) {
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
 
-  StepStatus status{StepStatus::Invalid};
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
@@ -458,13 +457,16 @@ void StartServer(int grpc_output_fd) {
     }
 
     // Daemon step is RUNNING after supervisor and related resources are ready.
-    status = ready ? StepStatus::Running : StepStatus::Failed;
+    g_task_mgr->SupervisorFinishInit(ready ? StepStatus::Running
+                                           : StepStatus::Failed);
+  } else if (g_config.StepSpec.local_direct_launch()) {
+    CRANE_DEBUG("[Step #{}.{}] Local direct launch from supervisor.",
+                g_config.JobId, g_config.StepId);
+    (void)g_task_mgr->ExecuteStepAsync();
   } else {
     // Common step is Starting after supervisor is ready.
-    status = StepStatus::Starting;
+    g_task_mgr->SupervisorFinishInit(StepStatus::Starting);
   }
-
-  g_task_mgr->SupervisorFinishInit(status);
 
   g_server->Wait();
   g_server.reset();

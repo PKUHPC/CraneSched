@@ -1077,6 +1077,10 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   *MutableStepToCtld() = step_to_ctld;
 }
 
+bool CommonStepInCtld::ShouldLocalDirectLaunch() const noexcept {
+  return ExecutionNodes().size() == 1;
+}
+
 crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     const CranedId& craned_id) const {
   crane::grpc::StepToD step_to_d;
@@ -1175,6 +1179,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_task_prolog(task_prolog);
   step_to_d.set_task_epilog(task_epilog);
+  step_to_d.set_local_direct_launch(ShouldLocalDirectLaunch());
   if (StepToCtld().has_io_meta()) {
     auto* mutable_meta = step_to_d.mutable_io_meta();
     mutable_meta->CopyFrom(StepToCtld().io_meta());
@@ -1212,12 +1217,30 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
               job_id, step_id, this->Status(), new_status, craned_id);
 
   switch (this->Status()) {
-  case crane::grpc::JobStatus::Configuring:
+  case crane::grpc::JobStatus::Configuring: {
     this->NodeConfigured(craned_id);
-    // Configuring -> Starting / Failed / Cancelled,
-    if (new_status != crane::grpc::JobStatus::Starting) {
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
+    const bool local_direct = ShouldLocalDirectLaunch();
+    const bool configured =
+        local_direct ? new_status == crane::grpc::JobStatus::Running
+                     : new_status == crane::grpc::JobStatus::Starting;
+    if (!configured) {
+      if (new_status == crane::grpc::JobStatus::Completing) {
+        this->SetErrorStatus(crane::grpc::JobStatus::Failed);
+        this->SetErrorExitCode(exit_code == 0 ? ExitCode::EC_RPC_ERR
+                                              : exit_code);
+      } else if (IsFinishedStepStatus(new_status)) {
+        this->SetErrorStatus(new_status);
+        this->SetErrorExitCode(exit_code);
+      } else {
+        CRANE_ERROR(
+            "[Step #{}.{}] Invalid common step status transition during "
+            "Configuring, local_direct={}, got {} from {}.",
+            job_id, step_id, local_direct, util::StepStatusToString(new_status),
+            craned_id);
+        this->SetErrorStatus(crane::grpc::JobStatus::Failed);
+        this->SetErrorExitCode(exit_code == 0 ? ExitCode::EC_RPC_ERR
+                                              : exit_code);
+      }
     }
     if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus().has_value()) {
@@ -1258,7 +1281,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
               job_id, step_id);
           for (const auto& node : this->ExecutionNodes())
             context->craned_cancel_steps[node][job_id].insert(step_id);
-        } else {
+        } else if (!local_direct) {
           // Launch step execution
           for (const auto& node : this->ExecutionNodes())
             context->craned_step_exec_map[node][job_id].insert(step_id);
@@ -1268,6 +1291,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       }
     }
     break;
+  }
   case crane::grpc::JobStatus::Running:
   case crane::grpc::JobStatus::Completing:
     if (new_status == crane::grpc::JobStatus::Completing) {
