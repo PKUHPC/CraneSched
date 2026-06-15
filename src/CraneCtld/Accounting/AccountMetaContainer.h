@@ -129,6 +129,13 @@ class AccountMetaContainer final {
   void FreeMetaResource(const JobInCtld& job);
 
   /*
+   * Release only running-slot resources when a job is requeued.
+   * IN: job - job whose running resource should be released
+   * RET: none
+   */
+  void FreeMetaRunningResource(const JobInCtld& job);
+
+  /*
    * Roll back running-slot resources reserved for a scheduler candidate.
    * IN: job - scheduler candidate whose running resource should be released
    * RET: none
@@ -246,7 +253,8 @@ class AccountMetaContainer final {
   void DoFreeResource_(job_id_t job_id, const std::string& username,
                        const std::list<std::string>& account_chain,
                        const std::string& qos, const std::string& partition_id,
-                       const MetaResource& meta_resource);
+                       const MetaResource& meta_resource,
+                       bool reduce_user_job = true);
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:

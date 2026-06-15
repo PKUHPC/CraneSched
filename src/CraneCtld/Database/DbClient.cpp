@@ -25,10 +25,6 @@
 
 namespace Ctld {
 
-// NOTE: MongoDB field names "job_id", "job_db_id", "job_name" were renamed
-// to "job_id", "job_db_id", "job_name" in this version. Existing databases from
-// older versions require field name migration before upgrading.
-
 using bsoncxx::builder::basic::kvp;
 using namespace std::chrono_literals;
 
@@ -507,6 +503,8 @@ bool MongodbClient::InsertRecoveredJob(
             // 2. Mark as aggregated
             MarkJobAsAggregated(
                 ViewGetArithmeticValue_<int32_t>(job_doc.view()["job_id"]),
+                ViewGetArithmeticValue_<int32_t>(
+                    job_doc.view()["requeue_count"]),
                 session);
           });
       if (txn_success) return true;
@@ -523,11 +521,27 @@ bool MongodbClient::InsertRecoveredJob(
 }
 
 bool MongodbClient::InsertJob(JobInCtld* job) {
+  if (job->EndTime() > job->StartTime() + job->time_limit ||
+      job->EndTime() < job->StartTime()) {
+    CRANE_ERROR(
+        "Job #{} end time {} is invalid, start time {}, max end time {} (start "
+        "time + time limit).",
+        job->JobId(), job->EndTime(), job->StartTime() + job->time_limit,
+        job->StartTime());
+    return false;
+  }
+  if (job->EndTimeInUnixSecond() == kJobMaxTimeStampSec) {
+    CRANE_ERROR("Job #{} end time {} is invalid default value", job->JobId(),
+                job->EndTime());
+    return false;
+  }
   document job_doc = JobInCtldToDocument_(job);
 
-  // Create filter by job_id
+  // Create filter by (job_id, requeue_count) composite key
   document filter;
   filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
+  filter.append(
+      kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
@@ -556,7 +570,7 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
               AppendToAccUsageTable(job_doc_copy.view(), session);
 
               // 2. Mark as aggregated
-              MarkJobAsAggregated(job->JobId(), session);
+              MarkJobAsAggregated(job->JobId(), job->RequeueCount(), session);
             });
 
         if (!txn_success) {
@@ -595,9 +609,11 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
     for (const auto& job : jobs) {
       document job_doc = JobInCtldToDocument_(job);
 
-      // Create filter by job_id
+      // Create filter by (job_id, requeue_count) composite key
       document filter;
       filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
+      filter.append(
+          kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
 
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
@@ -624,7 +640,7 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
             CommitTransaction([this, job](mongocxx::client_session* session) {
               AppendToAccUsageTable(job, session);
               // 2. Mark as aggregated
-              MarkJobAsAggregated(job->JobId(), session);
+              MarkJobAsAggregated(job->JobId(), job->RequeueCount(), session);
             });
         if (!txn_success)
           CRANE_WARN(
@@ -730,6 +746,8 @@ bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
     size_t limit) {
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
   document filter;
   auto req_step_map = BuildRequestedStepMap_(request);
 
@@ -863,28 +881,34 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  mongocxx::options::find option;
-  option = option.limit(limit);
-
-  document sort_doc;
-  sort_doc.append(kvp("job_db_id", -1));
-  option = option.sort(sort_doc.view());
+  // Use aggregation to deduplicate: for each job_id, only return the
+  // record with the highest requeue_count (the latest run), then apply
+  // request filters to those latest-run documents.
+  mongocxx::pipeline pipeline;
+  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
+  pipeline.group(
+      make_document(kvp("_id", "$job_id"),
+                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
+  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(filter.view());
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
+  pipeline.limit(static_cast<int32_t>(limit));
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                               option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
-  // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
-  // 15 priority      time_eligible  time_start     time_end      time_suspended
-  // 20 script        state          timelimit      time_submit   work_dir
-  // 25 submit_line   exit_code      username       qos           get_user_env
-  // 30 type          extra_attr     reservation    exclusive     cpus_alloc
-  // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
-  // 40 nodename_list wckey          submit_hostname deadline
-  // 44 array_job_id  array_task_id  array_start    array_end      array_stride
-  // 49 array_max_concurrent
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type          extra_attr     reservation    exclusive  cpus_alloc
+  // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
+  // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 array_job_id  array_task_id  array_start  array_end      array_stride
+  // 55 array_max_concurrent requeue_count
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
@@ -926,6 +950,16 @@ bool MongodbClient::FetchJobRecords(
         auto* gres_map_ptr = mutable_allocated_res_view->mutable_gres_map();
         *gres_map_ptr = ToGrpcGresMap(
             BsonToGresMap(view["device_map"].get_document().value));
+        if (auto env_elem = view["env"]; env_elem) {
+          auto env_doc =
+              bsoncxx::from_json(std::string(env_elem.get_string().value));
+          auto* mutable_env = job_info.mutable_env();
+          for (const auto& elem : env_doc.view()) {
+            if (elem.type() != bsoncxx::type::k_string) continue;
+            (*mutable_env)[std::string(elem.key())] =
+                std::string(elem.get_string().value);
+          }
+        }
         job_info.set_name(std::string(view["job_name"].get_string().value));
         job_info.set_qos(std::string(view["qos"].get_string().value));
         job_info.set_uid(view["id_user"].get_int32().value);
@@ -1012,11 +1046,27 @@ bool MongodbClient::FetchJobRecords(
         wckey_info += ViewValueOr_(view["wckey"], std::string(""));
         job_info.set_wckey(wckey_info);
 
+        auto* mutable_licenses = job_info.mutable_licenses_count();
+        for (auto&& elem :
+             ViewValueOr_(view["licenses_alloc"],
+                          bsoncxx::builder::basic::make_document().view())) {
+          auto license_count = ViewValueOr_(elem, int64_t{0});
+          if (license_count < 0) continue;
+          mutable_licenses->emplace(std::string(elem.key()),
+                                    static_cast<uint32_t>(license_count));
+        }
+        job_info.set_requeue_count(
+            ViewGetArithmeticValue_<int32_t>(view["requeue_count"]));
+
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
         job_info_ptr = &in_mem_job_it->second;
       }
+      // TODO: Support fetch duplicate job records
+      int32_t db_requeue_count =
+          ViewGetArithmeticValue_<int32_t>(view["requeue_count"]);
+      if (db_requeue_count < job_info_ptr->requeue_count()) continue;
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
       auto req_steps = RequestedStepsForJob_(job_id, array_job_id,
@@ -1040,6 +1090,7 @@ bool MongodbClient::FetchJobRecords(
 bool MongodbClient::FetchJobStepRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
+  using bsoncxx::builder::basic::make_document;
   if (job_info_map->empty()) return true;
   document filter;
   auto req_step_map = BuildRequestedStepMap_(request);
@@ -1168,15 +1219,22 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  mongocxx::options::find option;
-
-  document sort_doc;
-  sort_doc.append(kvp("job_db_id", -1));
-  option = option.sort(sort_doc.view());
+  // Use aggregation to deduplicate: for each job_id, only return the
+  // record with the highest requeue_count (the latest run).
+  // Apply the caller filter after deduplication so state/type/time-related
+  // constraints are evaluated against the latest run rather than an older
+  // matching run.
+  mongocxx::pipeline pipeline;
+  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
+  pipeline.group(
+      make_document(kvp("_id", "$job_id"),
+                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
+  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(filter.view());
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(filter.view(),
-                                                               option);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1185,7 +1243,10 @@ bool MongodbClient::FetchJobStepRecords(
   // 20 script        state          timelimit      time_submit   work_dir
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
-  // 35 mem_alloc     device_map     meta_container has_job_info
+  // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
+  // 40 licenses_alloc nodename_list wckey          using_default_wckey cluster
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
+  // 50 requeue_count
 
   try {
     for (auto view : cursor) {
@@ -1201,6 +1262,10 @@ bool MongodbClient::FetchJobStepRecords(
         continue;
       }
       auto* job_info_ptr = &in_mem_job_it->second;
+
+      int32_t db_requeue_count =
+          ViewGetArithmeticValue_<int32_t>(view["requeue_count"]);
+      if (db_requeue_count < job_info_ptr->requeue_count()) continue;
 
       auto steps_elem = view["steps"];
       if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
@@ -1219,11 +1284,18 @@ bool MongodbClient::FetchJobStepRecords(
       for (auto&& elem :
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {
+        auto license_count = ViewValueOr_(elem, int64_t{0});
+        if (license_count < 0) continue;
         mutable_licenses->emplace(std::string(elem.key()),
-                                  elem.get_int64().value);
+                                  static_cast<uint32_t>(license_count));
       }
 
-      job_info_ptr->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
+      if (view["wckey"]) {
+        std::string wckey_info;
+        if (ViewValueOr_(view["using_default_wckey"], false)) wckey_info += "*";
+        wckey_info += ViewValueOr_(view["wckey"], std::string(""));
+        job_info_ptr->set_wckey(wckey_info);
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1234,7 +1306,7 @@ bool MongodbClient::FetchJobStepRecords(
 
 bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
   document doc;
-  doc.append(kvp("job_db_inx", job_db_id));
+  doc.append(kvp("job_db_id", job_db_id));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
@@ -1390,9 +1462,12 @@ bool MongodbClient::InsertRecoveredStep(
 bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   if (steps.empty()) return false;
 
-  std::unordered_map<job_id_t, std::vector<StepInCtld*>> steps_by_job;
+  // Group steps by (job_id, requeue_count) composite key
+  using JobRequeueKey = std::pair<job_id_t, int32_t>;
+
+  absl::flat_hash_map<JobRequeueKey, std::vector<StepInCtld*>> steps_by_job;
   for (const auto& step : steps) {
-    steps_by_job[step->job_id].push_back(step);
+    steps_by_job[{step->job_id, step->RequeueCount()}].push_back(step);
   }
 
   mongocxx::options::bulk_write bulk_options;
@@ -1402,7 +1477,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         (*GetClient_())[m_db_name_][m_job_collection_name_].create_bulk_write(
             *GetSession_(), bulk_options);
 
-    for (const auto& [job_id, job_steps] : steps_by_job) {
+    for (const auto& [key, job_steps] : steps_by_job) {
+      auto [job_id, requeue_count] = key;
       // Build array of step documents
       array steps_array;
       for (const auto& step : job_steps) {
@@ -1410,9 +1486,10 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         steps_array.append(step_doc);
       }
 
-      // Filter by job_id
+      // Filter by (job_id, requeue_count) composite key
       document filter;
       filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
+      filter.append(kvp("requeue_count", static_cast<int32_t>(requeue_count)));
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document, sorted by step_id
@@ -1426,10 +1503,12 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
           }));
         }));
       }));
-      update_doc.append(
-          kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-            set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
-          }));
+      update_doc.append(kvp("$setOnInsert", [&job_id, &requeue_count](
+                                                sub_document set_on_insert) {
+        set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
+        set_on_insert.append(
+            kvp("requeue_count", static_cast<int32_t>(requeue_count)));
+      }));
 
       mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
       update_op.upsert(true);
@@ -1756,14 +1835,16 @@ void MongodbClient::AppendToMonthTable_(const JobAggregationInfo& info,
 }
 
 // Mark job as aggregated in job_table
-void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
+void MongodbClient::MarkJobAsAggregated(job_id_t job_id, int32_t requeue_count,
                                         mongocxx::client_session* session) {
   using bsoncxx::builder::basic::kvp;
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
   auto client = GetClient_();
-  auto filter = make_document(kvp("job_id", static_cast<int32_t>(job_id)));
+  auto filter =
+      make_document(kvp("job_id", static_cast<int32_t>(job_id)),
+                    kvp("requeue_count", static_cast<int32_t>(requeue_count)));
   auto update = make_document(kvp(
       "$set", make_document(kvp("aggregated", true),
                             kvp("aggregated_at",
@@ -2018,7 +2099,9 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
         CommitTransaction([this, &job_doc](mongocxx::client_session* session) {
           AppendToAccUsageTable(job_doc, session);
           MarkJobAsAggregated(
-              ViewGetArithmeticValue_<int32_t>(job_doc["job_id"]), session);
+              ViewGetArithmeticValue_<int32_t>(job_doc["job_id"]),
+              ViewGetArithmeticValue_<int32_t>(job_doc["requeue_count"]),
+              session);
         });
     if (!success) {
       CRANE_ERROR("Failed to append job to acc usage table.");
@@ -4644,11 +4727,11 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-  // 45 submit_hostname req_nodes      exclude_nodes   execution_nodes deadline
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
   // 50 array_job_id  array_task_id  array_start   array_end      array_stride
-  // 55 array_max_concurrent
+  // 55 array_max_concurrent requeue_count
   // clang-format off
-  std::array<std::string, 56> fields{
+  std::array<std::string, 57> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4667,11 +4750,11 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info",
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
-    // 45 - 49
     "submit_hostname", "req_nodes","exclude_nodes", "execution_nodes", "deadline",
-    // 50 - 55
+    // 50 - 54
     "array_job_id", "array_task_id", "array_start", "array_end", "array_stride",
-    "array_max_concurrent"
+    // 55 - 56
+    "array_max_concurrent", "requeue_count"
   };
   // clang-format on
 
@@ -4689,7 +4772,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
              std::vector<CranedId>, int64_t,                        /*48-49*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
-             int64_t>                                               /*55*/
+             int64_t, int32_t>                                      /*55-56*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4730,10 +4813,11 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           // 45-49
           job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
           execution_nodes, job_to_ctld.deadline_time().seconds(),
-          // 50-55
+          // 50-54
           array_job_id, array_task_id, array_spec_fields.start,
           array_spec_fields.end, array_spec_fields.stride,
-          array_spec_fields.max_concurrent};
+          // 55-56
+          array_spec_fields.max_concurrent, runtime_attr.requeue_count()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4820,10 +4904,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
   // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
   // 50 array_job_id  array_task_id  array_start  array_end      array_stride
-  // 55 array_max_concurrent
+  // 55 array_max_concurrent requeue_count
 
   // clang-format off
-  std::array<std::string, 56> fields{
+  std::array<std::string, 57> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4844,9 +4928,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 49
       "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline",
-      // 50 - 55
+      // 50 - 54
       "array_job_id", "array_task_id", "array_start", "array_end", "array_stride",
-      "array_max_concurrent",
+      // 55 - 56
+      "array_max_concurrent", "requeue_count"
   };
   // clang-format on
 
@@ -4865,7 +4950,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::unordered_set<CranedId>, std::vector<CranedId>,   /*47-48*/
              int64_t,                                               /*49*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
-             int64_t>                                               /*55*/
+             int64_t, int32_t>                                      /*55-56*/
       values{                                                       // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
@@ -4899,10 +4984,12 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
              job->executing_craned_ids, absl::ToUnixSeconds(job->deadline_time),
-             // 50-55
+             // 50-54
              array_job_id, array_task_id, array_spec_fields.start,
              array_spec_fields.end, array_spec_fields.stride,
-             array_spec_fields.max_concurrent};
+             // 55-56
+             array_spec_fields.max_concurrent,
+             static_cast<int32_t>(job->RequeueCount())};
 
   return DocumentConstructor_(fields, values);
 }
@@ -5230,6 +5317,7 @@ bool MongodbClient::InitTableIndexes() {
     auto client = m_connect_pool_->acquire();
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
+    CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
@@ -5523,7 +5611,8 @@ bool MongodbClient::MigrateV0ToV1_() {
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
       "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
-      "exclude_nodes(=[]), execution_nodes(=[])]...");
+      "exclude_nodes(=[]), submit_hostname(=\"\"), "
+      "execution_nodes(=[])]...");
 
   try {
     auto client = GetClient_();
@@ -5590,20 +5679,20 @@ bool MongodbClient::MigrateV0ToV1_() {
 
 // Detect and recover from interrupted migration on startup.
 //
-// SwapMigratedTaskTable_ performs two non-atomic renameCollection calls:
-//   Step 1: task_table -> task_table_backup_v{N}
-//   Step 2: task_table_migrating -> task_table
+// SwapMigratedJobTable_ performs two non-atomic renameCollection calls:
+//   Step 1: source_collection -> source_collection_backup_v{N}
+//   Step 2: job_table_migrating -> job_table
 //
 // Two failure scenarios can leave the database in an inconsistent state:
 //
 //   Scenario A (swap interrupted): Step 1 succeeded but step 2 failed
 //   and rollback also failed (or the process crashed between the two
-//   renames). Result: task_table is gone, only backup_v{N} remains.
-//   Recovery: rename backup back to task_table, then let the caller
+//   renames). Result: the source collection is gone, only backup_v{N} remains.
+//   Recovery: rename backup back to the source collection, then let the caller
 //   re-run migration from scratch.
 //
 //   Scenario B (version not persisted): Both renames succeeded but
-//   SetDbSchemaVersion_ failed. Result: task_table has migrated data,
+//   SetDbSchemaVersion_ failed. Result: job_table has migrated data,
 //   backup_v{N} still exists, version is stale.
 //   Recovery: set version to kCurrentDbSchemaVersion directly — the
 //   data is already migrated, no need to redo the migration.
@@ -5710,12 +5799,12 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
     return false;
   }
 
-  if (current < kCurrentDbSchemaVersion - 1) {
+  if (current < 0) {
     CRANE_LOGGER_ERROR(
         m_logger_,
-        "Database schema version {} is too old. Only migration from "
-        "version {} is supported. Please migrate manually.",
-        current, kCurrentDbSchemaVersion - 1);
+        "Database schema version {} is too old. Earliest supported version is "
+        "0. Please migrate manually.",
+        current);
     return false;
   }
 
@@ -5748,7 +5837,7 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
   // Copy-migrate-swap strategy:
   // 1. Copy source collection to temp collection (once)
   // 2. Run all migration steps on temp collection
-  // 3. Swap temp with original + persist version (once)
+  // 3. Swap temp into the target collection + persist version (once)
   // Original data is never modified until swap succeeds.
 
   // Step 1: Copy source collection to temp collection
@@ -5783,7 +5872,7 @@ bool MongodbClient::CheckAndMigrateDbSchema_() {
     }
   }
 
-  // Step 3: Swap temp collection with original + persist version
+  // Step 3: Swap temp collection into target collection + persist version
   if (!SwapMigratedJobTable_(source_collection, current,
                              kCurrentDbSchemaVersion)) {
     CRANE_LOGGER_ERROR(m_logger_,

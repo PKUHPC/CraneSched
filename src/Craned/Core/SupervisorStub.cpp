@@ -104,9 +104,9 @@ CraneErrCode SupervisorStub::ExecuteStep() {
   crane::grpc::supervisor::StepExecutionRequest request;
   crane::grpc::supervisor::StepExecutionReply reply;
 
-  auto status = m_stub_->ExecuteStep(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_ERROR("ExecuteStep RPC failed: {}", status.error_message());
+  auto ok = m_stub_->ExecuteStep(&context, request, &reply);
+  if (!ok.ok()) {
+    CRANE_ERROR("ExecuteStep failed: reply {},{}", ok.ok(), ok.error_message());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 

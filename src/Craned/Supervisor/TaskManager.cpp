@@ -310,15 +310,11 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
             "receiving new status 'Running', current status: {}.",
             job_id, step_id, m_status_.load());
     } else {
-      const bool expected = m_step_to_supv_.local_direct_launch()
-                                ? m_status_ == StepStatus::Configuring
-                                : m_status_ == StepStatus::Starting;
-      if (!expected)
+      if (m_status_ != StepStatus::Starting)
         CRANE_WARN(
-            "[Step {}.{}] Step status transition to Running is invalid, "
-            "local_direct={}, current status: {}.",
-            job_id, step_id, m_step_to_supv_.local_direct_launch(),
-            m_status_.load());
+            "[Step {}.{}] Step status is not 'Starting' when receiving new "
+            "status 'Running', current status: {}.",
+            job_id, step_id, m_status_.load());
     }
     break;
   }
@@ -337,13 +333,12 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   }
 
   case StepStatus::Completing: {
-    // Completing is valid before Running for direct-launch failure or
-    // pre-execute termination.
-    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting &&
-        m_status_ != StepStatus::Configuring)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting/Configuring' "
-          "when receiving new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
@@ -1709,8 +1704,7 @@ CraneErrCode ContainerInstance::Prepare() {
   // Pull image according to pull policy
   auto image_id_opt = cri_client->PullImage(
       ca_meta->image().image(), ca_meta->image().username(),
-      ca_meta->image().password(), ca_meta->image().pull_policy(),
-      g_config.Container.ImagePullingTimeout);
+      ca_meta->image().password(), ca_meta->image().pull_policy());
 
   if (!image_id_opt.has_value()) {
     CRANE_ERROR("Failed to pull image {} for container step #{}.{}",
@@ -2854,9 +2848,9 @@ std::future<CraneErrCode> TaskManager::ExecuteStepAsync() {
   std::future ok_future = ok_promise.get_future();
 
   auto elem = ExecuteStepElem{.ok_prom = std::move(ok_promise)};
+
   m_grpc_execute_step_queue_.enqueue(std::move(elem));
   m_grpc_execute_step_async_handle_->send();
-
   return ok_future;
 }
 
@@ -2885,40 +2879,6 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   }
 
   return CraneErrCode::SUCCESS;
-}
-
-void TaskManager::AbortTasksAfterLaunchFailure_(task_id_t failed_task_id,
-                                                const std::string& reason) {
-  CRANE_ASSERT_MSG(
-      !m_step_.IsDaemon(),
-      "Daemon step should not use this fail-fast path for multiple tasks.");
-
-  for (auto task_id : m_step_.GetTaskIds()) {
-    // The failed task was already finalized by LaunchExecution_; keep its root
-    // failure cause instead of rewriting it as a sibling launch abort.
-    if (task_id == failed_task_id) continue;
-
-    auto* task = m_step_.GetTaskInstance(task_id);
-    if (task == nullptr) continue;
-
-    auto* final_info = task->GetFinalInfo();
-    final_info->cause = TaskFinalizeCause::STEP_LAUNCH_ABORTED;
-    final_info->reason = reason;
-
-    if (task->GetExecId().has_value()) {
-      // Process-backed tasks must be finalized by their exit event after
-      // Kill(); finalizing here would race the SIGCHLD/CRI/cfored completion
-      // path.
-      auto err = task->Kill(SIGKILL);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_WARN("[task #{}] Failed to kill after launch failure: {}",
-                   task_id, static_cast<int>(err));
-      }
-      continue;
-    }
-
-    FinalizeTaskAsync(task_id, TaskFinalizeCause::STEP_LAUNCH_ABORTED, reason);
-  }
 }
 
 void TaskManager::EvExecuteDaemonPodCb_() {
@@ -3307,11 +3267,6 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
                            ExitCode::EC_SPAWN_FAILED, fi->reason);
       continue;
-    case TaskFinalizeCause::STEP_LAUNCH_ABORTED:
-      // Do not let sibling aborts override the root launch failure exit code.
-      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed, 0,
-                           fi->reason);
-      continue;
     case TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
                            ExitCode::EC_PERMISSION_DENIED, fi->reason);
@@ -3674,45 +3629,12 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       continue;
     }
 
-    const bool local_direct = m_step_.GetStep().local_direct_launch();
-    auto set_execute_result = [&](CraneErrCode err, std::string reason = "") {
-      elem.ok_prom.set_value(err);
-      if (local_direct && err != CraneErrCode::SUCCESS &&
-          step_status == StepStatus::Configuring) {
-        if (reason.empty())
-          reason = fmt::format("Local direct launch failed, code {}",
-                               static_cast<int>(err));
-        m_step_.GotNewStatus(StepStatus::Completing);
-        g_craned_client->StepStatusChangeAsync(StepStatus::Completing,
-                                               ExitCode::EC_EXEC_ERR, reason,
-                                               StepStatus::Failed);
-        ShutdownSupervisorAsync(StepStatus::Failed, ExitCode::EC_EXEC_ERR,
-                                std::move(reason));
-      }
-    };
-
-    const bool executable = local_direct
-                                ? step_status == StepStatus::Configuring
-                                : step_status == StepStatus::Starting;
-    if (!executable) {
-      CRANE_ERROR(
-          "[Step #{}.{}] ExecuteStep received at invalid status {}, "
-          "local_direct={}.",
-          m_step_.job_id, m_step_.step_id, step_status, local_direct);
-      set_execute_result(
-          CraneErrCode::ERR_INVALID_PARAM,
-          fmt::format("ExecuteStep received at invalid status {}",
-                      step_status));
-      continue;
-    }
-
     // ExecuteTaskAsync is only used for executable steps. Reaching here with an
     // empty task list is a fatal error.
     if (m_step_.task_ids.empty()) {
       CRANE_ERROR("No task ids assigned for executable step #{}.{}",
                   m_step_.job_id, m_step_.step_id);
-      set_execute_result(CraneErrCode::ERR_INVALID_PARAM,
-                         "No task ids assigned for executable step");
+      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;
     }
 
@@ -3721,19 +3643,15 @@ void TaskManager::EvGrpcExecuteStepCb_() {
           "Container step #{}.{} has {} tasks, but container steps only "
           "support exactly one task. Rejecting.",
           m_step_.job_id, m_step_.step_id, m_step_.task_ids.size());
-      set_execute_result(CraneErrCode::ERR_INVALID_PARAM,
-                         "Container steps only support exactly one task");
+      for (auto task_id : m_step_.task_ids)
+        g_task_mgr->FinalizeTaskAsync(
+            task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
+            "Container steps only support exactly one task");
+      elem.ok_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
       continue;
     }
 
-    // Admission checks passed. Return to the ExecuteStep RPC caller before any
-    // potentially slow pwd/prepare/cgroup/container image pull/spawn work.
-    elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-
     m_step_.GotNewStatus(StepStatus::Running);
-    if (local_direct && step_status == StepStatus::Configuring)
-      g_craned_client->StepStatusChangeAsync(StepStatus::Running, 0,
-                                             std::nullopt);
 
     for (auto task_id : m_step_.task_ids) {
       std::unique_ptr<ITaskInstance> instance;
@@ -3760,6 +3678,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
             task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
             fmt::format("Failed to look up password entry for uid {}",
                         m_step_.uid));
+      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
 
@@ -3774,11 +3693,13 @@ void TaskManager::EvGrpcExecuteStepCb_() {
               std::format("Failed to prepare step, code: {}",
                           static_cast<int>(err)));
         }
+        elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
         continue;
       }
     }
 
-    // TODO: We don't need to exec task for a calloc job
+    // TODO: We dont need to exec task for a calloc job
+
     if (!m_step_.IsDaemon()) {
       // Add a timer to limit the execution time of a task.
 
@@ -3789,7 +3710,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
       std::string log_timer =
           deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
-      bool is_deadline = deadline_sec <= time_limit_sec;
+      bool is_deadline = deadline_sec <= time_limit_sec ? true : false;
 
       AddTerminationTimer_(sec, is_deadline);
       CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
@@ -3820,6 +3741,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       // get short-circuited by the "no running task" fast path before the
       // interactive no-process finalization logic can run.
       m_exec_id_task_id_map_[0] = 0;
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
@@ -3834,6 +3756,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
                                       TaskFinalizeCause::STEP_CGROUP_FAILED,
                                       "Failed to allocate cgroup");
       }
+      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
     m_step_.step_user_cg = std::move(cg_expt.value());
@@ -3841,24 +3764,24 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    // TODO: Maybe we can launch tasks in parallel?
+    CraneErrCode err = CraneErrCode::SUCCESS;
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
-      auto err = LaunchExecution_(task);
-      if (err != CraneErrCode::SUCCESS) {
+      // TODO: Maybe we can launch tasks in parallel
+      auto task_err = LaunchExecution_(task);
+      if (task_err != CraneErrCode::SUCCESS) {
         CRANE_WARN("[task #{}] Failed to launch process.", task_id);
-        AbortTasksAfterLaunchFailure_(
-            task_id, std::format("Task #{} failed to launch, code: {}", task_id,
-                                 static_cast<int>(err)));
-        break;
+        err = task_err;
+      } else {
+        auto exec_id = task->GetExecId().value();
+        CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+                   std::visit([](auto&& arg) { return std::format("{}", arg); },
+                              exec_id));
+        m_exec_id_task_id_map_[exec_id] = task_id;
       }
-
-      auto exec_id = task->GetExecId().value();
-      CRANE_INFO("[task #{}] Launched execution, id: {}.", task_id,
-                 std::visit([](auto&& arg) { return std::format("{}", arg); },
-                            exec_id));
-      m_exec_id_task_id_map_[exec_id] = task_id;
     }
+
+    elem.ok_prom.set_value(err);
   }
 }
 
