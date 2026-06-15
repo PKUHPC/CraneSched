@@ -107,7 +107,8 @@
 | 103 | `ERR_MAX_TRES_PER_ACCOUNT_BEYOND` | 当前账号的 TRES 使用量达到 QoS 限制 | 联系管理员提升 QoS 的账号 TRES 限制 | The tres of jobs for the current account has reached the limit of this QOS |
 | 104 | `ERR_TRES_PER_JOB_BEYOND` | 单个作业的 TRES 超过 QoS 限制 | 减少作业资源请求或联系管理员提升 QoS 限制 | The tres of jobs has reached the limit of this QOS |
 | 105 | `ERR_INVALID_DEADLINE` | 截止时间无效（应晚于提交时间） | 设置一个晚于当前时间的截止时间 | Invalid deadline time(should be later than submit time) |
-| 106 | `ERR_PARTITION_TRES_PER_JOB_BEYOND` | 单个作业的 TRES 超过 Partition 的 `max_tres_per_job` 限制 | 减少作业资源请求或联系管理员提升 Partition 限制 | Resource (TRES) per job exceeds the partition limit |
-| 107 | `ERR_PARTITION_TIME_BEYOND` | 作业时间限制超过 Partition 的 `max_wall_duration_per_job` 限制 | 减少作业时间限制或联系管理员提升 Partition 时间限制 | Time limit exceeds the partition's per-job wall time limit |
-| 108 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` | 用户在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per user exceeded |
-| 109 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` | 账号在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per account exceeded |
+| 106 | `ERR_PMIX_ERR` | PMIx 初始化或运行时错误 | 联系管理员查看 PMIx 和作业启动日志 | PMIx error |
+| 107 | `ERR_PARTITION_TRES_PER_JOB_BEYOND` | 单个作业的 TRES 超过 Partition 的 `max_tres_per_job` 限制 | 减少作业资源请求或联系管理员提升 Partition 限制 | Resource (TRES) per job exceeds the partition limit |
+| 108 | `ERR_PARTITION_TIME_BEYOND` | 作业时间限制超过 Partition 的 `max_wall_duration_per_job` 限制 | 减少作业时间限制或联系管理员提升 Partition 时间限制 | Time limit exceeds the partition's per-job wall time limit |
+| 109 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` | 用户在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per user exceeded |
+| 110 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` | 账号在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per account exceeded |

@@ -188,11 +188,11 @@ Partition resource limits apply to a specific partition and can be set separatel
 | Field | Description |
 |-------|-------------|
 | `MaxJobs` | Maximum concurrent running jobs for this account/user in the partition |
-| `MaxSubmitJobs` | Maximum submitted (including queued) jobs for this account/user in the partition |
+| `MaxSubmitJobs` | Maximum submitted (including queued) jobs for this account/user in the partition; array jobs and batch submissions count by the submitted job count |
 | `MaxTres` | Maximum total TRES usage for this account/user in the partition |
 | `MaxTresPerJob` | Maximum TRES per job in the partition |
 | `MaxWall` | Cumulative wall-clock time limit for this account/user in the partition (seconds) |
-| `MaxWallPerJob` | Maximum wall-clock time per job in the partition (seconds) |
+| `MaxWallPerJob` | Maximum wall-clock time per job in the partition (seconds), mapped to the internal `max_wall_duration_per_job` field |
 
 ### 2.2 Set Partition Limits for an Account
 
@@ -202,7 +202,7 @@ Partition resource limits apply to a specific partition and can be set separatel
 cacctmgr modify account where Name=<account_name> Partition=<partition_name> set <field>=<value>
 ```
 
-> **Note**: All partition resource limit fields **require** `Partition=<partition_name>` in the `where` clause. Omitting it will result in an error.
+> **Note**: All partition resource limit fields **require** `Partition=<partition_name>` in the `where` clause. Omitting it will result in an error. The target account must already include the partition.
 
 **Parameter reference:**
 
@@ -251,7 +251,7 @@ cacctmgr modify account where Name=PKU Partition=GPU \
 cacctmgr modify user where Name=<username> [Account=<account_name>] Partition=<partition_name> set <field>=<value>
 ```
 
-> **Note**: All partition resource limit fields **require** `Partition=<partition_name>` in the `where` clause. Omitting it will result in an error.
+> **Note**: All partition resource limit fields **require** `Partition=<partition_name>` in the `where` clause. Omitting it will result in an error. The target user must already include the partition under the corresponding account.
 
 **Examples:**
 
@@ -329,10 +329,10 @@ The following limits are checked at job submission. If exceeded, the job is reje
 
 | Error Code | Description |
 |------------|-------------|
-| `ERR_PARTITION_TRES_PER_JOB_BEYOND` (106) | Job TRES exceeds partition `MaxTresPerJob` limit |
-| `ERR_PARTITION_TIME_BEYOND` (107) | Job time limit exceeds partition `MaxWallPerJob` limit |
-| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` (108) | User submit job count in partition exceeds `MaxSubmitJobs` limit |
-| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` (109) | Account submit job count in partition exceeds `MaxSubmitJobs` limit |
+| `ERR_PARTITION_TRES_PER_JOB_BEYOND` (107) | Job TRES exceeds partition `MaxTresPerJob` limit |
+| `ERR_PARTITION_TIME_BEYOND` (108) | Job time limit exceeds partition `MaxWallPerJob` limit |
+| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` (109) | User submit job count in partition exceeds `MaxSubmitJobs` limit |
+| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` (110) | Account submit job count in partition exceeds `MaxSubmitJobs` limit |
 
 **Scheduling stage (job remains pending):**
 
@@ -403,13 +403,17 @@ cacctmgr show user alice -P
 
 3. **Account vs. user limits**: Account-level partition limits apply to the total usage of all users under that account. User-level partition limits apply only to that individual user. When both are configured, a job must satisfy both.
 
-4. **TRES format**: TRES strings use the format `resource_type:amount`, with multiple resources separated by commas, e.g., `cpu:32,mem:64G`. Memory supports unit suffixes `K`, `M`, `G`, `T`. GRES format is `gres/type[:name]:num`, e.g., `gres/gpu:4`.
+4. **Partition deletion clears limits**: Removing a partition from an account or user's allowed partition list also removes the partition resource limits configured for that partition.
 
-5. **Time units**:
+5. **Submitted job count accounting**: `MaxSubmitJobs` is checked during submission and includes submitted, queued, and running jobs. Array jobs and batch submissions are checked using the actual job count reserved by the submission.
+
+6. **TRES format**: TRES strings use the format `resource_type:amount`, with multiple resources separated by commas, e.g., `cpu:32,mem:64G`. Memory supports unit suffixes `K`, `M`, `G`, `T`. GRES format is `gres/type[:name]:num`, e.g., `gres/gpu:4`.
+
+7. **Time units**:
    - QoS `MaxTimeLimitPerJob` supports duration format (`days-hours:minutes:seconds`, e.g., `1-2:30:0`) or seconds.
    - Partition `MaxWall` and `MaxWallPerJob` are in **seconds**, e.g., 1 hour = `3600`.
 
-6. **Meaning of unlimited**: When a field is not configured, it displays as `unlimited`, meaning no constraint applies for that dimension.
+8. **Meaning of unlimited**: When a field is not configured, it displays as `unlimited`, meaning no constraint applies for that dimension.
 
 ## See Also
 

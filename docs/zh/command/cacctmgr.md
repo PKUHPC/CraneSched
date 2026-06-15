@@ -27,6 +27,7 @@ cacctmgr <操作> <实体> [ID] [选项]
 - **-v, --version**: 显示 cacctmgr 版本
 - **-J, --json**: 以 JSON 格式输出
 - **-f, --force**: 强制执行操作，不需要确认
+- **-P, --partition-limit**: 在 `show account` 和 `show user` 输出中显示分区资源限制
 
 ## 操作
 
@@ -108,7 +109,7 @@ cacctmgr delete account ComputingCentre
 **语法：**
 
 ```bash
-cacctmgr modify account where Name=<账户> set <属性>=<值>
+cacctmgr modify account where Name=<账户> [Partition=<分区>] set <属性>=<值>
 ```
 
 **属性：**
@@ -121,6 +122,12 @@ cacctmgr modify account where Name=<账户> set <属性>=<值>
 - **AllowedQos=&lt;qos列表&gt;**: 设置允许的 QoS 列表（覆盖）
 - **AllowedQos+=&lt;qos列表&gt;**: 向允许列表添加 QoS
 - **AllowedQos-=&lt;qos列表&gt;**: 从允许列表移除 QoS
+- **MaxJobs=&lt;数量&gt;**: 设置指定分区内最大并发运行作业数（需要 `Partition=<分区>`）
+- **MaxSubmitJobs=&lt;数量&gt;**: 设置指定分区内最大提交作业数（需要 `Partition=<分区>`）
+- **MaxTres=&lt;tres&gt;**: 设置指定分区内最大 TRES 总用量（需要 `Partition=<分区>`）
+- **MaxTresPerJob=&lt;tres&gt;**: 设置指定分区内单作业最大 TRES 用量（需要 `Partition=<分区>`）
+- **MaxWall=&lt;秒&gt;**: 设置指定分区内累计墙钟时间上限（需要 `Partition=<分区>`）
+- **MaxWallPerJob=&lt;秒&gt;**: 设置指定分区内单作业最大墙钟时间（需要 `Partition=<分区>`）
 
 **示例：**
 
@@ -148,6 +155,13 @@ cacctmgr modify account where Name=PKU set AllowedPartition-=GPU
 cacctmgr modify account where Name=PKU set AllowedPartition=CPU,GPU
 ```
 
+设置账户在 `GPU` 分区的资源限制：
+
+```bash
+cacctmgr modify account where Name=PKU Partition=GPU \
+  set MaxJobs=20 MaxSubmitJobs=100 MaxTresPerJob=cpu:8,mem:32G MaxWallPerJob=7200
+```
+
 ### 1.4 显示账户
 
 **语法：**
@@ -159,6 +173,7 @@ cacctmgr show account [名称] [选项]
 **选项：**
 
 - **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定账户
+- **-P, --partition-limit**: 同时显示账户在各分区的资源限制
 
 **示例：**
 
@@ -178,6 +193,12 @@ cacctmgr show account PKU
 
 ```bash
 cacctmgr show account Name=PKU,ComputingCentre
+```
+
+显示账户分区资源限制：
+
+```bash
+cacctmgr show account PKU -P
 ```
 
 ### 1.5 阻止/解除阻止账户
@@ -320,6 +341,12 @@ cacctmgr modify user where Name=<用户> [Account=<账户>] [Partition=<分区>]
 - **AllowedQos=&lt;qos列表&gt;**: 设置允许的 QoS（覆盖）
 - **AllowedQos+=&lt;qos列表&gt;**: 添加 QoS
 - **AllowedQos-=&lt;qos列表&gt;**: 移除 QoS
+- **MaxJobs=&lt;数量&gt;**: 设置指定分区内最大并发运行作业数（需要 `Partition=<分区>`）
+- **MaxSubmitJobs=&lt;数量&gt;**: 设置指定分区内最大提交作业数（需要 `Partition=<分区>`）
+- **MaxTres=&lt;tres&gt;**: 设置指定分区内最大 TRES 总用量（需要 `Partition=<分区>`）
+- **MaxTresPerJob=&lt;tres&gt;**: 设置指定分区内单作业最大 TRES 用量（需要 `Partition=<分区>`）
+- **MaxWall=&lt;秒&gt;**: 设置指定分区内累计墙钟时间上限（需要 `Partition=<分区>`）
+- **MaxWallPerJob=&lt;秒&gt;**: 设置指定分区内单作业最大墙钟时间（需要 `Partition=<分区>`）
 
 **示例：**
 
@@ -341,6 +368,13 @@ cacctmgr modify user where Name=bob set AllowedPartition-=GPU
 cacctmgr modify user where Name=charlie set AllowedQos+=high
 ```
 
+设置用户在账户 `PKU` 的 `GPU` 分区中的资源限制：
+
+```bash
+cacctmgr modify user where Name=alice Account=PKU Partition=GPU \
+  set MaxJobs=5 MaxSubmitJobs=20 MaxTresPerJob=cpu:4,mem:16G MaxWallPerJob=3600
+```
+
 ### 2.4 显示用户
 
 **语法：**
@@ -353,6 +387,7 @@ cacctmgr show user [名称] [选项]
 
 - **Accounts=&lt;账户&gt;**: 仅显示特定账户的用户
 - **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定用户
+- **-P, --partition-limit**: 同时显示用户在各账户、各分区下的资源限制
 
 **示例：**
 
@@ -372,6 +407,12 @@ cacctmgr show user alice
 
 ```bash
 cacctmgr show user Accounts=PKU
+```
+
+显示用户分区资源限制：
+
+```bash
+cacctmgr show user alice -P
 ```
 
 ### 2.5 阻止/解除阻止用户

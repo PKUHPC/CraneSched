@@ -188,11 +188,11 @@ QoS 限制在**提交阶段**和**调度阶段**均会检查：
 | 限制项 | 说明 |
 |--------|------|
 | `MaxJobs` | 该账户/用户在此分区内最大并发运行作业数 |
-| `MaxSubmitJobs` | 该账户/用户在此分区内最大提交（含排队）作业数 |
+| `MaxSubmitJobs` | 该账户/用户在此分区内最大提交（含排队）作业数，数组作业或批量提交按本次提交数量累计 |
 | `MaxTres` | 该账户/用户在此分区内最大 TRES 总用量（如 CPU、内存） |
 | `MaxTresPerJob` | 单个作业在此分区内最大 TRES 用量 |
 | `MaxWall` | 该账户/用户在此分区内累计墙钟时间上限（秒） |
-| `MaxWallPerJob` | 单个作业在此分区内最大墙钟时间（秒） |
+| `MaxWallPerJob` | 单个作业在此分区内最大墙钟时间（秒），对应内部字段 `max_wall_duration_per_job` |
 
 ### 2.2 为账户设置分区资源限制
 
@@ -202,7 +202,7 @@ QoS 限制在**提交阶段**和**调度阶段**均会检查：
 cacctmgr modify account where Name=<账户名> Partition=<分区名> set <限制项>=<值>
 ```
 
-> **注意**：所有分区资源限制参数均**必须**在 `where` 子句中指定 `Partition=<分区名>`，否则命令将报错。
+> **注意**：所有分区资源限制参数均**必须**在 `where` 子句中指定 `Partition=<分区名>`，否则命令将报错。目标账户必须已包含该分区。
 
 **参数说明：**
 
@@ -251,7 +251,7 @@ cacctmgr modify account where Name=PKU Partition=GPU \
 cacctmgr modify user where Name=<用户名> [Account=<账户名>] Partition=<分区名> set <限制项>=<值>
 ```
 
-> **注意**：所有分区资源限制参数均**必须**在 `where` 子句中指定 `Partition=<分区名>`，否则命令将报错。
+> **注意**：所有分区资源限制参数均**必须**在 `where` 子句中指定 `Partition=<分区名>`，否则命令将报错。目标用户必须已在对应账户下包含该分区。
 
 **示例：**
 
@@ -329,10 +329,10 @@ cacctmgr show user alice -P
 
 | 错误码 | 说明 |
 |--------|------|
-| `ERR_PARTITION_TRES_PER_JOB_BEYOND` (106) | 单个作业的 TRES 超过分区 `MaxTresPerJob` 限制 |
-| `ERR_PARTITION_TIME_BEYOND` (107) | 作业时间限制超过分区 `MaxWallPerJob` 限制 |
-| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` (108) | 用户在该分区的提交作业数超过 `MaxSubmitJobs` 限制 |
-| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` (109) | 账号在该分区的提交作业数超过 `MaxSubmitJobs` 限制 |
+| `ERR_PARTITION_TRES_PER_JOB_BEYOND` (107) | 单个作业的 TRES 超过分区 `MaxTresPerJob` 限制 |
+| `ERR_PARTITION_TIME_BEYOND` (108) | 作业时间限制超过分区 `MaxWallPerJob` 限制 |
+| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` (109) | 用户在该分区的提交作业数超过 `MaxSubmitJobs` 限制 |
+| `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` (110) | 账号在该分区的提交作业数超过 `MaxSubmitJobs` 限制 |
 
 **调度阶段（作业排队等待）：**
 
@@ -403,13 +403,17 @@ cacctmgr show user alice -P
 
 3. **账户与用户限制的关系**：账户级别的分区限制对该账户下所有用户的总量生效；用户级别的分区限制仅对该用户生效。两者均配置时，作业需同时满足账户和用户的限制。
 
-4. **TRES 格式**：TRES 字符串格式为 `资源类型:数量`，多个资源用逗号分隔，例如 `cpu:32,mem:64G`。内存支持 `K`、`M`、`G`、`T` 等单位后缀。GRES 格式为 `gres/type[:name]:num`，例如 `gres/gpu:4`。
+4. **删除分区会清理限制**：从账户或用户的允许分区列表中删除某个分区时，该分区下已配置的分区资源限制会一并删除。
 
-5. **时间单位**：
+5. **提交作业数统计**：`MaxSubmitJobs` 限制提交阶段的作业数量，包含已提交、排队和运行中的作业。数组作业或批量提交会按本次提交实际占用的作业数量参与检查。
+
+6. **TRES 格式**：TRES 字符串格式为 `资源类型:数量`，多个资源用逗号分隔，例如 `cpu:32,mem:64G`。内存支持 `K`、`M`、`G`、`T` 等单位后缀。GRES 格式为 `gres/type[:name]:num`，例如 `gres/gpu:4`。
+
+7. **时间单位**：
    - QoS 的 `MaxTimeLimitPerJob` 支持时长格式（`天-时:分:秒`，如 `1-2:30:0`）或秒数
    - 分区限制的 `MaxWall` 和 `MaxWallPerJob` 单位均为**秒**，例如 1 小时填写 `3600`
 
-6. **unlimited 的含义**：未设置某项限制时，该项显示为 `unlimited`，表示不受该维度约束。
+8. **unlimited 的含义**：未设置某项限制时，该项显示为 `unlimited`，表示不受该维度约束。
 
 ## 另请参阅
 
