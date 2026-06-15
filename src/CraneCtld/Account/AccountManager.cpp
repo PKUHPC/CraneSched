@@ -2406,9 +2406,6 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetUserWallLimitNoLock_(
     return std::unexpected{
         FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
 
-  if (!CheckIfTimeLimitSecIsValid(value_number))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};
-
   if (!attrs_in_account.partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition,
                               &(attrs_in_account.partition_to_limit_map));
@@ -2585,9 +2582,6 @@ CraneExpectedRich<int64_t> AccountManager::CheckSetAccountWallLimitNoLock_(
   if (!ok)
     return std::unexpected{
         FormatRichErr(CraneErrCode::ERR_CONVERT_TO_INTEGER, value)};
-
-  if (!CheckIfTimeLimitSecIsValid(value_number))
-    return std::unexpected{FormatRichErr(CraneErrCode::ERR_TIME_LIMIT, value)};
 
   if (!res_account->partition_to_limit_map.contains(partition))
     EmplacePartitionResource_(partition,

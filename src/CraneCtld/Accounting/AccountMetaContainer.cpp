@@ -406,8 +406,13 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
 
   if (is_user) {
     if (qos.max_submit_jobs_per_user !=
-        std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max())
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
+      CRANE_TRACE(
+          "Skip user partition submit limit for account '{}', partition '{}' "
+          "because QoS max_submit_jobs_per_user is set to {}.",
+          account, partition_id, qos.max_submit_jobs_per_user);
       return CraneErrCode::SUCCESS;
+    }
 
     auto account_it = stat.account_to_partition_to_resource_map.find(account);
     if (account_it != stat.account_to_partition_to_resource_map.end()) {
@@ -415,20 +420,50 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
       if (pit != account_it->second.end()) {
         if (pit->second.submit_jobs_count + count >
             partition_limit->max_submit_jobs) {
+          CRANE_TRACE(
+              "User-account-partition submit limit exceeded: account='{}', "
+              "partition='{}', current_submit_jobs={}, request_count={}, "
+              "limit={}.",
+              account, partition_id, pit->second.submit_jobs_count, count,
+              partition_limit->max_submit_jobs);
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
         }
+      } else {
+        CRANE_TRACE(
+            "No user partition submit meta entry for account '{}', partition "
+            "'{}'.",
+            account, partition_id);
       }
+    } else {
+      CRANE_TRACE("No user account partition meta entry for account '{}'.",
+                  account);
     }
   } else {
     if (qos.max_submit_jobs_per_account !=
-        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max())
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max()) {
+      CRANE_TRACE(
+          "Skip account partition submit limit for account '{}', partition '{}' "
+          "because QoS max_submit_jobs_per_account is set to {}.",
+          account, partition_id, qos.max_submit_jobs_per_account);
       return CraneErrCode::SUCCESS;
+    }
 
     auto pit = stat.partition_to_resource_map.find(partition_id);
     if (pit != stat.partition_to_resource_map.end()) {
       if (pit->second.submit_jobs_count + count >
-          partition_limit->max_submit_jobs)
+          partition_limit->max_submit_jobs) {
+        CRANE_TRACE(
+            "Account partition submit limit exceeded: account='{}', "
+            "partition='{}', current_submit_jobs={}, request_count={}, "
+            "limit={}.",
+            account, partition_id, pit->second.submit_jobs_count, count,
+            partition_limit->max_submit_jobs);
         return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+      }
+    } else {
+      CRANE_TRACE("No account partition submit meta entry for account '{}', "
+                  "partition '{}'.",
+                  account, partition_id);
     }
   }
 
@@ -498,18 +533,32 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
 
   if (is_user) {
     auto account_it = stat.account_to_partition_to_resource_map.find(account);
-    if (account_it == stat.account_to_partition_to_resource_map.end())
+    if (account_it == stat.account_to_partition_to_resource_map.end()) {
+      CRANE_ERROR(
+          "User-account-partition run meta account entry missing: account='{}', "
+          "partition='{}'.",
+          account, partition_id);
       return std::unexpected("PartitionEntryNotFound");
+    }
 
     auto pit = account_it->second.find(partition_id);
-    if (pit == account_it->second.end())
+    if (pit == account_it->second.end()) {
+      CRANE_ERROR(
+          "User-account({})-partition run meta partition entry missing: "
+          " partition='{}'.",
+          account, partition_id);
       return std::unexpected("PartitionEntryNotFound");
+    }
 
     const MetaResource& val = pit->second;
 
     // max_jobs: only enforced when QoS does not already cap running jobs.
     if (qos.max_jobs_per_user == std::numeric_limits<uint32_t>::max()) {
       if (val.jobs_count + 1 > partition_limit->max_jobs) {
+        CRANE_TRACE(
+            "User-account-partition running job limit exceeded: account='{}', "
+            "partition='{}', current_jobs={}, request_jobs=1, limit={}.",
+            account, partition_id, val.jobs_count, partition_limit->max_jobs);
         return std::unexpected("UserPartitionJobsLimit");
       }
     }
@@ -518,6 +567,12 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     if (qos.max_wall == absl::ZeroDuration() &&
         partition_limit->max_wall > absl::ZeroDuration()) {
       if (val.wall_time + time_limit > partition_limit->max_wall) {
+        CRANE_TRACE(
+            "User-account-partition wall limit exceeded: account='{}', "
+            "partition='{}', current_wall={}s, request_wall={}s, limit={}s.",
+            account, partition_id, absl::ToInt64Seconds(val.wall_time),
+            absl::ToInt64Seconds(time_limit),
+            absl::ToInt64Seconds(partition_limit->max_wall));
         return std::unexpected("UserPartitionWallTimeLimit");
       }
     }
@@ -527,18 +582,35 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
       resource_use += val.resource;
       auto tres_result =
           CheckTres_(resource_use, partition_limit->max_tres, "Partition");
-      if (!tres_result) return tres_result;
+      if (!tres_result) {
+        CRANE_TRACE(
+            "User-account-partition TRES limit exceeded: account='{}', "
+            "partition='{}', reason='{}', requested_plus_current='{}', "
+            "limit='{}'.",
+            account, partition_id, tres_result.error(),
+            util::ReadableResourceView(resource_use),
+            util::ReadableResourceView(partition_limit->max_tres));
+        return tres_result;
+      }
     }
   } else {
     auto pit = stat.partition_to_resource_map.find(partition_id);
-    if (pit == stat.partition_to_resource_map.end())
+    if (pit == stat.partition_to_resource_map.end()) {
+      CRANE_ERROR("Account({}) partition run meta entry missing: "
+                 "partition='{}'.",
+                 account, partition_id);
       return std::unexpected("PartitionEntryNotFound");
+    }
 
     const MetaResource& val = pit->second;
 
     // max_jobs: only enforced when QoS does not already cap running jobs.
     if (qos.max_jobs_per_account == std::numeric_limits<uint32_t>::max()) {
       if (val.jobs_count + 1 > partition_limit->max_jobs) {
+        CRANE_TRACE(
+            "Account partition running job limit exceeded: account='{}', "
+            "partition='{}', current_jobs={}, request_jobs=1, limit={}.",
+            account, partition_id, val.jobs_count, partition_limit->max_jobs);
         return std::unexpected("AccPartitionJobsLimit");
       }
     }
@@ -547,6 +619,12 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     if (qos.max_wall == absl::ZeroDuration() &&
         partition_limit->max_wall > absl::ZeroDuration()) {
       if (val.wall_time + time_limit > partition_limit->max_wall) {
+        CRANE_TRACE(
+            "Account partition wall limit exceeded: account='{}', "
+            "partition='{}', current_wall={}s, request_wall={}s, limit={}s.",
+            account, partition_id, absl::ToInt64Seconds(val.wall_time),
+            absl::ToInt64Seconds(time_limit),
+            absl::ToInt64Seconds(partition_limit->max_wall));
         return std::unexpected("AccPartitionWallTimeLimit");
       }
     }
@@ -556,7 +634,16 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
       resource_use += val.resource;
       auto tres_result =
           CheckTres_(resource_use, partition_limit->max_tres, "Partition");
-      if (!tres_result) return tres_result;
+      if (!tres_result) {
+        CRANE_TRACE(
+            "Account partition TRES limit exceeded: account='{}', "
+            "partition='{}', reason='{}', requested_plus_current='{}', "
+            "limit='{}'.",
+            account, partition_id, tres_result.error(),
+            util::ReadableResourceView(resource_use),
+            util::ReadableResourceView(partition_limit->max_tres));
+        return tres_result;
+      }
     }
   }
 
@@ -608,16 +695,38 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
 
     if (user_part_limit) {  // first check partition limits
       if (!CheckTres_(job.req_total_res_view,
-                      user_part_limit->max_tres_per_job))
+                      user_part_limit->max_tres_per_job)) {
+        CRANE_TRACE(
+            "[job #{}]: user partition TRES-per-job limit exceeded during "
+            "submit check: user='{}', account='{}', partition='{}', "
+            "request='{}', limit='{}'.",
+            job.JobId(), job.Username(), job.account, job.partition_id,
+            util::ReadableResourceView(job.req_total_res_view),
+            util::ReadableResourceView(user_part_limit->max_tres_per_job));
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+      }
       if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
-        if (job.time_limit > user_part_limit->max_wall_duration_per_job)
+        if (job.time_limit > user_part_limit->max_wall_duration_per_job) {
+          CRANE_TRACE(
+              "[job #{}]: user partition wall-per-job limit exceeded during "
+              "submit check: user='{}', account='{}', partition='{}', "
+              "request_wall={}s, limit={}s.",
+              job.JobId(), job.Username(), job.account, job.partition_id,
+              absl::ToInt64Seconds(job.time_limit),
+              absl::ToInt64Seconds(
+                  user_part_limit->max_wall_duration_per_job));
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+        }
       }
       if (qos.max_submit_jobs_per_user ==
           std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
-        if (user_part_limit->max_submit_jobs == 0)
+        if (user_part_limit->max_submit_jobs == 0) {
+          CRANE_TRACE(
+              "[job #{}]: user partition max_submit_jobs is zero during "
+              "submit check: user='{}', account='{}', partition='{}'.",
+              job.JobId(), job.Username(), job.account, job.partition_id);
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
+        }
       }
     }
 
@@ -629,7 +738,14 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               user_part_limit, /*is_user=*/true, job.req_total_res_view,
               job.time_limit, count);
         });
-    if (result != CraneErrCode::SUCCESS) return result;
+    if (result != CraneErrCode::SUCCESS) {
+      CRANE_TRACE(
+          "[job #{}]: user submit limit check failed: user='{}', account='{}', "
+          "partition='{}', qos='{}', count={}, error='{}'.",
+          job.JobId(), job.Username(), job.account, job.partition_id, job.qos,
+          count, CraneErrStr(result));
+      return result;
+    }
   }
 
   // ---- Account chain ----
@@ -649,17 +765,39 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
 
     if (acct_part_limit) {  // first check partition limits
       if (!CheckTres_(job.req_total_res_view,
-                      acct_part_limit->max_tres_per_job))
+                      acct_part_limit->max_tres_per_job)) {
+        CRANE_TRACE(
+            "[job #{}]: account partition TRES-per-job limit exceeded during "
+            "submit check: account='{}', partition='{}', request='{}', "
+            "limit='{}'.",
+            job.JobId(), account_name, job.partition_id,
+            util::ReadableResourceView(job.req_total_res_view),
+            util::ReadableResourceView(acct_part_limit->max_tres_per_job));
         return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+      }
       if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
-        if (job.time_limit > acct_part_limit->max_wall_duration_per_job)
+        if (job.time_limit > acct_part_limit->max_wall_duration_per_job) {
+          CRANE_TRACE(
+              "[job #{}]: account partition wall-per-job limit exceeded during "
+              "submit check: account='{}', partition='{}', request_wall={}s, "
+              "limit={}s.",
+              job.JobId(), account_name, job.partition_id,
+              absl::ToInt64Seconds(job.time_limit),
+              absl::ToInt64Seconds(
+                  acct_part_limit->max_wall_duration_per_job));
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+        }
       }
       if (qos.max_submit_jobs_per_account ==
           std::numeric_limits<
               decltype(qos.max_submit_jobs_per_account)>::max()) {
-        if (acct_part_limit->max_submit_jobs == 0)
+        if (acct_part_limit->max_submit_jobs == 0) {
+          CRANE_TRACE(
+              "[job #{}]: account partition max_submit_jobs is zero during "
+              "submit check: account='{}', partition='{}'.",
+              job.JobId(), account_name, job.partition_id);
           return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+        }
       }
     }
 
@@ -671,7 +809,15 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               acct_part_limit, /*is_user=*/false, job.req_total_res_view,
               job.time_limit, count);
         });
-    if (result != CraneErrCode::SUCCESS) return result;
+    if (result != CraneErrCode::SUCCESS) {
+      CRANE_TRACE(
+          "[job #{}]: account submit limit check failed: user='{}', "
+          "job_account='{}', checked_account='{}', partition='{}', qos='{}', "
+          "count={}, error='{}'.",
+          job.JobId(), job.Username(), job.account, account_name,
+          job.partition_id, job.qos, count, CraneErrStr(result));
+      return result;
+    }
   }
 
   // ---- Global QoS counters ----
@@ -679,22 +825,44 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         const MetaResource& val = pair.second;
         if (val.submit_jobs_count + count > qos.max_submit_jobs) {
+          CRANE_TRACE(
+              "[job #{}]: global QoS submit limit exceeded: qos='{}', "
+              "current_submit_jobs={}, request_count={}, limit={}.",
+              job.JobId(), job.qos, val.submit_jobs_count, count,
+              qos.max_submit_jobs);
           result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
           return;
         }
         if (qos.flags[QosFlags::DenyOnLimit]) {
           if (val.jobs_count + 1 > qos.max_jobs) {
+            CRANE_TRACE(
+                "[job #{}]: global QoS running job limit exceeded during "
+                "submit check: qos='{}', current_jobs={}, request_jobs=1, "
+                "limit={}.",
+                job.JobId(), job.qos, val.jobs_count, qos.max_jobs);
             result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
             return;
           }
           if (qos.max_wall > absl::ZeroDuration() &&
               val.wall_time + job.time_limit > qos.max_wall) {
+            CRANE_TRACE(
+                "[job #{}]: global QoS wall limit exceeded during submit "
+                "check: qos='{}', current_wall={}s, request_wall={}s, "
+                "limit={}s.",
+                job.JobId(), job.qos, absl::ToInt64Seconds(val.wall_time),
+                absl::ToInt64Seconds(job.time_limit),
+                absl::ToInt64Seconds(qos.max_wall));
             result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
             return;
           }
           ResourceView resource_use{job.req_total_res_view};
           resource_use += val.resource;
           if (!CheckTres_(resource_use, qos.max_tres)) {
+            CRANE_TRACE(
+                "[job #{}]: global QoS TRES limit exceeded during submit "
+                "check: qos='{}', requested_plus_current='{}', limit='{}'.",
+                job.JobId(), job.qos, util::ReadableResourceView(resource_use),
+                util::ReadableResourceView(qos.max_tres));
             result = CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
           }
         }
@@ -754,7 +922,16 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
               user_part_limit, /*is_user=*/true, allocated_res,
               job.time_limit);
         });
-    if (!result) return result;
+    if (!result) {
+      CRANE_TRACE(
+          "[job #{}]: user run limit check failed: user='{}', account='{}', "
+          "partition='{}', qos='{}', allocated='{}', time_limit={}s, "
+          "reason='{}'.",
+          job.job_id, job.username, job.account, job.partition_id, job.qos,
+          util::ReadableResourceView(allocated_res),
+          absl::ToInt64Seconds(job.time_limit), result.error());
+      return result;
+    }
   }
 
   // ---- Account chain ----
@@ -781,7 +958,16 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
               acct_part_limit, /*is_user=*/false, allocated_res,
               job.time_limit);
         });
-    if (!result) return result;
+    if (!result) {
+      CRANE_TRACE(
+          "[job #{}]: account run limit check failed: user='{}', "
+          "job_account='{}', checked_account='{}', partition='{}', qos='{}', "
+          "allocated='{}', time_limit={}s, reason='{}'.",
+          job.job_id, job.username, job.account, account_name, job.partition_id,
+          job.qos, util::ReadableResourceView(allocated_res),
+          absl::ToInt64Seconds(job.time_limit), result.error());
+      return result;
+    }
   }
 
   // ---- Global QoS counters ----
@@ -792,15 +978,34 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
         resource_use += val.resource;
 
         if (val.jobs_count + 1 > qos.max_jobs) {
+          CRANE_TRACE(
+              "[job #{}]: global QoS running job limit exceeded during run "
+              "check: qos='{}', current_jobs={}, request_jobs=1, limit={}.",
+              job.job_id, job.qos, val.jobs_count, qos.max_jobs);
           result = std::unexpected("QosJobsResourceLimit");
           return;
         }
         if (qos.max_wall > absl::ZeroDuration() &&
             val.wall_time + job.time_limit > qos.max_wall) {
+          CRANE_TRACE(
+              "[job #{}]: global QoS wall limit exceeded during run check: "
+              "qos='{}', current_wall={}s, request_wall={}s, limit={}s.",
+              job.job_id, job.qos, absl::ToInt64Seconds(val.wall_time),
+              absl::ToInt64Seconds(job.time_limit),
+              absl::ToInt64Seconds(qos.max_wall));
           result = std::unexpected("QosWallTimeLimit");
           return;
         }
         result = CheckTres_(resource_use, qos.max_tres);
+        if (!result) {
+          CRANE_TRACE(
+              "[job #{}]: global QoS TRES limit exceeded during run check: "
+              "qos='{}', reason='{}', requested_plus_current='{}', "
+              "limit='{}'.",
+              job.job_id, job.qos, result.error(),
+              util::ReadableResourceView(resource_use),
+              util::ReadableResourceView(qos.max_tres));
+        }
       });
 
   return result;
@@ -847,6 +1052,12 @@ void AccountMetaContainer::DoMallocResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
     const std::string& partition_id, const MetaResource& meta_resource) {
+  CRANE_TRACE(
+      "Malloc meta resource: job_id={}, user='{}', account='{}', qos='{}', "
+      "partition='{}', delta={}.",
+      job_id, username, account_chain.front(), qos, partition_id,
+      meta_resource.DebugString());
+
   // Helper: upsert a MetaResource into a map by key.
   auto upsert = [&](auto& map, const std::string& key) {
     auto it = map.find(key);
@@ -900,6 +1111,12 @@ void AccountMetaContainer::DoFreeResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
     const std::string& partition_id, const MetaResource& meta_resource) {
+  CRANE_TRACE(
+      "Free meta resource: job_id={}, user='{}', account='{}', qos='{}', "
+      "partition='{}', delta={}.",
+      job_id, username, account_chain.front(), qos, partition_id,
+      meta_resource.DebugString());
+
   // Helper: safely subtract meta_resource from map[key], zeroing on underflow.
   auto safe_sub = [&](auto& map, const std::string& key,
                       const std::string& entity_type,
