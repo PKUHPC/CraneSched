@@ -442,7 +442,8 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
     if (qos.max_submit_jobs_per_account !=
         std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max()) {
       CRANE_TRACE(
-          "Skip account partition submit limit for account '{}', partition '{}' "
+          "Skip account partition submit limit for account '{}', partition "
+          "'{}' "
           "because QoS max_submit_jobs_per_account is set to {}.",
           account, partition_id, qos.max_submit_jobs_per_account);
       return CraneErrCode::SUCCESS;
@@ -461,9 +462,10 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
         return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
       }
     } else {
-      CRANE_TRACE("No account partition submit meta entry for account '{}', "
-                  "partition '{}'.",
-                  account, partition_id);
+      CRANE_TRACE(
+          "No account partition submit meta entry for account '{}', "
+          "partition '{}'.",
+          account, partition_id);
     }
   }
 
@@ -535,7 +537,8 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
     auto account_it = stat.account_to_partition_to_resource_map.find(account);
     if (account_it == stat.account_to_partition_to_resource_map.end()) {
       CRANE_ERROR(
-          "User-account-partition run meta account entry missing: account='{}', "
+          "User-account-partition run meta account entry missing: "
+          "account='{}', "
           "partition='{}'.",
           account, partition_id);
       return std::unexpected("PartitionEntryNotFound");
@@ -596,9 +599,10 @@ AccountMetaContainer::CheckPartitionRunLimitsForEntity_(
   } else {
     auto pit = stat.partition_to_resource_map.find(partition_id);
     if (pit == stat.partition_to_resource_map.end()) {
-      CRANE_ERROR("Account({}) partition run meta entry missing: "
-                 "partition='{}'.",
-                 account, partition_id);
+      CRANE_ERROR(
+          "Account({}) partition run meta entry missing: "
+          "partition='{}'.",
+          account, partition_id);
       return std::unexpected("PartitionEntryNotFound");
     }
 
@@ -713,8 +717,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               "request_wall={}s, limit={}s.",
               job.JobId(), job.Username(), job.account, job.partition_id,
               absl::ToInt64Seconds(job.time_limit),
-              absl::ToInt64Seconds(
-                  user_part_limit->max_wall_duration_per_job));
+              absl::ToInt64Seconds(user_part_limit->max_wall_duration_per_job));
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
         }
       }
@@ -783,8 +786,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               "limit={}s.",
               job.JobId(), account_name, job.partition_id,
               absl::ToInt64Seconds(job.time_limit),
-              absl::ToInt64Seconds(
-                  acct_part_limit->max_wall_duration_per_job));
+              absl::ToInt64Seconds(acct_part_limit->max_wall_duration_per_job));
           return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
         }
       }
@@ -919,8 +921,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
           result = CheckEntityRunLimits_(
               pair.second, job.account, job.qos, qos, job.partition_id,
-              user_part_limit, /*is_user=*/true, allocated_res,
-              job.time_limit);
+              user_part_limit, /*is_user=*/true, allocated_res, job.time_limit);
         });
     if (!result) {
       CRANE_TRACE(
@@ -953,10 +954,10 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
-          result = CheckEntityRunLimits_(
-              pair.second, job.account, job.qos, qos, job.partition_id,
-              acct_part_limit, /*is_user=*/false, allocated_res,
-              job.time_limit);
+          result = CheckEntityRunLimits_(pair.second, job.account, job.qos, qos,
+                                         job.partition_id, acct_part_limit,
+                                         /*is_user=*/false, allocated_res,
+                                         job.time_limit);
         });
     if (!result) {
       CRANE_TRACE(
@@ -1084,8 +1085,8 @@ void AccountMetaContainer::DoMallocResource_(
       },
       MetaResourceStat{
           .qos_to_resource_map = {{qos, meta_resource}},
-          .account_to_partition_to_resource_map =
-              {{account_chain.front(), {{partition_id, meta_resource}}}}});
+          .account_to_partition_to_resource_map = {
+              {account_chain.front(), {{partition_id, meta_resource}}}}});
 
   for (const auto& account_name : account_chain) {
     m_account_meta_map_.try_emplace_l(
