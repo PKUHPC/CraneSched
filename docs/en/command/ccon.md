@@ -64,6 +64,9 @@ ccon [Crane Options] run [Run Options] IMAGE [COMMAND] [ARG...]
 !!! tip "Crane Options Placement"
     Crane options (like `-p`, `-N`, `--mem`) must be placed between `ccon` and `run`, not after `run`.
 
+!!! note "Interactive Detach Key"
+    In an interactive TTY session such as `ccon run -it`, press `Ctrl-P + Ctrl-Q` to detach from the client without stopping the container. Use `ccon attach CONTAINER` to reconnect later.
+
 ### Crane Options (Resource Scheduling)
 
 These options control job resource allocation and scheduling behavior:
@@ -388,6 +391,9 @@ Connect to running container's stdin, stdout, and stderr.
 ccon attach [options] CONTAINER
 ```
 
+!!! note "Detach Key"
+    When attaching with a TTY, press `Ctrl-P + Ctrl-Q` to detach without stopping the container.
+
 **--stdin**
 
 :   Connect stdin. Default: `true`.
@@ -426,6 +432,9 @@ Execute command inside running container.
 ```bash
 ccon exec [options] CONTAINER COMMAND [ARG...]
 ```
+
+!!! note "Detach Key"
+    In an interactive TTY exec session such as `ccon exec -it`, press `Ctrl-P + Ctrl-Q` to detach without stopping the container.
 
 **-i, --interactive**
 
