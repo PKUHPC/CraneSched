@@ -769,14 +769,10 @@ ArrayManager::JobIdSelectorResolution ArrayManager::ResolveJobIdSelector(
 
   auto child_job_id = meta->ChildJobIdOfTask(array_task_id);
   if (!child_job_id.has_value()) {
-    std::string reason = "Array task has not been materialized yet";
-    if (!meta->Parent().pending_reason.empty()) {
-      reason += ": " + meta->Parent().pending_reason;
-    }
     unresolved.outcome = UnresolvedSelector{
         .job_id = job_id,
         .array_task_id = array_task_id,
-        .reason = std::move(reason),
+        .reason = "Array task has not been materialized yet",
     };
     return unresolved;
   }
