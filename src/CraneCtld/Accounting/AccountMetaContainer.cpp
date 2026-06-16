@@ -723,7 +723,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       }
       if (qos.max_submit_jobs_per_user ==
           std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max()) {
-        if (user_part_limit->max_submit_jobs == count - 1) {
+        if (count > user_part_limit->max_submit_jobs) {
           CRANE_TRACE(
               "[job #{}]: user partition max_submit_jobs is zero during "
               "submit check: user='{}', account='{}', partition='{}'.",
@@ -793,7 +793,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       if (qos.max_submit_jobs_per_account ==
           std::numeric_limits<
               decltype(qos.max_submit_jobs_per_account)>::max()) {
-        if (acct_part_limit->max_submit_jobs == count - 1) {
+        if (count > acct_part_limit->max_submit_jobs) {
           CRANE_TRACE(
               "[job #{}]: account partition max_submit_jobs is zero during "
               "submit check: account='{}', partition='{}'.",
