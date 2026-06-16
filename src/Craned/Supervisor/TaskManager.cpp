@@ -3657,7 +3657,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       std::unique_ptr<ITaskInstance> instance;
       if (m_step_.IsPod()) {
         // Pod
-        CRANE_ERROR(
+        CRANE_ASSERT_MSG(
+            false,
             "PodInstance should have been created in EvExecutePodCb_, "
             "unexpected to create it here.");
       } else if (m_step_.IsContainer()) {
@@ -3698,41 +3699,36 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       }
     }
 
-    // TODO: We dont need to exec task for a calloc job
+    // Add a timer to limit the execution time of a task.
+    int64_t time_limit_sec = m_step_.GetStep().time_limit().seconds();
+    int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
+                           absl::ToUnixSeconds(absl::Now());
+    int64_t sec = std::min(deadline_sec, time_limit_sec);
 
-    if (!m_step_.IsDaemon()) {
-      // Add a timer to limit the execution time of a task.
+    std::string log_timer =
+        deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
+    bool is_deadline = deadline_sec <= time_limit_sec;
 
-      int64_t time_limit_sec = m_step_.GetStep().time_limit().seconds();
-      int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
-                             absl::ToUnixSeconds(absl::Now());
-      int64_t sec = std::min(deadline_sec, time_limit_sec);
+    AddTerminationTimer_(sec, is_deadline);
+    CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
 
-      std::string log_timer =
-          deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
-      bool is_deadline = deadline_sec <= time_limit_sec ? true : false;
-
-      AddTerminationTimer_(sec, is_deadline);
-      CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
-
-      for (const auto& signal : m_step_.GetStep().signals()) {
-        if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
-            !m_step_.IsPrimary())
-          continue;
-        if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
-            m_step_.IsPrimary())
-          continue;
-        if (signal.signal_time() >= sec) {
-          CRANE_TRACE(
-              "signal time of {}s > time_limit {}s, ignore this signal.",
-              signal.signal_time(), sec);
-          continue;
-        }
-        AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
-        CRANE_INFO("Add a signal time of {}s for signal {}",
-                   signal.signal_time(), signal.signal_number());
+    for (const auto& signal : m_step_.GetStep().signals()) {
+      if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+          !m_step_.IsPrimary())
+        continue;
+      if (signal.signal_flag() != crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
+          m_step_.IsPrimary())
+        continue;
+      if (signal.signal_time() >= sec) {
+        CRANE_TRACE("signal time of {}s > time_limit {}s, ignore this signal.",
+                    signal.signal_time(), sec);
+        continue;
       }
+      AddSignalTimer_(sec - signal.signal_time(), signal.signal_number());
+      CRANE_INFO("Add a signal time of {}s for signal {}", signal.signal_time(),
+                 signal.signal_number());
     }
+
     // TODO: We dont need to exec task for a calloc job
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
