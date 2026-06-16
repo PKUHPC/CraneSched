@@ -48,133 +48,204 @@ struct MetaResource {
   std::string DebugString() const;
 };
 
+using QosToResourceMap = std::unordered_map<std::string,  // qos_name
+                                            MetaResource>;
+
+using PartitionToResourceMap =
+    std::unordered_map<std::string,  // partition_name
+                       MetaResource>;
+
+using AccountToPartitionToResourceMap =
+    std::unordered_map<std::string,  // account_name
+                       PartitionToResourceMap>;
+
+// Tracks per-user-account and per-account resource usage across both QoS and
+// partition dimensions.
+struct MetaResourceStat {
+  QosToResourceMap qos_to_resource_map;
+  PartitionToResourceMap partition_to_resource_map;
+  AccountToPartitionToResourceMap account_to_partition_to_resource_map;
+};
+
 class AccountMetaContainer final {
  public:
-  using QosToResourceMap = std::unordered_map<std::string,  // qos_name
-                                              MetaResource>;
-
-  using ResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string, QosToResourceMap,
-      phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
-      std::shared_mutex>;
-
-  using UserToJobNumMap = phmap::parallel_flat_hash_map<
-      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, uint32_t>>, 4,
-      std::shared_mutex>;
-
-  using QosResourceMap = phmap::parallel_flat_hash_map<
-      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, MetaResource>>, 4,
-      std::shared_mutex>;
-
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  // `count` is the number of submit-slots this call wants to reserve. A plain
-  // single-task submission uses the default `count=1`. An array parent
-  // submission passes its effective concurrent task limit, so user-configured
-  // array concurrency caps are reflected in submit-slot accounting.
-  CraneErrCode TryMallocQosSubmitResource(JobInCtld& job, uint32_t count = 1);
+  /*
+   * Validate QoS and partition submit-slot limits and reserve resources.
+   * IN/OUT: job - job to be submitted; qos_priority field is set on success
+   * IN: user - locked user object for job.Username()
+   * IN: count - submit slots to reserve; array parents pass effective run limit
+   * RET: CraneErrCode::SUCCESS on success, error code on limit exceeded
+   *
+   * NOTE: Caller must hold AccountManager user lock for user. This function
+   *       acquires AccountManager account and QoS locks in that order, then
+   *       acquires internal stripe locks.
+   */
+  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job, const User& user,
+                                           uint32_t count = 1);
 
-  void MallocQosSubmitResource(const JobInCtld& job, uint32_t count = 1);
+  /*
+   * Unconditionally reserve submit-slot resources without validation.
+   * IN: job - job whose submit-slot resources should be reserved
+   * IN: count - submit slots to reserve
+   * RET: none
+   *
+   * NOTE: Call only after TryMallocMetaSubmitResource succeeds.
+   */
+  void MallocMetaSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
-  void MallocQosResourceToRecoveredRunningJob(JobInCtld& job);
+  /*
+   * Reserve running resources for a job recovered from the embedded DB.
+   * IN/OUT: job - recovered running job; qos_priority is set on success
+   * RET: none
+   */
+  void MallocMetaResourceToRecoveredRunningJob(JobInCtld& job);
 
-  std::expected<void, std::string> CheckAndMallocQosResource(
+  /*
+   * Validate running-slot limits and atomically reserve resources.
+   * IN: job - pending job to be scheduled
+   * RET: void on success, string describing the pending reason on failure
+   *
+   * NOTE: Acquires internal stripe locks. Do not hold AccountManager locks.
+   */
+  std::expected<void, std::string> CheckAndMallocMetaResource(
       const PdJobInScheduler& job);
 
-  void FreeQosSubmitResource(const JobInCtld& job, uint32_t count = 1);
+  /*
+   * Release submit-slot resources when a pending job is cancelled or rejected.
+   * IN: job - job whose submit-slot resources should be released
+   * IN: count - submit slots to release
+   * RET: none
+   */
+  void FreeMetaSubmitResource(const JobInCtld& job, uint32_t count = 1);
 
-  void FreeQosResource(const JobInCtld& job);
+  /*
+   * Release running-slot resources when a running job finishes.
+   * IN: job - job whose running-slot resources should be released
+   * RET: none
+   */
+  void FreeMetaResource(const JobInCtld& job);
 
-  // Roll back a CheckAndMallocQosResource call — used when scheduling a
-  // candidate (e.g. array-parent expansion) fails between malloc and
-  // transition to running.
-  void FreeQosResource(const PdJobInScheduler& job);
+  /*
+   * Roll back running-slot resources reserved for a scheduler candidate.
+   * IN: job - scheduler candidate whose running resource should be released
+   * RET: none
+   */
+  void FreeMetaResource(const PdJobInScheduler& job);
 
-  // When a user/account object is deleted, resources need to be reset.
+  /*
+   * Remove all cached meta entries for a deleted user/account/qos object.
+   * IN: username/account/qos - name of the deleted entity
+   * RET: none
+   */
   void DeleteUserMeta(const std::string& username);
-
   void DeleteAccountMeta(const std::string& account);
-
   void DeleteQosMeta(const std::string& qos);
 
+  /* Increment the running or submit-reserved job counter for a user */
   void UserAddJob(const std::string& username, uint32_t count = 1);
-
+  /* Decrement the running or submit-reserved job counter for a user */
   void UserReduceJob(const std::string& username, uint32_t count = 1);
-
+  /*
+   * Check whether a user has any jobs.
+   * IN:  username - name of the user to check
+   * RET: true if the user has at least one job, false otherwise
+   */
   bool UserHasJob(const std::string& username);
 
  private:
   const static int kNumStripes = 128;
+  using AccountRawMap =
+      std::unordered_map<std::string, std::unique_ptr<Account>>;
 
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  CraneErrCode CheckUserQosSubmitResourceUsage_(const JobInCtld& job,
-                                                const Qos& qos, uint32_t count);
-
-  CraneErrCode CheckAccountQosSubmitResourceUsage_(const JobInCtld& job,
-                                                   const Qos& qos,
-                                                   uint32_t count);
-
-  CraneErrCode CheckQosSubmitResourceUsage_(const JobInCtld& job,
-                                            const Qos& qos, uint32_t count);
-
-  std::expected<void, std::string> CheckQosResource_(
-      const Qos& qos, const PdJobInScheduler& job);
-
-  template <typename T>
-  static void CheckAndSubResource_(T& current, const T& need,
-                                   const std::string& resource_name,
-                                   const std::string& username,
-                                   const std::string& qos, job_id_t job_id) {
-    if constexpr (std::is_same_v<T, ResourceView>) {
-      if (!(need <= current)) {
-        CRANE_ERROR(
-            "Insufficient {} when freeing for user/account '{}', qos '{}', "
-            "job {}.",
-            resource_name, username, qos, job_id);
-        current.SetToZero();
-        return;
-      }
-    } else if constexpr (std::is_same_v<T, uint32_t>) {
-      if (current < need) {
-        CRANE_ERROR(
-            "Insufficient {} when freeing for user/account '{}', qos '{}', "
-            "job {}. cur={}, need={}",
-            resource_name, username, qos, job_id, current, need);
-        current = 0;
-        return;
-      }
-    } else {
-      if (current < need) {
-        CRANE_ERROR("Unknown type: insufficient resource");
-        return;
-      }
-    }
-    current -= need;
-  }
-
+  // Checks that resource_req does not exceed resource_total in any dimension.
+  // prefix is used to distinguish QoS vs Partition in the error message.
   static std::expected<void, std::string> CheckTres_(
-      const ResourceView& resource_req, const ResourceView& resource_total);
+      const ResourceView& resource_req, const ResourceView& resource_total,
+      const std::string& prefix = "Qos");
 
   static bool CheckGres_(const GresMap& device_req,
                          const GresMap& device_total);
 
+  static bool IsUnlimitedTres_(const ResourceView& res);
+
+  // Submit-time QoS dimension check for a single entity.
+  CraneErrCode CheckQosSubmitLimitsForEntity_(const MetaResourceStat& stat,
+                                              const std::string& qos_name,
+                                              const Qos& qos, bool is_user,
+                                              const ResourceView& req_res,
+                                              uint32_t count) const;
+
+  // Submit-time Partition dimension check for a single entity.
+  // Returns SUCCESS when partition_limit is nullptr (no limit configured).
+  CraneErrCode CheckPartitionSubmitLimitsForEntity_(
+      const MetaResourceStat& stat, const std::string& account,
+      const std::string& partition_id,
+      const PartitionResourceLimit* partition_limit,
+      const ResourceView& req_res, absl::Duration time_limit, const Qos& qos,
+      bool is_user, uint32_t count) const;
+
+  // Submit-time combined check for a single entity (QoS + Partition).
+  CraneErrCode CheckEntitySubmitLimits_(
+      const MetaResourceStat& stat, const std::string& account,
+      const std::string& qos_name, const Qos& qos,
+      const std::string& partition_id,
+      const PartitionResourceLimit* partition_limit, bool is_user,
+      const ResourceView& req_res, absl::Duration time_limit,
+      uint32_t count) const;
+
+  // Schedule-time QoS dimension check for a single entity.
+  std::expected<void, std::string> CheckQosRunLimitsForEntity_(
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      bool is_user, const ResourceView& allocated_res,
+      absl::Duration time_limit) const;
+
+  std::expected<void, std::string> CheckPartitionRunLimitsForEntity_(
+      const MetaResourceStat& stat, const std::string& account,
+      const std::string& partition_id,
+      const PartitionResourceLimit* partition_limit,
+      const ResourceView& allocated_res, absl::Duration time_limit,
+      const Qos& qos, bool is_user) const;
+
+  // Schedule-time combined check for a single entity (QoS + Partition).
+  std::expected<void, std::string> CheckEntityRunLimits_(
+      const MetaResourceStat& stat, const std::string& account,
+      const std::string& qos_name, const Qos& qos,
+      const std::string& partition_id,
+      const PartitionResourceLimit* partition_limit, bool is_user,
+      const ResourceView& allocated_res, absl::Duration time_limit) const;
+
+  // Submit-time aggregated check across all entities.
+  // Replaces the old CheckMetaSubmitResourceUsage_.
+  CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const User& user,
+                                  const AccountRawMap& account_map,
+                                  const Qos& qos, uint32_t count);
+
+  // Schedule-time aggregated check across all entities.
+  // Replaces the old CheckMetaResource_.
+  std::expected<void, std::string> CheckRunLimits_(
+      const PdJobInScheduler& job, const User& user,
+      const AccountRawMap& account_map, const Qos& qos);
+
+  // Atomically increments both QoS and partition counters for user, every
+  // account in the chain, and the global QoS map.
   void DoMallocResource_(job_id_t job_id, const std::string& username,
                          const std::list<std::string>& account_chain,
                          const std::string& qos,
+                         const std::string& partition_id,
                          const MetaResource& meta_resource);
+
+  // Atomically decrements both QoS and partition counters (inverse of
+  // DoMallocResource_).
   void DoFreeResource_(job_id_t job_id, const std::string& username,
                        const std::list<std::string>& account_chain,
-                       const std::string& qos,
+                       const std::string& qos, const std::string& partition_id,
                        const MetaResource& meta_resource);
 
   // Lock acquisition order:
@@ -189,6 +260,25 @@ class AccountMetaContainer final {
   std::array<std::mutex, kNumStripes> m_qos_stripes_;
   std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(
       const std::list<std::string>& account_chain);
+
+  using ResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResourceStat,
+      phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, MetaResourceStat>>, 4,
+      std::shared_mutex>;
+
+  using UserToJobNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
+      std::shared_mutex>;
 
   ResourceMetaMap m_user_meta_map_;
   ResourceMetaMap m_account_meta_map_;
