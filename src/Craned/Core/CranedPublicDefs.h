@@ -88,6 +88,8 @@ struct Config {
     uint32_t NodeHealthCheckInterval;
     uint32_t ThreadPoolSize{0};
     uint32_t CgroupOpConcurrency{0};
+    bool CgroupV2FastPath{true};
+    std::string CgroupV2CleanupMode{"sync_rmdir"};
   };
   CranedConfig CranedConf;
   struct CranedListenConf {

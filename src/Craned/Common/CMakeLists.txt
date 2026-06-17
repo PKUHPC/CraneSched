@@ -5,6 +5,8 @@ add_library(craned_common STATIC
     DeviceManager.cpp
     CgroupManager.h
     CgroupManager.cpp
+    CgroupV2Fs.h
+    CgroupV2Fs.cpp
 )
 
 # Set the precompiled header for the common library

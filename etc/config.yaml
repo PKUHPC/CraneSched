@@ -92,6 +92,10 @@ Craned:
   ThreadPoolSize: 0
   # Optional worker-local cgroup operation concurrency limit (0 = disabled)
   CgroupOpConcurrency: 0
+  # Use direct cgroup v2 fs operations instead of libcgroup for hot paths.
+  CgroupV2FastPath: true
+  # sync_rmdir or async_rmdir. async_rmdir lets a background janitor remove dirs.
+  CgroupV2CleanupMode: sync_rmdir
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:

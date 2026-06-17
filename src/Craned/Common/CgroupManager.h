@@ -30,6 +30,9 @@
 #include <libcgroup.h>
 #include <semaphore.h>
 
+#include <memory>
+#include <string_view>
+
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>
 #endif
@@ -332,6 +335,13 @@ constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     CgConstant::Controller::CPUSET_CONTROLLER_V2;
 // NOLINTEND(readability-identifier-naming)
 
+enum class CgroupV2CleanupMode : uint8_t {
+  SYNC_RMDIR = 0,
+  ASYNC_RMDIR,
+};
+
+class CgroupV2FsBackend;
+
 #ifdef CRANE_ENABLE_BPF
 class BpfRuntimeInfo {
  public:
@@ -427,7 +437,7 @@ class CgroupInterface {
 
   virtual void Destroy();
 
-  bool MigrateProcIn(pid_t pid);
+  virtual bool MigrateProcIn(pid_t pid);
 
   std::string CgroupName() const { return m_cgroup_info_.GetCgroupName(); }
   std::filesystem::path CgroupPath() const {
@@ -466,6 +476,8 @@ class CgroupV1 : public CgroupInterface {
 class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id);
+  CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
+           std::shared_ptr<CgroupV2FsBackend> fs_backend);
 
 #ifdef CRANE_ENABLE_BPF
   CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
@@ -520,8 +532,14 @@ class CgroupV2 : public CgroupInterface {
   bool Empty() override;
 
   void Destroy() override;
+  bool MigrateProcIn(pid_t pid) override;
 
  private:
+  bool WriteControllerFile_(CgConstant::ControllerFile controller_file,
+                            std::string_view value);
+
+  std::shared_ptr<CgroupV2FsBackend> m_v2_fs_backend_;
+
 #ifdef CRANE_ENABLE_BPF
   bool m_bpf_attached_{false};
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
@@ -636,6 +654,9 @@ class CgroupManager {
                              bool recover, std::uint64_t min_mem = 0U);
 
   static void ConfigureCgroupOpConcurrency(uint32_t concurrency);
+  static void ConfigureCgroupV2FastPath(bool enabled);
+  static void ConfigureCgroupV2CleanupMode(std::string_view mode);
+  static void ShutdownCgroupV2FastPath();
   static sem_t* CgroupOpSemaphore();
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
@@ -723,6 +744,9 @@ class CgroupManager {
                                    CgConstant::Controller controller,
                                    bool required, bool has_cgroup,
                                    bool& changed_cgroup);
+  static std::unique_ptr<CgroupInterface> CreateOrOpenV2Fast_(
+      const std::string& cgroup_str, ControllerFlags preferred_controllers,
+      ControllerFlags required_controllers, bool retrieve);
 
   static std::unordered_map<ino_t, CgroupStrParsedIds>
   GetCgInoJobIdMapCgroupV2_(const std::filesystem::path& root_cgroup_path);
@@ -753,6 +777,10 @@ class CgroupManager {
   inline static uint32_t m_cgroup_op_concurrency_{0};
   inline static std::string m_cgroup_op_sem_name_;
   inline static sem_t* m_cgroup_op_sem_{SEM_FAILED};
+  inline static bool m_cgroup_v2_fast_path_enabled_{true};
+  inline static CgroupV2CleanupMode m_cgroup_v2_cleanup_mode_{
+      CgroupV2CleanupMode::SYNC_RMDIR};
+  inline static std::shared_ptr<CgroupV2FsBackend> m_v2_fs_backend_;
 
   // Overflow pool — modified only from event loop (single-threaded).
   inline static std::vector<bool> m_overflow_bits_;

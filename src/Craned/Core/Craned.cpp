@@ -119,15 +119,13 @@ CraneErrCode RecoverCgForJobSteps(
     // Open cgroup and destroy it.
     auto cg_str = CgroupManager::CgroupStrByParsedIds(ids);
 
-    // NOLINTBEGIN(readability-suspicious-call-argument)
-    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_BASE_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else
+    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1 ||
+        CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
+      auto cg_expt = CgroupManager::CreateOrOpenCgroup(cg_str, true);
+      if (cg_expt.has_value()) cg_ptr = std::move(cg_expt.value());
+    } else {
       std::unreachable();
+    }
 
     if (!cg_ptr) {
       // FIXME: Clean incomplete cgroups!
@@ -267,6 +265,10 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
     conf.CgroupOpConcurrency =
         YamlValueOr<uint32_t>(craned_config["CgroupOpConcurrency"], 0);
+    conf.CgroupV2FastPath =
+        YamlValueOr<bool>(craned_config["CgroupV2FastPath"], true);
+    conf.CgroupV2CleanupMode = YamlValueOr<std::string>(
+        craned_config["CgroupV2CleanupMode"], "sync_rmdir");
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -1487,6 +1489,10 @@ void GlobalVariableInit() {
   }
 
   using CgConstant::Controller;
+  CgroupManager::ConfigureCgroupV2FastPath(
+      g_config.CranedConf.CgroupV2FastPath);
+  CgroupManager::ConfigureCgroupV2CleanupMode(
+      g_config.CranedConf.CgroupV2CleanupMode);
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
   CgroupManager::ConfigureCgroupOpConcurrency(
       g_config.CranedConf.CgroupOpConcurrency);
@@ -1629,6 +1635,7 @@ void WaitForStopAndDoGvarFini() {
   g_plugin_client.reset();
 
   CgroupManager::ShutdownCpuPool();
+  CgroupManager::ShutdownCgroupV2FastPath();
 
   std::exit(0);
 }
