@@ -195,6 +195,8 @@ bool JobScheduler::Init() {
       recovered_running_jobs;
   std::unordered_map<job_id_t, std::vector<job_id_t>>
       recovered_array_child_ids_by_parent;
+  std::vector<std::tuple<job_id_t, array_task_id_t, job_id_t>>
+      recovered_pending_array_children_to_track;
   auto fail_recovered_running_job = [this, &recovered_running_jobs](
                                         job_id_t job_id, const char* reason) {
     auto job_it = recovered_running_jobs.find(job_id);
@@ -326,7 +328,8 @@ bool JobScheduler::Init() {
   if (!pending_queue.empty()) {
     CRANE_INFO("{} pending job(s) recovered.", pending_queue.size());
 
-    absl::Time recovery_time = absl::Now();
+    uint64_t recovery_time_sec =
+        static_cast<uint64_t>(absl::ToUnixSeconds(absl::Now()));
     for (auto&& [job_db_id, job_in_embedded_db] : pending_queue) {
       auto job = std::make_unique<JobInCtld>();
       job->SetFieldsByJobToCtld(job_in_embedded_db.job_to_ctld());
@@ -359,6 +362,10 @@ bool JobScheduler::Init() {
             "Recovered array child #{} from pending queue, but array children "
             "must never be pending in the direct-to-running design.",
             job_id);
+        if (job->ArrayJobId().has_value() && job->ArrayTaskId().has_value()) {
+          recovered_pending_array_children_to_track.emplace_back(
+              job->ArrayJobId().value(), job->ArrayTaskId().value(), job_id);
+        }
         mark_job_as_failed = true;
       }
 
@@ -391,8 +398,8 @@ bool JobScheduler::Init() {
             "move it to the ended queue.",
             job_id);
         job->SetStatus(crane::grpc::Failed);
-        job->SetStartTime(recovery_time);
-        job->SetEndTime(recovery_time);
+        job->SetStartTimeByUnixSecond(recovery_time_sec);
+        job->SetEndTimeByUnixSecond(recovery_time_sec);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
         if (!ok) {
@@ -662,6 +669,7 @@ bool JobScheduler::Init() {
       invalid_steps[job_id].emplace_back(std::move(step_info));
     }
   }
+
   std::vector<ArrayManager::FinalizedArrayParent> recovered_final_array_parents;
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -695,6 +703,25 @@ bool JobScheduler::Init() {
       fail_recovered_running_job(child_id, "array parent bind failed");
     }
 
+    for (auto [parent_id, task_id, child_id] :
+         recovered_pending_array_children_to_track) {
+      if (!m_array_manager_->IsRegisteredParent(parent_id)) {
+        CRANE_ERROR(
+            "Recovered terminal pending array child #{} for missing parent "
+            "#{}.",
+            child_id, parent_id);
+        continue;
+      }
+      if (auto track = m_array_manager_->TrackRecoveredTerminalChild(
+              parent_id, task_id, child_id);
+          !track.has_value()) {
+        CRANE_ERROR(
+            "Failed to track recovered terminal pending array child #{} for "
+            "parent #{}: {}.",
+            child_id, parent_id, CraneErrStr(track.error()));
+      }
+    }
+
     // Surface array parents whose materialization completed entirely in the
     // previous run. TrackRecoveredTerminalChild does not fire OnChildTerminal,
     // so the normal event path cannot finalize them.
@@ -707,6 +734,15 @@ bool JobScheduler::Init() {
   }
 
   if (!recovered_final_array_parents.empty()) {
+    std::unordered_set<job_id_t> finalized_array_parent_ids;
+    finalized_array_parent_ids.reserve(recovered_final_array_parents.size());
+    for (const auto& parent : recovered_final_array_parents) {
+      finalized_array_parent_ids.emplace(parent.array_job_id);
+    }
+    std::erase_if(deadline_timer_vec, [&finalized_array_parent_ids](
+                                          const DeadlineTimerQueueElem& elem) {
+      return finalized_array_parent_ids.contains(elem.first);
+    });
     ArrayManager::ProcessFinalParents(recovered_final_array_parents);
   }
 
@@ -6780,8 +6816,10 @@ void JobScheduler::SpliceFinalArrayParentsFromPendingMapNoLock_(
           bundle.array_job_id);
       continue;
     }
-    m_job_deadline_timer_del_queue_.enqueue(bundle.array_job_id);
-    m_job_deadline_timer_del_async_handle_->send();
+    if (m_job_deadline_timer_del_async_handle_) {
+      m_job_deadline_timer_del_queue_.enqueue(bundle.array_job_id);
+      m_job_deadline_timer_del_async_handle_->send();
+    }
     bundle.parent_job = std::move(it->second);
     m_pending_job_map_.erase(it);
   }
