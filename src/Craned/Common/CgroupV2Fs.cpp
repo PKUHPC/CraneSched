@@ -376,20 +376,12 @@ bool CgroupV2FsBackend::WriteControllerFile(
 
 bool CgroupV2FsBackend::MigrateProcIn(const std::string& cgroup_name,
                                       pid_t pid) {
-  auto begin = std::chrono::steady_clock::now();
-  CRANE_TRACE_SCOPE_NAMED(span, "cgroup/v2_migrate");
-  span.SetAttribute("cgroup_name", cgroup_name);
-  span.SetAttribute("pid", static_cast<int64_t>(pid));
+  // This path is used by the forked task child before exec().  Do not create
+  // spans or log here: async log/export locks inherited across fork can
+  // deadlock the child before it execs the user task.
   int err = 0;
   bool ok = WriteFile(FullPath_(cgroup_name) / "cgroup.procs",
                       std::to_string(pid), &err);
-  span.SetAttribute("errno", err);
-  span.SetAttribute("elapsed_ms", MsSince(begin));
-  if (!ok) {
-    span.SetStatus(crane::StatusCode::kError, "migrate_failed");
-    CRANE_WARN("Failed to migrate pid {} into cgroup {}: {}", pid, cgroup_name,
-               strerror(err));
-  }
   return ok;
 }
 
