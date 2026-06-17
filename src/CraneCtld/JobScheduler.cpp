@@ -5707,6 +5707,9 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE_CHILD_NAMED(db_commit_span, sc_span, "status_change/db_commit");
 
   db_commit_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
+  db_commit_span.SetAttribute("aggregation_mode", g_config.JobAggregationMode);
+  db_commit_span.SetAttribute("aggregation_pending_jobs",
+                              g_db_client->PendingJobAggregationCount());
   db_commit_span.SetAttribute(
       "step_update_count",
       static_cast<int64_t>(context.rn_step_raw_ptrs.size()));
@@ -5864,6 +5867,12 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         "job_count", static_cast<int64_t>(context.job_raw_ptrs.size()));
     mongo_insert_ms = ProcessFinalJobs_(context.job_raw_ptrs);
     mongo_insert_span.SetAttribute("mongo_insert_ms", mongo_insert_ms);
+    mongo_insert_span.SetAttribute("mongo_bulk_upsert_ms", mongo_insert_ms);
+    mongo_insert_span.SetAttribute("aggregation_mode",
+                                   g_config.JobAggregationMode);
+    mongo_insert_span.SetAttribute(
+        "aggregation_pending_jobs",
+        g_db_client->PendingJobAggregationCount());
   }
   duration = std::chrono::steady_clock::now() - now;
   CRANE_TRACE(
@@ -5882,6 +5891,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                               end_time - begin_time)
                               .count();
   db_commit_span.SetAttribute("mongo_insert_ms", mongo_insert_ms);
+  db_commit_span.SetAttribute("mongo_bulk_upsert_ms", mongo_insert_ms);
+  db_commit_span.SetAttribute("aggregation_mode", g_config.JobAggregationMode);
+  db_commit_span.SetAttribute("aggregation_pending_jobs",
+                              g_db_client->PendingJobAggregationCount());
   db_commit_span.SetAttribute("total_elapsed_ms", total_elapsed_ms);
   if (total_elapsed_ms > 1000 || step_txn_ms > 1000 || job_txn_ms > 1000 ||
       mongo_insert_ms > 1000) {

@@ -15,6 +15,13 @@ DbName: crane_db
 JobAggregationTimeoutMs: 600000
 # Job aggregation batch size for MongoDB operations.
 JobAggregationBatchSize: 100
+# Job final records are written synchronously; acc_usage aggregation can be
+# moved to a crash-recoverable background worker.
+JobAggregationMode: async
+JobAggregationWorkerBatchSize: 500
+JobAggregationPollIntervalMs: 200
+JobAggregationRetryBackoffMs: 500
+JobAggregationMaxRetryBackoffMs: 10000
 
 Vault:
   Enabled: false

@@ -62,6 +62,10 @@ constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
 constexpr uint32_t kJobStatusChangeBatchNum = 1000;
 constexpr uint32_t kJobStatusChangeMaxDrainPerTick = 200;
 constexpr uint32_t kJobStatusChangeDbCommitChunkSize = 200;
+constexpr uint32_t kJobAggregationWorkerBatchSize = 500;
+constexpr uint32_t kJobAggregationPollIntervalMs = 200;
+constexpr uint32_t kJobAggregationRetryBackoffMs = 500;
+constexpr uint32_t kJobAggregationMaxRetryBackoffMs = 10000;
 
 // Validate and adjust end_time to prevent it from exceeding time_limit
 // by too much. Allow 5 seconds of floating tolerance.
@@ -247,6 +251,11 @@ struct Config {
   uint32_t JobAggregationTimeoutMs{
       600000};  // Job aggregation timeout (ms, default 10 minutes)
   uint32_t JobAggregationBatchSize{100};  // Job aggregation batch size
+  std::string JobAggregationMode{"async"};
+  uint32_t JobAggregationWorkerBatchSize{kJobAggregationWorkerBatchSize};
+  uint32_t JobAggregationPollIntervalMs{kJobAggregationPollIntervalMs};
+  uint32_t JobAggregationRetryBackoffMs{kJobAggregationRetryBackoffMs};
+  uint32_t JobAggregationMaxRetryBackoffMs{kJobAggregationMaxRetryBackoffMs};
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;

@@ -289,6 +289,23 @@ void SetJobSummaryQueryCommonFilter(
   return;
 }
 
+bsoncxx::document::value MakePendingAggregationFilter_() {
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  return make_document(
+      kvp("aggregated", make_document(kvp("$ne", true))),
+      kvp("state",
+          make_document(kvp(
+              "$in",
+              make_array(
+                  static_cast<int32_t>(crane::grpc::JobStatus::Cancelled),
+                  static_cast<int32_t>(crane::grpc::JobStatus::Completed),
+                  static_cast<int32_t>(crane::grpc::JobStatus::OutOfMemory),
+                  static_cast<int32_t>(crane::grpc::JobStatus::ExceedTimeLimit),
+                  static_cast<int32_t>(crane::grpc::JobStatus::Failed))))));
+}
+
 }  // namespace
 
 bool MongodbClient::Connect() {
@@ -496,6 +513,12 @@ bool MongodbClient::InsertRecoveredJob(
             mongocxx::options::update{}.upsert(true));
 
     if (ret != bsoncxx::stdx::nullopt) {
+      if (!m_job_summary_enabled_) return true;
+      if (JobAggregationAsyncMode_()) {
+        NotifyJobAggregationWorker_(1);
+        return true;
+      }
+
       using bsoncxx::builder::basic::make_document;
 
       bool txn_success = CommitTransaction(
@@ -541,6 +564,12 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
             mongocxx::options::update{}.upsert(true));
 
     if (ret != bsoncxx::stdx::nullopt) {
+      if (!m_job_summary_enabled_) return true;
+      if (JobAggregationAsyncMode_()) {
+        NotifyJobAggregationWorker_(1);
+        return true;
+      }
+
       // Real-time aggregation: append to acc_usage tables with transaction
       // Note: Tasks in database are always completed/failed/cancelled
       // Uses transaction to ensure atomicity of aggregation and marking
@@ -615,6 +644,12 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
 
     auto result = bulk.execute();
     if (result) {
+      if (!m_job_summary_enabled_) return true;
+      if (JobAggregationAsyncMode_()) {
+        NotifyJobAggregationWorker_(jobs.size());
+        return true;
+      }
+
       // Real-time aggregation for each job (best effort)
       // Failures will be recovered on startup via RecoverMissingAggregations
       for (const JobInCtld* job : jobs) {
@@ -1777,6 +1812,466 @@ void MongodbClient::MarkJobAsAggregated(job_id_t job_id,
   }
 }
 
+bool MongodbClient::JobAggregationAsyncMode_() const {
+  return g_config.JobAggregationMode == "async";
+}
+
+void MongodbClient::StartJobAggregationWorker_() {
+  if (!m_job_summary_enabled_ || !JobAggregationAsyncMode_()) return;
+
+  bool expected = false;
+  if (!m_job_aggregation_worker_started_.compare_exchange_strong(expected,
+                                                                 true)) {
+    return;
+  }
+
+  m_job_aggregation_stop_.store(false, std::memory_order_release);
+  m_job_aggregation_worker_ =
+      std::thread(&MongodbClient::JobAggregationWorkerLoop_, this);
+  CRANE_LOGGER_INFO(
+      m_logger_,
+      "JobAggregationWorker started: mode={} batch_size={} poll_ms={} "
+      "retry_backoff_ms={} max_retry_backoff_ms={}",
+      g_config.JobAggregationMode, g_config.JobAggregationWorkerBatchSize,
+      g_config.JobAggregationPollIntervalMs,
+      g_config.JobAggregationRetryBackoffMs,
+      g_config.JobAggregationMaxRetryBackoffMs);
+}
+
+void MongodbClient::StopJobAggregationWorker_() {
+  if (!m_job_aggregation_worker_started_.load(std::memory_order_acquire)) {
+    return;
+  }
+
+  m_job_aggregation_stop_.store(true, std::memory_order_release);
+  m_job_aggregation_cv_.notify_all();
+  if (m_job_aggregation_worker_.joinable()) m_job_aggregation_worker_.join();
+  m_job_aggregation_worker_started_.store(false, std::memory_order_release);
+}
+
+void MongodbClient::NotifyJobAggregationWorker_(size_t job_count) {
+  if (job_count == 0) return;
+
+  m_job_aggregation_pending_jobs_.fetch_add(static_cast<int64_t>(job_count),
+                                            std::memory_order_relaxed);
+  m_job_aggregation_cv_.notify_one();
+}
+
+void MongodbClient::SubtractPendingJobAggregationCount_(size_t job_count) {
+  int64_t old = m_job_aggregation_pending_jobs_.load(std::memory_order_relaxed);
+  while (true) {
+    int64_t next =
+        old > static_cast<int64_t>(job_count)
+            ? old - static_cast<int64_t>(job_count)
+            : 0;
+    if (m_job_aggregation_pending_jobs_.compare_exchange_weak(
+            old, next, std::memory_order_relaxed)) {
+      return;
+    }
+  }
+}
+
+void MongodbClient::JobAggregationWorkerLoop_() {
+  uint32_t retry_backoff_ms =
+      std::max<uint32_t>(1, g_config.JobAggregationRetryBackoffMs);
+  const uint32_t max_retry_backoff_ms =
+      std::max<uint32_t>(retry_backoff_ms,
+                         g_config.JobAggregationMaxRetryBackoffMs);
+
+  while (!m_job_aggregation_stop_.load(std::memory_order_acquire)) {
+    auto processed = ProcessJobAggregationBatch_();
+    if (!processed.has_value()) {
+      std::unique_lock lock(m_job_aggregation_mtx_);
+      m_job_aggregation_cv_.wait_for(
+          lock, std::chrono::milliseconds(retry_backoff_ms), [this] {
+            return m_job_aggregation_stop_.load(std::memory_order_acquire);
+          });
+      retry_backoff_ms =
+          std::min<uint32_t>(retry_backoff_ms * 2, max_retry_backoff_ms);
+      continue;
+    }
+
+    retry_backoff_ms =
+        std::max<uint32_t>(1, g_config.JobAggregationRetryBackoffMs);
+    if (*processed > 0) continue;
+
+    std::unique_lock lock(m_job_aggregation_mtx_);
+    m_job_aggregation_cv_.wait_for(
+        lock, std::chrono::milliseconds(g_config.JobAggregationPollIntervalMs),
+        [this] {
+          return m_job_aggregation_stop_.load(std::memory_order_acquire) ||
+                 m_job_aggregation_pending_jobs_.load(
+                     std::memory_order_relaxed) > 0;
+        });
+  }
+
+  // Best-effort drain of one batch during shutdown. Unprocessed jobs remain
+  // aggregated != true and will be picked up on the next ctld start.
+  if (m_job_summary_enabled_ && JobAggregationAsyncMode_()) {
+    (void)ProcessJobAggregationBatch_();
+  }
+}
+
+std::vector<MongodbClient::PendingJobAggregationInfo>
+MongodbClient::FetchPendingAggregationJobs_(size_t limit,
+                                            int64_t* oldest_pending_ms) {
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  std::vector<PendingJobAggregationInfo> jobs;
+  if (oldest_pending_ms) *oldest_pending_ms = 0;
+
+  try {
+    auto job_coll = (*GetClient_())[m_db_name_][m_job_collection_name_];
+    auto filter = MakePendingAggregationFilter_();
+
+    mongocxx::options::find opts;
+    opts.limit(static_cast<int64_t>(limit));
+    opts.sort(make_document(kvp("time_end", 1), kvp("job_id", 1)));
+    opts.projection(make_document(
+        kvp("job_id", 1), kvp("account", 1), kvp("username", 1),
+        kvp("qos", 1), kvp("wckey", 1), kvp("time_start", 1),
+        kvp("time_end", 1), kvp("cpus_alloc", 1), kvp("nodes_alloc", 1)));
+
+    auto cursor = job_coll.find(filter.view(), opts);
+    int64_t oldest_end = 0;
+    for (auto&& doc : cursor) {
+      auto time_start = ViewValueOr_(doc["time_start"], int64_t{0});
+      auto time_end = ViewValueOr_(doc["time_end"], int64_t{0});
+      auto cpus_alloc = cpu_t::from_raw_value(
+          ViewValueOr_(doc["cpus_alloc"], int64_t{0}));
+      auto nodes_alloc = ViewValueOr_(doc["nodes_alloc"], int64_t{0});
+
+      PendingJobAggregationInfo info;
+      info.job_id = static_cast<job_id_t>(
+          ViewValueOr_(doc["job_id"], int64_t{0}));
+      info.time_end = time_end;
+      info.has_usage = time_start > 0 && time_end > time_start &&
+                       cpus_alloc.raw_value() > 0 && nodes_alloc > 0;
+      info.aggregation = JobAggregationInfo{
+          .account = ViewValueOr_(doc["account"], std::string{}),
+          .username = ViewValueOr_(doc["username"], std::string{}),
+          .qos = ViewValueOr_(doc["qos"], std::string{}),
+          .wckey = ViewValueOr_(doc["wckey"], std::string{}),
+          .start_time = sys_seconds{seconds{time_start}},
+          .end_time = sys_seconds{seconds{time_end}},
+          .total_cpus = cpus_alloc * nodes_alloc};
+      jobs.emplace_back(std::move(info));
+
+      if (time_end > 0 && (oldest_end == 0 || time_end < oldest_end)) {
+        oldest_end = time_end;
+      }
+    }
+
+    if (jobs.empty()) {
+      m_job_aggregation_pending_jobs_.store(0, std::memory_order_relaxed);
+      return jobs;
+    }
+
+    if (oldest_pending_ms && oldest_end > 0) {
+      int64_t now_sec =
+          duration_cast<seconds>(system_clock::now().time_since_epoch())
+              .count();
+      *oldest_pending_ms = std::max<int64_t>(0, now_sec - oldest_end) * 1000;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "JobAggregationWorker failed to fetch pending jobs: {}",
+                       e.what());
+    throw;
+  }
+
+  return jobs;
+}
+
+void MongodbClient::AddUsageDelta_(JobAggregationUsageMap* deltas,
+                                   const JobAggregationInfo& info,
+                                   std::chrono::sys_seconds period_start,
+                                   int64_t total_cpu_time) {
+  if (total_cpu_time <= 0) return;
+
+  JobAggregationUsageKey key{.period_start = period_start,
+                             .account = info.account,
+                             .username = info.username,
+                             .qos = info.qos,
+                             .wckey = info.wckey};
+  (*deltas)[std::move(key)] += total_cpu_time;
+}
+
+void MongodbClient::BuildJobAggregationDeltas_(
+    const std::vector<PendingJobAggregationInfo>& jobs,
+    JobAggregationUsageMap* hour_deltas, JobAggregationUsageMap* day_deltas,
+    JobAggregationUsageMap* month_deltas) {
+  using namespace std::chrono;
+
+  for (const auto& job : jobs) {
+    if (!job.has_usage) continue;
+    const auto& info = job.aggregation;
+
+    auto current_hour = floor<hours>(info.start_time);
+    auto end_hour = floor<hours>(info.end_time);
+    while (current_hour <= end_hour) {
+      auto next_hour = current_hour + hours{1};
+      auto hour_start = time_point_cast<seconds>(current_hour);
+      auto hour_end = time_point_cast<seconds>(next_hour);
+      auto usage_start = std::max(hour_start, info.start_time);
+      auto usage_end = std::min(hour_end, info.end_time);
+      int64_t seconds_in_bucket =
+          duration_cast<seconds>(usage_end - usage_start).count();
+      AddUsageDelta_(hour_deltas, info, time_point_cast<seconds>(current_hour),
+                     (info.total_cpus * seconds_in_bucket).raw_value());
+      current_hour = next_hour;
+    }
+
+    auto current_day = floor<days>(info.start_time);
+    auto end_day = floor<days>(info.end_time);
+    while (current_day <= end_day) {
+      auto next_day = current_day + days{1};
+      auto day_start = time_point_cast<seconds>(current_day);
+      auto day_end = time_point_cast<seconds>(next_day);
+      auto usage_start = std::max(day_start, info.start_time);
+      auto usage_end = std::min(day_end, info.end_time);
+      int64_t seconds_in_bucket =
+          duration_cast<seconds>(usage_end - usage_start).count();
+      AddUsageDelta_(day_deltas, info, time_point_cast<seconds>(current_day),
+                     (info.total_cpus * seconds_in_bucket).raw_value());
+      current_day = next_day;
+    }
+
+    auto start_day = floor<days>(info.start_time);
+    auto end_day_for_month = floor<days>(info.end_time);
+    auto start_ymd = year_month_day{start_day};
+    auto end_ymd = year_month_day{end_day_for_month};
+    auto current_month = year_month{start_ymd.year(), start_ymd.month()};
+    auto end_month = year_month{end_ymd.year(), end_ymd.month()};
+    while (current_month <= end_month) {
+      auto month_start = sys_days{current_month / 1};
+      auto next_month = current_month + months{1};
+      auto month_end = sys_days{next_month / 1};
+      auto month_start_sec = time_point_cast<seconds>(month_start);
+      auto month_end_sec = time_point_cast<seconds>(month_end);
+      auto usage_start = std::max(month_start_sec, info.start_time);
+      auto usage_end = std::min(month_end_sec, info.end_time);
+      int64_t seconds_in_bucket =
+          duration_cast<seconds>(usage_end - usage_start).count();
+      AddUsageDelta_(month_deltas, info, month_start_sec,
+                     (info.total_cpus * seconds_in_bucket).raw_value());
+      current_month = next_month;
+    }
+  }
+}
+
+bool MongodbClient::BulkIncUsageDeltas_(
+    mongocxx::client_session* session, const std::string& collection_name,
+    const std::string& period_field, const JobAggregationUsageMap& deltas,
+    int64_t* elapsed_ms) {
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto begin = steady_clock::now();
+  if (elapsed_ms) *elapsed_ms = 0;
+  if (deltas.empty()) return true;
+
+  try {
+    mongocxx::options::bulk_write bulk_options;
+    auto bulk =
+        (*GetClient_())[m_db_name_][collection_name].create_bulk_write(
+            *session, bulk_options);
+    const auto aggregated_at = bsoncxx::types::b_date{
+        time_point_cast<milliseconds>(system_clock::now())};
+
+    for (const auto& [key, total_cpu_time] : deltas) {
+      auto filter = make_document(
+          kvp(period_field,
+              bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                  key.period_start)}),
+          kvp("account", key.account), kvp("username", key.username),
+          kvp("qos", key.qos), kvp("wckey", key.wckey));
+      auto update = make_document(
+          kvp("$inc", make_document(kvp("total_cpu_time", total_cpu_time))),
+          kvp("$setOnInsert",
+              make_document(kvp("aggregated_at", aggregated_at))));
+      mongocxx::model::update_one update_op{filter.view(), update.view()};
+      update_op.upsert(true);
+      bulk.append(update_op);
+    }
+
+    auto result = bulk.execute();
+    if (!result) return false;
+    if (elapsed_ms) {
+      *elapsed_ms = duration_cast<milliseconds>(steady_clock::now() - begin)
+                        .count();
+    }
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_, "JobAggregationWorker bulk inc failed: coll={} error={}",
+        collection_name, e.what());
+    throw;
+  }
+}
+
+bool MongodbClient::MarkJobsAggregatedBatch_(
+    mongocxx::client_session* session,
+    const std::vector<PendingJobAggregationInfo>& jobs, int64_t* elapsed_ms) {
+  using bsoncxx::builder::basic::make_document;
+  using namespace std::chrono;
+
+  auto begin = steady_clock::now();
+  if (elapsed_ms) *elapsed_ms = 0;
+  if (jobs.empty()) return true;
+
+  try {
+    array job_ids;
+    for (const auto& job : jobs) {
+      job_ids.append(static_cast<int32_t>(job.job_id));
+    }
+
+    auto filter = make_document(kvp("job_id", make_document(kvp("$in", job_ids))));
+    auto update = make_document(kvp(
+        "$set",
+        make_document(
+            kvp("aggregated", true),
+            kvp("aggregated_at",
+                bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                    system_clock::now())}))));
+
+    auto result =
+        (*GetClient_())[m_db_name_][m_job_collection_name_].update_many(
+            *session, filter.view(), update.view());
+    if (!result) return false;
+    if (elapsed_ms) {
+      *elapsed_ms = duration_cast<milliseconds>(steady_clock::now() - begin)
+                        .count();
+    }
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "JobAggregationWorker failed to mark jobs aggregated: {}",
+                       e.what());
+    throw;
+  }
+}
+
+std::optional<size_t> MongodbClient::ProcessJobAggregationBatch_() {
+  using namespace std::chrono;
+
+  CRANE_TRACE_SCOPE_NAMED(batch_span, "aggregation/batch");
+  const size_t batch_limit =
+      std::max<uint32_t>(1, g_config.JobAggregationWorkerBatchSize);
+  batch_span.SetAttribute("batch_limit", static_cast<int64_t>(batch_limit));
+  batch_span.SetAttribute("pending_jobs",
+                          PendingJobAggregationCount());
+
+  int64_t oldest_pending_ms = 0;
+  std::vector<PendingJobAggregationInfo> jobs;
+  auto fetch_begin = steady_clock::now();
+  try {
+    CRANE_TRACE_CHILD_NAMED(fetch_span, batch_span,
+                            "aggregation/batch_fetch");
+    jobs = FetchPendingAggregationJobs_(batch_limit, &oldest_pending_ms);
+    fetch_span.SetAttribute("job_count", static_cast<int64_t>(jobs.size()));
+    fetch_span.SetAttribute("oldest_pending_ms", oldest_pending_ms);
+  } catch (const std::exception&) {
+    batch_span.SetStatus(crane::StatusCode::kError, "batch_fetch_failed");
+    return std::nullopt;
+  }
+
+  const int64_t fetch_ms =
+      duration_cast<milliseconds>(steady_clock::now() - fetch_begin).count();
+  batch_span.SetAttribute("aggregation/batch_fetch_ms", fetch_ms);
+  batch_span.SetAttribute("aggregation/oldest_pending_ms", oldest_pending_ms);
+  if (jobs.empty()) return size_t{0};
+
+  JobAggregationUsageMap hour_deltas, day_deltas, month_deltas;
+  auto build_begin = steady_clock::now();
+  {
+    CRANE_TRACE_CHILD_NAMED(build_span, batch_span,
+                            "aggregation/build_delta");
+    BuildJobAggregationDeltas_(jobs, &hour_deltas, &day_deltas, &month_deltas);
+    build_span.SetAttribute("hour_delta_count",
+                            static_cast<int64_t>(hour_deltas.size()));
+    build_span.SetAttribute("day_delta_count",
+                            static_cast<int64_t>(day_deltas.size()));
+    build_span.SetAttribute("month_delta_count",
+                            static_cast<int64_t>(month_deltas.size()));
+  }
+  const int64_t build_delta_ms =
+      duration_cast<milliseconds>(steady_clock::now() - build_begin).count();
+
+  int64_t hour_bulk_ms = 0;
+  int64_t day_bulk_ms = 0;
+  int64_t month_bulk_ms = 0;
+  int64_t mark_jobs_ms = 0;
+  auto txn_begin = steady_clock::now();
+  bool txn_success = CommitTransaction(
+      [this, &hour_deltas, &day_deltas, &month_deltas, &jobs, &hour_bulk_ms,
+       &day_bulk_ms, &month_bulk_ms,
+       &mark_jobs_ms](mongocxx::client_session* session) {
+        if (!BulkIncUsageDeltas_(session, m_acc_usage_hour_collection_name_,
+                                 "hour", hour_deltas, &hour_bulk_ms)) {
+          throw std::runtime_error("hour usage bulk write failed");
+        }
+        if (!BulkIncUsageDeltas_(session, m_acc_usage_day_collection_name_,
+                                 "day", day_deltas, &day_bulk_ms)) {
+          throw std::runtime_error("day usage bulk write failed");
+        }
+        if (!BulkIncUsageDeltas_(session, m_acc_usage_month_collection_name_,
+                                 "month", month_deltas, &month_bulk_ms)) {
+          throw std::runtime_error("month usage bulk write failed");
+        }
+        if (!MarkJobsAggregatedBatch_(session, jobs, &mark_jobs_ms)) {
+          throw std::runtime_error("mark jobs aggregated failed");
+        }
+      });
+
+  const int64_t batch_total_ms =
+      duration_cast<milliseconds>(steady_clock::now() - fetch_begin).count();
+  const int64_t txn_ms =
+      duration_cast<milliseconds>(steady_clock::now() - txn_begin).count();
+
+  batch_span.SetAttribute("job_count", static_cast<int64_t>(jobs.size()));
+  batch_span.SetAttribute("aggregation/build_delta_ms", build_delta_ms);
+  batch_span.SetAttribute("aggregation/hour_bulk_ms", hour_bulk_ms);
+  batch_span.SetAttribute("aggregation/day_bulk_ms", day_bulk_ms);
+  batch_span.SetAttribute("aggregation/month_bulk_ms", month_bulk_ms);
+  batch_span.SetAttribute("aggregation/mark_jobs_ms", mark_jobs_ms);
+  batch_span.SetAttribute("aggregation/batch_total_ms", batch_total_ms);
+  batch_span.SetAttribute("aggregation/txn_ms", txn_ms);
+  batch_span.SetAttribute("hour_delta_count",
+                          static_cast<int64_t>(hour_deltas.size()));
+  batch_span.SetAttribute("day_delta_count",
+                          static_cast<int64_t>(day_deltas.size()));
+  batch_span.SetAttribute("month_delta_count",
+                          static_cast<int64_t>(month_deltas.size()));
+
+  if (!txn_success) {
+    batch_span.SetStatus(crane::StatusCode::kError, "aggregation_txn_failed");
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "JobAggregationWorker batch failed: job_count={} fetch_ms={} "
+        "build_delta_ms={} txn_ms={} batch_total_ms={} pending_jobs={}",
+        jobs.size(), fetch_ms, build_delta_ms, txn_ms, batch_total_ms,
+        PendingJobAggregationCount());
+    return std::nullopt;
+  }
+
+  SubtractPendingJobAggregationCount_(jobs.size());
+  CRANE_LOGGER_INFO(
+      m_logger_,
+      "JobAggregationWorkerDiag job_count={} pending_jobs={} "
+      "oldest_pending_ms={} batch_fetch_ms={} build_delta_ms={} "
+      "hour_bulk_ms={} day_bulk_ms={} month_bulk_ms={} mark_jobs_ms={} "
+      "txn_ms={} batch_total_ms={} hour_delta_count={} day_delta_count={} "
+      "month_delta_count={}",
+      jobs.size(), PendingJobAggregationCount(), oldest_pending_ms, fetch_ms,
+      build_delta_ms, hour_bulk_ms, day_bulk_ms, month_bulk_ms, mark_jobs_ms,
+      txn_ms, batch_total_ms, hour_deltas.size(), day_deltas.size(),
+      month_deltas.size());
+
+  return jobs.size();
+}
+
 // Recovery for new cluster: batch aggregation using existing functions
 void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
                                                    bool day_done,
@@ -1988,25 +2483,13 @@ void MongodbClient::RecoverNewClusterAggregations_(bool hour_done,
 // Recovery for existing cluster: iterate unaggregated jobs and append
 void MongodbClient::RecoverExistingClusterAggregations_() {
   using bsoncxx::builder::basic::kvp;
-  using bsoncxx::builder::basic::make_array;
-  using bsoncxx::builder::basic::make_document;
 
   CRANE_INFO("Starting existing cluster aggregation recovery...");
 
   auto client = GetClient_();
 
   // 1. Query all unaggregated completed tasks
-  auto filter = make_document(
-      kvp("aggregated", make_document(kvp("$ne", true))),
-      kvp("state",
-          make_document(kvp(
-              "$in",
-              make_array(
-                  static_cast<int64_t>(crane::grpc::JobStatus::Cancelled),
-                  static_cast<int64_t>(crane::grpc::JobStatus::Completed),
-                  static_cast<int64_t>(crane::grpc::JobStatus::OutOfMemory),
-                  static_cast<int64_t>(crane::grpc::JobStatus::ExceedTimeLimit),
-                  static_cast<int64_t>(crane::grpc::JobStatus::Failed))))));
+  auto filter = MakePendingAggregationFilter_();
 
   auto cursor =
       (*client)[m_db_name_][m_job_collection_name_].find(filter.view());
@@ -2036,6 +2519,14 @@ void MongodbClient::RecoverExistingClusterAggregations_() {
 
 // Main recovery function: detect cluster type and choose strategy
 void MongodbClient::RecoverMissingAggregations_() {
+  if (JobAggregationAsyncMode_()) {
+    CRANE_INFO(
+        "JobAggregationMode=async: startup recovery is delegated to "
+        "JobAggregationWorker; ctld startup will not synchronously aggregate "
+        "pending jobs.");
+    return;
+  }
+
   // Check initial aggregation completion status for all levels
   bool hour_done = GetInitialAggregationCompleted_(JobSummary::Type::HOUR);
   bool day_done = GetInitialAggregationCompleted_(JobSummary::Type::DAY);
@@ -5129,10 +5620,12 @@ bool MongodbClient::InitTableIndexes() {
         raw_table, {"time_start", "time_end", "account", "username"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end", "cpus_alloc"},
                           false);
-    // job_table: add index for aggregated field (recovery optimization)
+    // job_table: add index for aggregated/state recovery optimization
     CRANE_LOGGER_DEBUG(m_logger_,
                        "Creating aggregation recovery index on job_table...");
-    CreateCollectionIndex(raw_table, {"aggregated", "status"}, false);
+    CreateCollectionIndex(raw_table, {"aggregated", "state", "time_end",
+                                      "job_id"},
+                         false);
 
     auto acc_hour_coll = client[m_db_name_][m_acc_usage_hour_collection_name_];
     CreateCollectionIndex(acc_hour_coll,
@@ -5190,18 +5683,20 @@ bool MongodbClient::Init() {
     return false;
   }
 
-  // Recover missing aggregations on startup
-  if (m_job_summary_enabled_) {
-    try {
-      CRANE_LOGGER_DEBUG(m_logger_, "Starting aggregation recovery...");
-      RecoverMissingAggregations_();
-      CRANE_LOGGER_DEBUG(m_logger_, "Aggregation recovery completed");
-      return true;
-    } catch (const std::exception& e) {
-      CRANE_ERROR("Aggregation recovery failed: {}. Continuing startup...",
-                  e.what());
-      return false;
+  try {
+    if (m_job_summary_enabled_) {
+      if (JobAggregationAsyncMode_()) {
+        StartJobAggregationWorker_();
+      } else {
+        CRANE_LOGGER_DEBUG(m_logger_, "Starting aggregation recovery...");
+        RecoverMissingAggregations_();
+        CRANE_LOGGER_DEBUG(m_logger_, "Aggregation recovery completed");
+      }
     }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Aggregation initialization failed: {}. Continuing startup...",
+                e.what());
+    return false;
   }
 
   return true;
@@ -5237,7 +5732,10 @@ MongodbClient::MongodbClient() {
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
-MongodbClient::~MongodbClient() { m_thread_stop_ = true; }
+MongodbClient::~MongodbClient() {
+  m_thread_stop_ = true;
+  StopJobAggregationWorker_();
+}
 
 // ======================== Database Schema Migration ========================
 

@@ -919,6 +919,30 @@ void ParseConfig(int argc, char** argv) {
             config["JobAggregationBatchSize"].as<uint32_t>();
       }
 
+      if (config["JobAggregationMode"]) {
+        g_config.JobAggregationMode =
+            config["JobAggregationMode"].as<std::string>();
+        if (g_config.JobAggregationMode != "async" &&
+            g_config.JobAggregationMode != "sync") {
+          CRANE_ERROR("Unknown JobAggregationMode '{}'. Valid: async|sync",
+                      g_config.JobAggregationMode);
+          std::exit(1);
+        }
+      }
+
+      g_config.JobAggregationWorkerBatchSize =
+          YamlValueOr<uint32_t>(config["JobAggregationWorkerBatchSize"],
+                                Ctld::kJobAggregationWorkerBatchSize);
+      g_config.JobAggregationPollIntervalMs =
+          YamlValueOr<uint32_t>(config["JobAggregationPollIntervalMs"],
+                                Ctld::kJobAggregationPollIntervalMs);
+      g_config.JobAggregationRetryBackoffMs =
+          YamlValueOr<uint32_t>(config["JobAggregationRetryBackoffMs"],
+                                Ctld::kJobAggregationRetryBackoffMs);
+      g_config.JobAggregationMaxRetryBackoffMs =
+          YamlValueOr<uint32_t>(config["JobAggregationMaxRetryBackoffMs"],
+                                Ctld::kJobAggregationMaxRetryBackoffMs);
+
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
