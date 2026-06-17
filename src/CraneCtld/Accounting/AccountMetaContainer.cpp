@@ -94,15 +94,15 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job,
     return CraneErrCode::ERR_INVALID_QOS;
   }
 
-  const ResourceView& resource_use = job.req_total_res_view;
+  const ResourceView& resource_use = job.req_total_res_view * count;
 
-  if (qos->max_submit_jobs_per_user == 0)
+  if (count > qos->max_submit_jobs_per_user)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
-  if (qos->max_submit_jobs_per_account == 0)
+  if (count > qos->max_submit_jobs_per_account)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
-  if (qos->max_submit_jobs == 0)
+  if (count > qos->max_submit_jobs)
     return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
 
   if (resource_use.GetCpuCount() > qos->max_cpus_per_user)
