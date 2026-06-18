@@ -1253,11 +1253,23 @@ class JobScheduler {
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
   void HandleFailToRecoverRngJob_(job_id_t job_id);
 
-  static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
-  static void PersistAndTransferStepsToMongodb_(
+  struct FinalTransferResult {
+    bool ok{true};
+    std::string failed_stage;
+    int64_t persist_ms{0};
+    int64_t mongo_insert_ms{0};
+    int64_t purge_ms{0};
+    int64_t plugin_hook_enqueue_ms{0};
+    bool mongo_inserted{false};
+  };
+
+  static FinalTransferResult ProcessFinalSteps_(
+      std::unordered_set<StepInCtld*> const& steps);
+  static FinalTransferResult PersistAndTransferStepsToMongodb_(
       std::unordered_set<StepInCtld*> const& steps);
 
-  static int64_t ProcessFinalJobs_(const std::unordered_set<JobInCtld*>& jobs);
+  static FinalTransferResult ProcessFinalJobs_(
+      const std::unordered_set<JobInCtld*>& jobs);
 
   // Move the parent unique_ptr out of m_pending_job_map_ into each
   // bundle.parent_job. Must be called with m_pending_job_map_mtx_ held.
@@ -1266,10 +1278,10 @@ class JobScheduler {
       std::vector<ArrayManager::FinalizedArrayParent>& parents)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
-  static void CallPluginHookForFinalJobs_(
+  static int64_t CallPluginHookForFinalJobs_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  static int64_t PersistAndTransferJobsToMongodb_(
+  static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
   CraneErrCode TerminateRunningStepNoLock_(
