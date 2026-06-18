@@ -25,7 +25,6 @@
 #include "CranedClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"
-#include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -137,18 +136,6 @@ int InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
-    g_config.Container.ImagePullingTimeout =
-        msg.container_config().has_image_pulling_timeout_seconds()
-            ? std::chrono::seconds(
-                  msg.container_config().image_pulling_timeout_seconds())
-            : cri::kCriDefaultImagePullingTimeout;
-    if (g_config.Container.ImagePullingTimeout <=
-        std::chrono::seconds::zero()) {
-      // Sliently reset to default if the configured timeout is invalid.
-      // No log because supervisor is not ready yet.
-      g_config.Container.ImagePullingTimeout =
-          cri::kCriDefaultImagePullingTimeout;
-    }
 
     if (msg.container_config().has_dns_config()) {
       const auto& dc = msg.container_config().dns_config();
@@ -412,6 +399,7 @@ void StartServer(int grpc_output_fd) {
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
 
+  StepStatus status{StepStatus::Invalid};
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
@@ -457,16 +445,13 @@ void StartServer(int grpc_output_fd) {
     }
 
     // Daemon step is RUNNING after supervisor and related resources are ready.
-    g_task_mgr->SupervisorFinishInit(ready ? StepStatus::Running
-                                           : StepStatus::Failed);
-  } else if (g_config.StepSpec.local_direct_launch()) {
-    CRANE_DEBUG("[Step #{}.{}] Local direct launch from supervisor.",
-                g_config.JobId, g_config.StepId);
-    (void)g_task_mgr->ExecuteStepAsync();
+    status = ready ? StepStatus::Running : StepStatus::Failed;
   } else {
     // Common step is Starting after supervisor is ready.
-    g_task_mgr->SupervisorFinishInit(StepStatus::Starting);
+    status = StepStatus::Starting;
   }
+
+  g_task_mgr->SupervisorFinishInit(status);
 
   g_server->Wait();
   g_server.reset();

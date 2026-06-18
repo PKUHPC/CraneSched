@@ -253,6 +253,21 @@ void AccountMetaContainer::FreeMetaResource(const JobInCtld& job) {
                   job.partition_id, meta_resource);
 }
 
+void AccountMetaContainer::FreeMetaRunningResource(const JobInCtld& job) {
+  CRANE_DEBUG(
+      "Free meta running resource for requeue job {} of user {} and "
+      "account {}.",
+      job.JobId(), job.Username(), job.account);
+
+  MetaResource meta_resource{.resource = job.allocated_res_view,
+                             .jobs_count = 1,
+                             .submit_jobs_count = 0,
+                             .wall_time = job.time_limit};
+
+  DoFreeResource_(job.JobId(), job.Username(), job.account_chain, job.qos,
+                  job.partition_id, meta_resource, false);
+}
+
 void AccountMetaContainer::FreeMetaResource(const PdJobInScheduler& job) {
   CRANE_DEBUG("Free meta resource for job {} of user {} and account {}.",
               job.job_id, job.username, job.account);
@@ -1111,7 +1126,8 @@ void AccountMetaContainer::DoMallocResource_(
 void AccountMetaContainer::DoFreeResource_(
     job_id_t job_id, const std::string& username,
     const std::list<std::string>& account_chain, const std::string& qos,
-    const std::string& partition_id, const MetaResource& meta_resource) {
+    const std::string& partition_id, const MetaResource& meta_resource,
+    bool reduce_user_job) {
   CRANE_TRACE(
       "Free meta resource: job_id={}, user='{}', account='{}', qos='{}', "
       "partition='{}', delta={}.",
@@ -1188,7 +1204,7 @@ void AccountMetaContainer::DoFreeResource_(
   // UserReduceJob mirrors the submit_jobs_count freed here so that
   // UserHasJob bookkeeping matches bulk allocations (e.g. array parent
   // reserving N slots at submit time).
-  UserReduceJob(username, meta_resource.submit_jobs_count);
+  if (reduce_user_job) UserReduceJob(username, meta_resource.submit_jobs_count);
 }
 
 }  // namespace Ctld

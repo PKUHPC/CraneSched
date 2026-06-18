@@ -50,6 +50,10 @@ CraneCtld:
   StatusChangeFlushTimeoutMs: 100
   # Batch size threshold for status change processing (default: 1000)
   StatusChangeBatchNum: 1000
+  # Whether batch jobs may be requeued by default. Users can override with --requeue/--no-requeue.
+  JobRequeue: true
+  # Max number of times a job can be requeued before it is held.
+  MaxRequeueCount: 5
 
 Keepalived:
   # the base directory of NFS storage
@@ -248,8 +252,6 @@ Container:
   RuntimeEndpoint: /run/containerd/containerd.sock
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   ImageEndpoint: /run/containerd/containerd.sock
-  # Image pulling timeout in seconds
-  ImagePullingTimeout: 600
   # Toggle whether to enable user namespace by default when submitting containers
   UserNsEnabledByDefault: true
   # DNS configuration for containers

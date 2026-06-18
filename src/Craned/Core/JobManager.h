@@ -23,6 +23,8 @@
 
 #include <grp.h>
 
+#include <future>
+
 #include "StepInstance.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -32,7 +34,14 @@ namespace Craned {
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 constexpr int kMaxStatusWaitRetryCount = 50;  // 50 * 200ms = 10s
 
+using StepKey = std::pair<job_id_t, step_id_t>;
+using StepCleanupFutureMap = std::unordered_map<
+    job_id_t, std::unordered_map<step_id_t, std::future<CraneErrCode>>>;
+using JobCleanupFutureMap =
+    std::unordered_map<job_id_t, std::future<CraneErrCode>>;
+
 struct CompletingStepState {
+  StepInstance* step = nullptr;
   int alive_check_count = 0;
   int status_wait_count = 0;
   bool sigkill_sent = false;
@@ -104,8 +113,10 @@ class JobManager {
 
   void AllocSteps(std::vector<StepToD>&& steps);
 
-  void FreeSteps(
+  StepCleanupFutureMap FreeSteps(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+
+  JobCleanupFutureMap FreeInvalidJobs(std::set<job_id_t>&& job_ids);
 
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
@@ -227,9 +238,13 @@ class JobManager {
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
       UidMap::MapExclusivePtr& uid_map_ptr);
 
-  bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
+  void CleanUpJobEnvironment_(job_id_t job_id,
+                              StepInstance::DaemonJobCleanupCtx&& ctx,
+                              bool run_epilog = true);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
+
+  void ResolveStepCleanupWaiters_(const StepKey& key, CraneErrCode result);
 
   bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
                                 const EnvMap& job_env);
@@ -284,11 +299,13 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_free_job_step_mtx_;
-  // Step may hold by a job, use raw pointer here.
-  std::unordered_map<StepInstance*, CompletingStepState>
-      m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
-  std::unordered_map<job_id_t, JobInD> m_completing_job_
+  // Step ownership remains in m_job_map_ or in the cleanup caller; this map
+  // only tracks cleanup polling state.
+  absl::flat_hash_map<StepKey, CompletingStepState> m_completing_step_retry_map_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
+  using StepCleanupPromise = std::shared_ptr<std::promise<CraneErrCode>>;
+  absl::flat_hash_map<StepKey, std::vector<StepCleanupPromise>>
+      m_step_cleanup_waiters_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
 
   absl::Mutex m_unexpected_supervisor_exit_mtx_;
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
@@ -316,10 +333,6 @@ class JobManager {
     job_id_t job_id;
     step_id_t step_id;
   };
-
-  std::shared_ptr<uvw::async_handle> m_free_jobs_async_handle_;
-  ConcurrentQueue<JobInD> m_free_jobs_queue_;
-  void EvCleanFreeJobsQueueCb_();
 
   std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
   ConcurrentQueue<FreeStepElem> m_free_steps_queue_;

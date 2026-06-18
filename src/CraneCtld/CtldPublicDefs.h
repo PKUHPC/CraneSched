@@ -86,6 +86,8 @@ constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectJobsBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
 constexpr bool kDefaultTrackWCKey = false;
+constexpr bool kDefaultJobRequeue = true;
+constexpr int32_t kDefaultMaxRequeueCount = 5;
 
 struct Config {
   struct CraneCtldConf {
@@ -96,6 +98,8 @@ struct Config {
     uint32_t SchedulerRpcThreadPoolSize{0};
     uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
+    bool JobRequeue{kDefaultJobRequeue};
+    int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
   };
   CraneCtldConf CtldConf;
 
@@ -277,6 +281,28 @@ namespace Ctld {
 
 struct InteractiveMeta {
   InteractiveMeta() = default;
+
+  InteractiveMeta& operator=(InteractiveMeta&& other) noexcept {
+    if (this == &other) return *this;
+    interactive_type = other.interactive_type;
+    cb_step_res_allocated = std::move(other.cb_step_res_allocated);
+    cb_step_completed = std::move(other.cb_step_completed);
+    cb_step_cancel = std::move(other.cb_step_cancel);
+    has_been_cancelled_on_front_end =
+        other.has_been_cancelled_on_front_end.load();
+    has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
+    cfored_name = std::move(other.cfored_name);
+
+    other.cb_step_res_allocated = nullptr;
+    other.cb_step_completed = nullptr;
+    other.cb_step_cancel = nullptr;
+    return *this;
+  }
+
+  InteractiveMeta(InteractiveMeta&& other) noexcept {
+    *this = std::move(other);
+  }
+
   InteractiveMeta& operator=(const InteractiveMeta& other) {
     interactive_type = other.interactive_type;
     cb_step_res_allocated = other.cb_step_res_allocated;
@@ -485,6 +511,10 @@ struct StepStatusChangeContext {
 
   // Jobs whose primary steps need batch AppendSteps after the main loop.
   std::vector<JobInCtld*> pending_append_steps_jobs;
+
+  // Jobs to requeue (collected during status change, processed after lock
+  // release)
+  std::vector<std::unique_ptr<JobInCtld>> requeue_jobs;
 };
 
 // Abstract interface of all the steps in Ctld.
@@ -734,7 +764,6 @@ struct CommonStepInCtld : StepInCtld {
 
   void InitPrimaryStepFromJob(JobInCtld& job);
   bool IsPrimaryStep() const noexcept;
-  [[nodiscard]] bool ShouldLocalDirectLaunch() const noexcept;
   void SetFieldsByStepToCtld(const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
@@ -858,6 +887,7 @@ struct JobInCtld {
   uint32_t exit_code{};
   bool held{false};
   bool cancel_requested{false};
+  bool requeue_requested{false};
   DependenciesInJob dependencies;
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
@@ -1016,6 +1046,17 @@ struct JobInCtld {
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
   bool CancelRequested() const { return cancel_requested; }
+
+  void SetRequeueRequested(bool val) {
+    requeue_requested = val;
+    runtime_attr.set_requeue_requested(val);
+  }
+  bool RequeueRequested() const { return requeue_requested; }
+
+  int32_t RequeueCount() const { return requeue_count; }
+
+  bool ShouldRequeue() const;
+  void ResetForRequeue();
 
   // Array job tracking accessors
   bool ArrayMaterializationComplete() const;

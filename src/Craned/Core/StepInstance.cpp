@@ -45,7 +45,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       status(status),
       supervisor_stub(supervisor_stub) {}
 
-void StepInstance::CleanUp() {
+void StepInstance::CleanUp(bool async) {
   if (this->status != StepStatus::Completing &&
       !IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
@@ -53,64 +53,49 @@ void StepInstance::CleanUp() {
         "current status: {}.",
         job_id, step_id, static_cast<int>(this->status));
   }
-  if (this->crane_cgroup != nullptr) {
-    g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
-                                cgroup = crane_cgroup.release(),
-                                step_cg_str = this->cg_str] {
-      // This is step_id/system cgroup
-      int cnt = 0;
 
-      while (true) {
-        if (cgroup->Empty()) break;
+  auto* cgroup = crane_cgroup.release();
+  if (cgroup == nullptr) return;
 
-        if (cnt >= 5) {
-          CRANE_ERROR(
-              "Couldn't kill the processes in cgroup {} after {} times. "
-              "Skipping it.",
-              cgroup->CgroupName(), cnt);
-          break;
-        }
+  auto clean_step_cgroup = [job_id = job_id, step_id = step_id, cgroup,
+                            step_cg_str = this->cg_str] {
+    CgroupManager::KillAndDestroyCgroup(
+        std::unique_ptr<CgroupInterface>{cgroup});
 
-        cgroup->KillAllProcesses(SIGKILL);
-        ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
-      }
-      // TODO: Plugin support step cgroup destroy hooks.
-      cgroup->Destroy();
+    // step_cg_str is e.g. "overflow/job_1/step_0/system"
+    // We want to remove the step_N directory (parent of system/user).
+    auto step_cg_path =
+        (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+         Common::CgConstant::kRootCgNamePrefix / step_cg_str)
+            .parent_path();
 
-      delete cgroup;
-
-      // step_cg_str is e.g. "overflow/job_1/step_0/system"
-      // We want to remove the step_N directory (parent of system/user).
-      auto step_cg_path =
-          (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-           Common::CgConstant::kRootCgNamePrefix / step_cg_str)
-              .parent_path();
-
-      std::error_code ec;
-      if (std::filesystem::exists(step_cg_path, ec)) {
-        // Remove step cgroup directory
-        std::filesystem::remove(step_cg_path, ec);
-        if (ec) {
-          CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                      job_id, step_id, step_cg_path, ec.message());
-        } else {
-          CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
-                      step_id, step_cg_path);
-        }
+    std::error_code ec;
+    if (std::filesystem::exists(step_cg_path, ec)) {
+      std::filesystem::remove(step_cg_path, ec);
+      if (ec) {
+        CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
+                    job_id, step_id, step_cg_path, ec.message());
       } else {
-        if (ec) {
-          CRANE_ERROR(
-              "[Step #{}.{}] Failed to check existence of step cgroup dir {}: "
-              "{}",
-              job_id, step_id, step_cg_path, ec.message());
-        } else {
-          CRANE_DEBUG(
-              "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-              job_id, step_id, step_cg_path);
-        }
+        CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
+                    step_id, step_cg_path);
       }
-    });
+    } else {
+      if (ec) {
+        CRANE_ERROR(
+            "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
+            job_id, step_id, step_cg_path, ec.message());
+      } else {
+        CRANE_DEBUG(
+            "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
+            job_id, step_id, step_cg_path);
+      }
+    }
+  };
+
+  if (async) {
+    g_thread_pool->detach_task(std::move(clean_step_cgroup));
+  } else {
+    clean_step_cgroup();
   }
 }
 
@@ -253,8 +238,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
-      container_conf->set_image_pulling_timeout_seconds(
-          g_config.Container.ImagePullingTimeout.count());
       auto* dns_conf = container_conf->mutable_dns_config();
       dns_conf->set_cluster_domain(g_config.Container.Dns.ClusterDomain);
       for (const auto& s : g_config.Container.Dns.Servers)
@@ -525,14 +508,11 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
             "receiving new status 'Running', current status: {}.",
             job_id, step_id, this->status);
     } else {
-      const bool expected = step_to_d.local_direct_launch()
-                                ? status == StepStatus::Configuring
-                                : status == StepStatus::Starting;
-      if (!expected)
+      if (status != StepStatus::Starting)
         CRANE_WARN(
-            "[Step {}.{}] Step status transition to Running is invalid, "
-            "local_direct={}, current status: {}.",
-            job_id, step_id, step_to_d.local_direct_launch(), this->status);
+            "[Step {}.{}] Step status is not 'Starting' when receiving new "
+            "status 'Running', current status: {}.",
+            job_id, step_id, this->status);
     }
     break;
   }
@@ -553,13 +533,12 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   }
 
   case StepStatus::Completing: {
-    // Completing is valid before Running for direct-launch failure or
-    // pre-execute termination.
-    if (status != StepStatus::Running && status != StepStatus::Starting &&
-        status != StepStatus::Configuring)
+    // Starting -> Completing is used when a termination request reaches the
+    // supervisor before ExecuteStep gets a chance to launch tasks.
+    if (status != StepStatus::Running && status != StepStatus::Starting)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting/Configuring' "
-          "when receiving new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
+          "new status 'Completing', current status: {}.",
           job_id, step_id, this->status);
     break;
   }

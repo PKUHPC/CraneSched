@@ -136,6 +136,8 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
       ToInt64Seconds(child->time_limit));
   child->account_chain = parent_job_->account_chain;
+  child->req_node_res_view = parent_job_->req_node_res_view;
+  child->req_task_res_view = parent_job_->req_task_res_view;
   child->req_total_res_view = parent_job_->req_total_res_view;
 
   {

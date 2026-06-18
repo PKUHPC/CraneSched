@@ -421,12 +421,6 @@ Container:
   # CRI 镜像服务套接字（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
 
-  # 镜像拉取超时时间（秒）
-  ImagePullingTimeout: 600
-
-  # 提交容器时是否默认启用用户命名空间
-  UserNsEnabledByDefault: true
-
   # DNS 配置
   Dns:
     ClusterDomain: "cluster.local"
@@ -441,7 +435,7 @@ Container:
       - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
     GidMappings:
       - { Id: 0, IdCount: 2000, SubIdStart: 100000, SubIdSize: 65536 }
-
+  
   # BindFs 配置（可选，用于用户命名空间映射）
   BindFs:
     Enabled: false
@@ -458,8 +452,6 @@ Container:
 | `TempDir` | string | `supervisor/containers/` | 容器运行期间的临时数据目录，相对于 `CraneBaseDir`。存储容器元数据、日志等 |
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
-| `ImagePullingTimeout` | integer | `600` | 镜像拉取 RPC 超时时间，单位为秒 |
-| `UserNsEnabledByDefault` | bool | `true` | 提交容器时是否默认启用用户命名空间。影响 `ccon run --userns` 与 `cbatch --pod --pod-userns` 的默认值，显式指定的命令行参数仍具有更高优先级 |
 
 ### DNS 配置
 

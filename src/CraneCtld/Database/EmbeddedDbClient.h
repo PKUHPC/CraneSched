@@ -189,6 +189,8 @@ class EmbeddedDbClient {
 
   bool ResetNextStepDbId();
 
+  bool ResetJobStepIdCounter(job_id_t job_id);
+
   bool PurgeAllJobHistory();
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);

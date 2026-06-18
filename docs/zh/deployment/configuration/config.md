@@ -159,6 +159,10 @@ PriorityWeightFairShare: 10000   # 公平份额权重
 PriorityWeightJobSize: 0         # 作业大小权重（0=禁用）
 PriorityWeightPartition: 1000    # 分区优先级权重
 PriorityWeightQoS: 1000000       # QoS 优先级权重
+
+CraneCtld:
+  JobRequeue: true               # 是否默认允许批处理作业被重排
+  MaxRequeueCount: 5             # 作业达到该重排次数后保持 Pending 并被 hold
 ```
 
 ## 网络设置
@@ -398,12 +402,6 @@ Container:
 
   # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
-
-  # 镜像拉取超时时间（秒）
-  ImagePullingTimeout: 600
-
-  # 提交容器时是否默认启用用户命名空间
-  UserNsEnabledByDefault: true
 
   # DNS 配置
   Dns:
