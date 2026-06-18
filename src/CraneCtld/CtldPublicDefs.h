@@ -227,6 +227,17 @@ struct Config {
   std::string CraneEmbeddedDbBackend;
   std::filesystem::path CraneCtldDbPath;
 
+  struct RocksDbConfig {
+    bool SyncWrites{true};
+    uint32_t ManualWalSyncIntervalMs{1000};
+    uint32_t WriteBufferSizeMB{64};
+    uint32_t MaxWriteBufferNumber{4};
+    uint32_t TargetFileSizeBaseMB{64};
+    uint32_t MaxBackgroundJobs{4};
+    std::string Compression{"lz4"};
+  };
+  RocksDbConfig RocksDb;
+
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneCtldMutexFilePath;
 

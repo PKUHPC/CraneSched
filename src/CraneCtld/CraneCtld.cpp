@@ -881,6 +881,24 @@ void ParseConfig(int argc, char** argv) {
       } else
         g_config.CraneCtldDbPath = db_base_dir / kDefaultCraneCtldDbPath;
 
+      if (config["RocksDb"]) {
+        const auto& rocksdb_config = config["RocksDb"];
+        g_config.RocksDb.SyncWrites =
+            YamlValueOr<bool>(rocksdb_config["SyncWrites"], true);
+        g_config.RocksDb.ManualWalSyncIntervalMs = YamlValueOr<uint32_t>(
+            rocksdb_config["ManualWalSyncIntervalMs"], 1000);
+        g_config.RocksDb.WriteBufferSizeMB =
+            YamlValueOr<uint32_t>(rocksdb_config["WriteBufferSizeMB"], 64);
+        g_config.RocksDb.MaxWriteBufferNumber =
+            YamlValueOr<uint32_t>(rocksdb_config["MaxWriteBufferNumber"], 4);
+        g_config.RocksDb.TargetFileSizeBaseMB =
+            YamlValueOr<uint32_t>(rocksdb_config["TargetFileSizeBaseMB"], 64);
+        g_config.RocksDb.MaxBackgroundJobs =
+            YamlValueOr<uint32_t>(rocksdb_config["MaxBackgroundJobs"], 4);
+        g_config.RocksDb.Compression =
+            YamlValueOr(rocksdb_config["Compression"], "lz4");
+      }
+
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
         if (config["DbPassword"] && !config["DbPassword"].IsNull())

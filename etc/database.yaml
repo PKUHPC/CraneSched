@@ -1,8 +1,16 @@
 # EmbeddedDb settings
-# BerkeleyDB or Unqlite(default)
+# BerkeleyDB, Unqlite(default), or RocksDB
 CraneEmbeddedDbBackend: Unqlite
 # File path of CraneCtld embeded DB (Relative to CraneBaseDir, when set Keepalived, Relative to CraneSharedBaseDir)
 CraneCtldDbPath: cranectld/embedded.db
+RocksDb:
+  SyncWrites: true
+  ManualWalSyncIntervalMs: 1000
+  WriteBufferSizeMB: 64
+  MaxWriteBufferNumber: 4
+  TargetFileSizeBaseMB: 64
+  MaxBackgroundJobs: 4
+  Compression: lz4
 
 # Mongodb settings
 DbUser: admin

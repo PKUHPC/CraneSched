@@ -88,6 +88,20 @@ if (ENABLE_UNQLITE)
     target_link_libraries(cranectld PRIVATE unqlite)
 endif ()
 
+if (ENABLE_ROCKSDB)
+    target_sources(cranectld PRIVATE
+            Database/RocksDbEmbeddedStore.cpp
+            Database/RocksDbEmbeddedStore.h)
+    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_ROCKSDB)
+    if (TARGET rocksdb)
+        target_link_libraries(cranectld PRIVATE rocksdb)
+    elseif (TARGET rocksdb-shared)
+        target_link_libraries(cranectld PRIVATE rocksdb-shared)
+    else ()
+        message(FATAL_ERROR "ENABLE_ROCKSDB is ON but no RocksDB target was generated.")
+    endif ()
+endif ()
+
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(cranectld PRIVATE stdc++fs)
