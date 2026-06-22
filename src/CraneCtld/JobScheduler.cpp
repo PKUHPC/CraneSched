@@ -4885,6 +4885,26 @@ void JobScheduler::CleanCancelJobQueueCb_() {
     std::unordered_set<JobInCtld*> pd_job_raw_ptrs;
 
     for (auto& job : pending_job_ptr_vec) pd_job_raw_ptrs.emplace(job.get());
+
+    std::vector<ArrayManager::FinalizedArrayParent> pending_final_array_parents;
+    {
+      LockGuard pending_guard(&m_pending_job_map_mtx_);
+      for (auto& job : pending_job_ptr_vec) {
+        if (!job->IsArrayChild() || !job->ArrayJobId().has_value()) continue;
+        auto parents =
+            m_array_manager_->OnChildTerminal(job.get(), pd_job_raw_ptrs);
+        pending_final_array_parents.insert(
+            pending_final_array_parents.end(),
+            std::make_move_iterator(parents.begin()),
+            std::make_move_iterator(parents.end()));
+      }
+      SpliceFinalArrayParentsFromPendingMapNoLock_(pending_final_array_parents);
+    }
+    final_array_parents.insert(
+        final_array_parents.end(),
+        std::make_move_iterator(pending_final_array_parents.begin()),
+        std::make_move_iterator(pending_final_array_parents.end()));
+
     ProcessFinalJobs_(pd_job_raw_ptrs);
   }
 
