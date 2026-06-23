@@ -521,13 +521,9 @@ bool MongodbClient::InsertRecoveredJob(
 }
 
 bool MongodbClient::InsertJob(JobInCtld* job) {
-  if (job->EndTime() > job->StartTime() + job->time_limit ||
-      job->EndTime() < job->StartTime()) {
-    CRANE_ERROR(
-        "Job #{} end time {} is invalid, start time {}, max end time {} (start "
-        "time + time limit).",
-        job->JobId(), job->EndTime(), job->StartTime() + job->time_limit,
-        job->StartTime());
+  if (job->EndTime() < job->StartTime()) {
+    CRANE_ERROR("Job #{} end time {} is invalid, start time {}.", job->JobId(),
+                job->EndTime(), job->StartTime());
     return false;
   }
   if (job->EndTimeInUnixSecond() == kJobMaxTimeStampSec) {
