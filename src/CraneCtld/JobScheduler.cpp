@@ -21,6 +21,8 @@
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
+#include <iterator>
+
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
 #include "Accounting/LicenseManager.h"
@@ -4698,7 +4700,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
   if (approximate_size == 0) return;
 
   std::vector<CancelJobQueueElem> jobs_to_cancel;
-  jobs_to_cancel.resize(approximate_size);
+  jobs_to_cancel.reserve(approximate_size);
 
   // Carry the ownership of JobInCtld for automatic destruction.
   std::vector<std::unique_ptr<JobInCtld>> pending_job_ptr_vec;
@@ -4711,8 +4713,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       running_job_craned_id_map;
 
   size_t actual_size = m_cancel_job_queue_.try_dequeue_bulk(
-      jobs_to_cancel.begin(), approximate_size);
-  jobs_to_cancel.resize(actual_size);
+      std::back_inserter(jobs_to_cancel), approximate_size);
   if (actual_size == 0) return;
 
   // For pending jobs and array parents, finish scheduler-side metadata. For
