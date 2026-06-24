@@ -30,15 +30,18 @@
 #  include <unqlite.h>
 #endif
 
-#ifdef CRANE_HAVE_ROCKSDB
-#  include "Database/RocksDbEmbeddedStore.h"
-#endif
-
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
 
 using txn_id_t = uint32_t;
+
+inline constexpr std::array<std::string_view, 3>
+    kCraneEmbeddedDbBackendValues{"Unqlite", "BerkeleyDB", "RocksDB"};
+
+inline bool IsValidCraneEmbeddedDbBackend(std::string_view backend) {
+  return std::ranges::contains(kCraneEmbeddedDbBackendValues, backend);
+}
 
 enum class DbErrorCode : uint8_t {
   NOT_FOUND,
@@ -167,12 +170,11 @@ class BerkeleyDb : public IEmbeddedDb {
 #endif
 
 class EmbeddedDbClient {
- private:
+ public:
   using db_id_t = job_db_id_t;
   using JobInEmbeddedDb = crane::grpc::JobInEmbeddedDb;
   using StepInEmbeddedDb = crane::grpc::StepInEmbeddedDb;
 
- public:
   struct DbSnapshot {
     std::unordered_map<db_id_t, JobInEmbeddedDb> pending_queue;
     std::unordered_map<db_id_t, JobInEmbeddedDb> running_queue;
@@ -183,105 +185,6 @@ class EmbeddedDbClient {
     std::unordered_map<job_id_t, std::vector<StepInEmbeddedDb>> steps;
   };
 
-  EmbeddedDbClient() = default;
-  ~EmbeddedDbClient();
-
-  bool Init(std::string const& db_path);
-
-  bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id);
-
-  bool ResetNextStepDbId();
-
-  bool PurgeAllJobHistory();
-
-  bool RetrieveLastSnapshot(DbSnapshot* snapshot);
-
-  bool RetrieveStepInfo(StepDbSnapshot* snapshot);
-
-  bool RetrieveReservationInfo(
-      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
-          reservation_info_map);
-
-  bool BeginVariableDbTransaction(txn_id_t* txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->BeginTransaction(RocksStoreKind::JobVar, txn_id);
-#endif
-    return BeginDbTransaction_(m_variable_db_.get(), txn_id);
-  }
-
-  bool CommitVariableDbTransaction(txn_id_t txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_) return m_rocks_store_->CommitTransaction(txn_id);
-#endif
-    return CommitDbTransaction_(m_variable_db_.get(), txn_id);
-  }
-
-  bool BeginFixedDbTransaction(txn_id_t* txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->BeginTransaction(RocksStoreKind::JobFixed, txn_id);
-#endif
-    return BeginDbTransaction_(m_fixed_db_.get(), txn_id);
-  }
-
-  bool CommitFixedDbTransaction(txn_id_t txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_) return m_rocks_store_->CommitTransaction(txn_id);
-#endif
-    return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
-  }
-
-  bool BeginStepVarDbTransaction(txn_id_t* txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->BeginTransaction(RocksStoreKind::StepVar, txn_id);
-#endif
-    return BeginDbTransaction_(m_step_var_db_.get(), txn_id);
-  }
-
-  bool CommitStepVarDbTransaction(txn_id_t txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_) return m_rocks_store_->CommitTransaction(txn_id);
-#endif
-    return CommitDbTransaction_(m_step_var_db_.get(), txn_id);
-  }
-
-  bool BeginStepFixedDbTransaction(txn_id_t* txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->BeginTransaction(RocksStoreKind::StepFixed,
-                                              txn_id);
-#endif
-    return BeginDbTransaction_(m_step_fixed_db_.get(), txn_id);
-  }
-
-  bool CommitStepFixedDbTransaction(txn_id_t txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_) return m_rocks_store_->CommitTransaction(txn_id);
-#endif
-    return CommitDbTransaction_(m_step_fixed_db_.get(), txn_id);
-  }
-
-  bool BeginReservationDbTransaction(txn_id_t* txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->BeginTransaction(RocksStoreKind::Reservation,
-                                              txn_id);
-#endif
-    return BeginDbTransaction_(m_resv_db_.get(), txn_id);
-  }
-
-  bool CommitReservationDbTransaction(txn_id_t txn_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_) return m_rocks_store_->CommitTransaction(txn_id);
-#endif
-    return CommitDbTransaction_(m_resv_db_.get(), txn_id);
-  }
-
-  // Note: All operations in transaction will abort or rollback automatically if
-  // some operation fails, so we don't need anything like AbortTransaction here!
-
   // Extra variable-db writes that should be committed atomically together
   // with the new jobs' variable-db entries (e.g. updating the runtime attr
   // of an array parent when materializing its children).
@@ -289,6 +192,49 @@ class EmbeddedDbClient {
     db_id_t db_id;
     crane::grpc::RuntimeAttrOfJob const* runtime_attr;
   };
+
+  EmbeddedDbClient() = default;
+  virtual ~EmbeddedDbClient() = default;
+
+  virtual bool Init(std::string const& db_path) = 0;
+
+  virtual bool ResetNextJobId(job_id_t next_job_id,
+                              db_id_t next_job_db_id) = 0;
+
+  virtual bool ResetNextStepDbId() = 0;
+
+  virtual bool PurgeAllJobHistory() = 0;
+
+  virtual bool RetrieveLastSnapshot(DbSnapshot* snapshot) = 0;
+
+  virtual bool RetrieveStepInfo(StepDbSnapshot* snapshot) = 0;
+
+  virtual bool RetrieveReservationInfo(
+      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
+          reservation_info_map) = 0;
+
+  virtual bool BeginVariableDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitVariableDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginFixedDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitFixedDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginStepVarDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitStepVarDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginStepFixedDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitStepFixedDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginReservationDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitReservationDbTransaction(txn_id_t txn_id) = 0;
+
+  // Note: All operations in transaction will abort or rollback automatically if
+  // some operation fails, so we don't need anything like AbortTransaction here!
 
   // Assign fresh IDs to jobs and persist them into embedded DB atomically.
   //
@@ -301,31 +247,147 @@ class EmbeddedDbClient {
   // reclaimed on the next successful call (their db_ids are reused) or by
   // crash-recovery cleanup (orphan fixed entries without a variable-db
   // counterpart are deleted at startup).
+  virtual bool AppendJobsToPendingAndAdvanceJobIds(
+      const std::vector<JobInCtld*>& jobs,
+      const std::vector<ExtraVariableWrite>& extra_variable_writes = {}) = 0;
+
+  virtual bool PurgeEndedJobs(
+      const std::unordered_map<job_id_t, job_db_id_t>& job_ids) = 0;
+
+  virtual bool UpdateRuntimeAttrOfJob(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) = 0;
+
+  virtual bool UpdateJobToCtld(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::JobToCtld const& job_to_ctld_ref) = 0;
+
+  virtual bool UpdateRuntimeAttrOfJobIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) = 0;
+
+  virtual bool UpdateJobToCtldIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::JobToCtld const& job_to_ctld_ref) = 0;
+
+  virtual bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
+                                JobInEmbeddedDb* job_in_db) = 0;
+
+  virtual bool AppendSteps(const std::vector<StepInCtld*>& steps) = 0;
+
+  virtual bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids) = 0;
+
+  virtual bool UpdateRuntimeAttrOfStep(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) = 0;
+
+  virtual bool UpdateStepToCtld(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) = 0;
+
+  virtual bool UpdateRuntimeAttrOfStepIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) = 0;
+
+  virtual bool UpdateStepToCtldIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) = 0;
+
+  virtual bool FetchStepDataInDb(txn_id_t txn_id, db_id_t db_id,
+                                 StepInEmbeddedDb* step_in_db) = 0;
+
+  virtual bool UpdateReservationInfo(
+      txn_id_t txn_id, const ResvId& name,
+      const crane::grpc::CreateReservationRequest& reservation_req) = 0;
+
+  virtual bool DeleteReservationInfo(txn_id_t txn_id,
+                                     const ResvId& name) = 0;
+};
+
+enum class LegacyEmbeddedDbBackend : uint8_t {
+  Unqlite,
+  BerkeleyDB,
+};
+
+class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
+ public:
+  explicit LegacyEmbeddedDbClient(LegacyEmbeddedDbBackend backend);
+  ~LegacyEmbeddedDbClient() override;
+
+  bool Init(std::string const& db_path) override;
+
+  bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id) override;
+
+  bool ResetNextStepDbId() override;
+
+  bool PurgeAllJobHistory() override;
+
+  bool RetrieveLastSnapshot(DbSnapshot* snapshot) override;
+
+  bool RetrieveStepInfo(StepDbSnapshot* snapshot) override;
+
+  bool RetrieveReservationInfo(
+      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
+          reservation_info_map) override;
+
+  bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
+    return BeginDbTransaction_(m_variable_db_.get(), txn_id);
+  }
+
+  bool CommitVariableDbTransaction(txn_id_t txn_id) override {
+    return CommitDbTransaction_(m_variable_db_.get(), txn_id);
+  }
+
+  bool BeginFixedDbTransaction(txn_id_t* txn_id) override {
+    return BeginDbTransaction_(m_fixed_db_.get(), txn_id);
+  }
+
+  bool CommitFixedDbTransaction(txn_id_t txn_id) override {
+    return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
+  }
+
+  bool BeginStepVarDbTransaction(txn_id_t* txn_id) override {
+    return BeginDbTransaction_(m_step_var_db_.get(), txn_id);
+  }
+
+  bool CommitStepVarDbTransaction(txn_id_t txn_id) override {
+    return CommitDbTransaction_(m_step_var_db_.get(), txn_id);
+  }
+
+  bool BeginStepFixedDbTransaction(txn_id_t* txn_id) override {
+    return BeginDbTransaction_(m_step_fixed_db_.get(), txn_id);
+  }
+
+  bool CommitStepFixedDbTransaction(txn_id_t txn_id) override {
+    return CommitDbTransaction_(m_step_fixed_db_.get(), txn_id);
+  }
+
+  bool BeginReservationDbTransaction(txn_id_t* txn_id) override {
+    return BeginDbTransaction_(m_resv_db_.get(), txn_id);
+  }
+
+  bool CommitReservationDbTransaction(txn_id_t txn_id) override {
+    return CommitDbTransaction_(m_resv_db_.get(), txn_id);
+  }
+
   bool AppendJobsToPendingAndAdvanceJobIds(
       const std::vector<JobInCtld*>& jobs,
-      const std::vector<ExtraVariableWrite>& extra_variable_writes = {});
+      const std::vector<ExtraVariableWrite>& extra_variable_writes) override;
 
-  bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
+  bool PurgeEndedJobs(
+      const std::unordered_map<job_id_t, job_db_id_t>& job_ids) override;
 
   bool UpdateRuntimeAttrOfJob(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateRuntimeAttrOfJob(txn_id, db_id,
-                                                    runtime_attr);
-#endif
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) override {
     return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                             GetVariableDbEntryName_(db_id), &runtime_attr)
         .has_value();
   }
 
-  bool UpdateJobToCtld(txn_id_t txn_id, db_id_t db_id,
-                       crane::grpc::JobToCtld const& job_to_ctld_ref) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateJobToCtld(txn_id, db_id, job_to_ctld_ref);
-#endif
+  bool UpdateJobToCtld(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::JobToCtld const& job_to_ctld_ref) override {
     return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                             GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
         .has_value();
@@ -333,25 +395,16 @@ class EmbeddedDbClient {
 
   bool UpdateRuntimeAttrOfJobIfExists(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateRuntimeAttrOfJobIfExists(txn_id, db_id,
-                                                            runtime_attr);
-#endif
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) override {
     return StoreTypeIntoDbIfExists_(m_variable_db_.get(), txn_id,
                                     GetVariableDbEntryName_(db_id),
                                     &runtime_attr)
         .has_value();
   }
 
-  bool UpdateJobToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::JobToCtld const& job_to_ctld_ref) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateJobToCtldIfExists(txn_id, db_id,
-                                                     job_to_ctld_ref);
-#endif
+  bool UpdateJobToCtldIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::JobToCtld const& job_to_ctld_ref) override {
     return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
                                     GetFixedDbEntryName_(db_id),
                                     &job_to_ctld_ref)
@@ -359,37 +412,25 @@ class EmbeddedDbClient {
   }
 
   bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
-                        JobInEmbeddedDb* job_in_db) {  // Only used in test
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->FetchJobDataInDb(txn_id, db_id, job_in_db);
-#endif
+                        JobInEmbeddedDb* job_in_db) override {
     return FetchJobDataInDbAtomic_(txn_id, db_id, job_in_db).has_value();
   }
 
-  bool AppendSteps(const std::vector<StepInCtld*>& steps);
+  bool AppendSteps(const std::vector<StepInCtld*>& steps) override;
 
-  bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids);
+  bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids) override;
 
   bool UpdateRuntimeAttrOfStep(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateRuntimeAttrOfStep(txn_id, db_id,
-                                                     runtime_attr);
-#endif
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) override {
     return StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
                             GetStepVariableDbEntryName_(db_id), &runtime_attr)
         .has_value();
   }
 
-  bool UpdateStepToCtld(txn_id_t txn_id, db_id_t db_id,
-                        crane::grpc::StepToCtld const& step_to_ctld) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateStepToCtld(txn_id, db_id, step_to_ctld);
-#endif
+  bool UpdateStepToCtld(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) override {
     return StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
                             GetStepFixedDbEntryName_(db_id), &step_to_ctld)
         .has_value();
@@ -397,25 +438,16 @@ class EmbeddedDbClient {
 
   bool UpdateRuntimeAttrOfStepIfExists(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateRuntimeAttrOfStepIfExists(txn_id, db_id,
-                                                             runtime_attr);
-#endif
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) override {
     return StoreTypeIntoDbIfExists_(m_step_var_db_.get(), txn_id,
                                     GetStepVariableDbEntryName_(db_id),
                                     &runtime_attr)
         .has_value();
   }
 
-  bool UpdateStepToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                                crane::grpc::StepToCtld const& step_to_ctld) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateStepToCtldIfExists(txn_id, db_id,
-                                                      step_to_ctld);
-#endif
+  bool UpdateStepToCtldIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) override {
     return StoreTypeIntoDbIfExists_(m_step_fixed_db_.get(), txn_id,
                                     GetStepFixedDbEntryName_(db_id),
                                     &step_to_ctld)
@@ -423,31 +455,18 @@ class EmbeddedDbClient {
   }
 
   bool FetchStepDataInDb(txn_id_t txn_id, db_id_t db_id,
-                         StepInEmbeddedDb* step_in_db) {  // Only used in test
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->FetchStepDataInDb(txn_id, db_id, step_in_db);
-#endif
+                         StepInEmbeddedDb* step_in_db) override {
     return FetchStepDataInDbAtomic_(txn_id, db_id, step_in_db).has_value();
   }
 
   bool UpdateReservationInfo(
       txn_id_t txn_id, const ResvId& name,
-      const crane::grpc::CreateReservationRequest& reservation_req) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->UpdateReservationInfo(txn_id, name,
-                                                   reservation_req);
-#endif
+      const crane::grpc::CreateReservationRequest& reservation_req) override {
     return StoreTypeIntoDb_(m_resv_db_.get(), txn_id, name, &reservation_req)
         .has_value();
   }
 
-  bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) {
-#ifdef CRANE_HAVE_ROCKSDB
-    if (m_rocks_store_)
-      return m_rocks_store_->DeleteReservationInfo(txn_id, name);
-#endif
+  bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) override {
     return m_resv_db_->Delete(txn_id, name).has_value();
   }
 
@@ -760,13 +779,12 @@ class EmbeddedDbClient {
       ABSL_GUARDED_BY(s_step_id_mtx_);
   std::unique_ptr<IEmbeddedDb> m_step_var_db_;
   std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
-#ifdef CRANE_HAVE_ROCKSDB
-  std::unique_ptr<RocksDbEmbeddedStore> m_rocks_store_;
-#endif
+
+  LegacyEmbeddedDbBackend backend_;
 };
 
 template <>
-inline std::expected<void, DbErrorCode> EmbeddedDbClient::StoreTypeIntoDb_(
+inline std::expected<void, DbErrorCode> LegacyEmbeddedDbClient::StoreTypeIntoDb_(
     IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
     const crane::grpc::StepNextIdInEmbeddedDb* value) {
   using google::protobuf::io::CodedOutputStream;
@@ -781,6 +799,8 @@ inline std::expected<void, DbErrorCode> EmbeddedDbClient::StoreTypeIntoDb_(
 
   return db->Store(txn_id, key, buf.data(), n_bytes);
 }
+
+std::unique_ptr<EmbeddedDbClient> MakeEmbeddedDbClient(std::string_view backend);
 
 }  // namespace Ctld
 

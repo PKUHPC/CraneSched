@@ -35,6 +35,10 @@ constexpr std::string_view kNextStepDbIdKey = "meta/next_step_db_id";
 
 constexpr uint64_t MiB(uint32_t value) { return uint64_t{value} * 1024 * 1024; }
 
+int ToRocksDbInt(uint32_t value) {
+  return static_cast<int>(value);
+}
+
 }  // namespace
 
 RocksDbEmbeddedStore::~RocksDbEmbeddedStore() { Close(); }
@@ -52,11 +56,13 @@ bool RocksDbEmbeddedStore::Init(std::string const& db_path) {
   rocksdb::Options options;
   options.create_if_missing = true;
   options.create_missing_column_families = true;
-  options.IncreaseParallelism(g_config.RocksDb.MaxBackgroundJobs);
+  options.IncreaseParallelism(ToRocksDbInt(g_config.RocksDb.MaxBackgroundJobs));
   options.write_buffer_size = MiB(g_config.RocksDb.WriteBufferSizeMB);
-  options.max_write_buffer_number = g_config.RocksDb.MaxWriteBufferNumber;
+  options.max_write_buffer_number =
+      ToRocksDbInt(g_config.RocksDb.MaxWriteBufferNumber);
   options.target_file_size_base = MiB(g_config.RocksDb.TargetFileSizeBaseMB);
-  options.max_background_jobs = g_config.RocksDb.MaxBackgroundJobs;
+  options.max_background_jobs =
+      ToRocksDbInt(g_config.RocksDb.MaxBackgroundJobs);
   options.compression = ParseCompression_(g_config.RocksDb.Compression);
 
   std::vector<rocksdb::ColumnFamilyDescriptor> cf_descs;
@@ -283,10 +289,8 @@ bool RocksDbEmbeddedStore::RetrieveLastSnapshot(DbSnapshot* snapshot) {
     }
   }
 
-  if (cleanup_batch.Count() > 0 &&
-      !WriteBatch_(&cleanup_batch, "rocksdb_retrieve_job_cleanup"))
-    return false;
-  return true;
+  return cleanup_batch.Count() == 0 ||
+         WriteBatch_(&cleanup_batch, "rocksdb_retrieve_job_cleanup");
 }
 
 bool RocksDbEmbeddedStore::RetrieveStepInfo(StepDbSnapshot* snapshot) {
@@ -423,7 +427,7 @@ bool RocksDbEmbeddedStore::UpdateJobToCtldIfExists(
                              JobFixedKey(db_id), job_to_ctld);
 }
 
-bool RocksDbEmbeddedStore::FetchJobDataInDb(rocks_txn_id_t txn_id,
+bool RocksDbEmbeddedStore::FetchJobDataInDb(rocks_txn_id_t /*txn_id*/,
                                             db_id_t db_id,
                                             JobInEmbeddedDb* job_in_db) {
   return GetProto_(Cf::JobFixed, JobFixedKey(db_id),
@@ -578,7 +582,7 @@ bool RocksDbEmbeddedStore::UpdateStepToCtldIfExists(
                              StepFixedKey(db_id), step_to_ctld);
 }
 
-bool RocksDbEmbeddedStore::FetchStepDataInDb(rocks_txn_id_t txn_id,
+bool RocksDbEmbeddedStore::FetchStepDataInDb(rocks_txn_id_t /*txn_id*/,
                                              db_id_t db_id,
                                              StepInEmbeddedDb* step_in_db) {
   return GetProto_(Cf::StepFixed, StepFixedKey(db_id),
@@ -640,13 +644,13 @@ rocksdb::ColumnFamilyHandle* RocksDbEmbeddedStore::Handle_(
   return nullptr;
 }
 
-rocksdb::WriteOptions RocksDbEmbeddedStore::WriteOptions_() const {
+rocksdb::WriteOptions RocksDbEmbeddedStore::WriteOptions_() {
   rocksdb::WriteOptions opts;
   opts.sync = g_config.RocksDb.SyncWrites;
   return opts;
 }
 
-rocksdb::ReadOptions RocksDbEmbeddedStore::ReadOptions_() const {
+rocksdb::ReadOptions RocksDbEmbeddedStore::ReadOptions_() {
   rocksdb::ReadOptions opts;
   return opts;
 }
@@ -732,12 +736,7 @@ bool RocksDbEmbeddedStore::StoreProto_(
     google::protobuf::MessageLite const& value) {
   if (txn_id == 0) {
     rocksdb::WriteBatch batch;
-    if (!PutProto_(&batch, kind == RocksStoreKind::JobVar       ? Cf::JobVar
-                          : kind == RocksStoreKind::JobFixed    ? Cf::JobFixed
-                          : kind == RocksStoreKind::StepVar     ? Cf::StepVar
-                          : kind == RocksStoreKind::StepFixed   ? Cf::StepFixed
-                                                                  : Cf::Reservation,
-                   key, value))
+    if (!PutProto_(&batch, CfFromStoreKind_(kind), key, value))
       return false;
     return WriteBatch_(&batch, "rocksdb_store_proto");
   }
@@ -755,12 +754,7 @@ bool RocksDbEmbeddedStore::StoreProto_(
 bool RocksDbEmbeddedStore::StoreProtoIfExists_(
     rocks_txn_id_t txn_id, RocksStoreKind kind, std::string const& key,
     google::protobuf::MessageLite const& value) {
-  Cf cf = kind == RocksStoreKind::JobVar       ? Cf::JobVar
-          : kind == RocksStoreKind::JobFixed   ? Cf::JobFixed
-          : kind == RocksStoreKind::StepVar    ? Cf::StepVar
-          : kind == RocksStoreKind::StepFixed  ? Cf::StepFixed
-                                                : Cf::Reservation;
-  if (!KeyExists_(cf, key)) return true;
+  if (!KeyExists_(CfFromStoreKind_(kind), key)) return true;
   return StoreProto_(txn_id, kind, key, value);
 }
 
@@ -804,8 +798,9 @@ bool RocksDbEmbeddedStore::InitMeta_() {
       return false;
   }
 
-  if (batch.Count() > 0 && !WriteBatch_(&batch, "rocksdb_init_meta"))
+  if (batch.Count() > 0 && !WriteBatch_(&batch, "rocksdb_init_meta")) {
     return false;
+  }
 
   {
     absl::MutexLock lock(&job_id_mu_);
@@ -861,8 +856,9 @@ bool RocksDbEmbeddedStore::RebuildMissingNextStepIds_(
     }
   }
   if (batch.Count() > 0 &&
-      !WriteBatch_(&batch, "rocksdb_rebuild_next_step_id"))
+      !WriteBatch_(&batch, "rocksdb_rebuild_next_step_id")) {
     return false;
+  }
   for (const auto& [job_id, next_step_id] : rebuilt_entries)
     next_step_id_map_[job_id] = next_step_id;
   return true;
@@ -925,7 +921,7 @@ std::string RocksDbEmbeddedStore::SerializeProto_(
 
 std::string RocksDbEmbeddedStore::ScalarValue_(const void* value,
                                                size_t size) {
-  return std::string(static_cast<const char*>(value), size);
+  return {static_cast<const char*>(value), size};
 }
 
 bool RocksDbEmbeddedStore::ParseDbId_(std::string const& key,
@@ -937,6 +933,23 @@ bool RocksDbEmbeddedStore::ParseDbId_(std::string const& key,
 
 std::string RocksDbEmbeddedStore::MetaKey_(std::string_view name) {
   return std::string{name};
+}
+
+RocksDbEmbeddedStore::Cf RocksDbEmbeddedStore::CfFromStoreKind_(
+    RocksStoreKind kind) {
+  switch (kind) {
+  case RocksStoreKind::JobVar:
+    return Cf::JobVar;
+  case RocksStoreKind::JobFixed:
+    return Cf::JobFixed;
+  case RocksStoreKind::StepVar:
+    return Cf::StepVar;
+  case RocksStoreKind::StepFixed:
+    return Cf::StepFixed;
+  case RocksStoreKind::Reservation:
+    return Cf::Reservation;
+  }
+  return Cf::Reservation;
 }
 
 }  // namespace Ctld

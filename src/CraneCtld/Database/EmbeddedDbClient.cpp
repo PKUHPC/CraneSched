@@ -18,6 +18,10 @@
 
 #include "EmbeddedDbClient.h"
 
+#ifdef CRANE_HAVE_ROCKSDB
+#  include "RocksDbEmbeddedStore.h"
+#endif
+
 namespace Ctld {
 
 #ifdef CRANE_HAVE_UNQLITE
@@ -478,7 +482,10 @@ DbTxn* BerkeleyDb::GetDbTxnFromId_(txn_id_t txn_id) {
 
 #endif
 
-EmbeddedDbClient::~EmbeddedDbClient() {
+LegacyEmbeddedDbClient::LegacyEmbeddedDbClient(LegacyEmbeddedDbBackend backend)
+    : backend_(backend) {}
+
+LegacyEmbeddedDbClient::~LegacyEmbeddedDbClient() {
   if (m_variable_db_) {
     auto result = m_variable_db_->Close();
     if (!result)
@@ -514,17 +521,8 @@ EmbeddedDbClient::~EmbeddedDbClient() {
   }
 }
 
-bool EmbeddedDbClient::Init(const std::string& db_path) {
-  if (g_config.CraneEmbeddedDbBackend == "RocksDB") {
-#ifdef CRANE_HAVE_ROCKSDB
-    m_rocks_store_ = std::make_unique<RocksDbEmbeddedStore>();
-    return m_rocks_store_->Init(db_path);
-#else
-    CRANE_ERROR(
-        "Select RocksDB as the embedded db but it's not been compiled.");
-    return false;
-#endif
-  } else if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
+bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
+  if (backend_ == LegacyEmbeddedDbBackend::Unqlite) {
 #ifdef CRANE_HAVE_UNQLITE
     m_variable_db_ = std::make_unique<UnqliteDb>();
     m_fixed_db_ = std::make_unique<UnqliteDb>();
@@ -538,7 +536,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     return false;
 #endif
 
-  } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
+  } else if (backend_ == LegacyEmbeddedDbBackend::BerkeleyDB) {
 #ifdef CRANE_HAVE_BERKELEY_DB
     m_variable_db_ = std::make_unique<BerkeleyDb>();
     m_fixed_db_ = std::make_unique<BerkeleyDb>();
@@ -553,8 +551,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 #endif
 
   } else {
-    CRANE_ERROR("Invalid embedded database backend: {}",
-                g_config.CraneEmbeddedDbBackend);
+    CRANE_ERROR("Invalid legacy embedded database backend.");
     return false;
   }
 
@@ -594,13 +591,8 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   return true;
 }
 
-bool EmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
-                                      db_id_t next_job_db_id) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_)
-    return m_rocks_store_->ResetNextJobId(next_job_id, next_job_db_id);
-#endif
-
+bool LegacyEmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
+                                            db_id_t next_job_db_id) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -666,11 +658,7 @@ bool EmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
   return true;
 }
 
-bool EmbeddedDbClient::ResetNextStepDbId() {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) return m_rocks_store_->ResetNextStepDbId();
-#endif
-
+bool LegacyEmbeddedDbClient::ResetNextStepDbId() {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -703,11 +691,7 @@ bool EmbeddedDbClient::ResetNextStepDbId() {
   return true;
 }
 
-bool EmbeddedDbClient::PurgeAllJobHistory() {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) return m_rocks_store_->PurgeAllJobHistory();
-#endif
-
+bool LegacyEmbeddedDbClient::PurgeAllJobHistory() {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> res;
 
@@ -812,18 +796,7 @@ bool EmbeddedDbClient::PurgeAllJobHistory() {
   return true;
 }
 
-bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) {
-    RocksDbEmbeddedStore::DbSnapshot rocks_snapshot;
-    if (!m_rocks_store_->RetrieveLastSnapshot(&rocks_snapshot)) return false;
-    snapshot->pending_queue = std::move(rocks_snapshot.pending_queue);
-    snapshot->running_queue = std::move(rocks_snapshot.running_queue);
-    snapshot->final_queue = std::move(rocks_snapshot.final_queue);
-    return true;
-  }
-#endif
-
+bool LegacyEmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   using JobStatus = crane::grpc::JobStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfJob;
 
@@ -895,16 +868,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   return true;
 }
 
-bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) {
-    RocksDbEmbeddedStore::StepDbSnapshot rocks_snapshot;
-    if (!m_rocks_store_->RetrieveStepInfo(&rocks_snapshot)) return false;
-    snapshot->steps = std::move(rocks_snapshot.steps);
-    return true;
-  }
-#endif
-
+bool LegacyEmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
   using JobStatus = crane::grpc::JobStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfStep;
 
@@ -976,14 +940,9 @@ bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
   return true;
 }
 
-bool EmbeddedDbClient::RetrieveReservationInfo(
+bool LegacyEmbeddedDbClient::RetrieveReservationInfo(
     std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
         reservation_info) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_)
-    return m_rocks_store_->RetrieveReservationInfo(reservation_info);
-#endif
-
   std::expected<void, DbErrorCode> result;
 
   result = m_resv_db_->IterateAllKv(
@@ -1004,22 +963,9 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
   return true;
 }
 
-bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
+bool LegacyEmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     const std::vector<JobInCtld*>& jobs,
     const std::vector<ExtraVariableWrite>& extra_variable_writes) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) {
-    std::vector<RocksDbEmbeddedStore::ExtraVariableWrite> rocks_extra_writes;
-    rocks_extra_writes.reserve(extra_variable_writes.size());
-    for (const auto& extra : extra_variable_writes) {
-      rocks_extra_writes.push_back(
-          {.db_id = extra.db_id, .runtime_attr = extra.runtime_attr});
-    }
-    return m_rocks_store_->AppendJobsToPendingAndAdvanceJobIds(
-        jobs, rocks_extra_writes);
-  }
-#endif
-
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -1100,12 +1046,8 @@ bool EmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedJobs(
+bool LegacyEmbeddedDbClient::PurgeEndedJobs(
     const std::unordered_map<job_id_t, job_db_id_t>& job_ids) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) return m_rocks_store_->PurgeEndedJobs(job_ids);
-#endif
-
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
   // 1. when inserting job data, fixed data db is written before variable db;
@@ -1156,11 +1098,8 @@ bool EmbeddedDbClient::PurgeEndedJobs(
   return true;
 }
 
-bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) return m_rocks_store_->AppendSteps(steps);
-#endif
-
+bool LegacyEmbeddedDbClient::AppendSteps(
+    const std::vector<StepInCtld*>& steps) {
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -1234,12 +1173,8 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedSteps(
+bool LegacyEmbeddedDbClient::PurgeEndedSteps(
     const std::vector<step_db_id_t>& db_ids) {
-#ifdef CRANE_HAVE_ROCKSDB
-  if (m_rocks_store_) return m_rocks_store_->PurgeEndedSteps(db_ids);
-#endif
-
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
   // 1. when inserting step data, fixed data db is written before variable db;
@@ -1272,6 +1207,32 @@ bool EmbeddedDbClient::PurgeEndedSteps(
   if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
 
   return true;
+}
+
+std::unique_ptr<EmbeddedDbClient> MakeEmbeddedDbClient(
+    std::string_view backend) {
+  if (backend == "RocksDB") {
+#ifdef CRANE_HAVE_ROCKSDB
+    return std::make_unique<RocksDbEmbeddedStore>();
+#else
+    CRANE_ERROR(
+        "Select RocksDB as the embedded db but it's not been compiled.");
+    return nullptr;
+#endif
+  }
+
+  if (backend == "Unqlite") {
+    return std::make_unique<LegacyEmbeddedDbClient>(
+        LegacyEmbeddedDbBackend::Unqlite);
+  }
+
+  if (backend == "BerkeleyDB") {
+    return std::make_unique<LegacyEmbeddedDbClient>(
+        LegacyEmbeddedDbBackend::BerkeleyDB);
+  }
+
+  CRANE_ERROR("Invalid embedded database backend: {}", backend);
+  return nullptr;
 }
 
 }  // namespace Ctld

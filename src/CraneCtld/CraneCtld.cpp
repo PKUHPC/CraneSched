@@ -862,11 +862,21 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(db_config_path);
 
       if (config["CraneEmbeddedDbBackend"] &&
-          !config["CraneEmbeddedDbBackend"].IsNull())
+          !config["CraneEmbeddedDbBackend"].IsNull()) {
         g_config.CraneEmbeddedDbBackend =
             config["CraneEmbeddedDbBackend"].as<std::string>();
-      else
+      } else {
         g_config.CraneEmbeddedDbBackend = "Unqlite";
+      }
+
+      if (!Ctld::IsValidCraneEmbeddedDbBackend(
+              g_config.CraneEmbeddedDbBackend)) {
+        CRANE_CRITICAL(
+            "Invalid CraneEmbeddedDbBackend '{}'. Valid values: {}",
+            g_config.CraneEmbeddedDbBackend,
+            fmt::join(Ctld::kCraneEmbeddedDbBackendValues, ", "));
+        std::exit(1);
+      }
 
       std::filesystem::path db_base_dir = g_config.CraneBaseDir;
       if (!g_config.KeepalivedConfig.CraneSharedBaseDir.empty())
@@ -1168,8 +1178,10 @@ void InitializeCtldGlobalVariables() {
   }
 
   bool ok;
-  g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
-  ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
+  g_embedded_db_client =
+      Ctld::MakeEmbeddedDbClient(g_config.CraneEmbeddedDbBackend);
+  ok = g_embedded_db_client &&
+       g_embedded_db_client->Init(g_config.CraneCtldDbPath);
   if (!ok) {
     CRANE_ERROR("Failed to initialize g_embedded_db_client.");
 
