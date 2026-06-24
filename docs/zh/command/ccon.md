@@ -64,6 +64,9 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 !!! tip "Crane 选项位置"
     Crane 选项（如 `-p`、`-N`、`--mem`）必须放在 `ccon` 和 `run` 之间，而非 `run` 之后。
 
+!!! note "交互式脱离快捷键"
+    在 `ccon run -it` 等交互式 TTY 会话中，按 `Ctrl-P + Ctrl-Q` 可从客户端脱离且不停止容器。之后可使用 `ccon attach CONTAINER` 重新连接。
+
 ### Crane 选项（资源调度）
 
 以下选项用于控制作业的资源分配和调度行为：
@@ -387,6 +390,9 @@ ccon logs --tail 100 123.1
 ccon attach [选项] CONTAINER
 ```
 
+!!! note "脱离快捷键"
+    在 TTY attach 会话中，按 `Ctrl-P + Ctrl-Q` 可脱离客户端且不停止容器。
+
 **--stdin**
 
 :   连接标准输入。默认：`true`。
@@ -425,6 +431,9 @@ ccon attach 123.1
 ```bash
 ccon exec [选项] CONTAINER COMMAND [ARG...]
 ```
+
+!!! note "脱离快捷键"
+    在 `ccon exec -it` 等交互式 TTY exec 会话中，按 `Ctrl-P + Ctrl-Q` 可脱离客户端且不停止容器。
 
 **-i, --interactive**
 

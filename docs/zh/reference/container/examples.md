@@ -19,6 +19,7 @@ ccon -p CPU -c 4 --mem 8G -t 2:00:00 run python:3.11 \
 
 # 交互式容器
 #   -i  保持 stdin 打开    -t  分配伪终端
+#   Ctrl-P + Ctrl-Q 可脱离连接且不停止容器
 ccon -p CPU run -it ubuntu:22.04 /bin/bash
 
 # 后台运行：命令返回容器 ID 后立即脱离终端
@@ -159,6 +160,7 @@ ccon logs -f 123.1          # -f 持续跟踪输出
 ccon logs --tail 100 123.1  # 仅显示最后 100 行
 
 # 进入容器
+#   Ctrl-P + Ctrl-Q 可脱离连接且不停止容器
 ccon exec -it 123.1 /bin/bash
 
 # 查看详情
