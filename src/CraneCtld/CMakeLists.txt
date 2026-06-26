@@ -53,6 +53,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PublicHeader
         Utility_PasswordEntry
         Utility_PluginClient
+        Utility_PrologEpilogExecutor
         $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
         crane_tracer
         uvw

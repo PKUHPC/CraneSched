@@ -72,6 +72,7 @@ target_link_libraries(ctld_public_defs_test
 
         Utility_PublicHeader
         Utility_PasswordEntry
+        Utility_PrologEpilogExecutor
         uvw
         cxxopts
         Threads::Threads

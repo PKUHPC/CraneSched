@@ -26,6 +26,12 @@
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
+namespace util::os {
+
+class PrologEpilogExecutor;
+
+}  // namespace util::os
+
 namespace Ctld {
 
 class IUpdateNodeCostPolicy {
@@ -1082,6 +1088,11 @@ class JobScheduler {
                              uint32_t exit_code, std::string reason,
                              google::protobuf::Timestamp timestamp);
 
+  void StepCompletingAndStatusChangeAsync(
+      job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+      crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+      std::string reason, google::protobuf::Timestamp timestamp);
+
   void TerminateJobsOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
   void QueryJobsInRam(
@@ -1358,6 +1369,7 @@ class JobScheduler {
   // may be occupied, then job `B` can never be scheduled, and therefore
   // the latch will cause a deadlock.
   std::unique_ptr<BS::thread_pool> m_rpc_worker_pool_;
+  std::unique_ptr<util::os::PrologEpilogExecutor> m_ctld_hook_executor_;
 
   std::thread m_schedule_thread_;
   void ScheduleThread_();

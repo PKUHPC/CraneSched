@@ -5803,6 +5803,8 @@ bool MongodbClient::InitTableIndexes() {
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
     CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
+    // Supports the latest-run deduplication sort in FetchJobRecords.
+    CreateCollectionIndex(raw_table, {"requeue_count", "job_db_id"}, false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(

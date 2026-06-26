@@ -170,6 +170,8 @@ class StepInstance {
   // Cfored client in step
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
+  }
+  void StartCforedClient() {
     m_cfored_client_->InitChannelAndStub(
         m_step_to_supv_.interactive_meta().cfored_name());
   }

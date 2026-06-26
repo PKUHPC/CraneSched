@@ -218,6 +218,18 @@ void StepInCtld::NodeConfigured(const CranedId& node) {
       m_configuring_nodes_.begin(), m_configuring_nodes_.end());
 }
 
+void StepInCtld::NodeConfiguredWithCleanupIntent(const CranedId& node) {
+  this->m_configuring_nodes_.erase(node);
+  this->m_runtime_attr_.mutable_configuring_nodes()->Assign(
+      m_configuring_nodes_.begin(), m_configuring_nodes_.end());
+  this->StepOnNodeCompleting(node);
+}
+
+void StepInCtld::NodeConfiguredWithTerminal(const CranedId& node) {
+  this->NodeConfiguredWithCleanupIntent(node);
+  this->StepOnNodeFinish(node);
+}
+
 void StepInCtld::SetRunningNodes(const std::unordered_set<CranedId>& nodes) {
   this->m_running_nodes_ = nodes;
   this->m_runtime_attr_.mutable_running_nodes()->Assign(nodes.begin(),
@@ -258,14 +270,19 @@ void StepInCtld::SetEndTime(absl::Time end_time) {
       ToUnixSeconds(end_time));
 }
 
-void StepInCtld::SetErrorStatus(crane::grpc::JobStatus failed_status) {
-  m_error_status = failed_status;
-  this->m_runtime_attr_.set_error_status(failed_status);
+void StepInCtld::SetPendingFinalStatus(
+    crane::grpc::JobStatus pending_final_status) {
+  CRANE_ASSERT_MSG(pending_final_status == crane::grpc::JobStatus::Invalid ||
+                       IsFinishedStepStatus(pending_final_status),
+                   std::format("Invalid pending final step status: {}",
+                               StepStatusToString(pending_final_status)));
+  m_pending_final_status_ = pending_final_status;
+  this->m_runtime_attr_.set_pending_final_status(pending_final_status);
 }
 
-void StepInCtld::SetErrorExitCode(uint32_t exit_code) {
-  m_error_exit_code_ = exit_code;
-  this->m_runtime_attr_.set_error_exit_code(exit_code);
+void StepInCtld::SetPendingFinalExitCode(uint32_t exit_code) {
+  m_pending_final_exit_code_ = exit_code;
+  this->m_runtime_attr_.set_pending_final_exit_code(exit_code);
 }
 
 void StepInCtld::SetStatus(crane::grpc::JobStatus new_status) {
@@ -373,8 +390,8 @@ void StepInCtld::RecoverFromDb(
   SetStartTime(absl::FromUnixSeconds(runtime_attr.start_time().seconds()));
   SetEndTime(absl::FromUnixSeconds(runtime_attr.end_time().seconds()));
 
-  SetErrorStatus(runtime_attr.error_status());
-  SetErrorExitCode(runtime_attr.error_exit_code());
+  SetPendingFinalStatus(runtime_attr.pending_final_status());
+  SetPendingFinalExitCode(runtime_attr.pending_final_exit_code());
   SetStatus(runtime_attr.status());
   SetExitCode(runtime_attr.exit_code());
   SetHeld(runtime_attr.held());
@@ -476,8 +493,8 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
   SetStartTime(job.StartTime());
   SetEndTime(job.EndTime());
 
-  SetErrorStatus(crane::grpc::JobStatus::Invalid);
-  SetErrorExitCode(0U);
+  SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
+  SetPendingFinalExitCode(0U);
   SetStatus(crane::grpc::JobStatus::Configuring);
   SetHeld(false);
 
@@ -630,28 +647,46 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   DaemonStepAction action{DaemonStepAction::None};
   DaemonCleanupReason cleanup_reason{DaemonCleanupReason::None};
+  bool allow_release_on_terminal{false};
+  bool cleanup_requested_while_configuring{false};
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, this->StepId(), this->Status(), new_status, craned_id);
 
   switch (this->Status()) {
   case crane::grpc::JobStatus::Configuring:
-    // Configuring -> Failed / Running
-    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
-      this->NodeConfigured(craned_id);
-    } else {
-      // CraneCtld Prolog completion event
+    cleanup_requested_while_configuring =
+        new_status == crane::grpc::JobStatus::Completing;
+    // Configuring -> Running / Completing / terminal
+    if (craned_id == kCtldPrologInternalNodeIndex) [[unlikely]] {
+      // CraneCtld Prolog completion event.
       this->SetCtldPrologPending(false);
     }
 
     switch (new_status) {
     case crane::grpc::JobStatus::Running:
+      if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+        this->NodeConfigured(craned_id);
+      }
+      break;
+
+    case crane::grpc::JobStatus::Completing:
+      if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+        this->NodeConfiguredWithCleanupIntent(craned_id);
+        context->rn_step_raw_ptrs.insert(this);
+      }
       break;
 
     case crane::grpc::JobStatus::Failed:
     case crane::grpc::JobStatus::Cancelled:
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
+      this->SetPendingFinalStatus(new_status);
+      this->SetPendingFinalExitCode(exit_code);
+      [[fallthrough]];
+    case crane::grpc::JobStatus::Completed:
+      if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+        this->NodeConfiguredWithTerminal(craned_id);
+        context->rn_step_raw_ptrs.insert(this);
+      }
       break;
 
     [[unlikely]] default:
@@ -662,7 +697,11 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     }
 
     if (this->AllNodesConfigured() && this->PrologComplete()) {
-      if (this->PrevErrorStatus()) {
+      if (this->PendingFinalStatus()) {
+        action = DaemonStepAction::StartCleanup;
+        cleanup_reason = DaemonCleanupReason::ConfiguringFinished;
+      } else if (cleanup_requested_while_configuring ||
+                 !m_completing_nodes_.empty()) {
         action = DaemonStepAction::StartCleanup;
         cleanup_reason = DaemonCleanupReason::ConfiguringFinished;
       } else if (job->CancelRequested()) {
@@ -673,8 +712,8 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
             "[Step #{}.{}] Cancel was requested during Configuring. "
             "Finishing as Cancelled.",
             job_id, this->StepId());
-        this->SetErrorStatus(crane::grpc::JobStatus::Cancelled);
-        this->SetErrorExitCode(ExitCode::EC_TERMINATED);
+        this->SetPendingFinalStatus(crane::grpc::JobStatus::Cancelled);
+        this->SetPendingFinalExitCode(ExitCode::EC_TERMINATED);
         action = DaemonStepAction::StartCleanup;
         cleanup_reason = DaemonCleanupReason::ConfiguringFinished;
       } else {
@@ -682,8 +721,8 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                     this->StepId());
 
         this->SetStatus(crane::grpc::JobStatus::Running);
-        this->SetErrorStatus(crane::grpc::JobStatus::Invalid);
-        this->SetErrorExitCode(0U);
+        this->SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
+        this->SetPendingFinalExitCode(0U);
 
         // After all daemon steps running, create the primary step from the
         // submitted job.
@@ -727,6 +766,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       // Track completing nodes and trigger daemon cleanup only after every
       // daemon node has reached Completing.
       this->StepOnNodeCompleting(craned_id);
+      context->rn_step_raw_ptrs.insert(this);
       const bool cleanup_already_requested =
           this->Status() == crane::grpc::JobStatus::Completing;
       if (!cleanup_already_requested && this->AllNodesCompleting()) {
@@ -736,22 +776,41 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       break;
     }
 
-    if (!IsFinishedStepStatus(new_status))
+    if (!IsFinishedStepStatus(new_status)) {
       CRANE_WARN("Node {} reported step status {} which is not a valid status.",
                  craned_id, util::StepStatusToString(new_status));
+      return std::nullopt;
+    }
     // Terminal report: cleanup done on this node.
     if (new_status != crane::grpc::JobStatus::Completed) {
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
+      this->SetPendingFinalStatus(new_status);
+      this->SetPendingFinalExitCode(exit_code);
     }
 
-    this->StepOnNodeFinish(craned_id);
-    if (this->AllNodesFinished()) {
-      action = DaemonStepAction::ReleaseAndReturnFinalStatus;
+    if (this->Status() == crane::grpc::JobStatus::Running) {
+      this->StepOnNodeCompleting(craned_id);
+      context->rn_step_raw_ptrs.insert(this);
+      if (this->AllNodesCompleting()) {
+        action = DaemonStepAction::StartCleanup;
+        cleanup_reason = DaemonCleanupReason::AllDaemonNodesCompleting;
+      } else {
+        CRANE_WARN(
+            "[Step #{}.{}] got daemon terminal {} from {} before cleanup "
+            "intent, waiting for {} more nodes to reach Completing.",
+            job_id, this->StepId(), new_status, craned_id,
+            this->ExecutionNodes().size() - m_completing_nodes_.size());
+      }
     } else {
-      CRANE_DEBUG(
-          "[Step #{}.{}] got a finish status, waiting for {} status change.",
-          job_id, this->StepId(), this->RunningNodes().size());
+      // Terminal report while Completing: cleanup done on this node.
+      this->StepOnNodeFinish(craned_id);
+      allow_release_on_terminal = true;
+      if (this->AllNodesFinished()) {
+        action = DaemonStepAction::ReleaseAndReturnFinalStatus;
+      } else {
+        CRANE_DEBUG(
+            "[Step #{}.{}] got a finish status, waiting for {} status change.",
+            job_id, this->StepId(), this->RunningNodes().size());
+      }
     }
     break;
 
@@ -763,6 +822,10 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     std::unreachable();
   }
   }
+
+  if (action == DaemonStepAction::ReleaseAndReturnFinalStatus &&
+      !allow_release_on_terminal)
+    return std::nullopt;
 
   switch (action) {
   case DaemonStepAction::None:
@@ -776,7 +839,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
           "[Step #{}.{}] Configuring failed with status {}, triggering "
           "daemon cleanup.",
           job_id, this->StepId(),
-          this->PrevErrorStatus().value_or(crane::grpc::JobStatus::Failed));
+          this->PendingFinalStatus().value_or(crane::grpc::JobStatus::Failed));
     } else {
       CRANE_INFO(
           "[Step #{}.{}] all daemon nodes completing, triggering "
@@ -824,9 +887,10 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     context->step_raw_ptrs.insert(this);
     context->step_ptrs.emplace(job->ReleaseDaemonStep());
 
-    if (std::optional error_status = this->PrevErrorStatus(); error_status) {
-      this->SetStatus(error_status.value());
-      this->SetExitCode(this->PrevErrorExitCode());
+    if (std::optional pending_final_status = this->PendingFinalStatus();
+        pending_final_status) {
+      this->SetStatus(pending_final_status.value());
+      this->SetExitCode(this->PendingFinalExitCode());
     } else {
       this->SetStatus(crane::grpc::JobStatus::Completed);
       this->SetExitCode(0U);
@@ -846,6 +910,31 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   }
 
   return std::nullopt;
+}
+
+void DaemonStepInCtld::RequestCleanupFromPrimaryFinish(
+    StepStatusChangeContext* context) {
+  if (this->Status() == crane::grpc::JobStatus::Completing ||
+      IsFinishedStepStatus(this->Status())) {
+    CRANE_DEBUG(
+        "[Step #{}.{}] daemon cleanup already requested or finished, status "
+        "{}.",
+        job_id, this->StepId(), this->Status());
+    return;
+  }
+
+  if (this->Status() != crane::grpc::JobStatus::Running) {
+    CRANE_WARN(
+        "[Step #{}.{}] primary finished while daemon status is {}. Requesting "
+        "daemon cleanup anyway.",
+        job_id, this->StepId(), this->Status());
+  }
+
+  this->SetStatus(crane::grpc::JobStatus::Completing);
+  for (const auto& node : this->ExecutionNodes()) {
+    context->craned_step_free_map[node][job->JobId()].insert(kDaemonStepId);
+  }
+  context->rn_step_raw_ptrs.insert(this);
 }
 
 void DaemonStepInCtld::RecoverFromDb(
@@ -921,8 +1010,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   SetStartTime(job.StartTime());
   SetEndTime(job.EndTime());
 
-  SetErrorStatus(crane::grpc::JobStatus::Invalid);
-  SetErrorExitCode(0U);
+  SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
+  SetPendingFinalExitCode(0U);
   SetStatus(crane::grpc::JobStatus::Configuring);
   SetHeld(false);
 
@@ -1105,8 +1194,8 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   SetStepType(crane::grpc::StepType::COMMON);
 
   SetRequeueCount(0);
-  SetErrorStatus(crane::grpc::JobStatus::Invalid);
-  SetErrorExitCode(0U);
+  SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
+  SetPendingFinalExitCode(0U);
   SetStatus(crane::grpc::JobStatus::Pending);
   SetHeld(false);
   SetStartTime(absl::Now());
@@ -1247,33 +1336,60 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   bool step_finished{false};
   bool step_all_completing{false};
+  bool allow_release_on_terminal{false};
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
 
   switch (this->Status()) {
   case crane::grpc::JobStatus::Configuring:
-    this->NodeConfigured(craned_id);
-    // Configuring -> Starting / Failed / Cancelled,
-    if (new_status != crane::grpc::JobStatus::Starting) {
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
+    // Configuring -> Starting / Completing / terminal
+    if (new_status == crane::grpc::JobStatus::Starting) {
+      this->NodeConfigured(craned_id);
+    } else if (new_status == crane::grpc::JobStatus::Completing) {
+      this->NodeConfiguredWithCleanupIntent(craned_id);
+      context->rn_step_raw_ptrs.insert(this);
+    } else if (IsFinishedStepStatus(new_status)) {
+      if (new_status != crane::grpc::JobStatus::Completed) {
+        this->SetPendingFinalStatus(new_status);
+        this->SetPendingFinalExitCode(exit_code);
+      }
+      this->NodeConfiguredWithTerminal(craned_id);
+      context->rn_step_raw_ptrs.insert(this);
+    } else {
+      CRANE_ERROR("Invalid step status transition, current: {}, new: {}",
+                  util::StepStatusToString(this->Status()),
+                  util::StepStatusToString(new_status));
+      return std::nullopt;
     }
     if (this->AllNodesConfigured()) {
-      if (this->PrevErrorStatus().has_value()) {
+      if (this->PendingFinalStatus().has_value()) {
         // Configure failed: enter completing flow.
         // Failed node counts as completing. Cancel other nodes and wait
         // for them to also complete.
         CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED, entering completing flow.",
                    job_id, step_id);
         this->SetStatus(crane::grpc::JobStatus::Completing);
-        this->StepOnNodeCompleting(craned_id);
-        // Cancel other nodes — their supervisors will send Completing
+        // Cancel nodes that have not already reported Completing/terminal.
         for (const auto& node : this->ExecutionNodes()) {
-          if (node != craned_id)
+          if (!m_completing_nodes_.contains(node))
             context->craned_cancel_steps[node][job->JobId()].insert(step_id);
         }
         step_all_completing = this->AllNodesCompleting();
+        if (step_all_completing) step_finished = this->AllNodesFinished();
+      } else if (!m_completing_nodes_.empty()) {
+        // A synthetic or recovery path can report Completing while the step is
+        // still Configuring. Treat it as cleanup intent, not as readiness to
+        // execute.
+        CRANE_INFO("[Step #{}.{}] CONFIGURE_COMPLETING, entering cleanup flow.",
+                   job_id, step_id);
+        this->SetStatus(crane::grpc::JobStatus::Completing);
+        for (const auto& node : this->ExecutionNodes()) {
+          if (!m_completing_nodes_.contains(node))
+            context->craned_cancel_steps[node][job->JobId()].insert(step_id);
+        }
+        step_all_completing = this->AllNodesCompleting();
+        if (step_all_completing) step_finished = this->AllNodesFinished();
       } else {
         // Configuring -> Running
         // All supervisor ready without failure, start execution.
@@ -1281,8 +1397,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         // No need to set to Configured, make it running and process failed
         // cases by step status change
         this->SetStatus(crane::grpc::JobStatus::Running);
-        this->SetErrorStatus(crane::grpc::JobStatus::Invalid);
-        this->SetErrorExitCode(0U);
+        this->SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
+        this->SetPendingFinalExitCode(0U);
         this->SetRunningNodes(this->ExecutionNodes());
 
         // Primary: Update job status when primary step is Running.
@@ -1312,6 +1428,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   case crane::grpc::JobStatus::Completing:
     if (new_status == crane::grpc::JobStatus::Completing) {
       this->StepOnNodeCompleting(craned_id);
+      context->rn_step_raw_ptrs.insert(this);
       step_all_completing = this->AllNodesCompleting();
       if (!step_all_completing) {
         CRANE_DEBUG("[Step #{}.{}] got Completing, waiting for {} more nodes.",
@@ -1323,17 +1440,36 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         CRANE_WARN(
             "Node {} reported step status {} which is not a valid status.",
             craned_id, util::StepStatusToString(new_status));
+        return std::nullopt;
       }
-      // Terminal report: cleanup done on this node.
       if (new_status != crane::grpc::JobStatus::Completed) {
-        this->SetErrorStatus(new_status);
-        this->SetErrorExitCode(exit_code);
+        this->SetPendingFinalStatus(new_status);
+        this->SetPendingFinalExitCode(exit_code);
       }
-      this->StepOnNodeFinish(craned_id);
-      step_finished = this->AllNodesFinished();
-      if (!step_finished) {
-        CRANE_DEBUG("[Step #{}.{}] got terminal, waiting for {} more nodes.",
-                    job_id, step_id, this->RunningNodes().size());
+      if (this->Status() == crane::grpc::JobStatus::Running) {
+        // Terminal before CTLD observes Completing means the final result is
+        // known, but step-level cleanup has not been requested yet.
+        this->StepOnNodeCompleting(craned_id);
+        this->StepOnNodeFinish(craned_id);
+        context->rn_step_raw_ptrs.insert(this);
+        step_all_completing = this->AllNodesCompleting();
+        if (step_all_completing) step_finished = this->AllNodesFinished();
+        if (!step_all_completing) {
+          CRANE_WARN(
+              "[Step #{}.{}] got terminal {} from {} before cleanup intent, "
+              "waiting for {} more nodes to reach Completing.",
+              job_id, step_id, new_status, craned_id,
+              this->ExecutionNodes().size() - m_completing_nodes_.size());
+        }
+      } else {
+        // Terminal report while Completing: cleanup done on this node.
+        this->StepOnNodeFinish(craned_id);
+        step_finished = this->AllNodesFinished();
+        allow_release_on_terminal = true;
+        if (!step_finished) {
+          CRANE_DEBUG("[Step #{}.{}] got terminal, waiting for {} more nodes.",
+                      job_id, step_id, this->RunningNodes().size());
+        }
       }
     }
     break;
@@ -1427,12 +1563,12 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   // AllNodesFinished (terminal from all nodes = step-level cleanup done).
   // Release step. Primary additionally triggers daemon cleanup.
-  if (step_finished) {
+  if (step_finished && allow_release_on_terminal) {
     this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
                      absl::Nanoseconds(timestamp.nanos()));
-    if (this->PrevErrorStatus().has_value()) {
-      this->SetStatus(this->PrevErrorStatus().value());
-      this->SetExitCode(this->PrevErrorExitCode());
+    if (this->PendingFinalStatus().has_value()) {
+      this->SetStatus(this->PendingFinalStatus().value());
+      this->SetExitCode(this->PendingFinalExitCode());
     } else {
       this->SetStatus(crane::grpc::JobStatus::Completed);
       this->SetExitCode(exit_code);
@@ -1443,8 +1579,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     // Primary step: trigger daemon FreeSteps for job-level cleanup. The daemon
     // terminal is sent by Craned only after local job resources are gone.
     if (this->IsPrimaryStep()) {
-      for (const auto& node : job->DaemonStep()->CranedIds()) {
-        context->craned_step_free_map[node][job_id].insert(kDaemonStepId);
+      if (auto* daemon_step = job->DaemonStep(); daemon_step != nullptr) {
+        daemon_step->RequestCleanupFromPrimaryFinish(context);
       }
     }
 
