@@ -47,6 +47,14 @@ struct CompletingStepState {
   bool sigkill_sent = false;
 };
 
+enum class LocalStepLiveness {
+  kUnknown,
+  kAlive,
+  kCleaning,
+  kDead,
+  kMissing,
+};
+
 using StepToD = crane::grpc::StepToD;
 
 // Job allocation info, where allocation = job spec + execution info
@@ -146,6 +154,8 @@ class JobManager {
   std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
 
   std::vector<step_id_t> GetAllocatedJobSteps(job_id_t job_id);
+
+  LocalStepLiveness CheckLocalStepLiveness(job_id_t job_id, step_id_t step_id);
 
   CraneErrCode SuspendJobByCgroup(job_id_t job_id);
 

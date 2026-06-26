@@ -21,6 +21,7 @@
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <latch>
@@ -1773,6 +1774,34 @@ std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
   return result;
 }
 
+LocalStepLiveness JobManager::CheckLocalStepLiveness(job_id_t job_id,
+                                                     step_id_t step_id) {
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    if (m_completing_step_retry_map_.contains(StepKey{job_id, step_id}))
+      return LocalStepLiveness::kCleaning;
+  }
+
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return LocalStepLiveness::kMissing;
+
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  auto it = job_ptr->step_map.find(step_id);
+  if (it == job_ptr->step_map.end()) return LocalStepLiveness::kMissing;
+
+  auto* step = it->second.get();
+  if (step->pending_terminal_status.has_value() ||
+      step->status == StepStatus::Completing) {
+    return LocalStepLiveness::kCleaning;
+  }
+
+  if (step->supv_pid <= 0) return LocalStepLiveness::kUnknown;
+
+  if (kill(step->supv_pid, 0) == 0) return LocalStepLiveness::kAlive;
+  if (errno == ESRCH) return LocalStepLiveness::kDead;
+  return LocalStepLiveness::kUnknown;
+}
+
 CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
@@ -1979,6 +2008,14 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
       auto& step = job_instance->step_map.at(elem.step_id);
       if (step->status != StepStatus::Running &&
           step->status != StepStatus::Starting) {
+        if (step->status == StepStatus::Completing ||
+            IsFinishedStepStatus(step->status)) {
+          CRANE_DEBUG(
+              "[Step #{}.{}] Step is already {}, terminate request is "
+              "idempotently complete.",
+              elem.job_id, elem.step_id, step->status);
+          continue;
+        }
         not_ready_elems.emplace_back(std::move(elem));
         CRANE_DEBUG(
             "[Step #{}.{}] Step not running/starting, current: {}, cannot "
@@ -2070,13 +2107,14 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
   std::vector<StepInstance*> steps_to_shutdown;
   {
     std::vector<StepInstance*> steps_to_free;
+    absl::flat_hash_set<StepKey> steps_to_free_keys;
     while (m_free_steps_queue_.try_dequeue(elem)) {
+      const StepKey key{elem.job_id, elem.step_id};
       auto job = m_job_map_.GetValueExclusivePtr(elem.job_id);
       if (!job) {
         CRANE_WARN("Try to free step [{}] for nonexistent job #{}.",
                    elem.step_id, elem.job_id);
-        ResolveStepCleanupWaiters_(StepKey{elem.job_id, elem.step_id},
-                                   CraneErrCode::SUCCESS);
+        ResolveStepCleanupWaiters_(key, CraneErrCode::SUCCESS);
         continue;
       }
       absl::MutexLock lk(job->step_map_mtx.get());
@@ -2084,25 +2122,19 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         bool step_is_cleaning = false;
         {
           absl::MutexLock retry_lk(&m_free_job_step_mtx_);
-          step_is_cleaning = m_completing_step_retry_map_.contains(
-              StepKey{elem.job_id, elem.step_id});
+          step_is_cleaning = m_completing_step_retry_map_.contains(key);
         }
-        if (step_is_cleaning) {
+        if (step_is_cleaning || steps_to_free_keys.contains(key)) {
           CRANE_DEBUG("[Step #{}.{}] is already cleaning, wait for cleanup.",
                       elem.job_id, elem.step_id);
           continue;
         }
 
         CRANE_WARN(
-            "[Step #{}.{}] Try to free nonexistent step, sending terminal.",
+            "[Step #{}.{}] Try to free nonexistent step, treating as "
+            "idempotent success.",
             elem.job_id, elem.step_id);
-        ResolveStepCleanupWaiters_(StepKey{elem.job_id, elem.step_id},
-                                   CraneErrCode::SUCCESS);
-        if (elem.step_id == kDaemonStepId) continue;
-        SendCompletingAndTerminal_(
-            elem.job_id, elem.step_id, StepStatus::Failed,
-            ExitCode::EC_TERMINATED,
-            "Step not found on craned during free request");
+        ResolveStepCleanupWaiters_(key, CraneErrCode::SUCCESS);
         continue;
       }
 
@@ -2111,6 +2143,7 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         if (step->daemon_job_cleanup.has_value()) {
           CRANE_DEBUG("[Step #{}.{}] Daemon step is already cleaning.",
                       elem.job_id, elem.step_id);
+          ResolveStepCleanupWaiters_(key, CraneErrCode::SUCCESS);
           continue;
         }
 
@@ -2120,10 +2153,12 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
             .job_cgroup = std::move(job->cgroup)};
         step->daemon_job_cleanup = std::move(cleanup_ctx);
         steps_to_free.emplace_back(step.get());
+        steps_to_free_keys.insert(key);
         continue;
       }
 
       steps_to_free.emplace_back(step.release());
+      steps_to_free_keys.insert(key);
       job->step_map.erase(elem.step_id);
     }
 

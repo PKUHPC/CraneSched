@@ -548,6 +548,8 @@ void CtldClient::Init() {
         }
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
+        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+            dead_running_steps{};
         std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
             steps_to_sync{};
         std::unordered_set<job_id_t> refrozen_jobs{};
@@ -599,34 +601,23 @@ void CtldClient::Init() {
             CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
                         job_id, step_id, ctld_status, craned_status);
 
-            if (craned_status == ctld_status) {
-              // Status match, no action needed
-              continue;
-            }
-
-            // Special case: Handle timeout-during-offline scenario
-            // This occurs when Craned goes offline and comes back online after
-            // job timeout. Only DaemonStep can be Running here because:
-            // - DaemonStep waits for Epilog to complete before terminating
-            // - CommonSteps should already be killed by Timer and in terminal
-            //   state
-            // Ctld detected timeout and marked as Completing. Let Ctld handle
-            // the termination.
-            if (craned_status == StepStatus::Running &&
-                ctld_status == StepStatus::Completing) {
-              CRANE_INFO(
-                  "[Step #{}.{}] Ctld has Completing status (likely due to "
-                  "timeout during offline), Craned reports Running (should be "
-                  "DaemonStep). Keeping Craned's state, Ctld will handle "
-                  "termination.",
-                  job_id, step_id);
-              continue;
-            }
-
-            // Handle Completing status from Ctld
             if (ctld_status == StepStatus::Completing) {
-              CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+              CRANE_TRACE(
+                  "[Step #{}.{}] Ctld is completing, replay local cleanup.",
+                  job_id, step_id);
               completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            if (ctld_status == StepStatus::Running &&
+                craned_status == StepStatus::Starting) {
+              CRANE_WARN(
+                  "[Step #{}.{}] Ctld is Running but Craned is still "
+                  "Starting. Starting recovery is unsupported; report lost "
+                  "step and clean up local residue.",
+                  job_id, step_id);
+              invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
               continue;
             }
 
@@ -649,6 +640,28 @@ void CtldClient::Init() {
               continue;
             }
 
+            if (craned_status == ctld_status) {
+              if (ctld_status == StepStatus::Running) {
+                auto liveness =
+                    g_job_mgr->CheckLocalStepLiveness(job_id, step_id);
+                if (liveness == LocalStepLiveness::kCleaning) {
+                  CRANE_INFO(
+                      "[Step #{}.{}] Ctld and Craned are Running but local "
+                      "cleanup is pending; replay FreeSteps.",
+                      job_id, step_id);
+                  completing_steps[job_id].insert(step_id);
+                } else if (liveness == LocalStepLiveness::kDead) {
+                  CRANE_WARN(
+                      "[Step #{}.{}] Ctld and Craned are Running but local "
+                      "supervisor is gone. Reporting Completing + Failed to "
+                      "drive recovery.",
+                      job_id, step_id);
+                  dead_running_steps[job_id].insert(step_id);
+                }
+              }
+              continue;
+            }
+
             int ctld_priority = GetStatusPriority(ctld_status);
             int craned_priority = GetStatusPriority(craned_status);
 
@@ -660,27 +673,14 @@ void CtldClient::Init() {
                   job_id, step_id, craned_status, ctld_status);
               steps_to_sync[job_id][step_id] = craned_status;
             } else if (craned_status == StepStatus::Starting) {
-              // For starting but not running step, terminate it
-              CRANE_TRACE(
-                  "[Step #{}.{}] is starting but not running, mark as "
-                  "invalid",
-                  job_id, step_id);
+              CRANE_WARN(
+                  "[Step #{}.{}] is Starting while Ctld has {}. Starting "
+                  "recovery is unsupported; report lost step and clean up "
+                  "locally.",
+                  job_id, step_id, ctld_status);
               invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
             } else {
-              // Ctld has higher/equal priority - terminate to maintain
-              // consistency
-              // This branch handles cases where craned_priority <=
-              // ctld_priority and not covered by special cases above,
-              // including:
-              // - Craned: Running, Ctld: Completing (non-DaemonStep case,
-              //   though this should rarely happen as CommonSteps should be
-              //   killed by timer)
-              // - Other cases where Ctld has equal or higher priority
-              // Craned: Configuring with Ctld: Running/Starting should
-              // not occur in the normal state machine flow, as Configuring
-              // means Ctld hasn't received the Starting status yet. The only
-              // valid case for Ctld to be ahead is when Ctld marks it as
-              // Completing (handled above).
               CRANE_WARN(
                   "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
                   "Terminating step to maintain consistency.",
@@ -696,6 +696,7 @@ void CtldClient::Init() {
                      invalid_steps = std::move(invalid_steps),
                      invalid_jobs = std::move(invalid_jobs),
                      completing_steps = std::move(completing_steps),
+                     dead_running_steps = std::move(dead_running_steps),
                      steps_to_sync = std::move(steps_to_sync)]() mutable {
           util::SetCurrentThreadName("CfgCleanupThr");
 
@@ -801,6 +802,14 @@ void CtldClient::Init() {
           if (!g_ctld_client_sm->EvConfigurationDone(token, lost_jobs,
                                                      lost_steps)) {
             return;
+          }
+
+          for (const auto& [job_id, step_ids] : dead_running_steps) {
+            for (const auto& step_id : step_ids) {
+              g_job_mgr->SendCompletingAndTerminal_(
+                  job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+                  "Supervisor exited during Craned recovery");
+            }
           }
 
           // Report status changes to Ctld for steps that need synchronization

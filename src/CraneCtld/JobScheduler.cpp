@@ -5521,12 +5521,16 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         auto err = stub->FreeSteps(steps);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR(
-              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure",
+              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure; "
+              "keep steps in current state and wait for Craned "
+              "reconnect/reconcile to replay cleanup.",
               util::JobStepsToString(steps), craned_id);
         }
       } else {
         CRANE_ERROR(
-            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid",
+            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid; "
+            "keep steps in current state and wait for Craned "
+            "reconnect/reconcile to replay cleanup.",
             util::JobStepsToString(steps), craned_id);
       }
     });
@@ -5569,8 +5573,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         auto err = stub->TerminateSteps(steps);
         if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to TerminateSteps for [{}] jobs on Node {}",
-                      util::JobStepsToString(steps), craned_id);
+          CRANE_ERROR(
+              "Failed to TerminateSteps for [{}] jobs on Node {}; "
+              "waiting for reconnect/lost-step recovery.",
+              util::JobStepsToString(steps), craned_id);
         }
       }
     });
