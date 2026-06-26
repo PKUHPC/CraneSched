@@ -167,7 +167,7 @@ std::string FormatControllerNames(ControllerFlags flags) {
 }
 
 bool StatInode(const std::filesystem::path& path, ino_t* inode, int* err_out) {
-  struct stat st {};
+  struct stat st{};
   if (stat(path.c_str(), &st) != 0) {
     if (err_out != nullptr) *err_out = errno;
     return false;
@@ -328,11 +328,11 @@ bool CgroupV2FsBackend::Probe(ControllerFlags mounted_controllers) {
     CRANE_WARN("Cgroup v2 fast path disabled: required controllers missing");
     return false;
   }
-  ControllerFlags required =
-      NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
-      CgConstant::Controller::MEMORY_CONTROLLER_V2 |
-      CgConstant::Controller::IO_CONTROLLER_V2 |
-      CgConstant::Controller::CPUSET_CONTROLLER_V2;
+  ControllerFlags required = NO_CONTROLLER_FLAG |
+                             CgConstant::Controller::CPU_CONTROLLER_V2 |
+                             CgConstant::Controller::MEMORY_CONTROLLER_V2 |
+                             CgConstant::Controller::IO_CONTROLLER_V2 |
+                             CgConstant::Controller::CPUSET_CONTROLLER_V2;
   if (!EnsureSubtreeControllers_(root_path_, required)) {
     CRANE_WARN(
         "Cgroup v2 fast path disabled: failed to prepare root subtree "
@@ -515,8 +515,7 @@ bool CgroupV2FsBackend::RefreshNodeLocked_(NodeState& node, int* err_out) {
   }
 
   int err = 0;
-  auto subtree =
-      ReadSmallFile(node.path / "cgroup.subtree_control", &err);
+  auto subtree = ReadSmallFile(node.path / "cgroup.subtree_control", &err);
   if (!subtree.has_value()) {
     if (err_out != nullptr) *err_out = err;
     return false;
@@ -686,7 +685,8 @@ CraneExpected<CgroupV2CreateResult> CgroupV2FsBackend::CreateOrOpenUnlocked_(
     node->inode = inode;
   }
 
-  return CgroupV2CreateResult{.inode = inode, .created = !created_paths.empty()};
+  return CgroupV2CreateResult{.inode = inode,
+                              .created = !created_paths.empty()};
 }
 
 bool CgroupV2FsBackend::ReadPopulated_(const std::filesystem::path& path,
@@ -763,9 +763,8 @@ bool CgroupV2FsBackend::RecursiveRmdir_(const std::filesystem::path& path,
   return true;
 }
 
-bool CgroupV2FsBackend::ListProcessesRecursive_(const std::filesystem::path& path,
-                                                std::vector<pid_t>* pids,
-                                                int* err_out) {
+bool CgroupV2FsBackend::ListProcessesRecursive_(
+    const std::filesystem::path& path, std::vector<pid_t>* pids, int* err_out) {
   int err = 0;
   auto procs = ReadSmallFile(path / "cgroup.procs", &err);
   if (!procs.has_value() && !IsNoEnt(err)) {

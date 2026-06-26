@@ -82,17 +82,17 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
     return CommitTransaction(txn_id);
   }
 
-  bool UpdateRuntimeAttrOfJob(rocks_txn_id_t txn_id, db_id_t db_id,
-                              crane::grpc::RuntimeAttrOfJob const& attr)
-      override;
+  bool UpdateRuntimeAttrOfJob(
+      rocks_txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfJob const& attr) override;
   bool UpdateJobToCtld(rocks_txn_id_t txn_id, db_id_t db_id,
                        crane::grpc::JobToCtld const& job_to_ctld) override;
   bool UpdateRuntimeAttrOfJobIfExists(
       rocks_txn_id_t txn_id, db_id_t db_id,
       crane::grpc::RuntimeAttrOfJob const& attr) override;
-  bool UpdateJobToCtldIfExists(rocks_txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::JobToCtld const& job_to_ctld)
-      override;
+  bool UpdateJobToCtldIfExists(
+      rocks_txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::JobToCtld const& job_to_ctld) override;
   bool FetchJobDataInDb(rocks_txn_id_t txn_id, db_id_t db_id,
                         JobInEmbeddedDb* job_in_db) override;
 
@@ -105,17 +105,17 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
   bool AppendSteps(const std::vector<StepInCtld*>& steps) override;
   bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids) override;
 
-  bool UpdateRuntimeAttrOfStep(rocks_txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::RuntimeAttrOfStep const& attr)
-      override;
+  bool UpdateRuntimeAttrOfStep(
+      rocks_txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& attr) override;
   bool UpdateStepToCtld(rocks_txn_id_t txn_id, db_id_t db_id,
                         crane::grpc::StepToCtld const& step_to_ctld) override;
   bool UpdateRuntimeAttrOfStepIfExists(
       rocks_txn_id_t txn_id, db_id_t db_id,
       crane::grpc::RuntimeAttrOfStep const& attr) override;
-  bool UpdateStepToCtldIfExists(rocks_txn_id_t txn_id, db_id_t db_id,
-                                crane::grpc::StepToCtld const& step_to_ctld)
-      override;
+  bool UpdateStepToCtldIfExists(
+      rocks_txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) override;
   bool FetchStepDataInDb(rocks_txn_id_t txn_id, db_id_t db_id,
                          StepInEmbeddedDb* step_in_db) override;
 
@@ -208,8 +208,7 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
   std::filesystem::path db_path_;
   std::unique_ptr<rocksdb::DB> db_;
   rocksdb::ColumnFamilyHandle* default_cf_handle_{nullptr};
-  std::array<rocksdb::ColumnFamilyHandle*,
-             static_cast<size_t>(Cf::Count)>
+  std::array<rocksdb::ColumnFamilyHandle*, static_cast<size_t>(Cf::Count)>
       cf_handles_{};
 
   absl::Mutex job_id_mu_;

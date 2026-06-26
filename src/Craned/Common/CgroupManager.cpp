@@ -23,12 +23,12 @@
 
 #include "CgroupManager.h"
 
-#include "CgroupV2Fs.h"
-
 #include <fcntl.h>
 
 #include <bit>
 #include <cctype>
+
+#include "CgroupV2Fs.h"
 
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/bpf.h>
@@ -346,7 +346,8 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
         m_v2_fs_backend_ = std::move(backend);
       } else {
         m_v2_fs_backend_.reset();
-        CRANE_WARN("Cgroup v2 fast path probe failed, falling back to libcgroup");
+        CRANE_WARN(
+            "Cgroup v2 fast path probe failed, falling back to libcgroup");
       }
     } else {
       m_v2_fs_backend_.reset();
@@ -783,8 +784,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpenV2Fast_(
   create_span.SetAttribute("gate_wait_ms", gate.WaitMs());
 
   std::string full_cg_name = CgConstant::kRootCgNamePrefix + "/" + cgroup_str;
-  auto result = m_v2_fs_backend_->CreateOrOpen(full_cg_name, controllers,
-                                               retrieve);
+  auto result =
+      m_v2_fs_backend_->CreateOrOpen(full_cg_name, controllers, retrieve);
   create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
   if (!result.has_value()) {
     create_span.SetStatus(crane::StatusCode::kError, "v2_fast_create_failed");
@@ -811,8 +812,8 @@ CgroupManager::AllocateAndGetCgroup(
         NO_CONTROLLER_FLAG, recover);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     if (m_v2_fs_backend_) {
-      cg_unique_ptr = CreateOrOpenV2Fast_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
-                                          NO_CONTROLLER_FLAG, recover);
+      cg_unique_ptr = CreateOrOpenV2Fast_(
+          cgroup_str, CG_V2_REQUIRED_CONTROLLERS, NO_CONTROLLER_FLAG, recover);
     } else {
       cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
                                     NO_CONTROLLER_FLAG, recover);
@@ -880,8 +881,8 @@ CgroupManager::CreateOrOpenCgroup(const std::string& cgroup_str,
                                   NO_CONTROLLER_FLAG, retrieve);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     if (m_v2_fs_backend_) {
-      cg_unique_ptr = CreateOrOpenV2Fast_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
-                                          NO_CONTROLLER_FLAG, retrieve);
+      cg_unique_ptr = CreateOrOpenV2Fast_(
+          cgroup_str, CG_V2_REQUIRED_CONTROLLERS, NO_CONTROLLER_FLAG, retrieve);
     } else {
       cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
                                     NO_CONTROLLER_FLAG, retrieve);
@@ -2020,8 +2021,8 @@ CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
  * If a controller implements best effort resource guarantee and/or limit,
  * the interface files should be named “low” and “high” respectively.
  */
-bool CgroupV2::WriteControllerFile_(
-    CgConstant::ControllerFile controller_file, std::string_view value) {
+bool CgroupV2::WriteControllerFile_(CgConstant::ControllerFile controller_file,
+                                    std::string_view value) {
   return m_v2_fs_backend_->WriteControllerFile(m_cgroup_info_.GetCgroupName(),
                                                controller_file, value);
 }

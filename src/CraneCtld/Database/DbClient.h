@@ -23,17 +23,16 @@
 
 #include <spdlog/fmt/fmt.h>
 
-#include <condition_variable>
-#include <map>
-#include <mutex>
-#include <thread>
-
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
+#include <condition_variable>
+#include <map>
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
+#include <mutex>
+#include <thread>
 
 #include "Account/AccountDefs.h"
 #include "protos/Crane.grpc.pb.h"
@@ -293,8 +292,7 @@ class MongodbClient {
                            int64_t* elapsed_ms);
   bool MarkJobsAggregatedBatch_(
       mongocxx::client_session* session,
-      const std::vector<PendingJobAggregationInfo>& jobs,
-      int64_t* elapsed_ms);
+      const std::vector<PendingJobAggregationInfo>& jobs, int64_t* elapsed_ms);
   void SubtractPendingJobAggregationCount_(size_t job_count);
 
   // Recovery helper functions

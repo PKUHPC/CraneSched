@@ -36,8 +36,8 @@ namespace Ctld {
 
 using txn_id_t = uint32_t;
 
-inline constexpr std::array<std::string_view, 3>
-    kCraneEmbeddedDbBackendValues{"Unqlite", "BerkeleyDB", "RocksDB"};
+inline constexpr std::array<std::string_view, 3> kCraneEmbeddedDbBackendValues{
+    "Unqlite", "BerkeleyDB", "RocksDB"};
 
 inline bool IsValidCraneEmbeddedDbBackend(std::string_view backend) {
   return std::ranges::contains(kCraneEmbeddedDbBackendValues, backend);
@@ -198,8 +198,7 @@ class EmbeddedDbClient {
 
   virtual bool Init(std::string const& db_path) = 0;
 
-  virtual bool ResetNextJobId(job_id_t next_job_id,
-                              db_id_t next_job_db_id) = 0;
+  virtual bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id) = 0;
 
   virtual bool ResetNextStepDbId() = 0;
 
@@ -302,8 +301,7 @@ class EmbeddedDbClient {
       txn_id_t txn_id, const ResvId& name,
       const crane::grpc::CreateReservationRequest& reservation_req) = 0;
 
-  virtual bool DeleteReservationInfo(txn_id_t txn_id,
-                                     const ResvId& name) = 0;
+  virtual bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) = 0;
 };
 
 enum class LegacyEmbeddedDbBackend : uint8_t {
@@ -389,9 +387,8 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
         .has_value();
   }
 
-  bool UpdateJobToCtld(
-      txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::JobToCtld const& job_to_ctld_ref) override {
+  bool UpdateJobToCtld(txn_id_t txn_id, db_id_t db_id,
+                       crane::grpc::JobToCtld const& job_to_ctld_ref) override {
     return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                             GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
         .has_value();
@@ -432,9 +429,8 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
         .has_value();
   }
 
-  bool UpdateStepToCtld(
-      txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::StepToCtld const& step_to_ctld) override {
+  bool UpdateStepToCtld(txn_id_t txn_id, db_id_t db_id,
+                        crane::grpc::StepToCtld const& step_to_ctld) override {
     return StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
                             GetStepFixedDbEntryName_(db_id), &step_to_ctld)
         .has_value();
@@ -788,7 +784,8 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
 };
 
 template <>
-inline std::expected<void, DbErrorCode> LegacyEmbeddedDbClient::StoreTypeIntoDb_(
+inline std::expected<void, DbErrorCode>
+LegacyEmbeddedDbClient::StoreTypeIntoDb_(
     IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
     const crane::grpc::StepNextIdInEmbeddedDb* value) {
   using google::protobuf::io::CodedOutputStream;
@@ -804,7 +801,8 @@ inline std::expected<void, DbErrorCode> LegacyEmbeddedDbClient::StoreTypeIntoDb_
   return db->Store(txn_id, key, buf.data(), n_bytes);
 }
 
-std::unique_ptr<EmbeddedDbClient> MakeEmbeddedDbClient(std::string_view backend);
+std::unique_ptr<EmbeddedDbClient> MakeEmbeddedDbClient(
+    std::string_view backend);
 
 }  // namespace Ctld
 

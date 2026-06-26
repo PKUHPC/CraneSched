@@ -480,7 +480,8 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     bool old_job_freeable = false;
     {
       absl::MutexLock lk(old_job->step_map_mtx.get());
-      old_job_freeable = old_job->step_map.empty() && old_job->cgroup == nullptr;
+      old_job_freeable =
+          old_job->step_map.empty() && old_job->cgroup == nullptr;
     }
 
     if (!old_job_freeable) {

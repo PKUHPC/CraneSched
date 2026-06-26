@@ -1942,10 +1942,9 @@ void MongodbClient::NotifyJobAggregationWorker_(size_t job_count) {
 void MongodbClient::SubtractPendingJobAggregationCount_(size_t job_count) {
   int64_t old = m_job_aggregation_pending_jobs_.load(std::memory_order_relaxed);
   while (true) {
-    int64_t next =
-        old > static_cast<int64_t>(job_count)
-            ? old - static_cast<int64_t>(job_count)
-            : 0;
+    int64_t next = old > static_cast<int64_t>(job_count)
+                       ? old - static_cast<int64_t>(job_count)
+                       : 0;
     if (m_job_aggregation_pending_jobs_.compare_exchange_weak(
             old, next, std::memory_order_relaxed)) {
       return;
@@ -1956,9 +1955,8 @@ void MongodbClient::SubtractPendingJobAggregationCount_(size_t job_count) {
 void MongodbClient::JobAggregationWorkerLoop_() {
   uint32_t retry_backoff_ms =
       std::max<uint32_t>(1, g_config.JobAggregationRetryBackoffMs);
-  const uint32_t max_retry_backoff_ms =
-      std::max<uint32_t>(retry_backoff_ms,
-                         g_config.JobAggregationMaxRetryBackoffMs);
+  const uint32_t max_retry_backoff_ms = std::max<uint32_t>(
+      retry_backoff_ms, g_config.JobAggregationMaxRetryBackoffMs);
 
   while (!m_job_aggregation_stop_.load(std::memory_order_acquire)) {
     auto processed = ProcessJobAggregationBatch_();
@@ -2011,22 +2009,22 @@ MongodbClient::FetchPendingAggregationJobs_(size_t limit,
     opts.limit(static_cast<int64_t>(limit));
     opts.sort(make_document(kvp("time_end", 1), kvp("job_id", 1)));
     opts.projection(make_document(
-        kvp("job_id", 1), kvp("account", 1), kvp("username", 1),
-        kvp("qos", 1), kvp("wckey", 1), kvp("time_start", 1),
-        kvp("time_end", 1), kvp("cpus_alloc", 1), kvp("nodes_alloc", 1)));
+        kvp("job_id", 1), kvp("account", 1), kvp("username", 1), kvp("qos", 1),
+        kvp("wckey", 1), kvp("time_start", 1), kvp("time_end", 1),
+        kvp("cpus_alloc", 1), kvp("nodes_alloc", 1)));
 
     auto cursor = job_coll.find(filter.view(), opts);
     int64_t oldest_end = 0;
     for (auto&& doc : cursor) {
       auto time_start = ViewValueOr_(doc["time_start"], int64_t{0});
       auto time_end = ViewValueOr_(doc["time_end"], int64_t{0});
-      auto cpus_alloc = cpu_t::from_raw_value(
-          ViewValueOr_(doc["cpus_alloc"], int64_t{0}));
+      auto cpus_alloc =
+          cpu_t::from_raw_value(ViewValueOr_(doc["cpus_alloc"], int64_t{0}));
       auto nodes_alloc = ViewValueOr_(doc["nodes_alloc"], int64_t{0});
 
       PendingJobAggregationInfo info;
-      info.job_id = static_cast<job_id_t>(
-          ViewValueOr_(doc["job_id"], int64_t{0}));
+      info.job_id =
+          static_cast<job_id_t>(ViewValueOr_(doc["job_id"], int64_t{0}));
       info.time_end = time_end;
       info.has_usage = time_start > 0 && time_end > time_start &&
                        cpus_alloc.raw_value() > 0 && nodes_alloc > 0;
@@ -2143,10 +2141,11 @@ void MongodbClient::BuildJobAggregationDeltas_(
   }
 }
 
-bool MongodbClient::BulkIncUsageDeltas_(
-    mongocxx::client_session* session, const std::string& collection_name,
-    const std::string& period_field, const JobAggregationUsageMap& deltas,
-    int64_t* elapsed_ms) {
+bool MongodbClient::BulkIncUsageDeltas_(mongocxx::client_session* session,
+                                        const std::string& collection_name,
+                                        const std::string& period_field,
+                                        const JobAggregationUsageMap& deltas,
+                                        int64_t* elapsed_ms) {
   using bsoncxx::builder::basic::make_document;
   using namespace std::chrono;
 
@@ -2156,17 +2155,16 @@ bool MongodbClient::BulkIncUsageDeltas_(
 
   try {
     mongocxx::options::bulk_write bulk_options;
-    auto bulk =
-        (*GetClient_())[m_db_name_][collection_name].create_bulk_write(
-            *session, bulk_options);
+    auto bulk = (*GetClient_())[m_db_name_][collection_name].create_bulk_write(
+        *session, bulk_options);
     const auto aggregated_at = bsoncxx::types::b_date{
         time_point_cast<milliseconds>(system_clock::now())};
 
     for (const auto& [key, total_cpu_time] : deltas) {
       auto filter = make_document(
           kvp(period_field,
-              bsoncxx::types::b_date{time_point_cast<milliseconds>(
-                  key.period_start)}),
+              bsoncxx::types::b_date{
+                  time_point_cast<milliseconds>(key.period_start)}),
           kvp("account", key.account), kvp("username", key.username),
           kvp("qos", key.qos), kvp("wckey", key.wckey));
       auto update = make_document(
@@ -2181,14 +2179,14 @@ bool MongodbClient::BulkIncUsageDeltas_(
     auto result = bulk.execute();
     if (!result) return false;
     if (elapsed_ms) {
-      *elapsed_ms = duration_cast<milliseconds>(steady_clock::now() - begin)
-                        .count();
+      *elapsed_ms =
+          duration_cast<milliseconds>(steady_clock::now() - begin).count();
     }
     return true;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(
-        m_logger_, "JobAggregationWorker bulk inc failed: coll={} error={}",
-        collection_name, e.what());
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "JobAggregationWorker bulk inc failed: coll={} error={}",
+                       collection_name, e.what());
     throw;
   }
 }
@@ -2209,28 +2207,28 @@ bool MongodbClient::MarkJobsAggregatedBatch_(
       job_ids.append(static_cast<int32_t>(job.job_id));
     }
 
-    auto filter = make_document(kvp("job_id", make_document(kvp("$in", job_ids))));
+    auto filter =
+        make_document(kvp("job_id", make_document(kvp("$in", job_ids))));
     auto update = make_document(kvp(
         "$set",
-        make_document(
-            kvp("aggregated", true),
-            kvp("aggregated_at",
-                bsoncxx::types::b_date{time_point_cast<milliseconds>(
-                    system_clock::now())}))));
+        make_document(kvp("aggregated", true),
+                      kvp("aggregated_at",
+                          bsoncxx::types::b_date{time_point_cast<milliseconds>(
+                              system_clock::now())}))));
 
     auto result =
         (*GetClient_())[m_db_name_][m_job_collection_name_].update_many(
             *session, filter.view(), update.view());
     if (!result) return false;
     if (elapsed_ms) {
-      *elapsed_ms = duration_cast<milliseconds>(steady_clock::now() - begin)
-                        .count();
+      *elapsed_ms =
+          duration_cast<milliseconds>(steady_clock::now() - begin).count();
     }
     return true;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_,
-                       "JobAggregationWorker failed to mark jobs aggregated: {}",
-                       e.what());
+    CRANE_LOGGER_ERROR(
+        m_logger_, "JobAggregationWorker failed to mark jobs aggregated: {}",
+        e.what());
     throw;
   }
 }
@@ -2242,15 +2240,13 @@ std::optional<size_t> MongodbClient::ProcessJobAggregationBatch_() {
   const size_t batch_limit =
       std::max<uint32_t>(1, g_config.JobAggregationWorkerBatchSize);
   batch_span.SetAttribute("batch_limit", static_cast<int64_t>(batch_limit));
-  batch_span.SetAttribute("pending_jobs",
-                          PendingJobAggregationCount());
+  batch_span.SetAttribute("pending_jobs", PendingJobAggregationCount());
 
   int64_t oldest_pending_ms = 0;
   std::vector<PendingJobAggregationInfo> jobs;
   auto fetch_begin = steady_clock::now();
   try {
-    CRANE_TRACE_CHILD_NAMED(fetch_span, batch_span,
-                            "aggregation/batch_fetch");
+    CRANE_TRACE_CHILD_NAMED(fetch_span, batch_span, "aggregation/batch_fetch");
     jobs = FetchPendingAggregationJobs_(batch_limit, &oldest_pending_ms);
     fetch_span.SetAttribute("job_count", static_cast<int64_t>(jobs.size()));
     fetch_span.SetAttribute("oldest_pending_ms", oldest_pending_ms);
@@ -2268,8 +2264,7 @@ std::optional<size_t> MongodbClient::ProcessJobAggregationBatch_() {
   JobAggregationUsageMap hour_deltas, day_deltas, month_deltas;
   auto build_begin = steady_clock::now();
   {
-    CRANE_TRACE_CHILD_NAMED(build_span, batch_span,
-                            "aggregation/build_delta");
+    CRANE_TRACE_CHILD_NAMED(build_span, batch_span, "aggregation/build_delta");
     BuildJobAggregationDeltas_(jobs, &hour_deltas, &day_deltas, &month_deltas);
     build_span.SetAttribute("hour_delta_count",
                             static_cast<int64_t>(hour_deltas.size()));
@@ -2286,10 +2281,10 @@ std::optional<size_t> MongodbClient::ProcessJobAggregationBatch_() {
   int64_t month_bulk_ms = 0;
   int64_t mark_jobs_ms = 0;
   auto txn_begin = steady_clock::now();
-  bool txn_success = CommitTransaction(
-      [this, &hour_deltas, &day_deltas, &month_deltas, &jobs, &hour_bulk_ms,
-       &day_bulk_ms, &month_bulk_ms,
-       &mark_jobs_ms](mongocxx::client_session* session) {
+  bool txn_success =
+      CommitTransaction([this, &hour_deltas, &day_deltas, &month_deltas, &jobs,
+                         &hour_bulk_ms, &day_bulk_ms, &month_bulk_ms,
+                         &mark_jobs_ms](mongocxx::client_session* session) {
         if (!BulkIncUsageDeltas_(session, m_acc_usage_hour_collection_name_,
                                  "hour", hour_deltas, &hour_bulk_ms)) {
           throw std::runtime_error("hour usage bulk write failed");
@@ -5818,9 +5813,8 @@ bool MongodbClient::InitTableIndexes() {
     // job_table: add index for aggregated/state recovery optimization
     CRANE_LOGGER_DEBUG(m_logger_,
                        "Creating aggregation recovery index on job_table...");
-    CreateCollectionIndex(raw_table, {"aggregated", "state", "time_end",
-                                      "job_id"},
-                         false);
+    CreateCollectionIndex(raw_table,
+                          {"aggregated", "state", "time_end", "job_id"}, false);
 
     auto acc_hour_coll = client[m_db_name_][m_acc_usage_hour_collection_name_];
     CreateCollectionIndex(acc_hour_coll,

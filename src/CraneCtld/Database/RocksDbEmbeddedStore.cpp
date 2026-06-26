@@ -35,9 +35,7 @@ constexpr std::string_view kNextStepDbIdKey = "meta/next_step_db_id";
 
 constexpr uint64_t MiB(uint32_t value) { return uint64_t{value} * 1024 * 1024; }
 
-int ToRocksDbInt(uint32_t value) {
-  return static_cast<int>(value);
-}
+int ToRocksDbInt(uint32_t value) { return static_cast<int>(value); }
 
 }  // namespace
 
@@ -121,14 +119,16 @@ void RocksDbEmbeddedStore::Close() {
 
   if (db_ != nullptr && !g_config.RocksDb.SyncWrites) {
     auto status = db_->SyncWAL();
-    if (!status.ok()) CRANE_WARN("RocksDB final SyncWAL failed: {}", ToString_(status));
+    if (!status.ok())
+      CRANE_WARN("RocksDB final SyncWAL failed: {}", ToString_(status));
   }
 
   for (auto*& handle : cf_handles_) {
     if (handle != nullptr && db_ != nullptr) {
       auto status = db_->DestroyColumnFamilyHandle(handle);
       if (!status.ok())
-        CRANE_WARN("Failed to destroy RocksDB CF handle: {}", ToString_(status));
+        CRANE_WARN("Failed to destroy RocksDB CF handle: {}",
+                   ToString_(status));
       handle = nullptr;
     }
   }
@@ -152,8 +152,7 @@ bool RocksDbEmbeddedStore::ResetNextJobId(job_id_t next_job_id,
       !PutScalar_(&batch, Cf::Meta, MetaKey_(kNextJobIdKey), next_job_id))
     return false;
   if (next_job_db_id > 0 &&
-      !PutScalar_(&batch, Cf::Meta, MetaKey_(kNextJobDbIdKey),
-                  next_job_db_id))
+      !PutScalar_(&batch, Cf::Meta, MetaKey_(kNextJobDbIdKey), next_job_db_id))
     return false;
 
   if (next_job_id > 0) {
@@ -250,7 +249,8 @@ bool RocksDbEmbeddedStore::RetrieveLastSnapshot(DbSnapshot* snapshot) {
       runtime_attrs.emplace(id, std::move(attr));
     }
     if (!it->status().ok()) {
-      CRANE_ERROR("Failed to scan RocksDB job_var: {}", ToString_(it->status()));
+      CRANE_ERROR("Failed to scan RocksDB job_var: {}",
+                  ToString_(it->status()));
       return false;
     }
   }
@@ -270,8 +270,8 @@ bool RocksDbEmbeddedStore::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
       JobInEmbeddedDb job_data;
       *job_data.mutable_runtime_attr() = std::move(attr_it->second);
-      if (!ParseProto_(it->value().ToString(),
-                       job_data.mutable_job_to_ctld(), it->key().ToString()))
+      if (!ParseProto_(it->value().ToString(), job_data.mutable_job_to_ctld(),
+                       it->key().ToString()))
         return false;
 
       JobStatus status = job_data.runtime_attr().status();
@@ -340,14 +340,13 @@ bool RocksDbEmbeddedStore::RetrieveStepInfo(StepDbSnapshot* snapshot) {
 
       StepInEmbeddedDb step;
       *step.mutable_runtime_attr() = std::move(attr_it->second);
-      if (!ParseProto_(it->value().ToString(),
-                       step.mutable_step_to_ctld(), it->key().ToString()))
+      if (!ParseProto_(it->value().ToString(), step.mutable_step_to_ctld(),
+                       it->key().ToString()))
         return false;
 
       auto job_id = step.step_to_ctld().job_id();
-      max_step_id_by_job[job_id] =
-          std::max<uint32_t>(max_step_id_by_job[job_id],
-                             step.runtime_attr().step_id());
+      max_step_id_by_job[job_id] = std::max<uint32_t>(
+          max_step_id_by_job[job_id], step.runtime_attr().step_id());
       snapshot->steps[job_id].push_back(std::move(step));
     }
     if (!it->status().ok()) {
@@ -580,8 +579,8 @@ bool RocksDbEmbeddedStore::UpdateStepToCtld(
 bool RocksDbEmbeddedStore::UpdateRuntimeAttrOfStepIfExists(
     rocks_txn_id_t txn_id, db_id_t db_id,
     crane::grpc::RuntimeAttrOfStep const& attr) {
-  return StoreProtoIfExists_(txn_id, RocksStoreKind::StepVar,
-                             StepVarKey(db_id), attr);
+  return StoreProtoIfExists_(txn_id, RocksStoreKind::StepVar, StepVarKey(db_id),
+                             attr);
 }
 
 bool RocksDbEmbeddedStore::UpdateStepToCtldIfExists(
@@ -695,15 +694,14 @@ bool RocksDbEmbeddedStore::PutProto_(
 }
 
 bool RocksDbEmbeddedStore::PutScalar_(rocksdb::WriteBatch* batch, Cf cf,
-                                      std::string const& key,
-                                      const void* value, size_t size) {
+                                      std::string const& key, const void* value,
+                                      size_t size) {
   batch->Put(Handle_(cf), key, ScalarValue_(value, size));
   return true;
 }
 
 bool RocksDbEmbeddedStore::GetProto_(
-    Cf cf, std::string const& key,
-    google::protobuf::MessageLite* value) const {
+    Cf cf, std::string const& key, google::protobuf::MessageLite* value) const {
   std::string data;
   auto status = db_->Get(ReadOptions_(), Handle_(cf), key, &data);
   if (!status.ok()) {
@@ -745,8 +743,7 @@ bool RocksDbEmbeddedStore::StoreProto_(
     google::protobuf::MessageLite const& value) {
   if (txn_id == 0) {
     rocksdb::WriteBatch batch;
-    if (!PutProto_(&batch, CfFromStoreKind_(kind), key, value))
-      return false;
+    if (!PutProto_(&batch, CfFromStoreKind_(kind), key, value)) return false;
     return WriteBatch_(&batch, "rocksdb_store_proto");
   }
 
@@ -832,8 +829,8 @@ bool RocksDbEmbeddedStore::LoadNextStepIdCache_() {
   for (it->Seek(std::string{kNextStepIdPrefix}); it->Valid(); it->Next()) {
     auto key = it->key().ToString();
     if (!key.starts_with(kNextStepIdPrefix)) break;
-    job_id_t job_id = std::stoul(
-        key.substr(std::string{kNextStepIdPrefix}.size()));
+    job_id_t job_id =
+        std::stoul(key.substr(std::string{kNextStepIdPrefix}.size()));
     uint32_t next_step_id;
     auto data = it->value().ToString();
     if (data.size() != sizeof(next_step_id)) {
@@ -910,9 +907,9 @@ std::string RocksDbEmbeddedStore::ToString_(rocksdb::Status const& status) {
   return status.ToString();
 }
 
-bool RocksDbEmbeddedStore::ParseProto_(
-    std::string const& data, google::protobuf::MessageLite* value,
-    std::string_view key) {
+bool RocksDbEmbeddedStore::ParseProto_(std::string const& data,
+                                       google::protobuf::MessageLite* value,
+                                       std::string_view key) {
   if (!value->ParseFromArray(data.data(), static_cast<int>(data.size()))) {
     CRANE_ERROR("Failed to parse RocksDB proto key {}", key);
     return false;
@@ -928,8 +925,7 @@ std::string RocksDbEmbeddedStore::SerializeProto_(
   return data;
 }
 
-std::string RocksDbEmbeddedStore::ScalarValue_(const void* value,
-                                               size_t size) {
+std::string RocksDbEmbeddedStore::ScalarValue_(const void* value, size_t size) {
   return {static_cast<const char*>(value), size};
 }
 

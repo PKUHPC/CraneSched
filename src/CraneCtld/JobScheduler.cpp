@@ -21,8 +21,8 @@
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
-#include <map>
 #include <iterator>
+#include <map>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -5697,15 +5697,15 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           m_running_job_map_.erase(iter);
         }  // end of normal completion path (else)
       }
-  }
+    }
 
-  SpliceFinalArrayParentsFromPendingMapNoLock_(final_array_parents);
-}  // Release m_pending_job_map_mtx_, m_running_job_map_mtx_ and
-   // m_job_indexes_mtx_
-auto state_machine_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now() -
-                              state_machine_begin)
-                              .count();
+    SpliceFinalArrayParentsFromPendingMapNoLock_(final_array_parents);
+  }  // Release m_pending_job_map_mtx_, m_running_job_map_mtx_ and
+     // m_job_indexes_mtx_
+  auto state_machine_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - state_machine_begin)
+          .count();
 
   sc_span.SetAttribute("running_transition_count",
                        static_cast<int64_t>(running_transition_count));
@@ -5734,11 +5734,11 @@ auto state_machine_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
     }
   }
 
-auto rpc_fanout_begin = std::chrono::steady_clock::now();
-CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span, "status_change/rpc_fanout");
+  auto rpc_fanout_begin = std::chrono::steady_clock::now();
+  CRANE_TRACE_CHILD_NAMED(rpc_fanout_span, sc_span, "status_change/rpc_fanout");
 
-// Batch AppendSteps for primary steps created during the loop.
-if (!context.pending_append_steps_jobs.empty()) {
+  // Batch AppendSteps for primary steps created during the loop.
+  if (!context.pending_append_steps_jobs.empty()) {
     std::vector<StepInCtld*> ptrs;
     ptrs.reserve(context.pending_append_steps_jobs.size());
     for (auto* job : context.pending_append_steps_jobs) {
@@ -6139,9 +6139,8 @@ if (!context.pending_append_steps_jobs.empty()) {
                                    final_job_result.plugin_hook_enqueue_ms);
     mongo_insert_span.SetAttribute("aggregation_mode",
                                    g_config.JobAggregationMode);
-    mongo_insert_span.SetAttribute(
-        "aggregation_pending_jobs",
-        g_db_client->PendingJobAggregationCount());
+    mongo_insert_span.SetAttribute("aggregation_pending_jobs",
+                                   g_db_client->PendingJobAggregationCount());
     if (!final_job_result.ok)
       mongo_insert_span.SetStatus(crane::StatusCode::kError,
                                   final_job_result.failed_stage);
@@ -6159,8 +6158,7 @@ if (!context.pending_append_steps_jobs.empty()) {
   duration = std::chrono::steady_clock::now() - now;
   auto array_parent_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-  CRANE_TRACE(
-      "ProcessFinalParents took {} ms", array_parent_ms);
+  CRANE_TRACE("ProcessFinalParents took {} ms", array_parent_ms);
 
   auto end_time = std::chrono::steady_clock::now();
   auto total_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -6176,8 +6174,7 @@ if (!context.pending_append_steps_jobs.empty()) {
                               final_job_result.persist_ms);
   db_commit_span.SetAttribute("final_job_mongo_insert_ms",
                               final_job_result.mongo_insert_ms);
-  db_commit_span.SetAttribute("final_job_purge_ms",
-                              final_job_result.purge_ms);
+  db_commit_span.SetAttribute("final_job_purge_ms", final_job_result.purge_ms);
   db_commit_span.SetAttribute("plugin_end_hook_enqueue_ms",
                               final_job_result.plugin_hook_enqueue_ms);
   db_commit_span.SetAttribute("array_parent_ms", array_parent_ms);
@@ -6190,10 +6187,10 @@ if (!context.pending_append_steps_jobs.empty()) {
                               g_db_client->PendingJobAggregationCount());
   db_commit_span.SetAttribute("total_elapsed_ms", total_elapsed_ms);
   if (!final_step_result.ok || !final_job_result.ok) {
-    db_commit_span.SetStatus(
-        crane::StatusCode::kError,
-        !final_step_result.ok ? final_step_result.failed_stage
-                              : final_job_result.failed_stage);
+    db_commit_span.SetStatus(crane::StatusCode::kError,
+                             !final_step_result.ok
+                                 ? final_step_result.failed_stage
+                                 : final_job_result.failed_stage);
   }
   if (total_elapsed_ms > 1000 || step_txn_ms > 1000 || job_txn_ms > 1000 ||
       final_job_result.mongo_insert_ms > 1000) {
@@ -6207,10 +6204,9 @@ if (!context.pending_append_steps_jobs.empty()) {
         "final_job_persist_ms={} final_job_mongo_insert_ms={} "
         "final_job_purge_ms={} plugin_end_hook_enqueue_ms={} "
         "array_parent_ms={}",
-        actual_size, rn_steps.size(),
-        rn_jobs.size(), finished_job_count, step_txn_ms,
-        job_txn_ms, final_job_result.mongo_insert_ms, total_elapsed_ms,
-        db_chunk_size, max_drain_per_tick, state_machine_ms,
+        actual_size, rn_steps.size(), rn_jobs.size(), finished_job_count,
+        step_txn_ms, job_txn_ms, final_job_result.mongo_insert_ms,
+        total_elapsed_ms, db_chunk_size, max_drain_per_tick, state_machine_ms,
         rpc_fanout_enqueue_ms, final_step_result.persist_ms,
         final_step_result.mongo_insert_ms, final_step_result.purge_ms,
         final_job_result.persist_ms, final_job_result.mongo_insert_ms,
@@ -6227,10 +6223,9 @@ if (!context.pending_append_steps_jobs.empty()) {
         "final_job_persist_ms={} final_job_mongo_insert_ms={} "
         "final_job_purge_ms={} plugin_end_hook_enqueue_ms={} "
         "array_parent_ms={}",
-        actual_size, rn_steps.size(),
-        rn_jobs.size(), finished_job_count, step_txn_ms,
-        job_txn_ms, final_job_result.mongo_insert_ms, total_elapsed_ms,
-        db_chunk_size, max_drain_per_tick, state_machine_ms,
+        actual_size, rn_steps.size(), rn_jobs.size(), finished_job_count,
+        step_txn_ms, job_txn_ms, final_job_result.mongo_insert_ms,
+        total_elapsed_ms, db_chunk_size, max_drain_per_tick, state_machine_ms,
         rpc_fanout_enqueue_ms, final_step_result.persist_ms,
         final_step_result.mongo_insert_ms, final_step_result.purge_ms,
         final_job_result.persist_ms, final_job_result.mongo_insert_ms,
@@ -7390,7 +7385,8 @@ JobScheduler::FinalTransferResult JobScheduler::ProcessFinalSteps_(
   // CallPluginHookForFinalJobs_(jobs);
 }
 
-JobScheduler::FinalTransferResult JobScheduler::PersistAndTransferStepsToMongodb_(
+JobScheduler::FinalTransferResult
+JobScheduler::PersistAndTransferStepsToMongodb_(
     std::unordered_set<StepInCtld*> const& steps) {
   FinalTransferResult result;
   if (steps.empty()) return result;
@@ -7447,9 +7443,10 @@ JobScheduler::FinalTransferResult JobScheduler::PersistAndTransferStepsToMongodb
             .count();
     return result;
   }
-  result.mongo_insert_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - mongo_begin)
-                               .count();
+  result.mongo_insert_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - mongo_begin)
+          .count();
   result.mongo_inserted = true;
 
   std::vector<step_db_id_t> db_ids;
@@ -7518,7 +7515,8 @@ int64_t JobScheduler::CallPluginHookForFinalJobs_(
       .count();
 }
 
-JobScheduler::FinalTransferResult JobScheduler::PersistAndTransferJobsToMongodb_(
+JobScheduler::FinalTransferResult
+JobScheduler::PersistAndTransferJobsToMongodb_(
     std::unordered_set<JobInCtld*> const& jobs) {
   FinalTransferResult result;
   if (jobs.empty()) return result;
@@ -7539,8 +7537,8 @@ JobScheduler::FinalTransferResult JobScheduler::PersistAndTransferJobsToMongodb_
     bool chunk_ok = true;
     for (size_t i = begin; i < end; ++i) {
       JobInCtld* job = job_vec[i];
-      if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
-              txn_id, job->JobDbId(), job->RuntimeAttr())) {
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(txn_id, job->JobDbId(),
+                                                        job->RuntimeAttr())) {
         chunk_ok = false;
         CRANE_ERROR("Failed to call UpdateRuntimeAttrOfJob() for job #{}",
                     job->JobId());
@@ -7575,10 +7573,10 @@ JobScheduler::FinalTransferResult JobScheduler::PersistAndTransferJobsToMongodb_
             .count();
     return result;
   }
-  result.mongo_insert_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() -
-                               mongo_insert_begin)
-                               .count();
+  result.mongo_insert_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - mongo_insert_begin)
+          .count();
   result.mongo_inserted = true;
 
   std::unordered_map<job_id_t, job_db_id_t> db_ids;

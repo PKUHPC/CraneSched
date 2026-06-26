@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include "CgroupManager.h"
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -21,6 +19,8 @@
 #include <optional>
 #include <thread>
 #include <vector>
+
+#include "CgroupManager.h"
 
 namespace Craned::Common {
 
@@ -74,8 +74,7 @@ class CgroupV2FsBackend {
   bool ReadPopulated_(const std::filesystem::path& path, bool* populated,
                       int* err_out);
   bool WaitPopulated_(const std::filesystem::path& path, bool expected,
-                      std::chrono::milliseconds timeout,
-                      int64_t* poll_ms_out);
+                      std::chrono::milliseconds timeout, int64_t* poll_ms_out);
   bool RecursiveRmdir_(const std::filesystem::path& path, int* err_out);
   bool ListProcessesRecursive_(const std::filesystem::path& path,
                                std::vector<pid_t>* pids, int* err_out);

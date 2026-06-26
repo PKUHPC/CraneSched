@@ -876,10 +876,9 @@ void ParseConfig(int argc, char** argv) {
 
       if (!Ctld::IsValidCraneEmbeddedDbBackend(
               g_config.CraneEmbeddedDbBackend)) {
-        CRANE_CRITICAL(
-            "Invalid CraneEmbeddedDbBackend '{}'. Valid values: {}",
-            g_config.CraneEmbeddedDbBackend,
-            fmt::join(Ctld::kCraneEmbeddedDbBackendValues, ", "));
+        CRANE_CRITICAL("Invalid CraneEmbeddedDbBackend '{}'. Valid values: {}",
+                       g_config.CraneEmbeddedDbBackend,
+                       fmt::join(Ctld::kCraneEmbeddedDbBackendValues, ", "));
         std::exit(1);
       }
 
