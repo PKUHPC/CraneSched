@@ -548,8 +548,6 @@ void CtldClient::Init() {
         }
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
-        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-            dead_running_steps{};
         std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
             steps_to_sync{};
         std::unordered_set<job_id_t> refrozen_jobs{};
@@ -641,24 +639,6 @@ void CtldClient::Init() {
             }
 
             if (craned_status == ctld_status) {
-              if (ctld_status == StepStatus::Running) {
-                auto liveness =
-                    g_job_mgr->CheckLocalStepLiveness(job_id, step_id);
-                if (liveness == LocalStepLiveness::kCleaning) {
-                  CRANE_INFO(
-                      "[Step #{}.{}] Ctld and Craned are Running but local "
-                      "cleanup is pending; replay FreeSteps.",
-                      job_id, step_id);
-                  completing_steps[job_id].insert(step_id);
-                } else if (liveness == LocalStepLiveness::kDead) {
-                  CRANE_WARN(
-                      "[Step #{}.{}] Ctld and Craned are Running but local "
-                      "supervisor is gone. Reporting Completing + Failed to "
-                      "drive recovery.",
-                      job_id, step_id);
-                  dead_running_steps[job_id].insert(step_id);
-                }
-              }
               continue;
             }
 
@@ -696,7 +676,6 @@ void CtldClient::Init() {
                      invalid_steps = std::move(invalid_steps),
                      invalid_jobs = std::move(invalid_jobs),
                      completing_steps = std::move(completing_steps),
-                     dead_running_steps = std::move(dead_running_steps),
                      steps_to_sync = std::move(steps_to_sync)]() mutable {
           util::SetCurrentThreadName("CfgCleanupThr");
 
@@ -802,14 +781,6 @@ void CtldClient::Init() {
           if (!g_ctld_client_sm->EvConfigurationDone(token, lost_jobs,
                                                      lost_steps)) {
             return;
-          }
-
-          for (const auto& [job_id, step_ids] : dead_running_steps) {
-            for (const auto& step_id : step_ids) {
-              g_job_mgr->SendCompletingAndTerminal_(
-                  job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
-                  "Supervisor exited during Craned recovery");
-            }
           }
 
           // Report status changes to Ctld for steps that need synchronization

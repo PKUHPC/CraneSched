@@ -1774,34 +1774,6 @@ std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
   return result;
 }
 
-LocalStepLiveness JobManager::CheckLocalStepLiveness(job_id_t job_id,
-                                                     step_id_t step_id) {
-  {
-    absl::MutexLock lk(&m_free_job_step_mtx_);
-    if (m_completing_step_retry_map_.contains(StepKey{job_id, step_id}))
-      return LocalStepLiveness::kCleaning;
-  }
-
-  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_ptr) return LocalStepLiveness::kMissing;
-
-  absl::MutexLock lk(job_ptr->step_map_mtx.get());
-  auto it = job_ptr->step_map.find(step_id);
-  if (it == job_ptr->step_map.end()) return LocalStepLiveness::kMissing;
-
-  auto* step = it->second.get();
-  if (step->pending_terminal_status.has_value() ||
-      step->status == StepStatus::Completing) {
-    return LocalStepLiveness::kCleaning;
-  }
-
-  if (step->supv_pid <= 0) return LocalStepLiveness::kUnknown;
-
-  if (kill(step->supv_pid, 0) == 0) return LocalStepLiveness::kAlive;
-  if (errno == ESRCH) return LocalStepLiveness::kDead;
-  return LocalStepLiveness::kUnknown;
-}
-
 CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
