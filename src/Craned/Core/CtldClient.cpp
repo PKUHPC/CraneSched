@@ -600,6 +600,15 @@ void CtldClient::Init() {
                         job_id, step_id, ctld_status, craned_status);
 
             if (ctld_status == StepStatus::Completing) {
+              if (craned_status == StepStatus::Running) {
+                CRANE_INFO(
+                    "[Step #{}.{}] Ctld is Completing while Craned is still "
+                    "Running. Skip FreeSteps replay and let Ctld drive the "
+                    "terminate path.",
+                    job_id, step_id);
+                continue;
+              }
+
               CRANE_TRACE(
                   "[Step #{}.{}] Ctld is completing, replay local cleanup.",
                   job_id, step_id);
