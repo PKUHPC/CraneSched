@@ -2333,11 +2333,11 @@ CraneErrCode ProcInstance::Spawn() {
 
     ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
                                           nullptr);
-    if (!ok || !msg.ok()) {
+    if (!ok || !child_process_ready.ok()) {
       if (!ok)
         CRANE_ERROR("Socket child endpoint failed: {}",
                     strerror(istream.GetErrno()));
-      if (!msg.ok())
+      if (!child_process_ready.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid, task_id);
       close(ctrl_fd);
 
@@ -2355,10 +2355,10 @@ CraneErrCode ProcInstance::Spawn() {
     auto success = m_task_cg_->MigrateProcIn(getpid());
     if (!success) {
       fmt::print(stderr, "[Subprocess] MigrateProcIn returned {}\n", success);
-      std::abort();
+      _exit(EXIT_FAILURE);
     }
     CraneErrCode err = SetChildProcProperty_();
-    if (err != CraneErrCode::SUCCESS) std::abort();
+    if (err != CraneErrCode::SUCCESS) _exit(EXIT_FAILURE);
 
     close(ctrl_sock_pair[0]);
     int ctrl_fd = ctrl_sock_pair[1];
@@ -2384,13 +2384,13 @@ CraneErrCode ProcInstance::Spawn() {
                    "[Subprocess] Error: Parent process ask to suicide.\n");
       }
 
-      std::abort();
+      _exit(EXIT_FAILURE);
     }
 
     if (m_parent_step_inst_->IsCrun()) {
       SetupCrunFwdAtChild_();
     } else if (SetChildProcBatchFd_() != CraneErrCode::SUCCESS) {
-      std::abort();
+      _exit(EXIT_FAILURE);
     }
 
     child_process_ready.set_ok(true);
@@ -2398,7 +2398,7 @@ CraneErrCode ProcInstance::Spawn() {
     ok &= ostream.Flush();
     if (!ok) {
       fmt::print(stderr, "[Subprocess] Error: Failed to flush.\n");
-      std::abort();
+      _exit(EXIT_FAILURE);
     }
 
     close(ctrl_fd);
@@ -2430,7 +2430,7 @@ CraneErrCode ProcInstance::Spawn() {
             stderr,
             "[Subprocess] Error: Failed to run task prolog, status={}:{}\n",
             status.exit_code, status.signal_num);
-        std::abort();
+        _exit(EXIT_FAILURE);
       }
       util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
                                                 STDOUT_FILENO);
@@ -2457,7 +2457,7 @@ CraneErrCode ProcInstance::Spawn() {
                    "[Subprocess] Error: Failed to run step task prolog, "
                    "status={}:{}\n",
                    status.exit_code, status.signal_num);
-        std::abort();
+        _exit(EXIT_FAILURE);
       }
       util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
                                                 STDOUT_FILENO);
@@ -2486,12 +2486,11 @@ CraneErrCode ProcInstance::Spawn() {
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
-    // Ctld use SIGABRT to inform the client of this failure.
     fmt::print(stderr, "[Subprocess] Error: execv failed: {}\n",
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
-    abort();
+    _exit(EXIT_FAILURE);
   }
 }
 

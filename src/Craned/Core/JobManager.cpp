@@ -23,6 +23,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <latch>
 #include <set>
 #include <utility>
 
@@ -2137,26 +2138,25 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         continue;
       }
       m_completing_step_retry_map_[key] = CompletingStepState{.step = step};
+      if (step->err_before_supv_start) continue;
+      if (!step->silent_cleanup && !step->IsDaemonStep()) continue;
       steps_to_shutdown.emplace_back(step);
     }
   }
 
-  for (auto* step : steps_to_shutdown) {
-    if (step->err_before_supv_start) continue;
+  if (steps_to_shutdown.empty()) return;
+  std::latch shutdown_latch(steps_to_shutdown.size());
 
-    g_thread_pool->detach_task([step] {
-      // Normal none daemon step, will exit when cleanup done,no need to
-      // terminate
-      if (!step->silent_cleanup && !step->IsDaemonStep()) {
-        return;
-      }
-      // Daemon or silent cleanup
-      auto stub = step->supervisor_stub;
-      if (!stub) {
-        CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
-                    step->job_id, step->step_id);
-        return;
-      }
+  for (auto* step : steps_to_shutdown) {
+    auto stub = step->supervisor_stub;
+    if (!stub) {
+      CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
+                  step->job_id, step->step_id);
+      shutdown_latch.count_down();
+      continue;
+    }
+
+    g_thread_pool->detach_task([step, stub = std::move(stub), &shutdown_latch] {
       CraneErrCode err;
       if (step->IsDaemonStep()) {
         CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
@@ -2174,8 +2174,10 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor.",
                     step->job_id, step->step_id);
       }
+      shutdown_latch.count_down();
     });
   }
+  shutdown_latch.wait();
 }
 
 void JobManager::StepStatusChangeAsync(
