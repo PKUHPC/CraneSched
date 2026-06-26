@@ -600,6 +600,11 @@ void CtldClient::Init() {
                         job_id, step_id, ctld_status, craned_status);
 
             if (ctld_status == StepStatus::Completing) {
+              // Special case: timeout while Craned was offline.
+              // Ctld may have marked the step Completing after timeout while
+              // Craned still sees a local Running step. Do not replay
+              // FreeSteps here because the local process may not have been
+              // terminated yet; let Ctld continue through the terminate path.
               if (craned_status == StepStatus::Running) {
                 CRANE_INFO(
                     "[Step #{}.{}] Ctld is Completing while Craned is still "
