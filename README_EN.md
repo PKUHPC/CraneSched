@@ -41,9 +41,11 @@ We welcome community contributions.
 
 ![Architecture](./docs/images/Architecture.png)
 
-For the detailed architecture design, please refer to the [CraneSched documentation](https://pkuhpc.github.io/CraneSched/deployment/index.html).
+CraneSched introduces a **Resource Manager** to support both HPC and AI workloads:
 
-For the design and implementation of container features, please refer to [CraneSched Container Features](https://pkuhpc.github.io/CraneSched/reference/container/index.html).
+- For **HPC jobs**: the **Cgroup Manager** allocates resources and isolates jobs via cgroups.
+- For **AI jobs**: the **Container Manager** allocates resources with Kubernetes, packages apps into containers, and manages their lifecycle.
+- Additionally, for **containerized workloads** (experimental): supports CRI (Container Runtime Interface) with runtimes like containerd or CRI-O for running containerized applications.
 
 # Application Scenarios
 

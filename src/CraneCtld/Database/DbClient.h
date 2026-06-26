@@ -218,8 +218,8 @@ class MongodbClient {
   void AppendToAccUsageTable(const JobInCtld* job,
                              mongocxx::client_session* session = nullptr);
 
-  // Mark job as aggregated in job_table
-  void MarkJobAsAggregated(job_id_t job_id,
+  // Mark job as aggregated in job_table (keyed by job_id + requeue_count)
+  void MarkJobAsAggregated(job_id_t job_id, int32_t requeue_count,
                            mongocxx::client_session* session = nullptr);
 
   // Recovery functions for startup
@@ -612,7 +612,16 @@ class MongodbClient {
                            const ResourceView& value);
 
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const PartitionToLimitMap& value);
+
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const ResourceView& value);
+
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
                               const GresMap& value);
+
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const PartitionToLimitMap& value);
 
   template <typename... Ts, std::size_t... Is>
   document documentConstructor_(
@@ -736,8 +745,8 @@ class MongodbClient {
   PodMetaInJob BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInJob BsonToContainerMeta(const bsoncxx::document::view& doc);
 
-  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view,
-                              const std::string& field, ResourceView* resource);
+  void BsonToResourceView(const bsoncxx::document::view& view,
+                          const std::string& field, ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_job_collection_name_{"job_table"};

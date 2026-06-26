@@ -1127,6 +1127,34 @@ Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
+void CgroupManager::KillAndDestroyCgroup(
+    std::unique_ptr<CgroupInterface> cgroup) {
+  if (cgroup == nullptr) return;
+
+  const auto cgroup_name = cgroup->CgroupName();
+  const auto cgroup_path = cgroup->CgroupPath().string();
+  CRANE_TRACE("Destroying cgroup {}.", cgroup_path);
+
+  int cnt = 0;
+  while (true) {
+    if (cgroup->Empty()) break;
+    if (cnt >= 5) {
+      CRANE_ERROR(
+          "Couldn't kill the processes in cgroup {} after {} times. "
+          "Skipping it.",
+          cgroup_name, cnt);
+      break;
+    }
+
+    cgroup->KillAllProcesses(SIGKILL);
+    ++cnt;
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+  }
+
+  cgroup->Destroy();
+  CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
+}
+
 CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
   std::ifstream infile(cgroup_file);
@@ -2549,6 +2577,21 @@ void CgroupManager::ShutdownCpuPool() {
   }
   m_overflow_bits_.clear();
   m_core_count_ = 0;
+}
+
+void CgroupManager::ReleaseJobCpuPool(
+    job_id_t job_id, const crane::grpc::ResourceInNodeV3& resource) {
+  ResourceInNodeV3 res_v3(resource);
+  const auto& cpu_set = res_v3.GetCpuSet();
+
+  if (cpu_set.IsInteger()) {
+    ReleaseCoresForIntJob(cpu_set.core_ids);
+    WriteOverflowCpuset();
+    CRANE_DEBUG("Released INT job #{} cpus=[{}]", job_id,
+                FormatCpusetString_(cpu_set.core_ids));
+  } else {
+    CRANE_DEBUG("Released overflow job #{}", job_id);
+  }
 }
 
 void CgroupManager::ClaimCoresForIntJob(const std::set<uint32_t>& core_ids) {

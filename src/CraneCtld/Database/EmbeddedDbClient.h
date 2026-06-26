@@ -203,6 +203,8 @@ class EmbeddedDbClient {
 
   virtual bool ResetNextStepDbId() = 0;
 
+  virtual bool ResetJobStepIdCounter(job_id_t job_id) = 0;
+
   virtual bool PurgeAllJobHistory() = 0;
 
   virtual bool RetrieveLastSnapshot(DbSnapshot* snapshot) = 0;
@@ -319,6 +321,8 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
   bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id) override;
 
   bool ResetNextStepDbId() override;
+
+  bool ResetJobStepIdCounter(job_id_t job_id) override;
 
   bool PurgeAllJobHistory() override;
 

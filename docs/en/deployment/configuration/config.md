@@ -159,6 +159,10 @@ PriorityWeightFairShare: 10000   # Fair share weight
 PriorityWeightJobSize: 0         # Job size weight (0=disabled)
 PriorityWeightPartition: 1000    # Partition priority weight
 PriorityWeightQoS: 1000000       # QoS priority weight
+
+CraneCtld:
+  JobRequeue: true               # Allow batch jobs to be requeued by default
+  MaxRequeueCount: 5             # Hold a job after it reaches this requeue count
 ```
 
 ## Network Settings

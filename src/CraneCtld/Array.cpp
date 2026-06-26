@@ -136,6 +136,8 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
       ToInt64Seconds(child->time_limit));
   child->account_chain = parent_job_->account_chain;
+  child->req_node_res_view = parent_job_->req_node_res_view;
+  child->req_task_res_view = parent_job_->req_task_res_view;
   child->req_total_res_view = parent_job_->req_total_res_view;
 
   {
@@ -486,7 +488,7 @@ void ArrayManager::RecoverAccountingForRegisteredParents() {
     // task limit. Array children do not allocate or release submit slots.
     uint32_t reserve_count =
         ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec());
-    g_account_meta_container->MallocQosSubmitResource(parent, reserve_count);
+    g_account_meta_container->MallocMetaSubmitResource(parent, reserve_count);
     g_account_meta_container->UserAddJob(parent.Username(), reserve_count);
   }
 }
@@ -565,7 +567,7 @@ void ArrayManager::TryFinalizeParentNoLock_(
 
   // Array children do not own submit slots; release the parent's reservation
   // only when the whole array parent finalizes.
-  g_account_meta_container->FreeQosSubmitResource(
+  g_account_meta_container->FreeMetaSubmitResource(
       parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
 
   auto meta_it = m_metas_.find(array_job_id);
@@ -608,7 +610,7 @@ ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
   auto& parent = meta->MutableParent();
   parent.TriggerTerminalDependencyEvents(end_time);
 
-  g_account_meta_container->FreeQosSubmitResource(
+  g_account_meta_container->FreeMetaSubmitResource(
       parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
 
   result.final_parents.push_back(FinalizedArrayParent{

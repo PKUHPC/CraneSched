@@ -54,6 +54,10 @@ CraneCtld:
   StatusChangeMaxDrainPerTick: 200
   # Max runtime DB updates per transaction chunk (default: 200)
   StatusChangeDbCommitChunkSize: 200
+  # Whether batch jobs may be requeued by default. Users can override with --requeue/--no-requeue.
+  JobRequeue: true
+  # Max number of times a job can be requeued before it is held.
+  MaxRequeueCount: 5
 
 Keepalived:
   # the base directory of NFS storage

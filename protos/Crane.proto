@@ -218,6 +218,16 @@ message CancelJobReply {
   repeated NotCancelledJobStep not_cancelled = 2;
 }
 
+message RequeueJobRequest {
+  uint32 operator_uid = 1;
+  repeated uint32 job_ids = 2;
+}
+
+message RequeueJobReply {
+  repeated uint32 requeued_jobs = 1;
+  map<uint32, string> not_requeued_jobs = 2;
+}
+
 message QueryStepFromPortRequest {
   uint32 port = 1;
 }
@@ -459,6 +469,7 @@ message ModifyAccountRequest {
   string name = 2;
   repeated ModifyFieldOperation operations = 3;
   bool force = 4;
+  string partition = 5;
 }
 
 message ModifyAccountReply {
@@ -1487,6 +1498,9 @@ service CraneCtld {
   /* RPCs called from ccancel */
 
   rpc CancelJob(CancelJobRequest) returns (CancelJobReply);
+
+  /* RPCs called from ccontrol requeue */
+  rpc RequeueJob(RequeueJobRequest) returns (RequeueJobReply);
 
   /* RPCs called from cbatch */
 

@@ -662,10 +662,14 @@ class CgroupManager {
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNodeV3& res_in_node);
 
+  static void KillAndDestroyCgroup(std::unique_ptr<CgroupInterface> cgroup);
+
   // --- CPU Pool Management ---
   // All state modifications below must be called from event loop only.
   static bool InitCpuPool(const std::set<uint32_t>& node_cpus);
   static void ShutdownCpuPool();
+  static void ReleaseJobCpuPool(job_id_t job_id,
+                                const crane::grpc::ResourceInNodeV3& resource);
 
   static void ClaimCoresForIntJob(const std::set<uint32_t>& core_ids);
   static void ReleaseCoresForIntJob(const std::set<uint32_t>& core_ids);

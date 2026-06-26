@@ -53,3 +53,48 @@ target_include_directories(embedded_db_client_test PUBLIC
         ${PROJECT_SOURCE_DIR}/src/CraneCtld
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database)
 gtest_discover_tests(embedded_db_client_test)
+
+add_executable(ctld_public_defs_test
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.cpp
+
+        CtldPublicDefsTest.cpp
+        CtldTestStubs.cpp
+        )
+target_link_libraries(ctld_public_defs_test
+        GTest::gtest GTest::gtest_main
+
+        spdlog::spdlog
+        concurrentqueue
+        crane_proto_lib
+
+        Utility_PublicHeader
+        Utility_PasswordEntry
+        uvw
+        cxxopts
+        Threads::Threads
+
+        absl::btree
+        absl::synchronization
+        absl::flat_hash_map
+
+        phmap
+        nlohmann_json
+        unqlite
+        range-v3::range-v3
+        bs_thread_pool
+        yaml-cpp
+        Backward::Interface
+        )
+target_include_directories(ctld_public_defs_test PUBLIC ${PROJECT_SOURCE_DIR}/src/CraneCtld)
+if (ENABLE_UNQLITE)
+    target_compile_definitions(ctld_public_defs_test PRIVATE CRANE_HAVE_UNQLITE)
+endif ()
+if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
+    target_compile_definitions(ctld_public_defs_test PRIVATE CRANE_HAVE_BERKELEY_DB)
+    target_include_directories(ctld_public_defs_test PRIVATE ${BERKELEY_DB_INCLUDE_DIR})
+    target_link_libraries(ctld_public_defs_test ${BERKELEY_DB_CXX_LIBRARIES})
+endif ()
+gtest_discover_tests(ctld_public_defs_test)

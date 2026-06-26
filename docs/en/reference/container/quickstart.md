@@ -86,6 +86,8 @@ Parameter description:
 
 Once inside the container, you can execute commands as in a normal terminal. The job automatically ends when you exit.
 
+To detach from an interactive TTY session without stopping the container, press `Ctrl-P + Ctrl-Q`.
+
 ---
 
 ## Background Container
@@ -196,7 +198,7 @@ ccon logs --tail 100 123.1
 ccon attach 123.1
 ```
 
-Use `Ctrl+C` to disconnect (does not terminate the container).
+When attached with a TTY, press `Ctrl-P + Ctrl-Q` to detach without terminating the container.
 
 ### Execute Commands in Container
 
@@ -207,6 +209,8 @@ ccon exec 123.1 ls -la /app
 # Start interactive shell
 ccon exec -it 123.1 /bin/bash
 ```
+
+For an interactive TTY exec session, press `Ctrl-P + Ctrl-Q` to detach without stopping the container.
 
 ---
 

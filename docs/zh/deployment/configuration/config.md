@@ -159,6 +159,10 @@ PriorityWeightFairShare: 10000   # 公平份额权重
 PriorityWeightJobSize: 0         # 作业大小权重（0=禁用）
 PriorityWeightPartition: 1000    # 分区优先级权重
 PriorityWeightQoS: 1000000       # QoS 优先级权重
+
+CraneCtld:
+  JobRequeue: true               # 是否默认允许批处理作业被重排
+  MaxRequeueCount: 5             # 作业达到该重排次数后保持 Pending 并被 hold
 ```
 
 ## 网络设置

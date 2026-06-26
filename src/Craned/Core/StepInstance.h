@@ -40,7 +40,7 @@ struct StepInstance {
 
   std::atomic_bool err_before_supv_start{false};
   // Stored when Completing is received from supervisor.
-  // Used by FreeJobs to send the real terminal status after cleanup.
+  // Used to send the real terminal status after cleanup.
   struct PendingTerminalStatus {
     crane::grpc::JobStatus final_status;
     uint32_t exit_code;
@@ -66,13 +66,20 @@ struct StepInstance {
   // Job's cgroup path info (for constructing child paths and cpuset migration).
   Common::CgroupPathInfo job_path_info;
 
+  struct DaemonJobCleanupCtx {
+    crane::grpc::ResourceInNodeV3 resource;
+    EnvMap epilog_env;
+    std::unique_ptr<CgroupInterface> job_cgroup;
+  };
+  std::optional<DaemonJobCleanupCtx> daemon_job_cleanup;
+
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
                         StepStatus status,
                         std::shared_ptr<SupervisorStub> supervisor_stub);
   ~StepInstance() = default;
-  void CleanUp();
+  void CleanUp(bool async = true);
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;

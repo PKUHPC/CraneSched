@@ -90,6 +90,11 @@ void ParseCtldConfig(const YAML::Node& config) {
     ctld_config.StatusChangeDbCommitChunkSize =
         YamlValueOr<uint32_t>(ctld_cfg["StatusChangeDbCommitChunkSize"],
                               Ctld::kJobStatusChangeDbCommitChunkSize);
+
+    ctld_config.JobRequeue =
+        YamlValueOr<bool>(ctld_cfg["JobRequeue"], Ctld::kDefaultJobRequeue);
+    ctld_config.MaxRequeueCount = YamlValueOr<int32_t>(
+        ctld_cfg["MaxRequeueCount"], Ctld::kDefaultMaxRequeueCount);
   }
 
   g_config.CtldConf = std::move(ctld_config);

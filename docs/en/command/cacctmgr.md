@@ -32,6 +32,7 @@ cacctmgr <ACTION> <ENTITY> [ID] [OPTIONS]
 - **-v, --version**: Display cacctmgr version
 - **-J, --json**: Output in JSON format
 - **-f, --force**: Force operation without confirmation
+- **-P, --partition-limit**: Show partition resource limits in `show account` and `show user` output
 
 ## Actions
 
@@ -113,7 +114,7 @@ cacctmgr delete account ComputingCentre
 **Syntax:**
 
 ```bash
-cacctmgr modify account where Name=<account> set <ATTRIBUTE>=<value>
+cacctmgr modify account where Name=<account> [Partition=<partition>] set <ATTRIBUTE>=<value>
 ```
 
 **Attributes:**
@@ -126,6 +127,12 @@ cacctmgr modify account where Name=<account> set <ATTRIBUTE>=<value>
 - **AllowedQos=&lt;qos_list&gt;**: Set allowed QoS list (overwrites)
 - **AllowedQos+=&lt;qos_list&gt;**: Add QoS to allowed list
 - **AllowedQos-=&lt;qos_list&gt;**: Remove QoS from allowed list
+- **MaxJobs=&lt;num&gt;**: Set maximum concurrent running jobs in the specified partition (requires `Partition=<partition>`)
+- **MaxSubmitJobs=&lt;num&gt;**: Set maximum submitted jobs in the specified partition (requires `Partition=<partition>`)
+- **MaxTres=&lt;tres&gt;**: Set maximum total TRES usage in the specified partition (requires `Partition=<partition>`)
+- **MaxTresPerJob=&lt;tres&gt;**: Set maximum TRES per job in the specified partition (requires `Partition=<partition>`)
+- **MaxWall=&lt;seconds&gt;**: Set cumulative wall-clock time limit in the specified partition (requires `Partition=<partition>`)
+- **MaxWallPerJob=&lt;seconds&gt;**: Set per-job wall-clock time limit in the specified partition (requires `Partition=<partition>`)
 
 **Examples:**
 
@@ -153,6 +160,13 @@ Set allowed partitions (replace existing):
 cacctmgr modify account where Name=PKU set AllowedPartition=CPU,GPU
 ```
 
+Set account resource limits in partition `GPU`:
+
+```bash
+cacctmgr modify account where Name=PKU Partition=GPU \
+  set MaxJobs=20 MaxSubmitJobs=100 MaxTresPerJob=cpu:8,mem:32G MaxWallPerJob=7200
+```
+
 ### 1.4 Show Accounts
 
 **Syntax:**
@@ -164,6 +178,7 @@ cacctmgr show account [name] [OPTIONS]
 **Options:**
 
 - **Name=&lt;name1,name2,...&gt;**: Show specific accounts only
+- **-P, --partition-limit**: Also show account resource limits in each partition
 
 **Examples:**
 
@@ -183,6 +198,12 @@ Show multiple accounts:
 
 ```bash
 cacctmgr show account Name=PKU,ComputingCentre
+```
+
+Show account partition resource limits:
+
+```bash
+cacctmgr show account PKU -P
 ```
 
 ### 1.5 Block/Unblock Account
@@ -325,6 +346,12 @@ cacctmgr modify user where Name=<user> [Account=<account>] [Partition=<partition
 - **AllowedQos=&lt;qos_list&gt;**: Set allowed QoS (overwrites)
 - **AllowedQos+=&lt;qos_list&gt;**: Add QoS
 - **AllowedQos-=&lt;qos_list&gt;**: Remove QoS
+- **MaxJobs=&lt;num&gt;**: Set maximum concurrent running jobs in the specified partition (requires `Partition=<partition>`)
+- **MaxSubmitJobs=&lt;num&gt;**: Set maximum submitted jobs in the specified partition (requires `Partition=<partition>`)
+- **MaxTres=&lt;tres&gt;**: Set maximum total TRES usage in the specified partition (requires `Partition=<partition>`)
+- **MaxTresPerJob=&lt;tres&gt;**: Set maximum TRES per job in the specified partition (requires `Partition=<partition>`)
+- **MaxWall=&lt;seconds&gt;**: Set cumulative wall-clock time limit in the specified partition (requires `Partition=<partition>`)
+- **MaxWallPerJob=&lt;seconds&gt;**: Set per-job wall-clock time limit in the specified partition (requires `Partition=<partition>`)
 
 **Examples:**
 
@@ -346,6 +373,13 @@ Add QoS to user:
 cacctmgr modify user where Name=charlie set AllowedQos+=high
 ```
 
+Set user resource limits in partition `GPU` under account `PKU`:
+
+```bash
+cacctmgr modify user where Name=alice Account=PKU Partition=GPU \
+  set MaxJobs=5 MaxSubmitJobs=20 MaxTresPerJob=cpu:4,mem:16G MaxWallPerJob=3600
+```
+
 ### 2.4 Show Users
 
 **Syntax:**
@@ -358,6 +392,7 @@ cacctmgr show user [name] [OPTIONS]
 
 - **Accounts=&lt;account&gt;**: Show users of specific account only
 - **Name=&lt;name1,name2,...&gt;**: Show specific users only
+- **-P, --partition-limit**: Also show user resource limits by account and partition
 
 **Examples:**
 
@@ -377,6 +412,12 @@ Show users in an account:
 
 ```bash
 cacctmgr show user Accounts=PKU
+```
+
+Show user partition resource limits:
+
+```bash
+cacctmgr show user alice -P
 ```
 
 ### 2.5 Block/Unblock User

@@ -149,8 +149,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
   }
 }
 
-void CtldClientStateMachine::EvConfigurationDone(
-    std::optional<std::set<job_id_t>> lost_jobs,
+bool CtldClientStateMachine::EvConfigurationDone(
+    const RegToken& token, std::optional<std::set<job_id_t>> lost_jobs,
     std::optional<std::unordered_map<job_id_t, std::set<step_id_t>>>
         lost_steps) {
   absl::MutexLock lk(&m_mtx_);
@@ -161,7 +161,18 @@ void CtldClientStateMachine::EvConfigurationDone(
         m_logger_,
         "EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
         StateToString(m_state_));
-    return;
+    return false;
+  }
+
+  if (!m_reg_token_.has_value() || token != m_reg_token_.value()) {
+    CRANE_LOGGER_WARN(
+        m_logger_,
+        "EvConfigurationDone triggered with stale token {}. Expected {}. "
+        "Ignoring.",
+        ProtoTimestampToString(token),
+        m_reg_token_.has_value() ? ProtoTimestampToString(m_reg_token_.value())
+                                 : "<null>");
+    return false;
   }
 
   if (lost_jobs.has_value() && lost_steps.has_value()) {
@@ -172,6 +183,8 @@ void CtldClientStateMachine::EvConfigurationDone(
     m_state_ = State::REQUESTING_CONFIG;
     ActionRequestConfig_();
   }
+
+  return true;
 }
 
 bool CtldClientStateMachine::EvGetRegisterReply(
@@ -695,58 +708,145 @@ void CtldClient::Init() {
           }
         }
 
-        g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+        std::thread([token, lost_jobs = std::move(lost_jobs),
+                     lost_steps = std::move(lost_steps),
+                     invalid_steps = std::move(invalid_steps),
+                     invalid_jobs = std::move(invalid_jobs),
+                     completing_steps = std::move(completing_steps),
+                     steps_to_sync = std::move(steps_to_sync)]() mutable {
+          util::SetCurrentThreadName("CfgCleanupThr");
 
-        // Report status changes to Ctld for steps that need synchronization
-        for (const auto& [job_id, step_status_map] : steps_to_sync) {
-          for (const auto& [step_id, status] : step_status_map) {
-            uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
-            google::protobuf::Timestamp end_time =
-                g_job_mgr->GetStepEndTime(job_id, step_id);
-            CRANE_INFO(
-                "[Step #{}.{}] Reporting status {} to Ctld during recovery "
-                "sync",
-                job_id, step_id, status);
-            StepStatusChangeQueueElem elem{
-                .job_id = job_id,
-                .step_id = step_id,
-                .new_status = status,
-                .exit_code = exit_code,
-                .reason = "Status synced from Craned during recovery",
-                .timestamp = end_time};
-            g_ctld_client->StepStatusChangeAsync(std::move(elem));
-          }
-        }
+          auto wait_step_futures =
+              [](StepCleanupFutureMap&& futures) -> CraneErrCode {
+            CraneErrCode result = CraneErrCode::SUCCESS;
+            for (auto& [job_id, step_futures] : futures) {
+              for (auto& [step_id, future] : step_futures) {
+                try {
+                  auto step_result = future.get();
+                  if (step_result != CraneErrCode::SUCCESS &&
+                      result == CraneErrCode::SUCCESS) {
+                    result = step_result;
+                  }
+                } catch (const std::exception& ex) {
+                  CRANE_ERROR("[Step #{}.{}] Cleanup future failed: {}", job_id,
+                              step_id, ex.what());
+                  if (result == CraneErrCode::SUCCESS)
+                    result = CraneErrCode::ERR_SYSTEM_ERR;
+                }
+              }
+            }
+            return result;
+          };
 
-        // Only terminate truly invalid steps (those not in Ctld's view at all)
-        // Don't kill steps that exist in both but may have status differences
-        // - Ctld will handle status synchronization via intelligent merging
-        if (!invalid_steps.empty()) {
-          CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
-                     util::JobStepsToString(invalid_steps));
-          // Mark as silent cleanup (no status forwarded to CraneCtld),
-          // then FreeSteps triggers CleanUpJobAndStepsAsync which
-          // terminates supervisors and waits for exit via timer.
-          std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-              steps_to_free;
-          for (auto& [job_id, steps] : invalid_steps) {
-            for (auto step_id : steps) {
-              g_job_mgr->MarkStepSilentCleanup(job_id, step_id);
-              steps_to_free[job_id].insert(step_id);
+          auto wait_job_futures =
+              [](JobCleanupFutureMap&& futures) -> CraneErrCode {
+            CraneErrCode result = CraneErrCode::SUCCESS;
+            for (auto& [job_id, future] : futures) {
+              try {
+                auto job_result = future.get();
+                if (job_result != CraneErrCode::SUCCESS &&
+                    result == CraneErrCode::SUCCESS) {
+                  result = job_result;
+                }
+              } catch (const std::exception& ex) {
+                CRANE_ERROR("[Job #{}] Cleanup future failed: {}", job_id,
+                            ex.what());
+                if (result == CraneErrCode::SUCCESS)
+                  result = CraneErrCode::ERR_SYSTEM_ERR;
+              }
+            }
+            return result;
+          };
+
+          auto free_steps_silently =
+              [&](std::unordered_map<job_id_t, std::set<step_id_t>>& steps)
+              -> CraneErrCode {
+            if (steps.empty()) return CraneErrCode::SUCCESS;
+
+            std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+                non_daemon_steps;
+            std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+                daemon_steps;
+            for (auto& [job_id, step_ids] : steps) {
+              for (auto step_id : step_ids) {
+                g_job_mgr->MarkStepSilentCleanup(job_id, step_id);
+                if (step_id == kDaemonStepId)
+                  daemon_steps[job_id].insert(step_id);
+                else
+                  non_daemon_steps[job_id].insert(step_id);
+              }
+            }
+
+            CraneErrCode result = CraneErrCode::SUCCESS;
+            if (!non_daemon_steps.empty()) {
+              result = wait_step_futures(
+                  g_job_mgr->FreeSteps(std::move(non_daemon_steps)));
+            }
+            if (result == CraneErrCode::SUCCESS && !daemon_steps.empty()) {
+              result = wait_step_futures(
+                  g_job_mgr->FreeSteps(std::move(daemon_steps)));
+            }
+            return result;
+          };
+
+          // Only terminate truly invalid steps (those not tracked by Ctld).
+          // Recovery waits for these local cleanups before Craned can become
+          // READY, so stale local supervisors cannot survive startup.
+          if (!invalid_steps.empty()) {
+            CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
+                       util::JobStepsToString(invalid_steps));
+            auto cleanup_result = free_steps_silently(invalid_steps);
+            if (cleanup_result != CraneErrCode::SUCCESS) {
+              CRANE_ERROR("Invalid step cleanup failed: {}",
+                          CraneErrStr(cleanup_result));
+              return;
             }
           }
-          g_job_mgr->FreeSteps(std::move(steps_to_free));
-        }
-        if (!invalid_jobs.empty()) {
-          CRANE_INFO("Freeing invalid jobs: [{}].",
-                     absl::StrJoin(invalid_jobs, ","));
-          g_job_mgr->FreeJobs(std::move(invalid_jobs));
-        }
-        if (!completing_steps.empty()) {
-          CRANE_INFO("Terminating completing steps: [{}].",
-                     util::JobStepsToString(completing_steps));
-          g_job_mgr->FreeSteps(std::move(completing_steps));
-        }
+
+          if (!invalid_jobs.empty()) {
+            CRANE_INFO("Freeing invalid jobs: [{}].",
+                       absl::StrJoin(invalid_jobs, ","));
+            auto cleanup_result = wait_job_futures(
+                g_job_mgr->FreeInvalidJobs(std::move(invalid_jobs)));
+            if (cleanup_result != CraneErrCode::SUCCESS) {
+              CRANE_ERROR("Invalid job cleanup failed: {}",
+                          CraneErrStr(cleanup_result));
+              return;
+            }
+          }
+
+          if (!g_ctld_client_sm->EvConfigurationDone(token, lost_jobs,
+                                                     lost_steps)) {
+            return;
+          }
+
+          // Report status changes to Ctld for steps that need synchronization
+          for (const auto& [job_id, step_status_map] : steps_to_sync) {
+            for (const auto& [step_id, status] : step_status_map) {
+              uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+              google::protobuf::Timestamp end_time =
+                  g_job_mgr->GetStepEndTime(job_id, step_id);
+              CRANE_INFO(
+                  "[Step #{}.{}] Reporting status {} to Ctld during recovery "
+                  "sync",
+                  job_id, step_id, status);
+              StepStatusChangeQueueElem elem{
+                  .job_id = job_id,
+                  .step_id = step_id,
+                  .new_status = status,
+                  .exit_code = exit_code,
+                  .reason = "Status synced from Craned during recovery",
+                  .timestamp = end_time};
+              g_ctld_client->StepStatusChangeAsync(std::move(elem));
+            }
+          }
+
+          if (!completing_steps.empty()) {
+            CRANE_INFO("Terminating completing steps: [{}].",
+                       util::JobStepsToString(completing_steps));
+            g_job_mgr->FreeSteps(std::move(completing_steps));
+          }
+        }).detach();
       },
       CallbackInvokeMode::ASYNC, false);
 

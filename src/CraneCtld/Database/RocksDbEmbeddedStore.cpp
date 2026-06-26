@@ -191,6 +191,15 @@ bool RocksDbEmbeddedStore::ResetNextStepDbId() {
   return true;
 }
 
+bool RocksDbEmbeddedStore::ResetJobStepIdCounter(job_id_t job_id) {
+  absl::MutexLock lock_steps(&step_id_mu_);
+  rocksdb::WriteBatch batch;
+  batch.Delete(Handle_(Cf::Meta), NextStepIdKey(job_id));
+  if (!WriteBatch_(&batch, "rocksdb_reset_job_step_id")) return false;
+  next_step_id_map_.erase(job_id);
+  return true;
+}
+
 bool RocksDbEmbeddedStore::PurgeAllJobHistory() {
   rocksdb::WriteBatch batch;
   auto delete_all = [&](Cf cf) -> bool {

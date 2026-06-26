@@ -94,6 +94,27 @@ bool ParseHexMask_(const std::string& line, uint64_t* mask) {
   }
 }
 
+CraneErrCode WaitStepCleanupFutures_(StepCleanupFutureMap&& futures) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+  for (auto& [job_id, step_futures] : futures) {
+    for (auto& [step_id, future] : step_futures) {
+      try {
+        auto step_result = future.get();
+        if (step_result != CraneErrCode::SUCCESS &&
+            result == CraneErrCode::SUCCESS) {
+          result = step_result;
+        }
+      } catch (const std::exception& ex) {
+        CRANE_ERROR("[Step #{}.{}] Cleanup future failed: {}", job_id, step_id,
+                    ex.what());
+        if (result == CraneErrCode::SUCCESS)
+          result = CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    }
+  }
+  return result;
+}
+
 bool ProcHasPendingSigkill_(pid_t pid) {
   std::ifstream ifs(fmt::format("/proc/{}/status", pid));
   if (!ifs.is_open()) return false;
@@ -366,12 +387,6 @@ JobManager::JobManager() {
       std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
       std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
-  m_free_jobs_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_free_jobs_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanFreeJobsQueueCb_();
-      });
-
   m_free_steps_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_free_steps_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
@@ -457,6 +472,26 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
   const auto uid_map_lock_end = std::chrono::steady_clock::now();
 
+  for (const auto& job : jobs) {
+    job_id_t job_id = job.job_id;
+    if (!job_map_ptr->contains(job_id)) continue;
+
+    auto* old_job = job_map_ptr->at(job_id).RawPtr();
+    bool old_job_freeable = false;
+    {
+      absl::MutexLock lk(old_job->step_map_mtx.get());
+      old_job_freeable = old_job->step_map.empty() && old_job->cgroup == nullptr;
+    }
+
+    if (!old_job_freeable) {
+      CRANE_ERROR(
+          "[Job #{}] Allocation rejected because the previous job record is "
+          "still active or cleaning.",
+          job_id);
+      return false;
+    }
+  }
+
   const auto insert_begin = std::chrono::steady_clock::now();
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
@@ -467,6 +502,11 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     alloc_span.SetAttribute("crane.dimension", "lifecycle");
 
     uid_t uid = job.Uid();
+    if (job_map_ptr->contains(job_id)) {
+      CRANE_INFO("[Job #{}] Reclaiming freeable stale job record.", job_id);
+      FreeJobInfoNoLock_(job_id, job_map_ptr, uid_map_ptr);
+    }
+
     job_map_ptr->emplace(job_id, std::move(job));
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
@@ -522,20 +562,49 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
   int64_t free_job_info_ms = 0;
   int64_t queue_len = 0;
   bool any_freed = false;
+  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
   for (job_id_t job_id : job_ids) {
     auto free_info_begin = std::chrono::steady_clock::now();
-    auto job = FreeJobInfo_(job_id);
+    if (!job_map_ptr->contains(job_id)) {
+      CRANE_DEBUG("[Job #{}] FreeJobs ignored because job is not found.",
+                  job_id);
+      free_job_info_ms +=
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - free_info_begin)
+              .count();
+      continue;
+    }
+
+    auto* job_ptr = job_map_ptr->at(job_id).RawPtr();
+    bool freeable = false;
+    size_t step_count = 0;
+    bool has_job_cgroup = job_ptr->cgroup != nullptr;
+    {
+      absl::MutexLock lk(job_ptr->step_map_mtx.get());
+      step_count = job_ptr->step_map.size();
+      freeable = step_count == 0 && !has_job_cgroup;
+    }
+
+    if (!freeable) {
+      CRANE_DEBUG(
+          "[Job #{}] FreeJobs ignored because job is active or cleaning. "
+          "step_count={}, has_job_cgroup={}",
+          job_id, step_count, has_job_cgroup);
+      free_job_info_ms +=
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - free_info_begin)
+              .count();
+      continue;
+    }
+
+    auto job = FreeJobInfoNoLock_(job_id, job_map_ptr, uid_map_ptr);
     free_job_info_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - free_info_begin)
                             .count();
     if (!job.has_value()) {
-      CRANE_INFO(
-          "Try to free non-existent job #{}, sending a status change as "
-          "daemon step",
-          job_id);
-      SendCompletingAndTerminal_(job_id, kDaemonStepId, StepStatus::Cancelled,
-                                 ExitCode::EC_TERMINATED,
-                                 "Job not found on craned during free request");
+      CRANE_DEBUG("[Job #{}] FreeJobs ignored because job is not found.",
+                  job_id);
       continue;
     }
 
@@ -607,14 +676,159 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
   m_grpc_alloc_step_async_handle_->send();
 }
 
-void JobManager::FreeSteps(
+StepCleanupFutureMap JobManager::FreeSteps(
     std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps) {
+  StepCleanupFutureMap futures;
+  std::vector<std::pair<StepKey, StepCleanupPromise>> waiters;
+  for (const auto& [job_id, step_ids] : steps) {
+    for (step_id_t step_id : step_ids) {
+      auto promise = std::make_shared<std::promise<CraneErrCode>>();
+      futures[job_id].emplace(step_id, promise->get_future());
+      waiters.emplace_back(StepKey{job_id, step_id}, std::move(promise));
+    }
+  }
+
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    CRANE_TRACE("JobManager is ending now, ignoring FreeSteps request.");
+    for (auto& [_, promise] : waiters) {
+      promise->set_value(CraneErrCode::ERR_SHUTTING_DOWN);
+    }
+    return futures;
+  }
+
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    for (auto& [key, promise] : waiters) {
+      m_step_cleanup_waiters_[key].emplace_back(std::move(promise));
+    }
+  }
+
   for (auto& [job_id, step_ids] : steps) {
     for (step_id_t step_id : step_ids) {
       m_free_steps_queue_.enqueue({job_id, step_id});
     }
   }
-  m_free_steps_async_handle_->send();
+  if (!steps.empty()) m_free_steps_async_handle_->send();
+  return futures;
+}
+
+JobCleanupFutureMap JobManager::FreeInvalidJobs(std::set<job_id_t>&& job_ids) {
+  JobCleanupFutureMap futures;
+  for (job_id_t job_id : job_ids) {
+    auto promise = std::make_shared<std::promise<CraneErrCode>>();
+    futures.emplace(job_id, promise->get_future());
+
+    if (m_is_ending_now_.load(std::memory_order_acquire)) {
+      CRANE_TRACE(
+          "JobManager is ending now, ignoring FreeInvalidJobs request.");
+      promise->set_value(CraneErrCode::ERR_SHUTTING_DOWN);
+      continue;
+    }
+
+    std::thread([this, job_id, promise = std::move(promise)]() mutable {
+      util::SetCurrentThreadName("InvJobCleanup");
+
+      std::unordered_set<step_id_t> non_daemon_steps;
+      std::unordered_set<step_id_t> daemon_steps;
+      {
+        auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+        if (!job_ptr) {
+          CRANE_DEBUG("[Job #{}] Invalid job cleanup skipped; job not found.",
+                      job_id);
+          promise->set_value(CraneErrCode::SUCCESS);
+          return;
+        }
+
+        absl::MutexLock lk(job_ptr->step_map_mtx.get());
+        for (auto& [step_id, step] : job_ptr->step_map) {
+          if (!step) continue;
+          step->silent_cleanup = true;
+          if (step_id == kDaemonStepId)
+            daemon_steps.insert(step_id);
+          else
+            non_daemon_steps.insert(step_id);
+        }
+      }
+
+      {
+        absl::MutexLock lk(&m_free_job_step_mtx_);
+        for (auto& [step_key, state] : m_completing_step_retry_map_) {
+          if (step_key.first != job_id || state.step == nullptr) continue;
+          state.step->silent_cleanup = true;
+          if (step_key.second == kDaemonStepId)
+            daemon_steps.insert(step_key.second);
+          else
+            non_daemon_steps.insert(step_key.second);
+        }
+      }
+
+      CraneErrCode result = CraneErrCode::SUCCESS;
+      if (!non_daemon_steps.empty()) {
+        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+            steps_to_free;
+        steps_to_free[job_id] = std::move(non_daemon_steps);
+        result = WaitStepCleanupFutures_(FreeSteps(std::move(steps_to_free)));
+      }
+
+      if (result == CraneErrCode::SUCCESS && !daemon_steps.empty()) {
+        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+            steps_to_free;
+        steps_to_free[job_id] = std::move(daemon_steps);
+        result = WaitStepCleanupFutures_(FreeSteps(std::move(steps_to_free)));
+      }
+
+      if (result == CraneErrCode::SUCCESS) {
+        std::optional<StepInstance::DaemonJobCleanupCtx> fallback_cleanup_ctx;
+        bool release_job_record = false;
+        {
+          auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+          if (job_ptr) {
+            size_t remaining_steps = 0;
+            {
+              absl::MutexLock lk(job_ptr->step_map_mtx.get());
+              remaining_steps = job_ptr->step_map.size();
+            }
+
+            if (remaining_steps != 0) {
+              CRANE_ERROR(
+                  "[Job #{}] Invalid job cleanup failed; {} steps remain.",
+                  job_id, remaining_steps);
+              result = CraneErrCode::ERR_SYSTEM_ERR;
+            } else {
+              if (job_ptr->cgroup) {
+                CRANE_WARN(
+                    "[Job #{}] Invalid job has job cgroup but no daemon "
+                    "cleanup context; destroying job cgroup directly.",
+                    job_id);
+                fallback_cleanup_ctx.emplace(StepInstance::DaemonJobCleanupCtx{
+                    .resource = job_ptr->job_to_d.res(),
+                    .epilog_env = EnvMap{},
+                    .job_cgroup = std::move(job_ptr->cgroup)});
+              }
+
+              release_job_record = true;
+            }
+          }
+        }
+
+        if (fallback_cleanup_ctx.has_value()) {
+          CleanUpJobEnvironment_(job_id, std::move(*fallback_cleanup_ctx),
+                                 false);
+        }
+
+        if (result == CraneErrCode::SUCCESS && release_job_record &&
+            !FreeJobInfo_(job_id).has_value()) {
+          CRANE_DEBUG(
+              "[Job #{}] Invalid job record disappeared before release.",
+              job_id);
+        }
+      }
+
+      promise->set_value(result);
+    }).detach();
+  }
+
+  return futures;
 }
 
 void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
@@ -663,8 +877,6 @@ void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
 }
 
 void JobManager::HandleUnexpectedSupervisorExits_() {
-  using StepKey = std::pair<job_id_t, step_id_t>;
-
   struct PendingFailure {
     job_id_t job_id;
     step_id_t step_id;
@@ -757,8 +969,14 @@ void JobManager::HandleUnexpectedSupervisorExits_() {
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
+  struct DaemonCleanupRequest {
+    job_id_t job_id;
+    step_id_t step_id;
+    std::optional<StepStatusChangeQueueElem> terminal;
+  };
+
   std::vector<std::pair<job_id_t, std::string>> jobs_to_check_pending_sigkill;
-  std::vector<JobInD> jobs_to_clean;
+  std::vector<DaemonCleanupRequest> daemon_cleanup_requests;
   // Step is completing, get ownership here.
   std::vector<std::unique_ptr<StepInstance>> steps_to_clean;
   {
@@ -777,11 +995,16 @@ bool JobManager::EvCheckSupervisorRunning_() {
     ThawFrozenJobsWithPendingSigkill_(jobs_to_check_pending_sigkill);
     HandleUnexpectedSupervisorExits_();
 
-    std::vector<StepInstance*> exit_steps;
+    std::vector<StepKey> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
-    for (auto& [step, state] : m_completing_step_retry_map_) {
+    for (auto& [step_key, state] : m_completing_step_retry_map_) {
+      auto* step = state.step;
+      if (step == nullptr) {
+        exit_steps.push_back(step_key);
+        continue;
+      }
       if (step->err_before_supv_start) {
-        exit_steps.push_back(step);
+        exit_steps.push_back(step_key);
         continue;
       }
       job_id_t job_id = step->job_id;
@@ -828,29 +1051,91 @@ bool JobManager::EvCheckSupervisorRunning_() {
           continue;
         }
       }
-      exit_steps.push_back(step);
+      exit_steps.push_back(step_key);
     }
-    for (auto* step : exit_steps) {
-      m_completing_step_retry_map_.erase(step);
-      if (!m_completing_job_.contains(step->job_id)) {
-        // Only the step is completing
-        steps_to_clean.emplace_back(step);
+    for (const auto& step_key : exit_steps) {
+      auto completing_it = m_completing_step_retry_map_.find(step_key);
+      if (completing_it == m_completing_step_retry_map_.end()) continue;
+      auto* step = completing_it->second.step;
+      m_completing_step_retry_map_.erase(completing_it);
+      if (step == nullptr) continue;
+      if (step->IsDaemonStep()) {
+        std::optional<StepStatusChangeQueueElem> terminal = std::nullopt;
+        if (step->pending_terminal_status.has_value() &&
+            !step->silent_cleanup) {
+          auto& pt = step->pending_terminal_status.value();
+          terminal = StepStatusChangeQueueElem{.job_id = step->job_id,
+                                               .step_id = step->step_id,
+                                               .new_status = pt.final_status,
+                                               .exit_code = pt.exit_code,
+                                               .reason = pt.reason,
+                                               .timestamp = pt.timestamp};
+        }
+        daemon_cleanup_requests.emplace_back(
+            DaemonCleanupRequest{.job_id = step->job_id,
+                                 .step_id = step->step_id,
+                                 .terminal = std::move(terminal)});
         continue;
       }
-      auto& job = m_completing_job_.at(step->job_id);
-      if (!job.step_map.contains(step->step_id)) {
-        // The step is considered completing before the job considered
-        // completing, already removed form step map.
-        steps_to_clean.emplace_back(step);
-        continue;
-      }
-      steps_to_clean.emplace_back(job.step_map.at(step->step_id).release());
-      job.step_map.erase(step->step_id);
-      if (job.step_map.empty()) {
-        jobs_to_clean.emplace_back(std::move(job));
-        m_completing_job_.erase(step->job_id);
-      }
+
+      steps_to_clean.emplace_back(step);
     }
+  }
+
+  for (auto& request : daemon_cleanup_requests) {
+    g_thread_pool->detach_task([this, request = std::move(request)]() mutable {
+      StepInstance* step = nullptr;
+      std::optional<StepInstance::DaemonJobCleanupCtx> cleanup_ctx;
+      CraneErrCode cleanup_result = CraneErrCode::SUCCESS;
+      {
+        auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
+        if (!job_ptr) {
+          CRANE_WARN("[Step #{}.{}] Job not found during daemon cleanup.",
+                     request.job_id, request.step_id);
+        } else {
+          absl::MutexLock lk(job_ptr->step_map_mtx.get());
+          auto step_it = job_ptr->step_map.find(request.step_id);
+          if (step_it == job_ptr->step_map.end()) {
+            CRANE_WARN("[Step #{}.{}] Step not found during daemon cleanup.",
+                       request.job_id, request.step_id);
+          } else {
+            step = step_it->second.get();
+            if (step->daemon_job_cleanup.has_value()) {
+              cleanup_ctx.emplace(std::move(*step->daemon_job_cleanup));
+            } else {
+              CRANE_WARN("[Step #{}.{}] Daemon cleanup context not found.",
+                         request.job_id, request.step_id);
+              cleanup_result = CraneErrCode::ERR_SYSTEM_ERR;
+            }
+          }
+        }
+      }
+
+      if (step != nullptr) step->CleanUp(false);
+      if (cleanup_ctx.has_value()) {
+        CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx));
+      }
+
+      {
+        auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
+        if (job_ptr) {
+          absl::MutexLock lk(job_ptr->step_map_mtx.get());
+          job_ptr->step_map.erase(request.step_id);
+        }
+      }
+
+      if (request.terminal.has_value()) {
+        CRANE_INFO(
+            "[Step #{}.{}] Daemon cleanup completed, sending terminal "
+            "status {}.",
+            request.job_id, request.step_id, request.terminal->new_status);
+        g_ctld_client->StepStatusChangeAsync(
+            std::move(request.terminal.value()));
+      }
+
+      ResolveStepCleanupWaiters_(StepKey{request.job_id, request.step_id},
+                                 cleanup_result);
+    });
   }
 
   if (!steps_to_clean.empty()) {
@@ -862,17 +1147,12 @@ bool JobManager::EvCheckSupervisorRunning_() {
                                       }),
                               ","));
     FreeStepAllocation_(std::move(steps_to_clean));
-    if (!jobs_to_clean.empty()) {
-      for (const auto& job : jobs_to_clean) {
-        CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/finish_release",
-                                      job.job_to_d.traceparent());
-        span.SetAttribute("job_id", job.job_id);
-      }
-      FreeJobAllocation_(std::move(jobs_to_clean));
-    }
   }
 
-  return m_completing_step_retry_map_.empty();
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    return m_completing_step_retry_map_.empty();
+  }
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -1184,60 +1464,78 @@ std::optional<JobInD> JobManager::FreeJobInfoNoLock_(
   return job_opt;
 }
 
-bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
-  CRANE_DEBUG("Freeing job [{}] allocation.",
-              absl::StrJoin(jobs | std::views::transform([](auto& job) {
-                              return job.job_id;
-                            }) | std::views::common,
-                            ","));
-  std::unordered_map<job_id_t, CgroupInterface*> job_cg_map;
+void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
+                                        StepInstance::DaemonJobCleanupCtx&& ctx,
+                                        bool run_epilog) {
+  CRANE_DEBUG("[Job #{}] Cleaning up job environment.", job_id);
 
-  std::vector<std::set<uint32_t>> int_core_ids_to_release;
-  for (auto& job : jobs) {
-    ResourceInNodeV3 res_v3(job.job_to_d.res());
-    if (res_v3.GetCpuSet().IsInteger()) {
-      int_core_ids_to_release.push_back(res_v3.GetCpuSet().core_ids);
+  if (run_epilog && !g_config.JobLifecycleHook.Epilogs.empty() &&
+      !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
+    bool script_lock = false;
+    if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+      m_prolog_serial_mutex_.Lock();
+      script_lock = true;
     }
-    job_cg_map[job.job_id] = job.cgroup.release();
-  }
+    CRANE_TRACE("[Job #{}] Running epilogs...", job_id);
+    RunPrologEpilogArgs run_epilog_args{
+        .scripts = g_config.JobLifecycleHook.Epilogs,
+        .envs = ctx.epilog_env,
+        .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
+        .run_uid = 0,
+        .run_gid = 0,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
-  for (auto [job_id, cgroup] : job_cg_map) {
-    if (cgroup == nullptr) continue;
+    run_epilog_args.fork_and_watch_fn = [this](std::function<pid_t()> do_fork)
+        -> std::optional<std::pair<pid_t, std::future<int>>> {
+      std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+      pid_t pid = do_fork();
+      if (pid < 0) return std::nullopt;
+      if (pid == 0) return std::make_pair(pid, std::future<int>{});
+      return std::make_pair(pid, m_exit_watcher_.Watch(pid));
+    };
 
-    if (g_config.Plugin.Enabled && g_plugin_client) {
-      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupName());
+    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec =
+          g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+    auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
+    if (!result) {
+      auto status = result.error();
+      CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
+                  status.exit_code, status.signal_num);
+      g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
+    } else {
+      CRANE_DEBUG("[Job #{}]: Epilog success", job_id);
     }
-
-    g_thread_pool->detach_task([cgroup]() {
-      int cnt = 0;
-
-      while (true) {
-        if (cgroup->Empty()) break;
-
-        if (cnt >= 5) {
-          CRANE_ERROR(
-              "Couldn't kill the processes in cgroup {} after {} times. "
-              "Skipping it.",
-              cgroup->CgroupName(), cnt);
-          break;
-        }
-
-        cgroup->KillAllProcesses(SIGKILL);
-        ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
-      }
-      cgroup->Destroy();
-
-      delete cgroup;
-    });
+    if (script_lock) m_prolog_serial_mutex_.Unlock();
   }
 
-  for (const auto& core_ids : int_core_ids_to_release) {
-    CgroupManager::ReleaseCoresForIntJob(core_ids);
-  }
-  if (!int_core_ids_to_release.empty()) CgroupManager::WriteOverflowCpuset();
+  CgroupManager::ReleaseJobCpuPool(job_id, ctx.resource);
 
-  return true;
+  if (ctx.job_cgroup == nullptr) return;
+
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    g_plugin_client->DestroyCgroupHookAsync(job_id,
+                                            ctx.job_cgroup->CgroupName());
+  }
+
+  CgroupManager::KillAndDestroyCgroup(std::move(ctx.job_cgroup));
+}
+
+void JobManager::ResolveStepCleanupWaiters_(const StepKey& key,
+                                            CraneErrCode result) {
+  std::vector<StepCleanupPromise> waiters;
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    auto it = m_step_cleanup_waiters_.find(key);
+    if (it == m_step_cleanup_waiters_.end()) return;
+    waiters = std::move(it->second);
+    m_step_cleanup_waiters_.erase(it);
+  }
+
+  for (auto& waiter : waiters) {
+    waiter->set_value(result);
+  }
 }
 
 void JobManager::FreeStepAllocation_(
@@ -1266,6 +1564,7 @@ void JobManager::FreeStepAllocation_(
                                     .reason = pt.reason,
                                     .timestamp = pt.timestamp});
     }
+    ResolveStepCleanupWaiters_(StepKey{job_id, step_id}, CraneErrCode::SUCCESS);
   }
 }
 
@@ -1426,18 +1725,32 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
   StepStatusChangeQueueElem status_change;
   while (m_step_status_change_queue_.try_dequeue(status_change)) {
     bool should_forward = true;
+    bool local_step_found = false;
+    const StepKey key{status_change.job_id, status_change.step_id};
+    const bool daemon_terminal = status_change.step_id == kDaemonStepId &&
+                                 IsFinishedStepStatus(status_change.new_status);
+    std::optional<StepInstance::PendingTerminalStatus> pending_terminal;
+    if (status_change.new_status == StepStatus::Completing &&
+        status_change.final_status.has_value()) {
+      pending_terminal = StepInstance::PendingTerminalStatus{
+          .final_status = status_change.final_status.value(),
+          .exit_code = status_change.exit_code,
+          .reason = status_change.reason.value_or(""),
+          .timestamp = status_change.timestamp};
+    } else if (daemon_terminal) {
+      pending_terminal = StepInstance::PendingTerminalStatus{
+          .final_status = status_change.new_status,
+          .exit_code = status_change.exit_code,
+          .reason = status_change.reason.value_or(""),
+          .timestamp = status_change.timestamp};
+    }
 
     // Lambda to update step fields once we have the pointer.
     auto update_step = [&](StepInstance* step) {
       step->GotNewStatus(status_change.new_status);
       should_forward = !step->silent_cleanup;
-      if (status_change.new_status == StepStatus::Completing &&
-          status_change.final_status.has_value()) {
-        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
-            .final_status = status_change.final_status.value(),
-            .exit_code = status_change.exit_code,
-            .reason = status_change.reason.value_or(""),
-            .timestamp = status_change.timestamp};
+      if (pending_terminal) {
+        step->pending_terminal_status = *pending_terminal;
       } else if (step->err_before_supv_start && !step->IsDaemonStep() &&
                  IsFinishedStepStatus(status_change.new_status)) {
         step->pending_terminal_status = StepInstance::PendingTerminalStatus{
@@ -1448,57 +1761,44 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
       }
     };
 
-    if (status_change.new_status == StepStatus::Completing) {
-      // Completing may arrive after FreeJobs/FreeSteps moved the step
-      // from m_job_map_ to m_completing_job_. Check both.
-      bool found = false;
-      {
-        absl::MutexLock lk(&m_free_job_step_mtx_);
-        if (auto it = m_completing_job_.find(status_change.job_id);
-            it != m_completing_job_.end()) {
-          absl::MutexLock lk2(it->second.step_map_mtx.get());
-          if (auto sit = it->second.step_map.find(status_change.step_id);
-              sit != it->second.step_map.end()) {
-            update_step(sit->second.get());
-            found = true;
-          }
+    // Find and update the local step under its owning lock. StepInstance
+    // pointers must not escape these guards.
+    {
+      absl::MutexLock lk(&m_free_job_step_mtx_);
+      if (auto completing_it = m_completing_step_retry_map_.find(key);
+          completing_it != m_completing_step_retry_map_.end()) {
+        auto* step = completing_it->second.step;
+        local_step_found = true;
+        if (step == nullptr) {
+          should_forward = false;
+        } else {
+          update_step(step);
         }
       }
-      if (!found) {
-        auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
-        if (job_ptr) {
-          absl::MutexLock lk(job_ptr->step_map_mtx.get());
-          if (auto it = job_ptr->step_map.find(status_change.step_id);
-              it != job_ptr->step_map.end()) {
-            update_step(it->second.get());
-            found = true;
-          }
-        }
-      }
-      // FreeSteps path: step was release()'d from step_map and only
-      // exists in m_completing_step_retry_map_.
-      if (!found) {
-        absl::MutexLock lk(&m_free_job_step_mtx_);
-        for (auto& [step_ptr, _] : m_completing_step_retry_map_) {
-          if (step_ptr->job_id == status_change.job_id &&
-              step_ptr->step_id == status_change.step_id) {
-            update_step(step_ptr);
-            break;
-          }
-        }
-      }
-    } else {
-      // Non-Completing status: step is in m_job_map_.
+    }
+
+    if (!local_step_found) {
       auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
       if (job_ptr) {
         absl::MutexLock lk(job_ptr->step_map_mtx.get());
         if (auto it = job_ptr->step_map.find(status_change.step_id);
             it != job_ptr->step_map.end()) {
-          update_step(it->second.get());
+          auto* step = it->second.get();
+          local_step_found = true;
+          update_step(step);
         }
       }
     }
 
+    if (!local_step_found && daemon_terminal) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] Daemon terminal status arrived after local cleanup, "
+          "suppressing direct forward.",
+          status_change.job_id, status_change.step_id);
+    }
+    should_forward &= !daemon_terminal;
+
+    // Forward only statuses that are not consumed by local cleanup.
     CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
                 status_change.job_id, status_change.step_id,
                 status_change.new_status);
@@ -1508,7 +1808,8 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
     } else {
       CRANE_DEBUG(
-          "[Step #{}.{}] silent_cleanup set, not forwarding to CraneCtld.",
+          "[Step #{}.{}] Status change is handled locally, not forwarding to "
+          "CraneCtld.",
           status_change.job_id, status_change.step_id);
     }
   }
@@ -1885,11 +2186,21 @@ void JobManager::TerminateStepAsync(
 
 void JobManager::MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_ptr) return;
-  absl::MutexLock lk(job_ptr->step_map_mtx.get());
-  if (auto it = job_ptr->step_map.find(step_id);
-      it != job_ptr->step_map.end()) {
-    it->second->silent_cleanup = true;
+  if (job_ptr) {
+    absl::MutexLock lk(job_ptr->step_map_mtx.get());
+    if (auto it = job_ptr->step_map.find(step_id);
+        it != job_ptr->step_map.end()) {
+      it->second->silent_cleanup = true;
+    }
+  }
+
+  {
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    if (auto it = m_completing_step_retry_map_.find(StepKey{job_id, step_id});
+        it != m_completing_step_retry_map_.end() &&
+        it->second.step != nullptr) {
+      it->second.step->silent_cleanup = true;
+    }
   }
 }
 
@@ -1919,97 +2230,6 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
     jobs_to_free.emplace_back(std::move(elem.job));
   }
 
-  if (steps_to_free.empty() && jobs_to_free.empty()) return;
-
-  CRANE_DEBUG(
-      "Free jobs [{}], steps [{}].",
-      absl::StrJoin(jobs_to_free | std::views::transform([](const auto& job) {
-                      return job.job_id;
-                    }) | std::views::common,
-                    ","),
-      absl::StrJoin(steps_to_free | std::views::transform([](const auto* step) {
-                      return step->StepIdString();
-                    }) | std::views::common,
-                    ","));
-
-  {
-    absl::MutexLock lk(&m_free_job_step_mtx_);
-    for (auto* step : steps_to_free) {
-      if (!m_completing_step_retry_map_.contains(step)) {
-        m_completing_step_retry_map_[step] = CompletingStepState{};
-      }
-    }
-
-    for (auto&& job : jobs_to_free) {
-      job_id_t jid = job.job_id;
-      if (m_completing_job_.contains(jid)) {
-        CRANE_DEBUG("[Job #{}] is already cleaning, ignore clean up.", jid);
-        continue;
-      }
-
-      if (!g_config.JobLifecycleHook.Epilogs.empty() &&
-          !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
-        g_thread_pool->detach_task([jid, env_map = job.GetJobEnvMap(), this]() {
-          bool script_lock = false;
-          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
-            m_prolog_serial_mutex_.Lock();
-            script_lock = true;
-          }
-          CRANE_TRACE("#{}: Running epilogs...", jid);
-          RunPrologEpilogArgs run_epilog_args{
-              .scripts = g_config.JobLifecycleHook.Epilogs,
-              .envs = env_map,
-              .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
-              .run_uid = 0,
-              .run_gid = 0,
-              .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-
-          run_epilog_args.fork_and_watch_fn =
-              [this](std::function<pid_t()> do_fork)
-              -> std::optional<std::pair<pid_t, std::future<int>>> {
-            std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
-            pid_t pid = do_fork();
-            if (pid < 0) return std::nullopt;
-            if (pid == 0) return std::make_pair(pid, std::future<int>{});
-            return std::make_pair(pid, m_exit_watcher_.Watch(pid));
-          };
-
-          if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-            run_epilog_args.timeout_sec =
-                g_config.JobLifecycleHook.PrologEpilogTimeout;
-
-          auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
-          if (!result) {
-            auto status = result.error();
-            CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", jid,
-                        status.exit_code, status.signal_num);
-            g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
-          } else {
-            CRANE_DEBUG("[Job #{}]: Epilog success", jid);
-          }
-          if (script_lock) m_prolog_serial_mutex_.Unlock();
-        });
-      }
-
-      m_completing_job_.emplace(jid, std::move(job));
-    }
-  }
-
-  for (auto* step : steps_to_free) {
-    if (step->err_before_supv_start || !step->IsDaemonStep()) continue;
-    auto stub = step->supervisor_stub;
-    if (!stub) continue;
-    g_thread_pool->detach_task(
-        [stub, job_id = step->job_id, step_id = step->step_id] {
-          CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.", job_id,
-                      step_id);
-          auto err = stub->ShutdownSupervisor();
-          if (err != CraneErrCode::SUCCESS) {
-            CRANE_ERROR("[Step #{}.{}] Failed to shut down supervisor.", job_id,
-                        step_id);
-          }
-        });
-  }
   auto evclean_elapsed_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - begin_time)
@@ -2031,61 +2251,113 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
 
 void JobManager::EvCleanFreeStepsQueueCb_() {
   FreeStepElem elem;
-  std::vector<StepInstance*> steps_to_free;
-
-  while (m_free_steps_queue_.try_dequeue(elem)) {
-    auto job = m_job_map_.GetValueExclusivePtr(elem.job_id);
-    if (!job) {
-      CRANE_WARN("Try to free step [{}] for nonexistent job #{}.", elem.step_id,
-                 elem.job_id);
-      continue;
-    }
-    absl::MutexLock lk(job->step_map_mtx.get());
-    if (!job->step_map.contains(elem.step_id)) {
-      CRANE_WARN(
-          "[Step #{}.{}] Try to free nonexistent step, sending terminal.",
-          elem.job_id, elem.step_id);
-      SendCompletingAndTerminal_(
-          elem.job_id, elem.step_id, StepStatus::Failed,
-          ExitCode::EC_TERMINATED,
-          "Step not found on craned during free request");
-      continue;
-    }
-    auto& step = job->step_map.at(elem.step_id);
-    if (step->IsDaemonStep()) {
-      CRANE_ERROR("Not allowed to free daemon step #{}.{}", elem.job_id,
-                  elem.step_id);
-      continue;
-    }
-    steps_to_free.emplace_back(job->step_map.at(elem.step_id).release());
-    job->step_map.erase(elem.step_id);
-  }
-
-  if (steps_to_free.empty()) return;
-
+  std::vector<StepInstance*> steps_to_shutdown;
   {
+    std::vector<StepInstance*> steps_to_free;
+    while (m_free_steps_queue_.try_dequeue(elem)) {
+      auto job = m_job_map_.GetValueExclusivePtr(elem.job_id);
+      if (!job) {
+        CRANE_WARN("Try to free step [{}] for nonexistent job #{}.",
+                   elem.step_id, elem.job_id);
+        ResolveStepCleanupWaiters_(StepKey{elem.job_id, elem.step_id},
+                                   CraneErrCode::SUCCESS);
+        continue;
+      }
+      absl::MutexLock lk(job->step_map_mtx.get());
+      if (!job->step_map.contains(elem.step_id)) {
+        bool step_is_cleaning = false;
+        {
+          absl::MutexLock retry_lk(&m_free_job_step_mtx_);
+          step_is_cleaning = m_completing_step_retry_map_.contains(
+              StepKey{elem.job_id, elem.step_id});
+        }
+        if (step_is_cleaning) {
+          CRANE_DEBUG("[Step #{}.{}] is already cleaning, wait for cleanup.",
+                      elem.job_id, elem.step_id);
+          continue;
+        }
+
+        CRANE_WARN(
+            "[Step #{}.{}] Try to free nonexistent step, sending terminal.",
+            elem.job_id, elem.step_id);
+        ResolveStepCleanupWaiters_(StepKey{elem.job_id, elem.step_id},
+                                   CraneErrCode::SUCCESS);
+        if (elem.step_id == kDaemonStepId) continue;
+        SendCompletingAndTerminal_(
+            elem.job_id, elem.step_id, StepStatus::Failed,
+            ExitCode::EC_TERMINATED,
+            "Step not found on craned during free request");
+        continue;
+      }
+
+      auto& step = job->step_map.at(elem.step_id);
+      if (step->IsDaemonStep()) {
+        if (step->daemon_job_cleanup.has_value()) {
+          CRANE_DEBUG("[Step #{}.{}] Daemon step is already cleaning.",
+                      elem.job_id, elem.step_id);
+          continue;
+        }
+
+        StepInstance::DaemonJobCleanupCtx cleanup_ctx{
+            .resource = job->job_to_d.res(),
+            .epilog_env = job->GetJobEnvMap(),
+            .job_cgroup = std::move(job->cgroup)};
+        step->daemon_job_cleanup = std::move(cleanup_ctx);
+        steps_to_free.emplace_back(step.get());
+        continue;
+      }
+
+      steps_to_free.emplace_back(step.release());
+      job->step_map.erase(elem.step_id);
+    }
+
+    if (steps_to_free.empty()) return;
+
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto* step : steps_to_free) {
-      if (!m_completing_step_retry_map_.contains(step)) {
-        m_completing_step_retry_map_[step] = CompletingStepState{};
+      const StepKey key{step->job_id, step->step_id};
+      if (m_completing_step_retry_map_.contains(key)) {
+        CRANE_DEBUG("[Step #{}.{}] is already cleaning, ignore clean up.",
+                    step->job_id, step->step_id);
+        continue;
       }
+      m_completing_step_retry_map_[key] = CompletingStepState{.step = step};
+      steps_to_shutdown.emplace_back(step);
     }
   }
 
-  for (auto* step : steps_to_free) {
-    if (!step->silent_cleanup || step->err_before_supv_start) continue;
-    auto stub = step->supervisor_stub;
-    if (!stub) continue;
-    g_thread_pool->detach_task([stub, job_id = step->job_id,
-                                step_id = step->step_id] {
-      CRANE_TRACE(
-          "[Step #{}.{}] Terminating non-daemon supervisor for silent cleanup.",
-          job_id, step_id);
-      auto err = stub->TerminateStep(
-          crane::grpc::TerminateSource::TERMINATE_SOURCE_NORMAL_COMPLETION);
+  for (auto* step : steps_to_shutdown) {
+    if (step->err_before_supv_start) continue;
+
+    g_thread_pool->detach_task([step] {
+      // Normal none daemon step, will exit when cleanup done,no need to
+      // terminate
+      if (!step->silent_cleanup && !step->IsDaemonStep()) {
+        return;
+      }
+      // Daemon or silent cleanup
+      auto stub = step->supervisor_stub;
+      if (!stub) {
+        CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
+                    step->job_id, step->step_id);
+        return;
+      }
+      CraneErrCode err;
+      if (step->IsDaemonStep()) {
+        CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
+                    step->job_id, step->step_id);
+        err = stub->ShutdownSupervisor();
+      } else {
+        CRANE_TRACE(
+            "[Step #{}.{}] Terminating non-daemon supervisor for silent "
+            "cleanup.",
+            step->job_id, step->step_id);
+        err = stub->TerminateStep(
+            crane::grpc::TerminateSource::TERMINATE_SOURCE_NORMAL_COMPLETION);
+      }
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor.", job_id,
-                    step_id);
+        CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor.",
+                    step->job_id, step->step_id);
       }
     });
   }

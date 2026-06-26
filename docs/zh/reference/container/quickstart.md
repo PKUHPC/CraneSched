@@ -86,6 +86,8 @@ ccon -p CPU run -it ubuntu:22.04 /bin/bash
 
 进入容器后，你可以像使用普通终端一样执行命令。退出容器后，作业自动结束。
 
+如需在不停止容器的情况下从交互式 TTY 会话脱离，按 `Ctrl-P + Ctrl-Q`。
+
 ---
 
 ## 后台运行容器
@@ -196,7 +198,7 @@ ccon logs --tail 100 123.1
 ccon attach 123.1
 ```
 
-使用 `Ctrl+C` 断开连接（不会终止容器）。
+使用 TTY 连接时，按 `Ctrl-P + Ctrl-Q` 可脱离连接（不会终止容器）。
 
 ### 在容器内执行命令
 
@@ -207,6 +209,8 @@ ccon exec 123.1 ls -la /app
 # 启动交互式 shell
 ccon exec -it 123.1 /bin/bash
 ```
+
+在交互式 TTY exec 会话中，按 `Ctrl-P + Ctrl-Q` 可脱离连接且不停止容器。
 
 ---
 

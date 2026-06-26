@@ -19,6 +19,7 @@ ccon -p CPU -c 4 --mem 8G -t 2:00:00 run python:3.11 \
 
 # Interactive container
 #   -i  keep stdin open    -t  allocate a pseudo-TTY
+#   Ctrl-P + Ctrl-Q detaches without stopping the container
 ccon -p CPU run -it ubuntu:22.04 /bin/bash
 
 # Background execution: returns the container ID and detaches from the terminal
@@ -159,6 +160,7 @@ ccon logs -f 123.1          # -f follow output in real time
 ccon logs --tail 100 123.1  # show only the last 100 lines
 
 # Exec into a running container
+#   Ctrl-P + Ctrl-Q detaches without stopping the container
 ccon exec -it 123.1 /bin/bash
 
 # Inspect
