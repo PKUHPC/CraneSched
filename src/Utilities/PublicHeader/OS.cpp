@@ -31,7 +31,11 @@
 #include <charconv>
 #include <cstring>
 #include <future>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <uvw.hpp>
 #include <vector>
 
@@ -580,6 +584,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     std::vector<char*> envp;
     std::vector<std::string> env_storage;
+    env_storage.reserve(args.envs.size());
     envp.reserve(args.envs.size() + 1);
     for (const auto& [name, value] : args.envs) {
       env_storage.emplace_back(name + "=" + value);
@@ -730,18 +735,66 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       close(stdout_pipe[1]);
       if (parent_setup_pipe[0] != -1) close(parent_setup_pipe[0]);
 
-      if (args.at_parent_setup_cb) {
-        char parent_setup_ok = args.at_parent_setup_cb(pid) ? 1 : 0;
-        ssize_t n;
-        do {
-          n = write(parent_setup_pipe[1], &parent_setup_ok,
-                    sizeof(parent_setup_ok));
-        } while (n == -1 && errno == EINTR);
-        if (n != sizeof(parent_setup_ok)) {
-          CRANE_ERROR("Failed to notify parent setup result for script '{}': {}",
-                      script, strerror(errno));
+      struct ParentSetupState {
+        std::mutex mutex;
+        int notify_fd{-1};
+      };
+      auto parent_setup_state = std::make_shared<ParentSetupState>();
+      parent_setup_state->notify_fd = parent_setup_pipe[1];
+      parent_setup_pipe[1] = -1;
+
+      auto close_parent_setup_notify_fd = [parent_setup_state]() {
+        std::scoped_lock lock(parent_setup_state->mutex);
+        if (parent_setup_state->notify_fd != -1) {
+          close(parent_setup_state->notify_fd);
+          parent_setup_state->notify_fd = -1;
         }
-        close(parent_setup_pipe[1]);
+      };
+
+      if (args.at_parent_setup_cb) {
+        auto notify_parent_setup_result = [script, parent_setup_state](bool ok) {
+          int fd = -1;
+          {
+            std::scoped_lock lock(parent_setup_state->mutex);
+            fd = parent_setup_state->notify_fd;
+            parent_setup_state->notify_fd = -1;
+          }
+          if (fd == -1) return;
+
+          char parent_setup_ok = ok ? 1 : 0;
+          ssize_t n;
+          do {
+            n = write(fd, &parent_setup_ok, sizeof(parent_setup_ok));
+          } while (n == -1 && errno == EINTR);
+          if (n != sizeof(parent_setup_ok)) {
+            CRANE_ERROR(
+                "Failed to notify parent setup result for script '{}': {}",
+                script, strerror(errno));
+          }
+          close(fd);
+        };
+
+        try {
+          std::thread(
+              [setup_cb = args.at_parent_setup_cb, pid,
+               notify = notify_parent_setup_result]() mutable {
+                try {
+                  notify(setup_cb(pid));
+                } catch (const std::exception& e) {
+                  CRANE_ERROR("Parent setup callback threw: {}", e.what());
+                  notify(false);
+                } catch (...) {
+                  CRANE_ERROR("Parent setup callback threw an unknown exception");
+                  notify(false);
+                }
+              })
+              .detach();
+        } catch (const std::system_error& e) {
+          CRANE_ERROR(
+              "Failed to start parent setup thread for script '{}': {}", script,
+              e.what());
+          notify_parent_setup_result(false);
+        }
       }
 
       // Create a dedicated libuv event loop for this script.
@@ -790,6 +843,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       auto stop_loop = [&]() {
         if (loop_stopping) return;
         loop_stopping = true;
+        close_parent_setup_notify_fd();
         pipe_handle->close();
         timeout_timer->close();
         poll_timer->close();
@@ -999,6 +1053,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       if (elapsed >= timeout) {
         CRANE_TRACE("Script '{}' timed out before its event loop started.",
                     script);
+        close_parent_setup_notify_fd();
         KillPg(pid);
 
         // Reap the child and capture its true exit status to avoid leaving
