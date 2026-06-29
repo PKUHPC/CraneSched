@@ -113,6 +113,20 @@ uint32_t QosSubmitReserveCount(const JobInCtld& job) {
   return ArrayUtil::EffectiveRunLimit(job.JobToCtld().array_spec());
 }
 
+absl::Time EffectiveJobEndTimeAfterTimeConstraintChange_(
+    const JobInCtld& job, absl::Duration time_limit, absl::Time deadline_time) {
+  absl::Duration suspended_duration =
+      job.EndTime() - (job.StartTime() + job.time_limit);
+  if (suspended_duration < absl::ZeroDuration())
+    suspended_duration = absl::ZeroDuration();
+
+  absl::Time end_time = job.StartTime() + time_limit + suspended_duration;
+  if (deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec))
+    end_time = std::min(end_time, deadline_time);
+
+  return end_time;
+}
+
 using Resolution = ArrayManager::JobIdSelectorResolution;
 using Resolved = Resolution::Resolved;
 using Unresolved = ArrayManager::UnresolvedSelector;
@@ -252,7 +266,7 @@ bool JobScheduler::Init() {
           job->SetExitCode(ExitCode::EC_CRANED_DOWN);
         }
         auto now = absl::Now();
-        auto max_end_time = job->StartTime() + job->time_limit;
+        auto max_end_time = job->EndTime();
         auto end_time = std::min(now, max_end_time);
         job->SetEndTime(end_time);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
@@ -1494,8 +1508,7 @@ void JobScheduler::ScheduleThread_() {
           job->pending_reason = job_in_scheduler->reason;
           continue;
         }
-        absl::Time end_time =
-            job_in_scheduler->start_time + job_in_scheduler->time_limit;
+        absl::Time end_time = job_in_scheduler->end_time;
         if (job_in_scheduler->reservation.empty()) {
           // Non-reservation job.
           for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
@@ -2211,8 +2224,9 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       !CheckIfTimeLimitSecIsValid(time_limit_seconds.value()))
     return CraneErrCode::ERR_INVALID_PARAM;
 
-  std::vector<std::pair<job_id_t, std::vector<CranedId>>> running_jobs_craneds;
-  std::optional<std::pair<std::string, absl::Time>> reservation_end_time_update;
+  std::vector<std::tuple<job_id_t, std::vector<CranedId>, int64_t,
+                         std::optional<int64_t>>>
+      running_jobs_craneds;
 
   {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -2255,16 +2269,21 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       auto rn_iter = m_running_job_map_.find(job_id);
       if (rn_iter != m_running_job_map_.end()) {
         found = true, job = rn_iter->second.get();
-        running_jobs_craneds.emplace_back(job_id, job->executing_craned_ids);
 
         if (job->reservation != "") {
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(job->reservation);
           auto resv_end_time = reservation_meta->end_time;
+          absl::Duration new_time_limit =
+              time_limit_seconds ? absl::Seconds(time_limit_seconds.value())
+                                 : job->time_limit;
+          absl::Time new_deadline =
+              absl_deadline_time.value_or(job->deadline_time);
+          absl::Time new_end_time =
+              EffectiveJobEndTimeAfterTimeConstraintChange_(
+                  *job, new_time_limit, new_deadline);
 
-          if (time_limit_seconds &&
-              resv_end_time <= job->StartTime() +
-                                   absl::Seconds(time_limit_seconds.value())) {
+          if (time_limit_seconds && resv_end_time <= new_end_time) {
             CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
                         job_id);
             return CraneErrCode::ERR_INVALID_PARAM;
@@ -2276,16 +2295,6 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
                         job_id);
             return CraneErrCode::ERR_INVALID_PARAM;
           }
-
-          absl::Duration new_time_limit =
-              time_limit_seconds ? absl::Seconds(time_limit_seconds.value())
-                                 : job->time_limit;
-          absl::Time new_deadline = absl_deadline_time
-                                        ? absl_deadline_time.value()
-                                        : job->deadline_time;
-          reservation_end_time_update = std::pair{
-              job->reservation,
-              std::min(job->StartTime() + new_time_limit, new_deadline)};
         }
       }
     }
@@ -2308,14 +2317,22 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
         JobInCtld* child = child_it->second.get();
 
         jobs_to_update.emplace_back(child);
-        running_jobs_craneds.emplace_back(child_job_id,
-                                          child->executing_craned_ids);
       }
     }
 
     std::vector<std::pair<JobInCtld*, crane::grpc::JobToCtld>> pending_updates;
+    std::vector<std::pair<JobInCtld*, absl::Time>> end_time_updates;
     pending_updates.reserve(jobs_to_update.size());
+    end_time_updates.reserve(jobs_to_update.size());
+    // FIXME: Primary step time metadata may show stale values after job-level
+    // time constraint changes.
     for (JobInCtld* target : jobs_to_update) {
+      absl::Duration new_time_limit =
+          time_limit_seconds ? absl::Seconds(time_limit_seconds.value())
+                             : target->time_limit;
+      absl::Time new_deadline =
+          absl_deadline_time.value_or(target->deadline_time);
+
       crane::grpc::JobToCtld job_to_ctld = target->JobToCtld();
       if (time_limit_seconds) {
         job_to_ctld.mutable_time_limit()->set_seconds(
@@ -2326,6 +2343,16 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             absl::ToUnixSeconds(absl_deadline_time.value()));
       }
       pending_updates.emplace_back(target, std::move(job_to_ctld));
+
+      if (target->Status() != crane::grpc::Pending) {
+        absl::Time new_end_time = EffectiveJobEndTimeAfterTimeConstraintChange_(
+            *target, new_time_limit, new_deadline);
+        end_time_updates.emplace_back(target, new_end_time);
+        running_jobs_craneds.emplace_back(
+            target->JobId(), target->executing_craned_ids,
+            absl::ToInt64Seconds(new_end_time - target->StartTime()),
+            deadline_time);
+      }
     }
 
     txn_id_t fixed_txn_id{0};
@@ -2356,6 +2383,18 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       return CraneErrCode::ERR_UPDATE_DATABASE;
     }
 
+    for (const auto& [target, end_time] : end_time_updates) {
+      auto runtime_attr = target->RuntimeAttr();
+      runtime_attr.mutable_end_time()->set_seconds(
+          absl::ToUnixSeconds(end_time));
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
+              0, target->JobDbId(), runtime_attr)) {
+        CRANE_ERROR("Failed to persist runtime end_time for job #{}.",
+                    target->JobId());
+        return CraneErrCode::ERR_UPDATE_DATABASE;
+      }
+    }
+
     for (JobInCtld* target : jobs_to_update) {
       if (time_limit_seconds) {
         target->time_limit = absl::Seconds(time_limit_seconds.value());
@@ -2369,9 +2408,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       }
     }
 
-    if (reservation_end_time_update.has_value()) {
-      g_meta_container->GetResvMetaPtr(reservation_end_time_update->first)
-          ->end_time = reservation_end_time_update->second;
+    for (const auto& [target, end_time] : end_time_updates) {
+      target->SetEndTime(end_time);
     }
 
     if (absl_deadline_time) {
@@ -2387,17 +2425,28 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
     }
   }
 
-  for (const auto& [target_job_id, target_craned_ids] : running_jobs_craneds) {
+  for (const auto& [target_job_id, target_craned_ids,
+                    effective_time_limit_seconds, deadline_time] :
+       running_jobs_craneds) {
     for (const CranedId& craned_id : target_craned_ids) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        CraneErrCode err = stub->ChangeJobTimeConstraint(
-            target_job_id, time_limit_seconds, deadline_time);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Failed to change time limit or deadline of job #{} on Node {}",
-              target_job_id, craned_id);
-        }
+      if (!stub || stub->Invalid()) {
+        CRANE_ERROR(
+            "Failed to get valid stub for craned {} when changing time "
+            "constraint of job #{}.",
+            craned_id, target_job_id);
+        // TODO: Expose partial-applied time-constraint updates to users.
+        return CraneErrCode::ERR_RPC_FAILURE;
+      }
+
+      CraneErrCode err = stub->ChangeJobTimeConstraint(
+          target_job_id, effective_time_limit_seconds, deadline_time);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR(
+            "Failed to change time limit or deadline of job #{} on Node {}: {}",
+            target_job_id, craned_id, CraneErrStr(err));
+        // TODO: Expose partial-applied time-constraint updates to users.
+        return err;
       }
     }
   }
@@ -4341,7 +4390,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
       bool failed = false;
       for (job_id_t job_id : craned_meta->rn_job_res_map | std::views::keys) {
         const auto& job = m_running_job_map_.at(job_id);
-        absl::Time job_end_time = job->StartTime() + job->time_limit;
+        absl::Time job_end_time = job->EndTime();
 
         if (job_end_time > start_time) {
           nodes_conflicted.emplace_back(craned_id);
@@ -4798,7 +4847,6 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       for (auto&& [terminate_source, steps] : terminate_batches) {
         (void)terminate_source;
         for (auto [job_id, step_ids] : steps) {
-          // Check if the job has exceeded time limit
           google::protobuf::Timestamp end_timestamp = now;
 
           {
@@ -4806,18 +4854,16 @@ void JobScheduler::CleanCancelJobQueueCb_() {
             auto job_it = m_running_job_map_.find(job_id);
             if (job_it != m_running_job_map_.end()) {
               JobInCtld* job = job_it->second.get();
-              absl::Time timeout_time = job->StartTime() + job->time_limit;
+              absl::Time expected_end_time = job->EndTime();
 
-              // If job exceeded time limit, use timeout time as end_time
-              if (current_time > timeout_time) {
-                end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
+              if (current_time > expected_end_time) {
+                end_timestamp.set_seconds(ToUnixSeconds(expected_end_time));
                 end_timestamp.set_nanos(0);
                 CRANE_DEBUG(
-                    "[Job #{}] Job exceeded time limit during craned {} "
+                    "[Job #{}] Job reached expected end_time during craned {} "
                     "offline. "
-                    "Using timeout time {} as end_time instead of cancel time "
-                    "{}.",
-                    job_id, craned_id, absl::FormatTime(timeout_time),
+                    "Using expected end_time {} instead of cancel time {}.",
+                    job_id, craned_id, absl::FormatTime(expected_end_time),
                     absl::FormatTime(current_time));
               }
             }
@@ -5342,7 +5388,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
         absl::Time end_time = absl::FromUnixSeconds(timestamp.seconds()) +
                               absl::Nanoseconds(timestamp.nanos());
-        absl::Time expected_end_time = job->StartTime() + job->time_limit;
+        absl::Time expected_end_time = job->EndTime();
 
         if (end_time >
             expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
@@ -5883,16 +5929,17 @@ void JobScheduler::QueryJobsInRam(
     job_info.mutable_elapsed_time()->set_seconds(
         ToInt64Seconds(now - job.StartTime()));
 
-    // Check if job has exceeded time limit
     crane::grpc::JobStatus display_status = job.EffectiveDisplayStatus();
-    if (display_status == crane::grpc::JobStatus::Running ||
-        display_status == crane::grpc::JobStatus::Configuring) {
-      if (job.StartTime() + job.time_limit < now) {
+    if (!job.IsArrayParent() &&
+        (display_status == crane::grpc::JobStatus::Running ||
+         display_status == crane::grpc::JobStatus::Configuring)) {
+      absl::Time expected_end_time = job.EndTime();
+      if (expected_end_time < now) {
         job_info.set_status(crane::grpc::JobStatus::Completing);
         job_info.mutable_end_time()->set_seconds(
-            ToUnixSeconds(job.StartTime() + job.time_limit));
+            ToUnixSeconds(expected_end_time));
         job_info.mutable_elapsed_time()->set_seconds(
-            ToInt64Seconds(job.time_limit));
+            ToInt64Seconds(expected_end_time - job.StartTime()));
       }
     }
 
@@ -5981,15 +6028,16 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     JobInCtld* job = job_it->second.get();
     auto* daemon_step = job->DaemonStep();
 
-    // Check if job has exceeded time limit during craned offline
+    absl::Time expected_end_time = job->EndTime();
     if (job->Status() == crane::grpc::JobStatus::Running &&
-        job->StartTime() + job->time_limit < now) {
+        expected_end_time < now) {
       CRANE_INFO(
-          "[Job #{}] Job exceeded time limit during craned {} offline. "
-          "StartTime: {}, TimeLimit: {}s, Current: {}. "
+          "[Job #{}] Job reached expected end_time during craned {} offline. "
+          "StartTime: {}, TimeLimit: {}s, EndTime: {}, Current: {}. "
           "State will be updated when craned reconnects.",
           job_id, craned_id, absl::FormatTime(job->StartTime()),
-          absl::ToInt64Seconds(job->time_limit), absl::FormatTime(now));
+          absl::ToInt64Seconds(job->time_limit),
+          absl::FormatTime(expected_end_time), absl::FormatTime(now));
     }
 
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
@@ -6099,6 +6147,8 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
 bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
     const absl::Time& now, PdJobInScheduler* job,
     std::vector<NodeState*>* nodes_to_sched) {
+  // FIXME: Deadline-aware placement should use the effective job end time
+  // instead of only start_time + time_limit.
   absl::Time earliest_end_time = now + job->time_limit;
 
   const ResourceView min_res_view =
@@ -6458,6 +6508,8 @@ void SchedulerAlgo::NodeSelect(
     const absl::Time& now,
     const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
     const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs) {
+  // FIXME: Model active suspension explicitly in scheduler predictions instead
+  // of treating the stored end_time as a deterministic release time.
   for (const auto& rn : running_jobs)
     rn->end_time = std::max(rn->end_time, now + absl::Seconds(1));
 
@@ -6715,6 +6767,8 @@ void SchedulerAlgo::NodeSelect(
       // Leave start_time unset
       job->reason = "Resource";
     } else {
+      // FIXME: Keep this consistent with deadline-aware placement once the
+      // scheduler uses effective job end time.
       job->end_time = job->start_time + job->time_limit;
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE("\t job #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
