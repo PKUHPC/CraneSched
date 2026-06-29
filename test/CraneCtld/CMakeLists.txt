@@ -18,14 +18,40 @@ target_link_libraries(embedded_db_client_test
         crane_proto_lib
 
         Utility_PublicHeader
+        Utility_PasswordEntry
+        crane_tracer
+
+        concurrentqueue
 
         absl::btree
         absl::synchronization
         absl::flat_hash_map
 
+        phmap
+        nlohmann_json
+        range-v3::range-v3
+        uvw
+
         unqlite
+        Backward::Interface
         )
-target_include_directories(embedded_db_client_test PUBLIC ${PROJECT_SOURCE_DIR}/src/CraneCtld)
+if (ENABLE_UNQLITE)
+    target_compile_definitions(embedded_db_client_test PRIVATE CRANE_HAVE_UNQLITE)
+endif ()
+if (ENABLE_ROCKSDB)
+    target_sources(embedded_db_client_test PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/RocksDbEmbeddedStore.h
+            ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/RocksDbEmbeddedStore.cpp)
+    target_compile_definitions(embedded_db_client_test PRIVATE CRANE_HAVE_ROCKSDB)
+    if (TARGET rocksdb)
+        target_link_libraries(embedded_db_client_test rocksdb)
+    elseif (TARGET rocksdb-shared)
+        target_link_libraries(embedded_db_client_test rocksdb-shared)
+    endif ()
+endif ()
+target_include_directories(embedded_db_client_test PUBLIC
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database)
 gtest_discover_tests(embedded_db_client_test)
 
 add_executable(ctld_public_defs_test

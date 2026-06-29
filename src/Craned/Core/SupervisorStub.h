@@ -25,6 +25,16 @@
 
 namespace Craned {
 
+struct ExecuteStepRpcResult {
+  CraneErrCode code{CraneErrCode::SUCCESS};
+  grpc::StatusCode grpc_status{grpc::StatusCode::OK};
+  std::string error_message;
+
+  [[nodiscard]] bool Ok() const {
+    return code == CraneErrCode::SUCCESS && grpc_status == grpc::StatusCode::OK;
+  }
+};
+
 class SupervisorStub {
  public:
   SupervisorStub(job_id_t job_id, step_id_t step_id);
@@ -44,6 +54,7 @@ class SupervisorStub {
       std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>>
   InitAndGetRecoveredMap();
   CraneErrCode ExecuteStep();
+  ExecuteStepRpcResult ExecuteStepWithStatus();
   CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
   CheckStatus();

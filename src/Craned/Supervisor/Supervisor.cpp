@@ -28,6 +28,10 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 using Craned::Supervisor::g_config;
 
@@ -189,6 +193,11 @@ int InitFromStdin(int argc, char** argv) {
   g_config.Plugin.Enabled = msg.has_plugin_config();
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
+
+  // Tracing config
+  g_config.Tracing.Enabled = msg.tracing_enabled();
+  g_config.Tracing.Level = crane::TraceLevel::Debug;
+  g_config.Tracing.Traceparent = msg.traceparent();
 
   g_config.SupervisorLogFile =
       std::filesystem::path(msg.log_dir()) /
@@ -373,6 +382,22 @@ void GlobalVariableInit(int grpc_output_fd) {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode),
+        std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode));
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+#endif
+
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
@@ -459,10 +484,13 @@ void StartServer(int grpc_output_fd) {
   g_task_mgr.reset();
 
   g_craned_client.reset();
+  Craned::Common::CgroupManager::ShutdownCgroupV2FastPath();
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_plugin_client.reset();
 
   g_thread_pool->wait();
-  g_thread_pool.reset();
 
   std::exit(0);
 }

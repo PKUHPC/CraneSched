@@ -50,6 +50,10 @@ CraneCtld:
   StatusChangeFlushTimeoutMs: 100
   # Batch size threshold for status change processing (default: 1000)
   StatusChangeBatchNum: 1000
+  # Max status changes drained in one event-loop tick (default: 200)
+  StatusChangeMaxDrainPerTick: 200
+  # Max runtime DB updates per transaction chunk (default: 200)
+  StatusChangeDbCommitChunkSize: 200
   # Whether batch jobs may be requeued by default. Users can override with --requeue/--no-requeue.
   JobRequeue: true
   # Max number of times a job can be requeued before it is held.
@@ -90,6 +94,12 @@ Craned:
   NodeHealthCheckInterval: 0
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
+  # Optional worker-local cgroup operation concurrency limit (0 = disabled)
+  CgroupOpConcurrency: 0
+  # Use direct cgroup v2 fs operations instead of libcgroup for hot paths.
+  CgroupV2FastPath: true
+  # sync_rmdir or async_rmdir. async_rmdir lets a background janitor remove dirs.
+  CgroupV2CleanupMode: sync_rmdir
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -242,6 +252,10 @@ Supervisor:
   MaxLogFileNum: 3
   # Number of threads in the supervisor thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
+
+Tracing:
+  # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)
+  Enabled: false
 
 Container:
   # Toggle the container support in CraneSched

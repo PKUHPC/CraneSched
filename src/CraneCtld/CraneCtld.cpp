@@ -40,6 +40,10 @@
 #include "Security/VaultClient.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
@@ -72,11 +76,20 @@ void ParseCtldConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(ctld_cfg["ThreadPoolSize"], 0);
     ctld_config.SchedulerRpcThreadPoolSize =
         YamlValueOr<uint32_t>(ctld_cfg["SchedulerRpcThreadPoolSize"], 0);
+    ctld_config.SchedulerAllocJobsRpcTimeoutSeconds =
+        YamlValueOr<uint32_t>(ctld_cfg["SchedulerAllocJobsRpcTimeoutSeconds"],
+                              Ctld::kCtldRpcTimeoutSeconds);
     ctld_config.StatusChangeFlushTimeoutMs =
         YamlValueOr<uint32_t>(ctld_cfg["StatusChangeFlushTimeoutMs"],
                               Ctld::kJobStatusChangeTimeoutMS);
     ctld_config.StatusChangeBatchNum = YamlValueOr<uint32_t>(
         ctld_cfg["StatusChangeBatchNum"], Ctld::kJobStatusChangeBatchNum);
+    ctld_config.StatusChangeMaxDrainPerTick =
+        YamlValueOr<uint32_t>(ctld_cfg["StatusChangeMaxDrainPerTick"],
+                              Ctld::kJobStatusChangeMaxDrainPerTick);
+    ctld_config.StatusChangeDbCommitChunkSize =
+        YamlValueOr<uint32_t>(ctld_cfg["StatusChangeDbCommitChunkSize"],
+                              Ctld::kJobStatusChangeDbCommitChunkSize);
 
     ctld_config.JobRequeue =
         YamlValueOr<bool>(ctld_cfg["JobRequeue"], Ctld::kDefaultJobRequeue);
@@ -776,6 +789,15 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Tracing"]) {
+        const auto& tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+        if (tracing_config["Level"])
+          g_config.Tracing.Level = crane::TraceLevelFromString(
+              tracing_config["Level"].as<std::string>());
+      }
+
       if (config["Preempt"]) {
         const auto& preempt_config = config["Preempt"];
 
@@ -845,11 +867,20 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(db_config_path);
 
       if (config["CraneEmbeddedDbBackend"] &&
-          !config["CraneEmbeddedDbBackend"].IsNull())
+          !config["CraneEmbeddedDbBackend"].IsNull()) {
         g_config.CraneEmbeddedDbBackend =
             config["CraneEmbeddedDbBackend"].as<std::string>();
-      else
+      } else {
         g_config.CraneEmbeddedDbBackend = "Unqlite";
+      }
+
+      if (!Ctld::IsValidCraneEmbeddedDbBackend(
+              g_config.CraneEmbeddedDbBackend)) {
+        CRANE_CRITICAL("Invalid CraneEmbeddedDbBackend '{}'. Valid values: {}",
+                       g_config.CraneEmbeddedDbBackend,
+                       fmt::join(Ctld::kCraneEmbeddedDbBackendValues, ", "));
+        std::exit(1);
+      }
 
       std::filesystem::path db_base_dir = g_config.CraneBaseDir;
       if (!g_config.KeepalivedConfig.CraneSharedBaseDir.empty())
@@ -863,6 +894,24 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneCtldDbPath = db_base_dir / path;
       } else
         g_config.CraneCtldDbPath = db_base_dir / kDefaultCraneCtldDbPath;
+
+      if (config["RocksDb"]) {
+        const auto& rocksdb_config = config["RocksDb"];
+        g_config.RocksDb.SyncWrites =
+            YamlValueOr<bool>(rocksdb_config["SyncWrites"], true);
+        g_config.RocksDb.ManualWalSyncIntervalMs = YamlValueOr<uint32_t>(
+            rocksdb_config["ManualWalSyncIntervalMs"], 1000);
+        g_config.RocksDb.WriteBufferSizeMB =
+            YamlValueOr<uint32_t>(rocksdb_config["WriteBufferSizeMB"], 64);
+        g_config.RocksDb.MaxWriteBufferNumber =
+            YamlValueOr<uint32_t>(rocksdb_config["MaxWriteBufferNumber"], 4);
+        g_config.RocksDb.TargetFileSizeBaseMB =
+            YamlValueOr<uint32_t>(rocksdb_config["TargetFileSizeBaseMB"], 64);
+        g_config.RocksDb.MaxBackgroundJobs =
+            YamlValueOr<uint32_t>(rocksdb_config["MaxBackgroundJobs"], 4);
+        g_config.RocksDb.Compression =
+            YamlValueOr(rocksdb_config["Compression"], "lz4");
+      }
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -901,6 +950,30 @@ void ParseConfig(int argc, char** argv) {
         g_config.JobAggregationBatchSize =
             config["JobAggregationBatchSize"].as<uint32_t>();
       }
+
+      if (config["JobAggregationMode"]) {
+        g_config.JobAggregationMode =
+            config["JobAggregationMode"].as<std::string>();
+        if (g_config.JobAggregationMode != "async" &&
+            g_config.JobAggregationMode != "sync") {
+          CRANE_ERROR("Unknown JobAggregationMode '{}'. Valid: async|sync",
+                      g_config.JobAggregationMode);
+          std::exit(1);
+        }
+      }
+
+      g_config.JobAggregationWorkerBatchSize =
+          YamlValueOr<uint32_t>(config["JobAggregationWorkerBatchSize"],
+                                Ctld::kJobAggregationWorkerBatchSize);
+      g_config.JobAggregationPollIntervalMs =
+          YamlValueOr<uint32_t>(config["JobAggregationPollIntervalMs"],
+                                Ctld::kJobAggregationPollIntervalMs);
+      g_config.JobAggregationRetryBackoffMs =
+          YamlValueOr<uint32_t>(config["JobAggregationRetryBackoffMs"],
+                                Ctld::kJobAggregationRetryBackoffMs);
+      g_config.JobAggregationMaxRetryBackoffMs =
+          YamlValueOr<uint32_t>(config["JobAggregationMaxRetryBackoffMs"],
+                                Ctld::kJobAggregationMaxRetryBackoffMs);
 
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
@@ -960,6 +1033,9 @@ void ParseConfig(int argc, char** argv) {
           fmt::format("unix://{}{}", g_config.CraneBaseDir,
                       YamlValueOr(plugin_config["PlugindSockPath"],
                                   kDefaultPlugindUnixSockPath));
+      g_config.Plugin.TraceHookMaxRequestBytes =
+          YamlValueOr<size_t>(plugin_config["TraceHookMaxRequestBytes"],
+                              kDefaultTraceHookMaxRequestBytes);
 
       CRANE_INFO("Plugin config loaded from {}", plugin_config_path);
     } catch (YAML::BadFile& e) {
@@ -998,6 +1074,9 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();
@@ -1051,8 +1130,24 @@ void InitializeCtldGlobalVariables() {
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
-    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+    g_plugin_client->InitChannelAndStub(
+        g_config.Plugin.PlugindSockPath,
+        g_config.Plugin.TraceHookMaxRequestBytes);
   }
+
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize("CraneCtld",
+                                                   std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize("CraneCtld");
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+#endif
 
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();
@@ -1087,8 +1182,10 @@ void InitializeCtldGlobalVariables() {
   }
 
   bool ok;
-  g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
-  ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
+  g_embedded_db_client =
+      Ctld::MakeEmbeddedDbClient(g_config.CraneEmbeddedDbBackend);
+  ok = g_embedded_db_client &&
+       g_embedded_db_client->Init(g_config.CraneCtldDbPath);
   if (!ok) {
     CRANE_ERROR("Failed to initialize g_embedded_db_client.");
 

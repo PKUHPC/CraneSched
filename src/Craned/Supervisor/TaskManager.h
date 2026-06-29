@@ -30,6 +30,7 @@
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
+#include "crane/Tracing.h"
 #include "cri/api.pb.h"
 
 namespace Craned::Supervisor {
@@ -98,6 +99,8 @@ class StepInstance {
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
 
+  crane::ManualSpan execute_span_;
+  crane::ManualSpan& ExecuteSpan() { return execute_span_; }
   std::unique_ptr<pmix::PmixServer> pmix_server;
 
   explicit StepInstance(const StepToSupv& step)
@@ -705,6 +708,8 @@ class TaskManager {
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
+
+  void CompleteStepBeforeTaskStart_(uint32_t exit_code, std::string reason);
 
   // Task sink for finalized tasks. Task will be removed here.
   // Should called in uvw thread, otherwise data race may happen.

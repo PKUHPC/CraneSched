@@ -25,6 +25,7 @@
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "crane/CriClient.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
@@ -138,6 +139,13 @@ CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
 }
 
 CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
+  CRANE_TRACE_SCOPE_FROM_REMOTE(spawn_span, "step/supervisor_spawn",
+                                this->traceparent);
+  spawn_span.SetAttribute("job_id", job_id);
+  spawn_span.SetAttribute("step_id", step_id);
+  spawn_span.SetAttribute("step_type",
+                          static_cast<int64_t>(step_to_d.step_type()));
+
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -151,6 +159,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
   if (pipe(supervisor_craned_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -158,6 +167,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     close(supervisor_craned_pipe[0]);
     close(supervisor_craned_pipe[1]);
     CRANE_ERROR("Pipe creation failed!");
+    spawn_span.SetStatus(crane::StatusCode::kError, "pipe_failed");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -173,6 +183,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   if (child_pid == -1) {
     CRANE_ERROR("[Step #{}.{}] fork() failed: {}", job_id, step_id,
                 strerror(errno));
+    spawn_span.SetStatus(crane::StatusCode::kError, "fork_failed");
 
     close(craned_supervisor_pipe[0]);
     close(craned_supervisor_pipe[1]);
@@ -198,6 +209,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     FileOutputStream ostream(craned_supervisor_fd);
 
     // Do Supervisor Init
+    CRANE_TRACE_CHILD_NAMED(init_span, spawn_span, "step/send_init");
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(job_id);
     init_req.set_job_name(step_to_d.name());
@@ -363,6 +375,15 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_enable_slurm_compatible_env(g_config.EnableSlurmCompatibleEnv);
     init_req.set_thread_pool_size(g_config.Supervisor.ThreadPoolSize);
 
+    init_req.set_tracing_enabled(g_config.Tracing.Enabled);
+    // Pass spawn span's context so step/execute becomes child of
+    // step/supervisor_spawn, not just child of job/lifecycle.
+    auto spawn_tp = crane::SerializeTraceParent(spawn_span.GetContext());
+    if (!spawn_tp.empty())
+      init_req.set_traceparent(spawn_tp);
+    else if (!this->traceparent.empty())
+      init_req.set_traceparent(this->traceparent);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
@@ -373,6 +394,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
                   job_id, step_id, strerror(ostream.GetErrno()));
+      init_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
+      spawn_span.SetStatus(crane::StatusCode::kError, "init_send_failed");
 
       crane_cgroup->KillAllProcesses(SIGKILL);
 
@@ -381,6 +404,12 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       return CraneErrCode::ERR_PROTOBUF;
     }
 
+    CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
+    init_span.End();
+
+    CRANE_TRACE_CHILD_NAMED(ready_span, spawn_span, "step/supervisor_ready");
+    ready_span.SetAttribute("job_id", job_id);
+    ready_span.SetAttribute("step_id", step_id);
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     bool clean_eof{false};
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,
@@ -396,6 +425,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
         CRANE_ERROR("[Step #{}.{}] False from subprocess {}.", job_id, step_id,
                     child_pid);
 
+      ready_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
+      spawn_span.SetStatus(crane::StatusCode::kError, "supervisor_not_ready");
       crane_cgroup->KillAllProcesses(SIGKILL);
 
       close(craned_supervisor_fd);
@@ -555,10 +586,57 @@ void StepInstance::ExecuteStepAsync() {
 
   g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
                               stub = supervisor_stub] {
-    auto code = stub->ExecuteStep();
-    if (code != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute step, code:{}.",
-                  job_id, step_id, static_cast<int>(code));
+    auto result = stub->ExecuteStepWithStatus();
+    if (result.Ok()) return;
+
+    if (result.grpc_status == grpc::StatusCode::DEADLINE_EXCEEDED) {
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor ExecuteStep ack deadline exceeded; "
+          "checking supervisor status before marking RPC failure.",
+          job_id, step_id);
+
+      for (int attempt = 1; attempt <= kCranedRpcTimeoutSeconds; ++attempt) {
+        std::this_thread::sleep_for(1s);
+        auto status = stub->CheckStatus();
+        if (status.has_value()) {
+          auto step_status = std::get<3>(*status);
+          if (step_status == StepStatus::Running ||
+              step_status == StepStatus::Completing ||
+              IsFinishedStepStatus(step_status)) {
+            CRANE_WARN(
+                "[Step #{}.{}] ExecuteStep ack deadline treated as accepted; "
+                "supervisor status is {}.",
+                job_id, step_id, step_status);
+            return;
+          }
+          CRANE_WARN(
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
+              "{}/{}; "
+              "supervisor status is {}.",
+              job_id, step_id, attempt, kCranedRpcTimeoutSeconds, step_status);
+        } else {
+          CRANE_WARN(
+              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
+              "{}/{}; "
+              "supervisor status query failed.",
+              job_id, step_id, attempt, kCranedRpcTimeoutSeconds);
+        }
+      }
+
+      CRANE_ERROR(
+          "[Step #{}.{}] ExecuteStep ack was not confirmed within {}s grace, "
+          "marking step failed.",
+          job_id, step_id, kCranedRpcTimeoutSeconds);
+    } else {
+      CRANE_ERROR(
+          "[Step #{}.{}] Supervisor failed to accept ExecuteStep, code:{}, "
+          "grpc_status:{}, error:{}.",
+          job_id, step_id, static_cast<int>(result.code),
+          static_cast<int>(result.grpc_status), result.error_message);
+    }
+
+    if (result.code != CraneErrCode::SUCCESS ||
+        result.grpc_status != grpc::StatusCode::OK) {
       g_job_mgr->SendCompletingAndTerminal_(
           job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
           "Supervisor not responding when execute step");

@@ -55,9 +55,13 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
+option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 
 option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)
+
+option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 
 option(CRANE_ENABLE_LUA "Enable lua support" OFF)
 
@@ -363,8 +367,12 @@ if (ENABLE_UNQLITE)
     message("Enable Unqlite as one of embedded db backend.")
 endif ()
 
-if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE)
-    message(FATAL_ERROR "At least one of Berkeley DB and Unqlite should be enabled.")
+if (ENABLE_ROCKSDB)
+    message("Enable RocksDB as one of embedded db backend.")
+endif ()
+
+if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE AND NOT ENABLE_ROCKSDB)
+    message(FATAL_ERROR "At least one embedded db backend should be enabled.")
 endif ()
 
 find_package(PAM REQUIRED)

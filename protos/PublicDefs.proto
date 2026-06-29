@@ -405,6 +405,7 @@ message JobToD {
 
   string name = 9;
 
+  optional string traceparent = 10;  // W3C traceparent for distributed tracing
   optional ArrayTaskIdentity array_task = 16;
 }
 

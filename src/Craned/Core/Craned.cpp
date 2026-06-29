@@ -43,6 +43,10 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
+#ifdef CRANE_ENABLE_TRACING
+#  include "crane/CraneSpanExporter.h"
+#endif
 
 using namespace Craned::Common;
 using Craned::g_config;
@@ -115,15 +119,13 @@ CraneErrCode RecoverCgForJobSteps(
     // Open cgroup and destroy it.
     auto cg_str = CgroupManager::CgroupStrByParsedIds(ids);
 
-    // NOLINTBEGIN(readability-suspicious-call-argument)
-    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_BASE_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
-      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
-                                            NO_CONTROLLER_FLAG, true);
-    else
+    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1 ||
+        CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
+      auto cg_expt = CgroupManager::CreateOrOpenCgroup(cg_str, true);
+      if (cg_expt.has_value()) cg_ptr = std::move(cg_expt.value());
+    } else {
       std::unreachable();
+    }
 
     if (!cg_ptr) {
       // FIXME: Clean incomplete cgroups!
@@ -261,6 +263,12 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
     conf.ThreadPoolSize =
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
+    conf.CgroupOpConcurrency =
+        YamlValueOr<uint32_t>(craned_config["CgroupOpConcurrency"], 0);
+    conf.CgroupV2FastPath =
+        YamlValueOr<bool>(craned_config["CgroupV2FastPath"], true);
+    conf.CgroupV2CleanupMode = YamlValueOr<std::string>(
+        craned_config["CgroupV2CleanupMode"], "sync_rmdir");
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -1121,6 +1129,15 @@ void ParseConfig(int argc, char** argv) {
         }
       }  // end of JobLifecycleHook
 
+      if (config["Tracing"]) {
+        const auto& tracing_config = config["Tracing"];
+        if (tracing_config["Enabled"])
+          g_config.Tracing.Enabled = tracing_config["Enabled"].as<bool>();
+        if (tracing_config["Level"])
+          g_config.Tracing.Level = crane::TraceLevelFromString(
+              tracing_config["Level"].as<std::string>());
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
@@ -1144,6 +1161,9 @@ void ParseConfig(int argc, char** argv) {
           fmt::format("unix://{}{}", g_config.CraneBaseDir,
                       YamlValueOr(plugin_config["PlugindSockPath"],
                                   kDefaultPlugindUnixSockPath));
+      g_config.Plugin.TraceHookMaxRequestBytes =
+          YamlValueOr<size_t>(plugin_config["TraceHookMaxRequestBytes"],
+                              kDefaultTraceHookMaxRequestBytes);
 
       CRANE_INFO("Plugin config loaded from {}", plugin_config_path);
     } catch (YAML::BadFile& e) {
@@ -1469,7 +1489,13 @@ void GlobalVariableInit() {
   }
 
   using CgConstant::Controller;
+  CgroupManager::ConfigureCgroupV2FastPath(
+      g_config.CranedConf.CgroupV2FastPath);
+  CgroupManager::ConfigureCgroupV2CleanupMode(
+      g_config.CranedConf.CgroupV2CleanupMode);
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
+  CgroupManager::ConfigureCgroupOpConcurrency(
+      g_config.CranedConf.CgroupOpConcurrency);
   if (CgroupManager::GetCgroupVersion() ==
           CgConstant::CgroupVersion::CGROUP_V1 &&
       (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER) ||
@@ -1533,8 +1559,25 @@ void GlobalVariableInit() {
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
-    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+    g_plugin_client->InitChannelAndStub(
+        g_config.Plugin.PlugindSockPath,
+        g_config.Plugin.TraceHookMaxRequestBytes);
   }
+
+#ifdef CRANE_ENABLE_TRACING
+  if (g_config.Plugin.Enabled && g_plugin_client) {
+    auto exporter =
+        std::make_unique<crane::CraneSpanExporter>(*g_plugin_client);
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Craned@{}", g_config.Hostname), std::move(exporter));
+  } else {
+    crane::TracerManager::GetInstance().Initialize(
+        fmt::format("Craned@{}", g_config.Hostname));
+  }
+  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
+                                 std::memory_order_release);
+  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+#endif
 
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
@@ -1584,11 +1627,15 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
 
   CgroupManager::ShutdownCpuPool();
+  CgroupManager::ShutdownCgroupV2FastPath();
 
   std::exit(0);
 }

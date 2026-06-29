@@ -8,3 +8,5 @@ add_subdirectory(PasswordEntry)
 add_subdirectory(PluginClient)
 add_subdirectory(Pmix)
 add_subdirectory(PublicHeader)
+
+add_subdirectory(OpenTelemetry)

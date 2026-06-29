@@ -140,6 +140,7 @@ message FreeJobsReply {}
 
 message ExecuteStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;
+  map<uint32, string> job_traceparents = 2;  // job_id → W3C traceparent
 }
 
 message ExecuteStepsReply {
@@ -648,6 +649,21 @@ message QueryJobsInfoReply {
   repeated JobInfo job_info_list = 2;
 }
 
+message QueueStateCount {
+  JobStatus state = 1;
+  uint64 count = 2;
+}
+
+message QueryQueueStateSummaryRequest {
+  repeated JobStatus filter_states = 1;
+}
+
+message QueryQueueStateSummaryReply {
+  bool ok = 1;
+  uint64 total_count = 2;
+  repeated QueueStateCount state_counts = 3;
+}
+
 message QueryJobEfficiencyRequest {
   repeated uint32 job_ids = 1;
   uint32 uid = 2;  // User ID for authorization
@@ -1065,6 +1081,86 @@ message StreamCrunReply {
     StepX11ConnReply payload_step_x11_conn_reply = 10;
     StepX11EofReply payload_step_x11_eof_reply = 11;
     TaskIOErrOutputForwardReply payload_task_io_err_output_forward_reply = 12;
+  }
+}
+
+message StreamCattachRequest {
+  enum CattachRequestType {
+    STEP_CONNECT_REQUEST = 0;
+    STEP_COMPLETION_REQUEST = 1;
+    TASK_IO_FORWARD = 2;
+  }
+
+  message StepConnectReq {
+    int32 cattach_pid = 1;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    uint32 uid = 4;
+  }
+
+  message StepCompleteReq {
+    JobStatus status = 1;
+  }
+
+  message TaskIOForwardReq {
+    bytes msg = 1;
+    bool eof = 2;
+    optional uint32 task_id = 3;  // If set, forward stdin only to the specified task; otherwise broadcast.
+  }
+
+  CattachRequestType type = 1;
+
+  oneof payload {
+    StepConnectReq payload_step_connect_req = 2;
+    StepCompleteReq payload_step_complete_req = 3;
+    TaskIOForwardReq payload_task_io_forward_req = 4;
+  }
+}
+
+message StreamCattachReply {
+  enum CforedCattachReplyType {
+    STEP_CONNECT_REPLY = 0;
+    STEP_CANCEL_REQUEST = 1;
+    STEP_COMPLETION_ACK_REPLY = 2;
+    TASK_IO_FORWARD = 3;
+    TASK_IO_FORWARD_READY = 4;
+    TASK_ERR_OUTPUT_FORWARD = 9;
+  }
+
+  message StepConnectReply {
+    bool ok = 1;
+    CattachStepInfo step_info = 2;
+    string failure_reason = 3;
+  }
+
+  message StepCancelRequest {}
+
+  message StepCompletionAckReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReadyReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReply {
+    bytes msg = 1;
+    uint32 task_id = 2;
+  }
+
+  message TaskIOErrOutputForwardReply {
+    bytes msg = 1;
+  }
+
+  CforedCattachReplyType type = 1;
+
+  oneof payload {
+    StepConnectReply payload_step_connect_reply = 2;
+    StepCancelRequest payload_step_cancel_request = 3;
+    StepCompletionAckReply payload_step_completion_ack_reply = 4;
+    TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 5;
+    TaskIOForwardReply payload_task_io_forward_reply = 6;
+    TaskIOErrOutputForwardReply payload_task_io_err_output_forward_reply = 11;
   }
 }
 
@@ -1579,6 +1675,8 @@ service CraneCtld {
 
   rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
 
+  rpc QueryQueueStateSummary(QueryQueueStateSummaryRequest) returns (QueryQueueStateSummaryReply);
+
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
 
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
@@ -1679,6 +1777,7 @@ service CranedForPam {
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
+  rpc CattachStream(stream StreamCattachRequest) returns (stream StreamCattachReply);
   rpc StepIOStream(stream StreamStepIORequest) returns (stream StreamStepIOReply);
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }

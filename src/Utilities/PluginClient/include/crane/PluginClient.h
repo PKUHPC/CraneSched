@@ -25,7 +25,12 @@
 #include <grpcpp/support/status.h>
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -57,6 +62,7 @@ class PluginClient {
     UPDATE_POWER_STATE,
     REGISTER_CRANED,
     UPDATE_LICENSES,
+    TRACE,
     HookTypeCount,
   };
 
@@ -65,7 +71,10 @@ class PluginClient {
     std::unique_ptr<google::protobuf::Message> msg;
   };
 
-  void InitChannelAndStub(const std::string& endpoint);
+  void InitChannelAndStub(
+      const std::string& endpoint,
+      size_t trace_hook_max_request_bytes = kDefaultTraceHookMaxRequestBytes);
+  bool DrainTraceHooks(std::chrono::microseconds timeout) noexcept;
 
   // These functions are used to add HookEvent into the event queue.
   // Launched by Ctld
@@ -73,6 +82,7 @@ class PluginClient {
   void EndHookAsync(std::vector<crane::grpc::JobInfo> jobs);
   void NodeEventHookAsync(
       std::vector<crane::grpc::plugin::CranedEventInfo> events);
+  void TraceHookAsync(std::vector<crane::grpc::plugin::SpanInfo> spans);
 
   // Launched by Craned
   void CreateCgroupHookAsync(job_id_t job_id, const std::string& cgroup,
@@ -112,8 +122,13 @@ class PluginClient {
 
   grpc::Status SendUpdateLicensesHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
+  grpc::Status SendTraceHook_(grpc::ClientContext* context,
+                              google::protobuf::Message* msg);
 
   void AsyncSendThread_();
+  void MarkTraceHookCompleted_(const HookEvent& event);
+  void MarkTraceHooksCompleted_(size_t count);
+  static size_t CountTraceHookEvents_(const std::list<HookEvent>& events);
 
   std::shared_ptr<Channel> m_channel_;
   std::unique_ptr<CranePluginD::Stub> m_stub_;
@@ -122,6 +137,11 @@ class PluginClient {
   std::atomic<bool> m_thread_stop_{false};
 
   ConcurrentQueue<HookEvent> m_event_queue_;
+  size_t m_trace_hook_max_request_bytes_{kDefaultTraceHookMaxRequestBytes};
+  std::atomic<uint64_t> m_trace_hooks_enqueued_{0};
+  std::atomic<uint64_t> m_trace_hooks_completed_{0};
+  std::mutex m_trace_drain_mutex_;
+  std::condition_variable m_trace_drain_cv_;
 
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.
@@ -132,7 +152,8 @@ class PluginClient {
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
            &PluginClient::SendRegisterCranedHook_,
-           &PluginClient::SendUpdateLicensesHook_}};
+           &PluginClient::SendUpdateLicensesHook_,
+           &PluginClient::SendTraceHook_}};
 };
 
 }  // namespace plugin

@@ -355,6 +355,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryJobsInfoRequest* request,
       crane::grpc::QueryJobsInfoReply* response) override;
 
+  grpc::Status QueryQueueStateSummary(
+      grpc::ServerContext* context,
+      const crane::grpc::QueryQueueStateSummaryRequest* request,
+      crane::grpc::QueryQueueStateSummaryReply* response) override;
+
   grpc::Status QueryCranedInfo(
       grpc::ServerContext* context,
       const crane::grpc::QueryCranedInfoRequest* request,

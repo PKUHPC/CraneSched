@@ -21,6 +21,7 @@
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -30,6 +31,7 @@
 #include "CtldClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 #include "protos/Supervisor.pb.h"
 
@@ -361,6 +363,15 @@ JobManager::JobManager() {
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanStepStatusChangeQueueCb_();
       });
+  m_step_status_change_timer_handle_ =
+      m_uvw_loop_->resource<uvw::timer_handle>();
+  m_step_status_change_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        EvCleanStepStatusChangeQueueCb_();
+      });
+  m_step_status_change_timer_handle_->start(
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs},
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
@@ -449,34 +460,49 @@ JobManager::~JobManager() {
 }
 
 bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
+  const auto total_begin = std::chrono::steady_clock::now();
+  const size_t job_count = jobs.size();
+  const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id;
+  const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id;
+
+  const auto job_map_lock_begin = std::chrono::steady_clock::now();
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  const auto job_map_lock_end = std::chrono::steady_clock::now();
+  const auto uid_map_lock_begin = std::chrono::steady_clock::now();
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+  const auto uid_map_lock_end = std::chrono::steady_clock::now();
 
   for (const auto& job : jobs) {
     job_id_t job_id = job.job_id;
-    if (job_map_ptr->contains(job_id)) {
-      auto* old_job = job_map_ptr->at(job_id).RawPtr();
-      bool old_job_freeable = false;
-      {
-        absl::MutexLock lk(old_job->step_map_mtx.get());
-        old_job_freeable =
-            old_job->step_map.empty() && old_job->cgroup == nullptr;
-      }
+    if (!job_map_ptr->contains(job_id)) continue;
 
-      if (!old_job_freeable) {
-        CRANE_ERROR(
-            "[Job #{}] Allocation rejected because the previous job record is "
-            "still active or cleaning.",
-            job_id);
-        return false;
-      }
+    auto* old_job = job_map_ptr->at(job_id).RawPtr();
+    bool old_job_freeable = false;
+    {
+      absl::MutexLock lk(old_job->step_map_mtx.get());
+      old_job_freeable =
+          old_job->step_map.empty() && old_job->cgroup == nullptr;
+    }
+
+    if (!old_job_freeable) {
+      CRANE_ERROR(
+          "[Job #{}] Allocation rejected because the previous job record is "
+          "still active or cleaning.",
+          job_id);
+      return false;
     }
   }
 
+  const auto insert_begin = std::chrono::steady_clock::now();
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
-    uid_t uid = job.Uid();
 
+    CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc",
+                                  job.job_to_d.traceparent());
+    alloc_span.SetAttribute("job_id", job_id);
+    alloc_span.SetAttribute("crane.dimension", "lifecycle");
+
+    uid_t uid = job.Uid();
     if (job_map_ptr->contains(job_id)) {
       CRANE_INFO("[Job #{}] Reclaiming freeable stale job record.", job_id);
       FreeJobInfoNoLock_(job_id, job_map_ptr, uid_map_ptr);
@@ -489,6 +515,40 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
       uid_map_ptr->emplace(uid, absl::flat_hash_set<job_id_t>({job_id}));
     }
   }
+  const auto insert_end = std::chrono::steady_clock::now();
+  const auto total_end = std::chrono::steady_clock::now();
+
+  const auto job_map_lock_wait_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(job_map_lock_end -
+                                                            job_map_lock_begin)
+          .count();
+  const auto uid_map_lock_wait_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(uid_map_lock_end -
+                                                            uid_map_lock_begin)
+          .count();
+  const auto insert_loop_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(insert_end -
+                                                            insert_begin)
+          .count();
+  const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            total_end - total_begin)
+                            .count();
+  if (job_map_lock_wait_ms > 1000 || uid_map_lock_wait_ms > 1000 ||
+      total_ms > 1000) {
+    CRANE_WARN(
+        "JobManagerAllocJobsDiag job_count={} first_job_id={} "
+        "last_job_id={} job_map_lock_wait_ms={} uid_map_lock_wait_ms={} "
+        "insert_loop_ms={} total_ms={}",
+        job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
+        uid_map_lock_wait_ms, insert_loop_ms, total_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerAllocJobsDiag job_count={} first_job_id={} "
+        "last_job_id={} job_map_lock_wait_ms={} uid_map_lock_wait_ms={} "
+        "insert_loop_ms={} total_ms={}",
+        job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
+        uid_map_lock_wait_ms, insert_loop_ms, total_ms);
+  }
 
   return true;
 }
@@ -499,22 +559,31 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
     return false;
   }
 
+  auto begin_time = std::chrono::steady_clock::now();
+  int64_t free_job_info_ms = 0;
+  int64_t queue_len = 0;
+  bool any_freed = false;
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
   for (job_id_t job_id : job_ids) {
+    auto free_info_begin = std::chrono::steady_clock::now();
     if (!job_map_ptr->contains(job_id)) {
       CRANE_DEBUG("[Job #{}] FreeJobs ignored because job is not found.",
                   job_id);
+      free_job_info_ms +=
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - free_info_begin)
+              .count();
       continue;
     }
 
-    auto* job = job_map_ptr->at(job_id).RawPtr();
+    auto* job_ptr = job_map_ptr->at(job_id).RawPtr();
     bool freeable = false;
     size_t step_count = 0;
-    bool has_job_cgroup = job->cgroup != nullptr;
+    bool has_job_cgroup = job_ptr->cgroup != nullptr;
     {
-      absl::MutexLock lk(job->step_map_mtx.get());
-      step_count = job->step_map.size();
+      absl::MutexLock lk(job_ptr->step_map_mtx.get());
+      step_count = job_ptr->step_map.size();
       freeable = step_count == 0 && !has_job_cgroup;
     }
 
@@ -523,13 +592,53 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
           "[Job #{}] FreeJobs ignored because job is active or cleaning. "
           "step_count={}, has_job_cgroup={}",
           job_id, step_count, has_job_cgroup);
+      free_job_info_ms +=
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - free_info_begin)
+              .count();
       continue;
     }
 
-    CRANE_INFO("[Job #{}] Freeing freeable job record.", job_id);
-    FreeJobInfoNoLock_(job_id, job_map_ptr, uid_map_ptr);
+    auto job = FreeJobInfoNoLock_(job_id, job_map_ptr, uid_map_ptr);
+    free_job_info_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - free_info_begin)
+                            .count();
+    if (!job.has_value()) {
+      CRANE_DEBUG("[Job #{}] FreeJobs ignored because job is not found.",
+                  job_id);
+      continue;
+    }
+
+    {
+      CRANE_TRACE_SCOPE_FROM_REMOTE(span, "job/free",
+                                    job->job_to_d.traceparent());
+      span.SetAttribute("job_id", job_id);
+    }
+
+    m_free_jobs_queue_.enqueue(FreeJobElem{
+        .job = std::move(job.value()),
+        .enqueue_time = std::chrono::steady_clock::now(),
+        .queue_len_at_enqueue =
+            static_cast<int64_t>(m_free_jobs_queue_.size_approx() + 1)});
+    queue_len = static_cast<int64_t>(m_free_jobs_queue_.size_approx());
+    any_freed = true;
   }
 
+  if (any_freed) m_free_jobs_async_handle_->send();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin_time)
+                        .count();
+  if (elapsed_ms > 1000 || free_job_info_ms > 1000 || queue_len > 1000) {
+    CRANE_WARN(
+        "JobManagerFreeJobsDiag phase=enqueue request_job_count={} "
+        "free_job_info_ms={} queue_len={} elapsed_ms={}",
+        job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerFreeJobsDiag phase=enqueue request_job_count={} "
+        "free_job_info_ms={} queue_len={} elapsed_ms={}",
+        job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
+  }
   return true;
 }
 
@@ -553,6 +662,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       // in the corresponding handler.
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
+      step_inst->traceparent = job_ptr->job_to_d.traceparent();
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
                                    .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
@@ -1105,9 +1215,15 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
                                 need_run_prolog = elem.need_run_prolog,
                                 job_env = elem.job_env] {
       if (need_run_prolog) {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(prolog_span, "step/prolog",
+                                      execution->traceparent);
+        prolog_span.SetAttribute("job_id", execution->job_id);
+        prolog_span.SetAttribute("step_id", execution->step_id);
         if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
-                                      job_env))
+                                      job_env)) {
+          prolog_span.SetStatus(crane::StatusCode::kError, "prolog_failed");
           return;
+        }
       }
 
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
@@ -1129,7 +1245,8 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
 // This change needs to be applied in StepInstance.cpp which now holds
 // the SpawnSupervisor logic (moved there by x11_task branch).
 CraneErrCode JobManager::ExecuteStepAsync(
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
+    std::unordered_map<job_id_t, std::string> traceparents) {
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
@@ -1143,9 +1260,11 @@ CraneErrCode JobManager::ExecuteStepAsync(
         return CraneErrCode::ERR_CGROUP;
       }
 
-      EvQueueExecuteStepElem elem{.job_id = job_id,
-                                  .step_id = step_id,
-                                  .ok_prom = std::promise<CraneErrCode>{}};
+      EvQueueExecuteStepElem elem{
+          .job_id = job_id,
+          .step_id = step_id,
+          .traceparent = traceparents.count(job_id) ? traceparents[job_id] : "",
+          .ok_prom = std::promise<CraneErrCode>{}};
 
       m_grpc_execute_step_queue_.enqueue(std::move(elem));
     }
@@ -1289,7 +1408,13 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
-    auto& [job_id, step_id, ok_prom] = elem;
+    auto& [job_id, step_id, traceparent, ok_prom] = elem;
+
+    CRANE_TRACE_SCOPE_FROM_REMOTE(dispatch_span, "step/queue_dispatch",
+                                  traceparent);
+    dispatch_span.SetAttribute("job_id", job_id);
+    dispatch_span.SetAttribute("step_id", step_id);
+
     auto job = m_job_map_.GetValueExclusivePtr(job_id);
 
     if (!job) {
@@ -1306,6 +1431,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    step_it->second->wait_execute_span.End();
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1588,6 +1714,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     // process.
     CRANE_TRACE("[Step #{}.{}] Supervisor spawned successfully.", job_id,
                 step_id);
+    CRANE_TRACE_MANUAL_FROM_REMOTE(wait_span, "step/wait_execute",
+                                   step_ptr->traceparent);
+    wait_span.SetAttribute("job_id", job_id);
+    wait_span.SetAttribute("step_id", step_id);
+    step_ptr->wait_execute_span = std::move(wait_span);
   }
 }
 
@@ -1615,6 +1746,22 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
           .timestamp = status_change.timestamp};
     }
 
+    // Lambda to update step fields once we have the pointer.
+    auto update_step = [&](StepInstance* step) {
+      step->GotNewStatus(status_change.new_status);
+      should_forward = !step->silent_cleanup;
+      if (pending_terminal) {
+        step->pending_terminal_status = *pending_terminal;
+      } else if (step->err_before_supv_start && !step->IsDaemonStep() &&
+                 IsFinishedStepStatus(status_change.new_status)) {
+        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+            .final_status = status_change.new_status,
+            .exit_code = status_change.exit_code,
+            .reason = status_change.reason.value_or(""),
+            .timestamp = status_change.timestamp};
+      }
+    };
+
     // Find and update the local step under its owning lock. StepInstance
     // pointers must not escape these guards.
     {
@@ -1626,10 +1773,7 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
         if (step == nullptr) {
           should_forward = false;
         } else {
-          step->GotNewStatus(status_change.new_status);
-          if (pending_terminal)
-            step->pending_terminal_status = *pending_terminal;
-          should_forward = !step->silent_cleanup;
+          update_step(step);
         }
       }
     }
@@ -1642,10 +1786,7 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
             it != job_ptr->step_map.end()) {
           auto* step = it->second.get();
           local_step_found = true;
-          step->GotNewStatus(status_change.new_status);
-          if (pending_terminal)
-            step->pending_terminal_status = *pending_terminal;
-          should_forward = !step->silent_cleanup;
+          update_step(step);
         }
       }
     }
@@ -2061,6 +2202,51 @@ void JobManager::MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id) {
         it->second.step != nullptr) {
       it->second.step->silent_cleanup = true;
     }
+  }
+}
+
+void JobManager::EvCleanFreeJobsQueueCb_() {
+  auto begin_time = std::chrono::steady_clock::now();
+  FreeJobElem elem;
+  std::vector<JobInD> jobs_to_free;
+  std::vector<StepInstance*> steps_to_free;
+  int64_t max_queue_wait_ms = 0;
+  int64_t max_queue_len = 0;
+
+  while (m_free_jobs_queue_.try_dequeue(elem)) {
+    auto queue_wait_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - elem.enqueue_time)
+            .count();
+    max_queue_wait_ms = std::max(max_queue_wait_ms, queue_wait_ms);
+    max_queue_len = std::max(max_queue_len, elem.queue_len_at_enqueue);
+    JobInD& job = elem.job;
+    for (auto& step : job.step_map | std::views::values) {
+      steps_to_free.emplace_back(step.get());
+    }
+
+    if (job.step_map.size() != 1)
+      CRANE_DEBUG("Job #{} to free has more than one step.", job.job_id);
+
+    jobs_to_free.emplace_back(std::move(elem.job));
+  }
+
+  auto evclean_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - begin_time)
+          .count();
+  if (max_queue_wait_ms > 1000 || evclean_elapsed_ms > 1000) {
+    CRANE_WARN(
+        "JobManagerFreeJobsDiag phase=evclean cleanup_batch_size={} "
+        "step_count={} queue_wait_ms={} queue_len={} evclean_elapsed_ms={}",
+        jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,
+        max_queue_len, evclean_elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "JobManagerFreeJobsDiag phase=evclean cleanup_batch_size={} "
+        "step_count={} queue_wait_ms={} queue_len={} evclean_elapsed_ms={}",
+        jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,
+        max_queue_len, evclean_elapsed_ms);
   }
 }
 
