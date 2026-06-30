@@ -190,6 +190,16 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 
 Then start services:
 
+For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
+
+```bash
+sudo mkdir -p /etc/systemd/system/craned.service.d
+sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+LimitMEMLOCK=infinity
+EOF
+```
+
 ```bash
 systemctl daemon-reload
 systemctl enable cranectld --now  # Control node
