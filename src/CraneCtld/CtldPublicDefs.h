@@ -735,6 +735,7 @@ struct DaemonStepInCtld : StepInCtld {
                    const std::string& reason, const CranedId& craned_id,
                    const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
+  void RequestCleanupFromPrimaryFinish(StepStatusChangeContext* context);
 
   void RecoverFromDb(const JobInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;

@@ -847,6 +847,31 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   return std::nullopt;
 }
 
+void DaemonStepInCtld::RequestCleanupFromPrimaryFinish(
+    StepStatusChangeContext* context) {
+  if (this->Status() == crane::grpc::JobStatus::Completing ||
+      IsFinishedStepStatus(this->Status())) {
+    CRANE_DEBUG(
+        "[Step #{}.{}] daemon cleanup already requested or finished, status "
+        "{}.",
+        job_id, this->StepId(), this->Status());
+    return;
+  }
+
+  if (this->Status() != crane::grpc::JobStatus::Running) {
+    CRANE_WARN(
+        "[Step #{}.{}] primary finished while daemon status is {}. Requesting "
+        "daemon cleanup anyway.",
+        job_id, this->StepId(), this->Status());
+  }
+
+  this->SetStatus(crane::grpc::JobStatus::Completing);
+  for (const auto& node : this->ExecutionNodes()) {
+    context->craned_step_free_map[node][job->JobId()].insert(kDaemonStepId);
+  }
+  context->rn_step_raw_ptrs.insert(this);
+}
+
 void DaemonStepInCtld::RecoverFromDb(
     const JobInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
@@ -1442,8 +1467,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     // Primary step: trigger daemon FreeSteps for job-level cleanup. The daemon
     // terminal is sent by Craned only after local job resources are gone.
     if (this->IsPrimaryStep()) {
-      for (const auto& node : job->DaemonStep()->CranedIds()) {
-        context->craned_step_free_map[node][job_id].insert(kDaemonStepId);
+      if (auto* daemon_step = job->DaemonStep(); daemon_step != nullptr) {
+        daemon_step->RequestCleanupFromPrimaryFinish(context);
       }
     }
 

@@ -600,12 +600,18 @@ void CtldClient::Init() {
                         job_id, step_id, ctld_status, craned_status);
 
             if (ctld_status == StepStatus::Completing) {
-              // Special case: timeout while Craned was offline.
-              // Ctld may have marked the step Completing after timeout while
-              // Craned still sees a local Running step. Do not replay
-              // FreeSteps here because the local process may not have been
-              // terminated yet; let Ctld continue through the terminate path.
               if (craned_status == StepStatus::Running) {
+                if (step_id == kDaemonStepId) {
+                  CRANE_INFO(
+                      "[Step #{}.{}] Ctld is Completing while daemon is still "
+                      "Running. Replay daemon cleanup.",
+                      job_id, step_id);
+                  completing_steps[job_id].insert(step_id);
+                  continue;
+                }
+
+                // Non-daemon steps may still have live user processes. Let
+                // Ctld continue through the terminate path before cleanup.
                 CRANE_INFO(
                     "[Step #{}.{}] Ctld is Completing while Craned is still "
                     "Running. Skip FreeSteps replay and let Ctld drive the "
