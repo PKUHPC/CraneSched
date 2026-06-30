@@ -145,6 +145,17 @@ sudo dpkg -i CraneSched-*-craned.deb
 
 安装后，配置 `/etc/crane/config.yaml` 和 `/etc/crane/database.yaml`（用于 cranectld），然后启动服务：
 
+对于需要锁定大量内存的作业，建议在所有计算节点为 `craned.service` 配置无限制的 memlock。启动 `craned` 前创建 systemd drop-in：
+
+```bash
+sudo mkdir -p /etc/systemd/system/craned.service.d
+sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+LimitMEMLOCK=infinity
+EOF
+sudo systemctl daemon-reload
+```
+
 ```bash
 # 在控制节点上
 systemctl enable --now cranectld
