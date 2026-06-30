@@ -4,6 +4,38 @@ Administrators can write Lua scripts to implement functions such as parameter va
 logging, and policy enforcement, and dynamically load them via configuration files.
 This document describes Crane’s Lua script configuration and its APIs.
 
+## Overview
+
+CraneSched builds with Lua support enabled by default. This means a default CMake
+configuration requires Lua development headers and libraries on the build host.
+
+Lua support at build time does **not** mean CraneSched executes a policy script by
+default. `cranectld` runs Lua callbacks only after `JobSubmitLuaScript` is set in
+`/etc/crane/config.yaml`. If this option is omitted or commented out, job
+submission and modification follow the normal path without Lua checks.
+
+When `JobSubmitLuaScript` is configured, `cranectld` invokes:
+
+- `crane_job_submit` for job submissions from commands such as `cbatch` and `calloc`.
+- `crane_job_modify` for job modification requests such as `ccontrol` updates.
+
+To build CraneSched without Lua support:
+
+```bash
+cmake -G Ninja -DCRANE_ENABLE_LUA=OFF -S . -B build
+```
+
+## Runtime Configuration
+
+Configure `JobSubmitLuaScript` only on nodes that run `cranectld`:
+
+```yaml
+JobSubmitLuaScript: /path/to/your/job_submit.lua
+```
+
+To disable Lua policy checks, remove or comment out `JobSubmitLuaScript` and
+restart `cranectld`.
+
 ## Lua Callback Functions
 
 When writing Lua scripts, **all callback functions must be implemented**.  
@@ -78,8 +110,9 @@ Same as the return values of `crane_job_submit`.
 | crane.set_job_env_field("env_name", "env_value", job_desc)      | Set a job's environment field                    |
 | crane.get_qos_priority("qos_name")                              | Query QoS priority                               |
 | crane.get_resv("resv_name")                                     | Query reservation info (nil if not found)        |
-| crane.log_error("msg") / crane.log_info("msg") / crane.log_debug("msg") | Logging functions                          |
+| crane.log_error("msg") / crane.log_info("msg") / crane.log_debug("msg") / crane.log_trace("msg") | Logging functions |
 | crane.log_user("msg")                                           | User-visible log message                         |
+| crane.time_str2mins("time_string")                              | Convert a Crane time string to minutes           |
 
 ---
 
@@ -135,6 +168,8 @@ Same as the return values of `crane_job_submit`.
 | denied_accounts         | table(string list)   | Denied accounts                  |
 | default_mem_per_cpu     | number               | Default memory per CPU           |
 | max_mem_per_cpu         | number               | Maximum memory per CPU           |
+| default_mem_per_node    | number               | Default memory per node          |
+| max_mem_per_node        | number               | Maximum memory per node          |
 
 ---
 
@@ -199,22 +234,6 @@ Same as the return values of `crane_job_submit`.
 | denied_users     | table(string list)   | Users denied for the reservation         |
 
 
-## Lua Script Configuration
-
-The system needs to have Lua version 5.x and lua-devel installed.
-
-### Crane compilation
-```shell
-# Check the packaging guide for details
-cmake -G Ninja .. -DCRANE_ENABLE_LUA=ON
-```
-
-### /etc/crane/config.yaml
-
-```yaml
-JobSubmitLuaScript: /path/to/your/job_submit.lua
-```
-
 ## Lua Script Example
 
 ```lua
@@ -256,7 +275,7 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_info("  memory_bytes: %d", rv.memory_bytes)
     crane.log_info("  device_map:")
     for dev, entry in pairs(rv.device_map) do
-        crane.log_info("    %s: untyped=%d", dev, entry.untyped_count)
+        crane.log_info("    %s: total=%d", dev, entry.total_count)
         crane.log_info("      typed:")
         for tname, tcount in pairs(entry.typed) do
             crane.log_info("        %s: %d", tname, tcount)
@@ -362,3 +381,13 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
     return crane.SUCCESS
 end
 ```
+
+## Troubleshooting
+
+- `Lua not found` during CMake configuration: install the platform-specific Lua
+  development package listed above, or build with `-DCRANE_ENABLE_LUA=OFF`.
+- The script is not running: confirm `JobSubmitLuaScript` is configured in the
+  `cranectld` configuration file and restart `cranectld`.
+- Job submission or modification returns `ERR_LUA_FAILED`: check the script path,
+  Lua syntax, required callback functions, callback return codes, and
+  `cranectld` logs.

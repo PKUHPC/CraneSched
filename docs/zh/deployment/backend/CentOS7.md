@@ -71,8 +71,10 @@ firewall-cmd --reload
 ## 3. 安装依赖
 
 ```bash
-yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel
+yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel lua-devel
 ```
+
+Lua 支持默认开启。CentOS 7 已 EOL；如果无法从普通仓库安装 `lua-devel`，请使用 vault 或内部镜像。
 
 从源码安装 libcgroup：
 
@@ -132,6 +134,9 @@ make install
 
 ## 5. 构建和安装
 
+Lua 支持默认开启。如不希望构建 Lua 支持，请在 CMake 命令中加入
+`-DCRANE_ENABLE_LUA=OFF`。
+
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
@@ -181,16 +186,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 然后启动服务：
-
-对于需要锁定大量内存的作业，建议在所有计算节点为 `craned.service` 配置无限制的 memlock。启动 `craned` 前创建 systemd drop-in：
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload

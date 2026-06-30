@@ -130,7 +130,8 @@ dnf install -y \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
-    shadow-utils-subid-devel
+    shadow-utils-subid-devel \
+    lua-devel
 ```
 
 ## 4. 安装和配置 MongoDB
@@ -144,6 +145,7 @@ MongoDB 仅在**控制节点**上需要。
 ### 5.1 构建和安装
 
 1. 配置和构建鹤思:
+
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
@@ -190,16 +192,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 然后启动服务：
-
-对于需要锁定大量内存的作业，建议在所有计算节点为 `craned.service` 配置无限制的 memlock。启动 `craned` 前创建 systemd drop-in：
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload

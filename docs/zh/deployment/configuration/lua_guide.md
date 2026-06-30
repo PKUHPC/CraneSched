@@ -1,9 +1,38 @@
 # Lua 脚本配置指南
-支持通过 Lua 脚本对作业提交与修改过程进行灵活扩展和策略控制。
-管理员可编写 Lua 脚本，实现如参数校验、日志记录、策略限制等功能，并通过配置文件动态加载。
-本文描述 Crane 的 Lua 脚本配置以及它们的 API。
+
+鹤思支持通过 Lua 脚本对作业提交与修改过程进行灵活扩展和策略控制。管理员可编写 Lua 脚本，实现如参数校验、日志记录、策略限制等功能，并通过配置文件动态加载。本文描述鹤思的 Lua 脚本配置以及它们的 API。
+
+## 概览
+
+CraneSched 默认在构建时启用 Lua 支持，CMake 配置要求构建机已安装 Lua 开发头文件和库。
+
+构建时启用 Lua 支持并不表示系统会默认执行 Lua 策略脚本。只有在 `/etc/crane/config.yaml`
+中配置 `JobSubmitLuaScript` 后，`cranectld` 才会执行 Lua 回调。如果该选项被省略或注释，
+作业提交和修改会按普通路径执行，不进行 Lua 检查。
+
+配置 `JobSubmitLuaScript` 后，`cranectld` 会在以下场景调用 Lua 回调：
+
+- `cbatch`、`calloc` 等作业提交路径调用 `crane_job_submit`。
+- `ccontrol` 等作业修改请求调用 `crane_job_modify`。
+
+如需构建不包含 Lua 支持的 CraneSched：
+
+```bash
+cmake -G Ninja -DCRANE_ENABLE_LUA=OFF -S . -B build
+```
+
+## 运行时配置
+
+`JobSubmitLuaScript` 只需要配置在运行 `cranectld` 的节点上：
+
+```yaml
+JobSubmitLuaScript: /path/to/your/job_submit.lua
+```
+
+如需禁用 Lua 策略检查，请删除或注释 `JobSubmitLuaScript`，然后重启 `cranectld`。
 
 ## Lua 实现函数
+
 编写 Lua 脚本时，以下所有函数均为必需项。未实现的函数必须提供 `stub`。
 
 ### crane_job_submit
@@ -64,8 +93,9 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | crane.set_job_env_field("env_name", "env_value", job_desc)     | 设置 job 的 env 字段    |
 | crane.get_qos_priority("qos_name")                             | 查询 QOS 的优先级        |
 | crane.get_resv("resv_name")                                    | 查询预约信息（不存在返回 nil） |
-| crane.log_error("msg")/crane.log_info("msg")/crane.log_debug("msg") | 日志函数              |
+| crane.log_error("msg")/crane.log_info("msg")/crane.log_debug("msg")/crane.log_trace("msg") | 日志函数 |
 | crane.log_user("msg")                                          | 用户日志              |
+| crane.time_str2mins("time_string")                             | 将 Crane 时间字符串转换为分钟 |
 
 ### 传入参数属性
 
@@ -119,6 +149,8 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | denied_accounts     | table(string list) | 拒绝的账户  |
 | default_mem_per_cpu | number             | 默认内存   |
 | max_mem_per_cpu     | number             | 最大内存   |
+| default_mem_per_node | number            | 每节点默认内存 |
+| max_mem_per_node     | number            | 每节点最大内存 |
 
 ### 全局变量
 
@@ -178,22 +210,6 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | allowed_users    | table(string list) | 预约允许的用户 |
 | denied_users     | table(string list) | 预约拒绝的用户 |
 
-## Lua 脚本配置
-
-系统需安装 Lua 5.x 版本及 lua-devel。
-
-### 构建配置
-```shell
-# 详细查看打包指南
-cmake -G Ninja .. -DCRANE_ENABLE_LUA=ON
-```
-
-### 系统配置
-
-```yaml
-JobSubmitLuaScript: /path/to/your/job_submit.lua
-```
-
 ## Lua 脚本样例
 
 ```lua
@@ -235,7 +251,7 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_info("  memory_bytes: %d", rv.memory_bytes)
     crane.log_info("  device_map:")
     for dev, entry in pairs(rv.device_map) do
-        crane.log_info("    %s: untyped=%d", dev, entry.untyped_count)
+        crane.log_info("    %s: total=%d", dev, entry.total_count)
         crane.log_info("      typed:")
         for tname, tcount in pairs(entry.typed) do
             crane.log_info("        %s: %d", tname, tcount)
@@ -341,3 +357,12 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
     return crane.SUCCESS
 end
 ```
+
+## 排障
+
+- CMake 配置阶段出现 `Lua not found`：安装上表中对应平台的 Lua 开发包，或使用
+  `-DCRANE_ENABLE_LUA=OFF` 构建不含 Lua 支持的版本。
+- 脚本没有执行：确认 `JobSubmitLuaScript` 已配置在 `cranectld` 使用的配置文件中，并重启
+  `cranectld`。
+- 作业提交或修改返回 `ERR_LUA_FAILED`：检查脚本路径、Lua 语法、必需回调函数、回调返回码
+  和 `cranectld` 日志。

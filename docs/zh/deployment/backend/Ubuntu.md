@@ -193,11 +193,15 @@ apt install -y \
     libaio-dev \
     libsystemd-dev \
     libelf-dev \
-    libsubid-dev
+    libsubid-dev \
+    liblua5.4-dev
 ```
 
 !!! info
     在 Ubuntu 22.04 及以下版本中， `libsubid-dev` 不可用。请参考：[https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/) 构建并安装 shadow 4.0 或更高版本。
+
+!!! info
+    Lua 支持默认开启。在 Ubuntu 20.04 上，请将 `liblua5.4-dev` 替换为 `liblua5.3-dev`。
 
 ## 4. 安装和配置 MongoDB
 
@@ -261,16 +265,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 然后启动服务：
-
-对于需要锁定大量内存的作业，建议在所有计算节点为 `craned.service` 配置无限制的 memlock。启动 `craned` 前创建 systemd drop-in：
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload

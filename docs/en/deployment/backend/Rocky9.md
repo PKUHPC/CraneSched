@@ -129,7 +129,8 @@ dnf install -y \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
-    shadow-utils-subid-devel
+    shadow-utils-subid-devel \
+    lua-devel
 ```
 
 ## 4. Install and Configure MongoDB
@@ -143,6 +144,7 @@ Please follow the [Database Configuration Guide](../configuration/database.md) f
 ### 5.1 Build and Install
 
 1. Configure and build CraneSched:
+
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
@@ -189,16 +191,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 Then start services:
-
-For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload

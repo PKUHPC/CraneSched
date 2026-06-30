@@ -94,7 +94,7 @@
 | 90 | `ERR_NO_DEFAULT_WCKEY` | 未设置默认 wckey | 指定 wckey 或设置默认 wckey | No default wckey is set. Please specify a wckey or set a default wckey |
 | 91 | `ERR_MISSING_DEPENDENCY` | 一个或多个依赖作业不存在或已结束 | 检查依赖作业的状态 | One or more dependency jobs may not exist or have ended |
 | 92 | `ERR_DB_INSERT_FAILED` | 数据库插入失败（内部错误） | 联系管理员查看日志 | Database insertion failed due to internal error |
-| 93 | `ERR_LUA_FAILED` | Lua 脚本验证失败 | 检查 Lua 脚本语法 | Lua script validation failed |
+| 93 | `ERR_LUA_FAILED` | Lua 脚本验证失败 | 检查 Lua 脚本路径、语法、必需回调、返回码和 cranectld 日志 | Lua script validation failed |
 | 94 | `ERR_RESOURCE_NOT_FOUND` | 资源未找到 | 检查资源名称是否正确 | The resource was not found in the crane |
 | 95 | `ERR_INVALID_ARGUMENT` | 提供了无效参数 | 检查参数格式和取值范围 | Invalid argument provided |
 | 96 | `ERR_RESOURCE_ALREADY_EXIST` | 资源已存在 | | The resource already exists in the crane |

@@ -75,8 +75,11 @@ firewall-cmd --reload
 ## 3. Install Dependencies
 
 ```bash
-yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel
+yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel lua-devel
 ```
+
+Lua support is enabled by default. CentOS 7 is EOL; if `lua-devel` cannot be
+installed from normal repositories, use a vault or internal mirror.
 
 Install libcgroup from source:
 
@@ -136,6 +139,9 @@ If you are using clang, you can use libstdc++ from GCC 14 by adding the followin
 
 ## 5. Build and Install
 
+Lua support is enabled by default. If you do not want to build Lua support, add
+`-DCRANE_ENABLE_LUA=OFF` to the CMake command.
+
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
@@ -185,16 +191,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 Then start services:
-
-For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload

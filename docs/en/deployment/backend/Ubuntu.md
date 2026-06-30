@@ -193,11 +193,15 @@ apt install -y \
     libaio-dev \
     libsystemd-dev \
     libelf-dev \
-    libsubid-dev
+    libsubid-dev \
+    liblua5.4-dev
 ```
 
 !!! info
     `libsubid-dev` is unavailable on Ubuntu 22.04 and older releases. Build and install shadow 4.0+ from [https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/).
+
+!!! info
+    Lua support is enabled by default. On Ubuntu 20.04, replace `liblua5.4-dev` with `liblua5.3-dev`.
 
 ## 4. Install and configure MongoDB
 
@@ -211,6 +215,7 @@ See the [Database Configuration Guide](../configuration/database.md) for step-by
 ### 5.1 Build and install
 
 **Configure and build CraneSched:**
+
 
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
@@ -262,16 +267,6 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 ```
 
 Then start services:
-
-For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
-
-```bash
-sudo mkdir -p /etc/systemd/system/craned.service.d
-sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
-[Service]
-LimitMEMLOCK=infinity
-EOF
-```
 
 ```bash
 systemctl daemon-reload
