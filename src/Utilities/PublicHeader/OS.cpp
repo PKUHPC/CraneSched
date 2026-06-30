@@ -752,7 +752,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       };
 
       if (args.at_parent_setup_cb) {
-        auto notify_parent_setup_result = [script, parent_setup_state](bool ok) {
+        auto notify_parent_setup_result = [script,
+                                           parent_setup_state](bool ok) {
           int fd = -1;
           {
             std::scoped_lock lock(parent_setup_state->mutex);
@@ -775,24 +776,21 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         };
 
         try {
-          std::thread(
-              [setup_cb = args.at_parent_setup_cb, pid,
-               notify = notify_parent_setup_result]() mutable {
-                try {
-                  notify(setup_cb(pid));
-                } catch (const std::exception& e) {
-                  CRANE_ERROR("Parent setup callback threw: {}", e.what());
-                  notify(false);
-                } catch (...) {
-                  CRANE_ERROR("Parent setup callback threw an unknown exception");
-                  notify(false);
-                }
-              })
-              .detach();
+          std::thread([setup_cb = args.at_parent_setup_cb, pid,
+                       notify = notify_parent_setup_result]() mutable {
+            try {
+              notify(setup_cb(pid));
+            } catch (const std::exception& e) {
+              CRANE_ERROR("Parent setup callback threw: {}", e.what());
+              notify(false);
+            } catch (...) {
+              CRANE_ERROR("Parent setup callback threw an unknown exception");
+              notify(false);
+            }
+          }).detach();
         } catch (const std::system_error& e) {
-          CRANE_ERROR(
-              "Failed to start parent setup thread for script '{}': {}", script,
-              e.what());
+          CRANE_ERROR("Failed to start parent setup thread for script '{}': {}",
+                      script, e.what());
           notify_parent_setup_result(false);
         }
       }
