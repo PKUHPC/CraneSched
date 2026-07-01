@@ -6,6 +6,8 @@ After=network.target nss-lookup.target
 User=root
 Group=root
 ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/craned
+LimitMEMLOCK=infinity
+LimitSTACK=infinity
 
 [Install]
 WantedBy=multi-user.target
