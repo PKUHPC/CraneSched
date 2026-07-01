@@ -653,6 +653,8 @@ struct StepInCtld {
 
   void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
   void NodeConfigured(const CranedId& node);
+  void NodeConfiguredWithCleanupIntent(const CranedId& node);
+  void NodeConfiguredWithTerminal(const CranedId& node);
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
 
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);

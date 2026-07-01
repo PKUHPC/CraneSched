@@ -392,6 +392,179 @@ TEST(CtldStepStateMachineTest,
   ExpectStepFreeRequested(context, "node-b", kJobId, kDaemonStepId);
 }
 
+TEST(CtldStepStateMachineTest,
+     PrimaryRunningTerminalFirstRequestsCleanupBeforeRelease) {
+  constexpr job_id_t kJobId = 47;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::JobType::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  auto* primary_step = job.PrimaryStep();
+  primary_step->SetConfiguringNodes({});
+  primary_step->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed,
+                                               42U, "terminal first", "node-a",
+                                               TimestampAt(410), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Completing);
+  EXPECT_NE(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(primary_step->PrevErrorStatus(), crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(primary_step->PrevErrorExitCode(), 42U);
+  ExpectStepFreeRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed, 42U,
+                                          "cleanup done", "node-a",
+                                          TimestampAt(411), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 42U);
+  ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
+}
+
+TEST(CtldStepStateMachineTest,
+     PrimaryRunningTerminalFirstWaitsForOtherNodesBeforeCleanup) {
+  constexpr job_id_t kJobId = 48;
+  const std::vector<CranedId> craned_ids{"node-a", "node-b"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::JobType::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  auto* primary_step = job.PrimaryStep();
+  primary_step->SetConfiguringNodes({});
+  primary_step->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed,
+                                               7U, "terminal first", "node-a",
+                                               TimestampAt(420), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Running);
+  EXPECT_TRUE(context.craned_step_free_map.empty());
+  EXPECT_NE(job.PrimaryStep(), nullptr);
+
+  result =
+      primary_step->StepStatusChange(crane::grpc::JobStatus::Completing, 0U, "",
+                                     "node-b", TimestampAt(421), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Completing);
+  ExpectStepFreeRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+  ExpectStepFreeRequested(context, "node-b", kJobId, Ctld::kPrimaryStepId);
+
+  result =
+      primary_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U, "",
+                                     "node-b", TimestampAt(422), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 7U);
+  ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
+  ExpectStepFreeRequested(context, "node-b", kJobId, kDaemonStepId);
+}
+
+TEST(CtldStepStateMachineTest,
+     PrimaryAllNodesCompletingThenTerminalReleasesAfterCleanupIntent) {
+  constexpr job_id_t kJobId = 49;
+  const std::vector<CranedId> craned_ids{"node-a", "node-b"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::JobType::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  auto* primary_step = job.PrimaryStep();
+  primary_step->SetConfiguringNodes({});
+  primary_step->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto result = primary_step->StepStatusChange(
+      crane::grpc::JobStatus::Completing, 1U, "synthetic", "node-a",
+      TimestampAt(430), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Running);
+  EXPECT_NE(job.PrimaryStep(), nullptr);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Completing,
+                                          2U, "synthetic", "node-b",
+                                          TimestampAt(431), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Completing);
+  ExpectStepFreeRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+  ExpectStepFreeRequested(context, "node-b", kJobId, Ctld::kPrimaryStepId);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed, 1U,
+                                          "cleanup done", "node-a",
+                                          TimestampAt(432), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_NE(job.PrimaryStep(), nullptr);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed, 2U,
+                                          "cleanup done", "node-b",
+                                          TimestampAt(433), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 2U);
+  ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
+  ExpectStepFreeRequested(context, "node-b", kJobId, kDaemonStepId);
+}
+
+TEST(CtldStepStateMachineTest,
+     PrimaryConfiguringSyntheticCompletingDoesNotStartExecution) {
+  constexpr job_id_t kJobId = 50;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::JobType::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Configuring);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  auto* primary_step = job.PrimaryStep();
+  Ctld::StepStatusChangeContext context;
+  auto result = primary_step->StepStatusChange(
+      crane::grpc::JobStatus::Completing, 3U, "synthetic", "node-a",
+      TimestampAt(440), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Completing);
+  EXPECT_TRUE(context.craned_step_exec_map.empty());
+  ExpectStepFreeRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed, 3U,
+                                          "cleanup done", "node-a",
+                                          TimestampAt(441), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 3U);
+}
+
 // --- ShouldRequeue tests ---
 
 TEST(ShouldRequeueTest, InteractiveJobNeverRequeues) {
@@ -548,6 +721,41 @@ TEST(CtldStepStateMachineTest, DaemonPartialCompletingDoesNotTriggerCleanup) {
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Running);
   EXPECT_TRUE(context.craned_step_free_map.empty());
+}
+
+TEST(CtldStepStateMachineTest,
+     DaemonRunningTerminalFirstRequestsCleanupBeforeRelease) {
+  constexpr job_id_t kJobId = 54;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Failed);
+  job.SetPrimaryStepExitCode(ExitCode::EC_CRANED_DOWN);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto* daemon_step = job.DaemonStep();
+
+  auto result = daemon_step->StepStatusChange(
+      crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
+      "terminal first", "node-a", TimestampAt(512), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Completing);
+  EXPECT_NE(job.DaemonStep(), nullptr);
+  ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
+
+  result = daemon_step->StepStatusChange(
+      crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN, "cleanup done",
+      "node-a", TimestampAt(513), &context);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->first, crane::grpc::JobStatus::Failed);
+  EXPECT_EQ(result->second, ExitCode::EC_CRANED_DOWN);
+  EXPECT_EQ(job.DaemonStep(), nullptr);
 }
 
 // --- Primary finished but daemon still pending ---

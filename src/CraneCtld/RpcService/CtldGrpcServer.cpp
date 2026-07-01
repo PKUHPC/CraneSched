@@ -150,13 +150,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     // (two independent events, not "terminal implies completing")
     for (const auto& [job_id, steps] : orphaned_steps) {
       for (const auto step_id : steps | std::views::reverse) {
-        // Synthetic Completing → drives AllNodesCompleting → FreeSteps
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-        // Synthetic Terminal → drives AllNodesFinished → release/FreeJobs
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
+        g_job_scheduler->StepCompletingAndStatusChangeAsync(
             job_id, step_id, request->craned_id(),
             crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);

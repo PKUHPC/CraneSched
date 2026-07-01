@@ -2005,9 +2005,9 @@ void JobScheduler::StepScheduleThread_() {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
             CRANE_ERROR("Failed to update steps to embedded database.");
-            StepStatusChangeAsync(step->job_id, step->StepId(), "",
-                                  crane::grpc::JobStatus::Failed, 0,
-                                  "DbUpdateError", now);
+            StepCompletingAndStatusChangeAsync(step->job_id, step->StepId(), "",
+                                               crane::grpc::JobStatus::Failed,
+                                               0, "DbUpdateError", now);
           }
         }
 
@@ -2032,9 +2032,9 @@ void JobScheduler::StepScheduleThread_() {
             if (stub == nullptr || stub->Invalid()) {
               thread_pool_mtx.Lock();
               for (const auto& step : steps)
-                StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
-                                      crane::grpc::JobStatus::Failed, 0,
-                                      "CranedDown", now);
+                StepCompletingAndStatusChangeAsync(
+                    step.job_id(), step.step_id(), craned_id,
+                    crane::grpc::JobStatus::Failed, 0, "CranedDown", now);
 
               thread_pool_mtx.Unlock();
 
@@ -2056,9 +2056,9 @@ void JobScheduler::StepScheduleThread_() {
 
             thread_pool_mtx.Lock();
             for (const auto& step : steps)
-              StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
-                                    crane::grpc::JobStatus::Failed, 0,
-                                    "AllocRpcError", now);
+              StepCompletingAndStatusChangeAsync(
+                  step.job_id(), step.step_id(), craned_id,
+                  crane::grpc::JobStatus::Failed, 0, "AllocRpcError", now);
             thread_pool_mtx.Unlock();
             CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
 
@@ -4823,9 +4823,9 @@ void JobScheduler::CleanCancelJobQueueCb_() {
             }
           }
           for (auto step_id : step_ids)
-            StepStatusChangeAsync(job_id, step_id, craned_id,
-                                  crane::grpc::JobStatus::Cancelled,
-                                  ExitCode::EC_TERMINATED, "", end_timestamp);
+            StepCompletingAndStatusChangeAsync(
+                job_id, step_id, craned_id, crane::grpc::JobStatus::Cancelled,
+                ExitCode::EC_TERMINATED, "", end_timestamp);
         }
       }
       continue;
@@ -5231,7 +5231,7 @@ void JobScheduler::StartCraneCtldPrologThread(JobInCtld* job) {
         auto status = run_prolog_result.error();
         CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}", job_id,
                     status.exit_code, status.signal_num);
-        this->StepStatusChangeAsync(
+        this->StepCompletingAndStatusChangeAsync(
             job_id, kDaemonStepId, kCtldPrologInternalNodeIndex,
             crane::grpc::JobStatus::Cancelled, ExitCode::EC_PROLOG_ERR,
             "CraneCtldPrologError", now);
@@ -5255,7 +5255,24 @@ void JobScheduler::StepStatusChangeAsync(
                                       .new_status = new_status,
                                       .craned_index = craned_index,
                                       .reason = std::move(reason),
-                                      .timestamp = std::move(timestamp)});
+                                      .timestamp = std::move(timestamp),
+                                      .ordered_terminal_status = std::nullopt});
+  m_job_status_change_async_handle_->send();
+}
+
+void JobScheduler::StepCompletingAndStatusChangeAsync(
+    job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+    crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+    std::string reason, google::protobuf::Timestamp timestamp) {
+  m_job_status_change_queue_.enqueue(
+      {.job_id = job_id,
+       .step_id = step_id,
+       .exit_code = exit_code,
+       .new_status = crane::grpc::JobStatus::Completing,
+       .craned_index = craned_index,
+       .reason = std::move(reason),
+       .timestamp = std::move(timestamp),
+       .ordered_terminal_status = terminal_status});
   m_job_status_change_async_handle_->send();
 }
 
@@ -5297,15 +5314,20 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     LockGuard running_guard(&m_running_job_map_mtx_);
     LockGuard indexes_guard(&m_job_indexes_mtx_);
 
-    for (const auto& [job_id, step_id, exit_code, new_status, craned_index,
-                      reason, timestamp] : args) {
+    auto process_status_change = [&](job_id_t job_id, step_id_t step_id,
+                                     uint32_t exit_code,
+                                     crane::grpc::JobStatus new_status,
+                                     const CranedId& craned_index,
+                                     const std::string& reason,
+                                     const google::protobuf::Timestamp&
+                                         timestamp) {
       auto iter = m_running_job_map_.find(job_id);
       if (iter == m_running_job_map_.end()) {
         CRANE_WARN(
             "[Job #{}] Ignoring unknown job in CleanJobStatusChangeQueueCb_ "
             "(status: {}).",
             job_id, util::StepStatusToString(new_status));
-        continue;
+        return;
       }
 
       // Free job allocation
@@ -5324,9 +5346,12 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       } else {
         CommonStepInCtld* step = job->GetStep(step_id);
         if (step == nullptr) {
-          CRANE_WARN("[Step #{}.{}] Ignoring unknown step in StepStatusChange.",
-                     job_id, step_id);
-          continue;
+          CRANE_WARN(
+              "[Step #{}.{}] Ignoring unknown step in StepStatusChange "
+              "(status: {}, from: {}, exit_code: {}, reason: {}).",
+              job_id, step_id, util::StepStatusToString(new_status),
+              craned_index, exit_code, reason);
+          return;
         }
         CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
                     job_id, step_id, new_status);
@@ -5445,6 +5470,17 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           m_running_job_map_.erase(iter);
         }  // end of normal completion path (else)
       }
+    };
+
+    for (const auto& arg : args) {
+      process_status_change(arg.job_id, arg.step_id, arg.exit_code,
+                            arg.new_status, arg.craned_index, arg.reason,
+                            arg.timestamp);
+      if (arg.ordered_terminal_status.has_value()) {
+        process_status_change(arg.job_id, arg.step_id, arg.exit_code,
+                              arg.ordered_terminal_status.value(),
+                              arg.craned_index, arg.reason, arg.timestamp);
+      }
     }
 
     SpliceFinalArrayParentsFromPendingMapNoLock_(final_array_parents);
@@ -5466,7 +5502,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       for (auto* job : context.pending_append_steps_jobs) {
         auto* daemon_step = job->DaemonStep();
         for (const auto& node_id : job->CranedIds()) {
-          StepStatusChangeWithReasonAsync(
+          StepCompletingAndStatusChangeAsync(
               job->JobId(), daemon_step->StepId(), node_id,
               crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
               "Batch AppendSteps failed", now_ts);
@@ -5505,7 +5541,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                 util::StepToDRangeIdString(steps), craned_id);
             auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
             for (const auto& step : steps) {
-              StepStatusChangeWithReasonAsync(
+              StepCompletingAndStatusChangeAsync(
                   step.job_id(), step.step_id(), craned_id,
                   crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
                   "CranedDown", now);
@@ -5548,7 +5584,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
                       util::JobStepsToString(failed_steps.value()), craned_id);
           for (const auto& [job_id, step_ids] : failed_steps.value()) {
             for (const auto& step_id : step_ids)
-              StepStatusChangeWithReasonAsync(
+              StepCompletingAndStatusChangeAsync(
                   job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
                   ExitCode::EC_RPC_ERR, "ExecRpcError", now);
           }
@@ -5559,7 +5595,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
             util::JobStepsToString(steps), craned_id);
         for (const auto& [job_id, step_ids] : steps) {
           for (const auto& step_id : step_ids)
-            StepStatusChangeWithReasonAsync(
+            StepCompletingAndStatusChangeAsync(
                 job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
                 ExitCode::EC_CRANED_DOWN, "CranedDown", now);
         }
@@ -7545,10 +7581,10 @@ void JobScheduler::TerminateJobsOnCraned(const CranedId& craned_id,
     std::vector<job_id_t> job_ids(it->second.begin(), it->second.end());
 
     for (job_id_t job_id : job_ids)
-      StepStatusChangeAsync(job_id, kDaemonStepId, craned_id,
-                            crane::grpc::JobStatus::Failed, exit_code,
-                            "Terminated",
-                            google::protobuf::util::TimeUtil::GetCurrentTime());
+      StepCompletingAndStatusChangeAsync(
+          job_id, kDaemonStepId, craned_id, crane::grpc::JobStatus::Failed,
+          exit_code, "Terminated",
+          google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     CRANE_TRACE("No job is executed by craned {}. Ignore cleaning step...",
                 craned_id);

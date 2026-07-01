@@ -913,9 +913,11 @@ bool JobManager::EvCheckSupervisorRunning_() {
               "sending SIGKILL.",
               job_id, step_id, kMaxSupervisorCheckRetryCount);
           kill(step->supv_pid, SIGKILL);
-          SendCompletingAndTerminal_(
-              job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
-              "Supervisor not responding during step completion");
+          step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+              .final_status = StepStatus::Failed,
+              .exit_code = ExitCode::EC_RPC_ERR,
+              .reason = "Supervisor not responding during step completion",
+              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
           state.sigkill_sent = true;
         }
         continue;
@@ -1489,11 +1491,10 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
       CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps failed status={}:{}",
                   job_id, step_id, status.exit_code, status.signal_num);
       g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-      ActivateStepStatusChangeAsync_(
+      SendCompletingAndTerminal_(
           job_id, step_id, crane::grpc::JobStatus::Failed,
           ExitCode::EC_PROLOG_ERR,
-          fmt::format("Failed to run prolog for job#{} ", job_id), std::nullopt,
-          google::protobuf::util::TimeUtil::GetCurrentTime());
+          fmt::format("Failed to run prolog for job#{} ", job_id));
       return false;
     }
     CRANE_DEBUG("[Step #{}.{}]: Prolog in AllocSteps success", job_id, step_id);
@@ -1511,11 +1512,10 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
     CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
-    ActivateStepStatusChangeAsync_(
+    SendCompletingAndTerminal_(
         job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_CGROUP_ERR,
-        fmt::format("Failed to get the allocation for job#{} ", job_id),
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+        fmt::format("Failed to get the allocation for job#{} ", job_id));
     return;
   }
   auto* job = job_ptr.get();
@@ -1526,10 +1526,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (step->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
-    ActivateStepStatusChangeAsync_(
-        job_id, step_id, crane::grpc::JobStatus::Failed,
-        ExitCode::EC_SPAWN_FAILED, "Container is not enabled in this craned.",
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+    SendCompletingAndTerminal_(job_id, step_id, crane::grpc::JobStatus::Failed,
+                               ExitCode::EC_SPAWN_FAILED,
+                               "Container is not enabled in this craned.");
     return;
   }
 
@@ -1545,11 +1544,10 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           CgroupManager::MakeCgroupPathInfo(job->job_id, res_v3.GetCpuSet());
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
-      ActivateStepStatusChangeAsync_(
+      SendCompletingAndTerminal_(
           job_id, step_id, crane::grpc::JobStatus::Failed,
           ExitCode::EC_CGROUP_ERR,
-          fmt::format("Failed to get cgroup for job#{} ", job_id), std::nullopt,
-          google::protobuf::util::TimeUtil::GetCurrentTime());
+          fmt::format("Failed to get cgroup for job#{} ", job_id));
       return;
     }
   }
@@ -1568,23 +1566,21 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
-    ActivateStepStatusChangeAsync_(
+    SendCompletingAndTerminal_(
         job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_CGROUP_ERR,
         fmt::format("Cannot create cgroup for the instance of step {}.{}",
-                    job_id, step_id),
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+                    job_id, step_id));
     return;
   }
   err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());
   if (err != CraneErrCode::SUCCESS) {
     step_ptr->err_before_supv_start = true;
-    ActivateStepStatusChangeAsync_(
+    SendCompletingAndTerminal_(
         job_id, step_id, crane::grpc::JobStatus::Failed,
         ExitCode::EC_SPAWN_FAILED,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
-                    job_id),
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+                    job_id));
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
     // process.
@@ -1631,7 +1627,9 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
           step->GotNewStatus(status_change.new_status);
           if (pending_terminal)
             step->pending_terminal_status = *pending_terminal;
-          should_forward = !step->silent_cleanup;
+          should_forward = !step->silent_cleanup &&
+                           !(IsFinishedStepStatus(status_change.new_status) &&
+                             step->pending_terminal_status.has_value());
         }
       }
     }
@@ -1647,7 +1645,9 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
           step->GotNewStatus(status_change.new_status);
           if (pending_terminal)
             step->pending_terminal_status = *pending_terminal;
-          should_forward = !step->silent_cleanup;
+          should_forward = !step->silent_cleanup &&
+                           !(IsFinishedStepStatus(status_change.new_status) &&
+                             step->pending_terminal_status.has_value());
         }
       }
     }

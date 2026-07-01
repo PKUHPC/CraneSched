@@ -1073,6 +1073,11 @@ class JobScheduler {
                              uint32_t exit_code, std::string reason,
                              google::protobuf::Timestamp timestamp);
 
+  void StepCompletingAndStatusChangeAsync(
+      job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+      crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+      std::string reason, google::protobuf::Timestamp timestamp);
+
   void TerminateJobsOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
   void QueryJobsInRam(
@@ -1460,6 +1465,7 @@ class JobScheduler {
     CranedId craned_index;
     std::string reason;
     google::protobuf::Timestamp timestamp;
+    std::optional<crane::grpc::JobStatus> ordered_terminal_status;
   };
 
   ConcurrentQueue<JobStatusChangeArg> m_job_status_change_queue_;
