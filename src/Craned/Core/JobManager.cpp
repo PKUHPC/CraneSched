@@ -1472,7 +1472,7 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
     };
 
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-      args.at_child_setup_cb = [this, job_id](pid_t pid) {
+      args.at_parent_setup_cb = [this, job_id](pid_t pid) {
         return MigrateProcToCgroupOfJob(pid, job_id);
       };
     }

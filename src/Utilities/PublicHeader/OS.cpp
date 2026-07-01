@@ -31,7 +31,11 @@
 #include <charconv>
 #include <cstring>
 #include <future>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <uvw.hpp>
 #include <vector>
 
@@ -580,6 +584,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     std::vector<char*> envp;
     std::vector<std::string> env_storage;
+    env_storage.reserve(args.envs.size());
     envp.reserve(args.envs.size() + 1);
     for (const auto& [name, value] : args.envs) {
       env_storage.emplace_back(name + "=" + value);
@@ -588,6 +593,17 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     envp.emplace_back(nullptr);
 
     const char* exec_argv[] = {script.c_str(), nullptr};
+    int parent_setup_pipe[2] = {-1, -1};
+
+    if (args.at_parent_setup_cb && pipe(parent_setup_pipe) != 0) {
+      CRANE_ERROR("Failed to create setup pipe for script '{}': {}", script,
+                  strerror(errno));
+      result = std::unexpected(
+          RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      return;
+    }
 
     if (args.fork_and_watch_fn) {
       auto fork_result = args.fork_and_watch_fn([]() { return fork(); });
@@ -596,6 +612,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         // fork() itself failed (errno is already logged inside the hook).
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        if (parent_setup_pipe[0] != -1) close(parent_setup_pipe[0]);
+        if (parent_setup_pipe[1] != -1) close(parent_setup_pipe[1]);
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         return;
@@ -619,6 +637,8 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        if (parent_setup_pipe[0] != -1) close(parent_setup_pipe[0]);
+        if (parent_setup_pipe[1] != -1) close(parent_setup_pipe[1]);
         return;
       }
     }
@@ -629,6 +649,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     if (pid == 0) {
       // The child only writes to the pipe; close the read end immediately.
       close(stdout_pipe[0]);
+      if (parent_setup_pipe[1] != -1) close(parent_setup_pipe[1]);
 
       // Redirect both stdout and stderr to the write end of the pipe so the
       // parent can capture all script output through a single fd.
@@ -643,21 +664,39 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // Close every fd >= 3 to avoid leaking parent file descriptors into
       // the script (e.g. sockets, log files, gRPC channels).
 #if defined(__linux__) && defined(SYS_close_range)
-      syscall(SYS_close_range, 3, UINT_MAX, 0);  // 单次系统调用
+      if (parent_setup_pipe[0] == -1) {
+        syscall(SYS_close_range, 3, UINT_MAX, 0);  // 单次系统调用
+      } else if (!CloseFdFromExcept(3, {parent_setup_pipe[0]})) {
+        int fd_max = GetFdOpenMax();
+        for (int i = 3; i < fd_max; i++) {
+          if (i != parent_setup_pipe[0]) close(i);
+        }
+      }
 #else
-      CloseFdFrom(3);
+      if (parent_setup_pipe[0] == -1) {
+        CloseFdFrom(3);
+      } else if (!CloseFdFromExcept(3, {parent_setup_pipe[0]})) {
+        int fd_max = GetFdOpenMax();
+        for (int i = 3; i < fd_max; i++) {
+          if (i != parent_setup_pipe[0]) close(i);
+        }
+      }
 #endif
 
       // Place the child in its own process group so KillPg() can send
       // signals to the entire group (child + any grandchildren it spawns).
       setpgid(0, 0);
 
-      // Optional caller-supplied callback executed in the child context
-      // (e.g., to move the child into a cgroup before exec).
-      // TODO: move to parent
-      if (args.at_child_setup_cb) {
-        if (!args.at_child_setup_cb(getpid())) {
-          const char msg[] = "[Subprocess] child setup callback failed\n";
+      if (parent_setup_pipe[0] != -1) {
+        char parent_setup_ok = 0;
+        ssize_t n;
+        do {
+          n = read(parent_setup_pipe[0], &parent_setup_ok,
+                   sizeof(parent_setup_ok));
+        } while (n == -1 && errno == EINTR);
+        close(parent_setup_pipe[0]);
+        if (n != sizeof(parent_setup_ok) || parent_setup_ok != 1) {
+          const char msg[] = "[Subprocess] parent setup callback failed\n";
           write(STDERR_FILENO, msg, sizeof(msg) - 1);
           _exit(EXIT_FAILURE);
         }
@@ -694,6 +733,67 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // The parent only reads from the pipe; close the write end so that
       // EOF (end_event) is triggered when the child closes its write end.
       close(stdout_pipe[1]);
+      if (parent_setup_pipe[0] != -1) close(parent_setup_pipe[0]);
+
+      struct ParentSetupState {
+        std::mutex mutex;
+        int notify_fd{-1};
+      };
+      auto parent_setup_state = std::make_shared<ParentSetupState>();
+      parent_setup_state->notify_fd = parent_setup_pipe[1];
+      parent_setup_pipe[1] = -1;
+
+      auto close_parent_setup_notify_fd = [parent_setup_state]() {
+        std::scoped_lock lock(parent_setup_state->mutex);
+        if (parent_setup_state->notify_fd != -1) {
+          close(parent_setup_state->notify_fd);
+          parent_setup_state->notify_fd = -1;
+        }
+      };
+
+      if (args.at_parent_setup_cb) {
+        auto notify_parent_setup_result = [script,
+                                           parent_setup_state](bool ok) {
+          int fd = -1;
+          {
+            std::scoped_lock lock(parent_setup_state->mutex);
+            fd = parent_setup_state->notify_fd;
+            parent_setup_state->notify_fd = -1;
+          }
+          if (fd == -1) return;
+
+          char parent_setup_ok = ok ? 1 : 0;
+          ssize_t n;
+          do {
+            n = write(fd, &parent_setup_ok, sizeof(parent_setup_ok));
+          } while (n == -1 && errno == EINTR);
+          if (n != sizeof(parent_setup_ok)) {
+            CRANE_ERROR(
+                "Failed to notify parent setup result for script '{}': {}",
+                script, strerror(errno));
+          }
+          close(fd);
+        };
+
+        try {
+          std::thread([setup_cb = args.at_parent_setup_cb, pid,
+                       notify = notify_parent_setup_result]() mutable {
+            try {
+              notify(setup_cb(pid));
+            } catch (const std::exception& e) {
+              CRANE_ERROR("Parent setup callback threw: {}", e.what());
+              notify(false);
+            } catch (...) {
+              CRANE_ERROR("Parent setup callback threw an unknown exception");
+              notify(false);
+            }
+          }).detach();
+        } catch (const std::system_error& e) {
+          CRANE_ERROR("Failed to start parent setup thread for script '{}': {}",
+                      script, e.what());
+          notify_parent_setup_result(false);
+        }
+      }
 
       // Create a dedicated libuv event loop for this script.
       // Using a fresh loop per script keeps state isolated and avoids
@@ -741,6 +841,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       auto stop_loop = [&]() {
         if (loop_stopping) return;
         loop_stopping = true;
+        close_parent_setup_notify_fd();
         pipe_handle->close();
         timeout_timer->close();
         poll_timer->close();
@@ -950,6 +1051,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       if (elapsed >= timeout) {
         CRANE_TRACE("Script '{}' timed out before its event loop started.",
                     script);
+        close_parent_setup_notify_fd();
         KillPg(pid);
 
         // Reap the child and capture its true exit status to avoid leaving
