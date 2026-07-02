@@ -457,9 +457,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);  // argv must be null-terminated.
-    fmt::print(stderr,
-               "[{:%Y-%m-%d %H:%M:%S}] [Step #{}.{}]: Executing supervisor\n",
-               std::chrono::system_clock::now(), job_id, step_id);
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),

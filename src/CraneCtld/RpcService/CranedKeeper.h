@@ -71,11 +71,13 @@ class CranedStub {
     m_token_.reset();
   }
 
-  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
+  CraneExpected<crane::grpc::AllocJobsReply> AllocJobs(
+      const std::vector<crane::grpc::JobToD> &jobs);
 
   CraneErrCode FreeJobs(const std::vector<job_id_t> &jobs);
 
-  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
+  CraneExpected<crane::grpc::AllocStepsReply> AllocSteps(
+      const std::vector<crane::grpc::StepToD> &steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);

@@ -213,9 +213,10 @@ grpc::Status CranedServiceImpl::AllocJobs(
     jobs.emplace_back(job_to_d);
   }
 
-  bool ok = g_job_mgr->AllocJobs(std::move(jobs));
-  if (!ok) {
-    CRANE_ERROR("Failed to alloc some jobs.");
+  g_job_mgr->AllocJobs(std::move(jobs), response);
+  if (!response->failed_job_ids().empty()) {
+    CRANE_ERROR("Failed to alloc jobs [{}].",
+                absl::StrJoin(response->failed_job_ids(), ","));
   }
 
   return Status::OK;
@@ -229,7 +230,16 @@ grpc::Status CranedServiceImpl::AllocSteps(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>());
+  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>(),
+                        response);
+  if (!response->failed_job_step_ids_map().empty()) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>> failed_steps;
+    for (const auto &[job_id, steps] : response->failed_job_step_ids_map()) {
+      failed_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
+    }
+    CRANE_ERROR("Failed to alloc steps [{}].",
+                util::JobStepsToString(failed_steps));
+  }
   return Status::OK;
 }
 

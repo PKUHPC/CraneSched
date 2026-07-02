@@ -1465,7 +1465,6 @@ class JobScheduler {
     CranedId craned_index;
     std::string reason;
     google::protobuf::Timestamp timestamp;
-    std::optional<crane::grpc::JobStatus> ordered_terminal_status;
   };
 
   ConcurrentQueue<JobStatusChangeArg> m_job_status_change_queue_;

@@ -450,9 +450,17 @@ JobManager::~JobManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
+void JobManager::AllocJobs(std::vector<JobInD>&& jobs,
+                           crane::grpc::AllocJobsReply* reply) {
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    CRANE_TRACE("JobManager is ending now, rejecting AllocJobs request.");
+    for (const auto& job : jobs) reply->add_failed_job_ids(job.job_id);
+    return;
+  }
+
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
   auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+  absl::flat_hash_set<job_id_t> failed_job_id_set;
 
   for (const auto& job : jobs) {
     job_id_t job_id = job.job_id;
@@ -470,13 +478,16 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
             "[Job #{}] Allocation rejected because the previous job record is "
             "still active or cleaning.",
             job_id);
-        return false;
+        reply->add_failed_job_ids(job_id);
+        failed_job_id_set.emplace(job_id);
       }
     }
   }
 
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
+    if (failed_job_id_set.contains(job_id)) continue;
+
     uid_t uid = job.Uid();
 
     if (job_map_ptr->contains(job_id)) {
@@ -491,8 +502,6 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
       uid_map_ptr->emplace(uid, absl::flat_hash_set<job_id_t>({job_id}));
     }
   }
-
-  return true;
 }
 
 bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
@@ -535,21 +544,50 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
   return true;
 }
 
-void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
+void JobManager::AllocSteps(std::vector<StepToD>&& steps,
+                            crane::grpc::AllocStepsReply* reply) {
+  auto fail_step = [reply](job_id_t job_id, step_id_t step_id) {
+    (*reply->mutable_failed_job_step_ids_map())[job_id].add_steps(step_id);
+  };
+
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    CRANE_TRACE("JobManager is ending now, ignoring the request.");
+    CRANE_TRACE("JobManager is ending now, rejecting AllocSteps request.");
+    for (const auto& step : steps) fail_step(step.job_id(), step.step_id());
     return;
   }
 
   CRANE_TRACE("Allocating step [{}].",
               absl::StrJoin(steps | std::views::transform(GetStepIdStr), ","));
 
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> accepted_steps;
+  bool accepted_any_step = false;
   for (auto& step : steps) {
+    job_id_t job_id = step.job_id();
+    step_id_t step_id = step.step_id();
+    if (accepted_steps[job_id].contains(step_id)) {
+      CRANE_WARN("[Step #{}.{}] Duplicate step in AllocSteps request.", job_id,
+                 step_id);
+      fail_step(job_id, step_id);
+      continue;
+    }
+
     auto job_ptr = m_job_map_.GetValueExclusivePtr(step.job_id());
     if (!job_ptr) {
       CRANE_WARN("Try to allocate step for nonexistent job#{}, ignoring it.",
                  step.job_id());
+      fail_step(job_id, step_id);
     } else {
+      {
+        absl::MutexLock lk(job_ptr->step_map_mtx.get());
+        if (job_ptr->step_map.contains(step_id)) {
+          CRANE_WARN(
+              "[Step #{}.{}] Try to allocate existing step, ignoring it.",
+              job_id, step_id);
+          fail_step(job_id, step_id);
+          continue;
+        }
+      }
+
       // Simply wrap the job structure within an Execution structure and
       // pass it to the event loop. The cgroup field of this job is initialized
       // in the corresponding handler.
@@ -564,9 +602,11 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
         job_ptr->is_prolog_run = true;
       }
       m_grpc_alloc_step_queue_.enqueue(std::move(elem));
+      accepted_steps[job_id].insert(step_id);
+      accepted_any_step = true;
     }
   }
-  m_grpc_alloc_step_async_handle_->send();
+  if (accepted_any_step) m_grpc_alloc_step_async_handle_->send();
 }
 
 StepCleanupFutureMap JobManager::FreeSteps(

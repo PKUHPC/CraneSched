@@ -118,13 +118,17 @@ message AllocJobsRequest {
   repeated JobToD jobs = 1;
 }
 
-message AllocJobsReply {}
+message AllocJobsReply {
+  repeated uint32 failed_job_ids = 1;
+}
 
 message AllocStepsRequest {
   repeated StepToD steps = 1;
 }
 
-message AllocStepsReply {}
+message AllocStepsReply {
+  map<uint32, JobStepIds> failed_job_step_ids_map = 1;
+}
 
 message FreeStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;

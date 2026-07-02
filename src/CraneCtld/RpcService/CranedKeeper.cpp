@@ -100,7 +100,7 @@ CraneErrCode CranedStub::TerminateSteps(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::AllocJobs(
+CraneExpected<crane::grpc::AllocJobsReply> CranedStub::AllocJobs(
     const std::vector<crane::grpc::JobToD> &jobs) {
   using crane::grpc::AllocJobsReply;
   using crane::grpc::AllocJobsRequest;
@@ -122,11 +122,11 @@ CraneErrCode CranedStub::AllocJobs(
     CRANE_ERROR("AllocJobs RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
-    return CraneErrCode::ERR_RPC_FAILURE;
+    return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
   UpdateLastActiveTime();
 
-  return CraneErrCode::SUCCESS;
+  return reply;
 }
 
 CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
@@ -155,7 +155,7 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::AllocSteps(
+CraneExpected<crane::grpc::AllocStepsReply> CranedStub::AllocSteps(
     const std::vector<crane::grpc::StepToD> &steps) {
   using crane::grpc::AllocStepsReply;
   using crane::grpc::AllocStepsRequest;
@@ -170,9 +170,10 @@ CraneErrCode CranedStub::AllocSteps(
     CRANE_DEBUG("AllocSteps RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
-    return CraneErrCode::ERR_RPC_FAILURE;
+    return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
-  return CraneErrCode::SUCCESS;
+  UpdateLastActiveTime();
+  return reply;
 }
 
 CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>>

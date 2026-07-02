@@ -160,12 +160,6 @@ TEST(CtldStepStateMachineTest,
   result =
       daemon_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U, "",
                                     "node-a", TimestampAt(102), &context);
-  EXPECT_FALSE(result.has_value());
-  EXPECT_NE(job.DaemonStep(), nullptr);
-
-  result =
-      daemon_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U, "",
-                                    "node-b", TimestampAt(103), &context);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->first, crane::grpc::JobStatus::Failed);
   EXPECT_EQ(result->second, 7U);
@@ -329,12 +323,6 @@ TEST(CtldStepStateMachineTest,
   result =
       primary_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U, "",
                                      "node-a", TimestampAt(303), &context);
-  EXPECT_FALSE(result.has_value());
-  EXPECT_NE(job.PrimaryStep(), nullptr);
-
-  result =
-      primary_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U, "",
-                                     "node-b", TimestampAt(304), &context);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(job.PrimaryStep(), nullptr);
   EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);

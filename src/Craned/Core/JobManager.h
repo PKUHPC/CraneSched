@@ -102,7 +102,8 @@ class JobManager {
 
   ~JobManager();
 
-  bool AllocJobs(std::vector<JobInD>&& jobs);
+  void AllocJobs(std::vector<JobInD>&& jobs,
+                 crane::grpc::AllocJobsReply* reply);
 
   /**
    * Terminate all job steps on the node and clean up.
@@ -111,7 +112,8 @@ class JobManager {
    */
   bool FreeJobs(std::set<job_id_t>&& job_ids);
 
-  void AllocSteps(std::vector<StepToD>&& steps);
+  void AllocSteps(std::vector<StepToD>&& steps,
+                  crane::grpc::AllocStepsReply* reply);
 
   StepCleanupFutureMap FreeSteps(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);

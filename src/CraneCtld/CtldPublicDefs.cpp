@@ -651,21 +651,22 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   case crane::grpc::JobStatus::Configuring:
     cleanup_requested_while_configuring =
         new_status == crane::grpc::JobStatus::Completing;
-    // Configuring -> Failed / Running
-    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
-      this->NodeConfigured(craned_id);
-    } else {
-      // CraneCtld Prolog completion event
+    // Configuring -> Running / Completing / terminal
+    if (craned_id == kCtldPrologInternalNodeIndex) [[unlikely]] {
+      // CraneCtld Prolog completion event.
       this->SetCtldPrologPending(false);
     }
 
     switch (new_status) {
     case crane::grpc::JobStatus::Running:
+      if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+        this->NodeConfigured(craned_id);
+      }
       break;
 
     case crane::grpc::JobStatus::Completing:
       if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
-        this->StepOnNodeCompleting(craned_id);
+        this->NodeConfiguredWithCleanupIntent(craned_id);
         context->rn_step_raw_ptrs.insert(this);
       }
       break;
@@ -674,8 +675,10 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     case crane::grpc::JobStatus::Cancelled:
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
+      [[fallthrough]];
+    case crane::grpc::JobStatus::Completed:
       if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
-        this->StepOnNodeCompleting(craned_id);
+        this->NodeConfiguredWithTerminal(craned_id);
         context->rn_step_raw_ptrs.insert(this);
       }
       break;
@@ -1331,17 +1334,24 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   switch (this->Status()) {
   case crane::grpc::JobStatus::Configuring:
-    // Configuring -> Starting / Failed / Cancelled,
+    // Configuring -> Starting / Completing / terminal
     if (new_status == crane::grpc::JobStatus::Starting) {
       this->NodeConfigured(craned_id);
     } else if (new_status == crane::grpc::JobStatus::Completing) {
       this->NodeConfiguredWithCleanupIntent(craned_id);
       context->rn_step_raw_ptrs.insert(this);
-    } else {
-      this->SetErrorStatus(new_status);
-      this->SetErrorExitCode(exit_code);
-      this->NodeConfiguredWithCleanupIntent(craned_id);
+    } else if (IsFinishedStepStatus(new_status)) {
+      if (new_status != crane::grpc::JobStatus::Completed) {
+        this->SetErrorStatus(new_status);
+        this->SetErrorExitCode(exit_code);
+      }
+      this->NodeConfiguredWithTerminal(craned_id);
       context->rn_step_raw_ptrs.insert(this);
+    } else {
+      CRANE_ERROR("Invalid step status transition, current: {}, new: {}",
+                  util::StepStatusToString(this->Status()),
+                  util::StepStatusToString(new_status));
+      return std::nullopt;
     }
     if (this->AllNodesConfigured()) {
       if (this->PrevErrorStatus().has_value()) {
