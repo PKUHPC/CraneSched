@@ -394,9 +394,6 @@ Container:
   # 启用容器支持（实验性）
   Enabled: false
 
-  # 容器数据临时目录（相对于 CraneBaseDir）
-  TempDir: supervisor/containers/
-
   # 容器运行时套接字路径
   RuntimeEndpoint: /run/containerd/containerd.sock
 

@@ -396,9 +396,6 @@ Container:
   # Enable container support (experimental)
   Enabled: false
 
-  # Temporary directory for container data (relative to CraneBaseDir)
-  TempDir: supervisor/containers/
-
   # Path to container runtime socket
   RuntimeEndpoint: /run/containerd/containerd.sock
 

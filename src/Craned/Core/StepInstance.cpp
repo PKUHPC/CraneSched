@@ -235,7 +235,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
-      container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
       container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
       auto* dns_conf = container_conf->mutable_dns_config();

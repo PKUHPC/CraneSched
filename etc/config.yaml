@@ -246,8 +246,6 @@ Supervisor:
 Container:
   # Toggle the container support in CraneSched
   Enabled: false
-  # Relate to CraneBaseDir
-  TempDir: supervisor/containers/
   # Runtime service endpoint, e.g., containerd socket path
   RuntimeEndpoint: /run/containerd/containerd.sock
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint

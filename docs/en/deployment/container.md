@@ -372,7 +372,6 @@ Edit `/etc/crane/config.yaml` and add the following container configuration:
 ```yaml
 Container:
   Enabled: true
-  TempDir: supervisor/containers/
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
   Dns:
@@ -414,9 +413,6 @@ Container:
   # Enable container feature
   Enabled: true
 
-  # Container temporary data directory (relative to CraneBaseDir)
-  TempDir: supervisor/containers/
-
   # CRI runtime service socket
   RuntimeEndpoint: /run/containerd/containerd.sock
 
@@ -451,7 +447,6 @@ Container:
 | Field | Type | Default | Description |
 |:-----|:-----|:-------|:-----|
 | `Enabled` | bool | `false` | Whether to enable the container feature. Set to `true` to enable |
-| `TempDir` | string | `supervisor/containers/` | Temporary data directory during container runtime, relative to `CraneBaseDir`. Stores container metadata, logs, etc. |
 | `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
 | `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
 

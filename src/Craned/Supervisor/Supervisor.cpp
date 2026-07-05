@@ -132,7 +132,6 @@ int InitFromStdin(int argc, char** argv) {
   // Container config
   g_config.Container.Enabled = msg.has_container_config();
   if (g_config.Container.Enabled) {
-    g_config.Container.TempDir = msg.container_config().temp_dir();
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
