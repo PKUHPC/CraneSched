@@ -63,7 +63,7 @@ option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)
 
 option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 
-option(CRANE_ENABLE_LUA "Enable lua support" OFF)
+option(CRANE_ENABLE_LUA "Enable lua support" ON)
 
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 

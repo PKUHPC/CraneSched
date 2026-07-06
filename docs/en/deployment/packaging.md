@@ -145,6 +145,17 @@ Both packages automatically:
 
 After installation, configure `/etc/crane/config.yaml` and `/etc/crane/database.yaml` (for cranectld), then start the services:
 
+For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
+
+```bash
+sudo mkdir -p /etc/systemd/system/craned.service.d
+sudo tee /etc/systemd/system/craned.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+LimitMEMLOCK=infinity
+EOF
+sudo systemctl daemon-reload
+```
+
 ```bash
 # On control node
 systemctl enable --now cranectld

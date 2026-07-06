@@ -94,7 +94,7 @@
 | 90 | `ERR_NO_DEFAULT_WCKEY` | No default wckey is set | Specify a wckey or set a default wckey | No default wckey is set. Please specify a wckey or set a default wckey |
 | 91 | `ERR_MISSING_DEPENDENCY` | One or more dependency jobs may not exist or have ended | Check the status of dependency jobs | One or more dependency jobs may not exist or have ended |
 | 92 | `ERR_DB_INSERT_FAILED` | Database insertion failed (internal error) | Contact administrator to check logs | Database insertion failed due to internal error |
-| 93 | `ERR_LUA_FAILED` | Lua script validation failed | Check Lua script syntax | Lua script validation failed |
+| 93 | `ERR_LUA_FAILED` | Lua script validation failed | Check the Lua script path, syntax, required callbacks, return code, and cranectld logs | Lua script validation failed |
 | 94 | `ERR_RESOURCE_NOT_FOUND` | Resource not found | Check if the resource name is correct | The resource was not found in the crane |
 | 95 | `ERR_INVALID_ARGUMENT` | Invalid argument provided | Check parameter format and value range | Invalid argument provided |
 | 96 | `ERR_RESOURCE_ALREADY_EXIST` | Resource already exists | | The resource already exists in the crane |
