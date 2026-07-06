@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 set(CMAKE_POLICY_DEFAULT_CMP0075 NEW)
 
-# Let cmake apply IPO flags for all compilers and do not output warnings.
+# Let CMake apply IPO flags for selected Crane targets and avoid policy warnings.
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 # When the option() command sees a normal variable of the given name,
@@ -275,9 +275,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
 endif ()
 
-# Check LTO support
+# Check LTO support.
 include(CheckIPOSupported)
-check_ipo_supported(RESULT supported OUTPUT error)
+check_ipo_supported(RESULT CRANE_IPO_SUPPORTED OUTPUT CRANE_IPO_ERROR)
 
 # If Clang is used, select lld as the linker.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -295,15 +295,22 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 endif ()
 
-if (supported)
+set(CRANE_ENABLE_TARGET_IPO FALSE)
+if (CRANE_IPO_SUPPORTED)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_BUILD_TYPE STREQUAL "Release")
         # IPO/LTO is disabled in g++ under Debug mode since it's quite slow.
-        message(STATUS "IPO / LTO enabled")
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        message(STATUS "IPO / LTO enabled for selected Crane targets")
+        set(CRANE_ENABLE_TARGET_IPO TRUE)
     endif ()
 else ()
-    message(STATUS "IPO / LTO not supported: <${error}>")
+    message(STATUS "IPO / LTO not supported: <${CRANE_IPO_ERROR}>")
 endif ()
+
+function(crane_enable_ipo target)
+    if (CRANE_ENABLE_TARGET_IPO)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif ()
+endfunction()
 
 if (CRANE_ENABLE_LUA)
     find_package(Lua QUIET)

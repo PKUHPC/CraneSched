@@ -14,6 +14,8 @@ add_executable(craned
         StepInstance.h
 )
 
+crane_enable_ipo(craned)
+
 # Link with the common static library
 target_link_libraries(craned
         PRIVATE

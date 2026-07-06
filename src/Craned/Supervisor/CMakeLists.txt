@@ -10,6 +10,8 @@ add_executable(csupervisor
         TaskManager.h
 )
 
+crane_enable_ipo(csupervisor)
+
 # Link with the common static library
 target_link_libraries(csupervisor
     PRIVATE

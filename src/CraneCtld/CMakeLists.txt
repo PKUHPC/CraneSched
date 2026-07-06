@@ -38,6 +38,8 @@ add_executable(cranectld
 
         CtldPreCompiledHeader.h)
 
+crane_enable_ipo(cranectld)
+
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
 target_include_directories(cranectld PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
