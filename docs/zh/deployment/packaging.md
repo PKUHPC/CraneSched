@@ -261,6 +261,7 @@ sudo apt install ./cranesched-plugin_*.deb
     - `dummy.so` - 测试插件
     - `mail.so` - 作业电子邮件通知
     - `monitor.so` - 资源使用指标收集
+    - `trace.so` - TraceHook 接收与 trace span 写入
     - `powerControl.so` - 电源管理
 
 - `/usr/lib/systemd/system/cplugind.service` - 插件守护进程服务

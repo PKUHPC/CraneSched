@@ -259,6 +259,7 @@ sudo apt install ./cranesched-plugin_*.deb
     - `dummy.so` - Test plugin
     - `mail.so` - Job email notifications
     - `monitor.so` - Resource usage metrics collection
+    - `trace.so` - TraceHook receiver and trace span writer
     - `powerControl.so` - Power management
 
 - `/usr/lib/systemd/system/cplugind.service` - Plugin daemon service

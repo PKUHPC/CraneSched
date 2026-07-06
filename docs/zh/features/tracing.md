@@ -23,7 +23,7 @@ Tracing 系统提供三个独立的追踪维度：
 
 - CraneSched 编译时需开启 `CRANE_ENABLE_TRACING`（debug preset 默认开启）
 - 需要 InfluxDB 2.x 作为时序存储后端
-- 需要 cplugind + monitor 插件作为 span 收集管道
+- 需要 cplugind + trace 插件作为 span 收集管道
 
 ## 部署步骤
 
@@ -66,39 +66,30 @@ influx setup --force \
 | `--retention` | 数据保留时间（`168h` = 7 天） |
 | `--token` | API 认证 token，后续配置需一致 |
 
-### 3. 构建 cplugind 和 monitor 插件
+### 3. 构建 cplugind 和 trace 插件
 
 在 CraneSched-FrontEnd 仓库中：
 
 ```bash
 make build   # 构建 cplugind 及 CLI 工具
-make plugin  # 构建 monitor.so 等插件
+make plugin  # 构建 monitor.so、trace.so 等插件
 ```
 
-构建产物位于 `build/bin/cplugind` 和 `build/plugin/monitor.so`。
+构建产物位于 `build/bin/cplugind`、`build/plugin/monitor.so` 和 `build/plugin/trace.so`。
 
 ### 4. 配置
 
 #### config.yaml
 
-在集群配置文件中开启 Tracing 和 Plugin：
+在集群配置文件中开启 Tracing：
 
 ```yaml
 Tracing:
   Enabled: true
   Level: debug
-
-Plugin:
-  Enabled: true
-  PlugindSockPath: "cplugind/cplugind.sock"
-  PlugindDebugLevel: "trace"
-  Plugins:
-    - Name: "monitor"
-      Path: "/usr/local/lib/crane/plugin/monitor.so"
-      Config: "/etc/crane/monitor.yaml"
 ```
 
-> `PlugindSockPath` 是相对于 `CraneBaseDir` 的路径。
+Plugin 由独立的 `plugin.yaml` 配置。
 
 #### plugin.yaml
 
@@ -112,22 +103,20 @@ Plugins:
   - Name: "monitor"
     Path: "/usr/local/lib/crane/plugin/monitor.so"
     Config: "/etc/crane/monitor.yaml"
+  - Name: "trace"
+    Path: "/usr/local/lib/crane/plugin/trace.so"
+    Config: "/etc/crane/trace.yaml"
 ```
 
-#### monitor.yaml
+> `PlugindSockPath` 是相对于 `CraneBaseDir` 的路径。
 
-monitor 插件的 InfluxDB 连接配置：
+#### trace.yaml
+
+trace 插件的 InfluxDB 连接配置：
 
 ```yaml
-Monitor:
-  SamplePeriod: 5s
-  Enabled:
-    Job: false
-    Ipmi: false
-    Gpu: false
-    Rapl: false
-    System: false
-    Event: false
+Tracing:
+  LogPath: "/var/log/crane/trace.log"
 
 Database:
   Type: "influxdb"
@@ -135,13 +124,20 @@ Database:
     Url: "http://<influxdb_host>:8086"
     Token: "<your_token>"
     Org: "crane"
-    NodeBucket: "crane_trace"
-    JobBucket: "crane_trace"
-    ClusterBucket: "crane_trace"
     TraceBucket: "crane_trace"
+    TraceCoreBucket: "crane_trace_core"
+    TraceDetailBucket: "crane_trace_detail"
+    TraceErrorBucket: "crane_trace_error"
+    TraceShardBuckets: []
+  TraceWriter:
+    Shards: 4
+    BatchSpans: 1024
+    QueueBatches: 8192
+    FlushIntervalMs: 50
+    RetryBackoffMs: 200
+    MaxRetryBackoffMs: 5000
 ```
 
-> 如果仅需 trace 功能，可将 Monitor.Enabled 下的各项设为 `false`。
 > 多节点部署时，worker 节点的 `Url` 需指向 InfluxDB 所在主机的地址。
 
 ### 5. 部署到集群
@@ -150,8 +146,8 @@ Database:
 
 - `/usr/local/bin/craned`、`/usr/libexec/csupervisor`、`/usr/local/bin/cfored`
 - `/usr/local/bin/cplugind`
-- `/usr/local/lib/crane/plugin/monitor.so`
-- `/etc/crane/config.yaml`、`/etc/crane/database.yaml`、`/etc/crane/plugin.yaml`、`/etc/crane/monitor.yaml`
+- `/usr/local/lib/crane/plugin/monitor.so`、`/usr/local/lib/crane/plugin/trace.so`
+- `/etc/crane/config.yaml`、`/etc/crane/database.yaml`、`/etc/crane/plugin.yaml`、`/etc/crane/monitor.yaml`、`/etc/crane/trace.yaml`
 
 ### 6. 启动顺序
 
@@ -361,7 +357,7 @@ CraneSched (CraneCtld / Craned / Supervisor)
   ▼
 CraneSpanExporter  →  PluginClient (gRPC, Unix socket)
   ▼
-cplugind  →  monitor.so (TraceHook handler)
+cplugind  →  trace.so (TraceHook handler)
   ▼
 InfluxDB 2.x  (measurement: "spans")
   ▼

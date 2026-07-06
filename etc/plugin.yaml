@@ -21,6 +21,9 @@ PlugindListenPort: "10018"
 
 # Plugins to be loaded in Plugind
 Plugins:
-  - Name: "dummy"
-    Path: "/path/to/dummy.so"
-    Config: "/path/to/dummy.yaml"
+  - Name: "monitor"
+    Path: "/usr/lib/crane/plugin/monitor.so"
+    Config: "/etc/crane/monitor.yaml"
+  - Name: "trace"
+    Path: "/usr/lib/crane/plugin/trace.so"
+    Config: "/etc/crane/trace.yaml"

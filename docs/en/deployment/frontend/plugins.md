@@ -59,7 +59,7 @@ sudo apt install ./cranesched-plugin_*.deb
 This installs:
 - `cplugind` daemon to `/usr/bin/`
 - Plugin shared objects to `/usr/lib/crane/plugin/`:
-  - `dummy.so`, `mail.so`, `monitor.so`, `powerControl.so`
+  - `dummy.so`, `mail.so`, `monitor.so`, `trace.so`, `powerControl.so`
 - `cplugind.service` systemd unit
 
 Enable and start the service:
@@ -102,6 +102,10 @@ Plugins:
     Path: "/usr/lib/crane/plugin/monitor.so"  # Package installation
     # Path: "/usr/local/lib/crane/plugin/monitor.so"  # Source installation (default PREFIX)
     Config: "/etc/crane/monitor.yaml"
+  - Name: "trace"
+    Path: "/usr/lib/crane/plugin/trace.so"  # Package installation
+    # Path: "/usr/local/lib/crane/plugin/trace.so"  # Source installation (default PREFIX)
+    Config: "/etc/crane/trace.yaml"
 ```
 
 ### Configuration Options
@@ -182,6 +186,10 @@ Plugins:
     - **Package installation**: Use `/usr/lib/crane/plugin/monitor.so`
     - **Source installation**: Use `/usr/local/lib/crane/plugin/monitor.so` (or custom PREFIX location)
     - **Development**: Use `build/plugin/monitor.so` from the build directory
+
+## Trace Plugin
+
+The trace plugin receives spans sent through TraceHook and writes them to InfluxDB core/detail/error buckets. It is independent from the monitor plugin; when trace collection is needed, register `trace.so` separately in `/etc/crane/plugin.yaml` and provide `/etc/crane/trace.yaml`.
 
 ## Mail Plugin
 

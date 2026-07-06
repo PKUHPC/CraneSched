@@ -60,7 +60,7 @@ sudo apt install ./cranesched-plugin_*.deb
 这将安装：
 - `cplugind` 守护进程到 `/usr/bin/`
 - 插件共享对象到 `/usr/lib/crane/plugin/`：
-  - `dummy.so`、`mail.so`、`monitor.so`、`powerControl.so`
+  - `dummy.so`、`mail.so`、`monitor.so`、`trace.so`、`powerControl.so`
 - `cplugind.service` systemd 单元
 
 启用并启动服务：
@@ -103,6 +103,10 @@ Plugins:
     Path: "/usr/lib/crane/plugin/monitor.so"  # 软件包安装
     # Path: "/usr/local/lib/crane/plugin/monitor.so"  # 源代码安装（默认 PREFIX）
     Config: "/etc/crane/monitor.yaml"
+  - Name: "trace"
+    Path: "/usr/lib/crane/plugin/trace.so"  # 软件包安装
+    # Path: "/usr/local/lib/crane/plugin/trace.so"  # 源代码安装（默认 PREFIX）
+    Config: "/etc/crane/trace.yaml"
 ```
 
 ### 配置选项
@@ -183,6 +187,10 @@ Plugins:
     - **软件包安装**：使用 `/usr/lib/crane/plugin/monitor.so`
     - **源代码安装**：使用 `/usr/local/lib/crane/plugin/monitor.so`（或自定义 PREFIX 位置）
     - **开发**：使用构建目录中的 `build/plugin/monitor.so`
+
+## Trace 插件
+
+trace 插件接收后端通过 TraceHook 发送的 span，并按 core/detail/error bucket 写入 InfluxDB。它独立于 monitor 插件；需要 trace 数据时，在 `/etc/crane/plugin.yaml` 中单独注册 `trace.so` 并提供 `/etc/crane/trace.yaml`。
 
 ## Mail 插件
 
