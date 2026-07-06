@@ -20,6 +20,8 @@ add_executable(cranectld
         Accounting/LicenseManager.cpp
         Database/EmbeddedDbClient.cpp
         Database/EmbeddedDbClient.h
+        Database/LegacyEmbeddedDbClient.cpp
+        Database/LegacyEmbeddedDbClient.h
 
         Security/VaultClient.cpp
         Security/VaultClient.h
