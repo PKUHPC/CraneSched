@@ -196,7 +196,9 @@ int InitFromStdin(int argc, char** argv) {
 
   // Tracing config
   g_config.Tracing.Enabled = msg.tracing_enabled();
-  g_config.Tracing.Level = crane::TraceLevel::Debug;
+  g_config.Tracing.Level = msg.trace_level().empty()
+                                ? crane::TraceLevel::Debug
+                                : crane::TraceLevelFromString(msg.trace_level());
   g_config.Tracing.Traceparent = msg.traceparent();
 
   g_config.SupervisorLogFile =
@@ -393,9 +395,17 @@ void GlobalVariableInit(int grpc_output_fd) {
     crane::TracerManager::GetInstance().Initialize(
         fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode));
   }
-  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
-                                 std::memory_order_release);
-  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+  auto trace_config =
+      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                     g_config.Tracing.Level);
+  if (trace_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(trace_config.runtime_level),
+        crane::TraceLevelToString(trace_config.compiled_max_level),
+        crane::TraceLevelToString(trace_config.effective_level));
+  }
 #endif
 
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();

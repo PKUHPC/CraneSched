@@ -32,6 +32,7 @@
 #include "Security/VaultClient.h"
 #include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
+#include "crane/TraceConfigProto.h"
 #include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -1486,6 +1487,100 @@ grpc::Status CraneCtldServiceImpl::ResetPartitionAcl(
 
   g_meta_container->ResetAllPartitionAcls(request->reload_from_config());
   response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryTraceConfig(
+    grpc::ServerContext* context,
+    const crane::grpc::QueryTraceConfigRequest* request,
+    crane::grpc::QueryTraceConfigReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason("permission denied");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return grpc::Status::OK;
+  }
+
+  response->set_ok(true);
+  crane::FillRuntimeTraceConfigProto(response->mutable_config());
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::SetTraceConfig(
+    grpc::ServerContext* context,
+    const crane::grpc::SetTraceConfigRequest* request,
+    crane::grpc::SetTraceConfigReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason("permission denied");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return grpc::Status::OK;
+  }
+
+  auto current_config = crane::GetRuntimeTraceConfig();
+  bool enabled = request->has_enabled() ? request->enabled()
+                                        : current_config.enabled;
+  crane::TraceLevel runtime_level = current_config.runtime_level;
+  if (request->has_level()) {
+    if (!crane::TraceLevelFromString(request->level(), &runtime_level)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "invalid trace level '{}', expected basic, detailed, or debug",
+          request->level()));
+      crane::FillRuntimeTraceConfigProto(response->mutable_config());
+      return grpc::Status::OK;
+    }
+  }
+
+  g_config.Tracing.Enabled = enabled;
+  g_config.Tracing.Level = runtime_level;
+  auto applied_config =
+      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                     g_config.Tracing.Level);
+  if (applied_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(applied_config.runtime_level),
+        crane::TraceLevelToString(applied_config.compiled_max_level),
+        crane::TraceLevelToString(applied_config.effective_level));
+  }
+  crane::FillRuntimeTraceConfigProto(response->mutable_config(),
+                                     applied_config);
+
+  const bool propagate =
+      !request->has_propagate_to_craned() || request->propagate_to_craned();
+  if (propagate && g_craned_keeper) {
+    for (const auto& [craned_id, node] : g_config.Nodes) {
+      (void)node;
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) continue;
+      auto err = stub->UpdateTraceConfig(response->config());
+      if (err != CraneErrCode::SUCCESS)
+        response->add_failed_craned_ids(craned_id);
+    }
+  }
+
+  const bool all_ok = response->failed_craned_ids().empty();
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason("trace config updated on ctld, but failed to update "
+                         "some craned nodes");
+  }
   return grpc::Status::OK;
 }
 

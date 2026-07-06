@@ -376,6 +376,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_thread_pool_size(g_config.Supervisor.ThreadPoolSize);
 
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
+    init_req.set_trace_level(
+        std::string{crane::TraceLevelToString(g_config.Tracing.Level)});
     // Pass spawn span's context so step/execute becomes child of
     // step/supervisor_spawn, not just child of job/lifecycle.
     auto spawn_tp = crane::SerializeTraceParent(spawn_span.GetContext());

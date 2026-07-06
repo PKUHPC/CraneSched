@@ -419,6 +419,16 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ResetPartitionAclRequest* request,
       crane::grpc::ResetPartitionAclReply* response) override;
 
+  grpc::Status QueryTraceConfig(
+      grpc::ServerContext* context,
+      const crane::grpc::QueryTraceConfigRequest* request,
+      crane::grpc::QueryTraceConfigReply* response) override;
+
+  grpc::Status SetTraceConfig(
+      grpc::ServerContext* context,
+      const crane::grpc::SetTraceConfigRequest* request,
+      crane::grpc::SetTraceConfigReply* response) override;
+
   grpc::Status AddAccount(grpc::ServerContext* context,
                           const crane::grpc::AddAccountRequest* request,
                           crane::grpc::AddAccountReply* response) override;

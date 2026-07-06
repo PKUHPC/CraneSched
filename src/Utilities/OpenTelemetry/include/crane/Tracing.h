@@ -179,15 +179,103 @@ inline std::atomic<bool> g_tracing_enabled{false};
 enum class TraceLevel : uint8_t { Basic = 0, Detailed = 1, Debug = 2 };
 enum class TraceSpanClass : uint8_t { Other = 0, Core = 1, Detailed = 2 };
 
-inline std::atomic<TraceLevel> g_trace_level{TraceLevel::Debug};
+#ifndef CRANE_TRACE_COMPILED_MAX_LEVEL_NUM
+#  define CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 2
+#endif
+
+constexpr TraceLevel TraceLevelFromNumber(int level) {
+  if (level <= 0) return TraceLevel::Basic;
+  if (level == 1) return TraceLevel::Detailed;
+  return TraceLevel::Debug;
+}
+
+constexpr TraceLevel MinTraceLevel(TraceLevel lhs, TraceLevel rhs) {
+  return static_cast<uint8_t>(lhs) < static_cast<uint8_t>(rhs) ? lhs : rhs;
+}
+
+inline constexpr TraceLevel kTraceCompiledMaxLevel =
+    TraceLevelFromNumber(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM);
+
+inline std::atomic<TraceLevel> g_trace_runtime_level{TraceLevel::Debug};
+inline std::atomic<TraceLevel> g_trace_level{
+    MinTraceLevel(TraceLevel::Debug, kTraceCompiledMaxLevel)};
+
+struct RuntimeTraceConfig {
+  bool compiled_with_tracing{false};
+  bool enabled{false};
+  TraceLevel runtime_level{TraceLevel::Debug};
+  TraceLevel compiled_max_level{kTraceCompiledMaxLevel};
+  TraceLevel effective_level{MinTraceLevel(TraceLevel::Debug,
+                                           kTraceCompiledMaxLevel)};
+  bool clamped{false};
+};
+
+inline bool TraceLevelFromString(std::string_view level, TraceLevel* parsed);
 
 inline TraceLevel TraceLevelFromString(std::string_view level) {
-  if (level == "basic" || level == "Basic" || level == "BASIC")
-    return TraceLevel::Basic;
-  if (level == "detailed" || level == "Detailed" || level == "detail" ||
-      level == "Detail" || level == "DETAILED" || level == "DETAIL")
-    return TraceLevel::Detailed;
+  TraceLevel parsed;
+  if (TraceLevelFromString(level, &parsed)) return parsed;
   return TraceLevel::Debug;
+}
+
+inline bool TraceLevelFromString(std::string_view level, TraceLevel* parsed) {
+  if (parsed == nullptr) return false;
+  if (level == "basic" || level == "Basic" || level == "BASIC") {
+    *parsed = TraceLevel::Basic;
+    return true;
+  }
+  if (level == "detailed" || level == "Detailed" || level == "detail" ||
+      level == "Detail" || level == "DETAILED" || level == "DETAIL") {
+    *parsed = TraceLevel::Detailed;
+    return true;
+  }
+  if (level == "debug" || level == "Debug" || level == "DEBUG") {
+    *parsed = TraceLevel::Debug;
+    return true;
+  }
+  return false;
+}
+
+inline std::string_view TraceLevelToString(TraceLevel level) {
+  switch (level) {
+  case TraceLevel::Basic:
+    return "basic";
+  case TraceLevel::Detailed:
+    return "detailed";
+  case TraceLevel::Debug:
+    return "debug";
+  }
+  return "debug";
+}
+
+constexpr bool TraceCompiledWithTracing() {
+#ifdef CRANE_ENABLE_TRACING
+  return true;
+#else
+  return false;
+#endif
+}
+
+inline RuntimeTraceConfig GetRuntimeTraceConfig() {
+  RuntimeTraceConfig config;
+  config.compiled_with_tracing = TraceCompiledWithTracing();
+  config.enabled = g_tracing_enabled.load(std::memory_order_acquire);
+  config.runtime_level =
+      g_trace_runtime_level.load(std::memory_order_acquire);
+  config.compiled_max_level = kTraceCompiledMaxLevel;
+  config.effective_level = g_trace_level.load(std::memory_order_acquire);
+  config.clamped = config.runtime_level != config.effective_level;
+  return config;
+}
+
+inline RuntimeTraceConfig ApplyRuntimeTraceConfig(bool enabled,
+                                                  TraceLevel runtime_level) {
+  TraceLevel effective_level = MinTraceLevel(runtime_level,
+                                             kTraceCompiledMaxLevel);
+  g_trace_runtime_level.store(runtime_level, std::memory_order_release);
+  g_trace_level.store(effective_level, std::memory_order_release);
+  g_tracing_enabled.store(enabled, std::memory_order_release);
+  return GetRuntimeTraceConfig();
 }
 
 inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
@@ -263,15 +351,26 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
   return TraceSpanClass::Other;
 }
 
-inline bool ShouldExportTraceSpan(std::string_view name, bool is_error) {
+inline bool TraceLevelAllowsSpan(TraceLevel level, std::string_view name,
+                                 bool is_error) {
   if (is_error) return true;
-  TraceLevel level = g_trace_level.load(std::memory_order_relaxed);
   if (level == TraceLevel::Debug) return true;
   TraceSpanClass span_class = ClassifyTraceSpanName(name);
   if (span_class == TraceSpanClass::Core) return true;
   if (level == TraceLevel::Detailed && span_class == TraceSpanClass::Detailed)
     return true;
   return false;
+}
+
+inline bool ShouldCreateTraceSpan(std::string_view name, bool is_error = false) {
+  if (!TraceCompiledWithTracing()) return false;
+  if (!g_tracing_enabled.load(std::memory_order_relaxed)) return false;
+  return TraceLevelAllowsSpan(g_trace_level.load(std::memory_order_relaxed),
+                              name, is_error);
+}
+
+inline bool ShouldExportTraceSpan(std::string_view name, bool is_error) {
+  return ShouldCreateTraceSpan(name, is_error);
 }
 
 #ifdef CRANE_ENABLE_TRACING
@@ -292,7 +391,7 @@ class ScopedSpan {
       std::string_view name,
       opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer)
       : tracer_(std::move(tracer)), ended_(false) {
-    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+    if (ShouldCreateTraceSpan(name) && tracer_) {
       span_ = tracer_->StartSpan(std::string(name));
     } else {
       ended_ = true;
@@ -305,7 +404,7 @@ class ScopedSpan {
       opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer,
       const opentelemetry::trace::SpanContext& parent_ctx)
       : tracer_(std::move(tracer)), ended_(false) {
-    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+    if (ShouldCreateTraceSpan(name) && tracer_) {
       opentelemetry::trace::StartSpanOptions opts;
       opts.parent = parent_ctx;
       span_ = tracer_->StartSpan(std::string(name), opts);
@@ -420,7 +519,7 @@ class ManualSpan {
       std::string_view name,
       opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer)
       : tracer_(std::move(tracer)) {
-    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+    if (ShouldCreateTraceSpan(name) && tracer_) {
       span_ = tracer_->StartSpan(std::string(name));
     }
   }
@@ -430,7 +529,7 @@ class ManualSpan {
       opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer,
       const opentelemetry::trace::SpanContext& parent_ctx)
       : tracer_(std::move(tracer)) {
-    if (g_tracing_enabled.load(std::memory_order_relaxed) && tracer_) {
+    if (ShouldCreateTraceSpan(name) && tracer_) {
       opentelemetry::trace::StartSpanOptions opts;
       opts.parent = parent_ctx;
       span_ = tracer_->StartSpan(std::string(name), opts);

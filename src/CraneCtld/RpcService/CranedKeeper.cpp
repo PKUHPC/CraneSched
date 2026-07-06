@@ -22,6 +22,7 @@
 
 #include "JobScheduler.h"
 #include "Node/CranedMetaContainer.h"
+#include "crane/TraceConfigProto.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -49,6 +50,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   crane::grpc::ConfigureCranedRequest request;
   request.set_ok(true);
   *request.mutable_token() = token;
+  crane::FillRuntimeTraceConfigProto(request.mutable_trace_config());
 
   g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
 
@@ -67,6 +69,32 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
     absl::MutexLock lock(&m_lock_);
     m_token_.reset();
   }
+}
+
+CraneErrCode CranedStub::UpdateTraceConfig(
+    const crane::grpc::RuntimeTraceConfig &trace_config) {
+  ClientContext context;
+  crane::grpc::UpdateTraceConfigRequest request;
+  crane::grpc::UpdateTraceConfigReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  *request.mutable_config() = trace_config;
+
+  auto status = m_stub_->UpdateTraceConfig(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_WARN(
+        "UpdateTraceConfig RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (!reply.ok()) {
+    CRANE_WARN("UpdateTraceConfig RPC for Node {} failed: {}", m_craned_id_,
+               reply.reason());
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode CranedStub::TerminateSteps(

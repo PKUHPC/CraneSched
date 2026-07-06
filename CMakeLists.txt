@@ -56,6 +56,21 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 # Options start here ----------------------------------------------------------------------------
 
 option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+set(CRANE_TRACE_COMPILED_MAX_LEVEL "debug" CACHE STRING
+        "Maximum tracing level compiled into binaries: basic, detailed, or debug")
+set_property(CACHE CRANE_TRACE_COMPILED_MAX_LEVEL PROPERTY STRINGS basic detailed debug)
+string(TOLOWER "${CRANE_TRACE_COMPILED_MAX_LEVEL}" CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED)
+if (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "basic")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 0)
+elseif (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "detailed")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 1)
+elseif (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "debug")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 2)
+else ()
+    message(FATAL_ERROR "CRANE_TRACE_COMPILED_MAX_LEVEL must be one of: basic, detailed, debug")
+endif ()
+
+option(CRANE_ENABLE_SCHED_ALGO_TRACE_LOG "Enable verbose scheduler algorithm trace logs" OFF)
 
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 

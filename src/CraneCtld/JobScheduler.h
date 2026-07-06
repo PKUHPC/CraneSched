@@ -263,7 +263,12 @@ class SchedulerAlgo {
       const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs);
 
  private:
-  static constexpr bool kAlgoTraceOutput = false;
+  static constexpr bool kAlgoTraceOutput =
+#ifdef CRANE_ENABLE_SCHED_ALGO_TRACE_LOG
+      true;
+#else
+      false;
+#endif
   // TODO: move to config
   static constexpr bool kAlgoRedundantNode = false;
   static constexpr uint32_t kAlgoMaxJobNumPerNode = 1000;

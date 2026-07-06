@@ -43,6 +43,7 @@
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/TraceConfigProto.h"
 #include "crane/Tracing.h"
 #ifdef CRANE_ENABLE_TRACING
 #  include "crane/CraneSpanExporter.h"
@@ -1545,6 +1546,20 @@ void GlobalVariableInit() {
 
   g_ctld_client_sm->AddActionConfigureCb(
       [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
+        if (arg.req.has_trace_config()) {
+          auto applied_config =
+              crane::ApplyRuntimeTraceConfig(arg.req.trace_config());
+          g_config.Tracing.Enabled = applied_config.enabled;
+          g_config.Tracing.Level = applied_config.runtime_level;
+          if (applied_config.clamped) {
+            CRANE_WARN(
+                "Tracing runtime level {} exceeds compiled max level {}; "
+                "effective level is {}.",
+                crane::TraceLevelToString(applied_config.runtime_level),
+                crane::TraceLevelToString(applied_config.compiled_max_level),
+                crane::TraceLevelToString(applied_config.effective_level));
+          }
+        }
         // Recover jobs and steps
         // Status synchronization is handled in CtldClient.cpp
         Recover(arg.req);
@@ -1574,9 +1589,17 @@ void GlobalVariableInit() {
     crane::TracerManager::GetInstance().Initialize(
         fmt::format("Craned@{}", g_config.Hostname));
   }
-  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
-                                 std::memory_order_release);
-  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+  auto trace_config =
+      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                     g_config.Tracing.Level);
+  if (trace_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(trace_config.runtime_level),
+        crane::TraceLevelToString(trace_config.compiled_max_level),
+        crane::TraceLevelToString(trace_config.effective_level));
+  }
 #endif
 
   g_craned_for_pam_server =

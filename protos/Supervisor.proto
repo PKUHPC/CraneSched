@@ -123,6 +123,7 @@ message InitSupervisorRequest {
 
   bool tracing_enabled = 41;
   optional string traceparent = 42;  // W3C traceparent for distributed tracing
+  string trace_level = 43;
 }
 
 message SupervisorReady {

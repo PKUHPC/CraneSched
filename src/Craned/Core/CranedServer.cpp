@@ -28,6 +28,7 @@
 #include "JobManager.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
+#include "crane/TraceConfigProto.h"
 #include "crane/Tracing.h"
 
 namespace Craned {
@@ -39,6 +40,35 @@ grpc::Status CranedServiceImpl::Configure(
   bool ok = g_ctld_client_sm->EvRecvConfigFromCtld(*request);
 
   CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::UpdateTraceConfig(
+    grpc::ServerContext *context,
+    const crane::grpc::UpdateTraceConfigRequest *request,
+    crane::grpc::UpdateTraceConfigReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    response->set_reason("CranedServer is not ready");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  auto applied_config = crane::ApplyRuntimeTraceConfig(request->config());
+  g_config.Tracing.Enabled = applied_config.enabled;
+  g_config.Tracing.Level = applied_config.runtime_level;
+  if (applied_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(applied_config.runtime_level),
+        crane::TraceLevelToString(applied_config.compiled_max_level),
+        crane::TraceLevelToString(applied_config.effective_level));
+  }
+  response->set_ok(true);
+  crane::FillRuntimeTraceConfigProto(response->mutable_config(),
+                                     applied_config);
   return Status::OK;
 }
 

@@ -86,6 +86,7 @@ make plugin  # 构建 monitor.so 等插件
 ```yaml
 Tracing:
   Enabled: true
+  Level: debug
 
 Plugin:
   Enabled: true
@@ -356,7 +357,7 @@ bash test/Trace/stress_test.sh 20 2
 
 ```
 CraneSched (CraneCtld / Craned / Supervisor)
-  │  OpenTelemetry SDK (BatchSpanProcessor, 5s / 512 batch)
+  │  OpenTelemetry SDK (SimpleSpanProcessor)
   ▼
 CraneSpanExporter  →  PluginClient (gRPC, Unix socket)
   ▼

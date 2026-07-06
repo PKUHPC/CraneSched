@@ -61,6 +61,9 @@ class CranedStub {
 
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
+  CraneErrCode UpdateTraceConfig(
+      const crane::grpc::RuntimeTraceConfig &trace_config);
+
   void SetReady() {
     CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
                        m_craned_id_);

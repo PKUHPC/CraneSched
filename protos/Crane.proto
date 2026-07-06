@@ -49,6 +49,50 @@ message ConfigureCranedRequest {
   bool ok = 1;
   map<uint32, JobStepsToD> job_steps = 2;
   google.protobuf.Timestamp token = 3;
+  RuntimeTraceConfig trace_config = 4;
+}
+
+message RuntimeTraceConfig {
+  bool compiled_with_tracing = 1;
+  string compiled_max_level = 2;
+  bool runtime_enabled = 3;
+  string runtime_level = 4;
+  string effective_level = 5;
+  bool clamped = 6;
+}
+
+message QueryTraceConfigRequest {
+  uint32 uid = 1;
+}
+
+message QueryTraceConfigReply {
+  bool ok = 1;
+  string reason = 2;
+  RuntimeTraceConfig config = 3;
+}
+
+message SetTraceConfigRequest {
+  uint32 uid = 1;
+  optional bool enabled = 2;
+  optional string level = 3;
+  optional bool propagate_to_craned = 4;
+}
+
+message SetTraceConfigReply {
+  bool ok = 1;
+  string reason = 2;
+  RuntimeTraceConfig config = 3;
+  repeated string failed_craned_ids = 4;
+}
+
+message UpdateTraceConfigRequest {
+  RuntimeTraceConfig config = 1;
+}
+
+message UpdateTraceConfigReply {
+  bool ok = 1;
+  string reason = 2;
+  RuntimeTraceConfig config = 3;
 }
 
 message CranedRegisterRequest {
@@ -1683,6 +1727,10 @@ service CraneCtld {
 
   rpc ResetPartitionAcl(ResetPartitionAclRequest) returns (ResetPartitionAclReply);
 
+  rpc QueryTraceConfig(QueryTraceConfigRequest) returns (QueryTraceConfigReply);
+
+  rpc SetTraceConfig(SetTraceConfigRequest) returns (SetTraceConfigReply);
+
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
 
   rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
@@ -1733,6 +1781,7 @@ service CraneCtldForInternal {
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
+  rpc UpdateTraceConfig(UpdateTraceConfigRequest) returns (UpdateTraceConfigReply);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
   rpc AllocJobs(AllocJobsRequest) returns (AllocJobsReply);

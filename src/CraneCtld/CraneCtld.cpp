@@ -1144,9 +1144,17 @@ void InitializeCtldGlobalVariables() {
   } else {
     crane::TracerManager::GetInstance().Initialize("CraneCtld");
   }
-  crane::g_tracing_enabled.store(g_config.Tracing.Enabled,
-                                 std::memory_order_release);
-  crane::g_trace_level.store(g_config.Tracing.Level, std::memory_order_release);
+  auto trace_config =
+      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                     g_config.Tracing.Level);
+  if (trace_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(trace_config.runtime_level),
+        crane::TraceLevelToString(trace_config.compiled_max_level),
+        crane::TraceLevelToString(trace_config.effective_level));
+  }
 #endif
 
   if (g_config.VaultConf.Enabled) {

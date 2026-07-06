@@ -256,6 +256,8 @@ Supervisor:
 Tracing:
   # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)
   Enabled: false
+  # Runtime tracing level: basic | detailed | debug
+  Level: debug
 
 Container:
   # Toggle the container support in CraneSched
