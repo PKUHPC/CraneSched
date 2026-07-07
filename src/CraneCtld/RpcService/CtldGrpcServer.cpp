@@ -1532,8 +1532,8 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   }
 
   auto current_config = crane::GetRuntimeTraceConfig();
-  bool enabled = request->has_enabled() ? request->enabled()
-                                        : current_config.enabled;
+  bool enabled =
+      request->has_enabled() ? request->enabled() : current_config.enabled;
   crane::TraceLevel runtime_level = current_config.runtime_level;
   if (request->has_level()) {
     if (!crane::TraceLevelFromString(request->level(), &runtime_level)) {
@@ -1548,9 +1548,8 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
 
   g_config.Tracing.Enabled = enabled;
   g_config.Tracing.Level = runtime_level;
-  auto applied_config =
-      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
-                                     g_config.Tracing.Level);
+  auto applied_config = crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                                       g_config.Tracing.Level);
   if (applied_config.clamped) {
     CRANE_WARN(
         "Tracing runtime level {} exceeds compiled max level {}; effective "
@@ -1578,8 +1577,9 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   const bool all_ok = response->failed_craned_ids().empty();
   response->set_ok(all_ok);
   if (!all_ok) {
-    response->set_reason("trace config updated on ctld, but failed to update "
-                         "some craned nodes");
+    response->set_reason(
+        "trace config updated on ctld, but failed to update "
+        "some craned nodes");
   }
   return grpc::Status::OK;
 }

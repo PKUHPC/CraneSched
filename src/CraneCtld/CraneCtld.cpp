@@ -1144,9 +1144,8 @@ void InitializeCtldGlobalVariables() {
   } else {
     crane::TracerManager::GetInstance().Initialize("CraneCtld");
   }
-  auto trace_config =
-      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
-                                     g_config.Tracing.Level);
+  auto trace_config = crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                                     g_config.Tracing.Level);
   if (trace_config.clamped) {
     CRANE_WARN(
         "Tracing runtime level {} exceeds compiled max level {}; effective "

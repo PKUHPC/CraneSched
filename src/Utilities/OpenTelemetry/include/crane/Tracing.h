@@ -205,8 +205,8 @@ struct RuntimeTraceConfig {
   bool enabled{false};
   TraceLevel runtime_level{TraceLevel::Debug};
   TraceLevel compiled_max_level{kTraceCompiledMaxLevel};
-  TraceLevel effective_level{MinTraceLevel(TraceLevel::Debug,
-                                           kTraceCompiledMaxLevel)};
+  TraceLevel effective_level{
+      MinTraceLevel(TraceLevel::Debug, kTraceCompiledMaxLevel)};
   bool clamped{false};
 };
 
@@ -260,8 +260,7 @@ inline RuntimeTraceConfig GetRuntimeTraceConfig() {
   RuntimeTraceConfig config;
   config.compiled_with_tracing = TraceCompiledWithTracing();
   config.enabled = g_tracing_enabled.load(std::memory_order_acquire);
-  config.runtime_level =
-      g_trace_runtime_level.load(std::memory_order_acquire);
+  config.runtime_level = g_trace_runtime_level.load(std::memory_order_acquire);
   config.compiled_max_level = kTraceCompiledMaxLevel;
   config.effective_level = g_trace_level.load(std::memory_order_acquire);
   config.clamped = config.runtime_level != config.effective_level;
@@ -270,8 +269,8 @@ inline RuntimeTraceConfig GetRuntimeTraceConfig() {
 
 inline RuntimeTraceConfig ApplyRuntimeTraceConfig(bool enabled,
                                                   TraceLevel runtime_level) {
-  TraceLevel effective_level = MinTraceLevel(runtime_level,
-                                             kTraceCompiledMaxLevel);
+  TraceLevel effective_level =
+      MinTraceLevel(runtime_level, kTraceCompiledMaxLevel);
   g_trace_runtime_level.store(runtime_level, std::memory_order_release);
   g_trace_level.store(effective_level, std::memory_order_release);
   g_tracing_enabled.store(enabled, std::memory_order_release);
@@ -362,7 +361,8 @@ inline bool TraceLevelAllowsSpan(TraceLevel level, std::string_view name,
   return false;
 }
 
-inline bool ShouldCreateTraceSpan(std::string_view name, bool is_error = false) {
+inline bool ShouldCreateTraceSpan(std::string_view name,
+                                  bool is_error = false) {
   if (!TraceCompiledWithTracing()) return false;
   if (!g_tracing_enabled.load(std::memory_order_relaxed)) return false;
   return TraceLevelAllowsSpan(g_trace_level.load(std::memory_order_relaxed),

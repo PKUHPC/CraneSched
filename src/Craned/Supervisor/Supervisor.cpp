@@ -197,8 +197,8 @@ int InitFromStdin(int argc, char** argv) {
   // Tracing config
   g_config.Tracing.Enabled = msg.tracing_enabled();
   g_config.Tracing.Level = msg.trace_level().empty()
-                                ? crane::TraceLevel::Debug
-                                : crane::TraceLevelFromString(msg.trace_level());
+                               ? crane::TraceLevel::Debug
+                               : crane::TraceLevelFromString(msg.trace_level());
   g_config.Tracing.Traceparent = msg.traceparent();
 
   g_config.SupervisorLogFile =
@@ -395,9 +395,8 @@ void GlobalVariableInit(int grpc_output_fd) {
     crane::TracerManager::GetInstance().Initialize(
         fmt::format("Supervisor@{}", g_config.CranedIdOfThisNode));
   }
-  auto trace_config =
-      crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
-                                     g_config.Tracing.Level);
+  auto trace_config = crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                                     g_config.Tracing.Level);
   if (trace_config.clamped) {
     CRANE_WARN(
         "Tracing runtime level {} exceeds compiled max level {}; effective "
