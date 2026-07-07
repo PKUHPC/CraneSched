@@ -10,11 +10,14 @@ add_executable(csupervisor
         TaskManager.h
 )
 
+crane_enable_ipo(csupervisor)
+
 # Link with the common static library
 target_link_libraries(csupervisor
     PRIVATE
         craned_common
         Utility_CriClient
         Utility_BindFs
+        crane_tracer
         Utility_Pmix
 )

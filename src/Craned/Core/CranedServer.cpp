@@ -20,12 +20,16 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <chrono>
+
 #include "CgroupManager.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
+#include "crane/TraceConfigProto.h"
+#include "crane/Tracing.h"
 
 namespace Craned {
 
@@ -36,6 +40,35 @@ grpc::Status CranedServiceImpl::Configure(
   bool ok = g_ctld_client_sm->EvRecvConfigFromCtld(*request);
 
   CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::UpdateTraceConfig(
+    grpc::ServerContext *context,
+    const crane::grpc::UpdateTraceConfigRequest *request,
+    crane::grpc::UpdateTraceConfigReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    response->set_reason("CranedServer is not ready");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  auto applied_config = crane::ApplyRuntimeTraceConfig(request->config());
+  g_config.Tracing.Enabled = applied_config.enabled;
+  g_config.Tracing.Level = applied_config.runtime_level;
+  if (applied_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(applied_config.runtime_level),
+        crane::TraceLevelToString(applied_config.compiled_max_level),
+        crane::TraceLevelToString(applied_config.effective_level));
+  }
+  response->set_ok(true);
+  crane::FillRuntimeTraceConfigProto(response->mutable_config(),
+                                     applied_config);
   return Status::OK;
 }
 
@@ -53,9 +86,22 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
 
+  // Mark RPC receive for latency measurement
+  for (const auto &[job_id, tp] : request->job_traceparents()) {
+    CRANE_TRACE_SCOPE_FROM_REMOTE(recv_span, "step/rpc_receive", tp);
+    recv_span.SetAttribute("job_id", job_id);
+  }
+
+  // Build traceparent map for downstream tracing
+  std::unordered_map<job_id_t, std::string> traceparents;
+  for (const auto &[job_id, tp] : request->job_traceparents()) {
+    traceparents[job_id] = tp;
+  }
+
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
-  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map));
+  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
+                              std::move(traceparents));
 
   return Status::OK;
 }
@@ -207,15 +253,60 @@ grpc::Status CranedServiceImpl::AllocJobs(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
+  const auto handler_begin = std::chrono::steady_clock::now();
+  const int job_count = request->jobs_size();
+  const job_id_t first_job_id = job_count == 0 ? 0 : request->jobs(0).job_id();
+  const job_id_t last_job_id =
+      job_count == 0 ? 0 : request->jobs(job_count - 1).job_id();
+  const auto deadline_remaining_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          context->deadline() - std::chrono::system_clock::now())
+          .count();
+  CRANE_DEBUG(
+      "AllocJobsServerDiag event=handler_enter job_count={} first_job_id={} "
+      "last_job_id={} deadline_remaining_ms={}",
+      job_count, first_job_id, last_job_id, deadline_remaining_ms);
+
   std::vector<JobInD> jobs;
+  const auto vector_begin = std::chrono::steady_clock::now();
   for (const auto &job_to_d : request->jobs()) {
     CRANE_INFO("Allocating job #{}, uid {}", job_to_d.job_id(), job_to_d.uid());
     jobs.emplace_back(job_to_d);
   }
+  const auto vector_end = std::chrono::steady_clock::now();
 
+  const auto job_mgr_begin = std::chrono::steady_clock::now();
   bool ok = g_job_mgr->AllocJobs(std::move(jobs));
+  const auto job_mgr_end = std::chrono::steady_clock::now();
   if (!ok) {
     CRANE_ERROR("Failed to alloc some jobs.");
+  }
+
+  const auto handler_end = std::chrono::steady_clock::now();
+  const auto vector_build_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(vector_end -
+                                                            vector_begin)
+          .count();
+  const auto job_mgr_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              job_mgr_end - job_mgr_begin)
+                              .count();
+  const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            handler_end - handler_begin)
+                            .count();
+  if (total_ms > 1000 || job_mgr_ms > 1000) {
+    CRANE_WARN(
+        "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
+        "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
+        "job_mgr_ms={} total_ms={} ok={}",
+        job_count, first_job_id, last_job_id, deadline_remaining_ms,
+        vector_build_ms, job_mgr_ms, total_ms, ok);
+  } else {
+    CRANE_DEBUG(
+        "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
+        "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
+        "job_mgr_ms={} total_ms={} ok={}",
+        job_count, first_job_id, last_job_id, deadline_remaining_ms,
+        vector_build_ms, job_mgr_ms, total_ms, ok);
   }
 
   return Status::OK;
@@ -255,6 +346,11 @@ grpc::Status CranedServiceImpl::FreeSteps(
 grpc::Status CranedServiceImpl::FreeJobs(
     grpc::ServerContext *context, const crane::grpc::FreeJobsRequest *request,
     crane::grpc::FreeJobsReply *response) {
+  auto handler_begin = std::chrono::steady_clock::now();
+  auto deadline_remaining_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          context->deadline() - std::chrono::system_clock::now())
+          .count();
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -263,8 +359,31 @@ grpc::Status CranedServiceImpl::FreeJobs(
   CRANE_TRACE("Receive FreeJobs RPC for Job [{}]",
               absl::StrJoin(request->job_id_list(), ","));
 
+  auto enqueue_begin = std::chrono::steady_clock::now();
   g_job_mgr->FreeJobs(
       std::set(request->job_id_list().begin(), request->job_id_list().end()));
+  auto enqueue_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - enqueue_begin)
+          .count();
+  auto handler_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - handler_begin)
+          .count();
+  if (deadline_remaining_ms < 1000 || handler_elapsed_ms > 1000 ||
+      enqueue_elapsed_ms > 1000) {
+    CRANE_WARN(
+        "FreeJobsServerDiag job_count={} deadline_remaining_ms={} "
+        "handler_elapsed_ms={} enqueue_elapsed_ms={}",
+        request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
+        enqueue_elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "FreeJobsServerDiag job_count={} deadline_remaining_ms={} "
+        "handler_elapsed_ms={} enqueue_elapsed_ms={}",
+        request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
+        enqueue_elapsed_ms);
+  }
 
   return Status::OK;
 }
@@ -544,6 +663,18 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::StepStatusChangeRequest *request,
     crane::grpc::StepStatusChangeReply *response) {
+  CRANE_TRACE_SCOPE_NAMED(recv_span, "status_change/craned_receive");
+  recv_span.SetAttribute("job_id", request->job_id());
+  recv_span.SetAttribute("step_id", request->step_id());
+  recv_span.SetAttribute("new_status",
+                         static_cast<int64_t>(request->new_status()));
+  recv_span.SetAttribute("exit_code",
+                         static_cast<int64_t>(request->exit_code()));
+  recv_span.SetAttribute("has_final_status", request->has_final_status());
+  if (request->has_final_status()) {
+    recv_span.SetAttribute("final_status",
+                           static_cast<int64_t>(request->final_status()));
+  }
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);

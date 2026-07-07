@@ -24,6 +24,8 @@
 #include <limits>
 #include <memory>
 
+#include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -58,6 +60,12 @@ constexpr uint32_t kSubmitJobBatchNum = 1000;
 // Clean JobStatusChangeQueue when timeout or exceeding batch num
 constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
 constexpr uint32_t kJobStatusChangeBatchNum = 1000;
+constexpr uint32_t kJobStatusChangeMaxDrainPerTick = 200;
+constexpr uint32_t kJobStatusChangeDbCommitChunkSize = 200;
+constexpr uint32_t kJobAggregationWorkerBatchSize = 500;
+constexpr uint32_t kJobAggregationPollIntervalMs = 200;
+constexpr uint32_t kJobAggregationRetryBackoffMs = 500;
+constexpr uint32_t kJobAggregationMaxRetryBackoffMs = 10000;
 
 // Validate and adjust end_time to prevent it from exceeding time_limit
 // by too much. Allow 5 seconds of floating tolerance.
@@ -96,8 +104,11 @@ struct Config {
     uint64_t MaxLogFileNum;
     uint32_t ThreadPoolSize{0};
     uint32_t SchedulerRpcThreadPoolSize{0};
+    uint32_t SchedulerAllocJobsRpcTimeoutSeconds{kCtldRpcTimeoutSeconds};
     uint32_t StatusChangeFlushTimeoutMs{kJobStatusChangeTimeoutMS};
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
+    uint32_t StatusChangeMaxDrainPerTick{kJobStatusChangeMaxDrainPerTick};
+    uint32_t StatusChangeDbCommitChunkSize{kJobStatusChangeDbCommitChunkSize};
     bool JobRequeue{kDefaultJobRequeue};
     int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
   };
@@ -176,8 +187,15 @@ struct Config {
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
+    size_t TraceHookMaxRequestBytes{kDefaultTraceHookMaxRequestBytes};
   };
   PluginConfig Plugin;
+
+  struct TracingConfig {
+    bool Enabled{false};
+    crane::TraceLevel Level{crane::TraceLevel::Debug};
+  };
+  TracingConfig Tracing;
 
   struct ContainerConfig {
     bool Enabled{false};
@@ -213,6 +231,17 @@ struct Config {
   std::string CraneEmbeddedDbBackend;
   std::filesystem::path CraneCtldDbPath;
 
+  struct RocksDbConfig {
+    bool SyncWrites{true};
+    uint32_t ManualWalSyncIntervalMs{1000};
+    uint32_t WriteBufferSizeMB{64};
+    uint32_t MaxWriteBufferNumber{4};
+    uint32_t TargetFileSizeBaseMB{64};
+    uint32_t MaxBackgroundJobs{4};
+    std::string Compression{"lz4"};
+  };
+  RocksDbConfig RocksDb;
+
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneCtldMutexFilePath;
 
@@ -237,6 +266,11 @@ struct Config {
   uint32_t JobAggregationTimeoutMs{
       600000};  // Job aggregation timeout (ms, default 10 minutes)
   uint32_t JobAggregationBatchSize{100};  // Job aggregation batch size
+  std::string JobAggregationMode{"async"};
+  uint32_t JobAggregationWorkerBatchSize{kJobAggregationWorkerBatchSize};
+  uint32_t JobAggregationPollIntervalMs{kJobAggregationPollIntervalMs};
+  uint32_t JobAggregationRetryBackoffMs{kJobAggregationRetryBackoffMs};
+  uint32_t JobAggregationMaxRetryBackoffMs{kJobAggregationMaxRetryBackoffMs};
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
@@ -508,6 +542,9 @@ struct StepStatusChangeContext {
   std::unordered_set<std::unique_ptr<JobInCtld>> job_ptrs;
   // Ended jobs will transfer from embedded db to mongodb
   std::unordered_set<JobInCtld*> job_raw_ptrs;
+
+  // Trace context lookup for RPC worker threads (job_id -> traceparent)
+  std::unordered_map<job_id_t, std::string> job_traceparents;
 
   // Jobs whose primary steps need batch AppendSteps after the main loop.
   std::vector<JobInCtld*> pending_append_steps_jobs;
@@ -912,6 +949,25 @@ struct JobInCtld {
   // Might change at each scheduling cycle.
   ResourceV3 allocated_res;
 
+  // W3C traceparent for distributed tracing. Set at Alloc time, read-only
+  // thereafter. Propagated to Craned via JobToD and to Supervisor via
+  // InitSupervisorRequest.
+  std::string traceparent_;
+
+  // D1 submission trace context. Set at gRPC entry, used for submit/validate
+  // child span. In-memory only (not propagated via proto).
+  std::string submit_traceparent_;
+  // Hex trace_id from D1 root span, used to correlate D1↔D3 dimensions.
+  std::string submit_id_;
+
+  // Non-RAII lifecycle span covering the entire job execution.
+  // Created at alloc time, End() called when job completes.
+  crane::ManualSpan lifecycle_span_;
+
+  // Non-RAII pending span covering scheduling wait time.
+  // Created at submit, End() called when scheduler allocates the job.
+  crane::ManualSpan pending_span_;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::JobToCtld job_to_ctld;
 
@@ -1146,6 +1202,19 @@ struct JobInCtld {
 
   void SetAllocatedRes(ResourceV3&& val);
   ResourceV3 const& AllocatedRes() const { return allocated_res; }
+
+  void SetTraceparent(std::string tp) { traceparent_ = std::move(tp); }
+  const std::string& Traceparent() const { return traceparent_; }
+
+  void SetSubmitTraceparent(std::string tp) {
+    submit_traceparent_ = std::move(tp);
+  }
+  const std::string& SubmitTraceparent() const { return submit_traceparent_; }
+  void SetSubmitId(std::string id) { submit_id_ = std::move(id); }
+  const std::string& SubmitId() const { return submit_id_; }
+
+  crane::ManualSpan& LifecycleSpan() { return lifecycle_span_; }
+  crane::ManualSpan& PendingSpan() { return pending_span_; }
 
   void SetDependency(const crane::grpc::Dependencies& grpc_deps);
   void UpdateDependency(job_id_t dep_job_id, absl::Time event_time);

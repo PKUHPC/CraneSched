@@ -22,154 +22,25 @@
 // Precompiled header comes first!
 
 #include "Account/AccountDefs.h"
-
-#ifdef CRANE_HAVE_BERKELEY_DB
-#  include <db_cxx.h>
-#endif
-
-#ifdef CRANE_HAVE_UNQLITE
-#  include <unqlite.h>
-#endif
-
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
 
 using txn_id_t = uint32_t;
 
-enum class DbErrorCode : uint8_t {
-  NOT_FOUND,
-  BUFFER_SMALL,
-  PARSING_ERR,
-  OTHER,
-};
+inline constexpr std::array<std::string_view, 3> kCraneEmbeddedDbBackendValues{
+    "Unqlite", "BerkeleyDB", "RocksDB"};
 
-class IEmbeddedDb {
- public:
-  virtual ~IEmbeddedDb() = default;
-
-  virtual std::expected<void, DbErrorCode> Init(std::string const& path) = 0;
-
-  virtual std::expected<void, DbErrorCode> Close() = 0;
-
-  virtual std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
-                                                 std::string const& key,
-                                                 const void* data,
-                                                 size_t len) = 0;
-
-  virtual std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                                   std::string const& key,
-                                                   void* buf, size_t* len) = 0;
-
-  virtual std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                                  std::string const& key) = 0;
-
-  virtual std::expected<txn_id_t, DbErrorCode> Begin() = 0;
-
-  virtual std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
-
-  virtual std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
-
-  using KvIterFunc =
-      std::function<bool(std::string&& key, std::vector<uint8_t>&& value)>;
-
-  /// @param func if the return value of func is true, continue to next KV.
-  ///             Otherwise, continue to next KV and delete current KV.
-  virtual std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) = 0;
-
-  virtual std::string const& DbPath() = 0;
-};
-
-#ifdef CRANE_HAVE_UNQLITE
-
-class UnqliteDb : public IEmbeddedDb {
- public:
-  std::expected<void, DbErrorCode> Init(const std::string& path) override;
-
-  std::expected<void, DbErrorCode> Close() override;
-
-  std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
-                                         const std::string& key,
-                                         const void* data, size_t len) override;
-
-  std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                           const std::string& key, void* buf,
-                                           size_t* len) override;
-
-  std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                          const std::string& key) override;
-
-  std::expected<txn_id_t, DbErrorCode> Begin() override;
-
-  std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) override;
-
-  std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) override;
-
-  std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
-
-  const std::string& DbPath() override { return m_db_path_; };
-
- private:
-  std::string GetInternalErrorStr_();
-
-  static constexpr txn_id_t s_fixed_txn_id_ = 1;
-
-  std::string m_db_path_;
-  unqlite* m_db_{nullptr};
-};
-
-#endif
-
-#ifdef CRANE_HAVE_BERKELEY_DB
-
-class BerkeleyDb : public IEmbeddedDb {
- public:
-  std::expected<void, DbErrorCode> Init(const std::string& path) override;
-
-  std::expected<void, DbErrorCode> Close() override;
-
-  std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
-                                         const std::string& key,
-                                         const void* data, size_t len) override;
-
-  std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                           const std::string& key, void* buf,
-                                           size_t* len) override;
-
-  std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                          const std::string& key) override;
-
-  std::expected<txn_id_t, DbErrorCode> Begin() override;
-
-  std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) override;
-
-  std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) override;
-
-  std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
-
-  const std::string& DbPath() override { return m_db_path_; };
-
- private:
-  DbTxn* GetDbTxnFromId_(txn_id_t txn_id);
-
-  std::string m_db_path_, m_env_home_;
-
-  std::unique_ptr<Db> m_db_;
-
-  std::unique_ptr<DbEnv> m_env_;
-
-  std::unordered_map<txn_id_t, DbTxn*> m_txn_map_;
-};
-
-#endif
+inline bool IsValidCraneEmbeddedDbBackend(std::string_view backend) {
+  return std::ranges::contains(kCraneEmbeddedDbBackendValues, backend);
+}
 
 class EmbeddedDbClient {
- private:
+ public:
   using db_id_t = job_db_id_t;
   using JobInEmbeddedDb = crane::grpc::JobInEmbeddedDb;
   using StepInEmbeddedDb = crane::grpc::StepInEmbeddedDb;
 
- public:
   struct DbSnapshot {
     std::unordered_map<db_id_t, JobInEmbeddedDb> pending_queue;
     std::unordered_map<db_id_t, JobInEmbeddedDb> running_queue;
@@ -180,70 +51,6 @@ class EmbeddedDbClient {
     std::unordered_map<job_id_t, std::vector<StepInEmbeddedDb>> steps;
   };
 
-  EmbeddedDbClient() = default;
-  ~EmbeddedDbClient();
-
-  bool Init(std::string const& db_path);
-
-  bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id);
-
-  bool ResetNextStepDbId();
-
-  bool ResetJobStepIdCounter(job_id_t job_id);
-
-  bool PurgeAllJobHistory();
-
-  bool RetrieveLastSnapshot(DbSnapshot* snapshot);
-
-  bool RetrieveStepInfo(StepDbSnapshot* snapshot);
-
-  bool RetrieveReservationInfo(
-      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
-          reservation_info_map);
-
-  bool BeginVariableDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_variable_db_.get(), txn_id);
-  }
-
-  bool CommitVariableDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_variable_db_.get(), txn_id);
-  }
-
-  bool BeginFixedDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_fixed_db_.get(), txn_id);
-  }
-
-  bool CommitFixedDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
-  }
-
-  bool BeginStepVarDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_step_var_db_.get(), txn_id);
-  }
-
-  bool CommitStepVarDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_step_var_db_.get(), txn_id);
-  }
-
-  bool BeginStepFixedDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_step_fixed_db_.get(), txn_id);
-  }
-
-  bool CommitStepFixedDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_step_fixed_db_.get(), txn_id);
-  }
-
-  bool BeginReservationDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_resv_db_.get(), txn_id);
-  }
-
-  bool CommitReservationDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_resv_db_.get(), txn_id);
-  }
-
-  // Note: All operations in transaction will abort or rollback automatically if
-  // some operation fails, so we don't need anything like AbortTransaction here!
-
   // Extra variable-db writes that should be committed atomically together
   // with the new jobs' variable-db entries (e.g. updating the runtime attr
   // of an array parent when materializing its children).
@@ -251,6 +58,50 @@ class EmbeddedDbClient {
     db_id_t db_id;
     crane::grpc::RuntimeAttrOfJob const* runtime_attr;
   };
+
+  EmbeddedDbClient() = default;
+  virtual ~EmbeddedDbClient() = default;
+
+  virtual bool Init(std::string const& db_path) = 0;
+
+  virtual bool ResetNextJobId(job_id_t next_job_id, db_id_t next_job_db_id) = 0;
+
+  virtual bool ResetNextStepDbId() = 0;
+
+  virtual bool ResetJobStepIdCounter(job_id_t job_id) = 0;
+
+  virtual bool PurgeAllJobHistory() = 0;
+
+  virtual bool RetrieveLastSnapshot(DbSnapshot* snapshot) = 0;
+
+  virtual bool RetrieveStepInfo(StepDbSnapshot* snapshot) = 0;
+
+  virtual bool RetrieveReservationInfo(
+      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
+          reservation_info_map) = 0;
+
+  virtual bool BeginVariableDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitVariableDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginFixedDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitFixedDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginStepVarDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitStepVarDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginStepFixedDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitStepFixedDbTransaction(txn_id_t txn_id) = 0;
+
+  virtual bool BeginReservationDbTransaction(txn_id_t* txn_id) = 0;
+
+  virtual bool CommitReservationDbTransaction(txn_id_t txn_id) = 0;
+
+  // Note: All operations in transaction will abort or rollback automatically if
+  // some operation fails, so we don't need anything like AbortTransaction here!
 
   // Assign fresh IDs to jobs and persist them into embedded DB atomically.
   //
@@ -263,428 +114,64 @@ class EmbeddedDbClient {
   // reclaimed on the next successful call (their db_ids are reused) or by
   // crash-recovery cleanup (orphan fixed entries without a variable-db
   // counterpart are deleted at startup).
-  bool AppendJobsToPendingAndAdvanceJobIds(
+  virtual bool AppendJobsToPendingAndAdvanceJobIds(
       const std::vector<JobInCtld*>& jobs,
-      const std::vector<ExtraVariableWrite>& extra_variable_writes = {});
+      const std::vector<ExtraVariableWrite>& extra_variable_writes = {}) = 0;
 
-  bool PurgeEndedJobs(const std::unordered_map<job_id_t, job_db_id_t>& job_ids);
+  virtual bool PurgeEndedJobs(
+      const std::unordered_map<job_id_t, job_db_id_t>& job_ids) = 0;
 
-  bool UpdateRuntimeAttrOfJob(
+  virtual bool UpdateRuntimeAttrOfJob(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
-    return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(db_id), &runtime_attr)
-        .has_value();
-  }
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) = 0;
 
-  bool UpdateJobToCtld(txn_id_t txn_id, db_id_t db_id,
-                       crane::grpc::JobToCtld const& job_to_ctld_ref) {
-    return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
-                            GetFixedDbEntryName_(db_id), &job_to_ctld_ref)
-        .has_value();
-  }
-
-  bool UpdateRuntimeAttrOfJobIfExists(
+  virtual bool UpdateJobToCtld(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfJob const& runtime_attr) {
-    return StoreTypeIntoDbIfExists_(m_variable_db_.get(), txn_id,
-                                    GetVariableDbEntryName_(db_id),
-                                    &runtime_attr)
-        .has_value();
-  }
+      crane::grpc::JobToCtld const& job_to_ctld_ref) = 0;
 
-  bool UpdateJobToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::JobToCtld const& job_to_ctld_ref) {
-    return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
-                                    GetFixedDbEntryName_(db_id),
-                                    &job_to_ctld_ref)
-        .has_value();
-  }
-
-  bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
-                        JobInEmbeddedDb* job_in_db) {  // Only used in test
-    return FetchJobDataInDbAtomic_(txn_id, db_id, job_in_db).has_value();
-  }
-
-  bool AppendSteps(const std::vector<StepInCtld*>& steps);
-
-  bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids);
-
-  bool UpdateRuntimeAttrOfStep(
+  virtual bool UpdateRuntimeAttrOfJobIfExists(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
-    return StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
-                            GetStepVariableDbEntryName_(db_id), &runtime_attr)
-        .has_value();
-  }
+      crane::grpc::RuntimeAttrOfJob const& runtime_attr) = 0;
 
-  bool UpdateStepToCtld(txn_id_t txn_id, db_id_t db_id,
-                        crane::grpc::StepToCtld const& step_to_ctld) {
-    return StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
-                            GetStepFixedDbEntryName_(db_id), &step_to_ctld)
-        .has_value();
-  }
-
-  bool UpdateRuntimeAttrOfStepIfExists(
+  virtual bool UpdateJobToCtldIfExists(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
-    return StoreTypeIntoDbIfExists_(m_step_var_db_.get(), txn_id,
-                                    GetStepVariableDbEntryName_(db_id),
-                                    &runtime_attr)
-        .has_value();
-  }
+      crane::grpc::JobToCtld const& job_to_ctld_ref) = 0;
 
-  bool UpdateStepToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                                crane::grpc::StepToCtld const& step_to_ctld) {
-    return StoreTypeIntoDbIfExists_(m_step_fixed_db_.get(), txn_id,
-                                    GetStepFixedDbEntryName_(db_id),
-                                    &step_to_ctld)
-        .has_value();
-  }
+  virtual bool FetchJobDataInDb(txn_id_t txn_id, db_id_t db_id,
+                                JobInEmbeddedDb* job_in_db) = 0;
 
-  bool FetchStepDataInDb(txn_id_t txn_id, db_id_t db_id,
-                         StepInEmbeddedDb* step_in_db) {  // Only used in test
-    return FetchStepDataInDbAtomic_(txn_id, db_id, step_in_db).has_value();
-  }
+  virtual bool AppendSteps(const std::vector<StepInCtld*>& steps) = 0;
 
-  bool UpdateReservationInfo(
+  virtual bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids) = 0;
+
+  virtual bool UpdateRuntimeAttrOfStep(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) = 0;
+
+  virtual bool UpdateStepToCtld(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) = 0;
+
+  virtual bool UpdateRuntimeAttrOfStepIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) = 0;
+
+  virtual bool UpdateStepToCtldIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::StepToCtld const& step_to_ctld) = 0;
+
+  virtual bool FetchStepDataInDb(txn_id_t txn_id, db_id_t db_id,
+                                 StepInEmbeddedDb* step_in_db) = 0;
+
+  virtual bool UpdateReservationInfo(
       txn_id_t txn_id, const ResvId& name,
-      const crane::grpc::CreateReservationRequest& reservation_req) {
-    return StoreTypeIntoDb_(m_resv_db_.get(), txn_id, name, &reservation_req)
-        .has_value();
-  }
+      const crane::grpc::CreateReservationRequest& reservation_req) = 0;
 
-  bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) {
-    return m_resv_db_->Delete(txn_id, name).has_value();
-  }
-
- private:
-  inline static std::string GetFixedDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}T", db_id);
-  }
-
-  inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}S", db_id);
-  }
-
-  inline static bool IsVariableDbJobDataEntry_(std::string const& key) {
-    return key.back() == 'S';
-  }
-
-  inline static job_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
-    return std::stol(key.substr(0, key.size() - 1));
-  }
-
-  inline static std::string GetStepFixedDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}ST", db_id);
-  }
-
-  inline static std::string GetStepVariableDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}SS", db_id);
-  }
-
-  inline static bool IsVariableDbStepDataEntry_(std::string const& key) {
-    return key.ends_with("SS");
-  }
-
-  inline static step_db_id_t ExtractStepDbIdFromEntry_(std::string const& key) {
-    return std::stol(key.substr(0, key.size() - 2));
-  }
-
-  bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
-    auto result = db->Begin();
-    if (result.has_value()) {
-      *txn_id = result.value();
-      return true;
-    }
-
-    CRANE_ERROR("Failed to begin a transaction.");
-    return false;
-  }
-
-  bool CommitDbTransaction_(IEmbeddedDb* db, txn_id_t txn_id) {
-    if (txn_id <= 0) {
-      CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
-      return false;
-    }
-
-    return db->Commit(txn_id).has_value();
-  }
-
-  // -------------------
-
-  // Helper functions for basic embedded db operations
-
-  inline std::expected<size_t, DbErrorCode> FetchJobDataInDbAtomic_(
-      txn_id_t txn_id, db_id_t db_id, JobInEmbeddedDb* job_in_db) {
-    auto result =
-        FetchTypeFromDb_(m_fixed_db_.get(), txn_id, GetFixedDbEntryName_(db_id),
-                         job_in_db->mutable_job_to_ctld());
-    if (!result) return result;
-
-    return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(db_id),
-                            job_in_db->mutable_runtime_attr());
-  }
-
-  inline std::expected<size_t, DbErrorCode> FetchStepDataInDbAtomic_(
-      txn_id_t txn_id, db_id_t db_id, StepInEmbeddedDb* step_in_db) {
-    auto result = FetchTypeFromDb_(m_step_fixed_db_.get(), txn_id,
-                                   GetStepFixedDbEntryName_(db_id),
-                                   step_in_db->mutable_step_to_ctld());
-    if (!result) return result;
-
-    return FetchTypeFromDb_(m_step_var_db_.get(), txn_id,
-                            GetStepVariableDbEntryName_(db_id),
-                            step_in_db->mutable_runtime_attr());
-  }
-
-  template <typename T>
-  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
-                                                   IEmbeddedDb* db,
-                                                   std::string const& key,
-                                                   T* buf, T value) {
-    std::expected<size_t, DbErrorCode> fetch_result =
-        FetchTypeFromDb_(db, txn_id, key, buf);
-    if (fetch_result.has_value()) return true;
-
-    if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-      CRANE_TRACE(
-          "Key {} not found in embedded db. Initialize it with given value.",
-          key);
-
-      std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
-      if (!store_result) {
-        CRANE_ERROR("Failed to init key '{}' in db.", key);
-        return false;
-      }
-
-      *buf = value;
-      return true;
-    } else {
-      CRANE_ERROR("Failed to fetch key '{}' from db.", key);
-      return false;
-    }
-  }
-
-  template <std::integral T>
-  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
-                                                   IEmbeddedDb* db,
-                                                   std::string const& key,
-                                                   T* buf, T value) {
-    std::expected<size_t, DbErrorCode> fetch_result =
-        FetchTypeFromDb_(db, txn_id, key, buf);
-    if (fetch_result.has_value()) return true;
-
-    if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-      CRANE_TRACE("Key {} not found in embedded db. Initializing it.", key);
-
-      std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
-      if (!store_result) {
-        CRANE_ERROR("Failed to init key '{}' in db.", key);
-        return false;
-      }
-
-      *buf = value;
-      return true;
-    } else {
-      CRANE_ERROR("Failed to fetch key '{}' from db.", key);
-      return false;
-    }
-  }
-
-  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(
-      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
-      std::string const& key, std::string* buf) {
-    size_t n_bytes{0};
-
-    auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (!result) {
-      CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
-                  key);
-      return result;
-    }
-
-    buf->resize(n_bytes);
-    result = db->Fetch(txn_id, key, buf->data(), &n_bytes);
-    if (!result) {
-      CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
-                  key);
-      return result;
-    }
-
-    return {n_bytes};
-  }
-
-  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(
-      IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
-      google::protobuf::MessageLite* value) {
-    size_t n_bytes{0};
-    std::string buf;
-
-    auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (!result && result.error() != DbErrorCode::BUFFER_SMALL) {
-      CRANE_ERROR(
-          "Unexpected error when fetching the size of proto key '{}': {}", key,
-          static_cast<uint8_t>(result.error()));
-      return result;
-    }
-
-    buf.resize(n_bytes);
-    result = db->Fetch(txn_id, key, buf.data(), &n_bytes);
-    if (!result) {
-      CRANE_ERROR(
-          "Unexpected error when fetching the data of proto key '{}': {}", key,
-          static_cast<uint8_t>(result.error()));
-      return result;
-    }
-
-    bool ok = value->ParseFromArray(buf.data(), static_cast<int>(n_bytes));
-    if (!ok) {
-      CRANE_ERROR("Failed to parse protobuf data of key {}", key);
-      return std::unexpected(DbErrorCode::PARSING_ERR);
-    }
-
-    return {n_bytes};
-  }
-
-  template <std::integral T>
-  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(IEmbeddedDb* db,
-                                                      txn_id_t txn_id,
-                                                      std::string const& key,
-                                                      T* buf) {
-    size_t n_bytes{sizeof(T)};
-    auto result = db->Fetch(txn_id, key, buf, &n_bytes);
-    if (!result && result.error() != DbErrorCode::NOT_FOUND)
-      CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
-    return result;
-  }
-
-  template <typename T>
-  std::expected<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
-                                                    txn_id_t txn_id,
-                                                    std::string const& key,
-                                                    const T* value)
-    requires std::derived_from<T, google::protobuf::MessageLite>
-  {
-    using google::protobuf::io::CodedOutputStream;
-    using google::protobuf::io::StringOutputStream;
-
-    std::string buf;
-    StringOutputStream stringOutputStream(&buf);
-    CodedOutputStream codedOutputStream(&stringOutputStream);
-
-    size_t n_bytes{value->ByteSizeLong()};
-    value->SerializeToCodedStream(&codedOutputStream);
-
-    return db->Store(txn_id, key, buf.data(), n_bytes);
-  }
-
-  template <std::integral T>
-  std::expected<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
-                                                    txn_id_t txn_id,
-                                                    std::string const& key,
-                                                    const T* value) {
-    return db->Store(txn_id, key, value, sizeof(T));
-  }
-
-  template <typename T>
-  std::expected<void, DbErrorCode> StoreTypeIntoDbIfExists_(
-      IEmbeddedDb* db, txn_id_t txn_id, const std::string& key, const T* value)
-    requires std::derived_from<T, google::protobuf::MessageLite>
-  {
-    bool owns_txn = txn_id == 0;
-    if (owns_txn && !BeginDbTransaction_(db, &txn_id))
-      return std::unexpected(DbErrorCode::OTHER);
-
-    size_t len = 0;
-    auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
-    if (!fetch_result) {
-      if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-        if (owns_txn) CommitDbTransaction_(db, txn_id);
-        return {};
-      }
-      if (fetch_result.error() != DbErrorCode::BUFFER_SMALL)
-        return std::unexpected(fetch_result.error());
-    }
-
-    auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
-    if (!store_result) return std::unexpected(store_result.error());
-
-    if (owns_txn && !CommitDbTransaction_(db, txn_id))
-      return std::unexpected(DbErrorCode::OTHER);
-    return {};
-  }
-
-  template <std::integral T>
-  std::expected<void, DbErrorCode> StoreTypeIntoDbIfExists_(
-      IEmbeddedDb* db, txn_id_t txn_id, const std::string& key,
-      const T* value) {
-    bool owns_txn = txn_id == 0;
-    if (owns_txn && !BeginDbTransaction_(db, &txn_id))
-      return std::unexpected(DbErrorCode::OTHER);
-
-    size_t len = 0;
-    auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
-    if (!fetch_result) {
-      if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
-        if (owns_txn) CommitDbTransaction_(db, txn_id);
-        return {};
-      }
-      if (fetch_result.error() != DbErrorCode::BUFFER_SMALL)
-        return std::unexpected(fetch_result.error());
-    }
-
-    auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
-    if (!store_result) return std::unexpected(store_result.error());
-
-    if (owns_txn && !CommitDbTransaction_(db, txn_id))
-      return std::unexpected(DbErrorCode::OTHER);
-    return {};
-  }
-
-  // -----------
-
-  inline static std::string const s_next_job_db_id_str_{"NDI"};
-  inline static std::string const s_next_job_id_str_{"NI"};
-
-  inline static absl::Mutex s_job_id_and_db_id_mtx_;
-  inline static job_id_t s_next_job_id_
-      ABSL_GUARDED_BY(s_job_id_and_db_id_mtx_);
-  inline static db_id_t s_next_job_db_id_
-      ABSL_GUARDED_BY(s_job_id_and_db_id_mtx_);
-
-  std::unique_ptr<IEmbeddedDb> m_variable_db_;
-  std::unique_ptr<IEmbeddedDb> m_fixed_db_;
-  std::unique_ptr<IEmbeddedDb> m_resv_db_;
-
-  inline static std::string const s_next_step_db_id_str_{"NSDI"};
-  inline static std::string const s_next_step_id_str_{"NSI"};
-
-  inline static absl::Mutex s_step_id_mtx_;
-  inline static db_id_t s_next_step_db_id_ ABSL_GUARDED_BY(s_step_id_mtx_);
-  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_
-      ABSL_GUARDED_BY(s_step_id_mtx_);
-  std::unique_ptr<IEmbeddedDb> m_step_var_db_;
-  std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
+  virtual bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) = 0;
 };
 
-template <>
-inline std::expected<void, DbErrorCode> EmbeddedDbClient::StoreTypeIntoDb_(
-    IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
-    const crane::grpc::StepNextIdInEmbeddedDb* value) {
-  using google::protobuf::io::CodedOutputStream;
-  using google::protobuf::io::StringOutputStream;
-
-  std::string buf;
-  StringOutputStream stringOutputStream(&buf);
-  CodedOutputStream codedOutputStream(&stringOutputStream);
-
-  size_t n_bytes{value->ByteSizeLong()};
-  value->SerializeToCodedStream(&codedOutputStream);
-
-  return db->Store(txn_id, key, buf.data(), n_bytes);
-}
+std::unique_ptr<EmbeddedDbClient> MakeEmbeddedDbClient(
+    std::string_view backend);
 
 }  // namespace Ctld
 

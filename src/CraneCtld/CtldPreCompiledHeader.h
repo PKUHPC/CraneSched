@@ -91,6 +91,13 @@
 // Ranges-v3
 #include <range/v3/all.hpp>
 
+// RocksDB
+#ifdef CRANE_HAVE_ROCKSDB
+#  include <rocksdb/db.h>
+#  include <rocksdb/options.h>
+#  include <rocksdb/write_batch.h>
+#endif
+
 // Concurrent queue
 #include <concurrentqueue/concurrentqueue.h>
 

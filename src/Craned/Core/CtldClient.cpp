@@ -30,6 +30,23 @@
 namespace Craned {
 using namespace std::chrono_literals;
 
+namespace {
+
+int64_t NowUnixMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+int64_t ElapsedMs(std::chrono::steady_clock::time_point begin,
+                  std::chrono::steady_clock::time_point end) {
+  if (begin == std::chrono::steady_clock::time_point{}) return 0;
+  return std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+      .count();
+}
+
+}  // namespace
+
 CtldClientStateMachine::CtldClientStateMachine() {
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
@@ -890,13 +907,20 @@ void CtldClient::SetPingFailedCb(std::function<void()>&& cb) {
 
 void CtldClient::StepStatusChangeAsync(
     StepStatusChangeQueueElem&& step_status_change) {
+  const auto enqueue_steady_time = std::chrono::steady_clock::now();
+  const auto enqueue_ts_ms = NowUnixMs();
   absl::MutexLock lock(&m_step_status_change_mtx_);
 
   CRANE_TRACE(
       "[Step #{}.{}] Step status change added to queue, status {},code {}.",
       step_status_change.job_id, step_status_change.step_id,
       step_status_change.new_status, step_status_change.exit_code);
+  step_status_change.enqueue_steady_time = enqueue_steady_time;
+  step_status_change.enqueue_ts_ms = enqueue_ts_ms;
   m_step_status_change_list_.emplace_back(std::move(step_status_change));
+  auto& queued_change = m_step_status_change_list_.back();
+  queued_change.queue_len_at_enqueue =
+      static_cast<int64_t>(m_step_status_change_list_.size());
 }
 
 void CtldClient::BroadcastPmixPort(
@@ -1128,9 +1152,31 @@ bool CtldClient::SendStatusChanges_(
     grpc::Status status;
 
     auto status_change = changes.front();
+    const auto send_start = std::chrono::steady_clock::now();
+    const int64_t queue_wait_ms =
+        ElapsedMs(status_change.enqueue_steady_time, send_start);
 
     CRANE_TRACE("[Step #{}.{}] Sending StepStatusChange.", status_change.job_id,
                 status_change.step_id);
+
+    CRANE_TRACE_SCOPE_NAMED(forward_span, "status_change/craned_forward");
+    forward_span.SetAttribute("job_id", status_change.job_id);
+    forward_span.SetAttribute("step_id", status_change.step_id);
+    forward_span.SetAttribute("craned_id", std::string(m_craned_id_));
+    forward_span.SetAttribute("new_status",
+                              static_cast<int64_t>(status_change.new_status));
+    forward_span.SetAttribute("exit_code",
+                              static_cast<int64_t>(status_change.exit_code));
+    forward_span.SetAttribute("has_final_status",
+                              status_change.final_status.has_value());
+    if (status_change.final_status.has_value()) {
+      forward_span.SetAttribute(
+          "final_status",
+          static_cast<int64_t>(status_change.final_status.value()));
+    }
+    forward_span.SetAttribute("queue_len", status_change.queue_len_at_enqueue);
+    forward_span.SetAttribute("queue_wait_ms", queue_wait_ms);
+    forward_span.SetAttribute("enqueue_ts_ms", status_change.enqueue_ts_ms);
 
     request.set_craned_id(m_craned_id_);
     request.set_job_id(status_change.job_id);
@@ -1143,7 +1189,15 @@ bool CtldClient::SendStatusChanges_(
     if (status_change.final_status.has_value())
       request.set_final_status(status_change.final_status.value());
 
+    const auto rpc_start = std::chrono::steady_clock::now();
     status = m_stub_->StepStatusChange(&context, request, &reply);
+    const auto rpc_elapsed_ms =
+        ElapsedMs(rpc_start, std::chrono::steady_clock::now());
+    forward_span.SetAttribute("rpc_elapsed_ms", rpc_elapsed_ms);
+    forward_span.SetAttribute("grpc_status_code",
+                              static_cast<int64_t>(status.error_code()));
+    forward_span.SetAttribute("grpc_status_ok", status.ok());
+    forward_span.SetAttribute("reply_ok", status.ok() && reply.ok());
     if (!status.ok()) {
       CRANE_ERROR(
           "Failed to send StepStatusChange: "

@@ -25,10 +25,14 @@
 
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
+#include <condition_variable>
+#include <map>
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
+#include <mutex>
+#include <thread>
 
 #include "Account/AccountDefs.h"
 #include "protos/Crane.grpc.pb.h"
@@ -105,6 +109,30 @@ class MongodbClient {
     cpu_t total_cpus;
   };
 
+  struct PendingJobAggregationInfo {
+    job_id_t job_id{0};
+    JobAggregationInfo aggregation;
+    bool has_usage{false};
+    int64_t time_end{0};
+  };
+
+  struct JobAggregationUsageKey {
+    std::chrono::sys_seconds period_start;
+    std::string account;
+    std::string username;
+    std::string qos;
+    std::string wckey;
+
+    bool operator<(const JobAggregationUsageKey& rhs) const {
+      return std::tie(period_start, account, username, qos, wckey) <
+             std::tie(rhs.period_start, rhs.account, rhs.username, rhs.qos,
+                      rhs.wckey);
+    }
+  };
+
+  using JobAggregationUsageMap =
+      std::map<JobAggregationUsageKey, int64_t /*total_cpu_time*/>;
+
   struct MongoServerVersion {
     int major{0};
     int minor{0};
@@ -139,6 +167,10 @@ class MongodbClient {
   // We intentionally disable the feature on older servers to avoid crashes.
   [[nodiscard]] bool JobSummaryEnabled() const {
     return m_job_summary_enabled_;
+  }
+
+  [[nodiscard]] int64_t PendingJobAggregationCount() const {
+    return m_job_aggregation_pending_jobs_.load(std::memory_order_relaxed);
   }
 
   /* ----- Method of operating the job table ----------- */
@@ -236,6 +268,32 @@ class MongodbClient {
                          mongocxx::client_session* session = nullptr);
   void AppendToMonthTable_(const JobAggregationInfo& info,
                            mongocxx::client_session* session = nullptr);
+
+  [[nodiscard]] bool JobAggregationAsyncMode_() const;
+  void StartJobAggregationWorker_();
+  void StopJobAggregationWorker_();
+  void NotifyJobAggregationWorker_(size_t job_count);
+  void JobAggregationWorkerLoop_();
+  std::optional<size_t> ProcessJobAggregationBatch_();
+  std::vector<PendingJobAggregationInfo> FetchPendingAggregationJobs_(
+      size_t limit, int64_t* oldest_pending_ms);
+  void BuildJobAggregationDeltas_(
+      const std::vector<PendingJobAggregationInfo>& jobs,
+      JobAggregationUsageMap* hour_deltas, JobAggregationUsageMap* day_deltas,
+      JobAggregationUsageMap* month_deltas);
+  void AddUsageDelta_(JobAggregationUsageMap* deltas,
+                      const JobAggregationInfo& info,
+                      std::chrono::sys_seconds period_start,
+                      int64_t total_cpu_time);
+  bool BulkIncUsageDeltas_(mongocxx::client_session* session,
+                           const std::string& collection_name,
+                           const std::string& period_field,
+                           const JobAggregationUsageMap& deltas,
+                           int64_t* elapsed_ms);
+  bool MarkJobsAggregatedBatch_(
+      mongocxx::client_session* session,
+      const std::vector<PendingJobAggregationInfo>& jobs, int64_t* elapsed_ms);
+  void SubtractPendingJobAggregationCount_(size_t job_count);
 
   // Recovery helper functions
   void RecoverNewClusterAggregations_(bool hour_done, bool day_done,
@@ -717,6 +775,12 @@ class MongodbClient {
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
   std::atomic_bool m_thread_stop_{false};
+  std::thread m_job_aggregation_worker_;
+  std::mutex m_job_aggregation_mtx_;
+  std::condition_variable m_job_aggregation_cv_;
+  std::atomic_bool m_job_aggregation_stop_{false};
+  std::atomic_bool m_job_aggregation_worker_started_{false};
+  std::atomic<int64_t> m_job_aggregation_pending_jobs_{0};
 };
 
 }  // namespace Ctld

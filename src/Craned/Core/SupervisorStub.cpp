@@ -97,6 +97,10 @@ SupervisorStub::InitAndGetRecoveredMap() {
 }
 
 CraneErrCode SupervisorStub::ExecuteStep() {
+  return ExecuteStepWithStatus().code;
+}
+
+ExecuteStepRpcResult SupervisorStub::ExecuteStepWithStatus() {
   ClientContext context;
   context.set_wait_for_ready(true);
   context.set_deadline(std::chrono::system_clock::now() +
@@ -106,11 +110,15 @@ CraneErrCode SupervisorStub::ExecuteStep() {
 
   auto ok = m_stub_->ExecuteStep(&context, request, &reply);
   if (!ok.ok()) {
-    CRANE_ERROR("ExecuteStep failed: reply {},{}", ok.ok(), ok.error_message());
-    return CraneErrCode::ERR_RPC_FAILURE;
+    CRANE_ERROR("ExecuteStep failed: reply {},{}, code: {}", ok.ok(),
+                ok.error_message(), static_cast<int>(ok.error_code()));
+    return ExecuteStepRpcResult{.code = CraneErrCode::ERR_RPC_FAILURE,
+                                .grpc_status = ok.error_code(),
+                                .error_message = ok.error_message()};
   }
 
-  return reply.code();
+  return ExecuteStepRpcResult{.code = static_cast<CraneErrCode>(reply.code()),
+                              .grpc_status = grpc::StatusCode::OK};
 }
 
 CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {

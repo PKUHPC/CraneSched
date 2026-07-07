@@ -7,6 +7,9 @@ Enabled: false
 # Socket path relative to CraneBaseDir
 PlugindSockPath: "cplugind/cplugind.sock"
 
+# Max serialized TraceHook request bytes. Keep below gRPC's default 4 MiB cap.
+TraceHookMaxRequestBytes: 3670016
+
 # Debug level of Plugind
 PlugindDebugLevel: "trace"
 
@@ -18,6 +21,9 @@ PlugindListenPort: "10018"
 
 # Plugins to be loaded in Plugind
 Plugins:
-  - Name: "dummy"
-    Path: "/path/to/dummy.so"
-    Config: "/path/to/dummy.yaml"
+  - Name: "monitor"
+    Path: "/usr/lib/crane/plugin/monitor.so"
+    Config: "/etc/crane/monitor.yaml"
+  - Name: "trace"
+    Path: "/usr/lib/crane/plugin/trace.so"
+    Config: "/etc/crane/trace.yaml"

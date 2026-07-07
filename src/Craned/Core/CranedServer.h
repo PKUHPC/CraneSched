@@ -54,6 +54,11 @@ class CranedServiceImpl : public Craned::Service {
                          const crane::grpc::ConfigureCranedRequest *request,
                          google::protobuf::Empty *response) override;
 
+  grpc::Status UpdateTraceConfig(
+      grpc::ServerContext *context,
+      const crane::grpc::UpdateTraceConfigRequest *request,
+      crane::grpc::UpdateTraceConfigReply *response) override;
+
   grpc::Status ExecuteSteps(grpc::ServerContext *context,
                             const crane::grpc::ExecuteStepsRequest *request,
                             crane::grpc::ExecuteStepsReply *response) override;

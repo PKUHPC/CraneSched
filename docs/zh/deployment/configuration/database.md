@@ -15,12 +15,21 @@
 ??? example "展开查看 /etc/crane/database.yaml 完整配置示例"
     ```yaml
     # ============ 嵌入式数据库配置 ============
-    # 嵌入式数据库后端类型（默认 Unqlite）
-    CraneEmbeddedDbBackend: Unqlite
+    # 嵌入式数据库后端类型：RocksDB（默认）、Unqlite 或 BerkeleyDB
+    CraneEmbeddedDbBackend: RocksDB
 
     # CraneCtld 嵌入式数据库文件路径
     # 相对于 CraneBaseDir（如果配置了 Keepalived，则相对于 CraneSharedBaseDir）
     CraneCtldDbPath: cranectld/embedded.db
+
+    RocksDb:
+      SyncWrites: true
+      ManualWalSyncIntervalMs: 1000
+      WriteBufferSizeMB: 64
+      MaxWriteBufferNumber: 4
+      TargetFileSizeBaseMB: 64
+      MaxBackgroundJobs: 4
+      Compression: lz4
 
     # ============ MongoDB 配置 ============
     DbUser: admin
@@ -57,10 +66,29 @@
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `CraneEmbeddedDbBackend` | 字符串 | `Unqlite` | 嵌入式数据库引擎，默认使用 `Unqlite` |
+| `CraneEmbeddedDbBackend` | 字符串 | `RocksDB` | 嵌入式数据库引擎，可选 `RocksDB`、`Unqlite` 或 `BerkeleyDB` |
 | `CraneCtldDbPath` | 路径 | `cranectld/embedded.db` | 数据库文件存储路径 |
 
-### 默认后端：Unqlite
+### 默认后端：RocksDB
+
+[RocksDB](https://rocksdb.org/) 是嵌入式持久化 KV 存储。CraneSched 默认使用 RocksDB 作为 embedded DB 后端，以支撑更大的 pending 队列和高吞吐状态更新。
+
+```yaml
+CraneEmbeddedDbBackend: RocksDB
+RocksDb:
+  SyncWrites: true
+  ManualWalSyncIntervalMs: 1000
+  WriteBufferSizeMB: 64
+  MaxWriteBufferNumber: 4
+  TargetFileSizeBaseMB: 64
+  MaxBackgroundJobs: 4
+  Compression: lz4
+```
+
+!!! warning
+    如果编译时没有启用 RocksDB 支持，配置 `CraneEmbeddedDbBackend: RocksDB` 会导致 CraneCtld 启动失败。需要回退 legacy 后端时，可改为 `Unqlite` 或 `BerkeleyDB`，并在保留或清理旧 embedded DB 路径后重启 CraneCtld。
+
+### Legacy 后端：Unqlite
 
 [Unqlite](https://unqlite.org/) 是一个嵌入式的 NoSQL 数据库引擎，零配置、无需外部依赖。
 
@@ -70,6 +98,14 @@ CraneEmbeddedDbBackend: Unqlite
 
 !!! note
     Unqlite 对单次事务中的记录数有约 900,000 条的上限限制，这会影响待执行队列的最大容量。
+
+### Legacy 后端：BerkeleyDB
+
+```yaml
+CraneEmbeddedDbBackend: BerkeleyDB
+```
+
+BerkeleyDB 需要编译时启用对应支持，并安装 BerkeleyDB 开发库。如果编译产物不包含 BerkeleyDB 支持，选择该后端会导致启动失败。
 
 ### 数据库路径
 
@@ -322,7 +358,8 @@ chown crane:crane /etc/crane/database.yaml
 
 **启动时报数据库后端错误**：
 
-- 检查 `CraneEmbeddedDbBackend` 拼写是否正确（区分大小写：`Unqlite`）
+- 检查 `CraneEmbeddedDbBackend` 拼写是否正确（区分大小写：`RocksDB`、`Unqlite` 或 `BerkeleyDB`）
+- 如果使用 `RocksDB` 或 `BerkeleyDB`，确认编译产物包含对应 backend 支持
 
 **数据库文件权限问题**：
 

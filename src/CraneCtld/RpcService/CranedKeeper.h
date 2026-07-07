@@ -61,6 +61,9 @@ class CranedStub {
 
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
+  CraneErrCode UpdateTraceConfig(
+      const crane::grpc::RuntimeTraceConfig &trace_config);
+
   void SetReady() {
     CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
                        m_craned_id_);
@@ -78,7 +81,8 @@ class CranedStub {
   CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+      const std::unordered_map<job_id_t, std::string> &traceparents = {});
 
   CraneErrCode FreeSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);

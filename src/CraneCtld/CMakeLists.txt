@@ -20,6 +20,8 @@ add_executable(cranectld
         Accounting/LicenseManager.cpp
         Database/EmbeddedDbClient.cpp
         Database/EmbeddedDbClient.h
+        Database/LegacyEmbeddedDbClient.cpp
+        Database/LegacyEmbeddedDbClient.h
 
         Security/VaultClient.cpp
         Security/VaultClient.h
@@ -36,6 +38,8 @@ add_executable(cranectld
 
         CtldPreCompiledHeader.h)
 
+crane_enable_ipo(cranectld)
+
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
 target_include_directories(cranectld PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -50,6 +54,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PasswordEntry
         Utility_PluginClient
         $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
+        crane_tracer
         uvw
 
         cxxopts
@@ -87,8 +92,22 @@ if (ENABLE_UNQLITE)
     target_link_libraries(cranectld PRIVATE unqlite)
 endif ()
 
-if (CRANE_ENABLE_TESTS)
-    target_compile_definitions(cranectld PRIVATE CRANE_ENABLE_TESTS)
+if (ENABLE_ROCKSDB)
+    target_sources(cranectld PRIVATE
+            Database/RocksDbEmbeddedStore.cpp
+            Database/RocksDbEmbeddedStore.h)
+    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_ROCKSDB)
+    if (TARGET rocksdb)
+        target_link_libraries(cranectld PRIVATE rocksdb)
+    elseif (TARGET rocksdb-shared)
+        target_link_libraries(cranectld PRIVATE rocksdb-shared)
+    else ()
+        message(FATAL_ERROR "ENABLE_ROCKSDB is ON but no RocksDB target was generated.")
+    endif ()
+endif ()
+
+if (CRANE_ENABLE_SCHED_ALGO_TRACE_LOG)
+    target_compile_definitions(cranectld PRIVATE CRANE_ENABLE_SCHED_ALGO_TRACE_LOG)
 endif ()
 
 # Linker flag for c++ 17 filesystem library

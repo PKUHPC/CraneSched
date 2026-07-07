@@ -43,6 +43,9 @@ class CranedClient {
     std::optional<std::string> reason;
     std::optional<crane::grpc::JobStatus> final_status;
     google::protobuf::Timestamp timestamp{};
+    std::chrono::steady_clock::time_point enqueue_steady_time{};
+    int64_t enqueue_ts_ms{};
+    int64_t queue_len_at_enqueue{};
   };
   absl::Mutex m_mutex_;
   absl::CondVar m_cv_;

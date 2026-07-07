@@ -23,6 +23,13 @@
 
 #include "CgroupManager.h"
 
+#include <fcntl.h>
+
+#include <bit>
+#include <cctype>
+
+#include "CgroupV2Fs.h"
+
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/bpf.h>
 #  include <bpf/libbpf.h>
@@ -35,10 +42,126 @@
 #endif
 
 #include "DeviceManager.h"
+#include "crane/OS.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "crane/Tracing.h"
 
 namespace Craned::Common {
+namespace {
+
+constexpr char kCgroupOpConcurrencyEnv[] = "CRANE_CGROUP_OP_CONCURRENCY";
+constexpr char kCgroupOpSemaphoreEnv[] = "CRANE_CGROUP_OP_SEM_NAME";
+constexpr char kCgroupV2FastPathEnv[] = "CRANE_CGROUP_V2_FAST_PATH";
+constexpr char kCgroupV2CleanupModeEnv[] = "CRANE_CGROUP_V2_CLEANUP_MODE";
+
+int64_t MsSince(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+int64_t CgroupVersionInt() {
+  return static_cast<int64_t>(CgroupManager::GetCgroupVersion());
+}
+
+int64_t CountControllers(ControllerFlags flags) {
+  return static_cast<int64_t>(std::popcount(flags.Raw()));
+}
+
+bool ParseBoolEnv(std::string_view value, bool default_value) {
+  if (value == "1" || value == "true" || value == "TRUE" || value == "yes" ||
+      value == "on")
+    return true;
+  if (value == "0" || value == "false" || value == "FALSE" || value == "no" ||
+      value == "off")
+    return false;
+  return default_value;
+}
+
+CgroupV2CleanupMode ParseCleanupMode(std::string_view mode) {
+  if (mode == "async_rmdir") return CgroupV2CleanupMode::ASYNC_RMDIR;
+  return CgroupV2CleanupMode::SYNC_RMDIR;
+}
+
+std::string_view CleanupModeString(CgroupV2CleanupMode mode) {
+  return mode == CgroupV2CleanupMode::ASYNC_RMDIR ? "async_rmdir"
+                                                  : "sync_rmdir";
+}
+
+bool CgroupNameHasPart(const std::string& cgroup_name, std::string_view part) {
+  return cgroup_name.find(part) != std::string::npos;
+}
+
+std::optional<int64_t> ParseIdAfterPrefix(const std::string& value,
+                                          std::string_view prefix) {
+  size_t pos = value.find(prefix);
+  if (pos == std::string::npos) return std::nullopt;
+  pos += prefix.size();
+  if (pos >= value.size() || !std::isdigit(value[pos])) return std::nullopt;
+  char* end = nullptr;
+  long long parsed = std::strtoll(value.c_str() + pos, &end, 10);
+  if (end == value.c_str() + pos) return std::nullopt;
+  return parsed;
+}
+
+template <typename SpanT>
+void SetCgroupSpanAttrs(SpanT& span, const std::string& cgroup_name,
+                        ControllerFlags controllers = NO_CONTROLLER_FLAG) {
+  span.SetAttribute("cgroup_name", cgroup_name);
+  span.SetAttribute("cgroup_version", CgroupVersionInt());
+  span.SetAttribute("controller_count", CountControllers(controllers));
+  span.SetAttribute(
+      "is_job_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kJobCgNamePrefix));
+  span.SetAttribute(
+      "is_step_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kStepCgNamePrefix));
+  span.SetAttribute(
+      "is_task_cgroup",
+      CgroupNameHasPart(cgroup_name, CgConstant::kTaskCgNamePrefix));
+  if (auto job_id =
+          ParseIdAfterPrefix(cgroup_name, CgConstant::kJobCgNamePrefix))
+    span.SetAttribute("job_id", *job_id);
+  if (auto step_id =
+          ParseIdAfterPrefix(cgroup_name, CgConstant::kStepCgNamePrefix))
+    span.SetAttribute("step_id", *step_id);
+  if (auto task_id =
+          ParseIdAfterPrefix(cgroup_name, CgConstant::kTaskCgNamePrefix))
+    span.SetAttribute("task_id", *task_id);
+}
+
+class CgroupOpGate {
+ public:
+  CgroupOpGate() {
+    sem_t* sem = CgroupManager::CgroupOpSemaphore();
+    if (sem == SEM_FAILED) return;
+    sem_ = sem;
+    auto wait_begin = std::chrono::steady_clock::now();
+    while (sem_wait(sem_) == -1) {
+      if (errno == EINTR) continue;
+      CRANE_WARN("Failed to wait cgroup op semaphore: {}", strerror(errno));
+      sem_ = SEM_FAILED;
+      return;
+    }
+    wait_ms_ = MsSince(wait_begin);
+  }
+
+  ~CgroupOpGate() {
+    if (sem_ != SEM_FAILED && sem_post(sem_) == -1) {
+      CRANE_WARN("Failed to post cgroup op semaphore: {}", strerror(errno));
+    }
+  }
+
+  int64_t WaitMs() const { return wait_ms_; }
+
+ private:
+  sem_t* sem_{SEM_FAILED};
+  int64_t wait_ms_{0};
+};
+
+}  // namespace
+
 CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
@@ -47,6 +170,32 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
 
   log_level = debug_level;
+  if (const char* fast_path_env = getenv(kCgroupV2FastPathEnv);
+      fast_path_env != nullptr) {
+    m_cgroup_v2_fast_path_enabled_ =
+        ParseBoolEnv(fast_path_env, m_cgroup_v2_fast_path_enabled_);
+  }
+  if (const char* cleanup_mode_env = getenv(kCgroupV2CleanupModeEnv);
+      cleanup_mode_env != nullptr) {
+    m_cgroup_v2_cleanup_mode_ = ParseCleanupMode(cleanup_mode_env);
+  }
+  if (const char* concurrency_env = getenv(kCgroupOpConcurrencyEnv);
+      concurrency_env != nullptr) {
+    m_cgroup_op_concurrency_ =
+        static_cast<uint32_t>(std::strtoul(concurrency_env, nullptr, 10));
+  }
+  if (m_cgroup_op_concurrency_ > 0) {
+    if (const char* sem_name_env = getenv(kCgroupOpSemaphoreEnv);
+        sem_name_env != nullptr && sem_name_env[0] != '\0') {
+      m_cgroup_op_sem_name_ = sem_name_env;
+      m_cgroup_op_sem_ = sem_open(m_cgroup_op_sem_name_.c_str(), 0);
+      if (m_cgroup_op_sem_ == SEM_FAILED) {
+        CRANE_WARN("Failed to open cgroup semaphore {}: {}",
+                   m_cgroup_op_sem_name_, strerror(errno));
+        m_cgroup_op_concurrency_ = 0;
+      }
+    }
+  }
 #ifdef CRANE_ENABLE_CGROUP_V2
   enum cg_setup_mode_t setup_mode;
   setup_mode = cgroup_setup_mode();
@@ -190,12 +339,83 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
     bpf_runtime_info.SetLogEnabled(debug_level < spdlog::level::info);
 #endif
 
+    if (m_cgroup_v2_fast_path_enabled_) {
+      auto backend =
+          std::make_shared<CgroupV2FsBackend>(m_cgroup_v2_cleanup_mode_);
+      if (backend->Probe(m_mounted_controllers_)) {
+        m_v2_fs_backend_ = std::move(backend);
+      } else {
+        m_v2_fs_backend_.reset();
+        CRANE_WARN(
+            "Cgroup v2 fast path probe failed, falling back to libcgroup");
+      }
+    } else {
+      m_v2_fs_backend_.reset();
+      CRANE_INFO("Cgroup v2 fast path disabled by configuration");
+    }
+
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
   }
 
   return CraneErrCode::SUCCESS;
+}
+
+void CgroupManager::ConfigureCgroupOpConcurrency(uint32_t concurrency) {
+  m_cgroup_op_concurrency_ = concurrency;
+  if (concurrency == 0) {
+    unsetenv(kCgroupOpConcurrencyEnv);
+    unsetenv(kCgroupOpSemaphoreEnv);
+    return;
+  }
+
+  auto hostname_expt = util::os::GetHostname();
+  std::string host_key = hostname_expt.has_value() ? hostname_expt.value()
+                                                   : std::to_string(getpid());
+  std::ranges::replace(host_key, '/', '_');
+  m_cgroup_op_sem_name_ =
+      fmt::format("/crane_cgroup_ops_{}_{}", host_key, getuid());
+  m_cgroup_op_sem_ =
+      sem_open(m_cgroup_op_sem_name_.c_str(), O_CREAT, 0600, concurrency);
+  if (m_cgroup_op_sem_ == SEM_FAILED) {
+    CRANE_WARN("Failed to create cgroup semaphore {} concurrency={}: {}",
+               m_cgroup_op_sem_name_, concurrency, strerror(errno));
+    m_cgroup_op_concurrency_ = 0;
+    unsetenv(kCgroupOpConcurrencyEnv);
+    unsetenv(kCgroupOpSemaphoreEnv);
+    return;
+  }
+
+  setenv(kCgroupOpConcurrencyEnv, std::to_string(concurrency).c_str(), 1);
+  setenv(kCgroupOpSemaphoreEnv, m_cgroup_op_sem_name_.c_str(), 1);
+  CRANE_INFO(
+      "Cgroup operation concurrency limit enabled: concurrency={} sem={}",
+      concurrency, m_cgroup_op_sem_name_);
+}
+
+void CgroupManager::ConfigureCgroupV2FastPath(bool enabled) {
+  m_cgroup_v2_fast_path_enabled_ = enabled;
+  setenv(kCgroupV2FastPathEnv, enabled ? "1" : "0", 1);
+}
+
+void CgroupManager::ConfigureCgroupV2CleanupMode(std::string_view mode) {
+  m_cgroup_v2_cleanup_mode_ = ParseCleanupMode(mode);
+  setenv(kCgroupV2CleanupModeEnv,
+         std::string(CleanupModeString(m_cgroup_v2_cleanup_mode_)).c_str(), 1);
+}
+
+void CgroupManager::ShutdownCgroupV2FastPath() {
+  if (!m_v2_fs_backend_) return;
+  if (!m_v2_fs_backend_->DrainJanitor(std::chrono::seconds{5})) {
+    CRANE_WARN("Cgroup v2 janitor did not drain during cgroup shutdown");
+  }
+  m_v2_fs_backend_.reset();
+}
+
+sem_t* CgroupManager::CgroupOpSemaphore() {
+  if (m_cgroup_op_concurrency_ == 0) return SEM_FAILED;
+  return m_cgroup_op_sem_;
 }
 
 void CgroupManager::ControllersMounted() {
@@ -369,6 +589,14 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   using CgConstant::Controller;
   using CgConstant::GetControllerStringView;
 
+  auto op_begin = std::chrono::steady_clock::now();
+  CgroupOpGate gate;
+  CRANE_TRACE_SCOPE_NAMED(create_span, "cgroup/create_or_open");
+  SetCgroupSpanAttrs(create_span, cgroup_str,
+                     preferred_controllers | required_controllers);
+  create_span.SetAttribute("retrieve", retrieve);
+  create_span.SetAttribute("gate_wait_ms", gate.WaitMs());
+
   // Full cgroup name = RootCgNamePrefix / cgroup_str;
   std::string full_cg_name = CgConstant::kRootCgNamePrefix + "/" + cgroup_str;
 
@@ -376,6 +604,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   struct cgroup* native_cgroup = cgroup_new_cgroup(full_cg_name.c_str());
   if (native_cgroup == nullptr) {
     CRANE_WARN("Unable to construct new cgroup object.\n");
+    create_span.SetStatus(crane::StatusCode::kError, "new_cgroup_failed");
     return nullptr;
   }
 
@@ -480,22 +709,36 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 
   int err;
   if (!has_cgroup) {
+    auto create_native_begin = std::chrono::steady_clock::now();
+    CRANE_TRACE_CHILD_NAMED(native_span, create_span, "cgroup/create_native");
+    SetCgroupSpanAttrs(native_span, cgroup_str,
+                       preferred_controllers | required_controllers);
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
       CRANE_WARN(
           "Unable to create cgroup {}. Cgroup functionality will not work:"
           "{} {}",
           full_cg_name.c_str(), err, cgroup_strerror(err));
+      native_span.SetAttribute("libcgroup_errno", err);
+      native_span.SetAttribute("elapsed_ms", MsSince(create_native_begin));
+      native_span.SetStatus(crane::StatusCode::kError, "create_native_failed");
+      create_span.SetAttribute("libcgroup_errno", err);
+      create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
+      create_span.SetStatus(crane::StatusCode::kError, "create_failed");
       return nullptr;
     }
+    native_span.SetAttribute("libcgroup_errno", 0);
+    native_span.SetAttribute("elapsed_ms", MsSince(create_native_begin));
   } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
     CRANE_WARN(
         "Unable to modify cgroup {}. Some cgroup functionality may not work: "
         "{} {}",
         full_cg_name.c_str(), err, cgroup_strerror(err));
+    create_span.SetAttribute("libcgroup_errno", err);
   }
 
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
+    create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
     return std::make_unique<CgroupV1>(full_cg_name, native_cgroup);
   }
 
@@ -507,16 +750,52 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
     if (stat(full_cg_path.c_str(), &cgroup_stat) != 0) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", full_cg_name,
                   std::strerror(errno));
+      create_span.SetAttribute("errno", errno);
+      create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
+      create_span.SetStatus(crane::StatusCode::kError, "stat_failed");
       return nullptr;
     }
 
+    create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
     return std::make_unique<CgroupV2>(full_cg_name, native_cgroup,
                                       cgroup_stat.st_ino);
   }
 
   CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
              full_cg_name);
+  create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
+  create_span.SetStatus(crane::StatusCode::kError,
+                        "unsupported_cgroup_version");
   return nullptr;
+}
+
+std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpenV2Fast_(
+    const std::string& cgroup_str, ControllerFlags preferred_controllers,
+    ControllerFlags required_controllers, bool retrieve) {
+  if (!m_v2_fs_backend_) return nullptr;
+
+  auto op_begin = std::chrono::steady_clock::now();
+  CgroupOpGate gate;
+  ControllerFlags controllers = preferred_controllers | required_controllers;
+  CRANE_TRACE_SCOPE_NAMED(create_span, "cgroup/create_or_open");
+  SetCgroupSpanAttrs(create_span, cgroup_str, controllers);
+  create_span.SetAttribute("retrieve", retrieve);
+  create_span.SetAttribute("fast_path", true);
+  create_span.SetAttribute("gate_wait_ms", gate.WaitMs());
+
+  std::string full_cg_name = CgConstant::kRootCgNamePrefix + "/" + cgroup_str;
+  auto result =
+      m_v2_fs_backend_->CreateOrOpen(full_cg_name, controllers, retrieve);
+  create_span.SetAttribute("elapsed_ms", MsSince(op_begin));
+  if (!result.has_value()) {
+    create_span.SetStatus(crane::StatusCode::kError, "v2_fast_create_failed");
+    return nullptr;
+  }
+
+  create_span.SetAttribute("created", result->created);
+  create_span.SetAttribute("inode", static_cast<int64_t>(result->inode));
+  return std::make_unique<CgroupV2>(full_cg_name, nullptr, result->inode,
+                                    m_v2_fs_backend_);
 }
 
 CraneExpected<std::unique_ptr<CgroupInterface>>
@@ -532,8 +811,13 @@ CgroupManager::AllocateAndGetCgroup(
         is_int_job ? CG_V1_INT_JOB_CONTROLLERS : CG_V1_BASE_CONTROLLERS,
         NO_CONTROLLER_FLAG, recover);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
-                                  NO_CONTROLLER_FLAG, recover);
+    if (m_v2_fs_backend_) {
+      cg_unique_ptr = CreateOrOpenV2Fast_(
+          cgroup_str, CG_V2_REQUIRED_CONTROLLERS, NO_CONTROLLER_FLAG, recover);
+    } else {
+      cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
+                                    NO_CONTROLLER_FLAG, recover);
+    }
   } else {
     CRANE_WARN("cgroup version is not supported.");
   }
@@ -572,7 +856,17 @@ CgroupManager::AllocateAndGetCgroup(
               res_v3.GetMemoryBytes() / (1024.0 * 1024.0),
               util::ReadableDresInNode(res_v3.GetGres()));
 
+  auto set_resource_begin = std::chrono::steady_clock::now();
+  CRANE_TRACE_SCOPE_NAMED(resource_span, "cgroup/set_resource");
+  SetCgroupSpanAttrs(resource_span, cgroup_str);
+  resource_span.SetAttribute("cpu_count",
+                             static_cast<double>(res_v3.GetCpuSet().cpu_count));
+  resource_span.SetAttribute("mem_bytes",
+                             static_cast<int64_t>(res_v3.GetMemoryBytes()));
   bool ok = ResourceInNodeV3Allocator::Allocate(res_v3, cg_unique_ptr.get());
+  resource_span.SetAttribute("elapsed_ms", MsSince(set_resource_begin));
+  if (!ok)
+    resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
 
   if (ok) return std::move(cg_unique_ptr);
   return std::unexpected(CraneErrCode::ERR_CGROUP);
@@ -586,8 +880,13 @@ CgroupManager::CreateOrOpenCgroup(const std::string& cgroup_str,
     cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_BASE_CONTROLLERS,
                                   NO_CONTROLLER_FLAG, retrieve);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
-                                  NO_CONTROLLER_FLAG, retrieve);
+    if (m_v2_fs_backend_) {
+      cg_unique_ptr = CreateOrOpenV2Fast_(
+          cgroup_str, CG_V2_REQUIRED_CONTROLLERS, NO_CONTROLLER_FLAG, retrieve);
+    } else {
+      cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
+                                    NO_CONTROLLER_FLAG, retrieve);
+    }
   } else {
     CRANE_WARN("cgroup version is not supported.");
   }
@@ -597,6 +896,9 @@ CgroupManager::CreateOrOpenCgroup(const std::string& cgroup_str,
 CraneErrCode CgroupManager::SetCgroupResource(
     CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource,
     std::uint64_t min_mem) {
+  auto begin_time = std::chrono::steady_clock::now();
+  CRANE_TRACE_SCOPE_NAMED(resource_span, "cgroup/set_resource");
+  if (cg != nullptr) SetCgroupSpanAttrs(resource_span, cg->CgroupName());
   ResourceInNodeV3 res_v3(resource);
   if (min_mem != 0) {
     if (res_v3.GetMemoryBytes() < min_mem) {
@@ -616,7 +918,13 @@ CraneErrCode CgroupManager::SetCgroupResource(
 
   bool ok = ResourceInNodeV3Allocator::Allocate(res_v3, cg);
 
+  resource_span.SetAttribute("cpu_count",
+                             static_cast<double>(res_v3.GetCpuSet().cpu_count));
+  resource_span.SetAttribute("mem_bytes",
+                             static_cast<int64_t>(res_v3.GetMemoryBytes()));
+  resource_span.SetAttribute("elapsed_ms", MsSince(begin_time));
   if (ok) return CraneErrCode::SUCCESS;
+  resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
   return CraneErrCode::ERR_CGROUP;
 }
 
@@ -1248,13 +1556,21 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
 
 void Cgroup::Destroy() {
   if (m_cgroup_ != nullptr) {
+    auto begin_time = std::chrono::steady_clock::now();
+    CgroupOpGate gate;
+    CRANE_TRACE_SCOPE_NAMED(remove_span, "cgroup/remove");
+    SetCgroupSpanAttrs(remove_span, m_cgroup_name_);
+    remove_span.SetAttribute("gate_wait_ms", gate.WaitMs());
     CRANE_DEBUG("Destroying cgroup {}.", m_cgroup_name_);
     int err = cgroup_delete_cgroup_ext(
         m_cgroup_, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION);
     if (err != 0) {
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
+      remove_span.SetAttribute("libcgroup_errno", err);
+      remove_span.SetStatus(crane::StatusCode::kError, "remove_failed");
     }
+    remove_span.SetAttribute("elapsed_ms", MsSince(begin_time));
 
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
@@ -1683,6 +1999,12 @@ CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id)
 #endif
 }
 
+CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
+                   std::shared_ptr<CgroupV2FsBackend> fs_backend)
+    : CgroupV2(name, handle, id) {
+  m_v2_fs_backend_ = std::move(fs_backend);
+}
+
 #ifdef CRANE_ENABLE_BPF
 // For recovery
 CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
@@ -1699,17 +2021,29 @@ CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
  * If a controller implements best effort resource guarantee and/or limit,
  * the interface files should be named “low” and “high” respectively.
  */
+bool CgroupV2::WriteControllerFile_(CgConstant::ControllerFile controller_file,
+                                    std::string_view value) {
+  return m_v2_fs_backend_->WriteControllerFile(m_cgroup_info_.GetCgroupName(),
+                                               controller_file, value);
+}
+
 bool CgroupV2::SetCpuCoreLimit(double core_num) {
   constexpr uint32_t period = 1 << 16;
   auto quota = static_cast<uint64_t>(period * core_num);
   std::string cpu_max_value =
       std::to_string(quota) + " " + std::to_string(period);
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::CPU_MAX_V2,
+                                cpu_max_value);
   return m_cgroup_info_.SetControllerStr(
       CgConstant::Controller::CPU_CONTROLLER_V2,
       CgConstant::ControllerFile::CPU_MAX_V2, cpu_max_value);
 }
 
 bool CgroupV2::SetCpuShares(uint64_t share) {
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::CPU_WEIGHT_V2,
+                                std::to_string(share));
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::CPU_CONTROLLER_V2,
       CgConstant::ControllerFile::CPU_WEIGHT_V2, share);
@@ -1730,6 +2064,9 @@ bool CgroupV2::SetCpuSet(const std::unordered_set<uint32_t>& cpu_set) {
 
   std::string cpu_list = absl::StrJoin(cpu_set, ",");
 
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::CPUSET_CPUS_V2,
+                                cpu_list);
   return m_cgroup_info_.SetControllerStr(
       CgConstant::Controller::CPUSET_CONTROLLER_V2,
       CgConstant::ControllerFile::CPUSET_CPUS_V2, cpu_list);
@@ -1739,30 +2076,45 @@ bool CgroupV2::SetCpusetMems(const std::string& mems) {
   if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
     return false;
   }
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::CPUSET_MEMS_V2,
+                                mems);
   return m_cgroup_info_.SetControllerStr(
       CgConstant::Controller::CPUSET_CONTROLLER_V2,
       CgConstant::ControllerFile::CPUSET_MEMS_V2, mems);
 }
 
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::MEMORY_MAX_V2,
+                                std::to_string(memory_bytes));
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_MAX_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::MEMORY_HIGH_V2,
+                                std::to_string(memory_bytes));
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_HIGH_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySwLimitBytes(uint64_t memory_bytes) {
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::MEMORY_SWAP_MAX_V2,
+                                std::to_string(memory_bytes));
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_SWAP_MAX_V2, memory_bytes);
 }
 
 bool CgroupV2::SetBlockioWeight(uint64_t weight) {
+  if (m_v2_fs_backend_)
+    return WriteControllerFile_(CgConstant::ControllerFile::IO_WEIGHT_V2,
+                                std::to_string(weight));
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::IO_CONTROLLER_V2,
       CgConstant::ControllerFile::IO_WEIGHT_V2, weight);
@@ -1930,6 +2282,11 @@ bool CgroupV2::EraseBpfDeviceMap() {
 #endif
 
 bool CgroupV2::KillAllProcesses(int signum) {
+  if (m_v2_fs_backend_) {
+    return m_v2_fs_backend_->KillAllProcesses(m_cgroup_info_.GetCgroupName(),
+                                              signum);
+  }
+
   using namespace CgConstant::Internal;
 
   const char* controller = CgConstant::GetControllerStringView(
@@ -1960,6 +2317,10 @@ bool CgroupV2::KillAllProcesses(int signum) {
 }
 
 bool CgroupV2::Empty() {
+  if (m_v2_fs_backend_) {
+    return m_v2_fs_backend_->Empty(m_cgroup_info_.GetCgroupName());
+  }
+
   using namespace CgConstant::Internal;
 
   const char* controller = CgConstant::GetControllerStringView(
@@ -1985,6 +2346,17 @@ bool CgroupV2::Empty() {
 }
 
 void CgroupV2::Destroy() {
+  if (m_v2_fs_backend_) {
+#ifdef CRANE_ENABLE_BPF
+    if (!m_cgroup_bpf_devices.empty()) {
+      EraseBpfDeviceMap();
+    }
+    CgroupManager::bpf_runtime_info.CloseBpfObj();
+#endif
+    m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
+    return;
+  }
+
   CgroupInterface::Destroy();
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) {
@@ -1992,6 +2364,13 @@ void CgroupV2::Destroy() {
   }
   CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
+}
+
+bool CgroupV2::MigrateProcIn(pid_t pid) {
+  if (m_v2_fs_backend_) {
+    return m_v2_fs_backend_->MigrateProcIn(m_cgroup_info_.GetCgroupName(), pid);
+  }
+  return CgroupInterface::MigrateProcIn(pid);
 }
 
 CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids) {
@@ -2175,17 +2554,13 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
   }
 
   // Create persistent overflow cgroup in cpu/memory/devices hierarchy
-  ControllerFlags flags =
-      IsCgV2() ? CG_V2_REQUIRED_CONTROLLERS : CG_V1_BASE_CONTROLLERS;
-
-  auto cg = CreateOrOpen_(CgConstant::kOverflowCgName, flags,
-                          NO_CONTROLLER_FLAG, false);
-  if (!cg) {
+  auto cg = CreateOrOpenCgroup(CgConstant::kOverflowCgName, false);
+  if (!cg.has_value()) {
     CRANE_ERROR("Failed to create overflow cgroup");
     return false;
   }
 
-  m_overflow_cg_ = std::move(cg);
+  m_overflow_cg_ = std::move(cg.value());
 
   // For v2, set overflow cpuset via the unified cgroup object
   if (IsCgV2()) {

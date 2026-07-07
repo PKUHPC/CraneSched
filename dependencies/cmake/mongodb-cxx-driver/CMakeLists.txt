@@ -31,6 +31,12 @@ FetchContent_Declare(mongo_c_driver_repo
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
+foreach (MONGO_C_TARGET mongoc_static mongoc_shared)
+    if (TARGET ${MONGO_C_TARGET})
+        target_compile_definitions(${MONGO_C_TARGET} PRIVATE _GNU_SOURCE)
+    endif ()
+endforeach ()
+
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_SHARED_AND_STATIC_LIBS OFF)
 set(BUILD_SHARED_LIBS_WITH_STATIC_MONGOC OFF)

@@ -106,6 +106,7 @@ inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
 inline constexpr size_t kMaxOutputQueueBytes = 10 * 1024 * 1024ULL;
+inline constexpr size_t kDefaultTraceHookMaxRequestBytes = 3584 * 1024ULL;
 
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
@@ -360,7 +361,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Resource (TRES) per job exceeds the partition limit",
         "Time limit exceeds the partition's per-job wall time limit",
         "Partition max submit jobs per user exceeded",
-        
+
         // 110
         "Partition max submit jobs per account exceeded"
     };
