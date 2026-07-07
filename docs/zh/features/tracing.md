@@ -89,6 +89,10 @@ Tracing:
   Level: debug
 ```
 
+`Level` 控制 span 创建等级：`basic` 只创建核心生命周期 span，`detailed` 额外创建调度、状态变更、cgroup/task 等细节 span，`debug` 创建编译进二进制的全部 span。实际生效等级为运行期 `Level` 和编译期 `CRANE_TRACE_COMPILED_MAX_LEVEL` 的较小值。
+
+错误 span 的 error bucket 路由只对已经创建并导出的 span 生效；如果某个 debug-only span 在 `basic` 等级下没有被创建，后续即使逻辑上设置 error status，也不会再补创建该 span。
+
 Plugin 由独立的 `plugin.yaml` 配置。
 
 #### plugin.yaml

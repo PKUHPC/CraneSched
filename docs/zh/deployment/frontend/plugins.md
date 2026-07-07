@@ -192,6 +192,8 @@ Plugins:
 
 trace 插件接收后端通过 TraceHook 发送的 span，并按 core/detail/error bucket 写入 InfluxDB。它独立于 monitor 插件；需要 trace 数据时，在 `/etc/crane/plugin.yaml` 中单独注册 `trace.so` 并提供 `/etc/crane/trace.yaml`。
 
+trace 配置不再从 `monitor.yaml` 读取。旧部署如果把 `TraceBucket`、`TraceShardBuckets` 或 `TraceWriter` 放在 monitor 插件配置中，需要迁移到独立的 `trace.yaml`。
+
 ## Mail 插件
 
 mail 插件从鹤思控制节点（cranectld）通过电子邮件发送作业通知。

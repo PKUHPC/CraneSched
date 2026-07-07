@@ -13,12 +13,21 @@ Complete `/etc/crane/database.yaml` example:
 
 ```yaml
 # ============ Embedded Database Settings ============
-# Embedded database backend: Unqlite (default) or BerkeleyDB
-CraneEmbeddedDbBackend: Unqlite
+# Embedded database backend: RocksDB (default), Unqlite, or BerkeleyDB
+CraneEmbeddedDbBackend: RocksDB
 
 # File path of CraneCtld embedded DB
 # Relative to CraneBaseDir (when Keepalived is set, relative to CraneSharedBaseDir)
 CraneCtldDbPath: cranectld/embedded.db
+
+RocksDb:
+  SyncWrites: true
+  ManualWalSyncIntervalMs: 1000
+  WriteBufferSizeMB: 64
+  MaxWriteBufferNumber: 4
+  TargetFileSizeBaseMB: 64
+  MaxBackgroundJobs: 4
+  Compression: lz4
 
 # ============ MongoDB Settings ============
 DbUser: admin
@@ -55,12 +64,34 @@ The embedded database runs directly inside the CraneCtld process — no separate
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `CraneEmbeddedDbBackend` | String | `Unqlite` | Embedded database engine: `Unqlite` or `BerkeleyDB` |
+| `CraneEmbeddedDbBackend` | String | `RocksDB` | Embedded database engine: `RocksDB`, `Unqlite`, or `BerkeleyDB` |
 | `CraneCtldDbPath` | Path | `cranectld/embedded.db` | Database file storage path |
 
 ### Backend Selection
 
-#### Unqlite (Default, Recommended)
+#### RocksDB (Default, Recommended for Large Queues)
+
+[RocksDB](https://rocksdb.org/) is an embeddable persistent key-value store. CraneSched uses it as the default embedded database backend for larger pending queues and high-throughput status updates.
+
+```yaml
+CraneEmbeddedDbBackend: RocksDB
+RocksDb:
+  SyncWrites: true
+  ManualWalSyncIntervalMs: 1000
+  WriteBufferSizeMB: 64
+  MaxWriteBufferNumber: 4
+  TargetFileSizeBaseMB: 64
+  MaxBackgroundJobs: 4
+  Compression: lz4
+```
+
+- **Advantages**: Better write batching and cleanup behavior for large-scale scheduling tests
+- **Prerequisites**: RocksDB support must be enabled at compile time, and RocksDB development libraries must be installed or provided by the build
+
+!!! warning
+    If CraneSched was built without RocksDB support, selecting `RocksDB` will cause CraneCtld startup to fail. Set `CraneEmbeddedDbBackend` to `Unqlite` or `BerkeleyDB` to roll back to a legacy backend.
+
+#### Unqlite
 
 [Unqlite](https://unqlite.org/) is an embedded NoSQL database engine — zero-configuration with no external dependencies.
 
@@ -69,7 +100,7 @@ CraneEmbeddedDbBackend: Unqlite
 ```
 
 - **Advantages**: Zero configuration, works out of the box, lightweight
-- **Use case**: Most deployment environments
+- **Use case**: Legacy deployments or environments where RocksDB is unavailable
 
 !!! note
     Unqlite has a limit of approximately 900,000 records per transaction, which affects the maximum pending queue capacity.
@@ -363,8 +394,9 @@ chown crane:crane /etc/crane/database.yaml
 
 **Database backend error at startup**:
 
-- Check that `CraneEmbeddedDbBackend` is spelled correctly (case-sensitive: `Unqlite` or `BerkeleyDB`)
-- If using `BerkeleyDB`, confirm it was included during compilation
+- Check that `CraneEmbeddedDbBackend` is spelled correctly (case-sensitive: `RocksDB`, `Unqlite`, or `BerkeleyDB`)
+- If using `RocksDB` or `BerkeleyDB`, confirm the selected backend was included during compilation
+- To roll back from RocksDB, set `CraneEmbeddedDbBackend` to `Unqlite` or `BerkeleyDB` and restart CraneCtld after preserving or removing the old embedded DB path as appropriate
 
 **Database file permission issues**:
 

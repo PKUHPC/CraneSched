@@ -1,5 +1,5 @@
 # EmbeddedDb settings
-# BerkeleyDB, Unqlite(default), or RocksDB
+# Embedded DB backend: RocksDB(default), Unqlite, or BerkeleyDB
 CraneEmbeddedDbBackend: RocksDB
 # File path of CraneCtld embeded DB (Relative to CraneBaseDir, when set Keepalived, Relative to CraneSharedBaseDir)
 CraneCtldDbPath: cranectld/embedded.db

@@ -191,6 +191,8 @@ Plugins:
 
 The trace plugin receives spans sent through TraceHook and writes them to InfluxDB core/detail/error buckets. It is independent from the monitor plugin; when trace collection is needed, register `trace.so` separately in `/etc/crane/plugin.yaml` and provide `/etc/crane/trace.yaml`.
 
+Trace configuration is no longer read from `monitor.yaml`. Old deployments that placed `TraceBucket`, `TraceShardBuckets`, or `TraceWriter` under the monitor plugin config must move those fields to `trace.yaml`.
+
 ## Mail Plugin
 
 The mail plugin sends job notifications via email from the CraneSched control node (cranectld).
