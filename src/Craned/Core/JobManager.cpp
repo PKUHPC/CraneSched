@@ -387,6 +387,12 @@ JobManager::JobManager() {
       std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
       std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
+  m_free_jobs_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_free_jobs_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanFreeJobsQueueCb_();
+      });
+
   m_free_steps_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_free_steps_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
