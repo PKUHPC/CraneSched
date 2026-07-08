@@ -965,7 +965,7 @@ bool MongodbClient::FetchJobRecords(
 
         auto* mutable_req_total_res_view =
             job_info.mutable_req_total_res_view();
-        mutable_req_total_res_view->set_cpu_count(static_cast<double>(
+        mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(
             cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
         auto mem_req = ViewGetArithmeticValue_<uint64_t>(view["mem_req"]);
         mutable_req_total_res_view->set_memory_bytes(mem_req);
@@ -973,7 +973,7 @@ bool MongodbClient::FetchJobRecords(
 
         auto* mutable_allocated_res_view =
             job_info.mutable_allocated_res_view();
-        mutable_allocated_res_view->set_cpu_count(static_cast<double>(
+        mutable_allocated_res_view->set_cpu_count(ConvertCpuCountForClient(
             cpu_t::from_raw_value(view["cpus_alloc"].get_int64().value)));
         auto mem_alloc = ViewGetArithmeticValue_<uint64_t>(view["mem_alloc"]);
         mutable_allocated_res_view->set_memory_bytes(mem_alloc);
@@ -5698,7 +5698,7 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
-  mutable_req_total_res_view->set_cpu_count(static_cast<double>(
+  mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(
       cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
   mutable_req_total_res_view->set_memory_bytes(
       view["mem_req"].get_int64().value);
@@ -5743,9 +5743,12 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
       static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
 
   step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
+  auto allocated_res_view =
+      BsonToResourceV3(view["res_alloc"].get_document().value).View();
   *step_info->mutable_allocated_res_view() =
-      static_cast<crane::grpc::ResourceView>(
-          BsonToResourceV3(view["res_alloc"].get_document().value).View());
+      static_cast<crane::grpc::ResourceView>(allocated_res_view);
+  step_info->mutable_allocated_res_view()->set_cpu_count(
+      ConvertCpuCountForClient(allocated_res_view.GetCpuCount()));
   step_info->set_step_type(
       static_cast<crane::grpc::StepType>(view["step_type"].get_int32().value));
 

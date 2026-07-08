@@ -6480,6 +6480,10 @@ void JobScheduler::QueryJobsInRam(
       step->SetFieldsOfStepInfo(step_info);
       step_info->mutable_elapsed_time()->set_seconds(
           ToInt64Seconds(now - step->StartTime()));
+      step_info->mutable_req_total_res_view()->set_cpu_count(
+          ConvertCpuCountForClient(step->req_total_res_view.GetCpuCount()));
+      step_info->mutable_allocated_res_view()->set_cpu_count(
+          ConvertCpuCountForClient(step->AllocatedRes().View().GetCpuCount()));
     }
   };
 
@@ -6490,6 +6494,10 @@ void JobScheduler::QueryJobsInRam(
     job.SetFieldsOfJobInfo(&job_info);
     job_info.mutable_elapsed_time()->set_seconds(
         ToInt64Seconds(now - job.StartTime()));
+    job_info.mutable_req_total_res_view()->set_cpu_count(
+        ConvertCpuCountForClient(job.req_total_res_view.GetCpuCount()));
+    job_info.mutable_allocated_res_view()->set_cpu_count(
+        ConvertCpuCountForClient(job.allocated_res_view.GetCpuCount()));
 
     crane::grpc::JobStatus display_status = job.EffectiveDisplayStatus();
     if (!job.IsArrayParent() &&
