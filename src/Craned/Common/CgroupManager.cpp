@@ -2518,10 +2518,48 @@ bool CgroupManager::InitCpusetCgroup_(const std::string& cg_name,
   return true;
 }
 
+bool CgroupManager::EnsureCpusetCgroupWithCpus(
+    const std::string& cpuset_cg_str, const std::set<uint32_t>& cpus,
+    const std::string& parent_cpuset_cg_str) {
+  if (cpuset_cg_str.empty()) return true;
+  if (IsCgV2()) return true;
+  if (!IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) return true;
+
+  auto cpus_str = FormatCpusetString_(cpus);
+  if (cpus_str.empty()) {
+    CRANE_WARN("Cannot initialize cpuset {} with empty CPU set", cpuset_cg_str);
+    return false;
+  }
+
+  auto read_cpuset_file = [](const std::filesystem::path& path) {
+    std::ifstream ifs(path);
+    std::string value;
+    if (ifs) std::getline(ifs, value);
+    return value;
+  };
+
+  auto parent_path = CpusetHierarchyPath_(parent_cpuset_cg_str);
+  auto mems = read_cpuset_file(parent_path / "cpuset.mems");
+  if (mems.empty()) mems = "0";
+
+  auto path = CpusetHierarchyPath_(cpuset_cg_str);
+  std::error_code ec;
+  std::filesystem::create_directories(path, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to create cpuset cgroup dir {}: {}", path.string(),
+                ec.message());
+    return false;
+  }
+
+  if (!WriteCpusetFile_(path / "cpuset.mems", mems)) return false;
+  if (!WriteCpusetFile_(path / "cpuset.cpus", cpus_str)) return false;
+  return true;
+}
+
 bool CgroupManager::MigrateToCpuset(pid_t pid,
                                     const std::string& cpuset_cg_str) {
-  if (cpuset_cg_str.empty()) return true;  // INT job or not needed
-  if (IsCgV2()) return true;  // v2: cpuset is in unified hierarchy, no-op
+  if (cpuset_cg_str.empty()) return true;
+  if (IsCgV2()) return true;
   if (!IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) return true;
 
   auto procs_path = CpusetHierarchyPath_(cpuset_cg_str) / "cgroup.procs";

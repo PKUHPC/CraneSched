@@ -683,6 +683,9 @@ class CgroupManager {
   // Migrate a process into the specified cpuset cgroup (v1 only).
   // If cpuset_cg_str is empty or running v2, this is a no-op.
   static bool MigrateToCpuset(pid_t pid, const std::string& cpuset_cg_str);
+  static bool EnsureCpusetCgroupWithCpus(
+      const std::string& cpuset_cg_str, const std::set<uint32_t>& cpus,
+      const std::string& parent_cpuset_cg_str = "");
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
     m_cg_version_ = v;

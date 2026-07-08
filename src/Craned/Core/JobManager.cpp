@@ -47,6 +47,192 @@ constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
 constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
 
+struct StepCpuShape {
+  bool has_cpu{false};
+  bool integer{false};
+  std::set<uint32_t> core_ids;
+};
+
+bool EnsureCgroupPresent(const std::string& cg_str) {
+  auto opened = Common::CgroupManager::CreateOrOpenCgroup(cg_str, true);
+  if (opened.has_value() && opened.value() != nullptr) return true;
+
+  auto created = Common::CgroupManager::CreateOrOpenCgroup(cg_str, false);
+  return created.has_value() && created.value() != nullptr;
+}
+
+StepCpuShape AnalyzeStepCpuShape(const StepToD& step) {
+  StepCpuShape shape;
+
+  ResourceInNodeV3 step_res(step.res());
+  const auto& step_cpu_set = step_res.GetCpuSet();
+  if (step_cpu_set.cpu_count > cpu_t{0}) shape.has_cpu = true;
+  shape.core_ids.insert(step_cpu_set.core_ids.begin(),
+                        step_cpu_set.core_ids.end());
+
+  for (const auto& [_, task_res] : step.task_res_map()) {
+    ResourceInNodeV3 task_res_v3(task_res);
+    const auto& task_cpu_set = task_res_v3.GetCpuSet();
+    if (task_cpu_set.cpu_count > cpu_t{0}) shape.has_cpu = true;
+    shape.core_ids.insert(task_cpu_set.core_ids.begin(),
+                          task_cpu_set.core_ids.end());
+  }
+
+  shape.integer = !shape.core_ids.empty();
+  return shape;
+}
+
+std::string LocalOverflowCgStr(const Common::CgroupPathInfo& job_path_info) {
+  return std::format("{}/{}", job_path_info.cg_str,
+                     Common::CgConstant::kOverflowCgName);
+}
+
+std::string LocalOverflowCpusetStr(
+    const Common::CgroupPathInfo& job_path_info) {
+  if (job_path_info.cpuset_cg_str.empty()) return "";
+  return std::format("{}/{}", job_path_info.cpuset_cg_str,
+                     Common::CgConstant::kOverflowCgName);
+}
+
+std::string StepCpusetStr(const Common::CgroupPathInfo& job_path_info,
+                          step_id_t step_id) {
+  if (job_path_info.cpuset_cg_str.empty()) return "";
+  return std::format("{}/{}{}", job_path_info.cpuset_cg_str,
+                     Common::CgConstant::kStepCgNamePrefix, step_id);
+}
+
+bool EnsureV2CgroupCpuset(const std::string& cg_str,
+                          const std::set<uint32_t>& cpu_ids) {
+  if (!EnsureCgroupPresent(cg_str)) return false;
+  if (cpu_ids.empty()) return true;
+  auto cg_expt = CgroupManager::CreateOrOpenCgroup(cg_str, true);
+  if (!cg_expt.has_value() || cg_expt.value() == nullptr) return false;
+  return cg_expt.value()->SetCpuSet(
+      std::unordered_set<uint32_t>(cpu_ids.begin(), cpu_ids.end()));
+}
+
+std::set<uint32_t> GetJobCoreIds(const JobInD& job) {
+  ResourceInNodeV3 job_res(job.job_to_d.res());
+  return job_res.GetCpuSet().core_ids;
+}
+
+bool JobHasLocalCpuPool(const JobInD& job) {
+  ResourceInNodeV3 job_res(job.job_to_d.res());
+  return job_res.GetCpuSet().IsInteger();
+}
+
+bool IsJobResidentStep(const StepInstance& step) {
+  auto step_type = step.step_to_d.step_type();
+  return step_type == crane::grpc::StepType::DAEMON ||
+         step_type == crane::grpc::StepType::PRIMARY;
+}
+
+void InitJobLocalOverflow(JobInD* job) {
+  if (!JobHasLocalCpuPool(*job)) return;
+  if (job->job_local_overflow_initialized) return;
+  job->job_local_overflow_cores = GetJobCoreIds(*job);
+  job->job_local_overflow_initialized = true;
+}
+
+void ClaimJobLocalCores(JobInD* job, const std::set<uint32_t>& core_ids) {
+  InitJobLocalOverflow(job);
+  for (auto cpu_id : core_ids) job->job_local_overflow_cores.erase(cpu_id);
+}
+
+void ReleaseJobLocalCores(JobInD* job, const std::set<uint32_t>& core_ids) {
+  InitJobLocalOverflow(job);
+  job->job_local_overflow_cores.insert(core_ids.begin(), core_ids.end());
+}
+
+bool WriteJobLocalOverflowCpuset(JobInD* job) {
+  if (!JobHasLocalCpuPool(*job)) return true;
+
+  InitJobLocalOverflow(job);
+  if (job->job_local_overflow_cores.empty()) {
+    CRANE_TRACE("[Job #{}] Job-local overflow cpuset is empty.", job->job_id);
+    return true;
+  }
+
+  auto overflow_cg_str = LocalOverflowCgStr(job->path_info);
+  bool ok = false;
+  if (CgroupManager::IsCgV2()) {
+    ok = EnsureV2CgroupCpuset(overflow_cg_str, job->job_local_overflow_cores);
+  } else {
+    if (!EnsureCgroupPresent(overflow_cg_str)) return false;
+    ok = CgroupManager::EnsureCpusetCgroupWithCpus(
+        LocalOverflowCpusetStr(job->path_info), job->job_local_overflow_cores,
+        job->path_info.cpuset_cg_str);
+  }
+
+  if (ok) job->job_local_overflow_cgroup_created = true;
+  return ok;
+}
+
+CraneExpected<Common::CgroupPathInfo> PrepareStepCpuPoolFromCtldAllocation(
+    JobInD* job, StepInstance* step) {
+  Common::CgroupPathInfo step_path_info = job->path_info;
+
+  if (IsJobResidentStep(*step)) return step_path_info;
+  if (!JobHasLocalCpuPool(*job)) return step_path_info;
+
+  auto shape = AnalyzeStepCpuShape(step->step_to_d);
+  if (!shape.has_cpu) return step_path_info;
+
+  InitJobLocalOverflow(job);
+
+  if (!shape.integer) {
+    if (job->job_local_overflow_cores.empty()) {
+      CRANE_WARN("[Step #{}.{}] Job-local overflow cpuset is empty.",
+                 step->job_id, step->step_id);
+      return std::unexpected(CraneErrCode::ERR_CGROUP);
+    }
+    if (!WriteJobLocalOverflowCpuset(job)) {
+      CRANE_WARN("[Step #{}.{}] Failed to update job-local overflow cpuset.",
+                 step->job_id, step->step_id);
+      return std::unexpected(CraneErrCode::ERR_CGROUP);
+    }
+    step_path_info.cg_str = LocalOverflowCgStr(job->path_info);
+    step_path_info.cpuset_cg_str = LocalOverflowCpusetStr(job->path_info);
+    return step_path_info;
+  }
+
+  if (!CgroupManager::IsCgV2()) {
+    auto step_cpuset_str = StepCpusetStr(job->path_info, step->step_id);
+    if (!CgroupManager::EnsureCpusetCgroupWithCpus(
+            step_cpuset_str, shape.core_ids, job->path_info.cpuset_cg_str)) {
+      return std::unexpected(CraneErrCode::ERR_CGROUP);
+    }
+    step_path_info.cpuset_cg_str = step_cpuset_str;
+  }
+
+  ClaimJobLocalCores(job, shape.core_ids);
+  if (job->job_local_overflow_cgroup_created &&
+      !WriteJobLocalOverflowCpuset(job)) {
+    ReleaseJobLocalCores(job, shape.core_ids);
+    WriteJobLocalOverflowCpuset(job);
+    CRANE_WARN("[Step #{}.{}] Failed to update job-local overflow cpuset.",
+               step->job_id, step->step_id);
+    return std::unexpected(CraneErrCode::ERR_CGROUP);
+  }
+
+  return step_path_info;
+}
+
+void ReleaseStepCpuPool(JobInD* job, const StepInstance& step) {
+  if (IsJobResidentStep(step)) return;
+  if (!JobHasLocalCpuPool(*job)) return;
+
+  auto shape = AnalyzeStepCpuShape(step.step_to_d);
+  if (!shape.integer) return;
+
+  ReleaseJobLocalCores(job, shape.core_ids);
+  if (job->job_local_overflow_cgroup_created &&
+      !WriteJobLocalOverflowCpuset(job)) {
+    CRANE_WARN("[Step #{}.{}] Failed to release job-local CPU.", step.job_id,
+               step.step_id);
+  }
+}
+
 std::filesystem::path GetV1ControllerPath_(
     const std::string& cg_path, Common::CgConstant::Controller ctrl) {
   return Common::CgConstant::kSystemCgPathPrefix /
@@ -1551,6 +1737,9 @@ void JobManager::FreeStepAllocation_(
     job_id_t job_id = step->job_id;
     step_id_t step_id = step->step_id;
     step->CleanUp();
+    if (auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id)) {
+      ReleaseStepCpuPool(job_ptr.get(), *step);
+    }
     std::optional<StepInstance::PendingTerminalStatus> terminal_status =
         std::nullopt;
     if (step->pending_terminal_status.has_value() && !step->silent_cleanup) {
@@ -1684,6 +1873,19 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     }
   }
 
+  auto step_path_info = PrepareStepCpuPoolFromCtldAllocation(job, step.get());
+  if (!step_path_info.has_value()) {
+    CRANE_ERROR("[Step #{}.{}] Failed to allocate job-local CPU.", job_id,
+                step_id);
+    ActivateStepStatusChangeAsync_(
+        job_id, step_id, crane::grpc::JobStatus::Failed,
+        ExitCode::EC_CGROUP_ERR,
+        fmt::format("Cannot allocate job-local CPU for step {}.{}", job_id,
+                    step_id),
+        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+    return;
+  }
+
   auto* step_ptr = step.get();
   {
     absl::MutexLock lk(job->step_map_mtx.get());
@@ -1693,7 +1895,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // SpawnSupervisor reports failure before registering a supervisor when
   // setup, fork, or process-group isolation fails. In these cases, report the
   // step status manually instead of waiting for a supervisor callback.
-  CraneErrCode err = step_ptr->Prepare(job->path_info);
+  CraneErrCode err = step_ptr->Prepare(step_path_info.value());
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
