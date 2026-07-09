@@ -203,19 +203,9 @@ apt install -y \
 !!! info
     Lua support is enabled by default. On Ubuntu 20.04, replace `liblua5.4-dev` with `liblua5.3-dev`.
 
-## 4. Install and configure MongoDB
+## 4. Build CraneSched Backend
 
-MongoDB is only required on the **control node**.
-
-See the [Database Configuration Guide](../configuration/database.md) for step-by-step instructions.
-
-
-## 5. Install and configure CraneSched
-
-### 5.1 Build and install
-
-**Configure and build CraneSched:**
-
+Configure and build CraneSched:
 
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
@@ -234,47 +224,32 @@ cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=true -DCRANE_ENABLE_BPF=true -S . -B bui
 cmake --build build
 ```
 
-**Install the built binaries:**
+## 5. Build and Install DEB Packages
 
-!!! tip
-    We recommend deploying CraneSched with DEB packages. Refer to the [Packaging Guide](../packaging.md) for details.
+After the build finishes, follow the [Packaging Guide](../packaging.md) to generate the `cranectld` and `craned` DEB packages, then install them on the target nodes with the package manager.
+
+!!! note "Source installation"
+    For local validation or development debugging, you can skip packaging and install directly from the source build. See the "Source Installation" appendix at the end of this page.
+
+## 6. Next Steps
+
+After installing the DEB packages, continue with the following configuration and deployment work:
+
+1. **Configure the database**: The control node needs a working database configuration. Follow the [Database Configuration Guide](../configuration/database.md) to prepare `/etc/crane/database.yaml`.
+2. **Configure the cluster topology**: All nodes need the same `/etc/crane/config.yaml`. Follow the [Cluster Configuration Guide](../configuration/config.md) to configure the control node, compute nodes, partitions, and resources.
+3. **Distribute configuration and start services**: Distribute packages and configuration to control and compute nodes, then start `cranectld` / `craned`. Follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
+4. **Install frontend tools**: Install the CLI tools and frontend services on login nodes or any nodes where users submit jobs. Follow the [Frontend Deployment Guide](../frontend/frontend.md).
+5. **Optional: configure PAM**: Configure PAM access control only after the cluster is deployed and verified. Follow the [PAM Module Configuration Guide](../configuration/pam.md).
+
+## Source Installation
+
+For local validation or development debugging, you can install the current build directory directly:
 
 ```bash
 cmake --install build
 ```
 
-For multi-node installations, follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
-
-### 5.2 Configure the PAM module
-
-Configuring PAM is optional but recommended in production clusters to control user access.
-
-See the [PAM Module Configuration Guide](../configuration/pam.md) for details.
-
-### 5.3 Configure the cluster
-
-Refer to the [Cluster Configuration Guide](../configuration/config.md) for configuration options.
-
-## 6. Start CraneSched
-
-### Using systemd (Recommended)
-
-**Control node only**: Create crane user (automatic with DEB packages):
-
-```bash
-sudo groupadd --system crane 2>/dev/null || true
-sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
-```
-
-Then start services:
-
-```bash
-systemctl daemon-reload
-systemctl enable cranectld --now  # Control node
-systemctl enable craned --now     # Compute node
-```
-
-### Running manually (foreground)
+Running binaries directly is recommended only for debugging:
 
 ```bash
 cranectld  # Control node

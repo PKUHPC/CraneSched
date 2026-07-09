@@ -37,7 +37,7 @@
 当前尚无官方发布的前端 RPM/DEB 软件包。您需要从源代码构建并部署组件，可根据需求选择以下方式：
 
 - **从源代码直接安装**：在需要运行前端的节点上执行 `make install`，适合快速验证和开发环境。
-- **构建自用 RPM/DEB 软件包**：使用 GoReleaser 生成软件包，然后通过包管理器安装，适合需要标准化交付的生产环境。
+- **使用自构建 RPM/DEB 软件包**：先按照[打包指南](../packaging.md)生成软件包，然后通过包管理器安装，适合需要标准化交付的生产环境。
 - **GitHub Action 构建产物**：CI 会在每次构建后生成实验性质的软件包，仅供测试。由于未经过充分验证，不建议在生产环境使用。
 
 以下章节首先介绍如何准备构建环境，然后分别说明直接安装和软件包安装流程。
@@ -75,12 +75,6 @@ unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```
 
-### 安装 GoReleaser（仅在构建软件包时需要）
-
-```bash
-go install github.com/goreleaser/goreleaser/v2@latest
-```
-
 ## 获取与构建
 
 ### 克隆前端仓库
@@ -110,22 +104,9 @@ make install
 make install PREFIX=/opt/crane
 ```
 
-## 构建 RPM/DEB 软件包<small>（可选）</small>
+## 使用 RPM/DEB 软件包安装<small>（可选）</small>
 
-如果需要使用包管理器部署，请在仓库根目录执行：
-
-```bash
-make package
-```
-
-软件包会生成在 `build/dist/` 中：
-
-- `cranesched-frontend_<version>_amd64.rpm` / `cranesched-frontend_<version>_amd64.deb`
-- `cranesched-plugin_<version>_amd64.rpm` / `cranesched-plugin_<version>_amd64.deb`
-
-版本号由仓库根目录的 `VERSION` 文件决定，可在构建前根据需要修改。
-
-在目标节点上安装自构建的软件包：
+如果需要使用包管理器部署，请先按照[打包指南](../packaging.md)构建 `cranesched-frontend` 和 `cranesched-plugin` 软件包。生成软件包后，在目标节点上安装：
 
 ```bash
 # RPM 系统示例

@@ -37,7 +37,7 @@ A brief overview of the main frontend components you will install and run:
 There are no official pre-built frontend RPM/DEB packages at the moment. You must build the components from source and deploy them in one of the following ways:
 
 - **Install directly from source**: Run `make install` on the nodes that need the frontend. This is convenient for quick validation and development environments.
-- **Build your own RPM/DEB packages**: Use GoReleaser to produce packages and install them through the system package manager. This is suitable for production environments that require standardized delivery.
+- **Use self-built RPM/DEB packages**: Build the packages by following the [Packaging Guide](../packaging.md), then install them through the system package manager. This is suitable for production environments that require standardized delivery.
 - **Use GitHub Action artifacts**: CI uploads experimental packages after each build. They are meant for testing only and are not recommended for production.
 
 The following sections describe how to prepare the build environment and how to deploy either directly or via self-built packages.
@@ -75,12 +75,6 @@ unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```
 
-### Install GoReleaser (only if you build packages)
-
-```bash
-go install github.com/goreleaser/goreleaser/v2@latest
-```
-
 ## Fetch and Build
 
 ### Clone the frontend repository
@@ -110,22 +104,9 @@ By default, binaries go to `/usr/local/bin/` and services to `/usr/local/lib/sys
 make install PREFIX=/opt/crane
 ```
 
-## Build RPM/DEB Packages (optional)
+## Install RPM/DEB Packages (optional)
 
-If you prefer to deploy via package managers, run the following in the repository root:
-
-```bash
-make package
-```
-
-Packages are generated under `build/dist/`:
-
-- `cranesched-frontend_<version>_amd64.rpm` / `cranesched-frontend_<version>_amd64.deb`
-- `cranesched-plugin_<version>_amd64.rpm` / `cranesched-plugin_<version>_amd64.deb`
-
-The version number is taken from the `VERSION` file in the repository root. Update it before `make package` if you need a custom version.
-
-Install the self-built packages on the target nodes:
+If you prefer to deploy via package managers, first build the `cranesched-frontend` and `cranesched-plugin` packages by following the [Packaging Guide](../packaging.md). After the packages are generated, install them on the target nodes:
 
 ```bash
 # RPM example

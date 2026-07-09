@@ -276,24 +276,4 @@ You can download pre-built packages from GitHub Action Artifacts. These CI-gener
 
 ## Cluster Deployment
 
-For deploying across a cluster, use cluster management tools:
-
-```bash
-# Copy packages to all nodes
-pdcp -w crane[01-04] CraneSched-*-craned.rpm /tmp/
-pdcp -w cranectld CraneSched-*-cranectld.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-frontend-*.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-plugin-*.rpm /tmp/
-
-# Install on compute nodes
-pdsh -w crane[01-04] "dnf install -y /tmp/CraneSched-*-craned.rpm"
-pdsh -w crane[01-04] "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# Install on control node
-pdsh -w cranectld "dnf install -y /tmp/CraneSched-*-cranectld.rpm"
-pdsh -w cranectld "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# Install on login nodes
-pdsh -w login01 "dnf install -y /tmp/cranesched-frontend-*.rpm"
-pdsh -w login01 "dnf install -y /tmp/cranesched-plugin-*.rpm"
-```
+After generating the packages, follow the [Multi-node Deployment Guide](./configuration/multi-node.md) to distribute and install them on control, compute, and login nodes.

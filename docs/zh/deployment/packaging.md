@@ -278,24 +278,4 @@ systemctl enable --now cplugind
 
 ## 集群部署
 
-要在集群中部署，请使用集群管理工具：
-
-```bash
-# 将软件包复制到所有节点
-pdcp -w crane[01-04] CraneSched-*-craned.rpm /tmp/
-pdcp -w cranectld CraneSched-*-cranectld.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-frontend-*.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-plugin-*.rpm /tmp/
-
-# 在计算节点上安装
-pdsh -w crane[01-04] "dnf install -y /tmp/CraneSched-*-craned.rpm"
-pdsh -w crane[01-04] "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# 在控制节点上安装
-pdsh -w cranectld "dnf install -y /tmp/CraneSched-*-cranectld.rpm"
-pdsh -w cranectld "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# 在登录节点上安装
-pdsh -w login01 "dnf install -y /tmp/cranesched-frontend-*.rpm"
-pdsh -w login01 "dnf install -y /tmp/cranesched-plugin-*.rpm"
-```
+生成软件包后，请按照[多节点部署](./configuration/multi-node.md)将软件包分发并安装到控制节点、计算节点和登录节点。
