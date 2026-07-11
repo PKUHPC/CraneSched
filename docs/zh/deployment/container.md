@@ -370,7 +370,6 @@ ls /etc/cdi/
 ```yaml
 Container:
   Enabled: true
-  TempDir: supervisor/containers/
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
   Dns:
@@ -412,9 +411,6 @@ Container:
   # 启用容器功能
   Enabled: true
   
-  # 容器临时数据目录（相对于 CraneBaseDir）
-  TempDir: supervisor/containers/
-  
   # CRI 运行时服务套接字
   RuntimeEndpoint: /run/containerd/containerd.sock
   
@@ -449,7 +445,6 @@ Container:
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
 | `Enabled` | bool | `false` | 是否启用容器功能。设为 `true` 以启用 |
-| `TempDir` | string | `supervisor/containers/` | 容器运行期间的临时数据目录，相对于 `CraneBaseDir`。存储容器元数据、日志等 |
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
 

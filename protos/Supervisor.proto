@@ -43,7 +43,7 @@ message InitSupervisorRequest {
   string job_name = 8;
 
   message ContainerConfig {
-    string temp_dir = 1;
+    reserved 1;
     string runtime_endpoint = 2;
     string image_endpoint = 3;
 

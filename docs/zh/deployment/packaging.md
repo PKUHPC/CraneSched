@@ -172,15 +172,50 @@ sudo systemctl daemon-reload
 
 #### 前置条件
 
-要构建前端软件包：
+构建前端软件包需要 Golang 1.24+、Protoc 30.2+ 和 GoReleaser v2。以下命令以 x86-64 环境为例；ARM64 环境需要将下载文件名中的架构改为 `arm64` 或 `aarch_64`。
 
-1. **Golang 1.24+** - Go 编程语言
-2. **Protoc 30.2+** - Protocol buffer 编译器
-3. **GoReleaser v2** - 软件包生成工具
+安装 Golang 和 Protocol Buffers 的 Go 代码生成插件：
+
+```bash
+GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
+curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
+rm -rf /usr/local/go
+tar -C /usr/local -xzf /tmp/go.tar.gz
+rm /tmp/go.tar.gz
+
+cat > /etc/profile.d/go.sh <<'EOF'
+export GOPATH=/root/go
+export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+EOF
+source /etc/profile.d/go.sh
+
+go env -w GO111MODULE=on
+go env -w GOPROXY=https://goproxy.cn,direct
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
+
+安装 Protoc：
+
+```bash
+PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
+curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
+unzip /tmp/protoc.zip -d /usr/local
+rm /tmp/protoc.zip /usr/local/readme.txt
+```
 
 安装 GoReleaser：
+
 ```bash
 go install github.com/goreleaser/goreleaser/v2@latest
+```
+
+确认工具均可用：
+
+```bash
+go version
+protoc --version
+goreleaser --version
 ```
 
 #### 构建过程
@@ -209,23 +244,9 @@ cranesched-plugin_1.1.2_amd64.deb
 
 软件包版本由仓库根目录中的 `VERSION` 文件确定。
 
-### 安装
+### 软件包内容
 
 #### cranesched-frontend 软件包
-
-在登录节点和需要 CLI 工具的任何位置安装：
-
-**基于 RPM 的系统：**
-```bash
-sudo dnf install cranesched-frontend-*.rpm
-```
-
-**基于 DEB 的系统：**
-```bash
-sudo apt install ./cranesched-frontend_*.deb
-```
-
-**软件包内容：**
 
 - `/usr/bin/` 中的 CLI 工具：
     - `cacct`、`cacctmgr`、`calloc`、`cbatch`、`ccancel`、`ccon`、`ccontrol`
@@ -233,26 +254,7 @@ sudo apt install ./cranesched-frontend_*.deb
 
 - `/usr/lib/systemd/system/cfored.service` - 前端守护进程服务
 
-在登录节点上启用 cfored（用于交互式作业）：
-```bash
-systemctl enable --now cfored
-```
-
 #### cranesched-plugin 软件包
-
-在需要插件功能的节点上安装（可选）：
-
-**基于 RPM 的系统：**
-```bash
-sudo dnf install cranesched-plugin-*.rpm
-```
-
-**基于 DEB 的系统：**
-```bash
-sudo apt install ./cranesched-plugin_*.deb
-```
-
-**软件包内容：**
 
 - `/usr/bin/cplugind` - 插件守护进程
 
@@ -266,37 +268,13 @@ sudo apt install ./cranesched-plugin_*.deb
 
 - `/usr/lib/systemd/system/cplugind.service` - 插件守护进程服务
 
-在需要插件的节点上启用 cplugind：
-```bash
-systemctl enable --now cplugind
-```
-
-在 `/etc/crane/plugin.yaml` 和各个插件配置文件（例如 `/etc/crane/monitor.yaml`）中配置插件。
+生成软件包后，请按照[前端组件部署指南](./frontend/frontend.md)将软件包安装到相应节点，并启用 `cfored` 和 `cplugind` 服务。
 
 ## 下载预构建软件包
 
 您可以从 GitHub Action Artifacts 中下载预构建的软件包。但是，CI 预构建的软件包仅作为测试目的，我们建议在生产环境中自行构建以确保兼容性。
 
-## 集群部署
+## 后续步骤
 
-要在集群中部署，请使用集群管理工具：
-
-```bash
-# 将软件包复制到所有节点
-pdcp -w crane[01-04] CraneSched-*-craned.rpm /tmp/
-pdcp -w cranectld CraneSched-*-cranectld.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-frontend-*.rpm /tmp/
-pdcp -w login01,crane[01-04] cranesched-plugin-*.rpm /tmp/
-
-# 在计算节点上安装
-pdsh -w crane[01-04] "dnf install -y /tmp/CraneSched-*-craned.rpm"
-pdsh -w crane[01-04] "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# 在控制节点上安装
-pdsh -w cranectld "dnf install -y /tmp/CraneSched-*-cranectld.rpm"
-pdsh -w cranectld "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# 在登录节点上安装
-pdsh -w login01 "dnf install -y /tmp/cranesched-frontend-*.rpm"
-pdsh -w login01 "dnf install -y /tmp/cranesched-plugin-*.rpm"
-```
+- 后端软件包：按照[多节点部署](./configuration/multi-node.md)分发并安装到控制节点和计算节点。
+- 前端软件包：按照[前端组件部署指南](./frontend/frontend.md)安装到登录节点和需要插件功能的节点。

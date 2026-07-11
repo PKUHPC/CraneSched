@@ -326,10 +326,6 @@ void ParseContainerConfig(const YAML::Node& container_config) {
   g_config.Container.UserNsEnabledByDefault =
       YamlValueOr<bool>(container_config["UserNsEnabledByDefault"], true);
 
-  g_config.Container.TempDir =
-      g_config.CraneBaseDir /
-      YamlValueOr(container_config["TempDir"], kDefaultContainerTempDir);
-
   if (container_config["RuntimeEndpoint"]) {
     g_config.Container.RuntimeEndpoint =
         container_config["RuntimeEndpoint"].as<std::string>();

@@ -55,7 +55,6 @@ struct Config {
 
   struct ContainerConfig {
     bool Enabled{false};
-    std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
 

@@ -112,7 +112,6 @@ struct Config {
   struct ContainerConfig {
     bool Enabled{false};
     bool UserNsEnabledByDefault{true};
-    std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
 
