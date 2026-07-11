@@ -172,15 +172,50 @@ The frontend packages contain CLI tools and plugins written in Golang.
 
 #### Prerequisites
 
-To build frontend packages:
+Building the frontend packages requires Golang 1.24+, Protoc 30.2+, and GoReleaser v2. The commands below target x86-64. On ARM64, change the architecture in the downloaded file names to `arm64` or `aarch_64`.
 
-1. **Golang 1.24+** - Go programming language
-2. **Protoc 30.2+** - Protocol buffer compiler
-3. **GoReleaser v2** - Package generation tool
+Install Golang and the Protocol Buffers Go code generators:
+
+```bash
+GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
+curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
+rm -rf /usr/local/go
+tar -C /usr/local -xzf /tmp/go.tar.gz
+rm /tmp/go.tar.gz
+
+cat > /etc/profile.d/go.sh <<'EOF'
+export GOPATH=/root/go
+export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+EOF
+source /etc/profile.d/go.sh
+
+go env -w GO111MODULE=on
+go env -w GOPROXY=https://goproxy.cn,direct
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
+
+Install Protoc:
+
+```bash
+PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
+curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
+unzip /tmp/protoc.zip -d /usr/local
+rm /tmp/protoc.zip /usr/local/readme.txt
+```
 
 Install GoReleaser:
+
 ```bash
 go install github.com/goreleaser/goreleaser/v2@latest
+```
+
+Verify that all tools are available:
+
+```bash
+go version
+protoc --version
+goreleaser --version
 ```
 
 #### Build Process
@@ -209,49 +244,16 @@ cranesched-plugin_1.1.2_amd64.deb
 
 The package version is determined by the `VERSION` file in the repository root.
 
-### Installing
+### Package Contents
 
 #### cranesched-frontend Package
-
-Install on login nodes and anywhere CLI tools are needed:
-
-**RPM-based systems:**
-```bash
-sudo dnf install cranesched-frontend-*.rpm
-```
-
-**DEB-based systems:**
-```bash
-sudo apt install ./cranesched-frontend_*.deb
-```
-
-**Package contents:**
 
 - CLI tools in `/usr/bin/`:
     - `cacct`, `cacctmgr`, `calloc`, `cbatch`, `ccancel`, `ccon`, `ccontrol`
     - `ceff`, `cfored`, `cinfo`, `cqueue`, `crun`, `cwrapper`
 - `/usr/lib/systemd/system/cfored.service` - Frontend daemon service
 
-Enable cfored on login nodes (for interactive jobs):
-```bash
-systemctl enable --now cfored
-```
-
 #### cranesched-plugin Package
-
-Install on nodes that need plugin functionality (optional):
-
-**RPM-based systems:**
-```bash
-sudo dnf install cranesched-plugin-*.rpm
-```
-
-**DEB-based systems:**
-```bash
-sudo apt install ./cranesched-plugin_*.deb
-```
-
-**Package contents:**
 
 - `/usr/bin/cplugind` - Plugin daemon
 - Plugin shared objects in `/usr/lib/crane/plugin/`:
@@ -263,17 +265,13 @@ sudo apt install ./cranesched-plugin_*.deb
 
 - `/usr/lib/systemd/system/cplugind.service` - Plugin daemon service
 
-Enable cplugind on nodes that need plugins:
-```bash
-systemctl enable --now cplugind
-```
-
-Configure plugins in `/etc/crane/plugin.yaml` and individual plugin configs (e.g., `/etc/crane/monitor.yaml`).
+After generating the packages, follow the [Frontend Components Deployment Guide](./frontend/frontend.md) to install them on the appropriate nodes and enable the `cfored` and `cplugind` services.
 
 ## Downloading Pre-built Packages
 
 You can download pre-built packages from GitHub Action Artifacts. These CI-generated packages are intended for testing purposes only; for production environments we recommend building the packages yourself to ensure compatibility.
 
-## Cluster Deployment
+## Next Steps
 
-After generating the packages, follow the [Multi-node Deployment Guide](./configuration/multi-node.md) to distribute and install them on control, compute, and login nodes.
+- Backend packages: follow the [Multi-node Deployment Guide](./configuration/multi-node.md) to distribute and install them on control and compute nodes.
+- Frontend packages: follow the [Frontend Components Deployment Guide](./frontend/frontend.md) to install them on login nodes and nodes that need plugin functionality.

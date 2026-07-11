@@ -34,102 +34,36 @@ A brief overview of the main frontend components you will install and run:
 
 ## Deployment Strategy
 
-There are no official pre-built frontend RPM/DEB packages at the moment. You must build the components from source and deploy them in one of the following ways:
+Frontend components are deployed through RPM/DEB packages by default.
 
-- **Install directly from source**: Run `make install` on the nodes that need the frontend. This is convenient for quick validation and development environments.
-- **Use self-built RPM/DEB packages**: Build the packages by following the [Packaging Guide](../packaging.md), then install them through the system package manager. This is suitable for production environments that require standardized delivery.
-- **Use GitHub Action artifacts**: CI uploads experimental packages after each build. They are meant for testing only and are not recommended for production.
+If you do not yet have `cranesched-frontend` and `cranesched-plugin` packages, follow the [Packaging Guide](../packaging.md) to install the build dependencies and generate them.
 
-The following sections describe how to prepare the build environment and how to deploy either directly or via self-built packages.
+Install `cranesched-frontend` on login nodes and any other nodes that need CLI tools. Install `cranesched-plugin` only on nodes that need plugin functionality.
 
-## Prepare the Build Environment
+!!! note "Other installation methods"
+    The project's GitHub Action uploads RPM/DEB artifacts after every master build. These artifacts have not been fully tested and are only suitable for quick validation.
 
-### Install Golang
+    In addition, you can also use the source installation method at the end of this page without generating RPM/DEB packages.
 
-```bash
-GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
-# ARM architecture: wget https://dl.google.com/go/go1.25.4.linux-arm64.tar.gz
-curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
+## Install Frontend Packages
 
-# Remove old Golang environment
-rm -rf /usr/local/go
-
-tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
-echo 'export GOPATH=/root/go' >> /etc/profile.d/go.sh
-echo 'export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh
-echo 'go env -w GO111MODULE=on' >> /etc/profile.d/go.sh
-echo 'go env -w GOPROXY=https://goproxy.cn,direct' >> /etc/profile.d/go.sh
-
-source /etc/profile.d/go.sh
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-```
-
-### Install Protoc
+Distribute the generated packages to the target nodes, then install them with the appropriate package manager:
 
 ```bash
-PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
-# aarch64: protoc-33.1-linux-aarch_64.zip
-curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
-unzip /tmp/protoc.zip -d /usr/local
-rm /tmp/protoc.zip /usr/local/readme.txt
-```
-
-## Fetch and Build
-
-### Clone the frontend repository
-
-```bash
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
-```
-
-### Build the binaries
-
-```bash
-make
-```
-
-The binaries are placed in `build/bin/` and the systemd units are placed in `etc/` after a successful build.
-
-### Install on the current node
-
-```bash
-make install
-```
-
-By default, binaries go to `/usr/local/bin/` and services to `/usr/local/lib/systemd/system/`. Set `PREFIX` if you need a different installation root:
-
-```bash
-make install PREFIX=/opt/crane
-```
-
-## Install RPM/DEB Packages (optional)
-
-If you prefer to deploy via package managers, first build the `cranesched-frontend` and `cranesched-plugin` packages by following the [Packaging Guide](../packaging.md). After the packages are generated, install them on the target nodes:
-
-```bash
-# RPM example
+# RPM systems: install CLI tools and cfored on login nodes
 sudo dnf install /tmp/cranesched-frontend-*.rpm
+
+# RPM systems: install only on nodes that need plugin functionality
 sudo dnf install /tmp/cranesched-plugin-*.rpm
 
-# DEB example
+# DEB systems: install CLI tools and cfored on login nodes
 sudo apt install ./cranesched-frontend_*.deb
+
+# DEB systems: install only on nodes that need plugin functionality
 sudo apt install ./cranesched-plugin_*.deb
 ```
 
-## Distribute and Enable
-
-### Deploy compiled binaries (when not using packages)
-
-```bash
-pdcp -w login01,cranectld,crane[01-04] build/bin/* /usr/local/bin/
-pdcp -w login01,cranectld,crane[01-04] etc/* /usr/local/lib/systemd/system/
-```
-
-Adjust the destination paths if you used a custom `PREFIX`. After the files are copied, run `systemctl daemon-reload` on every node to reload systemd units.
-
-### Enable the required services
+## Enable and Verify Services
 
 ```bash
 # cfored is needed on login nodes for interactive jobs
@@ -150,7 +84,7 @@ systemctl status cplugind
 ### Plugin path reminder
 
 !!! note "Installation paths"
-    Source installations default to the `/usr/local/` prefix. Package installations place files under `/usr/bin/`, `/usr/lib/crane/plugin/`, and `/usr/lib/systemd/system/`. When updating `/etc/crane/plugin.yaml`, make sure the `.so` paths match the installation method you used.
+    Packages install files under `/usr/bin/`, `/usr/lib/crane/plugin/`, and `/usr/lib/systemd/system/`. When updating `/etc/crane/plugin.yaml`, use the actual `.so` paths under `/usr/lib/crane/plugin/`.
 
 ## Optional: Slurm Command Compatibility
 
@@ -176,6 +110,15 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
 
-## GitHub Action artifacts (testing only)
+## Optional: Source Installation
 
-Every master-branch CI run uploads RPM/DEB artifacts. These builds are not fully validated and should be used only for quick testing or CI reproduction. Download them from the corresponding workflow page if you need to inspect them, but always rely on self-built binaries or packages for production deployments.
+Source installation is intended for development and quick validation. See the [Packaging Guide](../packaging.md) for the build dependencies and tool installation. After preparing the environment, run:
+
+```bash
+git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
+cd CraneSched-FrontEnd
+make
+make install
+```
+
+By default, binaries are installed to `/usr/local/bin/` and systemd units to `/usr/local/lib/systemd/system/`. Use `make install PREFIX=/opt/crane` to change the installation prefix. After distributing the files to the target nodes, run `systemctl daemon-reload`, then enable the required services as described above.
