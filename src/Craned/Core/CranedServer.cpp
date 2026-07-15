@@ -298,16 +298,16 @@ grpc::Status CranedServiceImpl::AllocJobs(
     CRANE_WARN(
         "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
         "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
-        "job_mgr_ms={} total_ms={} ok={}",
+        "job_mgr_ms={} total_ms={}",
         job_count, first_job_id, last_job_id, deadline_remaining_ms,
-        vector_build_ms, job_mgr_ms, total_ms, ok);
+        vector_build_ms, job_mgr_ms, total_ms);
   } else {
     CRANE_DEBUG(
         "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
         "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
-        "job_mgr_ms={} total_ms={} ok={}",
+        "job_mgr_ms={} total_ms={}",
         job_count, first_job_id, last_job_id, deadline_remaining_ms,
-        vector_build_ms, job_mgr_ms, total_ms, ok);
+        vector_build_ms, job_mgr_ms, total_ms);
   }
 
   return Status::OK;

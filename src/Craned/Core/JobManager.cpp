@@ -506,7 +506,7 @@ void JobManager::AllocJobs(std::vector<JobInD>&& jobs,
           "still active or cleaning.",
           job_id);
       reply->add_failed_job_ids(job_id);
-        failed_job_id_set.emplace(job_id);
+      failed_job_id_set.emplace(job_id);
     }
   }
 
@@ -514,7 +514,6 @@ void JobManager::AllocJobs(std::vector<JobInD>&& jobs,
   for (auto& job : jobs) {
     job_id_t job_id = job.job_id;
     if (failed_job_id_set.contains(job_id)) continue;
-
 
     CRANE_TRACE_SCOPE_FROM_REMOTE(alloc_span, "job/alloc",
                                   job.job_to_d.traceparent());
@@ -568,8 +567,6 @@ void JobManager::AllocJobs(std::vector<JobInD>&& jobs,
         job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
         uid_map_lock_wait_ms, insert_loop_ms, total_ms);
   }
-
-  return true;
 }
 
 bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
@@ -1794,12 +1791,10 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
     // Lambda to update step fields once we have the pointer.
     auto update_step = [&](StepInstance* step) {
       step->GotNewStatus(status_change.new_status);
-      if (pending_terminal)
-        step->pending_terminal_status = *pending_terminal;
+      if (pending_terminal) step->pending_terminal_status = *pending_terminal;
       should_forward = !step->silent_cleanup &&
                        !(IsFinishedStepStatus(status_change.new_status) &&
                          step->pending_terminal_status.has_value());
-
     };
 
     // Find and update the local step under its owning lock. StepInstance
@@ -1813,7 +1808,8 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
         if (step == nullptr) {
           should_forward = false;
         } else {
-          update_step(step);        }
+          update_step(step);
+        }
       }
     }
 
