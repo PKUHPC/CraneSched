@@ -336,10 +336,14 @@ void StepInstance::GotNewStatus(StepStatus new_status) {
   case StepStatus::Completing: {
     // Starting -> Completing is used when a termination request reaches the
     // supervisor before ExecuteStep gets a chance to launch tasks.
-    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting)
+    const bool daemon_configuration_failed =
+        this->IsDaemon() && m_status_ == StepStatus::Configuring;
+    if (m_status_ != StepStatus::Running && m_status_ != StepStatus::Starting &&
+        !daemon_configuration_failed)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
-          "new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not "
+          "'Running/Starting/daemon Configuring' when receiving new status "
+          "'Completing', current status: {}.",
           job_id, step_id, m_status_.load());
     break;
   }
@@ -2747,6 +2751,23 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
+void TaskManager::SupervisorFinishInitFailure(StepStatus final_status,
+                                              uint32_t exit_code,
+                                              std::string reason) {
+  CRANE_ASSERT(m_step_.IsDaemon());
+  CRANE_ASSERT(IsFinishedStepStatus(final_status) &&
+               final_status != StepStatus::Completed);
+
+  auto& termination = m_step_.final_termination_status;
+  termination.final_status_on_termination = final_status;
+  termination.max_exit_code = exit_code;
+  termination.final_reason_on_termination = reason;
+
+  m_step_.GotNewStatus(StepStatus::Completing);
+  g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
+                                         std::move(reason), final_status);
+}
+
 bool TaskManager::ReceivePmixPort(
     const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
   if (!m_step_.pmix_server) {
@@ -2881,7 +2902,9 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     g_craned_client->StepStatusChangeAsync(
         StepStatus::Completing, status.max_exit_code,
         status.final_reason_on_termination, status.final_status_on_termination);
-    ShutdownSupervisorAsync();
+    ShutdownSupervisorAsync(status.final_status_on_termination,
+                            status.max_exit_code,
+                            status.final_reason_on_termination);
   }
 }
 
@@ -3133,7 +3156,9 @@ void TaskManager::EvShutdownSupervisorCb_() {
     }
 
     auto& [status, exit_code, reason] = final_status;
-    if (m_step_.IsDaemon()) {
+    // The task finalizer may have already published Completing. In that case,
+    // explicit shutdown only authorizes cleanup and supervisor exit.
+    if (m_step_.IsDaemon() && m_step_.GetStatus() != StepStatus::Completing) {
       m_step_.GotNewStatus(StepStatus::Completing);
       CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
       g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,

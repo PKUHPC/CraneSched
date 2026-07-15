@@ -1649,17 +1649,45 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     return;
   }
   auto* job = job_ptr.get();
+  auto* step_ptr = step.get();
+
+  // A daemon owns job-level resources and must remain addressable until Ctld
+  // authorizes cleanup, even if setup fails before the supervisor is spawned.
+  if (step_ptr->IsDaemonStep()) {
+    absl::MutexLock lk(job->step_map_mtx.get());
+    auto [it, inserted] = job->step_map.emplace(step_id, std::move(step));
+    if (!inserted) {
+      CRANE_WARN("[Step #{}.{}] Step is already allocated, ignoring duplicate.",
+                 job_id, step_id);
+      return;
+    }
+    step_ptr = it->second.get();
+  }
+
+  auto report_config_failure = [this, step_ptr](uint32_t exit_code,
+                                                std::string reason) {
+    step_ptr->err_before_supv_start = true;
+    if (step_ptr->IsDaemonStep()) {
+      SendCompletingAndTerminal_(step_ptr->job_id, step_ptr->step_id,
+                                 StepStatus::Failed, exit_code,
+                                 std::move(reason));
+      return;
+    }
+
+    ActivateStepStatusChangeAsync_(
+        step_ptr->job_id, step_ptr->step_id, StepStatus::Failed, exit_code,
+        std::move(reason), std::nullopt,
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+  };
 
   // Check if the step is acceptable.
   // We keep this container check here in case we support enabling/disabling
   // container functionality on parts of nodes in the future.
-  if (step->IsContainer() && !g_config.Container.Enabled) {
+  if (step_ptr->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
-    ActivateStepStatusChangeAsync_(
-        job_id, step_id, crane::grpc::JobStatus::Failed,
-        ExitCode::EC_SPAWN_FAILED, "Container is not enabled in this craned.",
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+    report_config_failure(ExitCode::EC_SPAWN_FAILED,
+                          "Container is not enabled in this craned.");
     return;
   }
 
@@ -1675,19 +1703,22 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           CgroupManager::MakeCgroupPathInfo(job->job_id, res_v3.GetCpuSet());
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
-      ActivateStepStatusChangeAsync_(
-          job_id, step_id, crane::grpc::JobStatus::Failed,
+      report_config_failure(
           ExitCode::EC_CGROUP_ERR,
-          fmt::format("Failed to get cgroup for job#{} ", job_id), std::nullopt,
-          google::protobuf::util::TimeUtil::GetCurrentTime());
+          fmt::format("Failed to get cgroup for job#{} ", job_id));
       return;
     }
   }
 
-  auto* step_ptr = step.get();
-  {
+  if (!step_ptr->IsDaemonStep()) {
     absl::MutexLock lk(job->step_map_mtx.get());
-    job->step_map.emplace(step->step_id, std::move(step));
+    auto [it, inserted] = job->step_map.emplace(step_id, std::move(step));
+    if (!inserted) {
+      CRANE_WARN("[Step #{}.{}] Step is already allocated, ignoring duplicate.",
+                 job_id, step_id);
+      return;
+    }
+    step_ptr = it->second.get();
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -1697,24 +1728,18 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   CraneErrCode err = step_ptr->Prepare(job->path_info);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
-    step_ptr->err_before_supv_start = true;
-    ActivateStepStatusChangeAsync_(
-        job_id, step_id, crane::grpc::JobStatus::Failed,
+    report_config_failure(
         ExitCode::EC_CGROUP_ERR,
         fmt::format("Cannot create cgroup for the instance of step {}.{}",
-                    job_id, step_id),
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+                    job_id, step_id));
     return;
   }
   err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());
   if (err != CraneErrCode::SUCCESS) {
-    step_ptr->err_before_supv_start = true;
-    ActivateStepStatusChangeAsync_(
-        job_id, step_id, crane::grpc::JobStatus::Failed,
+    report_config_failure(
         ExitCode::EC_SPAWN_FAILED,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
-                    job_id),
-        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+                    job_id));
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
     // process.

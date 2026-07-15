@@ -567,10 +567,14 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   case StepStatus::Completing: {
     // Starting -> Completing is used when a termination request reaches the
     // supervisor before ExecuteStep gets a chance to launch tasks.
-    if (status != StepStatus::Running && status != StepStatus::Starting)
+    const bool daemon_configuration_failed =
+        this->IsDaemonStep() && status == StepStatus::Configuring;
+    if (status != StepStatus::Running && status != StepStatus::Starting &&
+        !daemon_configuration_failed)
       CRANE_WARN(
-          "[Step {}.{}] Step status is not 'Running/Starting' when receiving "
-          "new status 'Completing', current status: {}.",
+          "[Step {}.{}] Step status is not "
+          "'Running/Starting/daemon Configuring' when receiving new status "
+          "'Completing', current status: {}.",
           job_id, step_id, this->status);
     break;
   }

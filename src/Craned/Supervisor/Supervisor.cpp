@@ -27,6 +27,7 @@
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
+#include "crane/PublicHeader.h"
 #include "crane/String.h"
 #include "crane/Tracing.h"
 #ifdef CRANE_ENABLE_TRACING
@@ -414,9 +415,64 @@ void GlobalVariableInit(int grpc_output_fd) {
   close(grpc_output_fd);
 }
 
+bool RunDaemonPrologs() {
+  if (g_config.JobLifecycleHook.Prologs.empty()) return true;
+
+  CRANE_TRACE("Running Prologs...");
+  RunPrologEpilogArgs run_prolog_args{
+      .scripts = g_config.JobLifecycleHook.Prologs,
+      .envs = g_config.JobEnv,
+      .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
+      .run_uid = 0,
+      .run_gid = 0,
+      .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+  if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+    run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+  auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+  if (!result) {
+    const auto& status = result.error();
+    CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
+                status.signal_num);
+    return false;
+  }
+
+  CRANE_DEBUG("Prolog success");
+  return true;
+}
+
+void InitializeAndReportDaemonStep() {
+  using Craned::Supervisor::StepStatus;
+
+  if (g_config.StepSpec.has_pod_meta()) {
+    if (!g_config.Container.Enabled) {
+      CRANE_ERROR(
+          "Container config is required for daemon step with pod spec.");
+      g_task_mgr->SupervisorFinishInitFailure(
+          StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+          "Container support is disabled for daemon pod.");
+      return;
+    }
+
+    auto err_prom = g_task_mgr->ExecutePodInDaemonStepAsync();
+    if (auto err = err_prom.get(); err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Failed to start daemon step, code: {}",
+                  static_cast<int>(err));
+      // Pod task initialization failures are published by the task finalizer.
+      return;
+    }
+  }
+
+  if (!RunDaemonPrologs()) {
+    g_task_mgr->SupervisorFinishInit(StepStatus::Failed);
+    return;
+  }
+
+  g_task_mgr->SupervisorFinishInit(StepStatus::Running);
+}
+
 void StartServer(int grpc_output_fd) {
   using crane::grpc::StepType;
-  using Craned::Supervisor::StepStatus;
 
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
@@ -432,59 +488,11 @@ void StartServer(int grpc_output_fd) {
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
 
-  StepStatus status{StepStatus::Invalid};
   if (g_config.StepSpec.step_type() == StepType::DAEMON) {
-    // For container jobs, the daemon step need to setup a pod per node,
-    // then the following common steps will launch containers inside the pod.
-    bool ready = true;
-    if (g_config.StepSpec.has_pod_meta()) {
-      if (!g_config.Container.Enabled) {
-        CRANE_ERROR(
-            "Container config is required for daemon step with pod spec.");
-        ready = false;
-      } else {
-        // Just wait here for pod setup. if pod failed, daemon step failed.
-        auto err_prom = g_task_mgr->ExecutePodInDaemonStepAsync();
-        if (auto err = err_prom.get(); err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to start daemon step, code: {}",
-                      static_cast<int>(err));
-          ready = false;
-        }
-      }
-    }
-
-    if (!g_config.JobLifecycleHook.Prologs.empty()) {
-      CRANE_TRACE("Running Prologs...");
-      RunPrologEpilogArgs run_prolog_args{
-          .scripts = g_config.JobLifecycleHook.Prologs,
-          .envs = g_config.JobEnv,
-          .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
-          .run_uid = 0,
-          .run_gid = 0,
-          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec =
-            g_config.JobLifecycleHook.PrologEpilogTimeout;
-
-      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
-      if (!result) {
-        auto status = result.error();
-        CRANE_DEBUG("Prolog failed status={}:{}", status.exit_code,
-                    status.signal_num);
-        ready = false;
-      } else {
-        CRANE_DEBUG("Prolog success");
-      }
-    }
-
-    // Daemon step is RUNNING after supervisor and related resources are ready.
-    status = ready ? StepStatus::Running : StepStatus::Failed;
+    InitializeAndReportDaemonStep();
   } else {
-    // Common step is Starting after supervisor is ready.
-    status = StepStatus::Starting;
+    g_task_mgr->SupervisorFinishInit(crane::grpc::JobStatus::Starting);
   }
-
-  g_task_mgr->SupervisorFinishInit(status);
 
   g_server->Wait();
   g_server.reset();

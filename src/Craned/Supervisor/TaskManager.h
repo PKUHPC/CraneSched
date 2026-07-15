@@ -553,6 +553,8 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void SupervisorFinishInit(StepStatus status);
+  void SupervisorFinishInitFailure(StepStatus final_status, uint32_t exit_code,
+                                   std::string reason);
 
   bool ReceivePmixPort(
       const crane::grpc::supervisor::ReceivePmixPortRequest& request);

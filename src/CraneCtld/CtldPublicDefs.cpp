@@ -636,14 +636,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   switch (this->Status()) {
   case crane::grpc::JobStatus::Configuring:
-    // Configuring -> Failed / Running
-    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
-      this->NodeConfigured(craned_id);
-    } else {
-      // CraneCtld Prolog completion event
-      this->SetCtldPrologPending(false);
-    }
-
+    // Validate the result before advancing the configuration barrier.
     switch (new_status) {
     case crane::grpc::JobStatus::Running:
       break;
@@ -654,11 +647,35 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       this->SetErrorExitCode(exit_code);
       break;
 
+    case crane::grpc::JobStatus::Completing:
+      if (craned_id == kCtldPrologInternalNodeIndex) [[unlikely]] {
+        CRANE_ERROR(
+            "Invalid CraneCtld Prolog status transition, current: {}, new: {}",
+            util::StepStatusToString(this->Status()),
+            util::StepStatusToString(new_status));
+        return std::nullopt;
+      }
+
+      // The daemon workload ended before the global configuration barrier
+      // converged. Local cleanup is still pending, so retain Completing for
+      // the node while recording a failed configuration result globally.
+      this->StepOnNodeCompleting(craned_id);
+      this->SetErrorStatus(crane::grpc::JobStatus::Failed);
+      this->SetErrorExitCode(exit_code);
+      break;
+
     [[unlikely]] default:
       CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
                   util::StepStatusToString(this->Status()),
                   util::StepStatusToString(new_status));
       return std::nullopt;
+    }
+
+    if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
+      this->NodeConfigured(craned_id);
+    } else {
+      // CraneCtld Prolog completion event
+      this->SetCtldPrologPending(false);
     }
 
     if (this->AllNodesConfigured() && this->PrologComplete()) {
