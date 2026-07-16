@@ -50,6 +50,18 @@ using LicenseId = std::string;
 // representation. (1LL << 53) / 256 = 35184372088832 CPUs.
 inline const cpu_t kUnlimitedCpu = cpu_t::from_raw_value(int64_t{1} << 53);
 
+inline double ConvertCpuCountForClient(cpu_t cpu) {
+  constexpr int64_t kDecimalScale = 100;
+  const __int128 raw_scale = cpu_t{1}.raw_value();
+  __int128 scaled_raw = static_cast<__int128>(cpu.raw_value()) * kDecimalScale;
+  if (scaled_raw >= 0) {
+    scaled_raw = (scaled_raw + raw_scale / 2) / raw_scale;
+  } else {
+    scaled_raw = (scaled_raw - raw_scale / 2) / raw_scale;
+  }
+  return static_cast<double>(scaled_raw) / kDecimalScale;
+}
+
 using CraneErrCode = crane::grpc::ErrCode;
 
 using CraneRichError = crane::grpc::RichError;

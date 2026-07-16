@@ -2014,8 +2014,12 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
       auto& proto_limit = (*partition_resource_limit_map)[partition];
       proto_limit.mutable_max_tres()->CopyFrom(
           static_cast<crane::grpc::ResourceView>(limit.max_tres));
+      proto_limit.mutable_max_tres()->set_cpu_count(
+          ConvertCpuCountForClient(limit.max_tres.GetCpuCount()));
       proto_limit.mutable_max_tres_per_job()->CopyFrom(
           static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+      proto_limit.mutable_max_tres_per_job()->set_cpu_count(
+          ConvertCpuCountForClient(limit.max_tres_per_job.GetCpuCount()));
       proto_limit.set_max_jobs(limit.max_jobs);
       proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
       proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
@@ -2110,8 +2114,12 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         auto& proto_limit = (*partition_resource_limit_map)[partition];
         proto_limit.mutable_max_tres()->CopyFrom(
             static_cast<crane::grpc::ResourceView>(limit.max_tres));
+        proto_limit.mutable_max_tres()->set_cpu_count(
+            ConvertCpuCountForClient(limit.max_tres.GetCpuCount()));
         proto_limit.mutable_max_tres_per_job()->CopyFrom(
             static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+        proto_limit.mutable_max_tres_per_job()->set_cpu_count(
+            ConvertCpuCountForClient(limit.max_tres_per_job.GetCpuCount()));
         proto_limit.set_max_jobs(limit.max_jobs);
         proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
         proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
@@ -2204,7 +2212,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
     qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
-    qos_info->set_max_cpus_per_user(static_cast<double>(qos.max_cpus_per_user));
+    qos_info->set_max_cpus_per_user(
+        ConvertCpuCountForClient(qos.max_cpus_per_user));
     qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
     qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_job(
@@ -2217,10 +2226,16 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     // properly serializes GresMap including zero-value entries.
     qos_info->mutable_max_tres()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    qos_info->mutable_max_tres()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres.GetCpuCount()));
     qos_info->mutable_max_tres_per_user()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    qos_info->mutable_max_tres_per_user()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres_per_user.GetCpuCount()));
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->mutable_max_tres_per_account()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres_per_account.GetCpuCount()));
     qos_info->set_flags(qos.flags.ToInt64());
     for (const auto& preempt_name : qos.preempt) {
       qos_info->add_preempt(preempt_name);
