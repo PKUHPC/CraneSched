@@ -97,9 +97,7 @@ jobs:
     name: test
     needs: authorize
     if: needs.authorize.outputs.authorized == 'true'
-    runs-on:
-      group: ${{ vars.CRANESCHED_PRIVILEGED_RUNNER_GROUP }}
-      labels: cranesystemtest
+    runs-on: [self-hosted, cranesystemtest]
     timeout-minutes: 180
     permissions:
       contents: read

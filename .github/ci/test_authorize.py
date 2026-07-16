@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("authorize.py")
@@ -127,6 +130,37 @@ class AuthorizationPolicyTest(unittest.TestCase):
         )
         self.assertEqual(result["frontend_ref"], "master")
         self.assertEqual(result["frontend_sha"], FRONTEND_SHA)
+
+
+class GitHubApiTest(unittest.TestCase):
+    @staticmethod
+    def _http_error(status: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            "https://api.github.com/test",
+            status,
+            "test error",
+            hdrs=None,
+            fp=io.BytesIO(b"{}"),
+        )
+
+    def test_missing_commit_accepts_github_404_and_422_responses(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        for status in (404, 422):
+            with self.subTest(status=status), mock.patch.object(
+                authorize.urllib.request,
+                "urlopen",
+                side_effect=self._http_error(status),
+            ):
+                self.assertIsNone(api.commit("PKUHPC/CraneSched", "missing/ref"))
+
+    def test_permission_lookup_keeps_422_fail_closed(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        with mock.patch.object(
+            authorize.urllib.request,
+            "urlopen",
+            side_effect=self._http_error(422),
+        ), self.assertRaisesRegex(authorize.AuthorizationError, "HTTP 422"):
+            api.permission("PKUHPC/CraneSched", "maintainer")
 
 
 if __name__ == "__main__":

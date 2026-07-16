@@ -11,11 +11,18 @@ the following are true:
 - `github.triggering_actor` currently has `maintain` or `admin` permission;
 - Backend and FrontEnd refs resolve to full commit SHAs.
 
-The organization runner group must allow only
+The current cutover uses the existing repository-scoped runner and selects it
+with the `cranesystemtest` label. This temporary mode does not isolate the
+runner from other workflows in `PKUHPC/CraneSched`: labels route jobs, but do
+not authorize workflows. Keep the runner stopped except for controlled CI runs
+until an organization owner completes the runner-group migration below.
+
+The target state is an organization runner group that allows only
 `PKUHPC/CraneSched/.github/workflows/build.yaml@refs/heads/master`. Its runner
-must have the `cranesystemtest` label and runner name. The workflow selects the
-group through the `CRANESCHED_PRIVILEGED_RUNNER_GROUP` repository variable so
-the group name is not duplicated in source.
+must keep the `cranesystemtest` label and runner name. After migration, restore
+the workflow's `runs-on.group` selector using the
+`CRANESCHED_PRIVILEGED_RUNNER_GROUP` repository variable so the group name is
+not duplicated in source.
 
 ## Repository variables
 
@@ -25,7 +32,7 @@ these repository variables:
 
 | Variable | Contract |
 | --- | --- |
-| `CRANESCHED_PRIVILEGED_RUNNER_GROUP` | Organization runner group restricted to `.github/workflows/build.yaml` |
+| `CRANESCHED_PRIVILEGED_RUNNER_GROUP` | Target-state organization runner group; `Default` is only a temporary cutover marker and is not consumed by label-only routing |
 | `CRANETESTKIT_RELEASE_DIR` | Absolute path to a root-owned, recursively read-only AutoTest Git release |
 | `CRANETESTKIT_AUTOTEST_SHA` | Exact 40-character commit deployed at the release path |
 | `CRANETESTKIT_EXECUTABLE_SHA256` | SHA-256 of the prepared `<release>/.venv/bin/crane_testkit` entry point |
@@ -136,6 +143,35 @@ The AutoTest release remote must not contain a PAT. Rotate any previously
 embedded PAT, then use a short-lived read-only GitHub App or deploy credential
 only during the administrator deployment. CI itself performs no AutoTest Git
 network operation.
+
+## Organization runner-group migration
+
+An organization owner must perform this migration before the Backend runner is
+left online between runs:
+
+1. Create a PKUHPC organization runner group with selected-repository access
+   limited to `PKUHPC/CraneSched` and selected-workflow access limited to
+   `PKUHPC/CraneSched/.github/workflows/build.yaml@refs/heads/master`.
+2. Stop the repository-scoped Backend runner and confirm it is idle, no
+   CraneTestKit Lease is held, and no matching Actions job is queued.
+3. Remove the repository-scoped registration and register the same runner at
+   `https://github.com/PKUHPC` in the new group. Keep runner name and custom
+   label `cranesystemtest`; preserve the verified release hooks and restricted
+   kubeconfig in the service environment. Registration and removal tokens must
+   be short-lived, passed without logging, and never stored on disk.
+4. Set `CRANESCHED_PRIVILEGED_RUNNER_GROUP` to the new group name and restore
+   the workflow selector to:
+
+   ```yaml
+   runs-on:
+     group: ${{ vars.CRANESCHED_PRIVILEGED_RUNNER_GROUP }}
+     labels: cranesystemtest
+   ```
+
+5. Start only the Backend runner, dispatch `build.yaml` from `master`, and
+   verify the `test` job reports the new organization group before leaving the
+   service enabled. The AutoTest maintenance runner remains a separate
+   registration and group.
 
 ## Artifacts and result contract
 
