@@ -295,6 +295,7 @@ jobs:
           set -euo pipefail
           build_output="$RUNNER_TEMP/crane-build-output"
           build_log="$RUNNER_TEMP/crane-build.jsonl"
+          build_started_seconds=$SECONDS
           mkdir -p "$build_output"
           exec {maintenance_lock_fd}<"$CRANETESTKIT_CACHE_ROOT/.maintenance.lock"
           /usr/bin/flock --shared "$maintenance_lock_fd"
@@ -321,10 +322,12 @@ jobs:
           )"
           [[ "$build_manifest" == "$CRANETESTKIT_NFS_ROOT/builds/"*"/manifest.json" ]]
           [[ -f "$build_manifest" && ! -L "$build_manifest" ]]
+          build_duration_seconds=$((SECONDS - build_started_seconds))
           {
             echo "build_manifest=$build_manifest"
             echo "build_id=$build_id"
             echo "cache_hit=$cache_hit"
+            echo "duration_seconds=$build_duration_seconds"
           } >> "$GITHUB_OUTPUT"
 
       - name: Execute sharded system tests
@@ -352,6 +355,8 @@ jobs:
         if: always() && steps.verify-controls.outcome == 'success'
         env:
           EXECUTE_EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
+          BUILD_CACHE_HIT: ${{ steps.build.outputs.cache_hit }}
+          BUILD_DURATION_SECONDS: ${{ steps.build.outputs.duration_seconds }}
         run: |
           set -euo pipefail
           artifact_dir="$RUNNER_TEMP/crane-testkit-artifacts"
@@ -363,8 +368,24 @@ jobs:
           if [[ "$EXECUTE_EXIT_CODE" != "0" ]]; then
             arguments+=(--include-logs)
           fi
+          if [[ "$EXECUTE_EXIT_CODE" =~ ^[012]$ ]]; then
+            arguments+=(--execute-exit-code "$EXECUTE_EXIT_CODE")
+          fi
+          if [[ "$BUILD_CACHE_HIT" == "true" || "$BUILD_CACHE_HIT" == "false" ]]; then
+            arguments+=(--build-cache-hit "$BUILD_CACHE_HIT")
+          fi
+          if [[ "$BUILD_DURATION_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            arguments+=(--build-duration-seconds "$BUILD_DURATION_SECONDS")
+          fi
           /usr/bin/python3 -I trusted-ci/.github/ci/collect-cranetestkit-artifacts.py "${arguments[@]}"
-          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+          check_exit_code="$(
+            jq -er '.check_exit_code | select(. == 0 or . == 1 or . == 2)' \
+              "$artifact_dir/artifact-manifest.json"
+          )"
+          {
+            echo "artifact_dir=$artifact_dir"
+            echo "exit_code=$check_exit_code"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish job summary
         if: always() && steps.collect-artifacts.outcome == 'success'
@@ -376,16 +397,18 @@ jobs:
         with:
           name: crane-testkit-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.collect-artifacts.outputs.artifact_dir }}
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: error
           include-hidden-files: false
 
       - name: Enforce CraneTestKit exit contract
         if: always()
         env:
+          CHECK_EXIT_CODE: ${{ steps.collect-artifacts.outputs.exit_code }}
           EXECUTE_EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
         run: |
-          case "$EXECUTE_EXIT_CODE" in
+          exit_code="${CHECK_EXIT_CODE:-$EXECUTE_EXIT_CODE}"
+          case "$exit_code" in
             0) exit 0 ;;
             1) echo "System tests completed with test failures." >&2; exit 1 ;;
             2) echo "System tests ended with an infrastructure error." >&2; exit 2 ;;
