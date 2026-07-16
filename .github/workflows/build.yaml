@@ -311,7 +311,14 @@ jobs:
           build_json="$(tail -n 1 "$build_log")"
           build_manifest="$(jq -er '.manifest' <<<"$build_json")"
           build_id="$(jq -er '.build_id' <<<"$build_json")"
-          cache_hit="$(jq -er '.cache_hit' <<<"$build_json")"
+          cache_hit="$(
+            jq -er '
+              .cache_hit
+              | if type == "boolean" then tostring
+                else error("cache_hit must be a boolean")
+                end
+            ' <<<"$build_json"
+          )"
           [[ "$build_manifest" == "$CRANETESTKIT_NFS_ROOT/builds/"*"/manifest.json" ]]
           [[ -f "$build_manifest" && ! -L "$build_manifest" ]]
           {
