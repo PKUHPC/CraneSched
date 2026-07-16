@@ -183,10 +183,18 @@ collection and exact run cleanup.
 The workflow uploads only an allowlisted copy of plan, state, aggregate result,
 build/image manifests and checkpoints. Shard logs are uploaded only on failure,
 are capped at 4 MiB per file and 128 MiB in total, and pass through credential
-redaction. Every value written to the GitHub step summary uses the same
-redaction and Markdown escaping. Full NFS directories, environment files,
-kubeconfigs and Kubernetes Secrets are never uploaded. GitHub artifacts are
-retained for 14 days.
+redaction. The GitHub step summary renders the aggregate outcome, affected
+cases, infrastructure errors, per-shard balance, phase timings, slowest cases
+and folded provenance. Dynamic values use the same redaction and Markdown
+escaping, and report rows are capped before rendering. Full NFS directories,
+environment files, kubeconfigs and Kubernetes Secrets are never uploaded.
+GitHub artifacts are retained for the repository maximum of 3 days; durable
+run evidence remains under the configured NFS retention policy.
+
+The collector cross-checks the workflow-captured process exit code against the
+aggregate result, run state and terminal shard evidence. Any mismatch or
+incomplete evidence resolves to infrastructure exit code `2`, and the final
+required check uses that resolved value.
 
 CraneTestKit exit codes remain authoritative:
 
