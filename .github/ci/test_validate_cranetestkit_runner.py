@@ -216,6 +216,40 @@ class NfsMountValidationTest(unittest.TestCase):
                         )
 
 
+class RuntimeValidationTest(unittest.TestCase):
+    def test_tagged_runtime_image_is_normalized_to_repository_and_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "runtime.json"
+            autotest_sha = "a" * 40
+            lock_sha = "b" * 64
+            image_digest = "sha256:" + "c" * 64
+            path.write_text(
+                json.dumps(
+                    {
+                        "apiVersion": "cranesched.io/v1alpha1",
+                        "kind": "CraneTestKitImageRuntime",
+                        "sourceShas": {"autotest": autotest_sha},
+                        "lockSha256": lock_sha,
+                        "autotest": {
+                            "image": "localhost/autotest:bundle-id",
+                            "digest": image_digest,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validation._validate_runtime(
+                    path,
+                    _sha256(path),
+                    autotest_sha,
+                    lock_sha,
+                    "localhost/autotest",
+                ),
+                f"localhost/autotest@{image_digest}",
+            )
+
+
 class KubeconfigValidationTest(unittest.TestCase):
     def _config(self, user: dict[str, str]) -> dict[str, object]:
         return {
@@ -402,6 +436,47 @@ class KubernetesPermissionCommandTest(unittest.TestCase):
         )
         self.assertNotIn("--subresource", " ".join(command))
         self.assertIn("jobs.batch", command)
+
+    def test_can_i_accepts_kubectl_yes_and_no_exit_codes(self) -> None:
+        for answer, return_code, expected in (("yes", 0, True), ("no", 1, False)):
+            with self.subTest(answer=answer), mock.patch.object(
+                validation.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=return_code, stdout=f"{answer}\n", stderr=""
+                ),
+            ):
+                self.assertIs(
+                    validation._can_i(
+                        Path("/usr/local/bin/k3s"),
+                        {},
+                        "get",
+                        "secrets",
+                        "crane-testkit",
+                    ),
+                    expected,
+                )
+
+    def test_can_i_rejects_inconsistent_or_unexpected_results(self) -> None:
+        for answer, return_code in (("no", 0), ("yes", 1), ("no", 2), ("maybe", 0)):
+            with self.subTest(
+                answer=answer, return_code=return_code
+            ), mock.patch.object(
+                validation.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=return_code, stdout=f"{answer}\n", stderr=""
+                ),
+            ), self.assertRaisesRegex(
+                validation.ValidationError, "unexpected Kubernetes authorization"
+            ):
+                validation._can_i(
+                    Path("/usr/local/bin/k3s"),
+                    {},
+                    "get",
+                    "secrets",
+                    "crane-testkit",
+                )
 
 
 class AdmissionValidationTest(unittest.TestCase):

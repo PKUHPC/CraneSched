@@ -441,7 +441,7 @@ def _validate_runtime(
         )
     if pinned.rsplit("@", 1)[1] != digest:
         raise ValidationError("AutoTest image and digest fields disagree")
-    return pinned
+    return f"{repository}@{digest}"
 
 
 def _validate_nfs_mount_identity(
@@ -723,10 +723,16 @@ def _can_i(
     k3s: Path, env: dict[str, str], verb: str, resource: str, namespace: str
 ) -> bool:
     command = _can_i_command(k3s, verb, resource, namespace)
-    answer = _run(
-        command, env=env, label=f"check Kubernetes permission {verb} {resource}"
+    result = subprocess.run(
+        command,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
     )
-    if answer not in {"yes", "no"}:
+    answer = result.stdout.strip()
+    expected_return_code = {"yes": 0, "no": 1}.get(answer)
+    if expected_return_code is None or result.returncode != expected_return_code:
         raise ValidationError(
             f"unexpected Kubernetes authorization answer for {verb} {resource}"
         )
