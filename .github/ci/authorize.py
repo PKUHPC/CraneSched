@@ -159,7 +159,9 @@ class GitHubApi:
             )
         self._token = token
 
-    def _get(self, path: str, *, missing_ok: bool = False) -> dict[str, object] | None:
+    def _get(
+        self, path: str, *, missing_statuses: frozenset[int] = frozenset()
+    ) -> dict[str, object] | None:
         request = urllib.request.Request(
             f"https://api.github.com/{path}",
             headers={
@@ -173,7 +175,7 @@ class GitHubApi:
             with urllib.request.urlopen(request, timeout=30) as response:
                 value = json.load(response)
         except urllib.error.HTTPError as exc:
-            if missing_ok and exc.code == 404:
+            if exc.code in missing_statuses:
                 return None
             raise AuthorizationError(
                 f"GitHub API request failed with HTTP {exc.code}"
@@ -194,7 +196,10 @@ class GitHubApi:
 
     def commit(self, repository: str, ref: str) -> str | None:
         encoded_ref = urllib.parse.quote(ref, safe="")
-        value = self._get(f"repos/{repository}/commits/{encoded_ref}", missing_ok=True)
+        value = self._get(
+            f"repos/{repository}/commits/{encoded_ref}",
+            missing_statuses=frozenset({404, 422}),
+        )
         if value is None:
             return None
         revision = value.get("sha")
