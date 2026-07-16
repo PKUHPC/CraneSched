@@ -146,6 +146,11 @@ def _git(release: Path, arguments: Iterable[str], label: str) -> str:
     )
 
 
+def _is_generated_python_bytecode(relative: str) -> bool:
+    path = Path(relative)
+    return path.suffix == ".pyc" and "__pycache__" in path.parts
+
+
 def _validate_release(
     release: Path,
     expected_sha: str,
@@ -186,7 +191,9 @@ def _validate_release(
     unexpected_ignored = [
         relative
         for relative in filter(None, ignored)
-        if relative != ".venv" and not relative.startswith(".venv/")
+        if relative != ".venv"
+        and not relative.startswith(".venv/")
+        and not _is_generated_python_bytecode(relative)
     ]
     if unexpected_ignored:
         raise ValidationError(
