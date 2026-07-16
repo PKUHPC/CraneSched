@@ -146,9 +146,14 @@ def _git(release: Path, arguments: Iterable[str], label: str) -> str:
     )
 
 
-def _is_generated_python_bytecode(relative: str) -> bool:
+def _is_generated_python_bytecode(release: Path, relative: str) -> bool:
     path = Path(relative)
-    return path.suffix == ".pyc" and "__pycache__" in path.parts
+    if path.suffix != ".pyc" or "__pycache__" not in path.parts:
+        return False
+    try:
+        return stat.S_ISREG((release / path).lstat().st_mode)
+    except OSError:
+        return False
 
 
 def _validate_release(
@@ -193,7 +198,7 @@ def _validate_release(
         for relative in filter(None, ignored)
         if relative != ".venv"
         and not relative.startswith(".venv/")
-        and not _is_generated_python_bytecode(relative)
+        and not _is_generated_python_bytecode(release, relative)
     ]
     if unexpected_ignored:
         raise ValidationError(
@@ -215,6 +220,7 @@ def _validate_release(
         for name in [*directory_names, *file_names]:
             path = Path(directory) / name
             item_metadata = path.lstat()
+            relative = path.relative_to(release).as_posix()
             if item_metadata.st_uid != 0:
                 raise ValidationError(
                     f"AutoTest release entry is not root-owned: {path}"
@@ -222,6 +228,10 @@ def _validate_release(
             if (
                 not stat.S_ISLNK(item_metadata.st_mode)
                 and item_metadata.st_mode & 0o222
+                and not (
+                    stat.S_ISDIR(item_metadata.st_mode) and path.name == "__pycache__"
+                )
+                and not _is_generated_python_bytecode(release, relative)
             ):
                 raise ValidationError(
                     f"AutoTest release entry is writable by the runner: {path}"
