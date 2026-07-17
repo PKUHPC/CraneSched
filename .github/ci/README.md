@@ -2,27 +2,30 @@
 
 `.github/workflows/build.yaml` is the trusted dispatcher for the K3s system
 suite. Pull requests use `pull_request_target` only to authorize and resolve
-immutable revisions on a GitHub-hosted runner. The hosted job never checks out
-or executes pull-request code. A privileged job is dispatched only when all of
-the following are true:
+immutable revisions on a GitHub-hosted runner. The hosted job executes only
+trusted controls from `master`; after authorization, it checks out candidate
+workflow files for static inspection but never executes candidate code. A
+privileged job is dispatched only when all of the following are true:
 
 - the workflow was loaded from `master`;
 - the pull request is from this repository, not a fork;
 - `github.triggering_actor` currently has `maintain` or `admin` permission;
 - Backend and FrontEnd refs resolve to full commit SHAs.
 
-The current cutover uses the existing repository-scoped runner and selects it
-with the `cranesystemtest` label. This temporary mode does not isolate the
-runner from other workflows in `PKUHPC/CraneSched`: labels route jobs, but do
-not authorize workflows. Keep the runner stopped except for controlled CI runs
-until an organization owner completes the runner-group migration below.
+The privileged job uses the dedicated repository-scoped runner selected by the
+exact `cranesystemtest` label. Repository registration prevents other
+repositories from dispatching to it, but GitHub does not restrict which
+workflow in `PKUHPC/CraneSched` may request a repository runner. This is an
+accepted boundary of the deployment.
 
-The target state is an organization runner group that allows only
-`PKUHPC/CraneSched/.github/workflows/build.yaml@refs/heads/master`. Its runner
-must keep the `cranesystemtest` label and runner name. After migration, restore
-the workflow's `runs-on.group` selector using the
-`CRANESCHED_PRIVILEGED_RUNNER_GROUP` repository variable so the group name is
-not duplicated in source.
+The hosted authorization job applies a compensating routing guard before it
+dispatches `test`: after resolving the exact candidate Backend SHA, it checks
+that only `.github/workflows/build.yaml` contains the exact
+`cranesystemtest` token. The check runs trusted code from `master` and treats
+the candidate workflow files only as data. Protect `.github/workflows/**` and
+`.github/ci/**` through branch protection and required maintainer review
+because this static guard is an accidental-change check, not a GitHub-enforced
+workflow authorization boundary.
 
 ## Repository variables
 
@@ -32,7 +35,6 @@ these repository variables:
 
 | Variable | Contract |
 | --- | --- |
-| `CRANESCHED_PRIVILEGED_RUNNER_GROUP` | Target-state organization runner group; `Default` is only a temporary cutover marker and is not consumed by label-only routing |
 | `CRANETESTKIT_RELEASE_DIR` | Absolute path to a root-owned, recursively read-only AutoTest Git release |
 | `CRANETESTKIT_AUTOTEST_SHA` | Exact 40-character commit deployed at the release path |
 | `CRANETESTKIT_EXECUTABLE_SHA256` | SHA-256 of the prepared `<release>/.venv/bin/crane_testkit` entry point |
@@ -84,21 +86,21 @@ It then renders canonical Jobs from the validated release/profile/runtime and
 uses server-side dry-run to require that approved Jobs pass while forbidden
 nodeName, lifecycle, host-network, image and NFS mutations are denied by
 `crane-testkit-ci-jobs`. This verifies the admission boundary without creating
-resources. Permission or policy drift fails before pull-request code is checked
-out.
+resources. Permission or policy drift fails before pull-request source is
+checked out on the privileged runner.
 
 ## Runner setup
 
-The current migration baseline is the dedicated root-owned Backend service
+The dedicated Backend service is
 `actions.runner.PKUHPC-CraneSched.cranesystemtest`. Root is currently required
 to collect and clean NFS run artifacts written by privileged Pods, so the
-hosted authorization, organization runner-group restriction and Kubernetes
-RBAC checks are mandatory compensating controls. The separate AutoTest service
+hosted authorization, static routing guard and Kubernetes RBAC checks are
+mandatory compensating controls. The separate AutoTest service
 `actions.runner.PKUHPC-CraneSched-AutoTest.cranesystemtest-autotest` must not
-receive the Backend runner group or `cranesystemtest` label. A future non-root
-migration requires an explicit NFS ownership/ACL validation first. The
-preflight accepts a private kubeconfig owned by root or the effective runner
-account. Install Actions Runner `2.327.1` or newer; the pinned
+receive the Backend `cranesystemtest` label. A future non-root migration
+requires an explicit NFS ownership/ACL validation first. The preflight accepts
+a private kubeconfig owned by root or the effective runner account. Install
+Actions Runner `2.327.1` or newer; the pinned
 `upload-artifact@v6` action uses Node.js 24. The following state belongs on
 local SSD:
 
@@ -144,34 +146,26 @@ embedded PAT, then use a short-lived read-only GitHub App or deploy credential
 only during the administrator deployment. CI itself performs no AutoTest Git
 network operation.
 
-## Organization runner-group migration
+## Repository runner boundary
 
-An organization owner must perform this migration before the Backend runner is
-left online between runs:
+Keep the Backend runner registered directly to `PKUHPC/CraneSched`, with
+runner name and custom label both set to `cranesystemtest`. Keep the AutoTest
+maintenance runner registered directly to `PKUHPC/CraneSched-AutoTest`, with
+its distinct `cranesystemtest-autotest` label. Do not give either service the
+other service's label or environment.
 
-1. Create a PKUHPC organization runner group with selected-repository access
-   limited to `PKUHPC/CraneSched` and selected-workflow access limited to
-   `PKUHPC/CraneSched/.github/workflows/build.yaml@refs/heads/master`.
-2. Stop the repository-scoped Backend runner and confirm it is idle, no
-   CraneTestKit Lease is held, and no matching Actions job is queued.
-3. Remove the repository-scoped registration and register the same runner at
-   `https://github.com/PKUHPC` in the new group. Keep runner name and custom
-   label `cranesystemtest`; preserve the verified release hooks and restricted
-   kubeconfig in the service environment. Registration and removal tokens must
-   be short-lived, passed without logging, and never stored on disk.
-4. Set `CRANESCHED_PRIVILEGED_RUNNER_GROUP` to the new group name and restore
-   the workflow selector to:
+Only `build.yaml` may contain the exact Backend label. The hosted routing guard
+scans every `.yaml` and `.yml` file directly under `.github/workflows` at the
+authorized candidate SHA and fails closed on symlinked workflow files, a
+missing `build.yaml`, a missing Backend label, or any exact label occurrence in
+another workflow. Labels with longer names such as
+`cranesystemtest-autotest` are not Backend-label matches.
 
-   ```yaml
-   runs-on:
-     group: ${{ vars.CRANESCHED_PRIVILEGED_RUNNER_GROUP }}
-     labels: cranesystemtest
-   ```
-
-5. Start only the Backend runner, dispatch `build.yaml` from `master`, and
-   verify the `test` job reports the new organization group before leaving the
-   service enabled. The AutoTest maintenance runner remains a separate
-   registration and group.
+This guard catches a candidate workflow that accidentally names the dedicated
+label, but it cannot prevent routing through a generic default self-hosted
+label or a repository variable. Required maintainer review, branch protection,
+the trusted `pull_request_target` dispatcher and the restricted Kubernetes
+identity remain part of the repository-level security boundary.
 
 ## Artifacts and result contract
 
