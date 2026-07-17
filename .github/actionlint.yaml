@@ -2,7 +2,6 @@ self-hosted-runner:
   labels:
     - cranesystemtest
 config-variables:
-  - CRANESCHED_PRIVILEGED_RUNNER_GROUP
   - CRANETESTKIT_RELEASE_DIR
   - CRANETESTKIT_AUTOTEST_SHA
   - CRANETESTKIT_EXECUTABLE_SHA256

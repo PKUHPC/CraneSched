@@ -93,6 +93,24 @@ jobs:
           FRONTEND_REPOSITORY: PKUHPC/CraneSched-FrontEnd
         run: /usr/bin/python3 -I trusted-ci/.github/ci/authorize.py
 
+      - name: Checkout candidate workflow routing
+        if: steps.authorize.outputs.authorized == 'true'
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ steps.authorize.outputs.backend_sha }}
+          path: candidate-routing
+          sparse-checkout: .github/workflows
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+
+      - name: Validate repository runner routing
+        if: steps.authorize.outputs.authorized == 'true'
+        run: >-
+          /usr/bin/python3 -I
+          trusted-ci/.github/ci/validate-workflow-routing.py
+          --workflows-dir candidate-routing/.github/workflows
+
   test:
     name: test
     needs: authorize
@@ -102,7 +120,6 @@ jobs:
     permissions:
       contents: read
     env:
-      PYTHONDONTWRITEBYTECODE: "1"
       PYTHONNOUSERSITE: "1"
       PYTHONPATH: ""
       CRANETESTKIT_RELEASE_DIR: ${{ vars.CRANETESTKIT_RELEASE_DIR }}
