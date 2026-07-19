@@ -1,5 +1,7 @@
 # CraneTestKit privileged CI contract
 
+<!-- PR-only canary marker for repository runner dispatch validation. -->
+
 `.github/workflows/build.yaml` is the trusted dispatcher for the K3s system
 suite. Pull requests use `pull_request_target` only to authorize and resolve
 immutable revisions on a GitHub-hosted runner. The hosted job executes only
