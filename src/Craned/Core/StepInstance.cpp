@@ -428,6 +428,13 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
+    if (setpgid(0, 0) == -1) {
+      constexpr char message[] =
+          "[Craned] Failed to isolate supervisor process group\n";
+      (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+      _exit(1);
+    }
+
     // Cgroup migration is deferred to csupervisor (after SupervisorReady)
     // so the supervisor init is not throttled by the job's CPU quota.
     int craned_supervisor_fd = craned_supervisor_pipe[0];
