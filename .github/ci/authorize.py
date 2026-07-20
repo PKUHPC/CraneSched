@@ -62,6 +62,7 @@ class PullRequestSnapshot:
     head_sha: str
     merge_commit_sha: str
     mergeable: bool | None
+    mergeable_state: str
 
 
 PullRequestLookup = Callable[[str, int], PullRequestSnapshot]
@@ -119,10 +120,6 @@ def _validate_pr_event(context: DispatchContext) -> int:
         raise AuthorizationError("pull request base branch is not master")
     if not SHA_RE.fullmatch(context.pr_base_sha):
         raise AuthorizationError("pull request base is not a full commit SHA")
-    if context.event_sha != context.pr_base_sha:
-        raise AuthorizationError(
-            "trusted workflow revision does not match the pull request base"
-        )
     if not SHA_RE.fullmatch(context.pr_head_sha):
         raise AuthorizationError("pull request head is not a full commit SHA")
     if not context.pr_head_ref or any(
@@ -146,7 +143,6 @@ def _validate_pr_snapshot(
     if (
         snapshot.base_repository != context.pr_base_repository
         or snapshot.base_ref != context.pr_base_ref
-        or snapshot.base_sha != context.pr_base_sha
         or snapshot.head_repository != context.pr_head_repository
         or snapshot.head_ref != context.pr_head_ref
         or snapshot.head_sha != context.pr_head_sha
@@ -172,17 +168,19 @@ def _resolve_pr_merge(
     for attempt in range(attempts):
         snapshot = pull_request_lookup(context.repository, number)
         _validate_pr_snapshot(context, number, snapshot)
-        if snapshot.mergeable is False:
-            raise AuthorizationError("pull request has no mergeable proposed result")
-
-        merge_sha = snapshot.merge_commit_sha
-        if snapshot.mergeable is not True or not SHA_RE.fullmatch(merge_sha):
-            pending_reason = "GitHub has not computed the proposed merge"
-        elif context.pr_merge_sha and context.pr_merge_sha != merge_sha:
-            raise AuthorizationError(
-                "event proposed merge does not match the current pull request"
+        if snapshot.base_sha != context.event_sha:
+            pending_reason = (
+                "the current pull request base has not converged to the trusted "
+                "workflow revision"
             )
+        elif snapshot.mergeable is False:
+            raise AuthorizationError("pull request has no mergeable proposed result")
+        elif snapshot.mergeable is not True or not SHA_RE.fullmatch(
+            snapshot.merge_commit_sha
+        ):
+            pending_reason = "GitHub has not computed the proposed merge"
         else:
+            merge_sha = snapshot.merge_commit_sha
             merge_ref_sha = merge_ref_resolver(context.repository, number)
             if merge_ref_sha != merge_sha:
                 pending_reason = "the pull request merge ref is not synchronized"
@@ -190,27 +188,37 @@ def _resolve_pr_merge(
                 parents = commit_parents_resolver(context.repository, merge_sha)
                 if parents is None:
                     pending_reason = "the proposed merge commit is not available"
-                elif parents != (context.pr_base_sha, context.pr_head_sha):
+                elif parents != (context.event_sha, context.pr_head_sha):
                     raise AuthorizationError(
-                        "proposed merge parents do not match the event base and head"
+                        "proposed merge parents do not match the trusted base and "
+                        "event head"
                     )
                 else:
                     final_snapshot = pull_request_lookup(context.repository, number)
                     _validate_pr_snapshot(context, number, final_snapshot)
-                    final_ref_sha = merge_ref_resolver(context.repository, number)
-                    if (
-                        final_snapshot.mergeable is True
-                        and final_snapshot.merge_commit_sha == merge_sha
-                        and final_ref_sha == merge_sha
-                    ):
-                        return merge_sha
-                    if final_snapshot.mergeable is False:
+                    if final_snapshot.base_sha != context.event_sha:
+                        raise AuthorizationError(
+                            "pull request base changed during authorization; wait for "
+                            "the new run"
+                        )
+                    elif final_snapshot.mergeable is False:
                         raise AuthorizationError(
                             "pull request has no mergeable proposed result"
                         )
-                    pending_reason = (
-                        "the proposed merge changed during authorization"
-                    )
+                    elif (
+                        final_snapshot.mergeable is True
+                        and final_snapshot.merge_commit_sha == merge_sha
+                    ):
+                        final_ref_sha = merge_ref_resolver(context.repository, number)
+                        if final_ref_sha == merge_sha:
+                            return merge_sha
+                        pending_reason = (
+                            "the pull request merge ref changed during authorization"
+                        )
+                    else:
+                        pending_reason = (
+                            "the proposed merge changed during authorization"
+                        )
 
         if attempt < len(retry_delays):
             sleeper(retry_delays[attempt])
@@ -265,7 +273,7 @@ def authorize_dispatch(
             sleeper=sleeper,
             retry_delays=retry_delays,
         )
-        pr_base_sha = context.pr_base_sha
+        pr_base_sha = context.event_sha
         pr_head_sha = context.pr_head_sha
         pr_merge_sha = routing_sha
         frontend_ref = context.pr_head_ref
@@ -409,6 +417,7 @@ class GitHubApi:
         state = value.get("state")
         draft = value.get("draft")
         mergeable = value.get("mergeable")
+        mergeable_state = value.get("mergeable_state")
         merge_commit_sha = value.get("merge_commit_sha")
         fields = (
             base_repository.get("full_name"),
@@ -423,10 +432,12 @@ class GitHubApi:
             or isinstance(actual_number, bool)
             or not isinstance(state, str)
             or not isinstance(draft, bool)
-            or mergeable is not None
-            and not isinstance(mergeable, bool)
-            or merge_commit_sha is not None
-            and not isinstance(merge_commit_sha, str)
+            or (mergeable is not None and not isinstance(mergeable, bool))
+            or not isinstance(mergeable_state, str)
+            or (
+                merge_commit_sha is not None
+                and not isinstance(merge_commit_sha, str)
+            )
             or any(not isinstance(field, str) for field in fields)
         ):
             raise AuthorizationError("GitHub pull request response is malformed")
@@ -443,6 +454,7 @@ class GitHubApi:
             head_sha=fields[5],
             merge_commit_sha=merge_commit_sha or "",
             mergeable=mergeable,
+            mergeable_state=mergeable_state,
         )
 
     def merge_ref(self, repository: str, number: int) -> str | None:
