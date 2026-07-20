@@ -23,6 +23,8 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/TracerManager.h"
+#include "crane/Tracing.h"
 
 namespace Craned::Supervisor {
 
@@ -53,7 +55,6 @@ struct Config {
 
   struct ContainerConfig {
     bool Enabled{false};
-    std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
 
@@ -93,6 +94,13 @@ struct Config {
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct TracingConfig {
+    bool Enabled{false};
+    crane::TraceLevel Level{crane::TraceLevel::Debug};
+    std::string Traceparent;
+  };
+  TracingConfig Tracing;
 
   bool CompressedRpc{};
 

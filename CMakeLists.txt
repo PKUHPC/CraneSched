@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 set(CMAKE_POLICY_DEFAULT_CMP0075 NEW)
 
-# Let cmake apply IPO flags for all compilers and do not output warnings.
+# Let CMake apply IPO flags for selected Crane targets and avoid policy warnings.
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 # When the option() command sees a normal variable of the given name,
@@ -55,9 +55,28 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
+option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+set(CRANE_TRACE_COMPILED_MAX_LEVEL "debug" CACHE STRING
+        "Maximum tracing level compiled into binaries: basic, detailed, or debug")
+set_property(CACHE CRANE_TRACE_COMPILED_MAX_LEVEL PROPERTY STRINGS basic detailed debug)
+string(TOLOWER "${CRANE_TRACE_COMPILED_MAX_LEVEL}" CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED)
+if (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "basic")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 0)
+elseif (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "detailed")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 1)
+elseif (CRANE_TRACE_COMPILED_MAX_LEVEL_NORMALIZED STREQUAL "debug")
+    set(CRANE_TRACE_COMPILED_MAX_LEVEL_NUM 2)
+else ()
+    message(FATAL_ERROR "CRANE_TRACE_COMPILED_MAX_LEVEL must be one of: basic, detailed, debug")
+endif ()
+
+option(CRANE_ENABLE_SCHED_ALGO_TRACE_LOG "Enable verbose scheduler algorithm trace logs" OFF)
+
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
 
 option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)
+
+option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 
 option(CRANE_ENABLE_LUA "Enable lua support" ON)
 
@@ -256,9 +275,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
 endif ()
 
-# Check LTO support
+# Check LTO support.
 include(CheckIPOSupported)
-check_ipo_supported(RESULT supported OUTPUT error)
+check_ipo_supported(RESULT CRANE_IPO_SUPPORTED OUTPUT CRANE_IPO_ERROR)
 
 # If Clang is used, select lld as the linker.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -276,15 +295,22 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 endif ()
 
-if (supported)
+set(CRANE_ENABLE_TARGET_IPO FALSE)
+if (CRANE_IPO_SUPPORTED)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_BUILD_TYPE STREQUAL "Release")
         # IPO/LTO is disabled in g++ under Debug mode since it's quite slow.
-        message(STATUS "IPO / LTO enabled")
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        message(STATUS "IPO / LTO enabled for selected Crane targets")
+        set(CRANE_ENABLE_TARGET_IPO TRUE)
     endif ()
 else ()
-    message(STATUS "IPO / LTO not supported: <${error}>")
+    message(STATUS "IPO / LTO not supported: <${CRANE_IPO_ERROR}>")
 endif ()
+
+function(crane_enable_ipo target)
+    if (CRANE_ENABLE_TARGET_IPO)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif ()
+endfunction()
 
 if (CRANE_ENABLE_LUA)
     find_package(Lua QUIET)
@@ -363,8 +389,12 @@ if (ENABLE_UNQLITE)
     message("Enable Unqlite as one of embedded db backend.")
 endif ()
 
-if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE)
-    message(FATAL_ERROR "At least one of Berkeley DB and Unqlite should be enabled.")
+if (ENABLE_ROCKSDB)
+    message("Enable RocksDB as one of embedded db backend.")
+endif ()
+
+if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE AND NOT ENABLE_ROCKSDB)
+    message(FATAL_ERROR "At least one embedded db backend should be enabled.")
 endif ()
 
 find_package(PAM REQUIRED)

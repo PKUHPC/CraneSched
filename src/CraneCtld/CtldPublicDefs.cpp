@@ -545,6 +545,7 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.At(craned_id));
+  if (!job->Traceparent().empty()) job_to_d.set_traceparent(job->Traceparent());
   if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = job_to_d.mutable_array_task();
     array_task->set_array_job_id(identity->array_job_id);

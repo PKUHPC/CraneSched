@@ -32,6 +32,8 @@
 #include "Security/VaultClient.h"
 #include "absl/strings/ascii.h"
 #include "crane/PluginClient.h"
+#include "crane/TraceConfigProto.h"
+#include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -695,12 +697,29 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  CRANE_TRACE_SCOPE_NAMED(submit_span, "submit/request");
+  submit_span.SetAttribute("crane.dimension", "submit");
+  submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
+  submit_span.SetAttribute("partition",
+                           std::string(request->job().partition_name()));
+  submit_span.SetAttribute(
+      "queue_depth", static_cast<int64_t>(g_job_scheduler->PendingQueueSize()));
+
+  {
+    CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid());
+        msg) {
+      auth_span.SetStatus(crane::StatusCode::kError, msg.value());
+      submit_span.SetStatus(crane::StatusCode::kError, "auth_failed");
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+    }
+  }
 
   // Check job type
   if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
+    submit_span.SetStatus(crane::StatusCode::kError, "cri_disabled");
     response->set_ok(false);
     response->set_code(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
@@ -708,30 +727,52 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
 
   auto job = std::make_unique<JobInCtld>();
   job->SetFieldsByJobToCtld(request->job());
-  auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
-  if (lua_result) {
-    auto rich_err = lua_result.value().get();
-    if (rich_err.code() != CraneErrCode::SUCCESS) {
-      response->set_ok(false);
-      response->set_code(rich_err.code());
-      response->set_reason(rich_err.description());
-      return grpc::Status::OK;
+
+  // Generate submit_id from the trace context (reuse trace_id)
+  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  job->SetSubmitId(submit_id);
+  job->SetSubmitTraceparent(submit_tp);
+  submit_span.SetAttribute("crane.submit_id", submit_id);
+
+  {
+    CRANE_TRACE_CHILD_NAMED(lua_span, submit_span, "submit/lua_check");
+    auto lua_result = g_job_scheduler->JobSubmitLuaCheck(job.get());
+    if (lua_result) {
+      auto rich_err = lua_result.value().get();
+      if (rich_err.code() != CraneErrCode::SUCCESS) {
+        lua_span.SetStatus(crane::StatusCode::kError, "lua_rejected");
+        submit_span.SetStatus(crane::StatusCode::kError, "lua_rejected");
+        response->set_ok(false);
+        response->set_code(rich_err.code());
+        response->set_reason(rich_err.description());
+        return grpc::Status::OK;
+      }
     }
   }
 
-  auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
-  if (result.has_value()) {
-    CraneExpected<job_id_t> job_result = result.value().get();
-    if (job_result.has_value()) {
-      response->set_ok(true);
-      response->set_job_id(job_result.value());
+  {
+    CRANE_TRACE_CHILD_NAMED(enqueue_span, submit_span, "submit/enqueue");
+    auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
+    if (result.has_value()) {
+      CraneExpected<job_id_t> job_result = result.value().get();
+      if (job_result.has_value()) {
+        enqueue_span.SetAttribute("job_id", job_result.value());
+        submit_span.SetAttribute("job_id", job_result.value());
+        response->set_ok(true);
+        response->set_job_id(job_result.value());
+      } else {
+        enqueue_span.SetStatus(crane::StatusCode::kError, "enqueue_failed");
+        submit_span.SetStatus(crane::StatusCode::kError, "enqueue_failed");
+        response->set_ok(false);
+        response->set_code(job_result.error());
+      }
     } else {
+      enqueue_span.SetStatus(crane::StatusCode::kError, "validation_failed");
+      submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       response->set_ok(false);
-      response->set_code(job_result.error());
+      response->set_code(result.error());
     }
-  } else {
-    response->set_ok(false);
-    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -794,16 +835,35 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  CRANE_TRACE_SCOPE_NAMED(submit_span, "submit/batch_request");
+  submit_span.SetAttribute("crane.dimension", "submit");
+  submit_span.SetAttribute("count", static_cast<int64_t>(request->count()));
+  submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
+
+  {
+    CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->job().uid());
+        msg) {
+      auth_span.SetStatus(crane::StatusCode::kError, msg.value());
+      submit_span.SetStatus(crane::StatusCode::kError, "auth_failed");
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+    }
+  }
 
   // Check job type
   if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
+    submit_span.SetStatus(crane::StatusCode::kError, "cri_disabled");
     response->add_job_id_list(0);
     response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
   }
+
+  // Generate shared submit_id for all jobs in the batch
+  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  submit_span.SetAttribute("crane.submit_id", submit_id);
 
   std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
 
@@ -825,6 +885,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     auto parent_job = std::make_unique<JobInCtld>();
     // Do NOT set array_task_id here - the parent represents the whole array.
     parent_job->SetFieldsByJobToCtld(job_to_ctld);
+    parent_job->SetSubmitId(submit_id);
+    parent_job->SetSubmitTraceparent(submit_tp);
 
     auto result = g_job_scheduler->SubmitJobToScheduler(std::move(parent_job));
     if (result.has_value()) {
@@ -845,6 +907,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     for (uint32_t i = 0; i < job_count; i++) {
       auto job = std::make_unique<JobInCtld>();
       job->SetFieldsByJobToCtld(job_to_ctld);
+      job->SetSubmitId(submit_id);
+      job->SetSubmitTraceparent(submit_tp);
 
       auto result = g_job_scheduler->SubmitJobToScheduler(std::move(job));
       results.emplace_back(std::move(result));
@@ -1426,6 +1490,100 @@ grpc::Status CraneCtldServiceImpl::ResetPartitionAcl(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryTraceConfig(
+    grpc::ServerContext* context,
+    const crane::grpc::QueryTraceConfigRequest* request,
+    crane::grpc::QueryTraceConfigReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason("permission denied");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return grpc::Status::OK;
+  }
+
+  response->set_ok(true);
+  crane::FillRuntimeTraceConfigProto(response->mutable_config());
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::SetTraceConfig(
+    grpc::ServerContext* context,
+    const crane::grpc::SetTraceConfigRequest* request,
+    crane::grpc::SetTraceConfigReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason("permission denied");
+    crane::FillRuntimeTraceConfigProto(response->mutable_config());
+    return grpc::Status::OK;
+  }
+
+  auto current_config = crane::GetRuntimeTraceConfig();
+  bool enabled =
+      request->has_enabled() ? request->enabled() : current_config.enabled;
+  crane::TraceLevel runtime_level = current_config.runtime_level;
+  if (request->has_level()) {
+    if (!crane::TraceLevelFromString(request->level(), &runtime_level)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "invalid trace level '{}', expected basic, detailed, or debug",
+          request->level()));
+      crane::FillRuntimeTraceConfigProto(response->mutable_config());
+      return grpc::Status::OK;
+    }
+  }
+
+  g_config.Tracing.Enabled = enabled;
+  g_config.Tracing.Level = runtime_level;
+  auto applied_config = crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
+                                                       g_config.Tracing.Level);
+  if (applied_config.clamped) {
+    CRANE_WARN(
+        "Tracing runtime level {} exceeds compiled max level {}; effective "
+        "level is {}.",
+        crane::TraceLevelToString(applied_config.runtime_level),
+        crane::TraceLevelToString(applied_config.compiled_max_level),
+        crane::TraceLevelToString(applied_config.effective_level));
+  }
+  crane::FillRuntimeTraceConfigProto(response->mutable_config(),
+                                     applied_config);
+
+  const bool propagate =
+      !request->has_propagate_to_craned() || request->propagate_to_craned();
+  if (propagate && g_craned_keeper) {
+    for (const auto& [craned_id, node] : g_config.Nodes) {
+      (void)node;
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) continue;
+      auto err = stub->UpdateTraceConfig(response->config());
+      if (err != CraneErrCode::SUCCESS)
+        response->add_failed_craned_ids(craned_id);
+    }
+  }
+
+  const bool all_ok = response->failed_craned_ids().empty();
+  response->set_ok(all_ok);
+  if (!all_ok) {
+    response->set_reason(
+        "trace config updated on ctld, but failed to update "
+        "some craned nodes");
+  }
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryJobsInfoRequest* request,
@@ -1485,6 +1643,18 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
 
   sort_truncate_and_move_to_proto(num_limit);
   response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryQueueStateSummary(
+    grpc::ServerContext* context,
+    const crane::grpc::QueryQueueStateSummaryRequest* request,
+    crane::grpc::QueryQueueStateSummaryReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  g_job_scheduler->QueryQueueStateSummary(request, response);
   return grpc::Status::OK;
 }
 
@@ -1844,8 +2014,12 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
       auto& proto_limit = (*partition_resource_limit_map)[partition];
       proto_limit.mutable_max_tres()->CopyFrom(
           static_cast<crane::grpc::ResourceView>(limit.max_tres));
+      proto_limit.mutable_max_tres()->set_cpu_count(
+          ConvertCpuCountForClient(limit.max_tres.GetCpuCount()));
       proto_limit.mutable_max_tres_per_job()->CopyFrom(
           static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+      proto_limit.mutable_max_tres_per_job()->set_cpu_count(
+          ConvertCpuCountForClient(limit.max_tres_per_job.GetCpuCount()));
       proto_limit.set_max_jobs(limit.max_jobs);
       proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
       proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
@@ -1940,8 +2114,12 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         auto& proto_limit = (*partition_resource_limit_map)[partition];
         proto_limit.mutable_max_tres()->CopyFrom(
             static_cast<crane::grpc::ResourceView>(limit.max_tres));
+        proto_limit.mutable_max_tres()->set_cpu_count(
+            ConvertCpuCountForClient(limit.max_tres.GetCpuCount()));
         proto_limit.mutable_max_tres_per_job()->CopyFrom(
             static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+        proto_limit.mutable_max_tres_per_job()->set_cpu_count(
+            ConvertCpuCountForClient(limit.max_tres_per_job.GetCpuCount()));
         proto_limit.set_max_jobs(limit.max_jobs);
         proto_limit.set_max_submit_jobs(limit.max_submit_jobs);
         proto_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
@@ -2034,7 +2212,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
     qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
-    qos_info->set_max_cpus_per_user(static_cast<double>(qos.max_cpus_per_user));
+    qos_info->set_max_cpus_per_user(
+        ConvertCpuCountForClient(qos.max_cpus_per_user));
     qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
     qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_job(
@@ -2047,10 +2226,16 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     // properly serializes GresMap including zero-value entries.
     qos_info->mutable_max_tres()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    qos_info->mutable_max_tres()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres.GetCpuCount()));
     qos_info->mutable_max_tres_per_user()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    qos_info->mutable_max_tres_per_user()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres_per_user.GetCpuCount()));
     qos_info->mutable_max_tres_per_account()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->mutable_max_tres_per_account()->set_cpu_count(
+        ConvertCpuCountForClient(qos.max_tres_per_account.GetCpuCount()));
     qos_info->set_flags(qos.flags.ToInt64());
     for (const auto& preempt_name : qos.preempt) {
       qos_info->add_preempt(preempt_name);

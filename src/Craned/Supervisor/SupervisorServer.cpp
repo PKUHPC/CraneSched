@@ -28,11 +28,8 @@ grpc::Status SupervisorServiceImpl::ExecuteStep(
     const crane::grpc::supervisor::StepExecutionRequest* request,
     crane::grpc::supervisor::StepExecutionReply* response) {
   CRANE_ASSERT(g_config.StepSpec.step_type() != crane::grpc::StepType::DAEMON);
-  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteStepAsync();
-  code_future.wait();
-
-  CraneErrCode ok = code_future.get();
-  response->set_code(ok);
+  g_task_mgr->ExecuteStepAsync();
+  response->set_code(CraneErrCode::SUCCESS);
 
   return Status::OK;
 }

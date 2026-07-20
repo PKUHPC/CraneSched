@@ -5,6 +5,8 @@ add_library(craned_common STATIC
     DeviceManager.cpp
     CgroupManager.h
     CgroupManager.cpp
+    CgroupV2Fs.h
+    CgroupV2Fs.cpp
 )
 
 # Set the precompiled header for the common library
@@ -32,6 +34,7 @@ target_link_libraries(craned_common
         Utility_PublicHeader
         Utility_PasswordEntry
         Utility_PluginClient
+        crane_tracer
         
         crane_proto_lib
         cri_proto_lib

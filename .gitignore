@@ -94,3 +94,8 @@ _codeql_detected_source_root
 # Python
 .venv/
 *.pyc
+
+#Test Reports
+test-reports/
+
+.tmp/

@@ -355,6 +355,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryJobsInfoRequest* request,
       crane::grpc::QueryJobsInfoReply* response) override;
 
+  grpc::Status QueryQueueStateSummary(
+      grpc::ServerContext* context,
+      const crane::grpc::QueryQueueStateSummaryRequest* request,
+      crane::grpc::QueryQueueStateSummaryReply* response) override;
+
   grpc::Status QueryCranedInfo(
       grpc::ServerContext* context,
       const crane::grpc::QueryCranedInfoRequest* request,
@@ -413,6 +418,16 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext* context,
       const crane::grpc::ResetPartitionAclRequest* request,
       crane::grpc::ResetPartitionAclReply* response) override;
+
+  grpc::Status QueryTraceConfig(
+      grpc::ServerContext* context,
+      const crane::grpc::QueryTraceConfigRequest* request,
+      crane::grpc::QueryTraceConfigReply* response) override;
+
+  grpc::Status SetTraceConfig(
+      grpc::ServerContext* context,
+      const crane::grpc::SetTraceConfigRequest* request,
+      crane::grpc::SetTraceConfigReply* response) override;
 
   grpc::Status AddAccount(grpc::ServerContext* context,
                           const crane::grpc::AddAccountRequest* request,

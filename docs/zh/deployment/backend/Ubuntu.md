@@ -203,18 +203,9 @@ apt install -y \
 !!! info
     Lua 支持默认开启。在 Ubuntu 20.04 上，请将 `liblua5.4-dev` 替换为 `liblua5.3-dev`。
 
-## 4. 安装和配置 MongoDB
+## 4. 构建鹤思后端
 
-MongoDB 仅在**控制节点**上需要。
-
-请按照[数据库配置指南](../configuration/database.md)获取详细说明。
-
-
-## 5. 安装和配置鹤思
-
-### 5.1 构建和安装
-
-**配置和构建鹤思:**
+配置并构建鹤思：
 
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
@@ -233,46 +224,32 @@ cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=true -DCRANE_ENABLE_BPF=true -S . -B bui
 cmake --build build
 ```
 
-**安装构建的二进制文件：**
-!!! tip
-    我们建议使用 DEB 软件包部署鹤思。有关安装说明，请参阅[打包指南](../packaging.md)。
+## 5. 打包和安装 DEB 软件包
+
+构建完成后，按照[打包指南](../packaging.md)生成 `cranectld` 和 `craned` DEB 软件包，并通过包管理器安装到目标节点。
+
+!!! note "源码安装"
+    如果只是本机验证或开发调试，也可以跳过打包，直接使用源码安装。具体命令见本文末尾的“源码安装”附录。
+
+## 6. 后续步骤
+
+完成 DEB 安装后，继续完成以下配置和部署工作：
+
+1. **配置数据库**：控制节点需要可用的数据库配置。请参考[数据库配置指南](../configuration/database.md)准备 `/etc/crane/database.yaml`。
+2. **配置集群拓扑**：所有节点需要一致的 `/etc/crane/config.yaml`。请参考[集群配置指南](../configuration/config.md)配置控制节点、计算节点、分区和资源。
+3. **分发配置并启动服务**：将软件包和配置分发到控制节点、计算节点，并启动 `cranectld` / `craned`。请参考[多节点部署指南](../configuration/multi-node.md)。
+4. **安装前端工具**：在登录节点或需要提交作业的节点安装 CLI 和前端服务。请参考[前端部署指南](../frontend/frontend.md)。
+5. **可选：配置 PAM**：集群完成部署并验证运行后，再配置 PAM 访问控制。请参考[PAM 模块配置指南](../configuration/pam.md)。
+
+## 源码安装
+
+如果只是本机验证或开发调试，也可以直接安装当前构建目录中的产物：
+
 ```bash
 cmake --install build
 ```
 
-对于多节点部署鹤思，请按照[多节点部署指南](../configuration/multi-node.md)。
-
-
-### 5.2 配置 PAM 模块
-
-PAM 模块配置是可选的，但建议用于生产集群以控制用户访问。
-
-请按照 [PAM 模块配置指南](../configuration/pam.md)获取详细说明。
-
-### 5.3 配置集群
-
-有关集群配置详细信息，请参阅[集群配置指南](../configuration/config.md)。
-
-## 6. 启动鹤思
-
-### 使用 systemd 启动（推荐）
-
-**仅控制节点**需要先创建 crane 用户（DEB 包安装时自动创建）：
-
-```bash
-sudo groupadd --system crane 2>/dev/null || true
-sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
-```
-
-然后启动服务：
-
-```bash
-systemctl daemon-reload
-systemctl enable cranectld --now  # 控制节点
-systemctl enable craned --now     # 计算节点
-```
-
-### 手动运行（前台）
+直接运行二进制仅建议用于调试：
 
 ```bash
 cranectld  # 控制节点

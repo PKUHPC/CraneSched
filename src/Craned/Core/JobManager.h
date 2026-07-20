@@ -119,7 +119,8 @@ class JobManager {
   JobCleanupFutureMap FreeInvalidJobs(std::set<job_id_t>&& job_ids);
 
   CraneErrCode ExecuteStepAsync(
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
+      std::unordered_map<job_id_t, std::string> traceparents = {});
 
   bool ReceivePmixPort(
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
@@ -210,6 +211,7 @@ class JobManager {
   struct EvQueueExecuteStepElem {
     job_id_t job_id;
     step_id_t step_id;
+    std::string traceparent;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -323,6 +325,7 @@ class JobManager {
   ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_step_status_change_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_step_status_change_timer_handle_;
   ConcurrentQueue<StepStatusChangeQueueElem> m_step_status_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
@@ -333,6 +336,16 @@ class JobManager {
     job_id_t job_id;
     step_id_t step_id;
   };
+
+  struct FreeJobElem {
+    JobInD job;
+    std::chrono::steady_clock::time_point enqueue_time;
+    int64_t queue_len_at_enqueue{};
+  };
+
+  std::shared_ptr<uvw::async_handle> m_free_jobs_async_handle_;
+  ConcurrentQueue<FreeJobElem> m_free_jobs_queue_;
+  void EvCleanFreeJobsQueueCb_();
 
   std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
   ConcurrentQueue<FreeStepElem> m_free_steps_queue_;

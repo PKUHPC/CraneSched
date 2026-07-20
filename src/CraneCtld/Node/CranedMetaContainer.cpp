@@ -471,10 +471,16 @@ CranedMetaContainer::QueryAllPartitionInfo() {
 
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
+    part_info->mutable_res_total()->set_cpu_count(ConvertCpuCountForClient(
+        part_meta->partition_global_meta.res_total.GetCpuCount()));
     *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_avail);
+    part_info->mutable_res_avail()->set_cpu_count(ConvertCpuCountForClient(
+        part_meta->partition_global_meta.res_avail.GetCpuCount()));
     *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_in_use);
+    part_info->mutable_res_alloc()->set_cpu_count(ConvertCpuCountForClient(
+        part_meta->partition_global_meta.res_in_use.GetCpuCount()));
     part_info->set_default_mem_per_cpu(
         g_config.Partitions[part_name].default_mem_per_cpu);
     part_info->set_max_mem_per_cpu(
@@ -536,10 +542,16 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
 
   *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);
+  part_info->mutable_res_total()->set_cpu_count(ConvertCpuCountForClient(
+      part_meta->partition_global_meta.res_total.GetCpuCount()));
   *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_avail);
+  part_info->mutable_res_avail()->set_cpu_count(ConvertCpuCountForClient(
+      part_meta->partition_global_meta.res_avail.GetCpuCount()));
   *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_in_use);
+  part_info->mutable_res_alloc()->set_cpu_count(ConvertCpuCountForClient(
+      part_meta->partition_global_meta.res_in_use.GetCpuCount()));
 
   return reply;
 }
@@ -573,11 +585,17 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo() {
 
     reservation_info->mutable_res_total()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(res_total));
+    reservation_info->mutable_res_total()->set_cpu_count(
+        ConvertCpuCountForClient(res_total.GetCpuCount()));
     reservation_info->mutable_res_avail()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(res_avail));
+    reservation_info->mutable_res_avail()->set_cpu_count(
+        ConvertCpuCountForClient(res_avail.GetCpuCount()));
     reservation_info->mutable_res_alloc()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(res_total -=
                                                resv_meta_ptr->res_avail));
+    reservation_info->mutable_res_alloc()->set_cpu_count(
+        ConvertCpuCountForClient(res_total.GetCpuCount()));
 
     if (resv_meta_ptr->accounts_black_list) {
       for (auto const& account : resv_meta_ptr->accounts) {
@@ -631,11 +649,17 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryResvInfo(
 
   reservation_info->mutable_res_total()->CopyFrom(
       static_cast<crane::grpc::ResourceView>(res_total));
+  reservation_info->mutable_res_total()->set_cpu_count(
+      ConvertCpuCountForClient(res_total.GetCpuCount()));
   reservation_info->mutable_res_avail()->CopyFrom(
       static_cast<crane::grpc::ResourceView>(res_avail));
+  reservation_info->mutable_res_avail()->set_cpu_count(
+      ConvertCpuCountForClient(res_avail.GetCpuCount()));
   reservation_info->mutable_res_alloc()->CopyFrom(
       static_cast<crane::grpc::ResourceView>(res_total -=
                                              resv_meta_ptr->res_avail));
+  reservation_info->mutable_res_alloc()->set_cpu_count(
+      ConvertCpuCountForClient(res_total.GetCpuCount()));
 
   if (resv_meta_ptr->accounts_black_list) {
     for (auto const& account : resv_meta_ptr->accounts) {
@@ -1083,10 +1107,16 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
 
   *craned_info->mutable_res_total() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_total);
+  craned_info->mutable_res_total()->set_cpu_count(
+      ConvertCpuCountForClient(craned_meta.res_total.GetCpuSet().cpu_count));
   *craned_info->mutable_res_avail() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_avail);
+  craned_info->mutable_res_avail()->set_cpu_count(
+      ConvertCpuCountForClient(craned_meta.res_avail.GetCpuSet().cpu_count));
   *craned_info->mutable_res_alloc() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_in_use);
+  craned_info->mutable_res_alloc()->set_cpu_count(
+      ConvertCpuCountForClient(craned_meta.res_in_use.GetCpuSet().cpu_count));
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
   craned_info->set_craned_version(craned_meta.remote_meta.craned_version);

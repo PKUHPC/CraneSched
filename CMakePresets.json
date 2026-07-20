@@ -12,6 +12,7 @@
                 "ENABLE_BERKELEY_DB": "OFF",
                 "CRANE_FULL_DYNAMIC": "OFF",
                 "CRANE_USE_GITEE_SOURCE": "OFF",
+                "CRANE_ENABLE_TRACING": "ON",
                 "CRANE_ENABLE_BPF": "ON"
             }
         },
@@ -39,6 +40,7 @@
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_MIN_LOG_LEVEL": "TRACE",
                 "CRANE_NATIVE_ARCH_OPT": "OFF",
+                "CRANE_ENABLE_TRACING": "ON",
                 "CRANE_ENABLE_BPF": "ON"
             }
         },
@@ -52,6 +54,20 @@
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_NATIVE_ARCH_OPT": "OFF",
                 "CRANE_ENABLE_BPF": "ON"
+            }
+        },
+        {
+            "name": "release-tracing",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/cmake-build-release-tracing",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "ENABLE_UNQLITE": "ON",
+                "ENABLE_BERKELEY_DB": "OFF",
+                "CRANE_FULL_DYNAMIC": "OFF",
+                "CRANE_USE_GITEE_SOURCE": "OFF",
+                "CRANE_ENABLE_TRACING": "ON"
             }
         }
     ],
@@ -85,6 +101,11 @@
             "name": "ci-release",
             "inherits": "_base",
             "configurePreset": "ci-release"
+        },
+        {
+            "name": "release-tracing",
+            "inherits": "_base",
+            "configurePreset": "release-tracing"
         }
     ]
 }

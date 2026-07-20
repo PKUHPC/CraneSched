@@ -18,8 +18,11 @@
 
 #include "CranedKeeper.h"
 
+#include <chrono>
+
 #include "JobScheduler.h"
 #include "Node/CranedMetaContainer.h"
+#include "crane/TraceConfigProto.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -47,6 +50,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   crane::grpc::ConfigureCranedRequest request;
   request.set_ok(true);
   *request.mutable_token() = token;
+  crane::FillRuntimeTraceConfigProto(request.mutable_trace_config());
 
   g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
 
@@ -65,6 +69,32 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
     absl::MutexLock lock(&m_lock_);
     m_token_.reset();
   }
+}
+
+CraneErrCode CranedStub::UpdateTraceConfig(
+    const crane::grpc::RuntimeTraceConfig &trace_config) {
+  ClientContext context;
+  crane::grpc::UpdateTraceConfigRequest request;
+  crane::grpc::UpdateTraceConfigReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  *request.mutable_config() = trace_config;
+
+  auto status = m_stub_->UpdateTraceConfig(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_WARN(
+        "UpdateTraceConfig RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (!reply.ok()) {
+    CRANE_WARN("UpdateTraceConfig RPC for Node {} failed: {}", m_craned_id_,
+               reply.reason());
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+  UpdateLastActiveTime();
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode CranedStub::TerminateSteps(
@@ -110,19 +140,48 @@ CraneErrCode CranedStub::AllocJobs(
   AllocJobsReply reply;
 
   ClientContext context;
+  const auto timeout_sec =
+      g_config.CtldConf.SchedulerAllocJobsRpcTimeoutSeconds;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(timeout_sec));
 
   for (auto &&job : jobs) {
     *request.add_jobs() = job;
   }
 
+  const job_id_t first_job_id = jobs.empty() ? 0 : jobs.front().job_id();
+  const job_id_t last_job_id = jobs.empty() ? 0 : jobs.back().job_id();
+  const auto rpc_begin = std::chrono::steady_clock::now();
   status = m_stub_->AllocJobs(&context, request, &reply);
+  const auto rpc_end = std::chrono::steady_clock::now();
+  const auto elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(rpc_end - rpc_begin)
+          .count();
   if (!status.ok()) {
-    CRANE_ERROR("AllocJobs RPC for Node {} returned with status not ok: {}",
-                m_craned_id_, status.error_message());
+    CRANE_ERROR(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code={} "
+        "error_message={}",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms, static_cast<int>(status.error_code()),
+        status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (elapsed_ms > 1000) {
+    CRANE_WARN(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
+  } else {
+    CRANE_DEBUG(
+        "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
   }
   UpdateLastActiveTime();
 
@@ -133,22 +192,42 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
   using crane::grpc::FreeJobsReply;
   using crane::grpc::FreeJobsRequest;
 
+  auto begin_time = std::chrono::steady_clock::now();
   Status status;
   FreeJobsRequest request;
   FreeJobsReply reply;
 
+  constexpr int64_t timeout_sec = kCtldRpcTimeoutSeconds;
+  job_id_t first_job_id = jobs.empty() ? 0 : jobs.front();
+  job_id_t last_job_id = jobs.empty() ? 0 : jobs.back();
+
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(timeout_sec));
 
   request.mutable_job_id_list()->Assign(jobs.begin(), jobs.end());
 
   status = m_stub_->FreeJobs(&context, request, &reply);
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin_time)
+                        .count();
   if (!status.ok()) {
-    CRANE_DEBUG("FreeJobs gRPC for Node {} returned with status not ok: {}",
-                m_craned_id_, status.error_message());
+    CRANE_WARN(
+        "FreeJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code={} "
+        "error_message={}",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms, static_cast<int>(status.error_code()),
+        status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
+  } else {
+    CRANE_DEBUG(
+        "FreeJobsClientDiag craned_id={} job_count={} first_job_id={} "
+        "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
+        "error_message=",
+        m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
+        elapsed_ms);
   }
   UpdateLastActiveTime();
 
@@ -177,7 +256,8 @@ CraneErrCode CranedStub::AllocSteps(
 
 CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>>
 CranedStub::ExecuteSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps,
+    const std::unordered_map<job_id_t, std::string> &traceparents) {
   using crane::grpc::ExecuteStepsReply;
   using crane::grpc::ExecuteStepsRequest;
   ExecuteStepsRequest request;
@@ -191,6 +271,12 @@ CranedStub::ExecuteSteps(
   for (const auto &[job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
+  }
+
+  // Pass traceparents for cross-process trace correlation
+  auto &tp_map = *request.mutable_job_traceparents();
+  for (const auto &[job_id, tp] : traceparents) {
+    tp_map[job_id] = tp;
   }
 
   auto status = m_stub_->ExecuteSteps(&context, request, &reply);

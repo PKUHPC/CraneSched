@@ -1,12 +1,12 @@
-name: Build, Upload and Test
+name: CraneTestKit K3s CI
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # UTC 22:00 = CST 06:00 (next day)
+    - cron: "0 22 * * *"
   push:
     branches:
       - master
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
@@ -14,509 +14,420 @@ on:
       - ready_for_review
     branches:
       - master
-      - release/*
     paths:
+      - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - '.github/ci/**'
       - 'dependencies/**'
       - 'CMakeModule/**'
       - 'protos/**'
       - 'src/**'
       - 'test/**'
+      - 'etc/**'
       - 'CMakeLists.txt'
+      - 'CMakePresets.json'
       - 'VERSION'
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: 'Backend ref to use (branch name, tag, or commit SHA)'
+        description: Backend ref to resolve to an exact commit
         required: false
-        default: 'master'
+        default: master
       frontend_ref:
-        description: 'FrontEnd ref to use (branch name, tag, or commit SHA)'
+        description: FrontEnd ref to resolve to an exact commit
         required: false
-        default: 'master'
-      cache_buster:
-        description: 'Optional cache buster to force rebuild (any non-empty string)'
-        required: false
-        default: ''
+        default: master
+
+permissions: {}
 
 concurrency:
   group: >-
-    ${{ github.event_name == 'pull_request'
-        && format('pr-{0}', github.event.pull_request.number)
-        || github.event_name == 'workflow_dispatch'
-        && format('manual-{0}-{1}', inputs.backend_ref,inputs.frontend_ref)
-        || format('{0}-{1}', github.event_name, github.ref)}}
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request_target'
+      && format('pr-{0}', github.event.pull_request.number)
+      || github.event_name == 'workflow_dispatch'
+      && format('manual-{0}', github.run_id)
+      || github.ref
+    }}
   cancel-in-progress: true
 
-env:
-  # Runner working directory — contains the AutoTest repo and cache
-  RUNNER_DIR: /opt/AutoTest
-  # AutoTest repo (subdirectory of RUNNER_DIR)
-  AUTOTEST_REPO: /opt/AutoTest/CraneSched-AutoTest
-
-  # Cache buster for forcing rebuilds on workflow_dispatch
-  CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
-
-  # CI image tag (digest resolved at runtime)
-  CI_IMAGE_TAG: ghcr.io/nativu5/cranedev:ci
-
 jobs:
-
-  prepare:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+  authorize:
+    name: Authorize trusted test dispatch
+    if: github.event_name != 'pull_request_target' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
-      backend_ref: ${{ steps.set_ref.outputs.backend_ref }}
-      frontend_ref: ${{ steps.set_ref.outputs.frontend_ref }}
-    defaults:
-      run:
-        shell: bash -leo pipefail {0}
+      authorized: ${{ steps.authorize.outputs.authorized }}
+      backend_sha: ${{ steps.authorize.outputs.backend_sha }}
+      frontend_ref: ${{ steps.authorize.outputs.frontend_ref }}
+      frontend_sha: ${{ steps.authorize.outputs.frontend_sha }}
+      workflow_sha: ${{ steps.authorize.outputs.workflow_sha }}
     steps:
-      - name: Decide backend and frontend refs
-        id: set_ref
-        run: |
-          set -euo pipefail
-          DEFAULT_BRANCH="master"
-          
-          # Determine backend ref
-          BACKEND_REF=""
-          if [ -n "${{ github.event.inputs.backend_ref || '' }}" ]; then
-            BACKEND_REF="${{ github.event.inputs.backend_ref }}"
-            echo "Using backend ref: $BACKEND_REF"
-          fi
-          # If empty, actions/checkout will use the default ref
-          
-          # Determine frontend ref
-          FRONTEND_REF="$DEFAULT_BRANCH"
-          if [ -n "${{ github.event.inputs.frontend_ref || '' }}" ]; then
-            FRONTEND_REF="${{ github.event.inputs.frontend_ref }}"
-            echo "Using frontend ref: $FRONTEND_REF"
-          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            CANDIDATE="${GITHUB_HEAD_REF}"
-            echo "Checking if FrontEnd has branch: $CANDIDATE"
-            if git ls-remote --exit-code --heads https://github.com/PKUHPC/CraneSched-FrontEnd.git "$CANDIDATE"; then
-              FRONTEND_REF="$CANDIDATE"
-              echo "Found matching FrontEnd branch: $FRONTEND_REF"
-            fi
-          fi
-          
-          echo "backend_ref=$BACKEND_REF" >> $GITHUB_OUTPUT
-          echo "frontend_ref=$FRONTEND_REF" >> $GITHUB_OUTPUT
-          echo "Backend ref: $BACKEND_REF (empty means default)"
-          echo "Frontend ref: $FRONTEND_REF"
-
-  build:
-    needs: prepare
-    runs-on: [ "self-hosted", "CraneSched" ]
-
-    env:
-      BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
-      FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
-    defaults:
-      run:
-        shell: bash -leo pipefail {0}
-
-    outputs:
-      output_bundle_artifact: build-output
-      output_meta_artifact: build-meta
-      key_sha256: ${{ env.KEY_SHA256 }}
-
-    steps:
-      # Checkout backend repository
-      - name: Checkout backend
-        uses: actions/checkout@v5
+      - name: Checkout trusted authorization policy
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          path: CraneSched
-          ref: ${{ env.BACKEND_REF || github.ref }}
-          clean: false
+          ref: ${{ github.sha }}
+          path: trusted-ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
 
-      # Checkout frontend repository at unified ref
-      - name: Checkout frontend
-        uses: actions/checkout@v5
-        with:
-          repository: PKUHPC/CraneSched-FrontEnd
-          path: CraneSched-FrontEnd
-          ref: ${{ env.FRONTEND_REF }}
-          clean: false
-
-      # Pull latest AutoTest scripts and set up derived paths
-      - name: Update AutoTest repo
-        run: |
-          git -C "$AUTOTEST_REPO" pull --ff-only origin master || echo "WARN: AutoTest pull failed, using existing version"
-          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
-
-      # Resolve CI image digest (kept for metadata/fingerprint; not pinning run)
-      - name: Resolve CI image digest
-        id: imagedigest
-        run: |
-          set -euo pipefail
-          IMG="${CI_IMAGE_TAG}"
-
-          resolve_with_skopeo() {
-            command -v skopeo >/dev/null 2>&1 || return 1
-            DIGEST=$(skopeo inspect "docker://${IMG}" | jq -r '.Digest' 2>/dev/null) || return 1
-            [ -n "${DIGEST}" ] || return 1
-            echo "${DIGEST}"
-          }
-
-          resolve_with_manifest() {
-            command -v podman >/dev/null 2>&1 || return 1
-            RAW=$(podman manifest inspect "${IMG}" 2>/dev/null) || return 1
-            if echo "${RAW}" | jq -e '.manifests' >/dev/null 2>&1; then
-              ARCH=$(uname -m)
-              OS=$(uname -s | awk '{print tolower($0)}')
-              [ "$ARCH" = "x86_64" ] && ARCH="amd64"
-              DIGEST=$(echo "${RAW}" | jq -r --arg arch "$ARCH" --arg os "$OS" \
-                '.manifests[] | select(.platform.architecture==$arch and .platform.os==$os) | .digest' | head -n1)
-              [ -z "${DIGEST}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.manifests[0].digest')
-            fi
-            [ -z "${DIGEST:-}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.config.digest' 2>/dev/null || true)
-            [ -n "${DIGEST:-}" ] && [ "${DIGEST}" != "null" ] || return 1
-            echo "${DIGEST}"
-          }
-
-          resolve_with_pull() {
-            command -v podman >/dev/null 2>&1 || return 1
-            podman pull "${IMG}" >/dev/null
-            podman image inspect "${IMG}" --format '{{.Digest}}'
-          }
-
-          DIGEST="$(resolve_with_skopeo || true)"
-          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_manifest || true)"
-          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_pull || true)"
-          [ -z "$DIGEST" ] && { echo "ERROR: failed to resolve digest for ${IMG}" >&2; exit 1; }
-
-          echo "CI_IMAGE_DIGEST=${DIGEST}" | tee -a "$GITHUB_ENV"
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-
-      # Compute fingerprint and its sha256 key
-      - name: Compute fingerprint
-        id: fp
-        run: |
-          set -euo pipefail
-          CRANE_SHA=$(git -C CraneSched rev-parse HEAD)
-          FE_SHA=$(git -C CraneSched-FrontEnd rev-parse HEAD)
-          FE_REF="${FRONTEND_REF}"
-          CI_DIGEST="${CI_IMAGE_DIGEST}"
-          FINGERPRINT="${CRANE_SHA}-${FE_REF}-${FE_SHA}-${CI_DIGEST}-${CACHE_BUSTER}"
-
-          KEY_SHA256=$(printf '%s' "$FINGERPRINT" | sha256sum | awk '{print $1}')
-          CACHE_TGZ="${BUILD_CACHE_DIR}/${KEY_SHA256}.tar.gz"
-          CACHE_META="${BUILD_CACHE_DIR}/${KEY_SHA256}.meta.json"
-
-          echo "CRANE_SHA=${CRANE_SHA}" >> "$GITHUB_ENV"
-          echo "FE_SHA=${FE_SHA}"       >> "$GITHUB_ENV"
-          echo "FE_REF=${FE_REF}"       >> "$GITHUB_ENV"
-          echo "FINGERPRINT=${FINGERPRINT}" >> "$GITHUB_ENV"
-          echo "KEY_SHA256=${KEY_SHA256}"   >> "$GITHUB_ENV"
-          echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
-          echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
-
-      # Prepare workspace & local cache dir
-      - name: Prepare workspace & local cache
-        run: |
-          set -euo pipefail
-          mkdir -p "${BUILD_CACHE_DIR}" output log
-
-      # Local cache lookup with checksum verification
-      - name: Local cache lookup
-        id: local_cache
-        run: |
-          set -euo pipefail
-          HIT=false
-          if [ -f "${CACHE_TGZ}" ] && [ -f "${CACHE_META}" ]; then
-            echo "Found local cache files:"
-            ls -lh "${CACHE_TGZ}" "${CACHE_META}"
-            EXPECT_SHA=$(jq -r '.sha256 // empty' "${CACHE_META}" || true)
-            if [ -n "${EXPECT_SHA}" ]; then
-              ACTUAL_SHA=$(sha256sum "${CACHE_TGZ}" | awk '{print $1}')
-              if [ "${EXPECT_SHA}" = "${ACTUAL_SHA}" ]; then
-                echo "Local cache checksum OK."
-                rm -rf output/*; mkdir -p output
-                tar -xzf "${CACHE_TGZ}" -C output
-                HIT=true
-              else
-                echo "WARN: checksum mismatch, ignoring local cache."
-              fi
-            else
-              echo "WARN: missing sha256 in meta.json, ignoring local cache."
-            fi
-          else
-            echo "Local cache NOT found."
-          fi
-          echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
-          echo "LOCAL_CACHE_HIT=${HIT}" >> "$GITHUB_ENV"
-
-      # Pull CI Image only if local cache missed
-      - name: Pull CI Image (only on miss)
-        if: steps.local_cache.outputs.hit != 'true'
-        run: |
-          podman pull "${CI_IMAGE_TAG}"
-
-      # Build in container only if local cache missed
-      - name: Build in Container (only on miss)
-        if: steps.local_cache.outputs.hit != 'true'
-        run: |
-          podman run --rm --name ci-build \
-              -v ./CraneSched:/Workspace/CraneSched \
-              -v ./CraneSched-FrontEnd:/Workspace/CraneSched-FrontEnd \
-              -v ./output:/Workspace/output \
-              -v "${AUTOTEST_REPO}/docker/scripts":/Workspace/scripts \
-              -v ccache:/root/.cache/ccache \
-              -v gomod:/root/go/pkg/mod \
-              -v gobuild:/root/.cache/go-build \
-              -e CCACHE_DIR=/root/.cache/ccache \
-              -e CCACHE_MAXSIZE=5G \
-              "${CI_IMAGE_TAG}" /bin/bash --login scripts/build-crane.sh ci-debug
-
-      # Validate non-empty output
-      - name: Validate non-empty output
-        run: |
-          if ! find output -type f -print -quit | grep -q .; then
-            echo "ERROR: output/ is empty; failing early." >&2
-            ls -la output || true
-            exit 1
-          fi
-
-      # Create bundle tar.gz
-      - name: Create bundle (tar.gz)
-        run: |
-          rm -f build-output.tar.gz
-          tar -czf build-output.tar.gz --exclude='*debug*' --exclude='*.deb' -C output .
-
-      # Generate meta.json
-      - name: Generate meta.json
-        run: |
-          set -euo pipefail
-          TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          SIZE_BYTES=$(stat -c %s build-output.tar.gz)
-          SHA256=$(sha256sum build-output.tar.gz | awk '{print $1}')
-          RUNNER_HOST="$(hostname)"
-          RUNNER_UNAME="$(uname -srmo)"
-
-          jq -n \
-            --arg fingerprint "${FINGERPRINT}" \
-            --arg key_sha256 "${KEY_SHA256}" \
-            --arg created_utc "${TS}" \
-            --arg github_run "${RUN_URL}" \
-            --arg backend_sha "${CRANE_SHA}" \
-            --arg frontend_ref "${FE_REF}" \
-            --arg frontend_sha "${FE_SHA}" \
-            --arg ci_image_tag "${CI_IMAGE_TAG}" \
-            --arg ci_image_digest "${CI_IMAGE_DIGEST}" \
-            --arg cache_buster "${CACHE_BUSTER}" \
-            --arg sha256 "${SHA256}" \
-            --arg runner_host "${RUNNER_HOST}" \
-            --arg runner_uname "${RUNNER_UNAME}" \
-            --argjson size_bytes "${SIZE_BYTES}" \
-            '{
-              fingerprint: $fingerprint,
-              key_sha256: $key_sha256,
-              created_utc: $created_utc,
-              github_run: $github_run,
-              backend_sha: $backend_sha,
-              frontend_ref: $frontend_ref,
-              frontend_sha: $frontend_sha,
-              ci_image_tag: $ci_image_tag,
-              ci_image_digest: $ci_image_digest,
-              cache_buster: $cache_buster,
-              size_bytes: $size_bytes,
-              sha256: $sha256,
-              runner_host: $runner_host,
-              runner_uname: $runner_uname
-            }' > meta.json
-
-          cp -f meta.json output/meta.json
-
-      # Save to local cache only when built (miss case)
-      - name: Save to local cache (only on miss)
-        if: steps.local_cache.outputs.hit != 'true'
-        run: |
-          set -euo pipefail
-          TMP_DIR="${BUILD_CACHE_DIR}/${KEY_SHA256}.tmp"
-          mkdir -p "${TMP_DIR}"
-          cp -f build-output.tar.gz "${TMP_DIR}/"
-          cp -f meta.json "${TMP_DIR}/${KEY_SHA256}.meta.json"
-          # Atomic publish
-          rm -f "${CACHE_TGZ}" "${CACHE_META}" || true
-          mv -f "${TMP_DIR}/build-output.tar.gz" "${CACHE_TGZ}"
-          mv -f "${TMP_DIR}/${KEY_SHA256}.meta.json" "${CACHE_META}"
-          rmdir "${TMP_DIR}" || true
-          echo "Local cache stored: ${CACHE_TGZ}"
-
-      # Upload large bundle artifact (note: artifact name != file name)
-      - name: Upload bundle artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: build-output
-          path: build-output.tar.gz
-          retention-days: 3
-          if-no-files-found: error
-
-      # Upload lightweight meta artifact
-      - name: Upload meta artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: build-meta
-          path: meta.json
-          retention-days: 3
-          if-no-files-found: error
-      
-      # Upload RPM/DEB to private repository (only on miss)
-      - name: Upload to private repository (only on miss)
-        if: steps.local_cache.outputs.hit != 'true'
-        continue-on-error: true
+      - name: Authorize actor and resolve immutable revisions
+        id: authorize
         env:
-          NEXUS_URL: ${{ secrets.CCREPO_URL }}
-          NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          MANUAL_BACKEND_REF: ${{ inputs.backend_ref || 'master' }}
+          MANUAL_FRONTEND_REF: ${{ inputs.frontend_ref || 'master' }}
+          FRONTEND_REPOSITORY: PKUHPC/CraneSched-FrontEnd
+        run: /usr/bin/python3 -I trusted-ci/.github/ci/authorize.py
 
-          VERSION: >-
-            ${{ (github.event_name == 'pull_request')
-            && format('pr-{0}', github.event.number)
-            || github.ref_name }}
+      - name: Checkout candidate workflow routing
+        if: steps.authorize.outputs.authorized == 'true'
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ steps.authorize.outputs.backend_sha }}
+          path: candidate-routing
+          sparse-checkout: .github/workflows
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
 
-          RPM_REPO_NAME: "crane"
-          RPM_ARCH: "x86_64"
-          RPM_DISTRO: "8"
-
-          DEB_REPO_NAME: "cranedeb"
-          DEB_ARCH: "amd64"
-          DEB_DISTRO: "bullseye"
-
-          PACKAGE_DIR: ./output
-          CONTINUE_ON_ERROR: true
-
-          UPLOAD_MODE: "RPM"  # Currently only upload RPMs in this workflow
-
-        run: |
-          set -euo pipefail
-
-          # Check if secrets are available (they won't be in forked repositories)
-          if [ -z "${NEXUS_URL:-}" ] || [ -z "${NEXUS_USERNAME:-}" ] || [ -z "${NEXUS_PASSWORD:-}" ]; then
-            echo "Skipping upload: Repository secrets not available"
-            echo "This is expected for forked repositories and does not affect build/test results."
-            exit 0
-          fi
-
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          "${AUTOTEST_REPO}/github-runner/upload.sh"
-
+      - name: Validate repository runner routing
+        if: steps.authorize.outputs.authorized == 'true'
+        run: >-
+          /usr/bin/python3 -I
+          trusted-ci/.github/ci/validate-workflow-routing.py
+          --workflows-dir candidate-routing/.github/workflows
 
   test:
-    needs: [ prepare, build ]
-    runs-on: [ "self-hosted", "CraneSched" ]
+    name: test
+    needs: authorize
+    if: needs.authorize.outputs.authorized == 'true'
+    runs-on: [self-hosted, cranesystemtest]
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      PYTHONNOUSERSITE: "1"
+      PYTHONPATH: ""
+      CRANETESTKIT_RELEASE_DIR: ${{ vars.CRANETESTKIT_RELEASE_DIR }}
+      CRANETESTKIT_AUTOTEST_SHA: ${{ vars.CRANETESTKIT_AUTOTEST_SHA }}
+      CRANETESTKIT_EXECUTABLE_SHA256: ${{ vars.CRANETESTKIT_EXECUTABLE_SHA256 }}
+      CRANETESTKIT_PROFILE_PATH: ${{ vars.CRANETESTKIT_PROFILE_PATH }}
+      CRANETESTKIT_PROFILE_SHA256: ${{ vars.CRANETESTKIT_PROFILE_SHA256 }}
+      CRANETESTKIT_BUNDLE_ID: ${{ vars.CRANETESTKIT_BUNDLE_ID }}
+      CRANETESTKIT_IMAGE_RUNTIME_SHA256: ${{ vars.CRANETESTKIT_IMAGE_RUNTIME_SHA256 }}
+      EXPECTED_CRANE_TESTKIT_K3S_EXECUTABLE: ${{ vars.CRANETESTKIT_K3S_EXECUTABLE }}
+      EXPECTED_KUBECONFIG: ${{ vars.CRANETESTKIT_KUBECONFIG }}
+      CRANETESTKIT_NFS_ROOT: ${{ vars.CRANETESTKIT_NFS_ROOT }}
+      CRANETESTKIT_CACHE_ROOT: /opt/crane-testkit/cache
+      CRANETESTKIT_CCACHE_DIR: ${{ vars.CRANETESTKIT_CCACHE_DIR }}
+      CRANETESTKIT_FETCHCONTENT_DIR: ${{ vars.CRANETESTKIT_FETCHCONTENT_DIR }}
+      BACKEND_SHA: ${{ needs.authorize.outputs.backend_sha }}
+      FRONTEND_SHA: ${{ needs.authorize.outputs.frontend_sha }}
+      FRONTEND_REF: ${{ needs.authorize.outputs.frontend_ref }}
     defaults:
       run:
-        shell: bash -leo pipefail {0}
-    env:
-      TEST_FAILED: false
-      BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
-      FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
+        shell: bash
     steps:
-      # Prepare workspace for AutoTest
-      - name: Prepare workspace
-        run: |
-          echo "BUILD_CACHE_DIR=${RUNNER_DIR}/cache/builds" >> "$GITHUB_ENV"
-          mkdir -p output log
-
-      # Download lightweight meta first (small; fast)
-      - name: Download meta
-        uses: actions/download-artifact@v8
+      - name: Checkout trusted CI controls
+        id: trusted-controls
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          name: ${{ needs.build.outputs.output_meta_artifact }}   # build-meta
-          path: .
+          ref: ${{ needs.authorize.outputs.workflow_sha }}
+          path: trusted-ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
 
-      # Try local cache using key & sha from meta.json
-      - name: Try local cache first
-        id: local_first
+      - name: Validate trusted control revision
+        id: verify-controls
         run: |
           set -euo pipefail
-          META_FILE="./meta.json"
-          [ -f "$META_FILE" ] || { echo "meta.json missing"; exit 1; }
+          actual="$(git -C trusted-ci rev-parse HEAD)"
+          if [[ "$actual" != "${{ needs.authorize.outputs.workflow_sha }}" ]]; then
+            echo "Trusted CI control checkout resolved to an unexpected commit." >&2
+            exit 2
+          fi
 
-          KEY_SHA256=$(jq -r '.key_sha256' "$META_FILE")
-          BUNDLE_SHA=$(jq -r '.sha256' "$META_FILE")
-          echo "KEY_SHA256=$KEY_SHA256" | tee -a "$GITHUB_ENV"
-
-          CACHE_TGZ="${BUILD_CACHE_DIR}/${KEY_SHA256}.tar.gz"
-          CACHE_META="${BUILD_CACHE_DIR}/${KEY_SHA256}.meta.json"
-
-          HIT=false
-          if [ -f "$CACHE_TGZ" ] && [ -f "$CACHE_META" ]; then
-            EXPECT_SHA=$(jq -r '.sha256 // empty' "$CACHE_META")
-            if [ -n "$EXPECT_SHA" ]; then
-              ACTUAL_SHA=$(sha256sum "$CACHE_TGZ" | awk '{print $1}')
-              if [ "$EXPECT_SHA" = "$ACTUAL_SHA" ] && [ "$EXPECT_SHA" = "$BUNDLE_SHA" ]; then
-                echo "Local cache valid. Using ${CACHE_TGZ}"
-                rm -rf output/*; mkdir -p output
-                tar -xzf "$CACHE_TGZ" -C output
-                HIT=true
-              else
-                echo "WARN: local cache sha mismatch. meta=$EXPECT_SHA actual=$ACTUAL_SHA build=$BUNDLE_SHA"
-              fi
+      - name: Validate deployment variables
+        env:
+          EXPECTED_RUNNER_NAME: ${{ runner.name }}
+        run: |
+          set -euo pipefail
+          required=(
+            CRANETESTKIT_RELEASE_DIR
+            CRANETESTKIT_AUTOTEST_SHA
+            CRANETESTKIT_EXECUTABLE_SHA256
+            CRANETESTKIT_PROFILE_PATH
+            CRANETESTKIT_PROFILE_SHA256
+            CRANETESTKIT_BUNDLE_ID
+            CRANETESTKIT_IMAGE_RUNTIME_SHA256
+            ACTIONS_RUNNER_HOOK_JOB_STARTED
+            ACTIONS_RUNNER_HOOK_JOB_COMPLETED
+            CRANE_TESTKIT_HOOK_STATE_DIR
+            CRANE_TESTKIT_RELEASE_ROOT
+            CRANE_TESTKIT_PROFILE
+            CRANE_TESTKIT_K3S_EXECUTABLE
+            KUBECONFIG
+            EXPECTED_CRANE_TESTKIT_K3S_EXECUTABLE
+            EXPECTED_KUBECONFIG
+            CRANETESTKIT_NFS_ROOT
+            CRANETESTKIT_CACHE_ROOT
+            CRANETESTKIT_CCACHE_DIR
+            CRANETESTKIT_FETCHCONTENT_DIR
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required repository variable is empty: $name" >&2
+              exit 2
             fi
-          else
-            echo "Local cache NOT found for KEY=$KEY_SHA256"
+          done
+          if [[ "$(hostname -s)" != "cranesystemtest" ]]; then
+            echo "Privileged job was routed to an unexpected host." >&2
+            exit 2
           fi
+          if [[ "$EXPECTED_RUNNER_NAME" != "cranesystemtest" || "$(id -u)" != "0" ]]; then
+            echo "Privileged job was routed to an unexpected runner service identity." >&2
+            exit 2
+          fi
+          expected_started="${CRANETESTKIT_RELEASE_DIR}/github-runner/action_job_started.sh"
+          expected_completed="${CRANETESTKIT_RELEASE_DIR}/github-runner/action_job_completed.sh"
+          [[ "$ACTIONS_RUNNER_HOOK_JOB_STARTED" == "$expected_started" ]]
+          [[ "$ACTIONS_RUNNER_HOOK_JOB_COMPLETED" == "$expected_completed" ]]
+          [[ "$CRANE_TESTKIT_HOOK_STATE_DIR" == "/run/crane-testkit-runner" ]]
+          [[ "$CRANE_TESTKIT_RELEASE_ROOT" == "$CRANETESTKIT_RELEASE_DIR" ]]
+          [[ "$CRANE_TESTKIT_PROFILE" == "$CRANETESTKIT_PROFILE_PATH" ]]
+          [[ "$CRANE_TESTKIT_K3S_EXECUTABLE" == "$EXPECTED_CRANE_TESTKIT_K3S_EXECUTABLE" ]]
+          [[ "$KUBECONFIG" == "$EXPECTED_KUBECONFIG" ]]
+          [[ -x "$expected_started" && -x "$expected_completed" ]]
+          [[ -d "$CRANE_TESTKIT_HOOK_STATE_DIR" && ! -L "$CRANE_TESTKIT_HOOK_STATE_DIR" ]]
+          run_id="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          marker="${CRANE_TESTKIT_HOOK_STATE_DIR}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.run-id"
+          [[ -f "$marker" && ! -L "$marker" ]]
+          [[ "$(stat -c %u "$marker")" == "0" && "$(stat -c %a "$marker")" == "600" ]]
+          cmp -s <(printf '%s\n' "$run_id") "$marker"
+          while IFS= read -r variable_name; do
+            case "$variable_name" in
+              *CI_AGENT*|*FAILURE_ANALYSIS*)
+                echo "Legacy failure-analysis environment is still active." >&2
+                exit 2
+                ;;
+            esac
+          done < <(compgen -e)
 
-          echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
-
-      # Fallback: download large bundle artifact only if local cache missed
-      - name: Download bundle (fallback)
-        if: steps.local_first.outputs.hit != 'true'
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build.outputs.output_bundle_artifact }}  # build-output
-          path: .
-
-      # Fallback: extract bundle from artifact directory
-      - name: Extract bundle (fallback)
-        if: steps.local_first.outputs.hit != 'true'
+      - name: Validate CraneTestKit release and Kubernetes boundary
         run: |
           set -euo pipefail
-          rm -rf output/*; mkdir -p output
-          tar -xzf build-output.tar.gz -C output
+          runtime_manifest="${CRANETESTKIT_NFS_ROOT}/images/${CRANETESTKIT_BUNDLE_ID}/runtime.json"
+          /usr/bin/python3 -I trusted-ci/.github/ci/validate-cranetestkit-runner.py \
+            --release "$CRANETESTKIT_RELEASE_DIR" \
+            --autotest-sha "$CRANETESTKIT_AUTOTEST_SHA" \
+            --executable-sha256 "$CRANETESTKIT_EXECUTABLE_SHA256" \
+            --profile "$CRANETESTKIT_PROFILE_PATH" \
+            --profile-sha256 "$CRANETESTKIT_PROFILE_SHA256" \
+            --bundle-id "$CRANETESTKIT_BUNDLE_ID" \
+            --runtime-manifest "$runtime_manifest" \
+            --runtime-sha256 "$CRANETESTKIT_IMAGE_RUNTIME_SHA256" \
+            --k3s "$CRANE_TESTKIT_K3S_EXECUTABLE" \
+            --kubeconfig "$KUBECONFIG" \
+            --nfs-root "$CRANETESTKIT_NFS_ROOT"
+          {
+            echo "CRANETESTKIT_EXECUTABLE=${CRANETESTKIT_RELEASE_DIR}/.venv/bin/crane_testkit"
+            echo "CRANETESTKIT_IMAGE_RUNTIME=${runtime_manifest}"
+            echo "CRANETESTKIT_RUN_ID=gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            echo "CRANETESTKIT_RUN_ROOT=${CRANETESTKIT_NFS_ROOT}/runs/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_ENV"
 
-      # Run AutoTest
-      - name: Run AutoTest
-        continue-on-error: true
-        run: |
-          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]' || echo "testnetwork")
-          if [ -z "$NETWORK_ID" ]; then
-            echo "WARN: mongodb container network not found; falling back to default podman network"
-          fi
-          podman run -d --rm --name ci-test \
-            --privileged \
-            --systemd true \
-            -v /lib/modules:/lib/modules:ro \
-            -v "${AUTOTEST_REPO}/docker/scripts":/CraneSched-AutoTest/docker/scripts \
-            -v ./output:/CraneSched-AutoTest/output \
-            -v ./log:/CraneSched-AutoTest/log \
-            -v docker_crane-tls:/etc/crane/tls:ro \
-            $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
-            localhost/autotest
-          podman exec ci-test /bin/bash --login docker/scripts/run-test.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
-          podman stop ci-test || true
-
-      # Upload AutoTest results
-      - name: Upload AutoTest Results
-        uses: actions/upload-artifact@v6
+      - name: Checkout exact Backend revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          name: result.json
-          path: output/result.json
+          ref: ${{ needs.authorize.outputs.backend_sha }}
+          path: sources/CraneSched
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+
+      - name: Checkout exact FrontEnd revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: PKUHPC/CraneSched-FrontEnd
+          ref: ${{ needs.authorize.outputs.frontend_sha }}
+          path: sources/CraneSched-FrontEnd
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+
+      - name: Verify source revisions and local build cache
+        run: |
+          set -euo pipefail
+          backend_actual="$(git -C sources/CraneSched rev-parse HEAD)"
+          frontend_actual="$(git -C sources/CraneSched-FrontEnd rev-parse HEAD)"
+          [[ "$backend_actual" == "$BACKEND_SHA" ]]
+          [[ "$frontend_actual" == "$FRONTEND_SHA" ]]
+          [[ -z "$(git -C sources/CraneSched status --porcelain=v1 --untracked-files=all)" ]]
+          [[ -z "$(git -C sources/CraneSched-FrontEnd status --porcelain=v1 --untracked-files=all)" ]]
+          mkdir -p "$CRANETESTKIT_CCACHE_DIR" "$CRANETESTKIT_FETCHCONTENT_DIR"
+          cache_root_real="$(realpath "$CRANETESTKIT_CACHE_ROOT")"
+          ccache_real="$(realpath "$CRANETESTKIT_CCACHE_DIR")"
+          fetchcontent_real="$(realpath "$CRANETESTKIT_FETCHCONTENT_DIR")"
+          nfs_real="$(realpath "$CRANETESTKIT_NFS_ROOT")"
+          [[ "$cache_root_real" == "/opt/crane-testkit/cache" ]]
+          [[ "$ccache_real" == "$cache_root_real/ccache" ]]
+          [[ "$fetchcontent_real" == "$cache_root_real/fetchcontent" ]]
+          [[ -f "$cache_root_real/.maintenance.lock" && ! -L "$cache_root_real/.maintenance.lock" ]]
+          for cache_path in "$ccache_real" "$fetchcontent_real"; do
+            if [[ "$cache_path" != "$cache_root_real/"* ]]; then
+              echo "Build dependency cache is outside the coordinated cache root." >&2
+              exit 2
+            fi
+            if [[ "$cache_path" == "$nfs_real" || "$cache_path" == "$nfs_real/"* ]]; then
+              echo "Build dependency caches must stay on the cranesystemtest local SSD." >&2
+              exit 2
+            fi
+            case "$(stat -f -c %T "$cache_path")" in
+              nfs*|fuse*)
+                echo "Build dependency cache is not on a local filesystem: $cache_path" >&2
+                exit 2
+                ;;
+            esac
+          done
+
+      - name: Build and publish exact packages
+        id: build
+        run: |
+          set -euo pipefail
+          build_output="$RUNNER_TEMP/crane-build-output"
+          build_log="$RUNNER_TEMP/crane-build.jsonl"
+          build_started_seconds=$SECONDS
+          mkdir -p "$build_output"
+          exec {maintenance_lock_fd}<"$CRANETESTKIT_CACHE_ROOT/.maintenance.lock"
+          /usr/bin/flock --shared "$maintenance_lock_fd"
+          set -o pipefail
+          "$CRANETESTKIT_EXECUTABLE" env build \
+            --backend "$GITHUB_WORKSPACE/sources/CraneSched" \
+            --frontend "$GITHUB_WORKSPACE/sources/CraneSched-FrontEnd" \
+            --output "$build_output" \
+            --preset ci-debug \
+            --ccache-dir "$CRANETESTKIT_CCACHE_DIR" \
+            --fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR" \
+            --publish-root "$CRANETESTKIT_NFS_ROOT" \
+            | tee "$build_log"
+          build_json="$(tail -n 1 "$build_log")"
+          build_manifest="$(jq -er '.manifest' <<<"$build_json")"
+          build_id="$(jq -er '.build_id' <<<"$build_json")"
+          cache_hit="$(
+            jq -er '
+              .cache_hit
+              | if type == "boolean" then tostring
+                else error("cache_hit must be a boolean")
+                end
+            ' <<<"$build_json"
+          )"
+          [[ "$build_manifest" == "$CRANETESTKIT_NFS_ROOT/builds/"*"/manifest.json" ]]
+          [[ -f "$build_manifest" && ! -L "$build_manifest" ]]
+          build_duration_seconds=$((SECONDS - build_started_seconds))
+          {
+            echo "build_manifest=$build_manifest"
+            echo "build_id=$build_id"
+            echo "cache_hit=$cache_hit"
+            echo "duration_seconds=$build_duration_seconds"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Execute sharded system tests
+        id: execute
+        env:
+          BUILD_MANIFEST: ${{ steps.build.outputs.build_manifest }}
+        run: |
+          set -uo pipefail
+          "$CRANETESTKIT_EXECUTABLE" system execute \
+            --profile "$CRANETESTKIT_PROFILE_PATH" \
+            --run-id "$CRANETESTKIT_RUN_ID" \
+            --config "${CRANETESTKIT_RELEASE_DIR}/config/config.yaml" \
+            --build-manifest "$BUILD_MANIFEST" \
+            --image-runtime "$CRANETESTKIT_IMAGE_RUNTIME"
+          exit_code=$?
+          if [[ "$exit_code" != 0 && "$exit_code" != 1 && "$exit_code" != 2 ]]; then
+            echo "CraneTestKit returned an unsupported exit code: $exit_code" >&2
+            exit_code=2
+          fi
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Collect sanitized CI artifacts
+        id: collect-artifacts
+        if: always() && steps.verify-controls.outcome == 'success'
+        env:
+          EXECUTE_EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
+          BUILD_CACHE_HIT: ${{ steps.build.outputs.cache_hit }}
+          BUILD_DURATION_SECONDS: ${{ steps.build.outputs.duration_seconds }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/crane-testkit-artifacts"
+          arguments=(
+            --run-root "${CRANETESTKIT_RUN_ROOT:-$CRANETESTKIT_NFS_ROOT/runs/gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+            --destination "$artifact_dir"
+            --run-id "${CRANETESTKIT_RUN_ID:-gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          )
+          if [[ "$EXECUTE_EXIT_CODE" != "0" ]]; then
+            arguments+=(--include-logs)
+          fi
+          if [[ "$EXECUTE_EXIT_CODE" =~ ^[012]$ ]]; then
+            arguments+=(--execute-exit-code "$EXECUTE_EXIT_CODE")
+          fi
+          if [[ "$BUILD_CACHE_HIT" == "true" || "$BUILD_CACHE_HIT" == "false" ]]; then
+            arguments+=(--build-cache-hit "$BUILD_CACHE_HIT")
+          fi
+          if [[ "$BUILD_DURATION_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            arguments+=(--build-duration-seconds "$BUILD_DURATION_SECONDS")
+          fi
+          /usr/bin/python3 -I trusted-ci/.github/ci/collect-cranetestkit-artifacts.py "${arguments[@]}"
+          check_exit_code="$(
+            jq -er '.check_exit_code | select(. == 0 or . == 1 or . == 2)' \
+              "$artifact_dir/artifact-manifest.json"
+          )"
+          {
+            echo "artifact_dir=$artifact_dir"
+            echo "exit_code=$check_exit_code"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish job summary
+        if: always() && steps.collect-artifacts.outcome == 'success'
+        run: cat "${{ steps.collect-artifacts.outputs.artifact_dir }}/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized run evidence
+        if: always() && steps.collect-artifacts.outcome == 'success'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: crane-testkit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.collect-artifacts.outputs.artifact_dir }}
           retention-days: 3
           if-no-files-found: error
+          include-hidden-files: false
 
-      # Fail the job if tests failed
-      - name: Alarm on test failure
-        if: env.TEST_FAILED == 'true'
-        run: exit 1
-
-      # Launch CI failure analysis agent on test failure
-      - name: Launch CI failure analysis agent
-        if: failure()
-        continue-on-error: true
+      - name: Enforce CraneTestKit exit contract
+        if: always()
+        env:
+          CHECK_EXIT_CODE: ${{ steps.collect-artifacts.outputs.exit_code }}
+          EXECUTE_EXIT_CODE: ${{ steps.execute.outputs.exit_code }}
         run: |
-          bash "${AUTOTEST_REPO}/github-runner/ci-agent-launcher.sh"
+          exit_code="${CHECK_EXIT_CODE:-$EXECUTE_EXIT_CODE}"
+          case "$exit_code" in
+            0) exit 0 ;;
+            1) echo "System tests completed with test failures." >&2; exit 1 ;;
+            2) echo "System tests ended with an infrastructure error." >&2; exit 2 ;;
+            *) echo "System tests did not produce a valid aggregate exit code." >&2; exit 2 ;;
+          esac
