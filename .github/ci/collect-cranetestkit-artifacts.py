@@ -62,6 +62,13 @@ REDACTIONS = (
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 UNSAFE_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 BIDI_CONTROLS = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _full_sha(value: str) -> str:
+    if FULL_SHA.fullmatch(value) is None:
+        raise argparse.ArgumentTypeError("revision must be a full lowercase commit SHA")
+    return value
 
 
 def _sha256(path: Path) -> str:
@@ -587,6 +594,9 @@ def _write_summary(
     build_cache_hit: str | None = None,
     build_duration_seconds: float | None = None,
     execute_exit_code: int | None = None,
+    routing_sha: str | None = None,
+    pr_base_sha: str | None = None,
+    pr_head_sha: str | None = None,
 ) -> int | None:
     result = _read_run_json(run_root, Path("result.json"))
     state = _read_run_json(run_root, Path("state.json"))
@@ -886,6 +896,13 @@ def _write_summary(
         ("Started", result.get("started_at", "unavailable")),
         ("Finished", result.get("finished_at", "unavailable")),
     ]
+    if routing_sha is not None:
+        provenance_rows.insert(4, ("Workflow routing SHA", routing_sha))
+    if pr_head_sha is not None:
+        provenance_rows[4:4] = [
+            ("PR base SHA", pr_base_sha or "unavailable"),
+            ("PR head SHA", pr_head_sha),
+        ]
     lines.extend(["<details>", "<summary>Provenance</summary>", ""])
     _append_table(lines, ("Field", "Value"), provenance_rows)
     lines.extend(["", "</details>", ""])
@@ -909,7 +926,12 @@ def main() -> int:
     parser.add_argument("--build-cache-hit", choices=("true", "false"))
     parser.add_argument("--build-duration-seconds", type=float)
     parser.add_argument("--execute-exit-code", type=int, choices=(0, 1, 2))
+    parser.add_argument("--routing-sha", type=_full_sha)
+    parser.add_argument("--pr-base-sha", type=_full_sha)
+    parser.add_argument("--pr-head-sha", type=_full_sha)
     args = parser.parse_args()
+    if (args.pr_base_sha is None) != (args.pr_head_sha is None):
+        parser.error("PR base and head SHAs must be provided together")
 
     destination = args.destination.absolute()
     if destination.is_symlink():
@@ -929,6 +951,9 @@ def main() -> int:
         build_cache_hit=args.build_cache_hit,
         build_duration_seconds=args.build_duration_seconds,
         execute_exit_code=args.execute_exit_code,
+        routing_sha=args.routing_sha,
+        pr_base_sha=args.pr_base_sha,
+        pr_head_sha=args.pr_head_sha,
     )
     include_failure_logs = args.include_logs or summary_exit_code != 0
     if run_root.exists() and not run_root.is_symlink() and run_root.is_dir():
@@ -1001,6 +1026,11 @@ def main() -> int:
         "check_exit_code": (
             summary_exit_code if summary_exit_code in {0, 1, 2} else 2
         ),
+        "revision_routing": {
+            "routing_sha": args.routing_sha,
+            "pr_base_sha": args.pr_base_sha,
+            "pr_head_sha": args.pr_head_sha,
+        },
         "files": entries,
     }
     (destination / "artifact-manifest.json").write_text(

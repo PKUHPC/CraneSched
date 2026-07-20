@@ -20,77 +20,139 @@ on:
       - 'CMakeLists.txt'
       - 'VERSION'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: clang-format-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   format:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Checkout pull request head
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Switch to current branch
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          echo "Switching to branch: ${GITHUB_HEAD_REF}"
-          git checkout "${GITHUB_HEAD_REF}"
-
-      - name: Set up Git identity
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
       - name: Install latest Clang-Format
         run: |
+          set -euo pipefail
           sudo apt-get install -y wget lsb-release
           sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           sudo bash /tmp/llvm.sh 20
           sudo apt update
           sudo apt-get install clang-format-20
 
-      - name: Run clang-format and apply changes
+      - name: Check clang-format and prepare patch
+        id: format
+        continue-on-error: true
+        shell: bash
         run: |
-          find src -type f \( -name "*.cpp" -o -name "*.h" \) | while read -r file; do
-            clang-format-20 -i --style=file "$file"
-          done
-          find protos -type f -name "*.proto" | while read -r file; do
-            clang-format-20 -i --style=file:.clang-format-proto "$file"
-          done
+          set -euo pipefail
 
-          if ! git diff --quiet; then
-            echo "FORMATED=true" >> $GITHUB_ENV
-          else
-            echo "No formatting changes were necessary."
+          mapfile -d '' -t cpp_files < <(
+            find src -type f \( -name '*.cpp' -o -name '*.h' \) -print0
+          )
+          mapfile -d '' -t proto_files < <(
+            find protos -type f -name '*.proto' -print0
+          )
+
+          cpp_check_status=0
+          proto_check_status=0
+          if ((${#cpp_files[@]})); then
+            if clang-format-20 --dry-run --Werror --style=file "${cpp_files[@]}"; then
+              cpp_check_status=0
+            else
+              cpp_check_status=$?
+            fi
+          fi
+          if ((${#proto_files[@]})); then
+            if clang-format-20 --dry-run --Werror --style=file:.clang-format-proto \
+              "${proto_files[@]}"; then
+              proto_check_status=0
+            else
+              proto_check_status=$?
+            fi
           fi
 
-      - name: Commit formatting changes
-        if: github.event.pull_request.head.repo.full_name == github.repository && env.FORMATED == 'true'
-        run: |
-          git add .
-          git commit -m "style: auto format with clang-format."
-          git push
-          echo "Commit format."
-
-      - name: Generate diff
-        if: env.FORMATED == 'true'
-        run: |
-          if ! git diff --quiet; then
-            git diff  > format.patch
-          else
-            echo "No formatting changes were necessary."
+          if ((cpp_check_status == 0 && proto_check_status == 0)); then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'All files are formatted.'
+            exit 0
           fi
 
-      - name: Upload diff
-        if: github.event.pull_request.head.repo.full_name != github.repository && env.FORMATED == 'true'
-        uses: actions/upload-artifact@v6
+          cpp_format_status=0
+          proto_format_status=0
+          if ((cpp_check_status != 0 && ${#cpp_files[@]})); then
+            if clang-format-20 -i --style=file "${cpp_files[@]}"; then
+              cpp_format_status=0
+            else
+              cpp_format_status=$?
+            fi
+          fi
+          if ((proto_check_status != 0 && ${#proto_files[@]})); then
+            if clang-format-20 -i --style=file:.clang-format-proto "${proto_files[@]}"; then
+              proto_format_status=0
+            else
+              proto_format_status=$?
+            fi
+          fi
+
+          if ((cpp_format_status != 0 || proto_format_status != 0)); then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format could not produce a formatting patch.'
+            exit 1
+          fi
+
+          if git diff --quiet -- src protos; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format reported an error without changing source files.'
+            exit 1
+          fi
+
+          git diff --binary -- src protos > format.patch
+          if [[ ! -s format.patch ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format produced an empty patch.'
+            exit 1
+          fi
+
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          {
+            echo '### Clang format check failed'
+            echo
+            echo 'The checkout was not modified remotely. Download `format-diff` and run:'
+            echo
+            echo '```bash'
+            echo 'git apply format.patch'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload format patch
+        if: always() && steps.format.outputs.changed == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: format-diff
           path: format.patch
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Alert on formated for forked repo
-        if: github.event.pull_request.head.repo.full_name != github.repository && env.FORMATED == 'true'
+      - name: Fail when formatting is required
+        if: always() && (steps.format.outputs.changed == 'true' || steps.format.outcome == 'failure')
+        env:
+          FORMAT_CHANGED: ${{ steps.format.outputs.changed }}
+          FORMAT_OUTCOME: ${{ steps.format.outcome }}
         run: |
-          echo "Please download the patch and apply to format your code."
+          if [[ "$FORMAT_CHANGED" == 'true' ]]; then
+            echo 'Formatting changes are required; see the format-diff artifact.'
+          else
+            echo "clang-format check failed before a patch could be prepared (outcome: $FORMAT_OUTCOME)."
+          fi
           exit 1

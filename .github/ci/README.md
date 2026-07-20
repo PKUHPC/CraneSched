@@ -3,7 +3,7 @@
 `.github/workflows/build.yaml` is the trusted dispatcher for the K3s system
 suite. Pull requests use `pull_request_target` only to authorize and resolve
 immutable revisions on a GitHub-hosted runner. The hosted job executes only
-trusted controls from `master`; after authorization, it checks out candidate
+trusted controls from `master`; after authorization, it checks out proposed-merge
 workflow files for static inspection but never executes candidate code. A
 privileged job is dispatched only when all of the following are true:
 
@@ -19,13 +19,19 @@ workflow in `PKUHPC/CraneSched` may request a repository runner. This is an
 accepted boundary of the deployment.
 
 The hosted authorization job applies a compensating routing guard before it
-dispatches `test`: after resolving the exact candidate Backend SHA, it checks
-that only `.github/workflows/build.yaml` contains the exact
+dispatches `test`. For a pull request, it resolves the exact PR head SHA for
+the build, then obtains GitHub's proposed merge commit only for this static
+routing check. The merge commit must have exactly the event's base and head
+commits as parents, in that order; a stale or conflicting snapshot fails
+closed. It checks that only `.github/workflows/build.yaml` contains the exact
 `cranesystemtest` token. The check runs trusted code from `master` and treats
-the candidate workflow files only as data. Protect `.github/workflows/**` and
-`.github/ci/**` through branch protection and required maintainer review
-because this static guard is an accidental-change check, not a GitHub-enforced
-workflow authorization boundary.
+the proposed workflow files only as data. The privileged job still builds and
+tests the PR head SHA, not the temporary merge commit. Protect
+`.github/workflows/**` and `.github/ci/**` through branch protection and
+required maintainer review because this static guard is an accidental-change
+check, not a GitHub-enforced workflow authorization boundary.
+The sanitized artifact manifest and summary retain the base, head, and routing
+SHAs so reviewers can distinguish tested source from the inspected merge tree.
 
 ## Repository variables
 
@@ -156,10 +162,17 @@ other service's label or environment.
 
 Only `build.yaml` may contain the exact Backend label. The hosted routing guard
 scans every `.yaml` and `.yml` file directly under `.github/workflows` at the
-authorized candidate SHA and fails closed on symlinked workflow files, a
+authorized proposed-merge SHA and fails closed on symlinked workflow files, a
 missing `build.yaml`, a missing Backend label, or any exact label occurrence in
-another workflow. Labels with longer names such as
+another workflow. The checkout also verifies the merge commit's HEAD and
+parent SHAs before scanning. Labels with longer names such as
 `cranesystemtest-autotest` are not Backend-label matches.
+
+The Clang Format check is intentionally read-only. It checks the exact PR head
+on a hosted runner, never pushes a formatting commit, and uploads a short-lived
+binary patch when formatting changes are required. Same-repository and fork
+pull requests have the same behavior; a contributor applies the patch and
+pushes a normal commit, which then triggers the normal PR events.
 
 This guard catches a candidate workflow that accidentally names the dedicated
 label, but it cannot prevent routing through a generic default self-hosted
