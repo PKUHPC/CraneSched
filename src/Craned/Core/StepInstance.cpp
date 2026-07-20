@@ -429,9 +429,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     signal(SIGABRT, SIG_DFL);
 
     if (setpgid(0, 0) == -1) {
-      constexpr char message[] =
-          "[Craned] Failed to isolate supervisor process group\n";
-      (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+      fmt::print(stderr,
+                 "[Step #{}.{}] Failed to isolate supervisor process group: {}\n",
+                 job_id, step_id, strerror(errno));
       _exit(1);
     }
 
