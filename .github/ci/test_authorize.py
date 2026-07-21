@@ -72,6 +72,7 @@ def _snapshot(**overrides) -> authorize.PullRequestSnapshot:
         "head_sha": BACKEND_SHA,
         "merge_commit_sha": MERGE_SHA,
         "mergeable": True,
+        "mergeable_state": "blocked",
     }
     values.update(overrides)
     return authorize.PullRequestSnapshot(**values)
@@ -128,6 +129,61 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["routing_sha"], MERGE_SHA)
         self.assertEqual(result["pr_merge_sha"], MERGE_SHA)
 
+    def test_stale_event_base_and_merge_hints_use_current_api_snapshot(self) -> None:
+        result = _authorize(
+            _context(pr_base_sha="e" * 40, pr_merge_sha="f" * 40)
+        )
+
+        self.assertEqual(result["backend_sha"], BACKEND_SHA)
+        self.assertEqual(result["routing_sha"], MERGE_SHA)
+        self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
+        self.assertEqual(result["pr_head_sha"], BACKEND_SHA)
+        self.assertEqual(result["pr_merge_sha"], MERGE_SHA)
+
+    def test_waits_for_api_base_to_converge_to_trusted_workflow(self) -> None:
+        snapshots = iter(
+            [
+                _snapshot(base_sha="e" * 40),
+                _snapshot(),
+                _snapshot(),
+            ]
+        )
+        delays: list[float] = []
+
+        result = authorize.authorize_dispatch(
+            _context(pr_base_sha="e" * 40, pr_merge_sha="f" * 40),
+            lambda _repo, _actor: {"permission": "admin"},
+            _resolver,
+            lambda _repo, _number: next(snapshots),
+            _merge_ref,
+            _commit_parents,
+            sleeper=delays.append,
+            retry_delays=(0.25,),
+        )
+
+        self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
+        self.assertEqual(result["routing_sha"], MERGE_SHA)
+        self.assertEqual(delays, [0.25])
+
+    def test_api_base_convergence_is_bounded(self) -> None:
+        calls = 0
+
+        def stale_base(_repository: str, _number: int):
+            nonlocal calls
+            calls += 1
+            return _snapshot(base_sha="e" * 40)
+
+        with self.assertRaisesRegex(
+            authorize.AuthorizationError, "base has not converged"
+        ):
+            _authorize(
+                _context(pr_base_sha="e" * 40, pr_merge_sha="f" * 40),
+                pull_request_lookup=stale_base,
+                retry_delays=(0.0, 0.0),
+            )
+
+        self.assertEqual(calls, 3)
+
     def test_waits_for_github_to_compute_mergeability(self) -> None:
         snapshots = iter(
             [
@@ -171,11 +227,12 @@ class AuthorizationPolicyTest(unittest.TestCase):
 
         self.assertEqual(calls, 3)
 
-    def test_event_base_must_match_trusted_workflow_revision(self) -> None:
-        with self.assertRaisesRegex(
-            authorize.AuthorizationError, "trusted workflow revision"
-        ):
-            _authorize(_context(pr_base_sha="e" * 40))
+    def test_event_base_and_merge_hints_must_be_full_shas(self) -> None:
+        for field in ("pr_base_sha", "pr_merge_sha"):
+            with self.subTest(field=field), self.assertRaisesRegex(
+                authorize.AuthorizationError, "full commit SHA"
+            ):
+                _authorize(_context(**{field: "invalid"}))
 
     def test_current_pr_snapshot_must_match_event(self) -> None:
         with self.assertRaisesRegex(authorize.AuthorizationError, "changed"):
@@ -192,10 +249,6 @@ class AuthorizationPolicyTest(unittest.TestCase):
                     mergeable=False, merge_commit_sha=""
                 )
             )
-
-    def test_event_merge_must_match_current_merge(self) -> None:
-        with self.assertRaisesRegex(authorize.AuthorizationError, "event proposed merge"):
-            _authorize(_context(pr_merge_sha="e" * 40))
 
     def test_merge_ref_must_match_current_merge(self) -> None:
         with self.assertRaisesRegex(authorize.AuthorizationError, "merge ref"):
@@ -221,6 +274,23 @@ class AuthorizationPolicyTest(unittest.TestCase):
             _authorize(
                 pull_request_lookup=lambda _repo, _number: next(snapshots)
             )
+
+    def test_second_snapshot_detects_base_drift(self) -> None:
+        snapshots = iter([_snapshot(), _snapshot(base_sha="e" * 40)])
+
+        with self.assertRaisesRegex(authorize.AuthorizationError, "base changed"):
+            _authorize(
+                pull_request_lookup=lambda _repo, _number: next(snapshots)
+            )
+
+    def test_mergeable_blocked_pr_is_authorized(self) -> None:
+        result = _authorize(
+            pull_request_lookup=lambda _repo, _number: _snapshot(
+                mergeable=True, mergeable_state="blocked"
+            )
+        )
+
+        self.assertEqual(result["routing_sha"], MERGE_SHA)
 
     def test_fork_is_rejected_before_permission_lookup(self) -> None:
         def unexpected_permission(_repo, _actor):
@@ -339,6 +409,15 @@ class GitHubApiTest(unittest.TestCase):
         ), self.assertRaisesRegex(authorize.AuthorizationError, "HTTP 422"):
             api.permission("PKUHPC/CraneSched", "maintainer")
 
+    def test_api_timeout_fails_closed(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        with mock.patch.object(
+            authorize.urllib.request,
+            "urlopen",
+            side_effect=TimeoutError,
+        ), self.assertRaisesRegex(authorize.AuthorizationError, "request failed"):
+            api.permission("PKUHPC/CraneSched", "maintainer")
+
     def test_pull_request_response_is_parsed_into_snapshot(self) -> None:
         api = authorize.GitHubApi("test-token")
         response = {
@@ -346,6 +425,7 @@ class GitHubApiTest(unittest.TestCase):
             "state": "open",
             "draft": False,
             "mergeable": True,
+            "mergeable_state": "blocked",
             "merge_commit_sha": MERGE_SHA,
             "base": {
                 "ref": "master",
@@ -371,6 +451,7 @@ class GitHubApiTest(unittest.TestCase):
             "state": "open",
             "draft": False,
             "mergeable": None,
+            "mergeable_state": "unknown",
             "merge_commit_sha": None,
             "base": {
                 "ref": "master",
@@ -388,6 +469,7 @@ class GitHubApiTest(unittest.TestCase):
             snapshot = api.pull_request("PKUHPC/CraneSched", 935)
 
         self.assertIsNone(snapshot.mergeable)
+        self.assertEqual(snapshot.mergeable_state, "unknown")
         self.assertEqual(snapshot.merge_commit_sha, "")
 
     def test_merge_ref_and_commit_parents_are_parsed(self) -> None:

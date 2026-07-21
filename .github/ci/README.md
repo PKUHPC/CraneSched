@@ -23,7 +23,14 @@ dispatches `test`. For a pull request, it resolves the exact PR head SHA for
 the build, then obtains GitHub's proposed merge commit only for this static
 routing check. The merge commit must have exactly the event's base and head
 commits as parents, in that order; a stale or conflicting snapshot fails
-closed. It checks that only `.github/workflows/build.yaml` contains the exact
+closed. GitHub can retain stale base and proposed-merge SHAs in a `reopened`
+event payload after `master` advances, so those payload values are syntax
+checked but are not authorization inputs. The trusted base is the
+`pull_request_target` workflow SHA; the current PR API base and the proposed
+merge's first parent must both equal it. The current API head and second parent
+must equal the event head, while the API merge SHA and merge ref must agree.
+These current values are checked twice with bounded retries before dispatch.
+It checks that only `.github/workflows/build.yaml` contains the exact
 `cranesystemtest` token. The check runs trusted code from `master` and treats
 the proposed workflow files only as data. The privileged job still builds and
 tests the PR head SHA, not the temporary merge commit. Protect
