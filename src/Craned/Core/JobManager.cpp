@@ -887,7 +887,7 @@ void JobManager::RecordUnexpectedSupervisorExit_(pid_t pid, int status) {
     return;
   }
 
-  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+  auto job_map_ptr = m_job_map_.GetMapSharedPtr();
   for (auto& [job_id, job] : *job_map_ptr) {
     auto* job_ptr = job.RawPtr();
     absl::MutexLock step_lock(job_ptr->step_map_mtx.get());
@@ -1207,25 +1207,32 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
-  std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
-  int status;
-  pid_t pid;
-  while (true) {
-    pid = waitpid(-1, &status, WNOHANG
-                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+  std::vector<std::pair<pid_t, int>> unexpected_exits;
+  {
+    std::unique_lock<std::mutex> lock(m_fork_reap_mu_);
+    int status;
+    pid_t pid;
+    while (true) {
+      pid = waitpid(-1, &status, WNOHANG
+                    /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
-    if (pid > 0) {
-      if (!m_exit_watcher_.TryDeliver(pid, status)) {
-        RecordUnexpectedSupervisorExit_(pid, status);
+      if (pid > 0) {
+        if (!m_exit_watcher_.TryDeliver(pid, status)) {
+          unexpected_exits.emplace_back(pid, status);
+        }
+      } else if (pid == 0) {
+        // There's no child that needs reaping.
+        break;
+      } else if (pid < 0) {
+        if (errno != ECHILD)
+          CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+        break;
       }
-    } else if (pid == 0) {
-      // There's no child that needs reaping.
-      break;
-    } else if (pid < 0) {
-      if (errno != ECHILD)
-        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
-      break;
     }
+  }
+
+  for (const auto& [pid, status] : unexpected_exits) {
+    RecordUnexpectedSupervisorExit_(pid, status);
   }
 }
 
