@@ -62,6 +62,10 @@ jobs:
     outputs:
       authorized: ${{ steps.authorize.outputs.authorized }}
       backend_sha: ${{ steps.authorize.outputs.backend_sha }}
+      routing_sha: ${{ steps.authorize.outputs.routing_sha }}
+      pr_base_sha: ${{ steps.authorize.outputs.pr_base_sha }}
+      pr_head_sha: ${{ steps.authorize.outputs.pr_head_sha }}
+      pr_merge_sha: ${{ steps.authorize.outputs.pr_merge_sha }}
       frontend_ref: ${{ steps.authorize.outputs.frontend_ref }}
       frontend_sha: ${{ steps.authorize.outputs.frontend_sha }}
       workflow_sha: ${{ steps.authorize.outputs.workflow_sha }}
@@ -85,6 +89,11 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           EVENT_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || '' }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || '' }}
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || '' }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
@@ -93,16 +102,35 @@ jobs:
           FRONTEND_REPOSITORY: PKUHPC/CraneSched-FrontEnd
         run: /usr/bin/python3 -I trusted-ci/.github/ci/authorize.py
 
-      - name: Checkout candidate workflow routing
+      - name: Checkout proposed merge workflow routing
         if: steps.authorize.outputs.authorized == 'true'
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ steps.authorize.outputs.backend_sha }}
+          ref: ${{ steps.authorize.outputs.routing_sha }}
           path: candidate-routing
+          fetch-depth: 2
           sparse-checkout: .github/workflows
           persist-credentials: false
           clean: true
           set-safe-directory: false
+
+      - name: Verify proposed merge routing revision
+        if: steps.authorize.outputs.authorized == 'true'
+        env:
+          ROUTING_SHA: ${{ steps.authorize.outputs.routing_sha }}
+          PR_BASE_SHA: ${{ steps.authorize.outputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ steps.authorize.outputs.pr_head_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git -C candidate-routing rev-parse HEAD)"
+          [[ "$actual" == "$ROUTING_SHA" ]]
+          if [[ -n "$PR_BASE_SHA" || -n "$PR_HEAD_SHA" ]]; then
+            [[ -n "$PR_BASE_SHA" && -n "$PR_HEAD_SHA" ]]
+            read -r -a commit_fields <<< "$(git -C candidate-routing rev-list --parents -n 1 HEAD)"
+            [[ "${#commit_fields[@]}" -eq 3 ]]
+            [[ "${commit_fields[1]}" == "$PR_BASE_SHA" ]]
+            [[ "${commit_fields[2]}" == "$PR_HEAD_SHA" ]]
+          fi
 
       - name: Validate repository runner routing
         if: steps.authorize.outputs.authorized == 'true'
@@ -136,6 +164,10 @@ jobs:
       CRANETESTKIT_CCACHE_DIR: ${{ vars.CRANETESTKIT_CCACHE_DIR }}
       CRANETESTKIT_FETCHCONTENT_DIR: ${{ vars.CRANETESTKIT_FETCHCONTENT_DIR }}
       BACKEND_SHA: ${{ needs.authorize.outputs.backend_sha }}
+      ROUTING_SHA: ${{ needs.authorize.outputs.routing_sha }}
+      PR_BASE_SHA: ${{ needs.authorize.outputs.pr_base_sha }}
+      PR_HEAD_SHA: ${{ needs.authorize.outputs.pr_head_sha }}
+      PR_MERGE_SHA: ${{ needs.authorize.outputs.pr_merge_sha }}
       FRONTEND_SHA: ${{ needs.authorize.outputs.frontend_sha }}
       FRONTEND_REF: ${{ needs.authorize.outputs.frontend_ref }}
     defaults:
@@ -162,6 +194,20 @@ jobs:
             echo "Trusted CI control checkout resolved to an unexpected commit." >&2
             exit 2
           fi
+
+      - name: Record revision routing provenance
+        run: |
+          {
+            echo "### CI revision routing"
+            echo "- Backend test SHA: \`$BACKEND_SHA\`"
+            if [[ -n "$PR_HEAD_SHA" ]]; then
+              echo "- PR base SHA: \`$PR_BASE_SHA\`"
+              echo "- PR head SHA: \`$PR_HEAD_SHA\`"
+              echo "- Proposed merge routing SHA: \`$ROUTING_SHA\`"
+            else
+              echo "- Workflow routing SHA: \`$ROUTING_SHA\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate deployment variables
         env:
@@ -393,6 +439,10 @@ jobs:
           fi
           if [[ "$BUILD_DURATION_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
             arguments+=(--build-duration-seconds "$BUILD_DURATION_SECONDS")
+          fi
+          arguments+=(--routing-sha "$ROUTING_SHA")
+          if [[ -n "$PR_HEAD_SHA" ]]; then
+            arguments+=(--pr-base-sha "$PR_BASE_SHA" --pr-head-sha "$PR_HEAD_SHA")
           fi
           /usr/bin/python3 -I trusted-ci/.github/ci/collect-cranetestkit-artifacts.py "${arguments[@]}"
           check_exit_code="$(

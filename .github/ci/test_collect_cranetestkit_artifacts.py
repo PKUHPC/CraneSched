@@ -29,6 +29,9 @@ class ArtifactCollectionTest(unittest.TestCase):
         cache_hit: str | None = None,
         build_duration: float | None = None,
         execute_exit_code: int | None = None,
+        routing_sha: str | None = None,
+        pr_base_sha: str | None = None,
+        pr_head_sha: str | None = None,
     ) -> None:
         command = [
             sys.executable,
@@ -48,6 +51,12 @@ class ArtifactCollectionTest(unittest.TestCase):
             command.extend(("--build-duration-seconds", str(build_duration)))
         if execute_exit_code is not None:
             command.extend(("--execute-exit-code", str(execute_exit_code)))
+        if routing_sha is not None:
+            command.extend(("--routing-sha", routing_sha))
+        if pr_base_sha is not None:
+            command.extend(("--pr-base-sha", pr_base_sha))
+        if pr_head_sha is not None:
+            command.extend(("--pr-head-sha", pr_head_sha))
         subprocess.run(command, check=True)
 
     @staticmethod
@@ -311,6 +320,47 @@ class ArtifactCollectionTest(unittest.TestCase):
             )
             self.assertEqual(manifest["check_exit_code"], 0)
             self.assertFalse(manifest["failure_logs_included"])
+
+    def test_revision_routing_is_preserved_in_summary_and_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = [self._case("1.0.0.1", "passed", 1.0)]
+            run_root = self._run(
+                root,
+                cases,
+                exit_code=0,
+                shards=[cases],
+                workers={"wrl02": [0]},
+            )
+            self._checkpoint(run_root, "wrl02", 0, 0, cases, exit_code=0)
+            destination = root / "artifact"
+            routing_sha = "d" * 40
+            base_sha = "e" * 40
+            head_sha = "f" * 40
+
+            self._collect(
+                run_root,
+                destination,
+                routing_sha=routing_sha,
+                pr_base_sha=base_sha,
+                pr_head_sha=head_sha,
+            )
+
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+            self.assertIn(f"`{routing_sha}`", summary)
+            self.assertIn(f"`{base_sha}`", summary)
+            self.assertIn(f"`{head_sha}`", summary)
+            manifest = json.loads(
+                (destination / "artifact-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                manifest["revision_routing"],
+                {
+                    "routing_sha": routing_sha,
+                    "pr_base_sha": base_sha,
+                    "pr_head_sha": head_sha,
+                },
+            )
 
     def test_exit_one_summary_reports_failed_and_error_cases(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

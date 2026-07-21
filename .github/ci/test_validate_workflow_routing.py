@@ -123,7 +123,8 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         condition = "if: steps.authorize.outputs.authorized == 'true'"
         for step_name in (
-            "Checkout candidate workflow routing",
+            "Checkout proposed merge workflow routing",
+            "Verify proposed merge routing revision",
             "Validate repository runner routing",
         ):
             with self.subTest(step_name=step_name):
@@ -132,6 +133,51 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
                 if next_step == -1:
                     next_step = len(workflow)
                 self.assertIn(condition, workflow[step:next_step])
+
+    def test_candidate_checkout_uses_routing_output_and_parent_guard(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        checkout = workflow.index("- name: Checkout proposed merge workflow routing")
+        checkout_end = workflow.find("\n      - name:", checkout + 1)
+        if checkout_end == -1:
+            checkout_end = len(workflow)
+        checkout_block = workflow[checkout:checkout_end]
+        self.assertIn("ref: ${{ steps.authorize.outputs.routing_sha }}", checkout_block)
+        self.assertIn("fetch-depth: 2", checkout_block)
+
+        verify = workflow.index("- name: Verify proposed merge routing revision")
+        verify_end = workflow.find("\n      - name:", verify + 1)
+        if verify_end == -1:
+            verify_end = len(workflow)
+        verify_block = workflow[verify:verify_end]
+        self.assertIn("git -C candidate-routing rev-parse HEAD", verify_block)
+        self.assertIn("git -C candidate-routing rev-list --parents", verify_block)
+        self.assertIn("PR_BASE_SHA", verify_block)
+        self.assertIn("PR_HEAD_SHA", verify_block)
+
+    def test_pr_build_still_uses_backend_head_output(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "ref: ${{ needs.authorize.outputs.backend_sha }}",
+            workflow,
+        )
+
+    def test_stale_head_is_not_used_as_routing_input(self) -> None:
+        stale_head = self.workflows_dir / "stale-head"
+        merged_tree = self.workflows_dir / "merged-tree"
+        stale_head.mkdir()
+        merged_tree.mkdir()
+        (stale_head / "build.yaml").write_text(
+            "jobs:\n  test:\n    runs-on: [self-hosted, CraneSched]\n",
+            encoding="utf-8",
+        )
+        (merged_tree / "build.yaml").write_text(
+            "jobs:\n  test:\n    runs-on: [self-hosted, cranesystemtest]\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(routing.RoutingPolicyError):
+            routing.validate_workflow_routing(stale_head)
+        routing.validate_workflow_routing(merged_tree)
 
 
 if __name__ == "__main__":
