@@ -8,8 +8,10 @@ workflow files for static inspection but never executes candidate code. A
 privileged job is dispatched only when all of the following are true:
 
 - the workflow was loaded from `master`;
-- the pull request is from this repository, not a fork;
-- `github.triggering_actor` currently has `maintain` or `admin` permission;
+- a same-repository pull request was triggered by a user whose current
+  permission is `maintain` or `admin`; or
+- a fork pull request author recorded an exact-head `/request-ci` request and
+  a current `maintain` or `admin` user reran that same workflow run;
 - Backend and FrontEnd refs resolve to full commit SHAs.
 
 The privileged job uses the dedicated repository-scoped runner selected by the
@@ -17,6 +19,31 @@ exact `cranesystemtest` label. Repository registration prevents other
 repositories from dispatching to it, but GitHub does not restrict which
 workflow in `PKUHPC/CraneSched` may request a repository runner. This is an
 accepted boundary of the deployment.
+
+## Fork pull request approval
+
+The first `pull_request_target` run for a fork always fails in the hosted
+authorization job and never queues `cranesystemtest`. The fork author can then
+comment exactly `/request-ci`. The hosted-only `request-ci.yaml` workflow
+requires an open, non-draft fork PR targeting `master`, binds the request to
+the current head repository, ref and SHA, and verifies that attempt 1 of the
+latest matching `build.yaml` run failed authorization without assigning or
+starting `system-test`.
+
+The bot reply records a canonical hidden attestation containing the PR number,
+head SHA, original request comment ID and workflow run ID. A maintainer approves
+that exact request by following the reply and selecting **Re-run all jobs**.
+Every rerun checks the maintainer's current permission, rereads the original
+request comment, resolves the current PR and proposed merge, and rejects any
+run, head, base, comment or merge drift. A new head requires a new
+`/request-ci` comment. A maintainer may rerun the same attested run again after
+an infrastructure failure; all checks execute again.
+
+The request workflow has only hosted-runner access and read-only repository and
+Actions permissions plus permission to create or update its issue comment. It
+checks out only the exact default-branch SHA and never checks out or executes PR
+code. Fork authors can request a run but cannot approve or dispatch the
+self-hosted job themselves.
 
 The hosted authorization job applies a compensating routing guard before it
 dispatches `test`. For a pull request, it resolves the exact PR head SHA for
@@ -30,10 +57,13 @@ checked but are not authorization inputs. The trusted base is the
 merge's first parent must both equal it. The current API head and second parent
 must equal the event head, while the API merge SHA and merge ref must agree.
 These current values are checked twice with bounded retries before dispatch.
-It checks that only `.github/workflows/build.yaml` contains the exact
-`cranesystemtest` token. The check runs trusted code from `master` and treats
-the proposed workflow files only as data. The privileged job still builds and
-tests the PR head SHA, not the temporary merge commit. Protect
+It requires `.github/workflows/build.yaml:test` to use exactly
+`[self-hosted, cranesystemtest]` and every other workflow job to use the fixed
+`ubuntu-latest` hosted runner. Expressions, matrix-selected runners, other
+self-hosted labels and job-level reusable workflows are rejected. The check
+runs trusted code from `master` and treats the proposed workflow files only as
+data. The privileged job still builds and tests the PR head SHA, not the
+temporary merge commit. Protect
 `.github/workflows/**` and `.github/ci/**` through branch protection and
 required maintainer review because this static guard is an accidental-change
 check, not a GitHub-enforced workflow authorization boundary.
@@ -167,13 +197,13 @@ maintenance runner registered directly to `PKUHPC/CraneSched-AutoTest`, with
 its distinct `cranesystemtest-autotest` label. Do not give either service the
 other service's label or environment.
 
-Only `build.yaml` may contain the exact Backend label. The hosted routing guard
-scans every `.yaml` and `.yml` file directly under `.github/workflows` at the
-authorized proposed-merge SHA and fails closed on symlinked workflow files, a
-missing `build.yaml`, a missing Backend label, or any exact label occurrence in
-another workflow. The checkout also verifies the merge commit's HEAD and
-parent SHAs before scanning. Labels with longer names such as
-`cranesystemtest-autotest` are not Backend-label matches.
+Only the `test` job in `build.yaml` may select the Backend runner. The hosted
+routing guard scans every `.yaml` and `.yml` file directly under
+`.github/workflows` at the authorized proposed-merge SHA and fails closed on
+symlinked or noncanonical workflows, a missing privileged job, any other
+self-hosted route, dynamic runner selection, or job-level reusable workflows.
+The checkout also verifies the merge commit's HEAD and parent SHAs before
+scanning.
 
 The Clang Format check is intentionally read-only. It checks the exact PR head
 on a hosted runner, never pushes a formatting commit, and uploads a short-lived
@@ -181,11 +211,9 @@ binary patch when formatting changes are required. Same-repository and fork
 pull requests have the same behavior; a contributor applies the patch and
 pushes a normal commit, which then triggers the normal PR events.
 
-This guard catches a candidate workflow that accidentally names the dedicated
-label, but it cannot prevent routing through a generic default self-hosted
-label or a repository variable. Required maintainer review, branch protection,
-the trusted `pull_request_target` dispatcher and the restricted Kubernetes
-identity remain part of the repository-level security boundary.
+Required maintainer review, branch protection, the trusted
+`pull_request_target` dispatcher and the restricted Kubernetes identity remain
+part of the repository-level security boundary.
 
 ## Artifacts and result contract
 
@@ -216,13 +244,13 @@ CraneTestKit exit codes remain authoritative:
 - `1`: complete coverage with test failures or errors;
 - `2`: infrastructure error or incomplete coverage.
 
-The workflow replaces the serial implementation in
-`.github/workflows/build.yaml` in place, and the privileged job keeps both the
-job ID and display name `test`. It therefore takes over the existing required
-check context `test`; do not delete or rename that context during cutover.
-Verify the first production run before making any additional branch-protection
-change, and remove only separately named obsolete contexts that an administrator
-has confirmed actually exist.
+The privileged job keeps YAML job ID `test` but uses display name
+`system-test`. A hosted `final-test` job uses display name `test`, always runs,
+and succeeds only when authorization and the complete K3s system job both
+succeed. This preserves the existing required check context `test` while making
+an unapproved fork, failed authorization or skipped system job explicitly fail
+instead of appearing as a skipped required check. Do not delete or rename that
+context during cutover.
 
 If two consecutive production runs return infrastructure exit code `2`,
 disable this workflow and restore the previous serial workflow from Git

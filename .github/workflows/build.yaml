@@ -58,6 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read
       pull-requests: read
     outputs:
       authorized: ${{ steps.authorize.outputs.authorized }}
@@ -88,6 +89,8 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           EVENT_SHA: ${{ github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || '' }}
@@ -140,7 +143,7 @@ jobs:
           --workflows-dir candidate-routing/.github/workflows
 
   test:
-    name: test
+    name: system-test
     needs: authorize
     if: needs.authorize.outputs.authorized == 'true'
     runs-on: [self-hosted, cranesystemtest]
@@ -481,3 +484,26 @@ jobs:
             2) echo "System tests ended with an infrastructure error." >&2; exit 2 ;;
             *) echo "System tests did not produce a valid aggregate exit code." >&2; exit 2 ;;
           esac
+
+  final-test:
+    name: test
+    needs:
+      - authorize
+      - test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Enforce required test check
+        env:
+          AUTHORIZE_RESULT: ${{ needs.authorize.result }}
+          SYSTEM_TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [[ "$AUTHORIZE_RESULT" != "success" ]]; then
+            echo "Trusted CI authorization did not succeed." >&2
+            exit 1
+          fi
+          if [[ "$SYSTEM_TEST_RESULT" != "success" ]]; then
+            echo "The CraneTestKit system test did not succeed." >&2
+            exit 1
+          fi
