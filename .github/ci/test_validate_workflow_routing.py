@@ -10,6 +10,8 @@ from pathlib import Path
 MODULE_PATH = Path(__file__).with_name("validate-workflow-routing.py")
 BUILD_WORKFLOW = Path(__file__).parents[1] / "workflows" / "build.yaml"
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "build.yaml"
+WORKFLOWS_DIR = Path(__file__).parents[1] / "workflows"
+REQUEST_WORKFLOW = WORKFLOWS_DIR / "request-ci.yaml"
 SPEC = importlib.util.spec_from_file_location(
     "cranesched_ci_validate_workflow_routing", MODULE_PATH
 )
@@ -43,9 +45,7 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(
-            routing.RoutingPolicyError, r"debug.yml:3"
-        ):
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "fixed GitHub-hosted"):
             routing.validate_workflow_routing(self.workflows_dir)
 
     def test_rejects_mixed_case_backend_label_in_another_workflow(self) -> None:
@@ -54,25 +54,72 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(routing.RoutingPolicyError, r"debug.yml:3"):
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "fixed GitHub-hosted"):
             routing.validate_workflow_routing(self.workflows_dir)
 
-    def test_does_not_match_maintenance_runner_label_substring(self) -> None:
+    def test_rejects_other_self_hosted_runner(self) -> None:
         (self.workflows_dir / "maintenance.yaml").write_text(
-            "jobs:\n  clean:\n"
-            "    runs-on: [self-hosted, cranesystemtest-autotest]\n",
+            "jobs:\n  clean:\n    runs-on: [self-hosted, cranesystemtest-autotest]\n",
             encoding="utf-8",
         )
 
-        routing.validate_workflow_routing(self.workflows_dir)
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "fixed GitHub-hosted"):
+            routing.validate_workflow_routing(self.workflows_dir)
 
-    def test_does_not_match_dotted_runner_label_suffix(self) -> None:
+    def test_rejects_dotted_runner_label_suffix(self) -> None:
         (self.workflows_dir / "debug.yaml").write_text(
             "jobs:\n  debug:\n    runs-on: cranesystemtest.debug\n",
             encoding="utf-8",
         )
 
-        routing.validate_workflow_routing(self.workflows_dir)
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "fixed GitHub-hosted"):
+            routing.validate_workflow_routing(self.workflows_dir)
+
+    def test_rejects_expression_runner_routing(self) -> None:
+        (self.workflows_dir / "debug.yaml").write_text(
+            "jobs:\n  debug:\n    runs-on: ${{ matrix.runner }}\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "fixed GitHub-hosted"):
+            routing.validate_workflow_routing(self.workflows_dir)
+
+    def test_rejects_quoted_runner_key_escape(self) -> None:
+        (self.workflows_dir / "debug.yaml").write_text(
+            'jobs:\n  debug:\n    runs-on: ubuntu-latest\n    "runs-on": self-hosted\n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "non-canonical"):
+            routing.validate_workflow_routing(self.workflows_dir)
+
+    def test_rejects_job_level_reusable_workflow(self) -> None:
+        (self.workflows_dir / "debug.yaml").write_text(
+            "jobs:\n  debug:\n    uses: owner/repo/.github/workflows/job.yaml@main\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "job-level reusable"):
+            routing.validate_workflow_routing(self.workflows_dir)
+
+    def test_rejects_noncanonical_job_indentation(self) -> None:
+        (self.workflows_dir / "debug.yaml").write_text(
+            "jobs:\n   debug:\n      runs-on: self-hosted\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "non-canonical"):
+            routing.validate_workflow_routing(self.workflows_dir)
+
+    def test_rejects_duplicate_top_level_jobs_after_canonical_section(self) -> None:
+        (self.workflows_dir / "debug.yaml").write_text(
+            "jobs:\n  safe:\n    runs-on: ubuntu-latest\n"
+            '"jobs":\n  unsafe:\n    runs-on: self-hosted\n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "final top-level"):
+            routing.validate_workflow_routing(self.workflows_dir)
 
     def test_requires_backend_label_in_allowed_workflow(self) -> None:
         (self.workflows_dir / "build.yaml").write_text(
@@ -80,9 +127,7 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(
-            routing.RoutingPolicyError, "must route only"
-        ):
+        with self.assertRaisesRegex(routing.RoutingPolicyError, "must route only"):
             routing.validate_workflow_routing(self.workflows_dir)
 
     def test_comment_does_not_satisfy_allowed_job_selector(self) -> None:
@@ -160,6 +205,63 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             "ref: ${{ needs.authorize.outputs.backend_sha }}",
             workflow,
         )
+
+    def test_authorization_receives_actions_run_identity(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn("GITHUB_RUN_ID: ${{ github.run_id }}", workflow)
+        self.assertIn("GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow)
+        authorize_job = workflow.index("  authorize:\n")
+        privileged_job = workflow.index("  test:\n", authorize_job)
+        self.assertIn("      issues: read\n", workflow[authorize_job:privileged_job])
+
+    def test_final_test_is_hosted_and_never_skipped(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        final_job = workflow.index("  final-test:\n")
+        final_block = workflow[final_job:]
+        self.assertIn("    name: test\n", final_block)
+        self.assertIn("    if: always()\n", final_block)
+        self.assertIn("    runs-on: ubuntu-latest\n", final_block)
+        self.assertIn("      - authorize\n", final_block)
+        self.assertIn("      - test\n", final_block)
+        self.assertIn("needs.authorize.result", final_block)
+        self.assertIn("needs.test.result", final_block)
+        self.assertIn('[[ "$AUTHORIZE_RESULT" != "success" ]]', final_block)
+        self.assertIn('[[ "$SYSTEM_TEST_RESULT" != "success" ]]', final_block)
+        privileged_job = workflow.index("  test:\n")
+        privileged_end = workflow.index("  final-test:\n", privileged_job)
+        privileged_block = workflow[privileged_job:privileged_end]
+        self.assertIn("    name: system-test\n", privileged_block)
+        self.assertIn("    runs-on: [self-hosted, cranesystemtest]\n", privileged_block)
+
+    def test_request_workflow_is_hosted_and_does_not_execute_pr_code(self) -> None:
+        workflow = REQUEST_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("  issue_comment:\n", workflow)
+        self.assertIn("      - created\n", workflow)
+        self.assertIn("  contents: read\n", workflow)
+        self.assertIn("  pull-requests: read\n", workflow)
+        self.assertIn("  issues: write\n", workflow)
+        self.assertIn("  actions: read\n", workflow)
+        self.assertIn(
+            "  group: request-fork-ci-${{ github.event.issue.number }}\n", workflow
+        )
+        self.assertIn("  cancel-in-progress: false\n", workflow)
+        self.assertIn(
+            "if: github.event.issue.pull_request && "
+            "github.event.comment.body == '/request-ci'",
+            workflow,
+        )
+        self.assertIn("    runs-on: ubuntu-latest\n", workflow)
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn('[[ "$DEFAULT_BRANCH" == "master" ]]', workflow)
+        self.assertIn("git -C trusted-ci rev-parse HEAD", workflow)
+        self.assertIn("trusted-ci/.github/ci/request_ci.py", workflow)
+        self.assertNotIn("pull_request.head", workflow)
+        self.assertNotIn("secrets.", workflow)
+        self.assertNotIn("self-hosted", workflow)
+
+    def test_repository_workflows_obey_routing_policy(self) -> None:
+        routing.validate_workflow_routing(WORKFLOWS_DIR)
 
     def test_stale_head_is_not_used_as_routing_input(self) -> None:
         stale_head = self.workflows_dir / "stale-head"
