@@ -1,0 +1,49 @@
+name: Request Fork CI
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: request-fork-ci-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Record fork CI request
+    if: github.event.issue.pull_request && github.event.comment.body == '/request-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted request policy
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: trusted-ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+
+      - name: Verify trusted request policy revision
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          [[ "$DEFAULT_BRANCH" == "master" ]]
+          [[ "$(git -C trusted-ci rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+
+      - name: Record request for maintainer approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: >-
+          /usr/bin/python3 -I trusted-ci/.github/ci/request_ci.py
+          --event-path "$GITHUB_EVENT_PATH"

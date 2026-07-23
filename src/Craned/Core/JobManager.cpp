@@ -1690,10 +1690,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     job->step_map.emplace(step->step_id, std::move(step));
   }
 
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this job, and
-  // we should send StepStatusChange manually.
+  // SpawnSupervisor reports failure before registering a supervisor when
+  // setup, fork, or process-group isolation fails. In these cases, report the
+  // step status manually instead of waiting for a supervisor callback.
   CraneErrCode err = step_ptr->Prepare(job->path_info);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
