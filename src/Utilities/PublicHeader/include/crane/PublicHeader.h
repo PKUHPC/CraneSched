@@ -139,7 +139,7 @@ inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 inline const char* const kDefaultContainerClusterDomain = "cluster.local";
 
 inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
-inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
+inline const char* const kDefaultSupervisorUnixSockDir = "craned/supervisor";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 

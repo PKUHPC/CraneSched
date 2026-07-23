@@ -19,13 +19,21 @@
 
 #include <protos/Supervisor.grpc.pb.h>
 
+namespace {
+
+std::filesystem::path SupervisorUnixSockDir() {
+  return Craned::g_config.CraneBaseDir / kDefaultSupervisorUnixSockDir;
+}
+
+}  // namespace
+
 namespace Craned {
 using grpc::ClientContext;
 
 SupervisorStub::SupervisorStub(job_id_t job_id, step_id_t step_id) {
-  auto sock_path = fmt::format("unix://{}/step_{}.{}.sock",
-                               kDefaultSupervisorUnixSockDir, job_id, step_id);
-  InitChannelAndStub_(sock_path);
+  auto sock_path =
+      SupervisorUnixSockDir() / fmt::format("step_{}.{}.sock", job_id, step_id);
+  InitChannelAndStub_(fmt::format("unix://{}", sock_path.string()));
 }
 
 SupervisorStub::SupervisorStub(const std::string& endpoint) {
@@ -38,10 +46,10 @@ SupervisorStub::InitAndGetRecoveredMap() {
   static constexpr LazyRE2 supervisor_sock_pattern(
       R"(step_(\d+)\.(\d+)\.sock$)");
   try {
-    std::filesystem::path path = kDefaultSupervisorUnixSockDir;
+    std::filesystem::path path = SupervisorUnixSockDir();
     if (!std::filesystem::exists(path) ||
         !std::filesystem::is_directory(path)) {
-      CRANE_WARN("Supervisor socket dir doesn't not exists. Skip recovery.");
+      CRANE_WARN("Supervisor socket dir does not exist. Skip recovery.");
       return {};
     }
 
