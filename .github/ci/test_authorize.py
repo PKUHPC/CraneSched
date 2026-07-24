@@ -164,6 +164,7 @@ def _authorize(
     context: authorize.DispatchContext | None = None,
     *,
     permission: str = "maintain",
+    actor_permissions: dict[str, str] | None = None,
     resolver=_resolver,
     pull_request_lookup=_pull_request,
     merge_ref_resolver=_merge_ref,
@@ -172,9 +173,12 @@ def _authorize(
     issue_comment_lookup=None,
     retry_delays: tuple[float, ...] = (),
 ) -> dict[str, str]:
+    resolved_context = context or _context()
+    permissions = {resolved_context.triggering_actor: permission}
+    permissions.update(actor_permissions or {})
     return authorize.authorize_dispatch(
-        context or _context(),
-        lambda _repo, _actor: {"permission": permission},
+        resolved_context,
+        lambda _repo, actor: {"permission": permissions.get(actor, "none")},
         resolver,
         pull_request_lookup,
         merge_ref_resolver,
@@ -431,11 +435,51 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["routing_sha"], MERGE_SHA)
         self.assertEqual(result["pr_head_sha"], FORK_HEAD_SHA)
 
+    def test_maintainer_request_allows_a_different_maintainer_to_rerun(self) -> None:
+        result = _authorize(
+            _fork_context(triggering_actor="rerun-maintainer"),
+            permission="admin",
+            actor_permissions={"request-maintainer": "maintain"},
+            pull_request_lookup=_fork_pull_request,
+            commit_parents_resolver=_fork_commit_parents,
+            issue_comments_lookup=lambda _repo, _number: (_attestation_comment(),),
+            issue_comment_lookup=lambda _repo, _number, _comment_id: (
+                _request_comment(author_login="request-maintainer")
+            ),
+        )
+
+        self.assertEqual(result["backend_sha"], FORK_HEAD_SHA)
+
+    def test_non_author_requester_must_still_have_maintain_permission(self) -> None:
+        for permission in ("write", "triage", "read", "none"):
+            with (
+                self.subTest(permission=permission),
+                self.assertRaisesRegex(
+                    authorize.AuthorizationError, "current maintain/admin"
+                ),
+            ):
+                _authorize(
+                    _fork_context(),
+                    actor_permissions={"requester": permission},
+                    pull_request_lookup=_fork_pull_request,
+                    commit_parents_resolver=_fork_commit_parents,
+                    issue_comments_lookup=lambda _repo, _number: (
+                        _attestation_comment(),
+                    ),
+                    issue_comment_lookup=lambda _repo, _number, _comment_id: (
+                        _request_comment(author_login="requester")
+                    ),
+                )
+
     def test_deleted_or_edited_fork_request_is_rejected(self) -> None:
         for request, message in (
             (None, "no longer exists"),
             (_request_comment(body="/request-ci please"), "was edited"),
-            (_request_comment(author_login="someone-else"), "PR author"),
+            (_request_comment(author_type="Bot"), "not created by a user"),
+            (
+                _request_comment(author_login="someone-else"),
+                "PR author or a current maintain/admin",
+            ),
         ):
             with (
                 self.subTest(message=message),
