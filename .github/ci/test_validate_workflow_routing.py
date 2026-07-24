@@ -238,9 +238,10 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         self.assertIn("  issue_comment:\n", workflow)
         self.assertIn("      - created\n", workflow)
         self.assertIn("  contents: read\n", workflow)
-        self.assertIn("  pull-requests: read\n", workflow)
-        self.assertIn("  issues: write\n", workflow)
         self.assertIn("  actions: read\n", workflow)
+        self.assertIn("  issues: write\n", workflow)
+        self.assertIn("  pull-requests: write\n", workflow)
+        self.assertNotIn("  pull-requests: read\n", workflow)
         self.assertIn(
             "  group: request-fork-ci-${{ github.event.issue.number }}\n", workflow
         )
