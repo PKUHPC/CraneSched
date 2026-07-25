@@ -341,6 +341,19 @@ JobManager::JobManager() {
   m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0ms},
                                           std::chrono::milliseconds{200ms});
 
+  m_node_gc_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_node_gc_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        EvNodeGcTimerCb_();
+      });
+  if (g_config.CranedConf.NodeGarbageCollection.Enabled) {
+    auto initial_delay = std::chrono::seconds(
+        g_config.CranedConf.NodeGarbageCollection.InitialDelaySec);
+    auto interval = std::chrono::seconds(
+        g_config.CranedConf.NodeGarbageCollection.IntervalSec);
+    m_node_gc_timer_handle_->start(initial_delay, interval);
+  }
+
   // gRPC Alloc step Event
   m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_alloc_step_async_handle_->on<uvw::async_event>(
@@ -462,6 +475,7 @@ CraneErrCode JobManager::Recover(
 JobManager::~JobManager() {
   CRANE_DEBUG("JobManager is being destroyed.");
   m_is_ending_now_ = true;
+  if (m_node_gc_service_) m_node_gc_service_->Stop();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
@@ -1239,8 +1253,32 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
   if (has_int_job) CgroupManager::WriteOverflowCpuset();
 }
 
+void JobManager::EvNodeGcTimerCb_() {
+  if (m_is_ending_now_.load(std::memory_order_acquire) || !m_node_gc_service_)
+    return;
+
+  NodeGcContext ctx{
+      .now = absl::Now(),
+      .active_steps = GetAllocatedJobSteps(),
+  };
+
+  g_thread_pool->detach_task(
+      [node_gc_service = m_node_gc_service_, ctx = std::move(ctx)]() mutable {
+        node_gc_service->RunOnceIfNeeded(ctx);
+      });
+}
+
 void JobManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+}
+
+void JobManager::SetNodeGcService(
+    std::shared_ptr<NodeGarbageCollectionService> node_gc_service) {
+  m_node_gc_service_ = std::move(node_gc_service);
+}
+
+void JobManager::StopNodeGcService() {
+  if (m_node_gc_service_) m_node_gc_service_->Stop();
 }
 
 void JobManager::SetSigintCallback(std::function<void()> cb) {

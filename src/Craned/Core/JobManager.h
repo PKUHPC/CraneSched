@@ -25,6 +25,7 @@
 
 #include <future>
 
+#include "NodeGarbageCollectionService.h"
 #include "StepInstance.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -181,6 +182,9 @@ class JobManager {
   // Wait internal libuv base loop to exit...
   void Wait();
   bool IsEnding() { return m_is_ending_now_; }
+  void SetNodeGcService(
+      std::shared_ptr<NodeGarbageCollectionService> node_gc_service);
+  void StopNodeGcService();
 
   /***
    * Set the callback function will be called when SIGINT is triggered.
@@ -284,6 +288,8 @@ class JobManager {
 
   void EvCleanGrpcExecuteStepQueueCb_();
 
+  void EvNodeGcTimerCb_();
+
   void EvCleanStepStatusChangeQueueCb_();
 
   void EvCleanTerminateStepQueueCb_();
@@ -316,6 +322,7 @@ class JobManager {
           ABSL_GUARDED_BY(m_unexpected_supervisor_exit_mtx_);
 
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
+  std::shared_ptr<uvw::timer_handle> m_node_gc_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
   ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
@@ -353,6 +360,7 @@ class JobManager {
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
+  std::shared_ptr<NodeGarbageCollectionService> m_node_gc_service_;
 
   // When SIGINT is triggered or Shutdown() gets called, this variable is set to
   // true. Then, AddJobAsyncMethod will not accept any more new jobs and

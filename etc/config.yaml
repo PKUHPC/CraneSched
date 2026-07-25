@@ -100,6 +100,20 @@ Craned:
   CgroupV2FastPath: true
   # sync_rmdir or async_rmdir. async_rmdir lets a background janitor remove dirs.
   CgroupV2CleanupMode: sync_rmdir
+  NodeGarbageCollection:
+    # Enable periodic node-local garbage collection tasks.
+    Enabled: false
+    # GC interval in seconds.
+    IntervalSec: 3600
+    # Delay the first GC run after Craned starts.
+    InitialDelaySec: 300
+    LogCleanup:
+      # Enable cleanup for supervisor step log files in Supervisor.LogDir.
+      Enabled: true
+      # Keep log files newer than this many seconds. Default: 7 days.
+      RetentionSec: 604800
+      # Max files deleted in one GC cycle.
+      MaxDeletePerCycle: 500
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
