@@ -356,6 +356,24 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
     return std::stol(key.substr(0, key.size() - 2));
   }
 
+  inline static std::string GetNextStepIdEntryName_(job_id_t job_id) {
+    return fmt::format("{}{}", s_next_step_id_prefix_, job_id);
+  }
+
+  inline static bool IsNextStepIdEntry_(std::string const& key) {
+    return key.starts_with(s_next_step_id_prefix_);
+  }
+
+  static bool ExtractJobIdFromNextStepIdEntry_(std::string const& key,
+                                               job_id_t* job_id) {
+    if (!IsNextStepIdEntry_(key)) return false;
+    std::string_view id_str{key.c_str() + s_next_step_id_prefix_.size(),
+                            key.size() - s_next_step_id_prefix_.size()};
+    auto [ptr, ec] =
+        std::from_chars(id_str.data(), id_str.data() + id_str.size(), *job_id);
+    return ec == std::errc{} && ptr == id_str.data() + id_str.size();
+  }
+
   bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
     auto result = db->Begin();
     if (result.has_value()) {
@@ -608,6 +626,10 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
     return {};
   }
 
+  bool LoadNextStepIdMap_();
+
+  bool ResetStepIdCounters_();
+
   // -----------
 
   inline static std::string const s_next_job_db_id_str_{"NDI"};
@@ -624,34 +646,16 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
   std::unique_ptr<IEmbeddedDb> m_resv_db_;
 
   inline static std::string const s_next_step_db_id_str_{"NSDI"};
-  inline static std::string const s_next_step_id_str_{"NSI"};
+  inline static std::string const s_next_step_id_prefix_{"NSI:"};
 
   inline static absl::Mutex s_step_id_mtx_;
   inline static db_id_t s_next_step_db_id_ ABSL_GUARDED_BY(s_step_id_mtx_);
-  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_
+  inline static std::unordered_map<job_id_t, uint32_t> s_next_step_id_map_
       ABSL_GUARDED_BY(s_step_id_mtx_);
   std::unique_ptr<IEmbeddedDb> m_step_var_db_;
   std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
 
   LegacyEmbeddedDbBackend backend_;
 };
-
-template <>
-inline std::expected<void, DbErrorCode>
-LegacyEmbeddedDbClient::StoreTypeIntoDb_(
-    IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
-    const crane::grpc::StepNextIdInEmbeddedDb* value) {
-  using google::protobuf::io::CodedOutputStream;
-  using google::protobuf::io::StringOutputStream;
-
-  std::string buf;
-  StringOutputStream stringOutputStream(&buf);
-  CodedOutputStream codedOutputStream(&stringOutputStream);
-
-  size_t n_bytes{value->ByteSizeLong()};
-  value->SerializeToCodedStream(&codedOutputStream);
-
-  return db->Store(txn_id, key, buf.data(), n_bytes);
-}
 
 }  // namespace Ctld
