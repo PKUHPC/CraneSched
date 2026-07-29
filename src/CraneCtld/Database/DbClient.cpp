@@ -773,8 +773,8 @@ static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
          (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
 }
 
-// Select only the latest job_db_id per job through a covering index, then
-// fetch full documents after the lightweight IDs have been sorted.
+// Select the latest job_db_id per job through a covering index, then fetch
+// only that submission's latest requeue attempt.
 static void AppendLatestJobDocumentStages_(mongocxx::pipeline& pipeline,
                                            const std::string& collection_name) {
   using bsoncxx::builder::basic::make_array;
@@ -785,24 +785,24 @@ static void AppendLatestJobDocumentStages_(mongocxx::pipeline& pipeline,
       kvp("_id", "$job_id"),
       kvp("job_db_id", make_document(kvp("$last", "$job_db_id")))));
   pipeline.sort(make_document(kvp("job_db_id", -1)));
+
+  auto lookup_expr = make_document(kvp(
+      "$and",
+      make_array(
+          make_document(kvp("$eq", make_array("$job_id", "$$latest_job_id"))),
+          make_document(
+              kvp("$eq", make_array("$job_db_id", "$$latest_job_db_id"))))));
+  auto lookup_match = make_document(
+      kvp("$match", make_document(kvp("$expr", lookup_expr.view()))));
   pipeline.lookup(make_document(
       kvp("from", collection_name),
       kvp("let", make_document(kvp("latest_job_id", "$_id"),
                                kvp("latest_job_db_id", "$job_db_id"))),
       kvp("pipeline",
-          make_array(make_document(kvp(
-              "$match",
-              make_document(kvp(
-                  "$expr",
-                  make_document(kvp(
-                      "$and",
-                      make_array(
-                          make_document(kvp(
-                              "$eq", make_array("$job_id", "$$latest_job_id"))),
-                          make_document(
-                              kvp("$eq",
-                                  make_array("$job_db_id",
-                                             "$$latest_job_db_id")))))))))))),
+          make_array(lookup_match.view(),
+                     make_document(
+                         kvp("$sort", make_document(kvp("requeue_count", -1)))),
+                     make_document(kvp("$limit", 1)))),
       kvp("as", "latest_job")));
   pipeline.unwind("$latest_job");
   pipeline.replace_root(make_document(kvp("newRoot", "$latest_job")));
@@ -5829,8 +5829,9 @@ bool MongodbClient::InitTableIndexes() {
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
     CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
-    // Covers latest-record selection and the subsequent lookup.
-    CreateCollectionIndex(raw_table, {"job_id", "job_db_id"}, false);
+    // Covers latest submission/requeue selection and the subsequent lookup.
+    CreateCollectionIndex(raw_table, {"job_id", "job_db_id", "requeue_count"},
+                          false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
