@@ -102,6 +102,10 @@ struct Config {
     uint32_t CranedTimeout;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t AsyncLogQueueSize{kDefaultAsyncLogQueueSize};
+    uint32_t AsyncLogThreadCount{kDefaultAsyncLogThreadCount};
+    bool AsyncLogBlockWhenFull{kDefaultAsyncLogBlockWhenFull};
+    bool LogToConsole{kDefaultLogToConsole};
     uint32_t ThreadPoolSize{0};
     uint32_t SchedulerRpcThreadPoolSize{0};
     uint32_t SchedulerAllocJobsRpcTimeoutSeconds{kCtldRpcTimeoutSeconds};

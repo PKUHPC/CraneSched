@@ -5929,8 +5929,9 @@ MongodbClient::MongodbClient() {
         fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
-  g_runtime_status.db_logger = AddLogger(
-      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+  g_runtime_status.db_logger =
+      AddLogger("mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(),
+                g_config.CtldConf.LogToConsole);
 
   m_logger_ = g_runtime_status.db_logger;
 

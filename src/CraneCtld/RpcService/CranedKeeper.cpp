@@ -577,8 +577,9 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
   m_period_connect_thread_ =
       std::thread(&CranedKeeper::PeriodConnectCranedThreadFunc_, this);
 
-  g_runtime_status.conn_logger = AddLogger(
-      "conn", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+  g_runtime_status.conn_logger =
+      AddLogger("conn", StrToLogLevel(g_config.CraneCtldDebugLevel).value(),
+                g_config.CtldConf.LogToConsole);
 }
 
 CranedKeeper::~CranedKeeper() {

@@ -42,6 +42,14 @@ CraneCtld:
   MaxLogFileSize: 50M
   # max files of cranectld log file
   MaxLogFileNum: 3
+  # Number of messages buffered by the asynchronous logger
+  AsyncLogQueueSize: 8192
+  # Number of asynchronous logger worker threads (1 preserves log ordering)
+  AsyncLogThreadCount: 1
+  # Block producers when the queue is full; false overwrites oldest messages
+  AsyncLogBlockWhenFull: true
+  # Also write logs to stderr (usually captured by systemd-journald)
+  LogToConsole: true
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
   # Number of threads for scheduler RPC dispatch (0 = auto)
