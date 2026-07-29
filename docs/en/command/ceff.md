@@ -48,6 +48,7 @@ WARNING: Efficiency statistics may be misleading for RUNNING jobs.
 
 - **-h/--help**: Display help
 - **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
+- **-p/--plugin-config string**: Path to plugin configuration file (default: "/etc/crane/plugin.yaml")
 - **--json**: Output task information returned by backend in JSON format
 - **-v/--version**: Display ceff version
 

@@ -29,6 +29,7 @@ cacctmgr <ACTION> <ENTITY> [ID] [OPTIONS]
 
 - **-h, --help**: Display help information
 - **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
+- **-p, --plugin-config string**: Plugin configuration file path used by `show event` (default: `/etc/crane/plugin.yaml`)
 - **-v, --version**: Display cacctmgr version
 - **-J, --json**: Output in JSON format
 - **-f, --force**: Force operation without confirmation
