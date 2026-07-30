@@ -5961,7 +5961,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   // Fire-and-forget RPCs to craned nodes. Errors are handled via
-  // StepStatusChangeWithReasonAsync which feeds back into the status
+  // StepCompletingAndStatusChangeAsync which feeds back into the status
   // change queue. No need to block the status change processing thread.
   for (auto& [craned_id, steps] : context.craned_step_alloc_map) {
     m_rpc_worker_pool_->detach_task([this, craned_id,
@@ -5973,6 +5973,13 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           CRANE_ERROR(
               "Failed to AllocSteps for [{}] steps on Node {}: Rpc failure",
               util::StepToDRangeIdString(steps), craned_id);
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          for (const auto& step : steps) {
+            StepCompletingAndStatusChangeAsync(
+                step.job_id(), step.step_id(), craned_id,
+                crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
+                "AllocStepsRpcError", now);
+          }
         } else if (!err->failed_job_step_ids_map().empty()) {
           std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
               failed_steps;
