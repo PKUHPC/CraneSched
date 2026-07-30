@@ -24,6 +24,7 @@ cacctmgr <操作> <实体> [ID] [选项]
 
 - **-h, --help**: 显示帮助信息
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）
+- **-p, --plugin-config string**: `show event` 使用的插件配置文件路径（默认：`/etc/crane/plugin.yaml`）
 - **-v, --version**: 显示 cacctmgr 版本
 - **-J, --json**: 以 JSON 格式输出
 - **-f, --force**: 强制执行操作，不需要确认

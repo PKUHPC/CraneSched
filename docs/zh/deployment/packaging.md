@@ -108,6 +108,7 @@ sudo dpkg -i CraneSched-*-cranectld.deb
 - `/usr/lib/systemd/system/cranectld.service` - Systemd 服务
 - `/etc/crane/config.yaml.sample` - 配置模板
 - `/etc/crane/database.yaml.sample` - 数据库配置模板
+- `/etc/crane/plugin.yaml.sample` - 插件配置模板
 
 #### craned 软件包
 
@@ -131,6 +132,7 @@ sudo dpkg -i CraneSched-*-craned.deb
 - `/usr/libexec/csupervisor` - 作业步骤执行守护进程
 - `/usr/lib/systemd/system/craned.service` - Systemd 服务
 - `/etc/crane/config.yaml.sample` - 配置模板
+- `/etc/crane/plugin.yaml.sample` - 插件配置模板
 - `/usr/lib64/security/pam_crane.so` - PAM 身份验证模块
 
 #### 安装后操作
@@ -143,7 +145,7 @@ sudo dpkg -i CraneSched-*-craned.deb
 4. 复制示例配置文件（如果不存在）
 5. 设置适当的文件所有权和权限
 
-安装后，配置 `/etc/crane/config.yaml` 和 `/etc/crane/database.yaml`（用于 cranectld），然后启动服务：
+安装后，配置 `/etc/crane/config.yaml`、`/etc/crane/plugin.yaml` 和 `/etc/crane/database.yaml`（用于 cranectld），然后启动服务：
 
 ```bash
 # 在控制节点上
