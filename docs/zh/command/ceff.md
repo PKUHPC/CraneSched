@@ -46,6 +46,7 @@ WARNING: Efficiency statistics may be misleading for RUNNING jobs.
 
 - **-h/--help**: 显示帮助
 - **-C/--config string**: 配置文件路径（默认为"/etc/crane/config.yaml"）
+- **-p/--plugin-config string**: 插件配置文件路径（默认为"/etc/crane/plugin.yaml"）
 - **--json**: 以JSON格式输出后端返回的任务信息
 - **-v/--version**: 显示ceff的版本
 

@@ -225,9 +225,10 @@ def _validate_fork_request(
     )
     if run_attempt == 1:
         raise AuthorizationError(
-            "fork pull requests require approval: the pull request author must "
-            "comment exactly `/request-ci`, then a maintainer must use `Re-run all "
-            "jobs` on the workflow run linked by github-actions[bot]"
+            "fork pull requests require approval: the pull request author or a "
+            "maintain/admin user must comment exactly `/request-ci`, then a "
+            "maintainer must use `Re-run all jobs` on the workflow run linked by "
+            "github-actions[bot]"
         )
 
     if (
@@ -278,9 +279,16 @@ def _validate_fork_request(
         raise AuthorizationError("GitHub returned an unexpected request comment")
     if request.body != "/request-ci":
         raise AuthorizationError("the original `/request-ci` comment was edited")
-    if request.author_login != snapshot.author_login:
+    if request.author_type != "User":
         raise AuthorizationError(
-            "the original `/request-ci` comment was not created by the PR author"
+            "the original `/request-ci` comment was not created by a user"
+        )
+    if request.author_login != snapshot.author_login and not _has_maintain_permission(
+        permission_lookup(context.repository, request.author_login)
+    ):
+        raise AuthorizationError(
+            "the original `/request-ci` comment was not created by the PR author "
+            "or a current maintain/admin user"
         )
 
 

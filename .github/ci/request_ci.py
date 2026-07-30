@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record a fork author's request for a maintainer-approved CI rerun."""
+"""Record an authorized request for a maintainer-approved fork CI rerun."""
 
 from __future__ import annotations
 
@@ -119,6 +119,8 @@ class RequestResult:
 
 
 class RequestCiApi(Protocol):
+    def permission(self, repository: str, actor: str) -> dict[str, object]: ...
+
     def pull_request(self, repository: str, number: int) -> PullRequestSnapshot: ...
 
     def workflow_runs(
@@ -377,7 +379,7 @@ def validate_initial_jobs(values: list[dict[str, object]]) -> None:
         raise RequestCiError("privileged workflow job started executing steps")
 
 
-def _validate_pr(snapshot: PullRequestSnapshot, number: int, commenter: str) -> None:
+def _validate_pr(snapshot: PullRequestSnapshot, number: int) -> None:
     if snapshot.number != number:
         raise RequestCiError("GitHub returned an unexpected pull request")
     if snapshot.state != "open":
@@ -388,8 +390,6 @@ def _validate_pr(snapshot: PullRequestSnapshot, number: int, commenter: str) -> 
         raise RequestCiError("pull request does not target PKUHPC/CraneSched:master")
     if snapshot.head_repository == snapshot.base_repository:
         raise RequestCiError("same-repository pull requests do not use /request-ci")
-    if snapshot.author != commenter:
-        raise RequestCiError("only the pull request author may request CI")
     if SHA_RE.fullmatch(snapshot.base_sha) is None:
         raise RequestCiError("pull request base SHA is invalid")
     if SHA_RE.fullmatch(snapshot.head_sha) is None:
@@ -398,7 +398,34 @@ def _validate_pr(snapshot: PullRequestSnapshot, number: int, commenter: str) -> 
         raise RequestCiError("pull request head ref is invalid")
 
 
-def _event_request(event: object, repository: str) -> tuple[int, int, str] | None:
+def _has_maintain_permission(value: dict[str, object]) -> bool:
+    if value.get("permission") in {"maintain", "admin"}:
+        return True
+    user = value.get("user")
+    permissions = user.get("permissions") if isinstance(user, dict) else None
+    return isinstance(permissions, dict) and (
+        permissions.get("maintain") is True or permissions.get("admin") is True
+    )
+
+
+def _validate_requester(
+    snapshot: PullRequestSnapshot,
+    repository: str,
+    commenter: str,
+    commenter_type: str,
+    api: RequestCiApi,
+) -> None:
+    if commenter_type != "User":
+        raise RequestCiError("only a user may request CI")
+    if commenter == snapshot.author:
+        return
+    if not _has_maintain_permission(api.permission(repository, commenter)):
+        raise RequestCiError(
+            "only the pull request author or a maintain/admin user may request CI"
+        )
+
+
+def _event_request(event: object, repository: str) -> tuple[int, int, str, str] | None:
     root = _mapping(event, "issue_comment event")
     if root.get("action") != "created":
         return None
@@ -415,7 +442,8 @@ def _event_request(event: object, repository: str) -> tuple[int, int, str] | Non
     comment_id = _positive_int(comment.get("id"), "request comment ID")
     user = _mapping(comment.get("user"), "request comment author")
     commenter = _required_string(user.get("login"), "request comment author login")
-    return number, comment_id, commenter
+    commenter_type = _required_string(user.get("type"), "request comment author type")
+    return number, comment_id, commenter, commenter_type
 
 
 def handle_request(
@@ -426,10 +454,11 @@ def handle_request(
     request = _event_request(event, repository)
     if request is None:
         return None
-    number, request_comment_id, commenter = request
+    number, request_comment_id, commenter, commenter_type = request
 
     snapshot = api.pull_request(repository, number)
-    _validate_pr(snapshot, number, commenter)
+    _validate_pr(snapshot, number)
+    _validate_requester(snapshot, repository, commenter, commenter_type, api)
     run = select_workflow_run(
         api.workflow_runs(repository, snapshot.head_sha), snapshot
     )
@@ -450,9 +479,10 @@ def handle_request(
         raise RequestCiError("multiple bot attestations exist for the current head")
 
     final_snapshot = api.pull_request(repository, number)
-    _validate_pr(final_snapshot, number, commenter)
+    _validate_pr(final_snapshot, number)
     if final_snapshot != snapshot:
         raise RequestCiError("pull request changed while recording the CI request")
+    _validate_requester(final_snapshot, repository, commenter, commenter_type, api)
 
     attestation = Attestation(
         pr_number=number,
@@ -575,6 +605,12 @@ class GitHubApi:
             if len(current) < 100:
                 return values
         raise RequestCiError("GitHub API pagination exceeded the safety limit")
+
+    def permission(self, repository: str, actor: str) -> dict[str, object]:
+        encoded_actor = urllib.parse.quote(actor, safe="")
+        return self._object(
+            "GET", f"repos/{repository}/collaborators/{encoded_actor}/permission"
+        )
 
     def pull_request(self, repository: str, number: int) -> PullRequestSnapshot:
         value = self._object("GET", f"repos/{repository}/pulls/{number}")

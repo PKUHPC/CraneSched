@@ -611,6 +611,15 @@ if [ ! -f /etc/crane/database.yaml ]; then
     fi
 fi
 
+if [ ! -f /etc/crane/plugin.yaml ]; then
+    if [ -f /etc/crane/plugin.yaml.sample ]; then
+        cp /etc/crane/plugin.yaml.sample /etc/crane/plugin.yaml
+        chown crane:crane /etc/crane/plugin.yaml
+        chmod 644 /etc/crane/plugin.yaml
+        echo \"Created new configuration file: /etc/crane/plugin.yaml\"
+    fi
+fi
+
 exit 0
 ")
 

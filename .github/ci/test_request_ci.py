@@ -33,7 +33,7 @@ def _event(**overrides):
         "comment": {
             "id": REQUEST_COMMENT_ID,
             "body": "/request-ci",
-            "user": {"login": "fork-author"},
+            "user": {"login": "fork-author", "type": "User"},
         },
     }
     value.update(overrides)
@@ -130,9 +130,15 @@ class FakeApi:
         self.runs = [_run()]
         self.jobs = _jobs()
         self.comments = []
+        self.permissions = {}
         self.created = []
         self.updated = []
         self.job_requests = []
+        self.permission_requests = []
+
+    def permission(self, repository, actor):
+        self.permission_requests.append((repository, actor))
+        return self.permissions.get(actor, {"permission": "none"})
 
     def pull_request(self, _repository, _number):
         if len(self.snapshots) > 1:
@@ -197,6 +203,100 @@ class RequestProtocolTest(unittest.TestCase):
         self.assertIn(f"`{HEAD_SHA}`", api.created[0][1])
         self.assertIn(f"actions/runs/{RUN_ID}", api.created[0][1])
         self.assertIn("Re-run all jobs", api.created[0][1])
+        self.assertEqual(api.permission_requests, [])
+
+    def test_current_maintainer_or_admin_can_request_ci(self):
+        for permission in ("maintain", "admin"):
+            with self.subTest(permission=permission):
+                api = FakeApi()
+                api.permissions["requester"] = {"permission": permission}
+                event = _event(
+                    comment={
+                        "id": REQUEST_COMMENT_ID,
+                        "body": "/request-ci",
+                        "user": {"login": "requester", "type": "User"},
+                    }
+                )
+
+                result = _handle(api, event)
+
+                self.assertEqual(result.action, "created")
+                self.assertEqual(
+                    api.permission_requests,
+                    [
+                        ("PKUHPC/CraneSched", "requester"),
+                        ("PKUHPC/CraneSched", "requester"),
+                    ],
+                )
+
+    def test_non_author_without_maintain_permission_is_rejected(self):
+        for permission in ("write", "triage", "read", "none"):
+            with self.subTest(permission=permission):
+                api = FakeApi()
+                api.permissions["requester"] = {"permission": permission}
+                event = _event(
+                    comment={
+                        "id": REQUEST_COMMENT_ID,
+                        "body": "/request-ci",
+                        "user": {"login": "requester", "type": "User"},
+                    }
+                )
+
+                with self.assertRaisesRegex(
+                    request_ci.RequestCiError, "author or a maintain/admin"
+                ):
+                    _handle(api, event)
+
+                self.assertEqual(api.created, [])
+
+    def test_non_user_and_permission_lookup_failure_are_rejected(self):
+        api = FakeApi()
+        api.permissions["requester"] = {"permission": "admin"}
+        bot_event = _event(
+            comment={
+                "id": REQUEST_COMMENT_ID,
+                "body": "/request-ci",
+                "user": {"login": "requester", "type": "Bot"},
+            }
+        )
+        with self.assertRaisesRegex(request_ci.RequestCiError, "only a user"):
+            _handle(api, bot_event)
+        self.assertEqual(api.permission_requests, [])
+
+        api = FakeApi()
+        api.permission = mock.Mock(
+            side_effect=request_ci.RequestCiError("GitHub API request failed")
+        )
+        user_event = _event(
+            comment={
+                "id": REQUEST_COMMENT_ID,
+                "body": "/request-ci",
+                "user": {"login": "requester", "type": "User"},
+            }
+        )
+        with self.assertRaisesRegex(request_ci.RequestCiError, "API request failed"):
+            _handle(api, user_event)
+
+    def test_maintainer_permission_revoked_while_recording_is_rejected(self):
+        api = FakeApi()
+        api.permission = mock.Mock(
+            side_effect=[{"permission": "maintain"}, {"permission": "write"}]
+        )
+        event = _event(
+            comment={
+                "id": REQUEST_COMMENT_ID,
+                "body": "/request-ci",
+                "user": {"login": "requester", "type": "User"},
+            }
+        )
+
+        with self.assertRaisesRegex(
+            request_ci.RequestCiError, "author or a maintain/admin"
+        ):
+            _handle(api, event)
+
+        self.assertEqual(api.created, [])
+        self.assertEqual(api.updated, [])
 
     def test_non_created_wrong_command_and_non_pr_comments_are_ignored(self):
         cases = [
@@ -205,7 +305,7 @@ class RequestProtocolTest(unittest.TestCase):
                 comment={
                     "id": 1,
                     "body": "/request-ci ",
-                    "user": {"login": "fork-author"},
+                    "user": {"login": "fork-author", "type": "User"},
                 }
             ),
             _event(issue={"number": PR_NUMBER}),
@@ -225,14 +325,16 @@ class RequestProtocolTest(unittest.TestCase):
                 _event(repository={"full_name": "attacker/CraneSched"}),
             )
 
-    def test_pr_must_be_open_ready_fork_targeting_master_and_requested_by_author(self):
+    def test_pr_must_be_open_ready_fork_targeting_master_and_requested_by_authorized_user(
+        self,
+    ):
         cases = [
             (_snapshot(state="closed"), "not open"),
             (_snapshot(draft=True), "draft"),
             (_snapshot(base_ref="release"), "does not target"),
             (_snapshot(base_repository="other/repo"), "does not target"),
             (_snapshot(head_repository="PKUHPC/CraneSched"), "same-repository"),
-            (_snapshot(author="someone-else"), "only the pull request author"),
+            (_snapshot(author="someone-else"), "author or a maintain/admin"),
         ]
         for snapshot, message in cases:
             with (
@@ -544,6 +646,18 @@ class GitHubApiValidationTest(unittest.TestCase):
             self.assertRaisesRegex(request_ci.RequestCiError, "HTTP status"),
         ):
             self.api._request("GET", "repos/PKUHPC/CraneSched")
+
+    def test_permission_lookup_encodes_actor_and_returns_exact_response(self):
+        response = {"permission": "maintain"}
+        with mock.patch.object(self.api, "_object", return_value=response) as get:
+            self.assertEqual(
+                self.api.permission("PKUHPC/CraneSched", "maintainer/name"),
+                response,
+            )
+        get.assert_called_once_with(
+            "GET",
+            "repos/PKUHPC/CraneSched/collaborators/maintainer%2Fname/permission",
+        )
 
     def test_run_and_job_counts_cannot_be_boolean_or_truncated(self):
         for method, response in (

@@ -108,6 +108,7 @@ sudo dpkg -i CraneSched-*-cranectld.deb
 - `/usr/lib/systemd/system/cranectld.service` - Systemd service
 - `/etc/crane/config.yaml.sample` - Configuration template
 - `/etc/crane/database.yaml.sample` - Database configuration template
+- `/etc/crane/plugin.yaml.sample` - Plugin configuration template
 
 #### craned Package
 
@@ -131,6 +132,7 @@ sudo dpkg -i CraneSched-*-craned.deb
 - `/usr/libexec/csupervisor` - Per-step execution supervisor
 - `/usr/lib/systemd/system/craned.service` - Systemd service
 - `/etc/crane/config.yaml.sample` - Configuration template
+- `/etc/crane/plugin.yaml.sample` - Plugin configuration template
 - `/usr/lib64/security/pam_crane.so` - PAM authentication module
 
 #### Post-Installation
@@ -143,7 +145,7 @@ Both packages automatically:
 4. Copy sample configuration files (if not exists)
 5. Set appropriate file ownership and permissions
 
-After installation, configure `/etc/crane/config.yaml` and `/etc/crane/database.yaml` (for cranectld), then start the services:
+After installation, configure `/etc/crane/config.yaml`, `/etc/crane/plugin.yaml`, and `/etc/crane/database.yaml` (for cranectld), then start the services:
 
 For jobs that need to lock a large amount of memory, configure unlimited memlock for `craned.service` on all compute nodes. Create a systemd drop-in before starting `craned`:
 

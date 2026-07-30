@@ -7,9 +7,9 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
   actions: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: request-fork-ci-${{ github.event.issue.number }}

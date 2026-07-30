@@ -10,8 +10,9 @@ privileged job is dispatched only when all of the following are true:
 - the workflow was loaded from `master`;
 - a same-repository pull request was triggered by a user whose current
   permission is `maintain` or `admin`; or
-- a fork pull request author recorded an exact-head `/request-ci` request and
-  a current `maintain` or `admin` user reran that same workflow run;
+- a fork pull request author or current `maintain`/`admin` user recorded an
+  exact-head `/request-ci` request and a current `maintain` or `admin` user
+  reran that same workflow run;
 - Backend and FrontEnd refs resolve to full commit SHAs.
 
 The privileged job uses the dedicated repository-scoped runner selected by the
@@ -23,21 +24,23 @@ accepted boundary of the deployment.
 ## Fork pull request approval
 
 The first `pull_request_target` run for a fork always fails in the hosted
-authorization job and never queues `cranesystemtest`. The fork author can then
-comment exactly `/request-ci`. The hosted-only `request-ci.yaml` workflow
-requires an open, non-draft fork PR targeting `master`, binds the request to
-the current head repository, ref and SHA, and verifies that attempt 1 of the
-latest matching `build.yaml` run failed authorization without assigning or
-starting `system-test`.
+authorization job and never queues `cranesystemtest`. The fork author or a
+current `maintain`/`admin` user can then comment exactly `/request-ci`. The
+hosted-only `request-ci.yaml` workflow requires an open, non-draft fork PR
+targeting `master`, verifies a non-author requester's current permission, binds
+the request to the current head repository, ref and SHA, and verifies that
+attempt 1 of the latest matching `build.yaml` run failed authorization without
+assigning or starting `system-test`.
 
 The bot reply records a canonical hidden attestation containing the PR number,
 head SHA, original request comment ID and workflow run ID. A maintainer approves
 that exact request by following the reply and selecting **Re-run all jobs**.
-Every rerun checks the maintainer's current permission, rereads the original
-request comment, resolves the current PR and proposed merge, and rejects any
-run, head, base, comment or merge drift. A new head requires a new
-`/request-ci` comment. A maintainer may rerun the same attested run again after
-an infrastructure failure; all checks execute again.
+Every rerun checks the rerun actor's current permission and, for a request made
+by someone other than the PR author, the requester's current permission. It
+rereads the original request comment, resolves the current PR and proposed
+merge, and rejects any run, head, base, comment, permission or merge drift. A
+new head requires a new `/request-ci` comment. A maintainer may rerun the same
+attested run again after an infrastructure failure; all checks execute again.
 
 The request workflow has only hosted-runner access and read-only repository and
 Actions permissions plus permission to create or update its issue comment. It
