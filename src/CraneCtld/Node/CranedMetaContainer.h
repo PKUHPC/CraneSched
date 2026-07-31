@@ -72,6 +72,23 @@ class CranedMetaContainer final {
 
   void InitFromConfig(const Config& config);
 
+  void AddDynamicNodes(
+      const std::vector<crane::grpc::DynamicNodeRecord>& records);
+
+  std::expected<void, std::string> RemoveDynamicNodes(
+      const std::vector<CranedId>& node_ids);
+
+  std::expected<void, std::string> SetDynamicNodesDeleting(
+      const std::vector<CranedId>& node_ids);
+
+  void ClearDynamicNodesDeleting(const std::vector<CranedId>& node_ids);
+
+  void SetDynamicNodeRegistered(const CranedId& node_id);
+
+  [[nodiscard]] util::read_lock_guard LockTopologyShared() const {
+    return util::read_lock_guard(topology_mtx_);
+  }
+
   void AddDedicatedResource(const CranedId& node_id,
                             const DedicatedResourceInNode& resource);
 
@@ -102,7 +119,7 @@ class CranedMetaContainer final {
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
 
-  void CranedUp(const CranedId& craned_id,
+  bool CranedUp(const CranedId& craned_id,
                 const crane::grpc::CranedRemoteMeta& remote_meta);
 
   void CranedDown(const CranedId& craned_id);
@@ -204,12 +221,13 @@ class CranedMetaContainer final {
   // 4. unlock elements in partition_meta_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_meta_map_;
+  mutable util::rw_mutex topology_mtx_;
 
   // TODO: Move to Reservation Logical Partition.
   ResvMetaAtomicMap resv_meta_map_;
 
-  // A craned node may belong to multiple partitions.
-  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
+  // A craned node may belong to multiple partitions. Access this index while
+  // holding topology_mtx_.
   HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
 

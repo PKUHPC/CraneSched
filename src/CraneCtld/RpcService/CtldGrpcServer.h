@@ -307,6 +307,11 @@ class CtldForInternalServiceImpl final
       const crane::grpc::QueryCranedInfoRequest* request,
       crane::grpc::QueryCranedInfoReply* response) override;
 
+  grpc::Status QueryDynamicNodeConfig(
+      grpc::ServerContext* context,
+      const crane::grpc::QueryDynamicNodeConfigRequest* request,
+      crane::grpc::QueryDynamicNodeConfigReply* response) override;
+
   grpc::Status CforedStream(
       grpc::ServerContext* context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
@@ -364,6 +369,14 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext* context,
       const crane::grpc::QueryCranedInfoRequest* request,
       crane::grpc::QueryCranedInfoReply* response) override;
+
+  grpc::Status CreateNodes(grpc::ServerContext* context,
+                           const crane::grpc::CreateNodesRequest* request,
+                           crane::grpc::CreateNodesReply* response) override;
+
+  grpc::Status DeleteNodes(grpc::ServerContext* context,
+                           const crane::grpc::DeleteNodesRequest* request,
+                           crane::grpc::DeleteNodesReply* response) override;
 
   grpc::Status QueryPartitionInfo(
       grpc::ServerContext* context,

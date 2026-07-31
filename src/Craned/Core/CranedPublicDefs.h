@@ -194,6 +194,8 @@ struct Config {
   std::filesystem::path CranedForPamUnixSockPath;
 
   bool CranedForeground{};
+  bool Dynamic{};
+  uint64_t Generation{};
 
   std::string Hostname;
   CranedId CranedIdOfThisNode;

@@ -35,6 +35,7 @@
 #include "JobScheduler.h"
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
+#include "Node/NodeManager.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
@@ -95,6 +96,8 @@ void ParseCtldConfig(const YAML::Node& config) {
         YamlValueOr<bool>(ctld_cfg["JobRequeue"], Ctld::kDefaultJobRequeue);
     ctld_config.MaxRequeueCount = YamlValueOr<int32_t>(
         ctld_cfg["MaxRequeueCount"], Ctld::kDefaultMaxRequeueCount);
+    ctld_config.MaxNodeCount =
+        YamlValueOr<uint32_t>(ctld_cfg["MaxNodeCount"], 0);
   }
 
   g_config.CtldConf = std::move(ctld_config);
@@ -590,6 +593,14 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      if (g_config.CtldConf.MaxNodeCount == 0)
+        g_config.CtldConf.MaxNodeCount = g_config.Nodes.size();
+      if (g_config.CtldConf.MaxNodeCount < g_config.Nodes.size()) {
+        CRANE_ERROR("MaxNodeCount {} is smaller than static node count {}.",
+                    g_config.CtldConf.MaxNodeCount, g_config.Nodes.size());
+        std::exit(1);
+      }
+
       std::unordered_set nodes_without_part = g_config.Nodes |
                                               ranges::views::keys |
                                               ranges::to<std::unordered_set>();
@@ -1080,12 +1091,14 @@ void DestroyCtldGlobalVariables() {
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();
+  g_node_manager.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
 
   g_thread_pool->wait();
+  g_meta_container.reset();
   g_thread_pool.reset();
   g_plugin_client.reset();
 
@@ -1172,9 +1185,6 @@ void InitializeCtldGlobalVariables() {
   g_license_manager = std::make_unique<LicenseManager>();
   g_license_manager->Init(g_config.lic_id_to_count_map);
 
-  g_meta_container = std::make_unique<CranedMetaContainer>();
-  g_meta_container->InitFromConfig(g_config);
-
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
 
   if (!g_config.JobSubmitLuaScript.empty()) {
@@ -1200,7 +1210,19 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
+  g_node_manager = std::make_unique<NodeManager>();
+  if (!g_node_manager->Init()) {
+    CRANE_ERROR("Failed to initialize dynamic node manager.");
+    DestroyCtldGlobalVariables();
+    std::exit(1);
+  }
+
+  g_meta_container = std::make_unique<CranedMetaContainer>();
+  g_meta_container->InitFromConfig(g_config);
+  g_node_manager->RestoreDynamicNodes();
+
+  g_craned_keeper =
+      std::make_unique<CranedKeeper>(g_config.CtldConf.MaxNodeCount);
 
   g_craned_keeper->SetCranedConnectedCb(
       [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {

@@ -983,6 +983,7 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   crane::grpc::CranedTriggerReverseConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
+  req.set_generation(g_config.Generation);
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -1009,6 +1010,7 @@ bool CtldClient::CranedRegister_(
   crane::grpc::CranedRegisterRequest ready_request;
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
   *ready_request.mutable_token() = token;
+  ready_request.set_generation(g_config.Generation);
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
   auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
@@ -1400,7 +1402,11 @@ void CtldClient::NodeHealthCheck_() {
   double mem_gb_config =
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 
-  if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
+  bool memory_mismatch =
+      g_config.Dynamic
+          ? node_real.memory_gb + kMemoryToleranceGB < mem_gb_config
+          : std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB;
+  if (memory_mismatch) {
     reason = fmt::format(
         "Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
         mem_gb_config, node_real.memory_gb);

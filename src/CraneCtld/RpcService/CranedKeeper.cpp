@@ -563,7 +563,9 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
       std::make_unique<std::pmr::polymorphic_allocator<CqTag>>(
           m_pmr_pool_res_.get());
 
-  uint32_t thread_num = std::bit_ceil(node_num / kCompletionQueueCapacity);
+  uint32_t required_thread_num =
+      node_num == 0 ? 1 : (node_num - 1) / kCompletionQueueCapacity + 1;
+  uint32_t thread_num = std::bit_ceil(required_thread_num);
 
   m_cq_mtx_vec_ = std::vector<Mutex>(thread_num);
   m_cq_vec_ = std::vector<grpc::CompletionQueue>(thread_num);
@@ -920,6 +922,27 @@ bool CranedKeeper::IsCranedConnected(const CranedId &craned_id) {
   return m_connected_craned_id_stub_map_.contains(craned_id);
 }
 
+bool CranedKeeper::IsCranedTracked(const CranedId &craned_id) {
+  ReaderLock connect_lock(&m_connect_craned_mtx_);
+  util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
+  return m_connected_craned_id_stub_map_.contains(craned_id) ||
+         m_connecting_craned_set_.contains(craned_id) ||
+         m_unavail_craned_set_.contains(craned_id);
+}
+
+bool CranedKeeper::ForgetCraned(const CranedId &craned_id) {
+  WriterLock connect_lock(&m_connect_craned_mtx_);
+  util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
+  if (m_connected_craned_id_stub_map_.contains(craned_id) ||
+      m_connecting_craned_set_.contains(craned_id) ||
+      m_unavail_craned_set_.contains(craned_id))
+    return false;
+
+  util::lock_guard cache_lock(m_craned_id_to_ip_cache_map_mtx_);
+  m_craned_id_to_ip_cache_map_.erase(craned_id);
+  return true;
+}
+
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
   ReaderLock lock(&m_connect_craned_mtx_);
@@ -945,22 +968,18 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
   CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
               ProtoTimestampToString(token));
   util::lock_guard guard(m_unavail_craned_set_mtx_);
-  m_unavail_craned_set_.emplace(crane_id, token);
+  m_unavail_craned_set_.insert_or_assign(crane_id, token);
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
                                       RegToken token) {
-  static Mutex s_craned_id_to_ip_cache_map_mtx;
-  static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
-      s_craned_id_to_ip_cache_map;
-
   std::string ip_addr;
 
   {
-    util::lock_guard guard(s_craned_id_to_ip_cache_map_mtx);
+    util::lock_guard guard(m_craned_id_to_ip_cache_map_mtx_);
 
-    auto it = s_craned_id_to_ip_cache_map.find(craned_id);
-    if (it != s_craned_id_to_ip_cache_map.end()) {
+    auto it = m_craned_id_to_ip_cache_map_.find(craned_id);
+    if (it != m_craned_id_to_ip_cache_map_.end()) {
       if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
         ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
       } else {
@@ -972,10 +991,10 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
       ipv6_t ipv6_addr;
       if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
         ip_addr = crane::Ipv4ToStr(ipv4_addr);
-        s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
+        m_craned_id_to_ip_cache_map_.emplace(craned_id, ipv4_addr);
       } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
         ip_addr = crane::Ipv6ToStr(ipv6_addr);
-        s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
+        m_craned_id_to_ip_cache_map_.emplace(craned_id, ipv6_addr);
       } else {
         // Just hostname. It should never happen,
         // but we add error handling here for robustness.

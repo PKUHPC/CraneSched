@@ -1084,6 +1084,8 @@ class JobScheduler {
 
   void TerminateJobsOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
+  bool HasJobsOnNodes(const std::vector<CranedId>& node_ids);
+
   void QueryJobsInRam(
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);

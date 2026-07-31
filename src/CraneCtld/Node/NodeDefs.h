@@ -37,6 +37,10 @@ struct CranedStaticMeta {
   ResourceInNodeV3 res;
 
   NodeTopoInfo node_topo_info;
+  bool dynamic{false};
+  bool deleting{false};
+  uint64_t generation{0};
+  bool ever_registered{false};
 };
 
 struct CranedRemoteMeta {

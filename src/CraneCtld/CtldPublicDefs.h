@@ -111,6 +111,7 @@ struct Config {
     uint32_t StatusChangeDbCommitChunkSize{kJobStatusChangeDbCommitChunkSize};
     bool JobRequeue{kDefaultJobRequeue};
     int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
+    uint32_t MaxNodeCount{0};
   };
   CraneCtldConf CtldConf;
 

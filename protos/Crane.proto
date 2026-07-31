@@ -43,6 +43,7 @@ message StepStatusChangeReply {
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
+  uint64 generation = 3;
 }
 
 message ConfigureCranedRequest {
@@ -99,6 +100,7 @@ message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
   google.protobuf.Timestamp token = 3;
+  uint64 generation = 4;
 }
 
 message CranedRegisterReply {
@@ -300,6 +302,38 @@ message QueryCranedInfoRequest {
 
 message QueryCranedInfoReply {
   repeated CranedInfo craned_info_list = 1;
+}
+
+message CreateNodesRequest {
+  uint32 uid = 1;
+  repeated string node_names = 2;
+  DynamicNodeSpec spec = 3;
+  repeated string partition_names = 4;
+}
+
+message CreateNodesReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteNodesRequest {
+  uint32 uid = 1;
+  repeated string node_names = 2;
+}
+
+message DeleteNodesReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message QueryDynamicNodeConfigRequest { string node_name = 1; }
+
+message QueryDynamicNodeConfigReply {
+  bool ok = 1;
+  string reason = 2;
+  DynamicNodeSpec spec = 3;
+  repeated string partition_names = 4;
+  uint64 generation = 5;
 }
 
 message QueryPartitionInfoRequest {
@@ -1578,6 +1612,10 @@ service CraneCtld {
 
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
 
+  rpc CreateNodes(CreateNodesRequest) returns (CreateNodesReply);
+
+  rpc DeleteNodes(DeleteNodesRequest) returns (DeleteNodesReply);
+
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
 
   rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
@@ -1773,6 +1811,9 @@ service CraneCtldForInternal {
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+
+  rpc QueryDynamicNodeConfig(QueryDynamicNodeConfigRequest)
+      returns (QueryDynamicNodeConfigReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);

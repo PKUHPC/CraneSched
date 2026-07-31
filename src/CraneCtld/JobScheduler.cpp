@@ -4561,11 +4561,16 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     LockGuard running_guard(&m_running_job_map_mtx_);
     std::vector<CranedId> nodes_not_found;
     std::vector<CranedId> nodes_conflicted;
+    std::vector<CranedId> nodes_unavailable;
 
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
       if (!craned_meta) {
         nodes_not_found.emplace_back(craned_id);
+        continue;
+      }
+      if (craned_meta->static_meta.deleting) {
+        nodes_unavailable.emplace_back(craned_id);
         continue;
       }
 
@@ -4617,6 +4622,11 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
                 "Nodes conflicted by running jobs or other reservation: {}",
                 util::HostNameListToStr(nodes_conflicted));
       }
+      if (!nodes_unavailable.empty()) {
+        failed_msg +=
+            ". " + fmt::format("Nodes unavailable: {}",
+                               util::HostNameListToStr(nodes_unavailable));
+      }
       g_meta_container->UnlockResReduceEvents();
       return std::unexpected(failed_msg);
     }
@@ -4631,7 +4641,9 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     }
 
     std::vector<CranedId> affected_nodes_vec;
+    craned_ids.clear();
     for (auto& craned_meta : craned_meta_vec) {
+      craned_ids.emplace_back(craned_meta->static_meta.hostname);
       const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
           resv_name, std::make_pair(start_time, end_time));
       if (!ok) {
@@ -7173,40 +7185,45 @@ void SchedulerAlgo::NodeSelect(
       part_node_state_ptrs_map;
 
   {
-    auto all_partitions_meta_map =
-        g_meta_container->GetAllPartitionsMetaMapConstPtr();
+    auto topology_lock = g_meta_container->LockTopologyShared();
+    {
+      auto all_partitions_meta_map =
+          g_meta_container->GetAllPartitionsMetaMapConstPtr();
 
-    for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
-      if (!part_pd_job_ptr_map.contains(partition_id)) {
-        continue;  // no pending jobs, skip
+      for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
+        if (!part_pd_job_ptr_map.contains(partition_id)) {
+          continue;  // no pending jobs, skip
+        }
+        auto part_meta_ptr = partition_metas.GetExclusivePtr();
+        part_node_ids_map.emplace(
+            partition_id,
+            std::vector<CranedId>{part_meta_ptr->craned_ids.begin(),
+                                  part_meta_ptr->craned_ids.end()});
       }
-      auto part_meta_ptr = partition_metas.GetExclusivePtr();
-      part_node_ids_map.emplace(
-          partition_id, std::vector<CranedId>{part_meta_ptr->craned_ids.begin(),
-                                              part_meta_ptr->craned_ids.end()});
     }
-  }
 
-  {
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-    for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
-      for (const auto& craned_id : craned_ids) {
-        auto it = node_state_map.find(craned_id);
-        if (it == node_state_map.end()) {
-          auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-          if (!craned_meta) {
-            CRANE_ERROR("Craned {} not found", craned_id);
-            continue;
+    {
+      auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+      for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
+        for (const auto& craned_id : craned_ids) {
+          auto it = node_state_map.find(craned_id);
+          if (it == node_state_map.end()) {
+            auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
+            if (!craned_meta) {
+              CRANE_ERROR("Craned {} not found", craned_id);
+              continue;
+            }
+            if (!craned_meta->alive || craned_meta->drain ||
+                craned_meta->static_meta.deleting) {
+              CRANE_TRACE("Craned {} is unavailable for scheduling, skip it",
+                          craned_id);
+              continue;
+            }
+            it = node_state_map
+                     .emplace(craned_id,
+                              NodeState(craned_id, craned_meta->res_total))
+                     .first;
           }
-          if (!craned_meta->alive || craned_meta->drain) {
-            CRANE_TRACE("Craned {} is not alive or in drain mode, skip it",
-                        craned_id);
-            continue;
-          }
-          it = node_state_map
-                   .emplace(craned_id,
-                            NodeState(craned_id, craned_meta->res_total))
-                   .first;
         }
       }
     }
@@ -8313,6 +8330,14 @@ void JobScheduler::TerminateJobsOnCraned(const CranedId& craned_id,
     CRANE_TRACE("No job is executed by craned {}. Ignore cleaning step...",
                 craned_id);
   }
+}
+
+bool JobScheduler::HasJobsOnNodes(const std::vector<CranedId>& node_ids) {
+  LockGuard indexes_guard(&m_job_indexes_mtx_);
+  return std::ranges::any_of(node_ids, [this](const CranedId& node_id) {
+    auto it = m_node_to_jobs_map_.find(node_id);
+    return it != m_node_to_jobs_map_.end() && !it->second.empty();
+  });
 }
 
 void MultiFactorPriority::GetOrderedJobPtrVec(

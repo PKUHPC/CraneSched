@@ -46,6 +46,8 @@ CraneCtld:
   ThreadPoolSize: 0
   # Number of threads for scheduler RPC dispatch (0 = auto)
   SchedulerRpcThreadPoolSize: 0
+  # Maximum number of static and dynamic nodes managed by CraneCtld
+  MaxNodeCount: 4096
   # Flush timeout (ms) for status change batching (default: 100)
   StatusChangeFlushTimeoutMs: 100
   # Batch size threshold for status change processing (default: 1000)

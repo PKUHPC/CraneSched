@@ -20,8 +20,9 @@ namespace Ctld {
 
 namespace {
 
-constexpr std::array<std::string_view, 6> kCfNames{
-    "job_fixed", "job_var", "step_fixed", "step_var", "reservation", "meta"};
+constexpr std::array<std::string_view, 7> kCfNames{
+    "job_fixed",   "job_var",      "step_fixed", "step_var",
+    "reservation", "dynamic_node", "meta"};
 
 constexpr std::string_view kJobFixedPrefix = "job_fixed/";
 constexpr std::string_view kJobVarPrefix = "job_var/";
@@ -382,6 +383,34 @@ bool RocksDbEmbeddedStore::RetrieveReservationInfo(
   return true;
 }
 
+bool RocksDbEmbeddedStore::RetrieveDynamicNodeRecords(
+    std::unordered_map<CranedId, DynamicNodeRecord>* records) {
+  std::unique_ptr<rocksdb::Iterator> it(
+      db_->NewIterator(ReadOptions_(), Handle_(Cf::DynamicNode)));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    DynamicNodeRecord record;
+    if (!ParseProto_(it->value().ToString(), &record, it->key().ToString()))
+      return false;
+    records->emplace(it->key().ToString(), std::move(record));
+  }
+  if (!it->status().ok()) {
+    CRANE_ERROR("Failed to scan RocksDB dynamic_node CF: {}",
+                ToString_(it->status()));
+    return false;
+  }
+  return true;
+}
+
+bool RocksDbEmbeddedStore::StoreDynamicNodeRecords(
+    const std::vector<DynamicNodeRecord>& records) {
+  rocksdb::WriteBatch batch;
+  for (const auto& record : records) {
+    if (!PutProto_(&batch, Cf::DynamicNode, record.node_name(), record))
+      return false;
+  }
+  return WriteBatch_(&batch, "rocksdb_store_dynamic_nodes");
+}
+
 bool RocksDbEmbeddedStore::BeginTransaction(RocksStoreKind kind,
                                             rocks_txn_id_t* txn_id) {
   absl::MutexLock lock(&txn_mu_);
@@ -648,6 +677,8 @@ rocksdb::ColumnFamilyHandle* RocksDbEmbeddedStore::Handle_(
     return Handle_(Cf::StepFixed);
   case RocksStoreKind::Reservation:
     return Handle_(Cf::Reservation);
+  case RocksStoreKind::DynamicNode:
+    return Handle_(Cf::DynamicNode);
   }
   return nullptr;
 }
@@ -953,6 +984,8 @@ RocksDbEmbeddedStore::Cf RocksDbEmbeddedStore::CfFromStoreKind_(
     return Cf::StepFixed;
   case RocksStoreKind::Reservation:
     return Cf::Reservation;
+  case RocksStoreKind::DynamicNode:
+    return Cf::DynamicNode;
   }
   return Cf::Reservation;
 }

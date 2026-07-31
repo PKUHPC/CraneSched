@@ -185,6 +185,12 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
           reservation_info_map) override;
 
+  bool RetrieveDynamicNodeRecords(
+      std::unordered_map<CranedId, DynamicNodeRecord>* records) override;
+
+  bool StoreDynamicNodeRecords(
+      const std::vector<DynamicNodeRecord>& records) override;
+
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }
@@ -622,6 +628,7 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;
   std::unique_ptr<IEmbeddedDb> m_resv_db_;
+  std::unique_ptr<IEmbeddedDb> m_node_db_;
 
   inline static std::string const s_next_step_db_id_str_{"NSDI"};
   inline static std::string const s_next_step_id_str_{"NSI"};

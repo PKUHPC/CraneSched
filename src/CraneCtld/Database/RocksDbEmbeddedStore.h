@@ -22,6 +22,7 @@ enum class RocksStoreKind : uint8_t {
   StepVar,
   StepFixed,
   Reservation,
+  DynamicNode,
 };
 
 class RocksDbEmbeddedStore final : public EmbeddedDbClient {
@@ -41,6 +42,10 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
   bool RetrieveReservationInfo(
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
           reservation_info_map) override;
+  bool RetrieveDynamicNodeRecords(
+      std::unordered_map<CranedId, DynamicNodeRecord>* records) override;
+  bool StoreDynamicNodeRecords(
+      const std::vector<DynamicNodeRecord>& records) override;
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginTransaction(RocksStoreKind::JobVar, txn_id);
@@ -141,6 +146,7 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
     StepFixed,
     StepVar,
     Reservation,
+    DynamicNode,
     Meta,
     Count,
   };

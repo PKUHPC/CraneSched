@@ -515,6 +515,12 @@ LegacyEmbeddedDbClient::~LegacyEmbeddedDbClient() {
       CRANE_ERROR(
           "Error occurred when closing the embedded db of reservation data!");
   }
+
+  if (m_node_db_) {
+    auto result = m_node_db_->Close();
+    if (!result)
+      CRANE_ERROR("Error occurred when closing the dynamic node embedded db!");
+  }
 }
 
 bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
@@ -523,6 +529,7 @@ bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
     m_variable_db_ = std::make_unique<UnqliteDb>();
     m_fixed_db_ = std::make_unique<UnqliteDb>();
     m_resv_db_ = std::make_unique<UnqliteDb>();
+    m_node_db_ = std::make_unique<UnqliteDb>();
 
     m_step_var_db_ = std::make_unique<UnqliteDb>();
     m_step_fixed_db_ = std::make_unique<UnqliteDb>();
@@ -537,6 +544,7 @@ bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
     m_variable_db_ = std::make_unique<BerkeleyDb>();
     m_fixed_db_ = std::make_unique<BerkeleyDb>();
     m_resv_db_ = std::make_unique<BerkeleyDb>();
+    m_node_db_ = std::make_unique<BerkeleyDb>();
 
     m_step_var_db_ = std::make_unique<BerkeleyDb>();
     m_step_fixed_db_ = std::make_unique<BerkeleyDb>();
@@ -556,6 +564,8 @@ bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
   result = m_fixed_db_->Init(db_path + "fix");
   if (!result) return false;
   result = m_resv_db_->Init(db_path + "resv");
+  if (!result) return false;
+  result = m_node_db_->Init(db_path + "node");
   if (!result) return false;
 
   result = m_step_var_db_->Init(db_path + "step_var");
@@ -982,6 +992,44 @@ bool LegacyEmbeddedDbClient::RetrieveReservationInfo(
   }
 
   return true;
+}
+
+bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
+    std::unordered_map<CranedId, DynamicNodeRecord>* records) {
+  bool parse_ok = true;
+  auto result = m_node_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        DynamicNodeRecord record;
+        if (record.ParseFromArray(value.data(), value.size()))
+          records->emplace(std::move(key), std::move(record));
+        else
+          parse_ok = false;
+        return true;
+      });
+
+  if (!result || !parse_ok) {
+    CRANE_ERROR("Failed to restore dynamic node records from embedded db.");
+    return false;
+  }
+  return true;
+}
+
+bool LegacyEmbeddedDbClient::StoreDynamicNodeRecords(
+    const std::vector<DynamicNodeRecord>& records) {
+  auto txn_result = m_node_db_->Begin();
+  if (!txn_result) return false;
+
+  txn_id_t txn_id = txn_result.value();
+  for (const auto& record : records) {
+    auto result =
+        StoreTypeIntoDb_(m_node_db_.get(), txn_id, record.node_name(), &record);
+    if (!result) {
+      m_node_db_->Abort(txn_id);
+      return false;
+    }
+  }
+
+  return m_node_db_->Commit(txn_id).has_value();
 }
 
 bool LegacyEmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(

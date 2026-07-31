@@ -41,6 +41,7 @@
 #include "JobManager.h"
 #include "SupervisorStub.h"
 #include "crane/CriClient.h"
+#include "crane/GrpcHelper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "crane/TraceConfigProto.h"
@@ -545,6 +546,9 @@ void ParseConfig(int argc, char** argv) {
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
       ("C,nodeinfo", "Print current node cpu and memory info")
+      ("dynamic", "Start Craned as a precreated dynamic node")
+      ("node-name", "Logical node name used in dynamic mode",
+       cxxopts::value<std::string>())
       ;
   // clang-format on
 
@@ -580,6 +584,16 @@ void ParseConfig(int argc, char** argv) {
     fmt::print("    cpu: {}\n", node.cpu);
     fmt::print("    memory: {:.2f}G\n", node.memory_gb);
     std::exit(0);
+  }
+
+  g_config.Dynamic = parsed_args.count("dynamic") > 0;
+  if (g_config.Dynamic && parsed_args.count("node-name") == 0) {
+    fmt::print(stderr, "--node-name is required in dynamic mode.\n");
+    std::exit(1);
+  }
+  if (!g_config.Dynamic && parsed_args.count("node-name") > 0) {
+    fmt::print(stderr, "--node-name can only be used in dynamic mode.\n");
+    std::exit(1);
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
@@ -1210,16 +1224,98 @@ void ParseConfig(int argc, char** argv) {
     CRANE_ERROR("Error: get hostname.");
     std::exit(1);
   }
-  g_config.Hostname.assign(hostname.data());
+  g_config.Hostname = g_config.Dynamic
+                          ? parsed_args["node-name"].as<std::string>()
+                          : std::string(hostname.data());
 
-  if (!g_config.CranedRes.contains(g_config.Hostname)) {
-    CRANE_ERROR("This machine {} is not contained in Nodes!",
-                g_config.Hostname);
-    std::exit(1);
+  if (g_config.Dynamic) {
+    grpc::ChannelArguments channel_args;
+    SetGrpcClientKeepAliveChannelArgs(&channel_args);
+    std::shared_ptr<grpc::Channel> channel;
+    if (g_config.ListenConf.TlsConfig.Enabled) {
+      channel = CreateTcpTlsCustomChannelByHostname(
+          g_config.ControlMachine, g_config.CraneCtldForInternalListenPort,
+          g_config.ListenConf.TlsConfig.TlsCerts,
+          g_config.ListenConf.TlsConfig.DomainSuffix, channel_args);
+    } else {
+      channel = CreateTcpInsecureCustomChannel(
+          g_config.ControlMachine, g_config.CraneCtldForInternalListenPort,
+          channel_args);
+    }
+
+    auto stub = crane::grpc::CraneCtldForInternal::NewStub(channel);
+    crane::grpc::QueryDynamicNodeConfigRequest request;
+    request.set_node_name(g_config.Hostname);
+    crane::grpc::QueryDynamicNodeConfigReply reply;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(
+                             Craned::kCranedRpcTimeoutSeconds));
+    auto status = stub->QueryDynamicNodeConfig(&context, request, &reply);
+    if (!status.ok()) {
+      CRANE_ERROR("Failed to query dynamic node {}: {}", g_config.Hostname,
+                  status.error_message());
+      std::exit(1);
+    }
+    if (!reply.ok()) {
+      CRANE_ERROR("Dynamic node {} is rejected: {}", g_config.Hostname,
+                  reply.reason());
+      std::exit(1);
+    }
+
+    NodeSpecInfo node_real;
+    if (!util::os::GetNodeInfo(&node_real)) {
+      CRANE_ERROR("Failed to get local node information.");
+      std::exit(1);
+    }
+    const auto& spec = reply.spec();
+    if (node_real.cpu < spec.cpu_count()) {
+      CRANE_ERROR("Dynamic node {} requires {} CPUs, but only {} are online.",
+                  g_config.Hostname, spec.cpu_count(), node_real.cpu);
+      std::exit(1);
+    }
+    double configured_memory_gb =
+        static_cast<double>(spec.memory_bytes()) / (1024 * 1024 * 1024);
+    if (node_real.memory_gb + kMemoryToleranceGB < configured_memory_gb) {
+      CRANE_ERROR(
+          "Dynamic node {} requires {:.3f} GB memory, but only {:.3f} GB is "
+          "available.",
+          g_config.Hostname, configured_memory_gb, node_real.memory_gb);
+      std::exit(1);
+    }
+
+    auto node_res = std::make_shared<ResourceInNodeV3>();
+    node_res->GetCpuSet().cpu_count = cpu_t(spec.cpu_count());
+    for (uint32_t i = 0; i < spec.cpu_count(); ++i)
+      node_res->GetCpuSet().core_ids.insert(i);
+    node_res->SetMemoryBytes(spec.memory_bytes());
+    node_res->SetMemorySwBytes(spec.memory_bytes());
+    g_config.CranedRes[g_config.Hostname] = std::move(node_res);
+    g_config.node_topo_info.sockets = spec.sockets();
+    g_config.Generation = reply.generation();
+
+    for (const auto& partition_name : reply.partition_names()) {
+      auto partition_it = g_config.Partitions.find(partition_name);
+      if (partition_it == g_config.Partitions.end()) {
+        CRANE_ERROR(
+            "Partition {} of dynamic node {} is not configured locally.",
+            partition_name, g_config.Hostname);
+        std::exit(1);
+      }
+      partition_it->second.nodes.emplace(g_config.Hostname);
+    }
+    CRANE_INFO("Loaded dynamic node {} generation {} from CraneCtld.",
+               g_config.Hostname, g_config.Generation);
+  } else {
+    if (!g_config.CranedRes.contains(g_config.Hostname)) {
+      CRANE_ERROR("This machine {} is not contained in Nodes!",
+                  g_config.Hostname);
+      std::exit(1);
+    }
+
+    CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
+    g_config.node_topo_info = node_topologies.at(g_config.Hostname);
   }
-
-  CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
-  g_config.node_topo_info = node_topologies.at(g_config.Hostname);
   // get this node device info
   // Todo: Auto detect device
   {

@@ -180,6 +180,10 @@ class CranedKeeper {
 
   bool IsCranedConnected(const CranedId &craned_id);
 
+  bool IsCranedTracked(const CranedId &craned_id);
+
+  bool ForgetCraned(const CranedId &craned_id);
+
   /**
    * Get the pointer to CranedStub.
    * @param craned_id the index of CranedStub
@@ -246,6 +250,11 @@ class CranedKeeper {
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
   std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
       ABSL_GUARDED_BY(m_connect_craned_mtx_);
+
+  Mutex m_craned_id_to_ip_cache_map_mtx_;
+  std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
+      m_craned_id_to_ip_cache_map_
+          ABSL_GUARDED_BY(m_craned_id_to_ip_cache_map_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;
