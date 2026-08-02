@@ -21,6 +21,7 @@
 
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
+#include "TaskLifecycle.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
@@ -162,6 +163,10 @@ class StepInstance {
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsPmix() const noexcept;
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] std::string ExecutionFlowId() const;
+#endif
+
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
 
   const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
@@ -270,6 +275,10 @@ class ITaskInstance {
 
   [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
 
+  [[nodiscard]] bool TryBeginFinalization() {
+    return m_finalization_gate_.TryEnter();
+  }
+
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
@@ -288,6 +297,7 @@ class ITaskInstance {
   StepInstance* m_parent_step_inst_;
   EnvMap m_env_;
   TaskFinalInfo m_final_info_{};
+  detail::TaskFinalizationGate m_finalization_gate_;
   // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
@@ -773,6 +783,9 @@ class TaskManager {
       m_grpc_migrate_ssh_proc_to_cgroup_queue_;
 
   std::atomic_bool m_supervisor_exit_;
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  StepStatus m_exit_status_{StepStatus::Completed};
+#endif
   std::thread m_uvw_thread_;
 
   // This is the gate for daemon step. Daemon step will not exit when all tasks

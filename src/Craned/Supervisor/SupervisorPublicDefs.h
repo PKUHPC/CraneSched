@@ -96,9 +96,19 @@ struct Config {
   PluginConfig Plugin;
 
   struct TracingConfig {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    struct ExecutionFlowConfig {
+      bool Enabled{false};
+      uint32_t HeartbeatIntervalSeconds{5};
+    };
+#endif
+
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
     std::string Traceparent;
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    ExecutionFlowConfig ExecutionFlow;
+#endif
   };
   TracingConfig Tracing;
 

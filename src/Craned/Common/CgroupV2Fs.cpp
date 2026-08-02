@@ -190,6 +190,15 @@ struct CgroupV2FsBackend::NodeState {
 };
 
 class CgroupV2FsBackend::Janitor {
+  struct Item {
+    std::filesystem::path path;
+    int retry_count;
+    std::chrono::steady_clock::time_point first_enqueue;
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    CgroupDestroyCompletion completion;
+#endif
+  };
+
  public:
   explicit Janitor(CgroupV2FsBackend* backend) : backend_(backend) {
     worker_ = std::thread([this] { WorkerLoop_(); });
@@ -197,11 +206,31 @@ class CgroupV2FsBackend::Janitor {
 
   ~Janitor() { Stop(); }
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  bool Enqueue(std::filesystem::path path, CgroupDestroyCompletion completion) {
+    return EnqueueItem_({std::move(path), 0, std::chrono::steady_clock::now(),
+                         std::move(completion)});
+  }
+#else
   void Enqueue(std::filesystem::path path) {
-    std::lock_guard lk(mu_);
-    if (stopped_) return;
-    queue_.push_back({std::move(path), 0, std::chrono::steady_clock::now()});
-    cv_.notify_one();
+    (void)EnqueueItem_({std::move(path), 0, std::chrono::steady_clock::now()});
+  }
+#endif
+
+  bool EnqueueItem_(Item item) {
+    bool accepted = false;
+    {
+      std::lock_guard lk(mu_);
+      if (!stopped_) {
+        queue_.push_back(std::move(item));
+        accepted = true;
+        cv_.notify_one();
+      }
+    }
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    if (!accepted && item.completion) item.completion(false);
+#endif
+    return accepted;
   }
 
   bool Drain(std::chrono::milliseconds timeout) {
@@ -227,12 +256,6 @@ class CgroupV2FsBackend::Janitor {
   }
 
  private:
-  struct Item {
-    std::filesystem::path path;
-    int retry_count;
-    std::chrono::steady_clock::time_point first_enqueue;
-  };
-
   void WorkerLoop_() {
     while (true) {
       Item item;
@@ -257,33 +280,41 @@ class CgroupV2FsBackend::Janitor {
       span.SetAttribute("delete_elapsed_ms", MsSince(begin));
       span.SetAttribute("errno", err);
 
+      if (ok) {
+        backend_->ForgetPath_(item.path);
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+        if (item.completion) item.completion(true);
+#endif
+      } else {
+        span.SetStatus(crane::StatusCode::kError, "delete_failed");
+        bool stopping = false;
+        {
+          std::lock_guard lk(mu_);
+          stopping = stopped_;
+        }
+        if (stopping || item.retry_count >= kJanitorMaxRetries) {
+          if (!stopping) {
+            CRANE_WARN(
+                "Cgroup v2 janitor gave up deleting {} after {} retries: {}",
+                item.path.string(), item.retry_count, strerror(err));
+          }
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+          if (item.completion) item.completion(false);
+#endif
+        } else {
+          std::this_thread::sleep_for(std::min(
+              std::chrono::milliseconds{5000},
+              std::chrono::milliseconds{200 * (item.retry_count + 1)}));
+          item.retry_count++;
+          (void)EnqueueItem_(std::move(item));
+        }
+      }
+
       {
         std::lock_guard lk(mu_);
         --in_flight_;
         span.SetAttribute("queue_len", static_cast<int64_t>(queue_.size()));
       }
-
-      if (ok) {
-        backend_->ForgetPath_(item.path);
-        continue;
-      }
-
-      span.SetStatus(crane::StatusCode::kError, "delete_failed");
-      {
-        std::lock_guard lk(mu_);
-        if (stopped_) continue;
-      }
-      if (item.retry_count >= kJanitorMaxRetries) {
-        CRANE_WARN("Cgroup v2 janitor gave up deleting {} after {} retries: {}",
-                   item.path.string(), item.retry_count, strerror(err));
-        continue;
-      }
-
-      std::this_thread::sleep_for(
-          std::min(std::chrono::milliseconds{5000},
-                   std::chrono::milliseconds{200 * (item.retry_count + 1)}));
-      item.retry_count++;
-      Enqueue(std::move(item.path));
     }
   }
 
@@ -468,11 +499,20 @@ bool CgroupV2FsBackend::Empty(const std::string& cgroup_name) {
   return !populated;
 }
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name,
+                                CgroupDestroyCompletion completion) {
+#else
 bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name) {
+#endif
   auto path = FullPath_(cgroup_name);
   if (cleanup_mode_ == CgroupV2CleanupMode::ASYNC_RMDIR) {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    return janitor_->Enqueue(path, std::move(completion));
+#else
     janitor_->Enqueue(path);
     return true;
+#endif
   }
 
   int err = 0;
@@ -482,7 +522,11 @@ bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name) {
                strerror(err));
   }
   if (ok) ForgetPath_(path);
-  return ok || IsNoEnt(err);
+  const bool removed = ok || IsNoEnt(err);
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  if (completion) completion(removed);
+#endif
+  return removed;
 }
 
 bool CgroupV2FsBackend::DrainJanitor(std::chrono::milliseconds timeout) {

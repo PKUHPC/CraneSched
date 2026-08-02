@@ -56,6 +56,12 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 # Options start here ----------------------------------------------------------------------------
 
 option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+option(CRANE_ENABLE_EXECUTION_FLOW
+        "Enable execution-flow lifecycle point instrumentation" OFF)
+if (CRANE_ENABLE_EXECUTION_FLOW AND NOT CRANE_ENABLE_TRACING)
+    message(FATAL_ERROR
+            "CRANE_ENABLE_EXECUTION_FLOW requires CRANE_ENABLE_TRACING=ON")
+endif ()
 set(CRANE_TRACE_COMPILED_MAX_LEVEL "debug" CACHE STRING
         "Maximum tracing level compiled into binaries: basic, detailed, or debug")
 set_property(CACHE CRANE_TRACE_COMPILED_MAX_LEVEL PROPERTY STRINGS basic detailed debug)

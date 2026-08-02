@@ -30,6 +30,7 @@
 #include <libcgroup.h>
 #include <semaphore.h>
 
+#include <functional>
 #include <memory>
 #include <string_view>
 
@@ -38,6 +39,10 @@
 #endif
 
 namespace Craned::Common {
+
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+using CgroupDestroyCompletion = std::function<void(bool)>;
+#endif
 
 namespace CgConstant {
 
@@ -396,7 +401,11 @@ class Cgroup {
                          CgConstant::ControllerFile controller_file,
                          const std::vector<std::string>& strs);
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] bool Destroy();
+#else
   void Destroy();
+#endif
 
   // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
@@ -435,7 +444,11 @@ class CgroupInterface {
 
   virtual bool Empty() = 0;
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] virtual bool Destroy(CgroupDestroyCompletion completion = {});
+#else
   virtual void Destroy();
+#endif
 
   virtual bool MigrateProcIn(pid_t pid);
 
@@ -470,7 +483,11 @@ class CgroupV1 : public CgroupInterface {
 
   bool Empty() override;
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] bool Destroy(CgroupDestroyCompletion completion = {}) override;
+#else
   void Destroy() override;
+#endif
 };
 
 class CgroupV2 : public CgroupInterface {
@@ -531,7 +548,11 @@ class CgroupV2 : public CgroupInterface {
 
   bool Empty() override;
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] bool Destroy(CgroupDestroyCompletion completion = {}) override;
+#else
   void Destroy() override;
+#endif
   bool MigrateProcIn(pid_t pid) override;
 
  private:
@@ -662,7 +683,23 @@ class CgroupManager {
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNodeV3& res_in_node);
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  struct CgroupCleanupResult {
+    bool processes_drained{true};
+    bool cgroup_destroyed{true};
+
+    [[nodiscard]] bool Succeeded() const {
+      return processes_drained && cgroup_destroyed;
+    }
+  };
+
+  using CgroupCleanupCompletion = std::function<void(CgroupCleanupResult)>;
+
+  static void KillAndDestroyCgroup(std::unique_ptr<CgroupInterface> cgroup,
+                                   CgroupCleanupCompletion completion = {});
+#else
   static void KillAndDestroyCgroup(std::unique_ptr<CgroupInterface> cgroup);
+#endif
 
   // --- CPU Pool Management ---
   // All state modifications below must be called from event loop only.

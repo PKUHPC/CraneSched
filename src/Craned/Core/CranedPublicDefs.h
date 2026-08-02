@@ -65,6 +65,10 @@ struct StepStatusChangeQueueElem {
   std::chrono::steady_clock::time_point enqueue_steady_time{};
   int64_t enqueue_ts_ms{};
   int64_t queue_len_at_enqueue{};
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  std::string execution_flow_id;
+  std::string traceparent;
+#endif
 };
 
 struct JobInfoOfUid {
@@ -162,8 +166,18 @@ struct Config {
   PluginConfig Plugin;
 
   struct TracingConfig {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    struct ExecutionFlowConfig {
+      bool Enabled{false};
+      uint32_t HeartbeatIntervalSeconds{5};
+    };
+#endif
+
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    ExecutionFlowConfig ExecutionFlow;
+#endif
   };
   TracingConfig Tracing;
 

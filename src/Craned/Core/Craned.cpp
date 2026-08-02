@@ -41,6 +41,7 @@
 #include "JobManager.h"
 #include "SupervisorStub.h"
 #include "crane/CriClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "crane/TraceConfigProto.h"
@@ -136,7 +137,7 @@ CraneErrCode RecoverCgForJobSteps(
     }
 
     cg_ptr->KillAllProcesses(SIGKILL);
-    cg_ptr->Destroy();
+    (void)cg_ptr->Destroy();
   };
 
   bool has_int_recovery = false;
@@ -1133,6 +1134,17 @@ void ParseConfig(int argc, char** argv) {
         if (tracing_config["Level"])
           g_config.Tracing.Level = crane::TraceLevelFromString(
               tracing_config["Level"].as<std::string>());
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+        if (tracing_config["ExecutionFlow"]) {
+          const auto& flow_config = tracing_config["ExecutionFlow"];
+          if (flow_config["Enabled"])
+            g_config.Tracing.ExecutionFlow.Enabled =
+                flow_config["Enabled"].as<bool>();
+          if (flow_config["HeartbeatIntervalSeconds"])
+            g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
+                flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
+        }
+#endif
       }
 
     } catch (YAML::BadFile& e) {
@@ -1547,6 +1559,7 @@ void GlobalVariableInit() {
               crane::ApplyRuntimeTraceConfig(arg.req.trace_config());
           g_config.Tracing.Enabled = applied_config.enabled;
           g_config.Tracing.Level = applied_config.runtime_level;
+          CRANE_EXECUTION_FLOW_RECONCILE();
           if (applied_config.clamped) {
             CRANE_WARN(
                 "Tracing runtime level {} exceeds compiled max level {}; "
@@ -1596,6 +1609,17 @@ void GlobalVariableInit() {
         crane::TraceLevelToString(trace_config.effective_level));
   }
 #endif
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
+    CRANE_WARN(
+        "Execution flow requested while tracing is disabled; execution "
+        "flow remains inactive until tracing is enabled.");
+  }
+#endif
+  CRANE_EXECUTION_FLOW_INITIALIZE(
+      g_config.Tracing.ExecutionFlow.Enabled,
+      g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds, "craned",
+      g_config.Hostname, true);
 
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
@@ -1645,6 +1669,14 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  // Drain physical cgroup deletion while execution-flow tracing is still
+  // available so queued cleanup completions can publish their final point.
+  CgroupManager::ShutdownCpuPool();
+  CgroupManager::ShutdownCgroupV2FastPath();
+#endif
+
+  CRANE_EXECUTION_FLOW_SHUTDOWN();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
@@ -1652,8 +1684,10 @@ void WaitForStopAndDoGvarFini() {
   // It may be called in the thread pool.
   g_plugin_client.reset();
 
+#ifndef CRANE_ENABLE_EXECUTION_FLOW
   CgroupManager::ShutdownCpuPool();
   CgroupManager::ShutdownCgroupV2FastPath();
+#endif
 
   std::exit(0);
 }

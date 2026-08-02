@@ -38,6 +38,7 @@
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 #include "crane/Tracing.h"
@@ -796,6 +797,17 @@ void ParseConfig(int argc, char** argv) {
         if (tracing_config["Level"])
           g_config.Tracing.Level = crane::TraceLevelFromString(
               tracing_config["Level"].as<std::string>());
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+        if (tracing_config["ExecutionFlow"]) {
+          const auto& flow_config = tracing_config["ExecutionFlow"];
+          if (flow_config["Enabled"])
+            g_config.Tracing.ExecutionFlow.Enabled =
+                flow_config["Enabled"].as<bool>();
+          if (flow_config["HeartbeatIntervalSeconds"])
+            g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
+                flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
+        }
+#endif
       }
 
       if (config["Preempt"]) {
@@ -1074,6 +1086,7 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+  CRANE_EXECUTION_FLOW_SHUTDOWN();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
@@ -1155,6 +1168,17 @@ void InitializeCtldGlobalVariables() {
         crane::TraceLevelToString(trace_config.effective_level));
   }
 #endif
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
+    CRANE_WARN(
+        "Execution flow requested while tracing is disabled; execution "
+        "flow remains inactive until tracing is enabled.");
+  }
+#endif
+  CRANE_EXECUTION_FLOW_INITIALIZE(
+      g_config.Tracing.ExecutionFlow.Enabled,
+      g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds, "cranectld",
+      g_config.Hostname, true);
 
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();

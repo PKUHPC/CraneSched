@@ -36,6 +36,7 @@
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Logger.h"
 #include "crane/OS.h"
 #include "crane/PasswordEntry.h"
@@ -168,7 +169,7 @@ void StepInstance::CleanUp() {
       ++cnt;
       std::this_thread::sleep_for(100ms);
     }
-    step_user_cg->Destroy();
+    (void)step_user_cg->Destroy();
 
     step_user_cg.reset();
   }
@@ -213,6 +214,17 @@ bool StepInstance::IsDaemon() const noexcept {
 bool StepInstance::IsPrimary() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::PRIMARY;
 }
+
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+std::string StepInstance::ExecutionFlowId() const {
+  if (!IsBatch() || IsContainer() || m_step_to_supv_.has_array_task() ||
+      m_step_to_supv_.requeue_count() != 0)
+    return {};
+  auto parsed =
+      crane::ParseExecutionFlowId(m_step_to_supv_.execution_flow_id());
+  return parsed.value_or(std::string{});
+}
+#endif
 
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
@@ -2345,11 +2357,11 @@ CraneErrCode ProcInstance::Spawn() {
 
     ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
                                           nullptr);
-    if (!ok || !msg.ok()) {
+    if (!detail::ChildHandshakeSucceeded(ok, child_process_ready.ok())) {
       if (!ok)
         CRANE_ERROR("Socket child endpoint failed: {}",
                     strerror(istream.GetErrno()));
-      if (!msg.ok())
+      if (ok && !child_process_ready.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid, task_id);
       close(ctrl_fd);
 
@@ -2540,7 +2552,7 @@ CraneErrCode ProcInstance::Cleanup() {
       std::this_thread::sleep_for(100ms);
     }
 
-    m_task_cg_->Destroy();
+    (void)m_task_cg_->Destroy();
     m_task_cg_.reset();
   }
 
@@ -2711,6 +2723,9 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   CRANE_TRACE("TaskManager destroyed.");
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  bool epilog_success = true;
+#endif
   if (!g_config.JobLifecycleHook.Epilogs.empty()) {
     CRANE_TRACE("Running Epilogs...");
     CRANE_TRACE_SCOPE_FROM_REMOTE(epilog_span, "step/supervisor_epilog",
@@ -2731,6 +2746,9 @@ TaskManager::~TaskManager() {
 
     auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
     if (!result) {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+      epilog_success = false;
+#endif
       auto status = result.error();
       CRANE_DEBUG("Epilog failed status={}:{}", status.exit_code,
                   status.signal_num);
@@ -2740,10 +2758,40 @@ TaskManager::~TaskManager() {
       CRANE_DEBUG("Epilog success");
     }
   }
+  CRANE_FLOW_POINT(
+      "supervisor/step/epilog_finished", m_step_.ExecutionFlowId(),
+      g_config.Tracing.Traceparent,
+      CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+      CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+      CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.CranedIdOfThisNode});
+      CRANE_FLOW_SET_ATTR("operation", "supervisor-epilog");
+      CRANE_FLOW_SET_ATTR("outcome",
+                          g_config.JobLifecycleHook.Epilogs.empty()
+                              ? "skipped"
+                              : (epilog_success ? "success" : "failure"));
+      if (!epilog_success) CRANE_FLOW_SET_ERROR(););
+  CRANE_FLOW_POINT(
+      "supervisor/step/exiting", m_step_.ExecutionFlowId(),
+      g_config.Tracing.Traceparent,
+      CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+      CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+      CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.CranedIdOfThisNode});
+      CRANE_FLOW_SET_ATTR("status", static_cast<int64_t>(m_exit_status_));
+      CRANE_FLOW_SET_ATTR("operation", "exit-supervisor"););
 }
 
 void TaskManager::SupervisorFinishInit(StepStatus status) {
   m_step_.GotNewStatus(status);
+  CRANE_FLOW_POINT(
+      "supervisor/step/initialized", m_step_.ExecutionFlowId(),
+      g_config.Tracing.Traceparent,
+      CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+      CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+      CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.CranedIdOfThisNode});
+      CRANE_FLOW_SET_ATTR("status", static_cast<int64_t>(status));
+      CRANE_FLOW_SET_ATTR("operation", "initialize"); CRANE_FLOW_SET_ATTR(
+          "outcome", IsFinishedStepStatus(status) ? "failure" : "success");
+      if (IsFinishedStepStatus(status)) CRANE_FLOW_SET_ERROR(););
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
@@ -2799,6 +2847,11 @@ void TaskManager::FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
     return;
   }
 
+  if (!task->TryBeginFinalization()) {
+    CRANE_DEBUG("[Task #{}] Finalization is already queued.", task_id);
+    return;
+  }
+
   auto* final_info = task->GetFinalInfo();
   final_info->cause = cause;
   final_info->reason = std::move(reason);
@@ -2808,6 +2861,17 @@ void TaskManager::FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
 }
 
 void TaskManager::FinalizeTaskAsync(task_id_t task_id) {
+  auto* task = m_step_.GetTaskInstance(task_id);
+  if (task == nullptr) {
+    CRANE_DEBUG("[Task #{}] Task not found when finalizing.", task_id);
+    return;
+  }
+
+  if (!task->TryBeginFinalization()) {
+    CRANE_DEBUG("[Task #{}] Finalization is already queued.", task_id);
+    return;
+  }
+
   m_task_finalizing_queue_.enqueue(task_id);
   m_task_finalizing_async_handle_->send();
 }
@@ -2839,6 +2903,18 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     CRANE_WARN("[Task #{}] Failed to cleanup task: {}", task_id,
                static_cast<int>(err));
   }
+  CRANE_FLOW_POINT(
+      "supervisor/task/finalized", m_step_.ExecutionFlowId(),
+      g_config.Tracing.Traceparent,
+      CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+      CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+      CRANE_FLOW_SET_ATTR("task_id", static_cast<int64_t>(task_id));
+      CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.CranedIdOfThisNode});
+      CRANE_FLOW_SET_ATTR("status", static_cast<int64_t>(new_status));
+      CRANE_FLOW_SET_ATTR("operation", "finalize-task"); CRANE_FLOW_SET_ATTR(
+          "outcome",
+          err == CraneErrCode::SUCCESS ? "success" : "cleanup-failure");
+      if (err != CraneErrCode::SUCCESS) CRANE_FLOW_SET_ERROR(););
 
   auto& status = m_step_.final_termination_status;
   if (status.max_exit_code < exit_code) {
@@ -2860,6 +2936,16 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     DelSignalTimers_();
     m_step_.StopCforedClient();
 
+    CRANE_FLOW_POINT(
+        "supervisor/step/all_tasks_finalized", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id); CRANE_FLOW_SET_ATTR(
+            "node_id", std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR(
+            "status", static_cast<int64_t>(status.final_status_on_termination));
+        CRANE_FLOW_SET_ATTR("operation", "finalize-step"););
+
     // End the execute span now that all tasks have finished
     if (m_step_.ExecuteSpan().IsActive()) {
       if (status.max_exit_code != 0)
@@ -2878,10 +2964,20 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
       if (status.max_exit_code != 0)
         finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
     }
+    CRANE_FLOW_POINT(
+        "supervisor/step/completing_enqueued", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id); CRANE_FLOW_SET_ATTR(
+            "node_id", std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR("status",
+                            static_cast<int64_t>(StepStatus::Completing));
+        CRANE_FLOW_SET_ATTR("operation", "enqueue-status");
+        CRANE_FLOW_SET_ATTR("outcome", "queued"););
     g_craned_client->StepStatusChangeAsync(
         StepStatus::Completing, status.max_exit_code,
         status.final_reason_on_termination, status.final_status_on_termination);
-    ShutdownSupervisorAsync();
+    ShutdownSupervisorAsync(status.final_status_on_termination);
   }
 }
 
@@ -2909,6 +3005,17 @@ void TaskManager::CompleteStepBeforeTaskStart_(uint32_t exit_code,
     m_step_.ExecuteSpan().End();
   }
 
+  CRANE_FLOW_POINT(
+      "supervisor/step/completing_enqueued", m_step_.ExecutionFlowId(),
+      g_config.Tracing.Traceparent,
+      CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+      CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+      CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.CranedIdOfThisNode});
+      CRANE_FLOW_SET_ATTR("status",
+                          static_cast<int64_t>(StepStatus::Completing));
+      CRANE_FLOW_SET_ATTR("operation", "enqueue-status");
+      CRANE_FLOW_SET_ATTR("outcome", "pre-start-failure");
+      CRANE_FLOW_SET_ERROR(););
   g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
                                          reason, StepStatus::Failed);
   ShutdownSupervisorAsync(StepStatus::Failed, exit_code, std::move(reason));
@@ -2948,6 +3055,16 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
                                     static_cast<int>(err)));
       return err;
     }
+    CRANE_FLOW_POINT(
+        "supervisor/task/prepared", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+        CRANE_FLOW_SET_ATTR("task_id", static_cast<int64_t>(task->task_id));
+        CRANE_FLOW_SET_ATTR("node_id",
+                            std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR("operation", "prepare-task");
+        CRANE_FLOW_SET_ATTR("outcome", "success"););
   }
 
   CRANE_INFO("[Task #{}] Spawning in task", task->task_id);
@@ -2965,6 +3082,21 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
                       static_cast<int>(err)));
       return err;
     }
+    if (task->GetFinalInfo()->cause == TaskFinalizeCause::TASK_SPAWN_FAILED) {
+      spawn_span.SetStatus(crane::StatusCode::kError,
+                           "task_spawn_handshake_failed");
+      return CraneErrCode::SUCCESS;
+    }
+    CRANE_FLOW_POINT(
+        "supervisor/task/spawned", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+        CRANE_FLOW_SET_ATTR("task_id", static_cast<int64_t>(task->task_id));
+        CRANE_FLOW_SET_ATTR("node_id",
+                            std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR("operation", "spawn-task");
+        CRANE_FLOW_SET_ATTR("outcome", "success"););
   }
 
   return CraneErrCode::SUCCESS;
@@ -3133,9 +3265,30 @@ void TaskManager::EvShutdownSupervisorCb_() {
     }
 
     auto& [status, exit_code, reason] = final_status;
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    m_exit_status_ = status;
+#endif
+    CRANE_FLOW_POINT(
+        "supervisor/step/shutdown_received", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id); CRANE_FLOW_SET_ATTR(
+            "node_id", std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR("status", static_cast<int64_t>(status));
+        CRANE_FLOW_SET_ATTR("operation", "shutdown-supervisor"););
     if (m_step_.IsDaemon()) {
       m_step_.GotNewStatus(StepStatus::Completing);
       CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
+      CRANE_FLOW_POINT(
+          "supervisor/step/completing_enqueued", m_step_.ExecutionFlowId(),
+          g_config.Tracing.Traceparent,
+          CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+          CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id); CRANE_FLOW_SET_ATTR(
+              "node_id", std::string{g_config.CranedIdOfThisNode});
+          CRANE_FLOW_SET_ATTR("status",
+                              static_cast<int64_t>(StepStatus::Completing));
+          CRANE_FLOW_SET_ATTR("operation", "enqueue-status");
+          CRANE_FLOW_SET_ATTR("outcome", "queued"););
       g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
                                              reason, status);
     }
@@ -3195,6 +3348,20 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     auto* task = dynamic_cast<ProcInstance*>(m_step_.GetTaskInstance(task_id));
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
+
+    CRANE_FLOW_POINT(
+        "supervisor/task/exit_observed", m_step_.ExecutionFlowId(),
+        g_config.Tracing.Traceparent,
+        CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+        CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+        CRANE_FLOW_SET_ATTR("task_id", static_cast<int64_t>(task_id));
+        CRANE_FLOW_SET_ATTR("node_id",
+                            std::string{g_config.CranedIdOfThisNode});
+        CRANE_FLOW_SET_ATTR("operation", "observe-task-exit");
+        CRANE_FLOW_SET_ATTR(
+            "outcome", exit_info->is_terminated_by_signal ? "signal" : "exit");
+        if (exit_info->is_terminated_by_signal || exit_info->value != 0)
+            CRANE_FLOW_SET_ERROR(););
 
     CRANE_INFO("Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}", pid,
                exit_info->is_terminated_by_signal, exit_info->value);
@@ -3576,6 +3743,17 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       final_status.final_reason_on_termination.clear();
 
       if (elem.cause != TaskFinalizeCause::NORMAL) {
+        CRANE_FLOW_POINT(
+            "supervisor/step/completing_enqueued", m_step_.ExecutionFlowId(),
+            g_config.Tracing.Traceparent,
+            CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+            CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+            CRANE_FLOW_SET_ATTR("node_id",
+                                std::string{g_config.CranedIdOfThisNode});
+            CRANE_FLOW_SET_ATTR("status",
+                                static_cast<int64_t>(StepStatus::Completing));
+            CRANE_FLOW_SET_ATTR("operation", "enqueue-status");
+            CRANE_FLOW_SET_ATTR("outcome", "early-cancel"););
         g_craned_client->StepStatusChangeAsync(
             StepStatus::Completing, final_status.max_exit_code,
             final_status.final_reason_on_termination,
@@ -3595,7 +3773,6 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
-      task->GetFinalInfo()->cause = elem.cause;
 
       if (task->GetExecId().has_value()) {
         // Will kill the following types of tasks:
@@ -3604,6 +3781,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
+        task->GetFinalInfo()->cause = elem.cause;
         if (elem.cause == TaskFinalizeCause::CANCELLED_BY_USER) sig = SIGKILL;
         task->Kill(sig);
       } else if (m_step_.IsInteractive()) {
@@ -3617,7 +3795,7 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
           FinalizeTaskAsync(task_id, elem.cause);
         }
       } else {
-        CRANE_ASSERT_MSG(false, "Terminating a step without any task");
+        FinalizeTaskAsync(task_id, elem.cause);
       }
     }
   }
@@ -3756,6 +3934,15 @@ void TaskManager::EvGrpcExecuteStepCb_() {
     }
 
     m_step_.GotNewStatus(StepStatus::Running);
+
+    CRANE_FLOW_POINT("supervisor/step/execute_started",
+                     m_step_.ExecutionFlowId(), g_config.Tracing.Traceparent,
+                     CRANE_FLOW_SET_ATTR("job_id", m_step_.job_id);
+                     CRANE_FLOW_SET_ATTR("step_id", m_step_.step_id);
+                     CRANE_FLOW_SET_ATTR(
+                         "node_id", std::string{g_config.CranedIdOfThisNode});
+                     CRANE_FLOW_SET_ATTR("operation", "execute-step");
+                     CRANE_FLOW_SET_ATTR("outcome", "started"););
 
     CRANE_TRACE_MANUAL_FROM_REMOTE(exec_span, "step/execute",
                                    g_config.Tracing.Traceparent);

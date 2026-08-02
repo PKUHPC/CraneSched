@@ -1,6 +1,8 @@
+// The generated CRI Signal enum must be parsed before signal macros from GTest.
+// clang-format off
 #include "CgroupV2Fs.h"
-
 #include <gtest/gtest.h>
+// clang-format on
 #include <unistd.h>
 
 #include <atomic>
@@ -112,9 +114,8 @@ TEST(CgroupV2FsBackendTest, DirectResourceWriteAndMigrationUseCgroupFiles) {
   WriteText(fs.Root() / "crane/job_1/cpu.max", "");
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
-  ASSERT_TRUE(backend.WriteControllerFile("crane/job_1",
-                                          ControllerFile::CPU_MAX_V2,
-                                          "1000 65536"));
+  ASSERT_TRUE(backend.WriteControllerFile(
+      "crane/job_1", ControllerFile::CPU_MAX_V2, "1000 65536"));
   EXPECT_EQ("1000 65536", ReadText(fs.Root() / "crane/job_1/cpu.max"));
 
   ASSERT_TRUE(backend.MigrateProcIn("crane/job_1", 12345));
@@ -142,9 +143,43 @@ TEST(CgroupV2FsBackendTest, AsyncJanitorDrainsQueuedRmdir) {
   std::filesystem::create_directories(path);
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  std::atomic_bool completion_called{false};
+  std::atomic_bool completion_succeeded{false};
+  std::atomic_bool completion_observed_removal{false};
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    completion_succeeded.store(succeeded, std::memory_order_release);
+    completion_observed_removal.store(!std::filesystem::exists(path),
+                                      std::memory_order_release);
+    completion_called.store(true, std::memory_order_release);
+  }));
+#else
   ASSERT_TRUE(backend.Destroy("crane/job_1"));
+#endif
   EXPECT_TRUE(backend.DrainJanitor(std::chrono::seconds{2}));
   EXPECT_FALSE(std::filesystem::exists(path));
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  EXPECT_TRUE(completion_called.load(std::memory_order_acquire));
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_TRUE(completion_observed_removal.load(std::memory_order_acquire));
+#endif
 }
+
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+TEST(CgroupV2FsBackendTest, SyncRmdirCompletesAfterPhysicalRemoval) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+
+  CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
+  bool completion_called = false;
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    EXPECT_TRUE(succeeded);
+    EXPECT_FALSE(std::filesystem::exists(path));
+    completion_called = true;
+  }));
+  EXPECT_TRUE(completion_called);
+}
+#endif
 
 }  // namespace

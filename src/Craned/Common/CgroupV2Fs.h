@@ -54,7 +54,12 @@ class CgroupV2FsBackend {
   bool SignalAllProcesses(const std::string& cgroup_name, int signum);
   bool KillAllProcesses(const std::string& cgroup_name, int signum);
   bool Empty(const std::string& cgroup_name);
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  bool Destroy(const std::string& cgroup_name,
+               CgroupDestroyCompletion completion = {});
+#else
   bool Destroy(const std::string& cgroup_name);
+#endif
 
   bool DrainJanitor(std::chrono::milliseconds timeout);
   CgroupV2CleanupMode CleanupMode() const { return cleanup_mode_; }

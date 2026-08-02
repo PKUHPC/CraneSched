@@ -68,6 +68,10 @@ struct JobInD {
 
   uid_t Uid() const { return job_to_d.uid(); }
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] std::string ExecutionFlowId() const;
+#endif
+
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
   crane::grpc::JobStatus status{crane::grpc::JobStatus::Configuring};
@@ -240,9 +244,18 @@ class JobManager {
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
       UidMap::MapExclusivePtr& uid_map_ptr);
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  using JobCleanupCompletion = std::function<void(bool)>;
+
+  void CleanUpJobEnvironment_(job_id_t job_id,
+                              StepInstance::DaemonJobCleanupCtx&& ctx,
+                              bool run_epilog = true,
+                              JobCleanupCompletion completion = {});
+#else
   void CleanUpJobEnvironment_(job_id_t job_id,
                               StepInstance::DaemonJobCleanupCtx&& ctx,
                               bool run_epilog = true);
+#endif
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 

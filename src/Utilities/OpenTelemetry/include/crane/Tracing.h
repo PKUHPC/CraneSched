@@ -278,6 +278,10 @@ inline RuntimeTraceConfig ApplyRuntimeTraceConfig(bool enabled,
 }
 
 inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  if (name.starts_with("flow/v1/")) return TraceSpanClass::Core;
+#endif
+
   switch (name.size()) {
   case 7:
     if (name == "job/end") return TraceSpanClass::Core;

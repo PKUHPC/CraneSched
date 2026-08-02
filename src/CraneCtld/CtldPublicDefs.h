@@ -192,8 +192,18 @@ struct Config {
   PluginConfig Plugin;
 
   struct TracingConfig {
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    struct ExecutionFlowConfig {
+      bool Enabled{false};
+      uint32_t HeartbeatIntervalSeconds{5};
+    };
+#endif
+
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+    ExecutionFlowConfig ExecutionFlow;
+#endif
   };
   TracingConfig Tracing;
 
@@ -545,6 +555,10 @@ struct StepStatusChangeContext {
 
   // Trace context lookup for RPC worker threads (job_id -> traceparent)
   std::unordered_map<job_id_t, std::string> job_traceparents;
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  // Flow correlation copied before completed jobs leave the running map.
+  std::unordered_map<job_id_t, std::string> job_execution_flow_ids;
+#endif
 
   // Jobs whose primary steps need batch AppendSteps after the main loop.
   std::vector<JobInCtld*> pending_append_steps_jobs;
@@ -1110,6 +1124,13 @@ struct JobInCtld {
   bool RequeueRequested() const { return requeue_requested; }
 
   int32_t RequeueCount() const { return requeue_count; }
+
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+  [[nodiscard]] std::string RequestedExecutionFlowId() const;
+  [[nodiscard]] std::string ExecutionFlowId() const;
+  [[nodiscard]] std::string ExecutionFlowIdForStep(step_id_t step_id) const;
+  [[nodiscard]] std::string_view ExecutionFlowUnsupportedReason() const;
+#endif
 
   bool ShouldRequeue() const;
   void ResetForRequeue();

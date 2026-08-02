@@ -34,7 +34,23 @@ target_link_libraries(misc_cgroup_v2_fs_test
 )
 gtest_discover_tests(misc_cgroup_v2_fs_test)
 
+add_executable(misc_task_lifecycle_test task_lifecycle_test.cpp)
+target_include_directories(misc_task_lifecycle_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/src/Craned/Supervisor)
+target_link_libraries(misc_task_lifecycle_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+)
+gtest_discover_tests(misc_task_lifecycle_test)
+
 if (CRANE_ENABLE_TRACING)
+    add_executable(misc_execution_flow_test execution_flow_test.cpp)
+    target_link_libraries(misc_execution_flow_test
+            GTest::gtest GTest::gtest_main
+            crane_tracer
+    )
+    gtest_discover_tests(misc_execution_flow_test)
+
     add_executable(misc_tracer_manager_test tracer_manager_test.cpp)
     target_link_libraries(misc_tracer_manager_test
             GTest::gtest GTest::gtest_main
