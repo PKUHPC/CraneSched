@@ -91,6 +91,8 @@ CranedForeground: true
 Craned:
   # ping interval in seconds
   PingInterval: 15
+  # ping RPC timeout in seconds
+  PingTimeout: 5
   # register operation timeout in seconds
   CraneCtldTimeout: 30
   # max size of craned log file
@@ -102,8 +104,9 @@ Craned:
   NodeHealthCheckInterval: 0
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
-  # Optional worker-local cgroup operation concurrency limit (0 = disabled)
-  CgroupOpConcurrency: 0
+  # Limit cgroup operations across Craned and supervisors (0 = disabled).
+  # SysV SEM_UNDO restores permits; a restarted Craned reuses the same gate.
+  CgroupOpConcurrency: 4
   # Use direct cgroup v2 fs operations instead of libcgroup for hot paths.
   CgroupV2FastPath: true
   # sync_rmdir or async_rmdir. async_rmdir lets a background janitor remove dirs.
@@ -258,8 +261,13 @@ Supervisor:
   MaxLogFileSize: 50M
   # max files of supervisor log file
   MaxLogFileNum: 3
-  # Number of threads in the supervisor thread pool (0 = auto, uses hardware_concurrency)
-  ThreadPoolSize: 0
+  # Number of threads in each supervisor process (0 = auto, uses hardware_concurrency)
+  ThreadPoolSize: 4
+  # Number of resident gRPC EventEngine threads in each supervisor process
+  EventEngineThreadPoolSize: 4
+  # Seconds to wait for a supervisor to exit after step completion before SIGKILL
+  # This must cover the longest configured Epilog timeout and process cleanup.
+  ExitTimeout: 120
 
 Tracing:
   # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)

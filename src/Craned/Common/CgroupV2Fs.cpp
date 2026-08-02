@@ -177,6 +177,13 @@ bool StatInode(const std::filesystem::path& path, ino_t* inode, int* err_out) {
   return true;
 }
 
+std::future<CraneErrCode> MakeReadyFuture(CraneErrCode result) {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+  promise.set_value(result);
+  return future;
+}
+
 }  // namespace
 
 struct CgroupV2FsBackend::NodeState {
@@ -197,11 +204,22 @@ class CgroupV2FsBackend::Janitor {
 
   ~Janitor() { Stop(); }
 
-  void Enqueue(std::filesystem::path path) {
-    std::lock_guard lk(mu_);
-    if (stopped_) return;
-    queue_.push_back({std::move(path), 0, std::chrono::steady_clock::now()});
+  std::future<CraneErrCode> Enqueue(std::filesystem::path path) {
+    std::promise<CraneErrCode> completion;
+    auto future = completion.get_future();
+    {
+      std::lock_guard lk(mu_);
+      if (stopped_) {
+        completion.set_value(CraneErrCode::ERR_SHUTTING_DOWN);
+        return future;
+      }
+      queue_.push_back(Item{.path = std::move(path),
+                            .retry_count = 0,
+                            .first_enqueue = std::chrono::steady_clock::now(),
+                            .completion = std::move(completion)});
+    }
     cv_.notify_one();
+    return future;
   }
 
   bool Drain(std::chrono::milliseconds timeout) {
@@ -229,9 +247,16 @@ class CgroupV2FsBackend::Janitor {
  private:
   struct Item {
     std::filesystem::path path;
-    int retry_count;
+    int retry_count{0};
     std::chrono::steady_clock::time_point first_enqueue;
+    std::promise<CraneErrCode> completion;
   };
+
+  void Finish_(Item& item, CraneErrCode result) {
+    item.completion.set_value(result);
+    std::lock_guard lk(mu_);
+    --in_flight_;
+  }
 
   void WorkerLoop_() {
     while (true) {
@@ -259,23 +284,28 @@ class CgroupV2FsBackend::Janitor {
 
       {
         std::lock_guard lk(mu_);
-        --in_flight_;
         span.SetAttribute("queue_len", static_cast<int64_t>(queue_.size()));
       }
 
       if (ok) {
         backend_->ForgetPath_(item.path);
+        Finish_(item, CraneErrCode::SUCCESS);
         continue;
       }
 
       span.SetStatus(crane::StatusCode::kError, "delete_failed");
       {
         std::lock_guard lk(mu_);
-        if (stopped_) continue;
+        if (stopped_) {
+          --in_flight_;
+          item.completion.set_value(CraneErrCode::ERR_SHUTTING_DOWN);
+          continue;
+        }
       }
       if (item.retry_count >= kJanitorMaxRetries) {
         CRANE_WARN("Cgroup v2 janitor gave up deleting {} after {} retries: {}",
                    item.path.string(), item.retry_count, strerror(err));
+        Finish_(item, CraneErrCode::ERR_CGROUP);
         continue;
       }
 
@@ -283,7 +313,20 @@ class CgroupV2FsBackend::Janitor {
           std::min(std::chrono::milliseconds{5000},
                    std::chrono::milliseconds{200 * (item.retry_count + 1)}));
       item.retry_count++;
-      Enqueue(std::move(item.path));
+      bool requeued = false;
+      {
+        std::lock_guard lk(mu_);
+        if (!stopped_) {
+          queue_.push_back(std::move(item));
+          requeued = true;
+        }
+        --in_flight_;
+      }
+      if (requeued) {
+        cv_.notify_one();
+      } else {
+        item.completion.set_value(CraneErrCode::ERR_SHUTTING_DOWN);
+      }
     }
   }
 
@@ -468,11 +511,11 @@ bool CgroupV2FsBackend::Empty(const std::string& cgroup_name) {
   return !populated;
 }
 
-bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name) {
+std::future<CraneErrCode> CgroupV2FsBackend::Destroy(
+    const std::string& cgroup_name) {
   auto path = FullPath_(cgroup_name);
   if (cleanup_mode_ == CgroupV2CleanupMode::ASYNC_RMDIR) {
-    janitor_->Enqueue(path);
-    return true;
+    return janitor_->Enqueue(path);
   }
 
   int err = 0;
@@ -482,7 +525,8 @@ bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name) {
                strerror(err));
   }
   if (ok) ForgetPath_(path);
-  return ok || IsNoEnt(err);
+  return MakeReadyFuture(ok || IsNoEnt(err) ? CraneErrCode::SUCCESS
+                                            : CraneErrCode::ERR_CGROUP);
 }
 
 bool CgroupV2FsBackend::DrainJanitor(std::chrono::milliseconds timeout) {
@@ -616,7 +660,19 @@ bool CgroupV2FsBackend::EnsureSubtreeControllers_(
 CraneExpected<CgroupV2CreateResult> CgroupV2FsBackend::CreateOrOpenUnlocked_(
     const std::string& cgroup_name, ControllerFlags required_controllers,
     bool retrieve) {
-  auto target = FullPath_(cgroup_name);
+  auto relative = std::filesystem::path(cgroup_name).lexically_normal();
+  if (relative.empty() || relative.is_absolute()) {
+    CRANE_WARN("Invalid cgroup v2 path: {}", cgroup_name);
+    return std::unexpected(CraneErrCode::ERR_CGROUP);
+  }
+  for (const auto& part : relative) {
+    if (part == "..") {
+      CRANE_WARN("Invalid cgroup v2 path contains '..': {}", cgroup_name);
+      return std::unexpected(CraneErrCode::ERR_CGROUP);
+    }
+  }
+
+  auto target = root_path_ / relative;
   int err = 0;
   ino_t inode = 0;
   if (retrieve) {
@@ -632,15 +688,39 @@ CraneExpected<CgroupV2CreateResult> CgroupV2FsBackend::CreateOrOpenUnlocked_(
     return CgroupV2CreateResult{.inode = inode, .created = false};
   }
 
-  std::vector<std::filesystem::path> created_paths;
-  std::filesystem::path current = root_path_;
-  auto relative = std::filesystem::path(cgroup_name).lexically_normal();
-  for (const auto& part : relative) {
-    if (part.empty() || part == ".") continue;
-    if (part == "..") {
-      CRANE_WARN("Invalid cgroup v2 path contains '..': {}", cgroup_name);
+  // Craned creates the job/step hierarchy before starting a supervisor. In
+  // that common path, touching every ancestor again multiplies cgroupfs lock
+  // contention across all concurrent supervisors. Fall back to the recursive
+  // path only when the direct parent has not been created yet.
+  auto parent = target.parent_path();
+  std::error_code parent_ec;
+  if (std::filesystem::exists(parent, parent_ec) && !parent_ec) {
+    if (!EnsureSubtreeControllers_(parent, required_controllers)) {
       return std::unexpected(CraneErrCode::ERR_CGROUP);
     }
+
+    bool created = false;
+    if (MakeDirIfNeeded(target, &created, &err)) {
+      if (!StatInode(target, &inode, &err)) {
+        return std::unexpected(CraneErrCode::ERR_CGROUP);
+      }
+      auto node = GetNode_(target);
+      absl::MutexLock lk(&node->mu);
+      if (!node->exists || node->inode != inode)
+        node->subtree_enabled = NO_CONTROLLER_FLAG;
+      node->exists = true;
+      node->inode = inode;
+      return CgroupV2CreateResult{.inode = inode, .created = created};
+    }
+    if (err != ENOENT && err != ENOTDIR) {
+      return std::unexpected(CraneErrCode::ERR_CGROUP);
+    }
+  }
+
+  std::vector<std::filesystem::path> created_paths;
+  std::filesystem::path current = root_path_;
+  for (const auto& part : relative) {
+    if (part.empty() || part == ".") continue;
 
     if (!EnsureSubtreeControllers_(current, required_controllers)) {
       for (auto it = created_paths.rbegin(); it != created_paths.rend(); ++it) {
@@ -735,12 +815,22 @@ bool CgroupV2FsBackend::WaitPopulated_(const std::filesystem::path& path,
 
 bool CgroupV2FsBackend::RecursiveRmdir_(const std::filesystem::path& path,
                                         int* err_out) {
-  std::error_code ec;
-  if (!std::filesystem::exists(path, ec)) {
-    if (err_out != nullptr) *err_out = ec ? ec.value() : ENOENT;
+  if (rmdir(path.c_str()) == 0) {
+    if (err_out != nullptr) *err_out = 0;
     return true;
   }
 
+  int direct_err = errno;
+  if (IsNoEnt(direct_err)) {
+    if (err_out != nullptr) *err_out = direct_err;
+    return true;
+  }
+  if (direct_err != ENOTEMPTY && direct_err != EBUSY) {
+    if (err_out != nullptr) *err_out = direct_err;
+    return false;
+  }
+
+  std::error_code ec;
   for (const auto& entry : std::filesystem::directory_iterator(path, ec)) {
     if (ec) {
       if (err_out != nullptr) *err_out = ec.value();

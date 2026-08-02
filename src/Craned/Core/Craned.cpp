@@ -136,7 +136,7 @@ CraneErrCode RecoverCgForJobSteps(
     }
 
     cg_ptr->KillAllProcesses(SIGKILL);
-    cg_ptr->Destroy();
+    cg_ptr->Destroy().wait();
   };
 
   bool has_int_recovery = false;
@@ -236,6 +236,7 @@ void ParseCranedConfig(const YAML::Node& config) {
   Craned::Config::CranedConfig conf{};
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
+  conf.PingTimeoutSec = Craned::kCranedRpcTimeoutSeconds;
   conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
   conf.MaxLogFileSize = kDefaultCranedMaxLogFileSize;
   conf.MaxLogFileNum = kDefaultCranedMaxLogFileNum;
@@ -244,6 +245,8 @@ void ParseCranedConfig(const YAML::Node& config) {
     auto craned_config = config["Craned"];
     if (craned_config["PingInterval"])
       conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
+    if (craned_config["PingTimeout"])
+      conf.PingTimeoutSec = craned_config["PingTimeout"].as<uint32_t>();
     if (craned_config["CraneCtldTimeout"])
       conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
     if (craned_config["MaxLogFileSize"]) {
@@ -264,8 +267,8 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["NodeHealthCheckInterval"], 0);
     conf.ThreadPoolSize =
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
-    conf.CgroupOpConcurrency =
-        YamlValueOr<uint32_t>(craned_config["CgroupOpConcurrency"], 0);
+    conf.CgroupOpConcurrency = YamlValueOr<uint32_t>(
+        craned_config["CgroupOpConcurrency"], kDefaultCgroupOpConcurrency);
     conf.CgroupV2FastPath =
         YamlValueOr<bool>(craned_config["CgroupV2FastPath"], true);
     conf.CgroupV2CleanupMode = YamlValueOr<std::string>(
@@ -311,8 +314,24 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
 
   g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
       supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
-  g_config.Supervisor.ThreadPoolSize =
-      YamlValueOr<uint32_t>(supervisor_config["ThreadPoolSize"], 0);
+  g_config.Supervisor.ThreadPoolSize = YamlValueOr<uint32_t>(
+      supervisor_config["ThreadPoolSize"], kDefaultSupervisorThreadPoolSize);
+  g_config.Supervisor.EventEngineThreadPoolSize =
+      YamlValueOr<uint32_t>(supervisor_config["EventEngineThreadPoolSize"],
+                            kDefaultSupervisorEventEngineThreadPoolSize);
+  if (g_config.Supervisor.EventEngineThreadPoolSize == 0) {
+    fmt::print(
+        stderr,
+        "Supervisor.EventEngineThreadPoolSize must be greater than 0.\n");
+    std::exit(1);
+  }
+  g_config.Supervisor.ExitTimeoutSec =
+      YamlValueOr<uint32_t>(supervisor_config["ExitTimeout"],
+                            Craned::kDefaultSupervisorExitTimeoutSec);
+  if (g_config.Supervisor.ExitTimeoutSec == 0) {
+    fmt::print(stderr, "Supervisor.ExitTimeout must be greater than 0.\n");
+    std::exit(1);
+  }
 }
 
 void ParseContainerConfig(const YAML::Node& container_config) {
@@ -1654,6 +1673,7 @@ void WaitForStopAndDoGvarFini() {
 
   CgroupManager::ShutdownCpuPool();
   CgroupManager::ShutdownCgroupV2FastPath();
+  CgroupManager::ShutdownCgroupOpConcurrency();
 
   std::exit(0);
 }

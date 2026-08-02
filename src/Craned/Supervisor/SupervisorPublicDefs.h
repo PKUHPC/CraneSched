@@ -28,6 +28,8 @@
 
 namespace Craned::Supervisor {
 
+inline constexpr int64_t kCranedRpcTimeoutSeconds = 5;
+
 using Common::CgroupManager;
 using Common::EnvMap;
 
@@ -114,7 +116,9 @@ struct Config {
   std::filesystem::path SupervisorLogFile;
   uint64_t SupervisorMaxLogFileSize{kDefaultSupervisorMaxLogFileSize};
   uint64_t SupervisorMaxLogFileNum;
-  uint32_t ThreadPoolSize{0};
+  uint32_t ThreadPoolSize{kDefaultSupervisorThreadPoolSize};
+  uint32_t EventEngineThreadPoolSize{
+      kDefaultSupervisorEventEngineThreadPoolSize};
   CranedId CranedIdOfThisNode;
 
   std::filesystem::path SupervisorUnixSockPath;

@@ -1198,12 +1198,13 @@ bool CtldClient::SendStatusChanges_(
                               static_cast<int64_t>(status.error_code()));
     forward_span.SetAttribute("grpc_status_ok", status.ok());
     forward_span.SetAttribute("reply_ok", status.ok() && reply.ok());
-    if (!status.ok()) {
+    if (!status.ok() || !reply.ok()) {
       CRANE_ERROR(
           "Failed to send StepStatusChange: "
-          "{{Step: #{}.{}, NewStatus: {}}}, reason: {} | {}, code: {}",
+          "{{Step: #{}.{}, NewStatus: {}}}, reason: {}, reply_ok: {} | {}, "
+          "code: {}",
           status_change.job_id, status_change.step_id, status_change.new_status,
-          status.error_message(), context.debug_error_string(),
+          status.error_message(), reply.ok(), context.debug_error_string(),
           static_cast<int>(status.error_code()));
 
       if (m_stopping_) {
@@ -1342,8 +1343,9 @@ bool CtldClient::NeedHealthCheck_() {
 
 bool CtldClient::Ping_() {
   grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  context.set_deadline(
+      std::chrono::system_clock::now() +
+      std::chrono::seconds(g_config.CranedConf.PingTimeoutSec));
 
   crane::grpc::CranedPingRequest req;
   req.set_craned_id(m_craned_id_);

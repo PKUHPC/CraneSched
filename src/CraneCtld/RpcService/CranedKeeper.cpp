@@ -125,6 +125,11 @@ CraneErrCode CranedStub::TerminateSteps(
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  if (!reply.ok()) {
+    CRANE_WARN("TerminateSteps RPC for Node {} was rejected: {}", m_craned_id_,
+               reply.reason());
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
   UpdateLastActiveTime();
 
   return CraneErrCode::SUCCESS;
@@ -626,13 +631,13 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
     // If Shutdown() is called, return immediately.
     if (next_status == grpc::CompletionQueue::SHUTDOWN) break;
+    if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
 
     if (m_cq_closed_) {
       if (tag->type == CqTag::kInitializingCraned) delete tag->craned;
       continue;
     }
 
-    if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
     if (next_status == grpc::CompletionQueue::GOT_EVENT) {
       // If ok is false, the tag timed out.
       // However, we can also check timeout

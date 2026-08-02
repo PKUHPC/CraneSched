@@ -34,6 +34,7 @@ message StepStatusChangeRequest {
   string reason = 6;
   google.protobuf.Timestamp timestamp = 7;
   optional JobStatus final_status = 8;
+  uint32 supervisor_pid = 9;
 }
 
 message StepStatusChangeReply {

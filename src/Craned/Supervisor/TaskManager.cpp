@@ -168,8 +168,8 @@ void StepInstance::CleanUp() {
       ++cnt;
       std::this_thread::sleep_for(100ms);
     }
-    step_user_cg->Destroy();
 
+    step_user_cg->Destroy().wait();
     step_user_cg.reset();
   }
   StopCforedClient();
@@ -2520,6 +2520,7 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
+  CraneErrCode cleanup_result = CraneErrCode::SUCCESS;
   if (m_task_cg_) {
     int cnt = 0;
 
@@ -2539,13 +2540,13 @@ CraneErrCode ProcInstance::Cleanup() {
       std::this_thread::sleep_for(100ms);
     }
 
-    m_task_cg_->Destroy();
+    cleanup_result = m_task_cg_->Destroy().get();
     m_task_cg_.reset();
   }
 
   // TODO: Plugin support step cgroup destroy hooks?
   // NOTE: Pod and container have seperated cgroup handling.
-  return CraneErrCode::SUCCESS;
+  return cleanup_result;
 }
 
 std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
@@ -2742,8 +2743,16 @@ TaskManager::~TaskManager() {
 }
 
 void TaskManager::SupervisorFinishInit(StepStatus status) {
+  if (IsFinishedStepStatus(status)) {
+    auto& final_status = m_step_.final_termination_status;
+    final_status.final_status_on_termination = status;
+    m_step_.GotNewStatus(StepStatus::Completing);
+    g_craned_client->StepCompletionAsync(status, 0, std::nullopt);
+    return;
+  }
+
   m_step_.GotNewStatus(status);
-  g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
+  g_craned_client->StepStatusChangeAsync(status);
 }
 
 bool TaskManager::ReceivePmixPort(
@@ -2877,9 +2886,9 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
       if (status.max_exit_code != 0)
         finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
     }
-    g_craned_client->StepStatusChangeAsync(
-        StepStatus::Completing, status.max_exit_code,
-        status.final_reason_on_termination, status.final_status_on_termination);
+    g_craned_client->StepCompletionAsync(status.final_status_on_termination,
+                                         status.max_exit_code,
+                                         status.final_reason_on_termination);
     ShutdownSupervisorAsync();
   }
 }
@@ -2908,8 +2917,7 @@ void TaskManager::CompleteStepBeforeTaskStart_(uint32_t exit_code,
     m_step_.ExecuteSpan().End();
   }
 
-  g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
-                                         reason, StepStatus::Failed);
+  g_craned_client->StepCompletionAsync(StepStatus::Failed, exit_code, reason);
   ShutdownSupervisorAsync(StepStatus::Failed, exit_code, std::move(reason));
 }
 
@@ -3097,14 +3105,10 @@ void TaskManager::TerminatePodInDaemonStepAsync() {
 
 void TaskManager::CheckStatusAsync(
     crane::grpc::supervisor::CheckStatusReply* response) {
-  std::promise<StepStatus> status_promise;
-  auto status_future = status_promise.get_future();
-  m_grpc_check_status_queue_.enqueue(std::move(status_promise));
-  m_grpc_check_status_async_handle_->send();
   response->set_job_id(g_config.JobId);
   response->set_step_id(g_config.StepId);
   response->set_supervisor_pid(getpid());
-  response->set_status(status_future.get());
+  response->set_status(m_step_.GetStatus());
   response->set_ok(true);
 }
 
@@ -3133,10 +3137,15 @@ void TaskManager::EvShutdownSupervisorCb_() {
 
     auto& [status, exit_code, reason] = final_status;
     if (m_step_.IsDaemon()) {
-      m_step_.GotNewStatus(StepStatus::Completing);
-      CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
-      g_craned_client->StepStatusChangeAsync(StepStatus::Completing, exit_code,
-                                             reason, status);
+      if (m_step_.GetStatus() != StepStatus::Completing) {
+        m_step_.GotNewStatus(StepStatus::Completing);
+        CRANE_DEBUG("Sending Completing as daemon step (final: {}).", status);
+        g_craned_client->StepCompletionAsync(status, exit_code, reason);
+      } else {
+        CRANE_DEBUG(
+            "Daemon step already reported Completing; shutting down without "
+            "sending a duplicate status.");
+      }
     }
 
     // Non-daemon step don't need to report the status change in shutting down.
@@ -3575,10 +3584,10 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       final_status.final_reason_on_termination.clear();
 
       if (elem.cause != TaskFinalizeCause::NORMAL) {
-        g_craned_client->StepStatusChangeAsync(
-            StepStatus::Completing, final_status.max_exit_code,
-            final_status.final_reason_on_termination,
-            final_status.final_status_on_termination);
+        g_craned_client->StepCompletionAsync(
+            final_status.final_status_on_termination,
+            final_status.max_exit_code,
+            final_status.final_reason_on_termination);
       }
 
       g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
@@ -3721,7 +3730,8 @@ void TaskManager::EvGrpcExecuteStepCb_() {
   ExecuteStepElem elem;
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     auto step_status = m_step_.GetStatus();
-    if (step_status == StepStatus::Completing ||
+    if (step_status == StepStatus::Running ||
+        step_status == StepStatus::Completing ||
         IsFinishedStepStatus(step_status)) {
       CRANE_DEBUG(
           "[Step #{}.{}] ExecuteStep ignored because step status is {}.",

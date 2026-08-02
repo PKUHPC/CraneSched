@@ -3,6 +3,8 @@ add_executable(craned
         CtldClient.cpp
         JobManager.h
         JobManager.cpp
+        SupervisorProcessTracker.h
+        SupervisorProcessTracker.cpp
         SupervisorStub.cpp
         SupervisorStub.h
         CranedServer.h

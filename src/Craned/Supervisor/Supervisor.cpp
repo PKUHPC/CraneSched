@@ -246,6 +246,15 @@ int InitFromStdin(int argc, char** argv) {
 
   g_config.EnableSlurmCompatibleEnv = msg.enable_slurm_compatible_env();
   g_config.ThreadPoolSize = msg.thread_pool_size();
+  g_config.EventEngineThreadPoolSize = msg.event_engine_thread_pool_size();
+  if (g_config.EventEngineThreadPoolSize == 0) {
+    fmt::print(
+        stderr,
+        "[Supervisor #{}.{}] EventEngine thread pool size must be greater "
+        "than 0.\n",
+        g_config.JobId, g_config.StepId);
+    ok = false;
+  }
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -368,10 +377,23 @@ void GlobalVariableInit(int grpc_output_fd) {
     uint32_t pool_size = g_config.ThreadPoolSize > 0
                              ? g_config.ThreadPoolSize
                              : std::thread::hardware_concurrency();
+    CRANE_INFO("Supervisor thread pool size: {}", pool_size);
     g_thread_pool = std::make_unique<BS::thread_pool>(
         pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
   }
   g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
+
+  constexpr char kEventEngineThreadPoolSizeEnv[] =
+      "GRPC_EVENT_ENGINE_RESERVE_THREADS";
+  if (setenv(kEventEngineThreadPoolSizeEnv,
+             std::to_string(g_config.EventEngineThreadPoolSize).c_str(),
+             1) != 0) {
+    CRANE_ERROR("Failed to configure gRPC EventEngine thread pool: {}.",
+                std::strerror(errno));
+    std::abort();
+  }
+  CRANE_INFO("Supervisor gRPC EventEngine reserve threads: {}",
+             g_config.EventEngineThreadPoolSize);
 
   g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(
@@ -493,6 +515,7 @@ void StartServer(int grpc_output_fd) {
 
   g_craned_client.reset();
   Craned::Common::CgroupManager::ShutdownCgroupV2FastPath();
+  Craned::Common::CgroupManager::ShutdownCgroupOpConcurrency();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif

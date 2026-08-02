@@ -28,8 +28,8 @@
 // Precompiled header comes first.
 
 #include <libcgroup.h>
-#include <semaphore.h>
 
+#include <future>
 #include <memory>
 #include <string_view>
 
@@ -396,7 +396,7 @@ class Cgroup {
                          CgConstant::ControllerFile controller_file,
                          const std::vector<std::string>& strs);
 
-  void Destroy();
+  CraneErrCode Destroy();
 
   // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
@@ -435,7 +435,7 @@ class CgroupInterface {
 
   virtual bool Empty() = 0;
 
-  virtual void Destroy();
+  virtual std::future<CraneErrCode> Destroy();
 
   virtual bool MigrateProcIn(pid_t pid);
 
@@ -470,7 +470,7 @@ class CgroupV1 : public CgroupInterface {
 
   bool Empty() override;
 
-  void Destroy() override;
+  std::future<CraneErrCode> Destroy() override;
 };
 
 class CgroupV2 : public CgroupInterface {
@@ -484,7 +484,7 @@ class CgroupV2 : public CgroupInterface {
            std::vector<BpfDeviceMeta>& cgroup_bpf_devices);
 #endif
 
-  ~CgroupV2() override = default;
+  ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetCpuSet(const std::unordered_set<uint32_t>& cpu_set) override;
@@ -531,7 +531,7 @@ class CgroupV2 : public CgroupInterface {
 
   bool Empty() override;
 
-  void Destroy() override;
+  std::future<CraneErrCode> Destroy() override;
   bool MigrateProcIn(pid_t pid) override;
 
  private:
@@ -541,6 +541,10 @@ class CgroupV2 : public CgroupInterface {
   std::shared_ptr<CgroupV2FsBackend> m_v2_fs_backend_;
 
 #ifdef CRANE_ENABLE_BPF
+  bool EnsureBpfObject_();
+  void ReleaseBpfObject_();
+
+  bool m_bpf_object_ref_{false};
   bool m_bpf_attached_{false};
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
 #endif
@@ -654,15 +658,19 @@ class CgroupManager {
                              bool recover, std::uint64_t min_mem = 0U);
 
   static void ConfigureCgroupOpConcurrency(uint32_t concurrency);
+  static void ShutdownCgroupOpConcurrency();
   static void ConfigureCgroupV2FastPath(bool enabled);
   static void ConfigureCgroupV2CleanupMode(std::string_view mode);
   static void ShutdownCgroupV2FastPath();
-  static sem_t* CgroupOpSemaphore();
+  static int CgroupOpSemaphoreId();
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNodeV3& res_in_node);
 
-  static void KillAndDestroyCgroup(std::unique_ptr<CgroupInterface> cgroup);
+  static std::future<CraneErrCode> KillAndDestroyCgroup(
+      std::unique_ptr<CgroupInterface> cgroup);
+  static std::future<CraneErrCode> KillAndDestroyCgroupTree(
+      const std::string& cgroup_str);
 
   // --- CPU Pool Management ---
   // All state modifications below must be called from event loop only.
@@ -779,8 +787,7 @@ class CgroupManager {
 
   inline static CgConstant::CgroupVersion m_cg_version_;
   inline static uint32_t m_cgroup_op_concurrency_{0};
-  inline static std::string m_cgroup_op_sem_name_;
-  inline static sem_t* m_cgroup_op_sem_{SEM_FAILED};
+  inline static int m_cgroup_op_sem_id_{-1};
   inline static bool m_cgroup_v2_fast_path_enabled_{true};
   inline static CgroupV2CleanupMode m_cgroup_v2_cleanup_mode_{
       CgroupV2CleanupMode::SYNC_RMDIR};
