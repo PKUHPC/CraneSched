@@ -62,6 +62,7 @@ constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
 constexpr uint32_t kJobStatusChangeBatchNum = 1000;
 constexpr uint32_t kJobStatusChangeMaxDrainPerTick = 200;
 constexpr uint32_t kJobStatusChangeDbCommitChunkSize = 200;
+constexpr uint32_t kCompletingStepRetryIntervalSec = 60;
 constexpr uint32_t kJobAggregationWorkerBatchSize = 500;
 constexpr uint32_t kJobAggregationPollIntervalMs = 200;
 constexpr uint32_t kJobAggregationRetryBackoffMs = 500;
@@ -113,6 +114,7 @@ struct Config {
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
     uint32_t StatusChangeMaxDrainPerTick{kJobStatusChangeMaxDrainPerTick};
     uint32_t StatusChangeDbCommitChunkSize{kJobStatusChangeDbCommitChunkSize};
+    uint32_t CompletingStepRetryIntervalSec{kCompletingStepRetryIntervalSec};
     bool JobRequeue{kDefaultJobRequeue};
     int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
   };

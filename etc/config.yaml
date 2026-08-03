@@ -62,6 +62,8 @@ CraneCtld:
   StatusChangeMaxDrainPerTick: 200
   # Max runtime DB updates per transaction chunk (default: 200)
   StatusChangeDbCommitChunkSize: 200
+  # Retry FreeSteps for steps still Completing (seconds, 0 disables retries)
+  CompletingStepRetryIntervalSec: 60
   # Whether batch jobs may be requeued by default. Users can override with --requeue/--no-requeue.
   JobRequeue: true
   # Max number of times a job can be requeued before it is held.
