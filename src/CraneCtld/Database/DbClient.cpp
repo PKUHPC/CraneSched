@@ -911,8 +911,6 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  AppendJobIdSelectorClause_(request, filter);
-
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
@@ -948,7 +946,14 @@ bool MongodbClient::FetchJobRecords(
   }
 
   mongocxx::pipeline pipeline;
-  AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  if (request->filter_job_ids().empty()) {
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  } else {
+    document job_id_filter;
+    AppendJobIdSelectorClause_(request, job_id_filter);
+    pipeline.match(job_id_filter.view());
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  }
   pipeline.match(filter.view());
   pipeline.limit(static_cast<int32_t>(limit));
 
@@ -5832,6 +5837,9 @@ bool MongodbClient::InitTableIndexes() {
     // Covers latest submission/requeue selection and the subsequent lookup.
     CreateCollectionIndex(raw_table, {"job_id", "job_db_id", "requeue_count"},
                           false);
+    CreateCollectionIndex(
+        raw_table, {"array_job_id", "array_task_id", "job_id", "job_db_id"},
+        false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
