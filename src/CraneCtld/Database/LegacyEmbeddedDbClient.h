@@ -186,13 +186,14 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
           reservation_info_map) override;
 
   bool RetrieveDynamicNodeRecords(
-      std::unordered_map<CranedId, DynamicNodeRecord>* records) override;
+      std::unordered_map<CranedId, DynamicNodeRecord>* records,
+      DynamicNodeGenerationMap* generation_high_watermarks) override;
 
   bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) override;
 
   bool DeleteDynamicNodeRecords(
-      const std::vector<CranedId>& node_names) override;
+      const std::vector<DynamicNodeRecord>& records) override;
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);

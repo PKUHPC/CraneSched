@@ -130,6 +130,7 @@ message PrepareCranedRegistrationReply {
   repeated string partition_names = 7;
   google.protobuf.Timestamp expire_time = 8;
   uint64 catalog_revision = 9;
+  ErrCode code = 10;
 }
 
 message CranedPingRequest {
@@ -1371,6 +1372,7 @@ message PowerStateChangeRequest {
   string craned_id = 1;
   CranedPowerState state = 2;
   string reason = 3;
+  uint64 generation = 4;
 }
 
 message PowerStateChangeReply {

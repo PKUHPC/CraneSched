@@ -57,30 +57,32 @@ bool CranedMetaContainer::CranedUp(
       return true;
     }
 
-    if (node_meta->static_meta.dynamic &&
-        !node_meta->static_meta.ever_registered) {
-      if (!node_meta->res_in_use.IsZero() ||
-          !node_meta->resv_in_node_map.empty() ||
-          !(node_meta->res_avail == node_meta->res_total)) {
-        CRANE_WARN("Reject binding resources of dynamic node {} while in use.",
-                   craned_id);
-        return false;
-      }
-
+    if (node_meta->static_meta.dynamic) {
       ResourceInNodeV3 bound_resource = node_meta->static_meta.res;
       bound_resource.GetGres() = remote_meta.dres_in_node();
-      for (auto& partition_meta : part_meta_ptrs) {
-        auto& global_meta = partition_meta->partition_global_meta;
-        global_meta.res_total -= node_meta->static_meta.res;
-        global_meta.res_total += bound_resource;
-        global_meta.res_avail -= node_meta->res_avail;
-        global_meta.res_avail += bound_resource;
-        global_meta.res_total_inc_dead -= node_meta->static_meta.res;
-        global_meta.res_total_inc_dead += bound_resource;
+      if (!(bound_resource == node_meta->static_meta.res)) {
+        if (!node_meta->res_in_use.IsZero() ||
+            !node_meta->resv_in_node_map.empty() ||
+            !(node_meta->res_avail == node_meta->res_total)) {
+          CRANE_WARN(
+              "Reject changing resources of dynamic node {} while in use.",
+              craned_id);
+          return false;
+        }
+
+        for (auto& partition_meta : part_meta_ptrs) {
+          auto& global_meta = partition_meta->partition_global_meta;
+          global_meta.res_total -= node_meta->static_meta.res;
+          global_meta.res_total += bound_resource;
+          global_meta.res_avail -= node_meta->res_avail;
+          global_meta.res_avail += bound_resource;
+          global_meta.res_total_inc_dead -= node_meta->static_meta.res;
+          global_meta.res_total_inc_dead += bound_resource;
+        }
+        node_meta->static_meta.res = bound_resource;
+        node_meta->res_total = bound_resource;
+        node_meta->res_avail = bound_resource;
       }
-      node_meta->static_meta.res = bound_resource;
-      node_meta->res_total = bound_resource;
-      node_meta->res_avail = bound_resource;
     }
 
     node_meta->alive = true;
@@ -182,7 +184,8 @@ void CranedMetaContainer::PublishCranedState(const CranedId& craned_id) {
   g_plugin_client->RegisterCranedHookAsync(
       craned_id, node_meta->remote_meta.network_interfaces,
       node_meta->static_meta.dynamic, node_meta->static_meta.provider,
-      node_meta->power_state, running_job_ids);
+      node_meta->power_state, running_job_ids,
+      node_meta->static_meta.generation, node_meta->static_meta.revision);
 }
 
 void CranedMetaContainer::ReconcilePluginState() {
@@ -506,6 +509,7 @@ void CranedMetaContainer::AddDynamicNodes(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
     static_meta.dynamic = true;
     static_meta.generation = record.generation();
+    static_meta.revision = record.revision();
     static_meta.ever_registered = record.ever_registered();
     static_meta.origin = record.origin();
     static_meta.lifecycle = record.lifecycle();
@@ -524,9 +528,8 @@ void CranedMetaContainer::AddDynamicNodes(
     craned_meta.res_total = static_meta.res;
     craned_meta.res_avail = static_meta.res;
     craned_meta.res_in_use.SetToZero();
-    craned_meta.power_state =
-        CranedPowerStateFromDynamic(record.power_state())
-            .value_or(crane::grpc::CRANE_POWER_IDLE);
+    craned_meta.power_state = CranedPowerStateFromDynamic(record.power_state())
+                                  .value_or(crane::grpc::CRANE_POWER_IDLE);
 
     for (const auto& partition_id : record.partition_names()) {
       static_meta.partition_ids.emplace_back(partition_id);
@@ -565,13 +568,13 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
     return;
 
   auto& static_meta = node_meta->static_meta;
-  if (static_meta.ever_registered != record.ever_registered()) {
+  const auto& spec =
+      record.has_effective_spec() ? record.effective_spec() : record.spec();
+  ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
+  if (!(static_meta.res == updated_resource)) {
     CRANE_ASSERT(node_meta->res_in_use.IsZero());
     CRANE_ASSERT(node_meta->resv_in_node_map.empty());
-
-    const auto& spec =
-        record.has_effective_spec() ? record.effective_spec() : record.spec();
-    ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
+    CRANE_ASSERT(node_meta->res_avail == node_meta->res_total);
 
     for (auto& partition_meta : part_meta_ptrs) {
       auto& global_meta = partition_meta->partition_global_meta;
@@ -588,6 +591,7 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
   }
 
   static_meta.ever_registered = record.ever_registered();
+  static_meta.revision = record.revision();
   static_meta.origin = record.origin();
   static_meta.lifecycle = record.lifecycle();
   static_meta.dynamic_power_state = record.power_state();
@@ -602,8 +606,7 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
 }
 
 std::unordered_map<CranedId, std::string>
-CranedMetaContainer::RemoveDynamicNodes(
-    const std::vector<CranedId>& node_ids) {
+CranedMetaContainer::RemoveDynamicNodes(const std::vector<CranedId>& node_ids) {
   struct NodeToRemove {
     CranedId node_id;
     ResourceInNodeV3 resource;

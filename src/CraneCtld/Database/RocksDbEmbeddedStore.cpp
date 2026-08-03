@@ -14,6 +14,7 @@
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/slice_transform.h>
 
+#include <cstring>
 #include <unordered_set>
 
 namespace Ctld {
@@ -29,6 +30,7 @@ constexpr std::string_view kJobVarPrefix = "job_var/";
 constexpr std::string_view kStepFixedPrefix = "step_fixed/";
 constexpr std::string_view kStepVarPrefix = "step_var/";
 constexpr std::string_view kNextStepIdPrefix = "meta/next_step_id/";
+constexpr std::string_view kDynamicNodeGenerationPrefix = "\x01generation/";
 
 constexpr std::string_view kNextJobIdKey = "meta/next_job_id";
 constexpr std::string_view kNextJobDbIdKey = "meta/next_job_db_id";
@@ -384,14 +386,32 @@ bool RocksDbEmbeddedStore::RetrieveReservationInfo(
 }
 
 bool RocksDbEmbeddedStore::RetrieveDynamicNodeRecords(
-    std::unordered_map<CranedId, DynamicNodeRecord>* records) {
+    std::unordered_map<CranedId, DynamicNodeRecord>* records,
+    DynamicNodeGenerationMap* generation_high_watermarks) {
   std::unique_ptr<rocksdb::Iterator> it(
       db_->NewIterator(ReadOptions_(), Handle_(Cf::DynamicNode)));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    std::string key = it->key().ToString();
+    if (key.starts_with(kDynamicNodeGenerationPrefix)) {
+      if (it->value().size() != sizeof(uint64_t)) {
+        CRANE_ERROR("Invalid dynamic node generation marker {}", key);
+        return false;
+      }
+      uint64_t generation;
+      std::memcpy(&generation, it->value().data(), sizeof(generation));
+      std::string node_name = key.substr(kDynamicNodeGenerationPrefix.size());
+      if (node_name.empty()) {
+        CRANE_ERROR("Dynamic node generation marker has an empty node name");
+        return false;
+      }
+      auto& high_watermark = (*generation_high_watermarks)[node_name];
+      high_watermark = std::max(high_watermark, generation);
+      continue;
+    }
+
     DynamicNodeRecord record;
-    if (!ParseProto_(it->value().ToString(), &record, it->key().ToString()))
-      return false;
-    records->emplace(it->key().ToString(), std::move(record));
+    if (!ParseProto_(it->value().ToString(), &record, key)) return false;
+    records->emplace(std::move(key), std::move(record));
   }
   if (!it->status().ok()) {
     CRANE_ERROR("Failed to scan RocksDB dynamic_node CF: {}",
@@ -407,15 +427,26 @@ bool RocksDbEmbeddedStore::StoreDynamicNodeRecords(
   for (const auto& record : records) {
     if (!PutProto_(&batch, Cf::DynamicNode, record.node_name(), record))
       return false;
+    if (!PutScalar_(
+            &batch, Cf::DynamicNode,
+            std::string(kDynamicNodeGenerationPrefix) + record.node_name(),
+            record.generation()))
+      return false;
   }
   return WriteBatch_(&batch, "rocksdb_store_dynamic_nodes");
 }
 
 bool RocksDbEmbeddedStore::DeleteDynamicNodeRecords(
-    const std::vector<CranedId>& node_names) {
+    const std::vector<DynamicNodeRecord>& records) {
   rocksdb::WriteBatch batch;
-  for (const auto& node_name : node_names)
-    batch.Delete(Handle_(Cf::DynamicNode), node_name);
+  for (const auto& record : records) {
+    if (!PutScalar_(
+            &batch, Cf::DynamicNode,
+            std::string(kDynamicNodeGenerationPrefix) + record.node_name(),
+            record.generation()))
+      return false;
+    batch.Delete(Handle_(Cf::DynamicNode), record.node_name());
+  }
   return WriteBatch_(&batch, "rocksdb_delete_dynamic_nodes");
 }
 

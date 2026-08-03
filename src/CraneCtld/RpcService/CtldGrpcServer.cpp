@@ -39,6 +39,61 @@
 
 namespace Ctld {
 
+namespace {
+
+using GrpcPeerAddress = std::variant<ipv4_t, ipv6_t>;
+
+std::expected<GrpcPeerAddress, std::string> ParseGrpcPeerAddress(
+    std::string_view peer) {
+  constexpr std::string_view kIpv4Prefix = "ipv4:";
+  constexpr std::string_view kIpv6Prefix = "ipv6:[";
+
+  if (peer.starts_with(kIpv4Prefix)) {
+    const auto endpoint = peer.substr(kIpv4Prefix.size());
+    const auto port_separator = endpoint.rfind(':');
+    if (port_separator == std::string_view::npos || port_separator == 0 ||
+        port_separator + 1 == endpoint.size())
+      return std::unexpected(
+          fmt::format("Invalid gRPC peer address: {}", peer));
+
+    ipv4_t addr;
+    const std::string address{endpoint.substr(0, port_separator)};
+    if (!crane::StrToIpv4(address, &addr))
+      return std::unexpected(
+          fmt::format("Failed to parse IPv4 peer address: {}", address));
+    return addr;
+  }
+
+  if (peer.starts_with(kIpv6Prefix)) {
+    const auto port_separator = peer.rfind("]:");
+    if (port_separator == std::string_view::npos ||
+        port_separator <= kIpv6Prefix.size() ||
+        port_separator + 2 == peer.size())
+      return std::unexpected(
+          fmt::format("Invalid gRPC peer address: {}", peer));
+
+    ipv6_t addr;
+    const std::string address{
+        peer.substr(kIpv6Prefix.size(), port_separator - kIpv6Prefix.size())};
+    if (!crane::StrToIpv6(address, &addr))
+      return std::unexpected(
+          fmt::format("Failed to parse IPv6 peer address: {}", address));
+    return addr;
+  }
+
+  return std::unexpected(
+      fmt::format("Unsupported gRPC peer address: {}", peer));
+}
+
+bool PeerAddressMatchesHostname(const GrpcPeerAddress& peer,
+                                const std::string& hostname) {
+  if (std::holds_alternative<ipv4_t>(peer))
+    return crane::HostnameResolvesToIpv4(hostname, std::get<ipv4_t>(peer));
+  return crane::HostnameResolvesToIpv6(hostname, std::get<ipv6_t>(peer));
+}
+
+}  // namespace
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -70,26 +125,6 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     return grpc::Status::OK;
   }
 
-  if (begin_result->connected) {
-    // Before configure, craned should be connected but not online
-    if (g_meta_container->CheckCranedOnline(craned_id)) {
-      CRANE_TRACE(
-          "Already online craned {} notify craned connected, consider it down.",
-          craned_id);
-      g_meta_container->CranedDown(craned_id);
-    }
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub != nullptr) {
-      stub->SetRegToken(request->token());
-      g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-        stub->ConfigureCraned(craned_id, token);
-      });
-    } else {
-      g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token(),
-                                             begin_result->connection_hostname);
-    }
-  }
-
   return grpc::Status::OK;
 }
 
@@ -103,13 +138,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   if (!validation) {
     CRANE_WARN("Reject register request from node {}: {}", request->craned_id(),
                validation.error());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
-    CRANE_WARN("Reject register request from already online node {}",
-               request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -129,6 +157,21 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
+  auto registration_lock = stub->AcquireRegistrationLock();
+  if (!stub->Connected()) {
+    CRANE_WARN("Craned {} disconnected before registration.",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
+    CRANE_WARN("Reject register request from already online node {}",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
   if (!stub->CheckToken(request->token())) {
     CRANE_WARN("Reject register request from node {} with invalid token.",
                request->craned_id());
@@ -136,65 +179,24 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  std::unordered_map<job_id_t, std::set<step_id_t>> orphaned_steps;
-
-  // Some job or step lost, terminate them with orphaned status
-  if (!request->remote_meta().lost_jobs().empty()) {
-    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
-    for (const auto& job_id : request->remote_meta().lost_jobs()) {
-      orphaned_steps[job_id].emplace(kDaemonStepId);
-    }
-  }
-
-  if (!request->remote_meta().lost_steps().empty()) {
-    for (const auto& [job_id, steps] : request->remote_meta().lost_steps()) {
-      orphaned_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
-    }
-  }
-  CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
-             util::JobStepsToString(orphaned_steps));
-  if (!orphaned_steps.empty()) {
-    auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-    // Terminate steps on other alive nodes (normal cancel flow)
-    g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
-                                                request->craned_id());
-    // For the crashed node: send synthetic Completing + Terminal
-    // (two independent events, not "terminal implies completing")
-    for (const auto& [job_id, steps] : orphaned_steps) {
-      for (const auto step_id : steps | std::views::reverse) {
-        // Synthetic Completing → drives AllNodesCompleting → FreeSteps
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-        // Synthetic Terminal → drives AllNodesFinished → release/FreeJobs
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-      }
-    }
-  }
-
-  stub->SetReady();
-  if (!g_meta_container->CranedUp(request->craned_id(),
-                                  request->remote_meta())) {
-    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
-                                                     request->generation());
+  auto rollback_registration = [&] {
+    g_meta_container->CranedDown(request->craned_id());
+    auto rollback = g_node_manager->MarkRegistrationFailed(
+        request->craned_id(), request->generation(),
+        request->registration_token());
     if (!rollback)
       CRANE_ERROR("Failed to roll back dynamic node {} registration: {}",
                   request->craned_id(), rollback.error());
+  };
+
+  if (!g_meta_container->CranedUp(request->craned_id(),
+                                  request->remote_meta())) {
+    rollback_registration();
     response->set_ok(false);
     return grpc::Status::OK;
   }
   if (!stub->Connected()) {
-    g_meta_container->CranedDown(request->craned_id());
-    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
-                                                     request->generation());
-    if (!rollback)
-      CRANE_ERROR("Failed to persist dynamic node {} disconnect: {}",
-                  request->craned_id(), rollback.error());
+    rollback_registration();
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -203,18 +205,50 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
       request->craned_id(), request->generation(), request->remote_meta(),
       request->registration_token());
   if (!mark_result) {
-    g_meta_container->CranedDown(request->craned_id());
-    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
-                                                     request->generation());
-    if (!rollback)
-      CRANE_ERROR("Failed to roll back dynamic node {} registration: {}",
-                  request->craned_id(), rollback.error());
+    rollback_registration();
     CRANE_ERROR("Failed to register dynamic node {}: {}", request->craned_id(),
                 mark_result.error());
     response->set_ok(false);
     return grpc::Status::OK;
   }
 
+  std::unordered_map<job_id_t, std::set<step_id_t>> orphaned_steps;
+
+  // Some job or step lost, terminate them with orphaned status.
+  if (!request->remote_meta().lost_jobs().empty()) {
+    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
+               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
+    for (const auto& job_id : request->remote_meta().lost_jobs())
+      orphaned_steps[job_id].emplace(kDaemonStepId);
+  }
+
+  if (!request->remote_meta().lost_steps().empty()) {
+    for (const auto& [job_id, steps] : request->remote_meta().lost_steps())
+      orphaned_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
+  }
+  CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
+             util::JobStepsToString(orphaned_steps));
+  if (!orphaned_steps.empty()) {
+    auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+    // Terminate steps on other alive nodes (normal cancel flow).
+    g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
+                                                request->craned_id());
+    // For the crashed node, send independent Completing and Terminal events.
+    for (const auto& [job_id, steps] : orphaned_steps) {
+      for (const auto step_id : steps | std::views::reverse) {
+        g_job_scheduler->StepStatusChangeWithReasonAsync(
+            job_id, step_id, request->craned_id(),
+            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
+            "Craned re-registered but step lost.", now);
+        g_job_scheduler->StepStatusChangeWithReasonAsync(
+            job_id, step_id, request->craned_id(),
+            crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
+            "Craned re-registered but step lost.", now);
+      }
+    }
+  }
+
+  stub->SetReady(request->token());
   g_meta_container->PublishCranedState(request->craned_id());
   response->set_ok(true);
   return grpc::Status::OK;
@@ -227,6 +261,26 @@ grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+
+  // Bind the claimed physical hostname to the connection's peer address:
+  // registration tokens are issued by this RPC, so a host must not be able
+  // to obtain a lease for a machine other than itself.
+  auto peer_address = ParseGrpcPeerAddress(context->peer());
+  if (!peer_address) {
+    CRANE_WARN("Rejecting dynamic registration preparation from {}: {}",
+               context->peer(), peer_address.error());
+    response->set_reason("Failed to parse the peer address");
+    return grpc::Status::OK;
+  }
+  if (!PeerAddressMatchesHostname(*peer_address,
+                                  request->physical_hostname())) {
+    CRANE_WARN(
+        "Rejecting dynamic registration preparation: peer {} does not match "
+        "claimed physical host {}.",
+        context->peer(), request->physical_hostname());
+    response->set_reason("Physical hostname does not match the peer address");
+    return grpc::Status::OK;
+  }
 
   *response = g_node_manager->PrepareCranedRegistration(*request);
   return grpc::Status::OK;
@@ -1156,8 +1210,8 @@ grpc::Status CraneCtldServiceImpl::CreateNodes(
     CRANE_INFO("Dynamic nodes [{}] created by uid {}.",
                util::HostNameListToStr(request->node_names()), request->uid());
   else
-    CRANE_WARN("Uid {} failed to create dynamic nodes [{}]: {}",
-               request->uid(), util::HostNameListToStr(request->node_names()),
+    CRANE_WARN("Uid {} failed to create dynamic nodes [{}]: {}", request->uid(),
+               util::HostNameListToStr(request->node_names()),
                response->reason());
   return grpc::Status::OK;
 }
@@ -1540,7 +1594,8 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
 
       g_plugin_client->UpdatePowerStateHookAsync(
           crane_id, request->new_state(), true,
-          craned_meta->static_meta.dynamic, craned_meta->static_meta.provider);
+          craned_meta->static_meta.dynamic, craned_meta->static_meta.provider,
+          craned_meta->static_meta.generation);
       response->add_modified_nodes(crane_id);
     }
 
@@ -2906,12 +2961,16 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
              request->craned_id(),
              crane::grpc::CranedPowerState_Name(request->state()));
 
-  auto power_result =
-      g_node_manager->UpdatePowerState(request->craned_id(), request->state());
+  auto power_result = g_node_manager->UpdatePowerState(
+      request->craned_id(), request->generation(), request->state());
   if (!power_result) {
     CRANE_ERROR("Failed to persist power state of dynamic node {}: {}",
                 request->craned_id(), power_result.error());
     response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  if (*power_result) {
+    response->set_ok(true);
     return grpc::Status::OK;
   }
 
@@ -3011,7 +3070,7 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
     g_plugin_client->UpdatePowerStateHookAsync(
         craned_id, crane::grpc::CranedControlState::CRANE_NONE,
         request->enable(), craned_meta->static_meta.dynamic,
-        craned_meta->static_meta.provider);
+        craned_meta->static_meta.provider, craned_meta->static_meta.generation);
 
     response->add_modified_nodes(craned_id);
   }
@@ -3027,48 +3086,23 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
   if (!g_config.ListenConf.TlsConfig.AllowedNodes.empty()) {
-    std::string client_address = context->peer();
-    std::vector<std::string> str_list = absl::StrSplit(client_address, ":");
-    if (str_list.size() < 2) {
-      CRANE_ERROR("Invalid client address format: {}", client_address);
+    auto peer_address = ParseGrpcPeerAddress(context->peer());
+    if (!peer_address) {
+      CRANE_ERROR("{}", peer_address.error());
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
       return grpc::Status::OK;
     }
 
-    std::string hostname;
-    bool resolve_result = false;
-    if (str_list[0] == "ipv4") {
-      ipv4_t addr;
-      if (!crane::StrToIpv4(str_list[1], &addr)) {
-        CRANE_ERROR("Failed to parse ipv4 address: {}", str_list[1]);
-        response->set_ok(false);
-        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
-        return grpc::Status::OK;
-      }
-      resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
-    } else {
-      ipv6_t addr;
-      if (!crane::StrToIpv6(str_list[1], &addr)) {
-        CRANE_ERROR("Failed to parse ipv6 address: {}", str_list[1]);
-        response->set_ok(false);
-        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
-        return grpc::Status::OK;
-      }
-      resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
-    }
-
-    if (!resolve_result) {
-      CRANE_ERROR("Failed to resolve hostname for address: {}", client_address);
-      response->set_ok(false);
-      response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
-      return grpc::Status::OK;
-    }
-
-    if (!g_config.ListenConf.TlsConfig.AllowedNodes.contains(hostname)) {
+    const bool allowed = std::ranges::any_of(
+        g_config.ListenConf.TlsConfig.AllowedNodes,
+        [&](const std::string& hostname) {
+          return PeerAddressMatchesHostname(*peer_address, hostname);
+        });
+    if (!allowed) {
       CRANE_DEBUG(
-          "User {} tried to access from host {}, the host is not allowed.",
-          request->uid(), hostname);
+          "User {} tried to access from peer {}, the host is not allowed.",
+          request->uid(), context->peer());
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
       return grpc::Status::OK;

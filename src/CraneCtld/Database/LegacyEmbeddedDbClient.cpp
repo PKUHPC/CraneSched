@@ -18,7 +18,15 @@
 
 #include "LegacyEmbeddedDbClient.h"
 
+#include <cstring>
+
 namespace Ctld {
+
+namespace {
+
+constexpr std::string_view kDynamicNodeGenerationPrefix = "\x01generation/";
+
+}  // namespace
 
 #ifdef CRANE_HAVE_UNQLITE
 
@@ -995,17 +1003,35 @@ bool LegacyEmbeddedDbClient::RetrieveReservationInfo(
 }
 
 bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
-    std::unordered_map<CranedId, DynamicNodeRecord>* records) {
+    std::unordered_map<CranedId, DynamicNodeRecord>* records,
+    DynamicNodeGenerationMap* generation_high_watermarks) {
   bool parse_ok = true;
-  auto result = m_node_db_->IterateAllKv(
-      [&](std::string&& key, std::vector<uint8_t>&& value) {
-        DynamicNodeRecord record;
-        if (record.ParseFromArray(value.data(), value.size()))
-          records->emplace(std::move(key), std::move(record));
-        else
-          parse_ok = false;
+  auto result = m_node_db_->IterateAllKv([&](std::string&& key,
+                                             std::vector<uint8_t>&& value) {
+    if (key.starts_with(kDynamicNodeGenerationPrefix)) {
+      if (value.size() != sizeof(uint64_t)) {
+        parse_ok = false;
         return true;
-      });
+      }
+      uint64_t generation;
+      std::memcpy(&generation, value.data(), sizeof(generation));
+      std::string node_name = key.substr(kDynamicNodeGenerationPrefix.size());
+      if (node_name.empty()) {
+        parse_ok = false;
+        return true;
+      }
+      auto& high_watermark = (*generation_high_watermarks)[node_name];
+      high_watermark = std::max(high_watermark, generation);
+      return true;
+    }
+
+    DynamicNodeRecord record;
+    if (record.ParseFromArray(value.data(), value.size()))
+      records->emplace(std::move(key), std::move(record));
+    else
+      parse_ok = false;
+    return true;
+  });
 
   if (!result || !parse_ok) {
     CRANE_ERROR("Failed to restore dynamic node records from embedded db.");
@@ -1027,19 +1053,37 @@ bool LegacyEmbeddedDbClient::StoreDynamicNodeRecords(
       m_node_db_->Abort(txn_id);
       return false;
     }
+    const std::string generation_key =
+        std::string(kDynamicNodeGenerationPrefix) + record.node_name();
+    const uint64_t generation = record.generation();
+    result = m_node_db_->Store(txn_id, generation_key, &generation,
+                               sizeof(generation));
+    if (!result) {
+      m_node_db_->Abort(txn_id);
+      return false;
+    }
   }
 
   return m_node_db_->Commit(txn_id).has_value();
 }
 
 bool LegacyEmbeddedDbClient::DeleteDynamicNodeRecords(
-    const std::vector<CranedId>& node_names) {
+    const std::vector<DynamicNodeRecord>& records) {
   auto txn_result = m_node_db_->Begin();
   if (!txn_result) return false;
 
   txn_id_t txn_id = txn_result.value();
-  for (const auto& node_name : node_names) {
-    auto result = m_node_db_->Delete(txn_id, node_name);
+  for (const auto& record : records) {
+    const std::string generation_key =
+        std::string(kDynamicNodeGenerationPrefix) + record.node_name();
+    const uint64_t generation = record.generation();
+    auto result = m_node_db_->Store(txn_id, generation_key, &generation,
+                                    sizeof(generation));
+    if (!result) {
+      m_node_db_->Abort(txn_id);
+      return false;
+    }
+    result = m_node_db_->Delete(txn_id, record.node_name());
     if (!result) {
       m_node_db_->Abort(txn_id);
       return false;

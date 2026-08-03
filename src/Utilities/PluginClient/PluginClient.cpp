@@ -51,6 +51,27 @@ namespace {
 constexpr size_t kPluginHookMaxRequestBytes = 3 * 1024 * 1024;
 constexpr char kTraceHookMaxRequestBytesEnv[] =
     "CRANE_TRACE_HOOK_MAX_REQUEST_BYTES";
+constexpr uint8_t kStateSnapshotHookMaxRetries = 3;
+
+bool ShouldRetryStateSnapshotHook(const PluginClient::HookEvent& event,
+                                  grpc::StatusCode code) {
+  if (event.retry_count >= kStateSnapshotHookMaxRetries ||
+      (event.type != PluginClient::HookType::REGISTER_CRANED &&
+       event.type != PluginClient::HookType::NODE_DEFINITION))
+    return false;
+
+  switch (code) {
+  case grpc::CANCELLED:
+  case grpc::UNKNOWN:
+  case grpc::DEADLINE_EXCEEDED:
+  case grpc::RESOURCE_EXHAUSTED:
+  case grpc::ABORTED:
+  case grpc::INTERNAL:
+    return true;
+  default:
+    return false;
+  }
+}
 
 std::unique_ptr<crane::grpc::plugin::TraceHookRequest> MakeTraceHookRequest() {
   return std::make_unique<crane::grpc::plugin::TraceHookRequest>();
@@ -195,6 +216,14 @@ void PluginClient::AsyncSendThread_() {
                                         events.size());
           }
           break;
+        }
+        if (!stopping && ShouldRetryStateSnapshotHook(e, status.error_code())) {
+          ++e.retry_count;
+          CRANE_WARN("[Plugin] Retrying state snapshot hook type {} ({}/{}).",
+                     int(e.type), e.retry_count, kStateSnapshotHookMaxRetries);
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(100 * e.retry_count));
+          continue;
         }
       } else {
         CRANE_TRACE("[Plugin] Hook event sent: hook type: {}", int(e.type));
@@ -493,7 +522,8 @@ void PluginClient::NodeEventHookAsync(
 
 void PluginClient::UpdatePowerStateHookAsync(
     const std::string& craned_id, crane::grpc::CranedControlState state,
-    bool enable_auto_power_control, bool dynamic, std::string_view provider) {
+    bool enable_auto_power_control, bool dynamic, std::string_view provider,
+    uint64_t generation) {
   auto request =
       std::make_unique<crane::grpc::plugin::UpdatePowerStateHookRequest>();
   request->set_craned_id(craned_id);
@@ -501,6 +531,7 @@ void PluginClient::UpdatePowerStateHookAsync(
   request->set_enable_auto_power_control(enable_auto_power_control);
   request->set_dynamic(dynamic);
   request->set_provider(provider);
+  request->set_generation(generation);
 
   HookEvent e{HookType::UPDATE_POWER_STATE,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
@@ -511,13 +542,16 @@ void PluginClient::RegisterCranedHookAsync(
     const std::string& craned_id,
     const std::vector<crane::grpc::NetworkInterface>& interfaces, bool dynamic,
     std::string_view provider, crane::grpc::CranedPowerState power_state,
-    const std::vector<uint32_t>& running_job_ids) {
+    const std::vector<uint32_t>& running_job_ids, uint64_t generation,
+    uint64_t revision) {
   auto request =
       std::make_unique<crane::grpc::plugin::RegisterCranedHookRequest>();
   request->set_craned_id(craned_id);
   request->set_dynamic(dynamic);
   request->set_provider(provider);
   request->set_power_state(power_state);
+  request->set_generation(generation);
+  request->set_revision(revision);
 
   for (const auto& interface : interfaces) {
     request->mutable_network_interfaces()->Add()->CopyFrom(interface);
@@ -541,6 +575,8 @@ void PluginClient::NodeDefinitionHookAsync(
   request->set_power_state(record.power_state());
   request->set_provider(record.provider());
   request->set_provider_profile(record.provider_profile());
+  request->set_generation(record.generation());
+  request->set_revision(record.revision());
 
   HookEvent e{HookType::NODE_DEFINITION,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};

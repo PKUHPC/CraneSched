@@ -18,6 +18,7 @@
 
 #include "CtldClient.h"
 
+#include <csignal>
 #include <random>
 
 #include "CranedServer.h"
@@ -287,7 +288,20 @@ void CtldClientStateMachine::ActionRequestConfig_() {
                      StateToString(m_state_));
   m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
-  m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
+  RegToken token = ToProtoTimestamp(std::chrono::system_clock::now());
+  if (m_reg_token_.has_value() &&
+      (token.seconds() < m_reg_token_->seconds() ||
+       (token.seconds() == m_reg_token_->seconds() &&
+        token.nanos() <= m_reg_token_->nanos()))) {
+    token = *m_reg_token_;
+    if (token.nanos() == 999999999) {
+      token.set_seconds(token.seconds() + 1);
+      token.set_nanos(0);
+    } else {
+      token.set_nanos(token.nanos() + 1);
+    }
+  }
+  m_reg_token_ = std::move(token);
   if (m_action_request_config_cb_)
     g_thread_pool->detach_task([tok = m_reg_token_.value(), this] {
       m_action_request_config_cb_(tok);
@@ -992,6 +1006,17 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
     auto prepare_status = m_stub_->PrepareCranedRegistration(
         &prepare_context, prepare_request, &prepare_reply);
     if (!prepare_status.ok() || !prepare_reply.ok()) {
+      if (prepare_status.ok() &&
+          prepare_reply.code() == crane::grpc::ERR_NODE_STALE_GENERATION) {
+        CRANE_LOGGER_ERROR(
+            g_runtime_status.conn_logger,
+            "Dynamic node {} generation {} is stale: {}. Shutting down to "
+            "negotiate a new identity on restart.",
+            g_config.CranedIdOfThisNode, g_config.Generation,
+            prepare_reply.reason());
+        raise(SIGTERM);
+        return false;
+      }
       CRANE_LOGGER_WARN(g_runtime_status.conn_logger,
                         "Failed to renew dynamic registration for {}: {}",
                         g_config.CranedIdOfThisNode,
@@ -1004,9 +1029,10 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
       CRANE_LOGGER_ERROR(
           g_runtime_status.conn_logger,
           "Dynamic registration identity changed from {} generation {} to {} "
-          "generation {}.",
+          "generation {}. Shutting down to adopt the new identity on restart.",
           g_config.CranedIdOfThisNode, g_config.Generation,
           prepare_reply.node_name(), prepare_reply.generation());
+      raise(SIGTERM);
       return false;
     }
     g_config.DynamicRegistrationToken = prepare_reply.registration_token();

@@ -71,6 +71,7 @@ class PluginClient {
   struct HookEvent {
     HookType type;
     std::unique_ptr<google::protobuf::Message> msg;
+    uint8_t retry_count{0};
   };
 
   void InitChannelAndStub(
@@ -96,14 +97,16 @@ class PluginClient {
                                  crane::grpc::CranedControlState state,
                                  bool enable_auto_power_control = true,
                                  bool dynamic = false,
-                                 std::string_view provider = {});
+                                 std::string_view provider = {},
+                                 uint64_t generation = 0);
 
   void RegisterCranedHookAsync(
       const std::string& craned_id,
       const std::vector<crane::grpc::NetworkInterface>& interfaces,
       bool dynamic, std::string_view provider,
       crane::grpc::CranedPowerState power_state,
-      const std::vector<uint32_t>& running_job_ids);
+      const std::vector<uint32_t>& running_job_ids, uint64_t generation,
+      uint64_t revision);
 
   void NodeDefinitionHookAsync(
       const crane::grpc::DynamicNodeRecord& record,

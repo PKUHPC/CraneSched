@@ -21,6 +21,7 @@
 #include <absl/strings/str_split.h>
 #include <absl/strings/strip.h>
 #include <glob.h>
+#include <openssl/rand.h>
 #include <pthread.h>
 
 #include <cstddef>
@@ -580,6 +581,20 @@ std::expected<CertPair, std::string> ParseCertificate(
   OPENSSL_free(hex);
 
   return CertPair{cn, formatted_serial_number};
+}
+
+std::string GenerateSecureRandomHex(size_t byte_count) {
+  std::vector<unsigned char> buffer(byte_count);
+  if (RAND_bytes(buffer.data(), static_cast<int>(buffer.size())) != 1) {
+    CRANE_CRITICAL("The system CSPRNG failed to generate random bytes.");
+    std::terminate();
+  }
+
+  std::string hex;
+  hex.reserve(byte_count * 2);
+  for (unsigned char byte : buffer)
+    fmt::format_to(std::back_inserter(hex), "{:02x}", byte);
+  return hex;
 }
 
 std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id) {

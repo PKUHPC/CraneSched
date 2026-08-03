@@ -35,7 +35,6 @@
 #include <cxxopts.hpp>
 #include <fstream>
 #include <limits>
-#include <random>
 
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
@@ -1408,12 +1407,10 @@ void ParseConfig(int argc, char** argv) {
     }
 
     auto stub = crane::grpc::CraneCtldForInternal::NewStub(channel);
-    std::random_device random_device;
-    auto random_u64 = [&random_device] {
-      return static_cast<uint64_t>(random_device()) << 32 | random_device();
-    };
-    g_config.DynamicRegistrationNonce =
-        fmt::format("{:016x}{:016x}", random_u64(), random_u64());
+    // The nonce keys idempotent replay of the preparation request, and a
+    // replayed request returns the registration token, so it must be
+    // unguessable.
+    g_config.DynamicRegistrationNonce = util::GenerateSecureRandomHex(16);
     crane::grpc::PrepareCranedRegistrationRequest request =
         Craned::BuildPrepareCranedRegistrationRequest();
     crane::grpc::PrepareCranedRegistrationReply reply;

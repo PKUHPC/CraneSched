@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <mutex>
+
 #include "crane/Lock.h"
 #include "crane/Network.h"
 #include "protos/Crane.grpc.pb.h"
@@ -44,9 +46,33 @@ class CranedStub {
   ~CranedStub() = default;
   void Fini();
 
-  void SetRegToken(const RegToken &token) {
+  [[nodiscard]] bool SetRegToken(const RegToken &token) {
     absl::MutexLock l(&m_lock_);
+    if (m_latest_reg_token_.has_value()) {
+      const auto &latest = m_latest_reg_token_.value();
+      const bool older = token.seconds() < latest.seconds() ||
+                         (token.seconds() == latest.seconds() &&
+                          token.nanos() < latest.nanos());
+      if (older ||
+          (token == latest && (m_registered_.load(std::memory_order_acquire) ||
+                               (m_active_reg_token_.has_value() &&
+                                m_active_reg_token_.value() == token))))
+        return false;
+    }
+    m_latest_reg_token_ = token;
     m_token_ = token;
+    m_registered_.store(false, std::memory_order_release);
+    return true;
+  }
+
+  [[nodiscard]] bool TryBeginRegistration(const RegToken &token) {
+    absl::MutexLock l(&m_lock_);
+    if (!m_token_.has_value() || m_token_.value() != token ||
+        (m_active_reg_token_.has_value() &&
+         m_active_reg_token_.value() == token))
+      return false;
+    m_active_reg_token_ = token;
+    return true;
   }
 
   [[nodiscard]] bool CheckToken(const RegToken &token) {
@@ -64,14 +90,24 @@ class CranedStub {
   CraneErrCode UpdateTraceConfig(
       const crane::grpc::RuntimeTraceConfig &trace_config);
 
-  void SetReady() {
+  void SetReady(const RegToken &token) {
+    absl::MutexLock l(&m_lock_);
+    if (m_active_reg_token_.has_value() && m_active_reg_token_.value() == token)
+      m_active_reg_token_.reset();
+    if (!m_token_.has_value() || m_token_.value() != token) {
+      m_registered_.store(false, std::memory_order_release);
+      return;
+    }
+
     CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
                        m_craned_id_);
+    m_token_.reset();
     m_registered_.store(true, std::memory_order_release);
     UpdateLastActiveTime();
+  }
 
-    absl::MutexLock l(&m_lock_);
-    m_token_.reset();
+  [[nodiscard]] std::unique_lock<std::mutex> AcquireRegistrationLock() {
+    return std::unique_lock<std::mutex>(m_registration_mtx_);
   }
 
   CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
@@ -138,6 +174,8 @@ class CranedStub {
   std::atomic_bool m_disconnected_;
   std::atomic_bool m_registered_{false};
 
+  std::mutex m_registration_mtx_;
+
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
 
@@ -145,6 +183,10 @@ class CranedStub {
 
   absl::Mutex m_lock_;
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_lock_){std::nullopt};
+  std::optional<RegToken> m_active_reg_token_ ABSL_GUARDED_BY(m_lock_){
+      std::nullopt};
+  std::optional<RegToken> m_latest_reg_token_ ABSL_GUARDED_BY(m_lock_){
+      std::nullopt};
   std::atomic<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_active_time_;
 
@@ -200,7 +242,9 @@ class CranedKeeper {
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
-  void PutNodeIntoUnavailSet(const std::string &crane_id, const RegToken &token,
+  // Returns true when a connected stub already exists. Otherwise the latest
+  // request is queued for connection.
+  bool PutNodeIntoUnavailSet(const std::string &crane_id, const RegToken &token,
                              std::string connection_hostname);
 
  private:
@@ -215,8 +259,8 @@ class CranedKeeper {
     CranedStub *craned;
   };
 
-  // Remove stub from unavail/connecting set. Must be called with
-  // `m_connect_craned_mtx_` held.
+  // Remove the stub from the connecting set. Must be called with
+  // `m_connect_craned_mtx_` held. A later pending request is preserved.
   static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id, RegToken token,
@@ -265,6 +309,7 @@ class CranedKeeper {
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;
   std::atomic_bool m_cq_closed_;
+  std::once_flag m_shutdown_once_;
 
   std::vector<std::thread> m_cq_thread_vec_;
 

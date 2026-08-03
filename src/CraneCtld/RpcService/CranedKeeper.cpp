@@ -67,7 +67,9 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
         "Resetting token.",
         craned_id, status.error_message());
     absl::MutexLock lock(&m_lock_);
-    m_token_.reset();
+    if (m_token_.has_value() && m_token_.value() == token) m_token_.reset();
+    if (m_active_reg_token_.has_value() && m_active_reg_token_.value() == token)
+      m_active_reg_token_.reset();
   }
 }
 
@@ -584,33 +586,33 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
 
 CranedKeeper::~CranedKeeper() {
   Shutdown();
-
-  for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
-  if (m_period_connect_thread_.joinable()) m_period_connect_thread_.join();
-
   CRANE_TRACE("CranedKeeper has been closed.");
 }
 
 void CranedKeeper::Shutdown() {
-  if (m_cq_closed_) return;
+  std::call_once(m_shutdown_once_, [this] {
+    m_cq_closed_ = true;
 
-  m_cq_closed_ = true;
-
-  {
-    util::lock_guard l(m_connect_craned_mtx_);
-    for (auto &&[craned_id, stub] : m_connected_craned_id_stub_map_) {
-      stub->m_channel_.reset();
+    for (int i = 0; i < m_cq_vec_.size(); i++) {
+      util::lock_guard lock(m_cq_mtx_vec_[i]);
+      m_cq_vec_[i].Shutdown();
     }
+
+    for (auto &cq_thread : m_cq_thread_vec_)
+      if (cq_thread.joinable()) cq_thread.join();
+    if (m_period_connect_thread_.joinable()) m_period_connect_thread_.join();
+
+    WriterLock connect_lock(&m_connect_craned_mtx_);
+    util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
+    for (auto &&[craned_id, stub] : m_connected_craned_id_stub_map_)
+      stub->m_channel_.reset();
     m_connected_craned_id_stub_map_.clear();
-  }
+    m_connecting_craned_set_.clear();
+    m_unavail_craned_set_.clear();
 
-  for (int i = 0; i < m_cq_vec_.size(); i++) {
-    util::lock_guard lock(m_cq_mtx_vec_[i]);
-    m_cq_vec_[i].Shutdown();
-  }
-
-  // Dependency order: rpc_cq -> channel_state_cq -> tag pool.
-  // Tag pool's destructor will free all trailing tags in cq.
+    // Dependency order: rpc_cq -> channel_state_cq -> tag pool.
+    // Tag pool's destructor will free all trailing tags in cq.
+  });
 }
 
 void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
@@ -626,13 +628,13 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
     // If Shutdown() is called, return immediately.
     if (next_status == grpc::CompletionQueue::SHUTDOWN) break;
+    if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
 
     if (m_cq_closed_) {
       if (tag->type == CqTag::kInitializingCraned) delete tag->craned;
       continue;
     }
 
-    if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
     if (next_status == grpc::CompletionQueue::GOT_EVENT) {
       // If ok is false, the tag timed out.
       // However, we can also check timeout
@@ -656,10 +658,14 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
       if (next_tag) {
         // When cq is closed, do not register any more callbacks on it.
+        bool queued = false;
         if (!m_cq_closed_) {
           // CRANE_TRACE("Registering next tag {} for {}", tag->type,
           //            craned->m_craned_id_);
-          if (CheckNodeTimeoutAndClean(tag)) continue;
+          if (CheckNodeTimeoutAndClean(tag)) {
+            m_tag_sync_allocator_->delete_object(next_tag);
+            continue;
+          }
 
           auto deadline = std::chrono::system_clock::now();
           if (tag->type == CqTag::kInitializingCraned)
@@ -676,9 +682,28 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           //            craned->m_craned_id_);
 
           util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
-          craned->m_channel_->NotifyOnStateChange(
-              craned->m_prev_channel_state_, deadline, &m_cq_vec_[thread_id],
-              next_tag);
+          if (!m_cq_closed_) {
+            craned->m_channel_->NotifyOnStateChange(
+                craned->m_prev_channel_state_, deadline, &m_cq_vec_[thread_id],
+                next_tag);
+            queued = true;
+          }
+        }
+        if (!queued) {
+          m_tag_sync_allocator_->delete_object(next_tag);
+          if (tag->type == CqTag::kInitializingCraned) {
+            bool keeper_owns_craned = false;
+            {
+              WriterLock lock(&m_connect_craned_mtx_);
+              auto it =
+                  m_connected_craned_id_stub_map_.find(craned->m_craned_id_);
+              keeper_owns_craned =
+                  it != m_connected_craned_id_stub_map_.end() &&
+                  it->second.get() == craned;
+              if (!keeper_owns_craned) craned->Fini();
+            }
+            if (!keeper_owns_craned) delete craned;
+          }
         }
       } else {
         // END state of both state machine. Free the Craned client.
@@ -693,18 +718,28 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           craned->Fini();
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
+          const CranedId craned_id = craned->m_craned_id_;
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                             "Craned {} disconnected.", craned->m_craned_id_);
-          if (m_craned_disconnected_cb_) {
-            g_thread_pool->detach_task(
-                [this, craned_id = craned->m_craned_id_] {
-                  m_craned_disconnected_cb_(craned_id);
-                });
-          }
+                             "Craned {} disconnected.", craned_id);
 
-          WriterLock lock(&m_connect_craned_mtx_);
-          craned->Fini();
-          m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+          std::shared_ptr<CranedStub> retained_stub;
+          auto registration_lock = craned->AcquireRegistrationLock();
+          craned->m_disconnected_ = true;
+          craned->m_registered_ = false;
+          std::function<void(CranedId)> disconnected_cb;
+          {
+            WriterLock lock(&m_connect_craned_mtx_);
+            auto it = m_connected_craned_id_stub_map_.find(craned_id);
+            if (it != m_connected_craned_id_stub_map_.end() &&
+                it->second.get() == craned)
+              retained_stub = it->second;
+            craned->Fini();
+            m_connected_craned_id_stub_map_.erase(craned_id);
+            disconnected_cb = m_craned_disconnected_cb_;
+          }
+          if (disconnected_cb)
+            g_thread_pool->detach_task([callback = std::move(disconnected_cb),
+                                        craned_id] { callback(craned_id); });
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Unknown tag type: {}", (int)tag->type);
@@ -728,6 +763,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
     RegToken token;
+    std::function<void(CranedId, const RegToken &)> connected_cb;
     {
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "{} -> READY. New craned {} with token {} connected.",
@@ -736,21 +772,33 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
                          ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connect_craned_mtx_);
+      util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
       CRANE_ASSERT(
           !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
-      m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
-      craned->m_disconnected_ = false;
       auto it = m_connecting_craned_set_.find(craned->m_craned_id_);
       CRANE_ASSERT(it != m_connecting_craned_set_.end());
       token = it->second;
       m_connecting_craned_set_.erase(craned->m_craned_id_);
+
+      // A newer reverse-connection request may arrive while the channel is
+      // connecting. Reuse the established channel, but configure Craned with
+      // the latest token.
+      auto pending = m_unavail_craned_set_.find(craned->m_craned_id_);
+      if (pending != m_unavail_craned_set_.end()) {
+        if (craned->SetRegToken(pending->second.token))
+          token = pending->second.token;
+        m_unavail_craned_set_.erase(pending);
+      }
+
+      m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
+      craned->m_disconnected_ = false;
+      connected_cb = m_craned_connected_cb_;
     }
 
-    if (m_craned_connected_cb_)
-      g_thread_pool->detach_task(
-          [this, craned_id = craned->m_craned_id_, token]() {
-            m_craned_connected_cb_(craned_id, token);
-          });
+    if (connected_cb)
+      g_thread_pool->detach_task([callback = std::move(connected_cb),
+                                  craned_id = craned->m_craned_id_,
+                                  token] { callback(craned_id, token); });
 
     // Switch to EstablishedCraned state machine
     next_tag_type = CqTag::kEstablishedCraned;
@@ -846,9 +894,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // READY -> IDLE (the only edge)
 
     CRANE_TRACE("[Node #{}] READY -> IDLE", craned->m_craned_id_);
-    craned->m_disconnected_ = true;
-    craned->m_registered_ = false;
-
     next_tag_type = std::nullopt;
     break;
   }
@@ -867,9 +912,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    craned->m_disconnected_ = true;
-    craned->m_registered_ = false;
-
     next_tag_type = std::nullopt;
     break;
   }
@@ -896,18 +938,28 @@ bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
   CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                      "Craned {} going to down because timeout",
                      craned->m_craned_id_);
-  if (m_craned_disconnected_cb_) {
-    g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
-      m_craned_disconnected_cb_(craned_id);
-    });
-  }
-  WriterLock lock(&m_connect_craned_mtx_);
+  const CranedId craned_id = craned->m_craned_id_;
+  std::shared_ptr<CranedStub> retained_stub;
+  auto registration_lock = craned->AcquireRegistrationLock();
+  craned->m_disconnected_ = true;
+  craned->m_registered_ = false;
+  std::function<void(CranedId)> disconnected_cb;
+  {
+    WriterLock lock(&m_connect_craned_mtx_);
 
-  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                     "Craned {} stub destroyed: timeout.",
-                     craned->m_craned_id_);
-  craned->Fini();
-  m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                       "Craned {} stub destroyed: timeout.", craned_id);
+    auto it = m_connected_craned_id_stub_map_.find(craned_id);
+    if (it != m_connected_craned_id_stub_map_.end() &&
+        it->second.get() == craned)
+      retained_stub = it->second;
+    craned->Fini();
+    m_connected_craned_id_stub_map_.erase(craned_id);
+    disconnected_cb = m_craned_disconnected_cb_;
+  }
+  if (disconnected_cb)
+    g_thread_pool->detach_task([callback = std::move(disconnected_cb),
+                                craned_id] { callback(craned_id); });
   m_tag_sync_allocator_->delete_object(tag);
   return true;
 }
@@ -954,27 +1006,54 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
 
 void CranedKeeper::SetCranedConnectedCb(
     std::function<void(CranedId, const RegToken &)> cb) {
+  WriterLock lock(&m_connect_craned_mtx_);
   m_craned_connected_cb_ = std::move(cb);
 }
 
 void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
+  WriterLock lock(&m_connect_craned_mtx_);
   m_craned_disconnected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
+bool CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
                                          const RegToken &token,
                                          std::string connection_hostname) {
-  if (m_cq_closed_) return;
+  if (m_cq_closed_) return false;
 
-  CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
-              ProtoTimestampToString(token));
-  util::lock_guard guard(m_unavail_craned_set_mtx_);
-  m_unavail_craned_set_.insert_or_assign(
-      crane_id, PendingConnection{token, std::move(connection_hostname)});
+  std::function<void(CranedId, const RegToken &)> connected_cb;
+  {
+    WriterLock connect_lock(&m_connect_craned_mtx_);
+    auto connected = m_connected_craned_id_stub_map_.find(crane_id);
+    if (connected != m_connected_craned_id_stub_map_.end()) {
+      if (connected->second->SetRegToken(token))
+        connected_cb = m_craned_connected_cb_;
+    } else {
+      CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
+                  ProtoTimestampToString(token));
+      util::lock_guard guard(m_unavail_craned_set_mtx_);
+      if (m_cq_closed_) return false;
+      m_unavail_craned_set_.insert_or_assign(
+          crane_id, PendingConnection{token, std::move(connection_hostname)});
+      return false;
+    }
+  }
+
+  if (connected_cb)
+    g_thread_pool->detach_task([callback = std::move(connected_cb), crane_id,
+                                token] { callback(crane_id, token); });
+  return true;
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id, RegToken token,
                                       std::string connection_hostname) {
+  if (m_cq_closed_) {
+    WriterLock connect_lock(&m_connect_craned_mtx_);
+    util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
+    m_connecting_craned_set_.erase(craned_id);
+    m_unavail_craned_set_.erase(craned_id);
+    return;
+  }
+
   if (connection_hostname.empty()) connection_hostname = craned_id;
   std::string ip_addr;
 
@@ -1021,7 +1100,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id, RegToken token,
   }
 
   auto *craned = new CranedStub(this);
-  craned->SetRegToken(token);
+  CRANE_ASSERT(craned->SetRegToken(token));
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -1067,21 +1146,31 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id, RegToken token,
   static std::atomic<uint32_t> cur_cq_id = 0;
   uint32_t thread_id = cur_cq_id++ % m_cq_vec_.size();
 
-  util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
-  craned->m_channel_->NotifyOnStateChange(
-      craned->m_prev_channel_state_,
-      std::chrono::system_clock::now() +
-          std::chrono::seconds(kCompletionQueueConnectingTimeoutSeconds),
-      &m_cq_vec_[thread_id], tag);
+  bool queued = false;
+  {
+    util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
+    if (!m_cq_closed_) {
+      craned->m_channel_->NotifyOnStateChange(
+          craned->m_prev_channel_state_,
+          std::chrono::system_clock::now() +
+              std::chrono::seconds(kCompletionQueueConnectingTimeoutSeconds),
+          &m_cq_vec_[thread_id], tag);
+      queued = true;
+    }
+  }
+  if (!queued) {
+    WriterLock connect_lock(&m_connect_craned_mtx_);
+    craned->Fini();
+    delete craned;
+    m_tag_sync_allocator_->delete_object(tag);
+  }
 }
 
 void CranedKeeper::CranedChannelConnFailNoLock_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
   craned_keeper->m_connect_craned_mtx_.AssertHeld();
-  util::lock_guard guard(craned_keeper->m_unavail_craned_set_mtx_);
   craned_keeper->m_channel_count_.fetch_sub(1);
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
-  craned_keeper->m_unavail_craned_set_.erase(stub->m_craned_id_);
   CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);
 }
 
@@ -1093,7 +1182,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
     // Use a window to limit the maximum number of connecting craned nodes.
     {
-      absl::ReaderMutexLock connected_reader_lock(&m_connect_craned_mtx_);
+      absl::WriterMutexLock connected_writer_lock(&m_connect_craned_mtx_);
       util::lock_guard guard(m_unavail_craned_set_mtx_);
 
       uint32_t fetch_num =
@@ -1101,8 +1190,13 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
       auto it = m_unavail_craned_set_.begin();
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
-        if (!m_connecting_craned_set_.contains(it->first) &&
-            !m_connected_craned_id_stub_map_.contains(it->first)) {
+        if (m_connecting_craned_set_.contains(it->first)) {
+          // Keep a newer request until the in-flight channel is established;
+          // InitCranedStateMachine_ will consume its token.
+          ++it;
+          continue;
+        }
+        if (!m_connected_craned_id_stub_map_.contains(it->first)) {
           m_connecting_craned_set_.emplace(it->first, it->second.token);
           g_thread_pool->detach_task(
               [this, craned_id = it->first, token = it->second.token,
@@ -1113,7 +1207,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
           fetch_num--;
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                             "Craned {} is already connecting or connected, "
+                             "Craned {} is already connected, "
                              "drop new connection request. Token {}.",
                              it->first,
                              ProtoTimestampToString(it->second.token));

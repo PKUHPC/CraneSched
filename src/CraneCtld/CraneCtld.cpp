@@ -1292,9 +1292,15 @@ void DestroyCtldGlobalVariables() {
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
-  g_craned_keeper.reset();
-  // Craned keeper will query running job from scheduler
+
+  // Stop callback producers, then drain their tasks while every callback
+  // dependency is still alive. CranedKeeper callbacks can query both the
+  // scheduler and NodeManager.
+  if (g_craned_keeper != nullptr) g_craned_keeper->Shutdown();
+  if (g_thread_pool != nullptr) g_thread_pool->wait();
   g_job_scheduler.reset();
+  if (g_thread_pool != nullptr) g_thread_pool->wait();
+  g_craned_keeper.reset();
   if (g_plugin_client != nullptr) g_plugin_client->SetReconnectCallback({});
   g_node_manager.reset();
 
@@ -1302,7 +1308,6 @@ void DestroyCtldGlobalVariables() {
   // in which log function is called.
   g_embedded_db_client.reset();
 
-  g_thread_pool->wait();
   g_meta_container.reset();
   g_thread_pool.reset();
   g_plugin_client.reset();
@@ -1425,6 +1430,7 @@ void InitializeCtldGlobalVariables() {
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
   g_node_manager->RestoreDynamicNodes();
+  g_node_manager->StartReconcileThread();
 
   g_craned_keeper =
       std::make_unique<CranedKeeper>(g_config.CtldConf.MaxNodeCount);
@@ -1437,15 +1443,28 @@ void InitializeCtldGlobalVariables() {
           CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
           return;
         }
+        auto registration_lock = stub->AcquireRegistrationLock();
+        if (!stub->Connected()) return;
+        if (!stub->TryBeginRegistration(token)) {
+          CRANE_TRACE(
+              "Ignore stale registration callback for craned {} token {}.",
+              craned_id, ProtoTimestampToString(token));
+          return;
+        }
+        if (g_meta_container->CheckCranedOnline(craned_id)) {
+          CRANE_TRACE(
+              "Already online craned {} notified Ctld, consider it down.",
+              craned_id);
+          g_meta_container->CranedDown(craned_id);
+        }
         stub->ConfigureCraned(craned_id, token);
       });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
     // No need to worry disconnect before job scheduler init
-    g_meta_container->CranedDown(craned_id);
     if (g_node_manager) {
-      auto result = g_node_manager->MarkDisconnected(craned_id);
+      auto result = g_node_manager->MarkDisconnectedIfUntracked(craned_id);
       if (!result)
         CRANE_WARN("Failed to persist dynamic node {} down state: {}",
                    craned_id, result.error());

@@ -13,6 +13,10 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <absl/synchronization/notification.h>
+
+#include <thread>
+
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -22,20 +26,22 @@ class NodeManager final {
   using DynamicNodeRecord = crane::grpc::DynamicNodeRecord;
   using DynamicNodeSpec = crane::grpc::DynamicNodeSpec;
 
+  struct PowerTarget {
+    CranedId node_id;
+    uint64_t generation;
+  };
+
   struct ScaleUpResult {
-    std::vector<CranedId> nodes_to_power_on;
-    std::vector<CranedId> nodes_to_wake;
+    std::vector<PowerTarget> nodes_to_power_on;
+    std::vector<PowerTarget> nodes_to_wake;
     std::vector<CranedId> reserved_nodes;
     bool in_progress{false};
   };
 
-  struct RegistrationStartResult {
-    bool connected;
-    std::string connection_hostname;
-  };
-
   bool Init();
+  ~NodeManager();
   void RestoreDynamicNodes();
+  void StartReconcileThread();
   void ReconcilePluginState();
 
   crane::grpc::CreateNodesReply CreateNodes(
@@ -46,7 +52,7 @@ class NodeManager final {
   crane::grpc::PrepareCranedRegistrationReply PrepareCranedRegistration(
       const crane::grpc::PrepareCranedRegistrationRequest& request);
 
-  std::expected<RegistrationStartResult, std::string> BeginRegistration(
+  std::expected<void, std::string> BeginRegistration(
       const CranedId& node_id, uint64_t generation, const RegToken& token,
       std::string_view registration_token = {});
   std::expected<void, std::string> ValidateRegistration(
@@ -57,10 +63,16 @@ class NodeManager final {
       const CranedId& node_id, uint64_t generation,
       const crane::grpc::CranedRemoteMeta& remote_meta,
       std::string_view registration_token = {});
-  std::expected<void, std::string> MarkDisconnected(const CranedId& node_id,
-                                                    uint64_t generation = 0);
-  std::expected<void, std::string> UpdatePowerState(
-      const CranedId& node_id, crane::grpc::CranedPowerState power_state);
+  std::expected<void, std::string> MarkRegistrationFailed(
+      const CranedId& node_id, uint64_t generation,
+      std::string_view registration_token);
+  std::expected<void, std::string> MarkDisconnectedIfUntracked(
+      const CranedId& node_id);
+  // A true value means the report belongs to a stale dynamic incarnation and
+  // must not reach the runtime state/event path.
+  std::expected<bool, std::string> UpdatePowerState(
+      const CranedId& node_id, uint64_t generation,
+      crane::grpc::CranedPowerState power_state);
   std::expected<ScaleUpResult, std::string> RequestScaleUp(
       const PartitionId& partition, const ResourceView& node_resource,
       const ResourceView& task_resource, uint32_t min_tasks_per_node,
@@ -70,14 +82,21 @@ class NodeManager final {
       const std::unordered_set<std::string>& excluded_nodes);
 
  private:
+  void ReconcileThreadFunc_();
+
   std::expected<void, std::string> ValidateRegistrationNoLock_(
       const CranedId& node_id, uint64_t generation) const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  std::expected<void, std::string> MarkDisconnectedNoLock_(
+      const CranedId& node_id, uint64_t generation)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   std::expected<void, std::string> ValidatePresentRecord_(
       const DynamicNodeRecord& record) const;
   std::expected<void, std::string> ReleaseExpiredRegistrationLeasesNoLock_()
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupExpiredTombstonesNoLock_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  std::expected<uint64_t, std::string> NextGenerationNoLock_(
+      const CranedId& node_id) const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   std::expected<void, std::string> ValidateReportedSpecStructure_(
       const DynamicNodeSpec& reported) const;
@@ -106,10 +125,23 @@ class NodeManager final {
       const DynamicNodeRecord& record,
       crane::grpc::PrepareCranedRegistrationReply* reply);
 
+  // Lock order: mutex_ may be held while taking CranedMetaContainer's
+  // topology lock (Create/Delete/Prepare paths). Never call into NodeManager
+  // while holding the topology lock; the scheduler must release its topology
+  // read lock before calling RequestScaleUp.
   absl::Mutex mutex_;
   std::unordered_map<CranedId, DynamicNodeRecord> records_
       ABSL_GUARDED_BY(mutex_);
+  std::unordered_map<CranedId, uint64_t> generation_high_watermarks_
+      ABSL_GUARDED_BY(mutex_);
+  // Present records whose partitions no longer exist in the static
+  // configuration. They are excluded from the runtime topology and cannot
+  // register or be leased; only deletion is allowed.
+  std::unordered_set<CranedId> quarantined_nodes_ ABSL_GUARDED_BY(mutex_);
   uint64_t catalog_revision_ ABSL_GUARDED_BY(mutex_){0};
+
+  absl::Notification reconcile_stop_notification_;
+  std::thread reconcile_thread_;
 };
 
 }  // namespace Ctld

@@ -43,11 +43,12 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
           reservation_info_map) override;
   bool RetrieveDynamicNodeRecords(
-      std::unordered_map<CranedId, DynamicNodeRecord>* records) override;
+      std::unordered_map<CranedId, DynamicNodeRecord>* records,
+      DynamicNodeGenerationMap* generation_high_watermarks) override;
   bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) override;
   bool DeleteDynamicNodeRecords(
-      const std::vector<CranedId>& node_names) override;
+      const std::vector<DynamicNodeRecord>& records) override;
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginTransaction(RocksStoreKind::JobVar, txn_id);

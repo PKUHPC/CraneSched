@@ -62,6 +62,10 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr);
 
 bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr);
 
+bool HostnameResolvesToIpv4(const std::string& hostname, ipv4_t addr);
+
+bool HostnameResolvesToIpv6(const std::string& hostname, const ipv6_t& addr);
+
 bool StrToIpv4(const std::string& ip, ipv4_t* addr);
 
 bool StrToIpv6(const std::string& ip, ipv6_t* addr);

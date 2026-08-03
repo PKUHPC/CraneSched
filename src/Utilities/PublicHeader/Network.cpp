@@ -34,6 +34,31 @@ namespace crane {
 
 namespace internal {
 
+template <typename Matcher>
+bool HostnameResolvesToAddress(const std::string& hostname, int family,
+                               Matcher&& matcher) {
+  struct addrinfo hints{};
+  struct addrinfo* result = nullptr;
+  hints.ai_family = family;
+
+  int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
+  if (ret != 0) {
+    CRANE_TRACE("Error in getaddrinfo when resolving hostname {}: {}", hostname,
+                gai_strerror(ret));
+    return false;
+  }
+
+  bool matched = false;
+  for (auto* current = result; current != nullptr; current = current->ai_next) {
+    if (matcher(current->ai_addr)) {
+      matched = true;
+      break;
+    }
+  }
+  freeaddrinfo(result);
+  return matched;
+}
+
 class HostsMap {
  public:
   HostsMap() {
@@ -275,6 +300,27 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
 
   freeaddrinfo(res);
   return true;
+}
+
+bool HostnameResolvesToIpv4(const std::string& hostname, ipv4_t addr) {
+  return internal::HostnameResolvesToAddress(
+      hostname, AF_INET, [addr](const sockaddr* resolved) {
+        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(resolved);
+        return ntohl(ipv4->sin_addr.s_addr) == addr;
+      });
+}
+
+bool HostnameResolvesToIpv6(const std::string& hostname, const ipv6_t& addr) {
+  return internal::HostnameResolvesToAddress(
+      hostname, AF_INET6, [&addr](const sockaddr* resolved) {
+        const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(resolved);
+        ipv6_t resolved_addr = 0;
+        for (int i = 0; i < 4; ++i) {
+          const uint32_t part = ntohl(ipv6->sin6_addr.s6_addr32[i]);
+          resolved_addr = (resolved_addr << 32) | part;
+        }
+        return resolved_addr == addr;
+      });
 }
 
 bool StrToIpv4(const std::string& ip, ipv4_t* addr) {

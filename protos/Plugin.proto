@@ -97,6 +97,7 @@ message UpdatePowerStateHookRequest {
   bool enable_auto_power_control = 3;
   bool dynamic = 4;
   string provider = 5;
+  uint64 generation = 6;
 }
 
 message UpdatePowerStateHookReply {
@@ -110,6 +111,8 @@ message RegisterCranedHookRequest {
   string provider = 4;
   CranedPowerState power_state = 5;
   repeated uint32 running_job_ids = 6;
+  uint64 generation = 7;
+  uint64 revision = 8;
 }
 
 message RegisterCranedHookReply {
@@ -129,6 +132,8 @@ message NodeDefinitionHookRequest {
   DynamicNodePowerState power_state = 4;
   string provider = 5;
   string provider_profile = 6;
+  uint64 generation = 7;
+  uint64 revision = 8;
 }
 
 message NodeDefinitionHookReply {

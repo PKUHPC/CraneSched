@@ -138,6 +138,12 @@ std::string NormalizeClusterDomain(std::string domain);
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string& cert_pem);
 
+// Generate `byte_count` bytes from the system CSPRNG and return them as a
+// lowercase hex string of 2 * byte_count characters. Terminates the process
+// if the CSPRNG is unavailable, since credentials must never be generated
+// from a weak source.
+std::string GenerateSecureRandomHex(size_t byte_count);
+
 template <typename YamlNode>
 std::optional<std::string> ParseCertConfig(const std::string& cert_name,
                                            const YamlNode& tls_config,

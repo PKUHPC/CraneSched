@@ -10,8 +10,10 @@
 
 #include "Node/NodeManager.h"
 
+#include <openssl/crypto.h>
+
+#include <limits>
 #include <map>
-#include <random>
 #include <regex>
 #include <set>
 
@@ -176,12 +178,8 @@ bool NodeManager::RegistrationLeaseExpired_(const DynamicNodeRecord& record) {
 }
 
 std::string NodeManager::GenerateRegistrationToken_() {
-  std::random_device random_device;
-  auto random_u64 = [&random_device] {
-    return static_cast<uint64_t>(random_device()) << 32 | random_device();
-  };
-  return fmt::format("{:016x}{:016x}{:016x}{:016x}", random_u64(), random_u64(),
-                     random_u64(), random_u64());
+  constexpr size_t kRegistrationTokenBytes = 32;
+  return util::GenerateSecureRandomHex(kRegistrationTokenBytes);
 }
 
 bool NodeManager::GresMatch_(const DynamicNodeSpec& expected,
@@ -285,8 +283,10 @@ std::expected<void, std::string> NodeManager::ValidateRegistrationToken_(
     return std::unexpected("Dynamic node has no active registration lease");
   if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING)
     return std::unexpected("Dynamic node is not registering");
-  if (registration_token.empty() ||
-      record.registration_token() != registration_token)
+  if (registration_token.size() != record.registration_token().size() ||
+      CRYPTO_memcmp(registration_token.data(),
+                    record.registration_token().data(),
+                    registration_token.size()) != 0)
     return std::unexpected("Invalid dynamic registration token");
   if (RegistrationLeaseExpired_(record))
     return std::unexpected("Dynamic registration token has expired");
@@ -296,7 +296,9 @@ std::expected<void, std::string> NodeManager::ValidateRegistrationToken_(
 std::optional<CranedId> NodeManager::FindNodeByPhysicalHostnameNoLock_(
     std::string_view physical_hostname, std::string_view excluded_node) const {
   for (const auto& [node_id, record] : records_) {
-    if (node_id != excluded_node && IsDynamicRecordPresent(record) &&
+    if (node_id != excluded_node &&
+        (IsDynamicRecordPresent(record) ||
+         record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DELETING) &&
         record.physical_hostname() == physical_hostname)
       return node_id;
   }
@@ -319,13 +321,21 @@ void NodeManager::FillPreparationReply_(
 
 bool NodeManager::Init() {
   std::unordered_map<CranedId, DynamicNodeRecord> records;
-  if (!g_embedded_db_client->RetrieveDynamicNodeRecords(&records)) return false;
+  EmbeddedDbClient::DynamicNodeGenerationMap generation_high_watermarks;
+  if (!g_embedded_db_client->RetrieveDynamicNodeRecords(
+          &records, &generation_high_watermarks))
+    return false;
 
-  for (const auto& record : records | std::views::values)
+  absl::MutexLock lock(&mutex_);
+  for (const auto& record : records | std::views::values) {
     catalog_revision_ = std::max(catalog_revision_, record.revision());
+    auto& high_watermark = generation_high_watermarks[record.node_name()];
+    high_watermark = std::max(high_watermark, record.generation());
+  }
 
   std::vector<DynamicNodeRecord> changed_records;
   std::unordered_map<std::string, CranedId> physical_hosts;
+  std::unordered_set<CranedId> quarantined;
   size_t present_node_count = 0;
   for (auto& [node_id, record] : records) {
     if (node_id != record.node_name()) {
@@ -360,10 +370,23 @@ bool NodeManager::Init() {
       return false;
     }
 
-    auto result = ValidatePresentRecord_(record);
-    if (!result) {
-      CRANE_ERROR("Invalid dynamic node {}: {}", node_id, result.error());
-      return false;
+    auto missing_partition = std::ranges::find_if(
+        record.partition_names(), [](const std::string& partition_id) {
+          return !g_config.Partitions.contains(partition_id);
+        });
+    if (missing_partition != record.partition_names().end()) {
+      CRANE_ERROR(
+          "Dynamic node {} references partition {} which no longer exists. "
+          "The node is excluded from the cluster topology and cannot "
+          "register; restore the partition or delete the node.",
+          node_id, *missing_partition);
+      quarantined.emplace(node_id);
+    } else {
+      auto result = ValidatePresentRecord_(record);
+      if (!result) {
+        CRANE_ERROR("Invalid dynamic node {}: {}", node_id, result.error());
+        return false;
+      }
     }
     if (!record.physical_hostname().empty()) {
       auto [it, inserted] =
@@ -395,10 +418,36 @@ bool NodeManager::Init() {
     return false;
   }
 
-  absl::MutexLock lock(&mutex_);
   records_ = std::move(records);
+  generation_high_watermarks_ = std::move(generation_high_watermarks);
+  quarantined_nodes_ = std::move(quarantined);
   CleanupExpiredTombstonesNoLock_();
   return true;
+}
+
+NodeManager::~NodeManager() {
+  if (reconcile_thread_.joinable()) {
+    reconcile_stop_notification_.Notify();
+    reconcile_thread_.join();
+  }
+}
+
+void NodeManager::StartReconcileThread() {
+  reconcile_thread_ = std::thread(&NodeManager::ReconcileThreadFunc_, this);
+}
+
+void NodeManager::ReconcileThreadFunc_() {
+  util::SetCurrentThreadName("NodeReconcile");
+  const absl::Duration period =
+      absl::Seconds(g_config.CtldConf.DynamicNodes.RegistrationLeaseSeconds);
+  while (!reconcile_stop_notification_.WaitForNotificationWithTimeout(period)) {
+    absl::MutexLock lock(&mutex_);
+    auto lease_result = ReleaseExpiredRegistrationLeasesNoLock_();
+    if (!lease_result)
+      CRANE_WARN("Failed to release expired dynamic registration leases: {}",
+                 lease_result.error());
+    CleanupExpiredTombstonesNoLock_();
+  }
 }
 
 void NodeManager::RestoreDynamicNodes() {
@@ -406,7 +455,9 @@ void NodeManager::RestoreDynamicNodes() {
   {
     absl::MutexLock lock(&mutex_);
     for (const auto& [node_id, record] : records_) {
-      if (IsDynamicRecordPresent(record)) runtime_records.emplace_back(record);
+      if (IsDynamicRecordPresent(record) &&
+          !quarantined_nodes_.contains(node_id))
+        runtime_records.emplace_back(record);
     }
   }
   g_meta_container->AddDynamicNodes(runtime_records);
@@ -417,9 +468,11 @@ void NodeManager::ReconcilePluginState() {
 
   {
     absl::MutexLock lock(&mutex_);
-    for (const auto& record : records_ | std::views::values) {
+    for (const auto& [node_id, record] : records_) {
+      const bool available = IsDynamicRecordPresent(record) &&
+                             !quarantined_nodes_.contains(node_id);
       PublishNodeDefinition(
-          record, IsDynamicRecordPresent(record)
+          record, available
                       ? crane::grpc::plugin::NODE_DEFINITION_ACTION_UPSERT
                       : crane::grpc::plugin::NODE_DEFINITION_ACTION_REMOVE);
     }
@@ -427,30 +480,30 @@ void NodeManager::ReconcilePluginState() {
   g_meta_container->ReconcilePluginState();
 
   absl::MutexLock lock(&mutex_);
-  for (const auto& record : records_ | std::views::values) {
+  for (const auto& [node_id, record] : records_) {
     if (record.provider() != kPowerControlProvider ||
-        !IsDynamicRecordPresent(record))
+        !IsDynamicRecordPresent(record) || quarantined_nodes_.contains(node_id))
       continue;
     if (record.power_state() ==
         crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON) {
-      g_plugin_client->UpdatePowerStateHookAsync(record.node_name(),
-                                                 crane::grpc::CRANE_POWERON,
-                                                 true, true, record.provider());
+      g_plugin_client->UpdatePowerStateHookAsync(
+          record.node_name(), crane::grpc::CRANE_POWERON, true, true,
+          record.provider(), record.generation());
     } else if (record.power_state() ==
                crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) {
-      g_plugin_client->UpdatePowerStateHookAsync(record.node_name(),
-                                                 crane::grpc::CRANE_WAKE, true,
-                                                 true, record.provider());
+      g_plugin_client->UpdatePowerStateHookAsync(
+          record.node_name(), crane::grpc::CRANE_WAKE, true, true,
+          record.provider(), record.generation());
     } else if (record.power_state() ==
                crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_OFF) {
-      g_plugin_client->UpdatePowerStateHookAsync(record.node_name(),
-                                                 crane::grpc::CRANE_POWEROFF,
-                                                 true, true, record.provider());
+      g_plugin_client->UpdatePowerStateHookAsync(
+          record.node_name(), crane::grpc::CRANE_POWEROFF, true, true,
+          record.provider(), record.generation());
     } else if (record.power_state() ==
                crane::grpc::DYNAMIC_NODE_POWER_STATE_TO_SLEEPING) {
-      g_plugin_client->UpdatePowerStateHookAsync(record.node_name(),
-                                                 crane::grpc::CRANE_SLEEP, true,
-                                                 true, record.provider());
+      g_plugin_client->UpdatePowerStateHookAsync(
+          record.node_name(), crane::grpc::CRANE_SLEEP, true, true,
+          record.provider(), record.generation());
     }
   }
 }
@@ -519,21 +572,24 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
       return reply;
     }
 
-    uint64_t generation = 1;
     auto it = records_.find(node_id);
     if (it != records_.end()) {
       if (it->second.lifecycle() != DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) {
         reply.set_reason(fmt::format("Node {} already exists", node_id));
         return reply;
       }
-      generation = it->second.generation() + 1;
+    }
+    auto generation = NextGenerationNoLock_(node_id);
+    if (!generation) {
+      reply.set_reason(generation.error());
+      return reply;
     }
 
     DynamicNodeRecord record;
     record.set_node_name(node_id);
     *record.mutable_spec() = request.spec();
     record.mutable_partition_names()->CopyFrom(request.partition_names());
-    record.set_generation(generation);
+    record.set_generation(*generation);
     record.set_origin(request.origin() ==
                               crane::grpc::DYNAMIC_NODE_ORIGIN_UNSPECIFIED
                           ? DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN
@@ -579,6 +635,8 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
     return reply;
   }
   for (const auto& record : new_records) records_[record.node_name()] = record;
+  for (const auto& record : new_records)
+    generation_high_watermarks_[record.node_name()] = record.generation();
   g_meta_container->AddDynamicNodes(new_records);
   for (const auto& record : new_records) {
     PublishNodeDefinition(record,
@@ -624,27 +682,33 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
       continue;
     }
     const DynamicNodeRecord& record = it->second;
-    if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-        !RegistrationLeaseExpired_(record)) {
-      reject(node_id, "Node is still registering");
-      continue;
-    }
-    if (IsTransitionalPowerState(record.power_state())) {
-      if (!PowerActionExpired(record)) {
-        reject(node_id, "Node has a power action in progress");
+    const bool quarantined = quarantined_nodes_.contains(node_id);
+    if (!quarantined) {
+      if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
+          !RegistrationLeaseExpired_(record)) {
+        reject(node_id, "Node is still registering");
         continue;
       }
-    } else if (record.provider() == kPowerControlProvider &&
-               record.power_state() != DYNAMIC_NODE_POWER_STATE_OFF) {
-      reject(node_id, "Node must be powered off before deletion");
-      continue;
+      if (IsTransitionalPowerState(record.power_state())) {
+        if (!PowerActionExpired(record)) {
+          reject(node_id, "Node has a power action in progress");
+          continue;
+        }
+      } else if (record.provider() == kPowerControlProvider &&
+                 record.power_state() != DYNAMIC_NODE_POWER_STATE_OFF) {
+        reject(node_id, "Node must be powered off before deletion");
+        continue;
+      }
     }
     if (g_craned_keeper->IsCranedTracked(node_id)) {
       reject(node_id, "Node is still connected");
       continue;
     }
-    pending.emplace_back(node_id, record,
-                         record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DELETING);
+    // Quarantined nodes were never added to the runtime topology, so the
+    // topology-side deleting steps must be skipped for them.
+    pending.emplace_back(
+        node_id, record,
+        record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DELETING && !quarantined);
   }
   if (pending.empty()) return reply;
 
@@ -761,7 +825,10 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     PublishNodeDefinition(record,
                           crane::grpc::plugin::NODE_DEFINITION_ACTION_REMOVE);
   }
-  for (const auto& node : pending) reply.add_deleted_nodes(node.node_id);
+  for (const auto& node : pending) {
+    quarantined_nodes_.erase(node.node_id);
+    reply.add_deleted_nodes(node.node_id);
+  }
 
   return reply;
 }
@@ -770,19 +837,33 @@ void NodeManager::CleanupExpiredTombstonesNoLock_() {
   const int64_t expire_before =
       absl::ToUnixSeconds(absl::Now()) -
       g_config.CtldConf.DynamicNodes.TombstoneRetentionSeconds;
-  std::vector<CranedId> expired;
-  for (const auto& [node_id, record] : records_) {
+  std::vector<DynamicNodeRecord> expired;
+  for (const auto& record : records_ | std::views::values) {
     if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) continue;
     if (!record.has_tombstone_time() ||
         record.tombstone_time().seconds() <= expire_before)
-      expired.emplace_back(node_id);
+      expired.emplace_back(record);
   }
   if (expired.empty()) return;
   if (!g_embedded_db_client->DeleteDynamicNodeRecords(expired)) {
     CRANE_WARN("Failed to purge expired dynamic node tombstones.");
     return;
   }
-  for (const auto& node_id : expired) records_.erase(node_id);
+  for (const auto& record : expired) records_.erase(record.node_name());
+}
+
+std::expected<uint64_t, std::string> NodeManager::NextGenerationNoLock_(
+    const CranedId& node_id) const {
+  uint64_t high_watermark = 0;
+  if (auto it = generation_high_watermarks_.find(node_id);
+      it != generation_high_watermarks_.end())
+    high_watermark = it->second;
+  if (auto it = records_.find(node_id); it != records_.end())
+    high_watermark = std::max(high_watermark, it->second.generation());
+  if (high_watermark == std::numeric_limits<uint64_t>::max())
+    return std::unexpected(
+        fmt::format("Node {} generation is exhausted", node_id));
+  return high_watermark + 1;
 }
 
 std::expected<void, std::string>
@@ -883,11 +964,19 @@ NodeManager::PrepareCranedRegistration(
     }
     auto it = records_.find(request.requested_node_name());
     if (it == records_.end() || !IsDynamicRecordPresent(it->second)) {
+      if (request.generation() != 0)
+        reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
       reply.set_reason("Dynamic node is not precreated");
+      return reply;
+    }
+    if (quarantined_nodes_.contains(request.requested_node_name())) {
+      reply.set_reason(
+          "Dynamic node references a partition that no longer exists");
       return reply;
     }
     if (request.generation() != 0 &&
         request.generation() != it->second.generation()) {
+      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
       reply.set_reason("Dynamic node generation has changed");
       return reply;
     }
@@ -1072,6 +1161,11 @@ NodeManager::PrepareCranedRegistration(
 
     if (existing != records_.end() &&
         IsDynamicRecordPresent(existing->second)) {
+      if (quarantined_nodes_.contains(existing->first)) {
+        reply.set_reason(
+            "Dynamic node references a partition that no longer exists");
+        return reply;
+      }
       if (existing->second.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_REGISTERED) {
         reply.set_reason("Node name is reserved by a precreated dynamic node");
         return reply;
@@ -1087,6 +1181,7 @@ NodeManager::PrepareCranedRegistration(
       }
       if (request.generation() != 0 &&
           request.generation() != existing->second.generation()) {
+        reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
         reply.set_reason("Dynamic node generation has changed");
         return reply;
       }
@@ -1134,7 +1229,13 @@ NodeManager::PrepareCranedRegistration(
     }
 
     if (request.generation() != 0) {
+      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
       reply.set_reason("Dynamic node is no longer available");
+      return reply;
+    }
+    if (existing != records_.end() &&
+        existing->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DELETING) {
+      reply.set_reason("Dynamic node deletion is still in progress");
       return reply;
     }
 
@@ -1186,10 +1287,12 @@ NodeManager::PrepareCranedRegistration(
     else
       record.mutable_partition_names()->CopyFrom(
           request.requested_partitions());
-    uint64_t generation = 1;
-    if (existing != records_.end())
-      generation = existing->second.generation() + 1;
-    record.set_generation(generation);
+    auto generation = NextGenerationNoLock_(node_name);
+    if (!generation) {
+      reply.set_reason(generation.error());
+      return reply;
+    }
+    record.set_generation(*generation);
     record.set_origin(DYNAMIC_NODE_ORIGIN_DYNAMIC_REGISTERED);
     record.set_pool(policy.Name);
     record.set_lifecycle(DYNAMIC_NODE_LIFECYCLE_REGISTERING);
@@ -1206,6 +1309,7 @@ NodeManager::PrepareCranedRegistration(
       return reply;
     }
     records_[node_name] = record;
+    generation_high_watermarks_[node_name] = record.generation();
     g_meta_container->AddDynamicNodes({record});
     PublishNodeDefinition(record,
                           crane::grpc::plugin::NODE_DEFINITION_ACTION_UPSERT);
@@ -1229,7 +1333,9 @@ NodeManager::PrepareCranedRegistration(
 
   std::vector<std::reference_wrapper<DynamicNodeRecord>> candidates;
   for (auto& [node_name, record] : records_) {
-    if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN) continue;
+    if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN ||
+        quarantined_nodes_.contains(node_name))
+      continue;
     if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
         record.registration_nonce() == request.client_nonce() &&
         record.physical_hostname() == request.physical_hostname() &&
@@ -1283,6 +1389,8 @@ NodeManager::PrepareCranedRegistration(
     return lhs.get().node_name() < rhs.get().node_name();
   });
   if (candidates.empty()) {
+    if (request.generation() != 0)
+      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
     reply.set_reason("No FUTURE node matches the reported resources");
     return reply;
   }
@@ -1305,30 +1413,29 @@ NodeManager::PrepareCranedRegistration(
   return reply;
 }
 
-std::expected<NodeManager::RegistrationStartResult, std::string>
-NodeManager::BeginRegistration(const CranedId& node_id, uint64_t generation,
-                               const RegToken& token,
-                               std::string_view registration_token) {
+std::expected<void, std::string> NodeManager::BeginRegistration(
+    const CranedId& node_id, uint64_t generation, const RegToken& token,
+    std::string_view registration_token) {
   absl::MutexLock lock(&mutex_);
   auto result = ValidateRegistrationNoLock_(node_id, generation);
   if (!result) return std::unexpected(result.error());
 
-  RegistrationStartResult start_result{
-      .connected = g_craned_keeper->IsCranedConnected(node_id),
-      .connection_hostname = node_id};
+  std::string connection_hostname = node_id;
   auto it = records_.find(node_id);
-  if (it != records_.end()) {
+  if (!g_config.Nodes.contains(node_id) && it != records_.end()) {
     auto token_result =
         ValidateRegistrationToken_(it->second, registration_token);
     if (!token_result) return std::unexpected(token_result.error());
-    start_result.connection_hostname = it->second.physical_hostname();
+    connection_hostname = it->second.physical_hostname();
   }
 
-  if (!start_result.connected) {
-    g_craned_keeper->PutNodeIntoUnavailSet(node_id, token,
-                                           start_result.connection_hostname);
+  if (!g_craned_keeper->PutNodeIntoUnavailSet(node_id, token,
+                                              std::move(connection_hostname))) {
+    // Registration is serialized by mutex_, so the channel cannot finish the
+    // registration before the previous runtime state is marked down.
+    g_meta_container->CranedDown(node_id);
   }
-  return start_result;
+  return {};
 }
 
 std::expected<void, std::string> NodeManager::ValidateRegistration(
@@ -1338,6 +1445,7 @@ std::expected<void, std::string> NodeManager::ValidateRegistration(
   absl::MutexLock lock(&mutex_);
   auto result = ValidateRegistrationNoLock_(node_id, generation);
   if (!result) return result;
+  if (g_config.Nodes.contains(node_id)) return {};
 
   auto it = records_.find(node_id);
   if (it == records_.end()) return {};
@@ -1392,6 +1500,7 @@ std::expected<void, std::string> NodeManager::MarkRegistered(
   absl::MutexLock lock(&mutex_);
   auto result = ValidateRegistrationNoLock_(node_id, generation);
   if (!result) return result;
+  if (g_config.Nodes.contains(node_id)) return {};
 
   auto it = records_.find(node_id);
   if (it == records_.end()) return {};
@@ -1417,9 +1526,33 @@ std::expected<void, std::string> NodeManager::MarkRegistered(
   return {};
 }
 
-std::expected<void, std::string> NodeManager::MarkDisconnected(
-    const CranedId& node_id, uint64_t generation) {
+std::expected<void, std::string> NodeManager::MarkRegistrationFailed(
+    const CranedId& node_id, uint64_t generation,
+    std::string_view registration_token) {
   absl::MutexLock lock(&mutex_);
+  auto it = records_.find(node_id);
+  if (it == records_.end() || it->second.generation() != generation ||
+      !ValidateRegistrationToken_(it->second, registration_token))
+    return {};
+  return MarkDisconnectedNoLock_(node_id, generation);
+}
+
+std::expected<void, std::string> NodeManager::MarkDisconnectedIfUntracked(
+    const CranedId& node_id) {
+  absl::MutexLock lock(&mutex_);
+  if (g_craned_keeper->IsCranedTracked(node_id)) return {};
+  g_meta_container->CranedDown(node_id);
+  auto it = records_.find(node_id);
+  // A delayed callback from the old connection must not revoke a new lease.
+  if (it != records_.end() &&
+      it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
+      !RegistrationLeaseExpired_(it->second))
+    return {};
+  return MarkDisconnectedNoLock_(node_id, 0);
+}
+
+std::expected<void, std::string> NodeManager::MarkDisconnectedNoLock_(
+    const CranedId& node_id, uint64_t generation) {
   auto it = records_.find(node_id);
   if (it == records_.end()) return {};
   if ((generation != 0 && it->second.generation() != generation) ||
@@ -1436,19 +1569,26 @@ std::expected<void, std::string> NodeManager::MarkDisconnected(
   return {};
 }
 
-std::expected<void, std::string> NodeManager::UpdatePowerState(
-    const CranedId& node_id, crane::grpc::CranedPowerState power_state) {
+std::expected<bool, std::string> NodeManager::UpdatePowerState(
+    const CranedId& node_id, uint64_t generation,
+    crane::grpc::CranedPowerState power_state) {
   absl::MutexLock lock(&mutex_);
   auto dynamic_power_state = DynamicNodePowerStateFromCraned(power_state);
   if (!dynamic_power_state)
     return std::unexpected("Invalid Craned power state");
+  if (g_config.Nodes.contains(node_id)) {
+    // Ignore a delayed report from a former dynamic incarnation of this name.
+    return generation != 0;
+  }
 
   auto it = records_.find(node_id);
-  if (it == records_.end()) return {};
-  if (!IsDynamicRecordPresent(it->second))
-    return std::unexpected("Dynamic node is not available");
+  if (it == records_.end()) return generation != 0;
+  if (quarantined_nodes_.contains(node_id) ||
+      !IsDynamicRecordPresent(it->second) ||
+      it->second.generation() != generation)
+    return true;
 
-  if (it->second.power_state() == *dynamic_power_state) return {};
+  if (it->second.power_state() == *dynamic_power_state) return false;
   DynamicNodeRecord record = it->second;
   SetRecordPowerState(&record, *dynamic_power_state);
   record.set_revision(++catalog_revision_);
@@ -1456,7 +1596,7 @@ std::expected<void, std::string> NodeManager::UpdatePowerState(
     return std::unexpected("Failed to persist dynamic node power state");
   it->second = record;
   g_meta_container->UpdateDynamicNodeMetadata(record);
-  return {};
+  return false;
 }
 
 std::expected<NodeManager::ScaleUpResult, std::string>
@@ -1502,6 +1642,7 @@ NodeManager::RequestScaleUp(
 
   for (const auto& [node_id, record] : records_) {
     if (!IsDynamicRecordPresent(record) ||
+        quarantined_nodes_.contains(node_id) ||
         (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE &&
          record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
          record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DOWN) ||
@@ -1516,15 +1657,20 @@ NodeManager::RequestScaleUp(
     if (tasks == 0) continue;
 
     if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
-        record.power_state() ==
-            crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON ||
-        record.power_state() ==
-            crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) {
+        ((record.power_state() ==
+              crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON ||
+          record.power_state() ==
+              crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) &&
+         !PowerActionExpired(record))) {
       in_progress_candidates.emplace_back(node_id, tasks);
-    } else if (record.power_state() == DYNAMIC_NODE_POWER_STATE_OFF) {
+    } else if (record.power_state() == DYNAMIC_NODE_POWER_STATE_OFF ||
+               record.power_state() ==
+                   crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON) {
       power_on_candidates.emplace_back(node_id, tasks);
     } else if (record.power_state() ==
-               crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING) {
+                   crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING ||
+               record.power_state() ==
+                   crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) {
       wake_candidates.emplace_back(node_id, tasks);
     }
   }
@@ -1603,11 +1749,13 @@ NodeManager::RequestScaleUp(
       result.reserved_nodes.emplace_back(selection.node_id);
       break;
     case SelectionKind::kWake:
-      result.nodes_to_wake.emplace_back(selection.node_id);
+      result.nodes_to_wake.emplace_back(
+          selection.node_id, records_.at(selection.node_id).generation());
       result.reserved_nodes.emplace_back(selection.node_id);
       break;
     case SelectionKind::kPowerOn:
-      result.nodes_to_power_on.emplace_back(selection.node_id);
+      result.nodes_to_power_on.emplace_back(
+          selection.node_id, records_.at(selection.node_id).generation());
       result.reserved_nodes.emplace_back(selection.node_id);
       break;
     }
@@ -1619,15 +1767,15 @@ NodeManager::RequestScaleUp(
   std::vector<DynamicNodeRecord> updated_records;
   updated_records.reserve(result.nodes_to_wake.size() +
                           result.nodes_to_power_on.size());
-  for (const auto& node_id : result.nodes_to_wake) {
-    DynamicNodeRecord record = records_.at(node_id);
+  for (const auto& target : result.nodes_to_wake) {
+    DynamicNodeRecord record = records_.at(target.node_id);
     SetRecordPowerState(&record,
                         crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP);
     record.set_revision(++catalog_revision_);
     updated_records.emplace_back(std::move(record));
   }
-  for (const auto& node_id : result.nodes_to_power_on) {
-    DynamicNodeRecord record = records_.at(node_id);
+  for (const auto& target : result.nodes_to_power_on) {
+    DynamicNodeRecord record = records_.at(target.node_id);
     SetRecordPowerState(&record,
                         crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON);
     record.set_revision(++catalog_revision_);
@@ -1656,6 +1804,9 @@ std::expected<void, std::string> NodeManager::ValidateRegistrationNoLock_(
   auto it = records_.find(node_id);
   if (it == records_.end() || !IsDynamicRecordPresent(it->second))
     return std::unexpected("Dynamic node is not available");
+  if (quarantined_nodes_.contains(node_id))
+    return std::unexpected(
+        "Dynamic node references a partition that no longer exists");
   if (it->second.generation() != generation)
     return std::unexpected(fmt::format("Stale generation {}, expected {}",
                                        generation, it->second.generation()));

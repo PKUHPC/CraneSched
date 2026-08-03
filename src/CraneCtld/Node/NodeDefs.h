@@ -40,6 +40,7 @@ struct CranedStaticMeta {
   bool dynamic{false};
   bool deleting{false};
   uint64_t generation{0};
+  uint64_t revision{0};
   bool ever_registered{false};
   crane::grpc::DynamicNodeOrigin origin{
       crane::grpc::DYNAMIC_NODE_ORIGIN_STATIC_CONFIG};

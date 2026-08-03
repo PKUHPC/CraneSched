@@ -41,6 +41,7 @@ class EmbeddedDbClient {
   using JobInEmbeddedDb = crane::grpc::JobInEmbeddedDb;
   using StepInEmbeddedDb = crane::grpc::StepInEmbeddedDb;
   using DynamicNodeRecord = crane::grpc::DynamicNodeRecord;
+  using DynamicNodeGenerationMap = std::unordered_map<CranedId, uint64_t>;
 
   struct DbSnapshot {
     std::unordered_map<db_id_t, JobInEmbeddedDb> pending_queue;
@@ -82,13 +83,14 @@ class EmbeddedDbClient {
           reservation_info_map) = 0;
 
   virtual bool RetrieveDynamicNodeRecords(
-      std::unordered_map<CranedId, DynamicNodeRecord>* records) = 0;
+      std::unordered_map<CranedId, DynamicNodeRecord>* records,
+      DynamicNodeGenerationMap* generation_high_watermarks) = 0;
 
   virtual bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) = 0;
 
   virtual bool DeleteDynamicNodeRecords(
-      const std::vector<CranedId>& node_names) = 0;
+      const std::vector<DynamicNodeRecord>& records) = 0;
 
   virtual bool BeginVariableDbTransaction(txn_id_t* txn_id) = 0;
 

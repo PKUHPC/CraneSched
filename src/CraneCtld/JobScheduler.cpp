@@ -7517,15 +7517,15 @@ void SchedulerAlgo::NodeSelect(
     }
     reserved_scale_up_nodes.insert(scale_up->reserved_nodes.begin(),
                                    scale_up->reserved_nodes.end());
-    for (const auto& node_id : scale_up->nodes_to_wake) {
+    for (const auto& target : scale_up->nodes_to_wake) {
       g_plugin_client->UpdatePowerStateHookAsync(
-          node_id, crane::grpc::CranedControlState::CRANE_WAKE, true, true,
-          kPowerControlProvider);
+          target.node_id, crane::grpc::CranedControlState::CRANE_WAKE, true,
+          true, kPowerControlProvider, target.generation);
     }
-    for (const auto& node_id : scale_up->nodes_to_power_on) {
+    for (const auto& target : scale_up->nodes_to_power_on) {
       g_plugin_client->UpdatePowerStateHookAsync(
-          node_id, crane::grpc::CranedControlState::CRANE_POWERON, true, true,
-          kPowerControlProvider);
+          target.node_id, crane::grpc::CranedControlState::CRANE_POWERON, true,
+          true, kPowerControlProvider, target.generation);
     }
     if (scale_up->in_progress) job->reason = "PoweringUp";
   }

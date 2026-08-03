@@ -1037,6 +1037,7 @@ enum ErrCode {
   ERR_PARTITION_TIME_BEYOND = 108;                  // Partition max_wall_duration_per_job exceeded
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 109;     // Partition max_submit_jobs exceeded (user dimension)
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT = 110;  // Partition max_submit_jobs exceeded (account dimension)
+  ERR_NODE_STALE_GENERATION = 111;                  // Dynamic node was deleted or recreated; the held identity is stale
 }
 
 enum EntityType {
