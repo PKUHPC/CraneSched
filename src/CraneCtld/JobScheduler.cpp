@@ -997,6 +997,19 @@ bool JobScheduler::Init() {
                                 3),
       std::chrono::milliseconds(g_config.CtldConf.StatusChangeFlushTimeoutMs));
 
+  if (g_config.CtldConf.CompletingStepRetryIntervalSec > 0) {
+    m_completing_step_retry_timer_handle_ =
+        uvw_job_status_change_loop->resource<uvw::timer_handle>();
+    m_completing_step_retry_timer_handle_->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle&) {
+          RetryCompletingSteps_();
+        });
+    const auto retry_interval =
+        std::chrono::seconds(g_config.CtldConf.CompletingStepRetryIntervalSec);
+    m_completing_step_retry_timer_handle_->start(retry_interval,
+                                                 retry_interval);
+  }
+
   m_job_status_change_async_handle_ =
       uvw_job_status_change_loop->resource<uvw::async_handle>();
   m_job_status_change_async_handle_->on<uvw::async_event>(
@@ -1164,6 +1177,18 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
 
   for (const CranedId& craned_id : job->CranedIds())
     m_node_to_jobs_map_[craned_id].emplace(job->JobId());
+
+  const job_id_t job_id = job->JobId();
+  auto index_completing_step = [this, job_id](const StepInCtld* step) {
+    if (step != nullptr &&
+        step->Status() == crane::grpc::JobStatus::Completing) {
+      m_completing_step_ids_[job_id].insert(step->StepId());
+    }
+  };
+  index_completing_step(job->DaemonStep());
+  index_completing_step(job->PrimaryStep());
+  for (const auto& step : job->Steps() | std::views::values)
+    index_completing_step(step.get());
 
   m_running_job_map_.emplace(job->JobId(), std::move(job));
 }
@@ -5633,6 +5658,155 @@ void JobScheduler::StepCompletingAndStatusChangeAsync(
   m_job_status_change_async_handle_->send();
 }
 
+bool JobScheduler::SynthesizeStepStatusIfCranedDown_(
+    const CranedId& craned_id,
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
+    crane::grpc::JobStatus new_status, uint32_t exit_code, const char* reason) {
+  if (g_meta_container->CheckCranedOnline(craned_id)) return false;
+
+  CRANE_ASSERT(new_status == crane::grpc::JobStatus::Completing ||
+               new_status == crane::grpc::JobStatus::Completed);
+
+  CRANE_INFO(
+      "Craned {} is down; synthesizing {} for [{}] instead of waiting for "
+      "the node.",
+      craned_id, util::StepStatusToString(new_status),
+      util::JobStepsToString(steps));
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  for (const auto& [job_id, step_ids] : steps) {
+    for (step_id_t step_id : step_ids) {
+      StepStatusChangeAsync(job_id, step_id, craned_id, new_status, exit_code,
+                            reason, now);
+    }
+  }
+
+  return true;
+}
+
+void JobScheduler::DispatchFreeSteps_(
+    CranedId craned_id,
+    std::unordered_map<job_id_t, std::set<step_id_t>> steps) {
+  if (steps.empty()) return;
+
+  m_rpc_worker_pool_->detach_task(
+      [this, craned_id = std::move(craned_id), steps = std::move(steps)] {
+        auto synthesize_cleanup_if_down = [this, &craned_id, &steps] {
+          return SynthesizeStepStatusIfCranedDown_(
+              craned_id, steps, crane::grpc::JobStatus::Completed, 0,
+              "CranedDownDuringFreeSteps");
+        };
+        if (synthesize_cleanup_if_down()) return;
+
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        const bool stub_valid = stub && !stub->Invalid();
+        if (stub_valid) {
+          auto err = stub->FreeSteps(steps);
+          if (err == CraneErrCode::SUCCESS) return;
+        }
+
+        if (synthesize_cleanup_if_down()) return;
+
+        if (stub_valid) {
+          CRANE_ERROR(
+              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure; "
+              "keep steps in Completing for periodic retry.",
+              util::JobStepsToString(steps), craned_id);
+        } else {
+          CRANE_ERROR(
+              "Failed to FreeSteps for [{}] steps on Node {}, stub invalid; "
+              "keep steps in Completing for periodic retry.",
+              util::JobStepsToString(steps), craned_id);
+        }
+      });
+}
+
+void JobScheduler::DispatchTerminateSteps_(
+    CranedId craned_id,
+    std::unordered_map<job_id_t, std::set<step_id_t>> steps) {
+  if (steps.empty()) return;
+
+  m_rpc_worker_pool_->detach_task([this, craned_id = std::move(craned_id),
+                                   steps = std::move(steps)] {
+    auto synthesize_completing_if_down = [this, &craned_id, &steps] {
+      return SynthesizeStepStatusIfCranedDown_(
+          craned_id, steps, crane::grpc::JobStatus::Completing, 0,
+          "CranedDownDuringTerminateSteps");
+    };
+    if (synthesize_completing_if_down()) return;
+
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    const bool stub_valid = stub && !stub->Invalid();
+    if (stub_valid) {
+      auto err = stub->TerminateSteps(steps);
+      if (err == CraneErrCode::SUCCESS) return;
+    }
+
+    if (synthesize_completing_if_down()) return;
+
+    if (stub_valid) {
+      CRANE_ERROR(
+          "Failed to TerminateSteps for [{}] steps on Node {}; waiting "
+          "for reconnect/lost-step recovery.",
+          util::JobStepsToString(steps), craned_id);
+    } else {
+      CRANE_ERROR(
+          "Failed to TerminateSteps for [{}] steps on Node {}; stub invalid "
+          "while Craned is still online.",
+          util::JobStepsToString(steps), craned_id);
+    }
+  });
+}
+
+void JobScheduler::RetryCompletingSteps_() {
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      steps_by_craned;
+
+  {
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    for (auto job_it = m_completing_step_ids_.begin();
+         job_it != m_completing_step_ids_.end();) {
+      auto running_job_it = m_running_job_map_.find(job_it->first);
+      if (running_job_it == m_running_job_map_.end()) {
+        job_it = m_completing_step_ids_.erase(job_it);
+        continue;
+      }
+
+      JobInCtld* job = running_job_it->second.get();
+      auto& step_ids = job_it->second;
+      for (auto step_it = step_ids.begin(); step_it != step_ids.end();) {
+        StepInCtld* step = nullptr;
+        if (*step_it == kDaemonStepId)
+          step = job->DaemonStep();
+        else
+          step = job->GetStep(*step_it);
+
+        if (step == nullptr ||
+            step->Status() != crane::grpc::JobStatus::Completing) {
+          step_it = step_ids.erase(step_it);
+          continue;
+        }
+
+        for (const CranedId& craned_id : step->RunningNodes())
+          steps_by_craned[craned_id][job_it->first].insert(*step_it);
+        ++step_it;
+      }
+
+      if (step_ids.empty())
+        job_it = m_completing_step_ids_.erase(job_it);
+      else
+        ++job_it;
+    }
+  }
+
+  if (steps_by_craned.empty()) return;
+
+  CRANE_DEBUG("Retrying FreeSteps for Completing steps on {} Craned nodes.",
+              steps_by_craned.size());
+  for (auto& [craned_id, steps] : steps_by_craned)
+    DispatchFreeSteps_(std::move(craned_id), std::move(steps));
+}
+
 void JobScheduler::JobStatusChangeTimerCb_() {
   m_clean_job_status_change_handle_->send();
 }
@@ -5887,6 +6061,25 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       }
     }
 
+    // Keep a compact retry index instead of periodically scanning every running
+    // job. Both sets keep their pointed-to steps alive until this callback
+    // ends.
+    for (const StepInCtld* step : context.rn_step_raw_ptrs) {
+      if (step->Status() == crane::grpc::JobStatus::Completing) {
+        m_completing_step_ids_[step->job_id].insert(step->StepId());
+      } else if (auto it = m_completing_step_ids_.find(step->job_id);
+                 it != m_completing_step_ids_.end()) {
+        it->second.erase(step->StepId());
+        if (it->second.empty()) m_completing_step_ids_.erase(it);
+      }
+    }
+    for (const StepInCtld* step : context.step_raw_ptrs) {
+      auto it = m_completing_step_ids_.find(step->job_id);
+      if (it == m_completing_step_ids_.end()) continue;
+      it->second.erase(step->StepId());
+      if (it->second.empty()) m_completing_step_ids_.erase(it);
+    }
+
     SpliceFinalArrayParentsFromPendingMapNoLock_(final_array_parents);
   }  // Release m_pending_job_map_mtx_, m_running_job_map_mtx_ and
      // m_job_indexes_mtx_
@@ -6015,25 +6208,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   for (auto& [craned_id, steps] : context.craned_step_free_map) {
-    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        auto err = stub->FreeSteps(steps);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure; "
-              "keep steps in current state and wait for Craned "
-              "reconnect/reconcile to replay cleanup.",
-              util::JobStepsToString(steps), craned_id);
-        }
-      } else {
-        CRANE_ERROR(
-            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid; "
-            "keep steps in current state and wait for Craned "
-            "reconnect/reconcile to replay cleanup.",
-            util::JobStepsToString(steps), craned_id);
-      }
-    });
+    DispatchFreeSteps_(std::move(craned_id), std::move(steps));
   }
 
   for (auto& [craned_id, steps] : context.craned_step_exec_map) {
@@ -6080,18 +6255,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   for (auto& [craned_id, steps] : context.craned_cancel_steps) {
-    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        auto err = stub->TerminateSteps(steps);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Failed to TerminateSteps for [{}] jobs on Node {}; "
-              "waiting for reconnect/lost-step recovery.",
-              util::JobStepsToString(steps), craned_id);
-        }
-      }
-    });
+    DispatchTerminateSteps_(std::move(craned_id), std::move(steps));
   }
 
   for (auto& [craned_id, jobs] : context.craned_jobs_to_free) {

@@ -186,6 +186,7 @@ CranedListenPort: 10010
 # Health check settings
 Craned:
   PingInterval: 15        # Ping cranectld every 15 seconds
+  PingTimeout: 5          # Ping RPC timeout
   CraneCtldTimeout: 5     # Timeout for cranectld connection
 ```
 
@@ -376,6 +377,15 @@ Supervisor:
   
   # Log directory (relative to CraneBaseDir)
   LogDir: supervisor
+
+  # Worker threads created in each supervisor process
+  ThreadPoolSize: 4
+
+  # Resident gRPC EventEngine threads in each supervisor process
+  EventEngineThreadPoolSize: 4
+
+  # Seconds to wait for graceful exit after step completion
+  ExitTimeout: 120
 ```
 
 **Supervisor Parameters:**
@@ -383,6 +393,9 @@ Supervisor:
 - **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
 - **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
 - **LogDir**: Directory for supervisor log files, relative to the `CraneBaseDir` setting. Log files are helpful for diagnosing job execution issues.
+- **ThreadPoolSize**: Worker threads created in each Supervisor process. The default is `4`; set it to `0` to use the host's hardware concurrency.
+- **EventEngineThreadPoolSize**: Resident gRPC EventEngine threads created in each Supervisor process. The default is `4` and the value must be greater than `0`. EventEngine may temporarily create more threads when all resident workers are busy.
+- **ExitTimeout**: Seconds Craned waits for a supervisor to exit after a step enters completion before sending `SIGKILL`. The default is `120`; set it longer than the maximum Epilog runtime plus cleanup time.
 
 !!! tip
     When troubleshooting job execution problems, you can temporarily set `DebugLevel` to `debug` or `trace` for more detailed log information.

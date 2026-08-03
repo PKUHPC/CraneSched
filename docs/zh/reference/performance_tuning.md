@@ -25,7 +25,8 @@
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `Supervisor.ThreadPoolSize` | 0 (auto = hardware_concurrency) | 每个 Supervisor 进程内部的线程池。对短时作业影响较小。除非在单个 Supervisor 内运行复杂的多步骤作业，否则保持默认即可。 |
+| `Supervisor.ThreadPoolSize` | 4 | 每个 Supervisor 进程都会创建一份该线程池。并发 step 数增加时线程开销会成倍增长，因此应保持较小；仅在明确需要按 CPU 线程数展开时配置为 `0`。 |
+| `Supervisor.EventEngineThreadPoolSize` | 4 | 每个 Supervisor 进程常驻的 gRPC EventEngine 线程数。该值是保留线程数而非硬上限；常驻线程全部繁忙时，EventEngine 可能临时增加工作线程。 |
 
 ## 推荐配置
 
@@ -44,7 +45,8 @@ Craned:
   ThreadPoolSize: 32  # 或 CPU 核数 × 4
 
 Supervisor:
-  ThreadPoolSize: 0
+  ThreadPoolSize: 4
+  EventEngineThreadPoolSize: 4
 ```
 
 ### 通用 HPC
@@ -62,5 +64,6 @@ Craned:
   ThreadPoolSize: 0
 
 Supervisor:
-  ThreadPoolSize: 0
+  ThreadPoolSize: 4
+  EventEngineThreadPoolSize: 4
 ```

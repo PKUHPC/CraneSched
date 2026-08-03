@@ -333,6 +333,62 @@ TEST(CtldStepStateMachineTest,
 }
 
 TEST(CtldStepStateMachineTest,
+     PrimaryCancelDuringConfiguringPreservesCancelledFinalStatus) {
+  constexpr job_id_t kJobId = 451;
+  const std::vector<CranedId> craned_ids{"node-a", "node-b"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::JobType::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Configuring);
+  job.SetCancelRequested(true);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  Ctld::StepStatusChangeContext context;
+  auto* primary_step = job.PrimaryStep();
+
+  auto result =
+      primary_step->StepStatusChange(crane::grpc::JobStatus::Starting, 0U, "",
+                                     "node-a", TimestampAt(310), &context);
+  EXPECT_FALSE(result.has_value());
+
+  result =
+      primary_step->StepStatusChange(crane::grpc::JobStatus::Starting, 0U, "",
+                                     "node-b", TimestampAt(311), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->PendingFinalStatus(),
+            crane::grpc::JobStatus::Cancelled);
+  EXPECT_EQ(primary_step->PendingFinalExitCode(), ExitCode::EC_TERMINATED);
+  EXPECT_TRUE(context.craned_step_exec_map.empty());
+  ExpectStepCancelRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+  ExpectStepCancelRequested(context, "node-b", kJobId, Ctld::kPrimaryStepId);
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Completing,
+                                          0U, "offline terminate ack", "node-a",
+                                          TimestampAt(312), &context);
+  EXPECT_FALSE(result.has_value());
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Completing,
+                                          0U, "offline terminate ack", "node-b",
+                                          TimestampAt(313), &context);
+  EXPECT_FALSE(result.has_value());
+
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U,
+                                          "offline cleanup ack", "node-a",
+                                          TimestampAt(314), &context);
+  EXPECT_FALSE(result.has_value());
+  result = primary_step->StepStatusChange(crane::grpc::JobStatus::Completed, 0U,
+                                          "offline cleanup ack", "node-b",
+                                          TimestampAt(315), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Cancelled);
+  EXPECT_EQ(job.PrimaryStepExitCode(), ExitCode::EC_TERMINATED);
+}
+
+TEST(CtldStepStateMachineTest,
      PrimaryTerminalFailurePreservesFailureExitCodeAfterCleanup) {
   constexpr job_id_t kJobId = 46;
   const std::vector<CranedId> craned_ids{"node-a", "node-b"};
@@ -896,7 +952,7 @@ class StepLifecycleTest : public ::testing::Test {
                ("crane_test_" + std::to_string(::getpid()));
     std::filesystem::create_directories(tmp_dir_);
     g_config.CraneEmbeddedDbBackend = "Unqlite";
-    g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
+    g_embedded_db_client = Ctld::MakeEmbeddedDbClient("Unqlite");
     ASSERT_TRUE(g_embedded_db_client->Init(tmp_dir_.string()));
   }
   void TearDown() override {

@@ -186,6 +186,7 @@ CranedListenPort: 10010
 # 健康检查设置
 Craned:
   PingInterval: 15        # 每 15 秒 ping cranectld
+  PingTimeout: 5          # Ping RPC 超时时间
   CraneCtldTimeout: 5     # cranectld 连接超时时间
 ```
 
@@ -374,6 +375,15 @@ Supervisor:
   
   # 日志目录(相对于 CraneBaseDir)
   LogDir: supervisor
+
+  # 每个 Supervisor 进程创建的工作线程数
+  ThreadPoolSize: 4
+
+  # 每个 Supervisor 进程常驻的 gRPC EventEngine 线程数
+  EventEngineThreadPoolSize: 4
+
+  # step 进入完成阶段后等待 Supervisor 正常退出的秒数
+  ExitTimeout: 120
 ```
 
 **Supervisor 参数:**
@@ -381,6 +391,9 @@ Supervisor:
 - **Path**: Supervisor 可执行文件的完整路径。默认路径为 `/usr/libexec/csupervisor`,通常在安装时已正确设置。
 - **DebugLevel**: 控制 Supervisor 日志的详细程度。可选值包括 `trace`(最详细)、`debug`、`info`、`warn`、`error`(最简略)。生产环境建议使用 `info` 或 `warn`。
 - **LogDir**: Supervisor 日志文件的存储目录,相对于 `CraneBaseDir` 配置项。日志文件对于诊断作业执行问题很有帮助。
+- **ThreadPoolSize**: 每个 Supervisor 进程创建的工作线程数。默认值为 `4`；配置为 `0` 时使用宿主机硬件并发数。
+- **EventEngineThreadPoolSize**: 每个 Supervisor 进程常驻的 gRPC EventEngine 线程数。默认值为 `4`，且必须大于 `0`；常驻线程全部繁忙时，EventEngine 仍可能临时创建更多线程。
+- **ExitTimeout**: step 进入完成阶段后 Craned 等待 Supervisor 正常退出的秒数，超时后发送 `SIGKILL`。默认值为 `120`，应大于最长 Epilog 运行时间与进程清理时间之和。
 
 !!! tip
     在排查作业执行问题时,可以临时将 `DebugLevel` 设置为 `debug` 或 `trace` 以获取更详细的日志信息。

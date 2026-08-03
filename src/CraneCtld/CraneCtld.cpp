@@ -106,6 +106,9 @@ void ParseCtldConfig(const YAML::Node& config) {
     ctld_config.StatusChangeDbCommitChunkSize =
         YamlValueOr<uint32_t>(ctld_cfg["StatusChangeDbCommitChunkSize"],
                               Ctld::kJobStatusChangeDbCommitChunkSize);
+    ctld_config.CompletingStepRetryIntervalSec =
+        YamlValueOr<uint32_t>(ctld_cfg["CompletingStepRetryIntervalSec"],
+                              Ctld::kCompletingStepRetryIntervalSec);
 
     ctld_config.JobRequeue =
         YamlValueOr<bool>(ctld_cfg["JobRequeue"], Ctld::kDefaultJobRequeue);

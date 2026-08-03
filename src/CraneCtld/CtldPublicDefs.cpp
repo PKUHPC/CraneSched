@@ -1412,6 +1412,8 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
               "[Step #{}.{}] Cancel was requested during Configuring. "
               "Cancelling without launching step execution.",
               job_id, step_id);
+          this->SetPendingFinalStatus(crane::grpc::JobStatus::Cancelled);
+          this->SetPendingFinalExitCode(ExitCode::EC_TERMINATED);
           for (const auto& node : this->ExecutionNodes())
             context->craned_cancel_steps[node][job_id].insert(step_id);
         } else {

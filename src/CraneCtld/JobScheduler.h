@@ -1312,6 +1312,19 @@ class JobScheduler {
                                crane::grpc::TerminateSource terminate_source =
                                    crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
+  bool SynthesizeStepStatusIfCranedDown_(
+      const CranedId& craned_id,
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
+      crane::grpc::JobStatus new_status, uint32_t exit_code,
+      const char* reason);
+  void DispatchFreeSteps_(
+      CranedId craned_id,
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+  void DispatchTerminateSteps_(
+      CranedId craned_id,
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+  void RetryCompletingSteps_();
+
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
   std::expected<void, std::string> CreateResv_(
@@ -1332,6 +1345,8 @@ class JobScheduler {
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
   Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+      m_completing_step_ids_ ABSL_GUARDED_BY(m_running_job_map_mtx_);
 
   // Owns all array metas and drives child materialization/lifecycle.
   // Uses references to the above pending/running maps and must be
@@ -1486,6 +1501,8 @@ class JobScheduler {
 
   std::shared_ptr<uvw::timer_handle> m_job_status_change_timer_handle_;
   void JobStatusChangeTimerCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_completing_step_retry_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_job_status_change_async_handle_;
 
