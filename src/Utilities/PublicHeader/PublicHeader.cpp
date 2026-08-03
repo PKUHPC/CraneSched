@@ -889,6 +889,25 @@ bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs) {
   return lhs.GetGres() <= rhs.GetGres();
 }
 
+bool operator==(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs) {
+  return lhs.GetCpuSet().cpu_count == rhs.GetCpuSet().cpu_count &&
+         lhs.GetMemoryBytes() == rhs.GetMemoryBytes() &&
+         lhs.GetMemorySwBytes() == rhs.GetMemorySwBytes() &&
+         lhs.GetGres() == rhs.GetGres();
+}
+
+ResourceInNodeV3 ResourceInNodeFromDynamicSpec(
+    const crane::grpc::DynamicNodeSpec& spec) {
+  ResourceInNodeV3 res;
+  res.GetCpuSet().cpu_count = cpu_t(spec.cpu_count());
+  for (uint32_t i = 0; i < spec.cpu_count(); ++i)
+    res.GetCpuSet().core_ids.insert(i);
+  res.SetMemoryBytes(spec.memory_bytes());
+  res.SetMemorySwBytes(spec.memory_bytes());
+  res.GetGres() = spec.gres();
+  return res;
+}
+
 // ==================== ResourceV3 ====================
 
 ResourceV3& ResourceV3::operator+=(const ResourceV3& rhs) {

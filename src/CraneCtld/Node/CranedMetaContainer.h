@@ -75,15 +75,17 @@ class CranedMetaContainer final {
   void AddDynamicNodes(
       const std::vector<crane::grpc::DynamicNodeRecord>& records);
 
-  std::expected<void, std::string> RemoveDynamicNodes(
+  void UpdateDynamicNodeMetadata(const crane::grpc::DynamicNodeRecord& record);
+
+  // The returned maps contain the nodes that failed the operation and the
+  // per-node reasons; nodes not present in the map were applied.
+  std::unordered_map<CranedId, std::string> RemoveDynamicNodes(
       const std::vector<CranedId>& node_ids);
 
-  std::expected<void, std::string> SetDynamicNodesDeleting(
+  std::unordered_map<CranedId, std::string> SetDynamicNodesDeleting(
       const std::vector<CranedId>& node_ids);
 
   void ClearDynamicNodesDeleting(const std::vector<CranedId>& node_ids);
-
-  void SetDynamicNodeRegistered(const CranedId& node_id);
 
   [[nodiscard]] util::read_lock_guard LockTopologyShared() const {
     return util::read_lock_guard(topology_mtx_);
@@ -123,6 +125,10 @@ class CranedMetaContainer final {
                 const crane::grpc::CranedRemoteMeta& remote_meta);
 
   void CranedDown(const CranedId& craned_id);
+
+  void PublishCranedState(const CranedId& craned_id);
+
+  void ReconcilePluginState();
 
   bool CheckCranedOnline(const CranedId& craned_id);
 

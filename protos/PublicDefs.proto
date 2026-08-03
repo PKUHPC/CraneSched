@@ -740,13 +740,43 @@ message DynamicNodeSpec {
   uint32 cpu_count = 1;
   uint64 memory_bytes = 2;
   uint32 sockets = 3;
+  DedicatedResourceInNode gres = 4;
+  repeated string features = 5;
 }
 
-enum DynamicNodeRecordState {
-  DYNAMIC_NODE_RECORD_STATE_UNSPECIFIED = 0;
-  DYNAMIC_NODE_RECORD_STATE_PRESENT = 1;
-  DYNAMIC_NODE_RECORD_STATE_DELETING = 2;
-  DYNAMIC_NODE_RECORD_STATE_TOMBSTONE = 3;
+enum DynamicNodeOrigin {
+  DYNAMIC_NODE_ORIGIN_UNSPECIFIED = 0;
+  DYNAMIC_NODE_ORIGIN_STATIC_CONFIG = 1;
+  DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN = 2;
+  DYNAMIC_NODE_ORIGIN_DYNAMIC_REGISTERED = 3;
+}
+
+enum DynamicNodeLifecycle {
+  DYNAMIC_NODE_LIFECYCLE_UNSPECIFIED = 0;
+  DYNAMIC_NODE_LIFECYCLE_FUTURE = 1;
+  DYNAMIC_NODE_LIFECYCLE_REGISTERING = 2;
+  DYNAMIC_NODE_LIFECYCLE_ACTIVE = 3;
+  DYNAMIC_NODE_LIFECYCLE_DOWN = 4;
+  DYNAMIC_NODE_LIFECYCLE_DELETING = 5;
+  DYNAMIC_NODE_LIFECYCLE_TOMBSTONE = 6;
+}
+
+enum DynamicNodePowerState {
+  DYNAMIC_NODE_POWER_STATE_UNSPECIFIED = 0;
+  DYNAMIC_NODE_POWER_STATE_ON = 1;
+  DYNAMIC_NODE_POWER_STATE_OFF = 2;
+  DYNAMIC_NODE_POWER_STATE_POWERING_ON = 3;
+  DYNAMIC_NODE_POWER_STATE_POWERING_OFF = 4;
+  DYNAMIC_NODE_POWER_STATE_SLEEPING = 5;
+  DYNAMIC_NODE_POWER_STATE_WAKING_UP = 6;
+  DYNAMIC_NODE_POWER_STATE_TO_SLEEPING = 7;
+}
+
+enum DynamicNodeRegistrationMode {
+  DYNAMIC_NODE_REGISTRATION_MODE_UNSPECIFIED = 0;
+  DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED = 1;
+  DYNAMIC_NODE_REGISTRATION_MODE_AUTO_CREATE = 2;
+  DYNAMIC_NODE_REGISTRATION_MODE_FUTURE_POOL = 3;
 }
 
 enum DynamicNodeRuntimeState {
@@ -763,7 +793,22 @@ message DynamicNodeRecord {
   repeated string partition_names = 3;
   uint64 generation = 4;
   bool ever_registered = 5;
-  DynamicNodeRecordState state = 6;
+  DynamicNodeOrigin origin = 6;
+  DynamicNodeLifecycle lifecycle = 7;
+  DynamicNodePowerState power_state = 8;
+  DynamicNodeSpec reported_spec = 9;
+  DynamicNodeSpec effective_spec = 10;
+  string pool = 11;
+  string physical_hostname = 12;
+  string registration_token = 13;
+  string registration_nonce = 14;
+  google.protobuf.Timestamp lease_expire_time = 15;
+  uint64 revision = 16;
+  string provider = 17;
+  string provider_profile = 18;
+  repeated NetworkInterface network_interfaces = 19;
+  google.protobuf.Timestamp tombstone_time = 20;
+  google.protobuf.Timestamp power_state_change_time = 21;
 }
 
 message PartitionInfo {
@@ -812,6 +857,13 @@ message CranedInfo {
   bool dynamic = 18;
   uint64 generation = 19;
   DynamicNodeRuntimeState dynamic_state = 20;
+  DynamicNodeOrigin dynamic_origin = 21;
+  DynamicNodeLifecycle lifecycle = 22;
+  DynamicNodePowerState dynamic_power_state = 23;
+  string dynamic_pool = 24;
+  string physical_hostname = 25;
+  string provider = 26;
+  string provider_profile = 27;
 }
 
 message ReservationInfo {
@@ -1177,6 +1229,8 @@ message CranedRemoteMeta {
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
   NodeTopoInfo node_topo_info = 10;
+  DynamicNodeSpec reported_spec = 11;
+  string physical_hostname = 12;
 }
 
 enum TxnAction {

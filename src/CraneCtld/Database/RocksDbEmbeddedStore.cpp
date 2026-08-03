@@ -411,6 +411,14 @@ bool RocksDbEmbeddedStore::StoreDynamicNodeRecords(
   return WriteBatch_(&batch, "rocksdb_store_dynamic_nodes");
 }
 
+bool RocksDbEmbeddedStore::DeleteDynamicNodeRecords(
+    const std::vector<CranedId>& node_names) {
+  rocksdb::WriteBatch batch;
+  for (const auto& node_name : node_names)
+    batch.Delete(Handle_(Cf::DynamicNode), node_name);
+  return WriteBatch_(&batch, "rocksdb_delete_dynamic_nodes");
+}
+
 bool RocksDbEmbeddedStore::BeginTransaction(RocksStoreKind kind,
                                             rocks_txn_id_t* txn_id) {
   absl::MutexLock lock(&txn_mu_);

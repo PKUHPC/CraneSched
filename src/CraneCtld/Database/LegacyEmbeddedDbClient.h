@@ -191,6 +191,9 @@ class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
   bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) override;
 
+  bool DeleteDynamicNodeRecords(
+      const std::vector<CranedId>& node_names) override;
+
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }

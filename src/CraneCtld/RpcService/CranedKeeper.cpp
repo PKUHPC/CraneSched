@@ -962,20 +962,23 @@ void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
 }
 
 void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
-                                         const RegToken &token) {
+                                         const RegToken &token,
+                                         std::string connection_hostname) {
   if (m_cq_closed_) return;
 
   CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
               ProtoTimestampToString(token));
   util::lock_guard guard(m_unavail_craned_set_mtx_);
-  m_unavail_craned_set_.insert_or_assign(crane_id, token);
+  m_unavail_craned_set_.insert_or_assign(
+      crane_id, PendingConnection{token, std::move(connection_hostname)});
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
-                                      RegToken token) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id, RegToken token,
+                                      std::string connection_hostname) {
+  if (connection_hostname.empty()) connection_hostname = craned_id;
   std::string ip_addr;
 
-  {
+  if (connection_hostname == craned_id) {
     util::lock_guard guard(m_craned_id_to_ip_cache_map_mtx_);
 
     auto it = m_craned_id_to_ip_cache_map_.find(craned_id);
@@ -989,18 +992,31 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     } else {
       ipv4_t ipv4_addr;
       ipv6_t ipv6_addr;
-      if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
+      if (crane::ResolveIpv4FromHostname(connection_hostname, &ipv4_addr)) {
         ip_addr = crane::Ipv4ToStr(ipv4_addr);
         m_craned_id_to_ip_cache_map_.emplace(craned_id, ipv4_addr);
-      } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
+      } else if (crane::ResolveIpv6FromHostname(connection_hostname,
+                                                &ipv6_addr)) {
         ip_addr = crane::Ipv6ToStr(ipv6_addr);
         m_craned_id_to_ip_cache_map_.emplace(craned_id, ipv6_addr);
       } else {
         // Just hostname. It should never happen,
         // but we add error handling here for robustness.
-        CRANE_ERROR("Unresolved hostname: {}", craned_id);
-        ip_addr = craned_id;
+        CRANE_ERROR("Unresolved hostname: {}", connection_hostname);
+        ip_addr = connection_hostname;
       }
+    }
+  } else {
+    ipv4_t ipv4_addr;
+    ipv6_t ipv6_addr;
+    if (crane::ResolveIpv4FromHostname(connection_hostname, &ipv4_addr)) {
+      ip_addr = crane::Ipv4ToStr(ipv4_addr);
+    } else if (crane::ResolveIpv6FromHostname(connection_hostname,
+                                              &ipv6_addr)) {
+      ip_addr = crane::Ipv6ToStr(ipv6_addr);
+    } else {
+      CRANE_ERROR("Unresolved hostname: {}", connection_hostname);
+      ip_addr = connection_hostname;
     }
   }
 
@@ -1020,12 +1036,14 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("Creating a channel to {} {}:{}. Token: {}. Channel count: {}",
-              craned_id, ip_addr, g_config.CranedListenConf.CranedListenPort,
-              ProtoTimestampToString(token), m_channel_count_.fetch_add(1) + 1);
+  CRANE_TRACE(
+      "Creating a channel to {} at {} ({}):{}. Token: {}. Channel count: {}",
+      craned_id, connection_hostname, ip_addr,
+      g_config.CranedListenConf.CranedListenPort, ProtoTimestampToString(token),
+      m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
-    SetTlsHostnameOverride(&channel_args, craned_id,
+    SetTlsHostnameOverride(&channel_args, connection_hostname,
                            g_config.ListenConf.TlsConfig.DomainSuffix);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
@@ -1085,17 +1103,20 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
-          m_connecting_craned_set_.emplace(*it);
+          m_connecting_craned_set_.emplace(it->first, it->second.token);
           g_thread_pool->detach_task(
-              [this, craned_id = it->first, token = it->second] {
-                ConnectCranedNode_(craned_id, token);
+              [this, craned_id = it->first, token = it->second.token,
+               hostname = std::move(it->second.hostname)]() mutable {
+                ConnectCranedNode_(craned_id, std::move(token),
+                                   std::move(hostname));
               });
           fetch_num--;
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Craned {} is already connecting or connected, "
                              "drop new connection request. Token {}.",
-                             it->first, ProtoTimestampToString(it->second));
+                             it->first,
+                             ProtoTimestampToString(it->second.token));
         }
         it = m_unavail_craned_set_.erase(it);
       }

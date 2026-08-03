@@ -87,6 +87,9 @@ class EmbeddedDbClient {
   virtual bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) = 0;
 
+  virtual bool DeleteDynamicNodeRecords(
+      const std::vector<CranedId>& node_names) = 0;
+
   virtual bool BeginVariableDbTransaction(txn_id_t* txn_id) = 0;
 
   virtual bool CommitVariableDbTransaction(txn_id_t txn_id) = 0;

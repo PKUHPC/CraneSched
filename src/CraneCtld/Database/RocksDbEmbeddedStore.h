@@ -46,6 +46,8 @@ class RocksDbEmbeddedStore final : public EmbeddedDbClient {
       std::unordered_map<CranedId, DynamicNodeRecord>* records) override;
   bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) override;
+  bool DeleteDynamicNodeRecords(
+      const std::vector<CranedId>& node_names) override;
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) override {
     return BeginTransaction(RocksStoreKind::JobVar, txn_id);

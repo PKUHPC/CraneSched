@@ -41,6 +41,16 @@ struct CranedStaticMeta {
   bool deleting{false};
   uint64_t generation{0};
   bool ever_registered{false};
+  crane::grpc::DynamicNodeOrigin origin{
+      crane::grpc::DYNAMIC_NODE_ORIGIN_STATIC_CONFIG};
+  crane::grpc::DynamicNodeLifecycle lifecycle{
+      crane::grpc::DYNAMIC_NODE_LIFECYCLE_UNSPECIFIED};
+  crane::grpc::DynamicNodePowerState dynamic_power_state{
+      crane::grpc::DYNAMIC_NODE_POWER_STATE_UNSPECIFIED};
+  std::string pool;
+  std::string physical_hostname;
+  std::string provider;
+  std::string provider_profile;
 };
 
 struct CranedRemoteMeta {
@@ -51,6 +61,8 @@ struct CranedRemoteMeta {
   absl::Time system_boot_time;
 
   std::vector<crane::grpc::NetworkInterface> network_interfaces;
+  crane::grpc::DynamicNodeSpec reported_spec;
+  std::string physical_hostname;
 
   CranedRemoteMeta() = default;
   explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta);
@@ -125,5 +137,16 @@ struct PartitionMeta {
   PartitionGlobalMeta partition_global_meta;
   std::unordered_set<CranedId> craned_ids;
 };
+
+// Map a dynamic node power state to the Craned power state shown at runtime.
+// Returns std::nullopt for ON/UNSPECIFIED, whose runtime state depends on
+// whether the node is busy.
+std::optional<crane::grpc::CranedPowerState> CranedPowerStateFromDynamic(
+    crane::grpc::DynamicNodePowerState state);
+
+// Returns std::nullopt for Craned power states that have no dynamic
+// counterpart.
+std::optional<crane::grpc::DynamicNodePowerState>
+DynamicNodePowerStateFromCraned(crane::grpc::CranedPowerState state);
 
 }  // namespace Ctld

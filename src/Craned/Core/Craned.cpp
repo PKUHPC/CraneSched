@@ -31,7 +31,11 @@
 #endif
 
 #include <array>
+#include <cctype>
 #include <cxxopts.hpp>
+#include <fstream>
+#include <limits>
+#include <random>
 
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
@@ -546,8 +550,15 @@ void ParseConfig(int argc, char** argv) {
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
       ("C,nodeinfo", "Print current node cpu and memory info")
-      ("dynamic", "Start Craned as a precreated dynamic node")
+      ("dynamic", "Start Craned as a dynamic node")
       ("node-name", "Logical node name used in dynamic mode",
+       cxxopts::value<std::string>())
+      ("registration-mode", "Dynamic registration mode: precreated, auto, future",
+       cxxopts::value<std::string>()->default_value("precreated"))
+      ("pool", "Dynamic node pool", cxxopts::value<std::string>())
+      ("features", "Comma-separated dynamic node features",
+       cxxopts::value<std::string>())
+      ("partitions", "Comma-separated dynamic node partitions",
        cxxopts::value<std::string>())
       ;
   // clang-format on
@@ -587,13 +598,73 @@ void ParseConfig(int argc, char** argv) {
   }
 
   g_config.Dynamic = parsed_args.count("dynamic") > 0;
-  if (g_config.Dynamic && parsed_args.count("node-name") == 0) {
-    fmt::print(stderr, "--node-name is required in dynamic mode.\n");
-    std::exit(1);
-  }
   if (!g_config.Dynamic && parsed_args.count("node-name") > 0) {
     fmt::print(stderr, "--node-name can only be used in dynamic mode.\n");
     std::exit(1);
+  }
+  if (!g_config.Dynamic &&
+      (parsed_args.count("registration-mode") > 0 ||
+       parsed_args.count("pool") > 0 || parsed_args.count("features") > 0 ||
+       parsed_args.count("partitions") > 0)) {
+    fmt::print(stderr,
+               "Dynamic registration options require --dynamic mode.\n");
+    std::exit(1);
+  }
+
+  if (g_config.Dynamic) {
+    auto mode = absl::AsciiStrToLower(
+        parsed_args["registration-mode"].as<std::string>());
+    if (mode == "precreated") {
+      g_config.DynamicRegistrationMode =
+          crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED;
+      if (parsed_args.count("node-name") == 0) {
+        fmt::print(stderr,
+                   "--node-name is required for precreated registration.\n");
+        std::exit(1);
+      }
+    } else if (mode == "auto") {
+      g_config.DynamicRegistrationMode =
+          crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_AUTO_CREATE;
+      if (parsed_args.count("pool") == 0 ||
+          parsed_args["pool"].as<std::string>().empty()) {
+        fmt::print(stderr, "--pool is required for auto registration.\n");
+        std::exit(1);
+      }
+    } else if (mode == "future") {
+      g_config.DynamicRegistrationMode =
+          crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_FUTURE_POOL;
+      if (parsed_args.count("node-name") > 0) {
+        fmt::print(stderr,
+                   "--node-name cannot be used for future registration.\n");
+        std::exit(1);
+      }
+      if (parsed_args.count("pool") == 0 ||
+          parsed_args["pool"].as<std::string>().empty()) {
+        fmt::print(stderr, "--pool is required for future registration.\n");
+        std::exit(1);
+      }
+    } else {
+      fmt::print(stderr, "Invalid dynamic registration mode: {}\n", mode);
+      std::exit(1);
+    }
+    if (parsed_args.count("pool") > 0)
+      g_config.DynamicPool = parsed_args["pool"].as<std::string>();
+    if (parsed_args.count("features") > 0) {
+      for (const auto& feature :
+           absl::StrSplit(parsed_args["features"].as<std::string>(), ',')) {
+        auto value = std::string(absl::StripAsciiWhitespace(feature));
+        if (!value.empty())
+          g_config.DynamicFeatures.emplace_back(std::move(value));
+      }
+    }
+    if (parsed_args.count("partitions") > 0) {
+      for (const auto& partition :
+           absl::StrSplit(parsed_args["partitions"].as<std::string>(), ',')) {
+        auto value = std::string(absl::StripAsciiWhitespace(partition));
+        if (!value.empty())
+          g_config.DynamicPartitions.emplace_back(std::move(value));
+      }
+    }
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
@@ -1224,11 +1295,104 @@ void ParseConfig(int argc, char** argv) {
     CRANE_ERROR("Error: get hostname.");
     std::exit(1);
   }
-  g_config.Hostname = g_config.Dynamic
+  g_config.PhysicalHostname = hostname.data();
+  g_config.Hostname = g_config.Dynamic && parsed_args.count("node-name") > 0
                           ? parsed_args["node-name"].as<std::string>()
-                          : std::string(hostname.data());
+                          : g_config.PhysicalHostname;
 
   if (g_config.Dynamic) {
+    NodeSpecInfo node_real;
+    if (!util::os::GetNodeInfo(&node_real)) {
+      CRANE_ERROR("Failed to get local node information.");
+      std::exit(1);
+    }
+
+    crane::grpc::DynamicNodeSpec reported_spec;
+    if (node_real.cpu > std::numeric_limits<uint32_t>::max()) {
+      CRANE_ERROR("Online CPU count {} exceeds the supported limit.",
+                  node_real.cpu);
+      std::exit(1);
+    }
+    reported_spec.set_cpu_count(static_cast<uint32_t>(node_real.cpu));
+    reported_spec.set_memory_bytes(
+        static_cast<uint64_t>(node_real.memory_gb * 1024 * 1024 * 1024));
+
+    uint32_t sockets = 0;
+    std::set<std::string> socket_ids;
+    const auto cpu_root = std::filesystem::path("/sys/devices/system/cpu");
+    std::error_code cpu_error;
+    if (std::filesystem::is_directory(cpu_root, cpu_error)) {
+      for (std::filesystem::directory_iterator it(cpu_root, cpu_error), end;
+           it != end && !cpu_error; it.increment(cpu_error)) {
+        const auto& entry = *it;
+        const auto name = entry.path().filename().string();
+        if (!name.starts_with("cpu") || name.size() == 3 ||
+            !std::ranges::all_of(name.substr(3), [](unsigned char c) {
+              return std::isdigit(c) != 0;
+            }))
+          continue;
+        std::ifstream online_file(entry.path() / "online");
+        int online;
+        if (online_file >> online && online == 0) continue;
+        std::ifstream socket_file(entry.path() /
+                                  "topology/physical_package_id");
+        std::string socket_id;
+        if (socket_file >> socket_id) socket_ids.emplace(std::move(socket_id));
+      }
+    }
+    if (cpu_error) {
+      CRANE_ERROR("Failed to inspect CPU topology: {}", cpu_error.message());
+      std::exit(1);
+    }
+    sockets = socket_ids.empty() ? 1 : static_cast<uint32_t>(socket_ids.size());
+    reported_spec.set_sockets(sockets);
+    reported_spec.mutable_features()->Assign(g_config.DynamicFeatures.begin(),
+                                             g_config.DynamicFeatures.end());
+
+    const auto device_config_key =
+        g_config.DynamicRegistrationMode ==
+                crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED
+            ? g_config.Hostname
+            : g_config.PhysicalHostname;
+    auto& physical_devices = each_node_device[device_config_key];
+    if (physical_devices.empty()) {
+      const std::filesystem::path dev_root("/dev");
+      std::error_code dev_error;
+      if (std::filesystem::is_directory(dev_root, dev_error)) {
+        for (std::filesystem::directory_iterator it(dev_root, dev_error), end;
+             it != end && !dev_error; it.increment(dev_error)) {
+          const auto& entry = *it;
+          const auto name = entry.path().filename().string();
+          if (!name.starts_with("nvidia") || name.size() <= 6 ||
+              !std::ranges::all_of(name.substr(6), [](unsigned char c) {
+                return std::isdigit(c) != 0;
+              }))
+            continue;
+          physical_devices.push_back({.name = "gpu",
+                                      .type = "auto",
+                                      .path = {entry.path().string()},
+                                      .EnvInjectorStr = std::string("nvidia"),
+                                      .CdiName = std::nullopt,
+                                      .CniPipeline = std::nullopt});
+        }
+      }
+      if (dev_error) {
+        CRANE_ERROR("Failed to inspect local devices: {}", dev_error.message());
+        std::exit(1);
+      }
+    }
+    std::ranges::sort(physical_devices, [](const auto& lhs, const auto& rhs) {
+      return std::tie(lhs.name, lhs.type, lhs.path) <
+             std::tie(rhs.name, rhs.type, rhs.path);
+    });
+    for (const auto& device : physical_devices) {
+      auto& types =
+          (*reported_spec.mutable_gres()->mutable_name_type_map())[device.name];
+      auto& slots = (*types.mutable_type_slots_map())[device.type];
+      if (!device.path.empty()) slots.add_slots(device.path.front());
+    }
+    g_config.DynamicReportedSpec = reported_spec;
+
     grpc::ChannelArguments channel_args;
     SetGrpcClientKeepAliveChannelArgs(&channel_args);
     std::shared_ptr<grpc::Channel> channel;
@@ -1244,34 +1408,54 @@ void ParseConfig(int argc, char** argv) {
     }
 
     auto stub = crane::grpc::CraneCtldForInternal::NewStub(channel);
-    crane::grpc::QueryDynamicNodeConfigRequest request;
-    request.set_node_name(g_config.Hostname);
-    crane::grpc::QueryDynamicNodeConfigReply reply;
-    grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(
-                             Craned::kCranedRpcTimeoutSeconds));
-    auto status = stub->QueryDynamicNodeConfig(&context, request, &reply);
-    if (!status.ok()) {
-      CRANE_ERROR("Failed to query dynamic node {}: {}", g_config.Hostname,
-                  status.error_message());
-      std::exit(1);
+    std::random_device random_device;
+    auto random_u64 = [&random_device] {
+      return static_cast<uint64_t>(random_device()) << 32 | random_device();
+    };
+    g_config.DynamicRegistrationNonce =
+        fmt::format("{:016x}{:016x}", random_u64(), random_u64());
+    crane::grpc::PrepareCranedRegistrationRequest request =
+        Craned::BuildPrepareCranedRegistrationRequest();
+    crane::grpc::PrepareCranedRegistrationReply reply;
+    while (true) {
+      grpc::ClientContext context;
+      context.set_deadline(
+          std::chrono::system_clock::now() +
+          std::chrono::seconds(Craned::kCranedRpcTimeoutSeconds));
+      auto status = stub->PrepareCranedRegistration(&context, request, &reply);
+      if (status.ok()) break;
+      if (status.error_code() != grpc::StatusCode::UNAVAILABLE &&
+          status.error_code() != grpc::StatusCode::DEADLINE_EXCEEDED) {
+        CRANE_ERROR("Failed to prepare dynamic node registration for {}: {}",
+                    g_config.PhysicalHostname, status.error_message());
+        std::exit(1);
+      }
+      CRANE_WARN(
+          "CraneCtld is unavailable while preparing dynamic node {}: {}. "
+          "Retrying...",
+          g_config.PhysicalHostname, status.error_message());
+      std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     if (!reply.ok()) {
-      CRANE_ERROR("Dynamic node {} is rejected: {}", g_config.Hostname,
+      CRANE_ERROR("Dynamic node {} is rejected: {}", g_config.PhysicalHostname,
                   reply.reason());
       std::exit(1);
     }
 
-    NodeSpecInfo node_real;
-    if (!util::os::GetNodeInfo(&node_real)) {
-      CRANE_ERROR("Failed to get local node information.");
-      std::exit(1);
+    g_config.Hostname = reply.node_name();
+    if (g_config.DynamicRegistrationMode ==
+        crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_FUTURE_POOL) {
+      g_config.DynamicRegistrationMode =
+          crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED;
     }
-    const auto& spec = reply.spec();
+    g_config.DynamicRegistrationToken = reply.registration_token();
+    g_config.Generation = reply.generation();
+    g_config.DynamicPartitions.assign(reply.partition_names().begin(),
+                                      reply.partition_names().end());
+    const auto& spec = reply.effective_spec();
     if (node_real.cpu < spec.cpu_count()) {
       CRANE_ERROR("Dynamic node {} requires {} CPUs, but only {} are online.",
-                  g_config.Hostname, spec.cpu_count(), node_real.cpu);
+                  g_config.PhysicalHostname, spec.cpu_count(), node_real.cpu);
       std::exit(1);
     }
     double configured_memory_gb =
@@ -1280,7 +1464,7 @@ void ParseConfig(int argc, char** argv) {
       CRANE_ERROR(
           "Dynamic node {} requires {:.3f} GB memory, but only {:.3f} GB is "
           "available.",
-          g_config.Hostname, configured_memory_gb, node_real.memory_gb);
+          g_config.PhysicalHostname, configured_memory_gb, node_real.memory_gb);
       std::exit(1);
     }
 
@@ -1290,9 +1474,16 @@ void ParseConfig(int argc, char** argv) {
       node_res->GetCpuSet().core_ids.insert(i);
     node_res->SetMemoryBytes(spec.memory_bytes());
     node_res->SetMemorySwBytes(spec.memory_bytes());
+    node_res->GetGres() = spec.gres();
     g_config.CranedRes[g_config.Hostname] = std::move(node_res);
     g_config.node_topo_info.sockets = spec.sockets();
-    g_config.Generation = reply.generation();
+
+    if (device_config_key != g_config.Hostname &&
+        each_node_device.contains(g_config.PhysicalHostname)) {
+      each_node_device[g_config.Hostname] =
+          std::move(each_node_device[g_config.PhysicalHostname]);
+      each_node_device.erase(g_config.PhysicalHostname);
+    }
 
     for (const auto& partition_name : reply.partition_names()) {
       auto partition_it = g_config.Partitions.find(partition_name);
@@ -1304,8 +1495,10 @@ void ParseConfig(int argc, char** argv) {
       }
       partition_it->second.nodes.emplace(g_config.Hostname);
     }
-    CRANE_INFO("Loaded dynamic node {} generation {} from CraneCtld.",
-               g_config.Hostname, g_config.Generation);
+    CRANE_INFO(
+        "Loaded dynamic node {} (physical host {}) generation {} from "
+        "CraneCtld.",
+        g_config.Hostname, g_config.PhysicalHostname, g_config.Generation);
   } else {
     if (!g_config.CranedRes.contains(g_config.Hostname)) {
       CRANE_ERROR("This machine {} is not contained in Nodes!",
@@ -1321,9 +1514,37 @@ void ParseConfig(int argc, char** argv) {
   {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
+    std::map<std::pair<std::string, std::string>, size_t>
+        remaining_dynamic_gres;
+    std::map<std::string, size_t> remaining_untyped_dynamic_gres;
+    if (g_config.Dynamic) {
+      for (const auto& [name, types] :
+           node_res->GetGres().name_type_slots_map) {
+        for (const auto& [type, slots] : types.type_slots_map) {
+          if (type.empty())
+            remaining_untyped_dynamic_gres[name] = slots.size();
+          else
+            remaining_dynamic_gres[{name, type}] = slots.size();
+        }
+      }
+      node_res->GetGres() = DedicatedResourceInNode{};
+    }
     for (auto& dev_arg : devices) {
       auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
           dev_arg;
+      if (g_config.Dynamic) {
+        auto remaining = remaining_dynamic_gres.find({name, type});
+        if (remaining != remaining_dynamic_gres.end() &&
+            remaining->second != 0) {
+          --remaining->second;
+        } else {
+          auto untyped = remaining_untyped_dynamic_gres.find(name);
+          if (untyped == remaining_untyped_dynamic_gres.end() ||
+              untyped->second == 0)
+            continue;
+          --untyped->second;
+        }
+      }
       auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
@@ -1343,6 +1564,18 @@ void ParseConfig(int argc, char** argv) {
           dev->slot_id);
 
       g_this_node_device[dev->slot_id] = std::move(dev);
+    }
+    if (g_config.Dynamic && (std::ranges::any_of(remaining_dynamic_gres,
+                                                 [](const auto& entry) {
+                                                   return entry.second != 0;
+                                                 }) ||
+                             std::ranges::any_of(remaining_untyped_dynamic_gres,
+                                                 [](const auto& entry) {
+                                                   return entry.second != 0;
+                                                 }))) {
+      CRANE_ERROR(
+          "The local devices do not satisfy the effective dynamic GRES spec.");
+      std::exit(1);
     }
     each_node_device.clear();
 

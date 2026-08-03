@@ -980,10 +980,44 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                      "Requesting config from CraneCtld...");
 
+  if (g_config.Dynamic) {
+    crane::grpc::PrepareCranedRegistrationRequest prepare_request =
+        BuildPrepareCranedRegistrationRequest();
+
+    grpc::ClientContext prepare_context;
+    prepare_context.set_deadline(
+        std::chrono::system_clock::now() +
+        std::chrono::seconds(kCranedRpcTimeoutSeconds));
+    crane::grpc::PrepareCranedRegistrationReply prepare_reply;
+    auto prepare_status = m_stub_->PrepareCranedRegistration(
+        &prepare_context, prepare_request, &prepare_reply);
+    if (!prepare_status.ok() || !prepare_reply.ok()) {
+      CRANE_LOGGER_WARN(g_runtime_status.conn_logger,
+                        "Failed to renew dynamic registration for {}: {}",
+                        g_config.CranedIdOfThisNode,
+                        prepare_status.ok() ? prepare_reply.reason()
+                                            : prepare_status.error_message());
+      return false;
+    }
+    if (prepare_reply.node_name() != g_config.CranedIdOfThisNode ||
+        prepare_reply.generation() != g_config.Generation) {
+      CRANE_LOGGER_ERROR(
+          g_runtime_status.conn_logger,
+          "Dynamic registration identity changed from {} generation {} to {} "
+          "generation {}.",
+          g_config.CranedIdOfThisNode, g_config.Generation,
+          prepare_reply.node_name(), prepare_reply.generation());
+      return false;
+    }
+    g_config.DynamicRegistrationToken = prepare_reply.registration_token();
+  }
+
   crane::grpc::CranedTriggerReverseConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
   req.set_generation(g_config.Generation);
+  if (g_config.Dynamic)
+    req.set_registration_token(g_config.DynamicRegistrationToken);
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -1011,12 +1045,18 @@ bool CtldClient::CranedRegister_(
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
   *ready_request.mutable_token() = token;
   ready_request.set_generation(g_config.Generation);
+  if (g_config.Dynamic)
+    ready_request.set_registration_token(g_config.DynamicRegistrationToken);
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
-  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
+  auto& dres = g_config.CranedRes.at(g_config.CranedIdOfThisNode)->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
+  if (g_config.Dynamic) {
+    *grpc_meta->mutable_reported_spec() = g_config.DynamicReportedSpec;
+    grpc_meta->set_physical_hostname(g_config.PhysicalHostname);
+  }
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
   grpc_meta->mutable_node_topo_info()->set_sockets(

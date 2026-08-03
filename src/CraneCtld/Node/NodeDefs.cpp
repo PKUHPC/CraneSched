@@ -35,6 +35,52 @@ CranedRemoteMeta::CranedRemoteMeta(
   for (const auto& interface : grpc_meta.network_interfaces()) {
     this->network_interfaces.emplace_back(interface);
   }
+  if (grpc_meta.has_reported_spec())
+    this->reported_spec = grpc_meta.reported_spec();
+  this->physical_hostname = grpc_meta.physical_hostname();
+}
+
+std::optional<crane::grpc::CranedPowerState> CranedPowerStateFromDynamic(
+    crane::grpc::DynamicNodePowerState state) {
+  switch (state) {
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_OFF:
+    return crane::grpc::CRANE_POWER_POWEREDOFF;
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON:
+    return crane::grpc::CRANE_POWER_POWERING_ON;
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_OFF:
+    return crane::grpc::CRANE_POWER_POWERING_OFF;
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING:
+    return crane::grpc::CRANE_POWER_SLEEPING;
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP:
+    return crane::grpc::CRANE_POWER_WAKING_UP;
+  case crane::grpc::DYNAMIC_NODE_POWER_STATE_TO_SLEEPING:
+    return crane::grpc::CRANE_POWER_TO_SLEEPING;
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<crane::grpc::DynamicNodePowerState>
+DynamicNodePowerStateFromCraned(crane::grpc::CranedPowerState state) {
+  switch (state) {
+  case crane::grpc::CRANE_POWER_POWEREDOFF:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_OFF;
+  case crane::grpc::CRANE_POWER_POWERING_ON:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON;
+  case crane::grpc::CRANE_POWER_WAKING_UP:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP;
+  case crane::grpc::CRANE_POWER_POWERING_OFF:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_OFF;
+  case crane::grpc::CRANE_POWER_SLEEPING:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING;
+  case crane::grpc::CRANE_POWER_TO_SLEEPING:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_TO_SLEEPING;
+  case crane::grpc::CRANE_POWER_ACTIVE:
+  case crane::grpc::CRANE_POWER_IDLE:
+    return crane::grpc::DYNAMIC_NODE_POWER_STATE_ON;
+  default:
+    return std::nullopt;
+  }
 }
 
 }  // namespace Ctld

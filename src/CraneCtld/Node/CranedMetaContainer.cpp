@@ -57,6 +57,32 @@ bool CranedMetaContainer::CranedUp(
       return true;
     }
 
+    if (node_meta->static_meta.dynamic &&
+        !node_meta->static_meta.ever_registered) {
+      if (!node_meta->res_in_use.IsZero() ||
+          !node_meta->resv_in_node_map.empty() ||
+          !(node_meta->res_avail == node_meta->res_total)) {
+        CRANE_WARN("Reject binding resources of dynamic node {} while in use.",
+                   craned_id);
+        return false;
+      }
+
+      ResourceInNodeV3 bound_resource = node_meta->static_meta.res;
+      bound_resource.GetGres() = remote_meta.dres_in_node();
+      for (auto& partition_meta : part_meta_ptrs) {
+        auto& global_meta = partition_meta->partition_global_meta;
+        global_meta.res_total -= node_meta->static_meta.res;
+        global_meta.res_total += bound_resource;
+        global_meta.res_avail -= node_meta->res_avail;
+        global_meta.res_avail += bound_resource;
+        global_meta.res_total_inc_dead -= node_meta->static_meta.res;
+        global_meta.res_total_inc_dead += bound_resource;
+      }
+      node_meta->static_meta.res = bound_resource;
+      node_meta->res_total = bound_resource;
+      node_meta->res_avail = bound_resource;
+    }
+
     node_meta->alive = true;
 
     node_meta->remote_meta = CranedRemoteMeta(remote_meta);
@@ -71,19 +97,21 @@ bool CranedMetaContainer::CranedUp(
       }
       node_meta->static_meta.node_topo_info.sockets = reported;
     }
+    if (node_meta->static_meta.dynamic) {
+      node_meta->static_meta.ever_registered = true;
+      node_meta->static_meta.dynamic_power_state =
+          crane::grpc::DYNAMIC_NODE_POWER_STATE_ON;
+      node_meta->static_meta.physical_hostname =
+          remote_meta.physical_hostname();
+      node_meta->power_state = node_meta->rn_job_res_map.empty()
+                                   ? crane::grpc::CRANE_POWER_IDLE
+                                   : crane::grpc::CRANE_POWER_ACTIVE;
+    }
     for (auto& partition_meta : part_meta_ptrs) {
       PartitionGlobalMeta& part_global_meta =
           partition_meta->partition_global_meta;
       part_global_meta.alive_craned_cnt++;
     }
-  }
-
-  if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
-    std::vector<crane::NetworkInterface> interfaces;
-    for (const auto& interface : remote_meta.network_interfaces()) {
-      interfaces.emplace_back(interface);
-    }
-    g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
   }
 
   CRANE_INFO("Craned {} is up now.", craned_id);
@@ -120,6 +148,9 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   }
   node_meta->alive = false;
   node_meta->craned_down_time = absl::Now();
+  if (node_meta->static_meta.dynamic) {
+    node_meta->static_meta.lifecycle = crane::grpc::DYNAMIC_NODE_LIFECYCLE_DOWN;
+  }
 
   AddResReduceEventsAndUnlock(
       {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
@@ -132,6 +163,38 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   }
 
   CRANE_INFO("Craned {} is down now.", craned_id);
+}
+
+void CranedMetaContainer::PublishCranedState(const CranedId& craned_id) {
+  if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) return;
+
+  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  if (!node_meta ||
+      (!node_meta->alive && node_meta->remote_meta.network_interfaces.empty()))
+    return;
+
+  std::vector<uint32_t> running_job_ids;
+  running_job_ids.reserve(node_meta->rn_job_res_map.size());
+  for (job_id_t job_id : node_meta->rn_job_res_map | std::views::keys)
+    running_job_ids.emplace_back(job_id);
+  std::ranges::sort(running_job_ids);
+
+  g_plugin_client->RegisterCranedHookAsync(
+      craned_id, node_meta->remote_meta.network_interfaces,
+      node_meta->static_meta.dynamic, node_meta->static_meta.provider,
+      node_meta->power_state, running_job_ids);
+}
+
+void CranedMetaContainer::ReconcilePluginState() {
+  std::vector<CranedId> node_ids;
+  {
+    auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+    node_ids.reserve(craned_map->size());
+    for (const auto& node_id : *craned_map | std::views::keys)
+      node_ids.emplace_back(node_id);
+  }
+  std::ranges::sort(node_ids);
+  for (const auto& node_id : node_ids) PublishCranedState(node_id);
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
@@ -431,6 +494,8 @@ void CranedMetaContainer::AddDynamicNodes(
   auto craned_map = craned_meta_map_.GetMapExclusivePtr();
 
   for (const auto& record : records) {
+    if (craned_map->contains(record.node_name())) continue;
+
     CranedMeta craned_meta;
     craned_meta.remote_meta.craned_version = "unknown";
     craned_meta.remote_meta.sys_rel_info.name = "unknown";
@@ -442,16 +507,26 @@ void CranedMetaContainer::AddDynamicNodes(
     static_meta.dynamic = true;
     static_meta.generation = record.generation();
     static_meta.ever_registered = record.ever_registered();
-    static_meta.node_topo_info.sockets = record.spec().sockets();
-    static_meta.res.GetCpuSet().cpu_count = cpu_t(record.spec().cpu_count());
-    for (uint32_t i = 0; i < record.spec().cpu_count(); ++i)
-      static_meta.res.GetCpuSet().core_ids.insert(i);
-    static_meta.res.SetMemoryBytes(record.spec().memory_bytes());
-    static_meta.res.SetMemorySwBytes(record.spec().memory_bytes());
+    static_meta.origin = record.origin();
+    static_meta.lifecycle = record.lifecycle();
+    static_meta.dynamic_power_state = record.power_state();
+    static_meta.pool = record.pool();
+    static_meta.physical_hostname = record.physical_hostname();
+    static_meta.provider = record.provider();
+    static_meta.provider_profile = record.provider_profile();
+    craned_meta.remote_meta.network_interfaces.assign(
+        record.network_interfaces().begin(), record.network_interfaces().end());
+    const auto& spec =
+        record.has_effective_spec() ? record.effective_spec() : record.spec();
+    static_meta.node_topo_info.sockets = spec.sockets();
+    static_meta.res = ResourceInNodeFromDynamicSpec(spec);
 
     craned_meta.res_total = static_meta.res;
     craned_meta.res_avail = static_meta.res;
     craned_meta.res_in_use.SetToZero();
+    craned_meta.power_state =
+        CranedPowerStateFromDynamic(record.power_state())
+            .value_or(crane::grpc::CRANE_POWER_IDLE);
 
     for (const auto& partition_id : record.partition_names()) {
       static_meta.partition_ids.emplace_back(partition_id);
@@ -471,7 +546,63 @@ void CranedMetaContainer::AddDynamicNodes(
   }
 }
 
-std::expected<void, std::string> CranedMetaContainer::RemoveDynamicNodes(
+void CranedMetaContainer::UpdateDynamicNodeMetadata(
+    const crane::grpc::DynamicNodeRecord& record) {
+  auto topology_lock = LockTopologyShared();
+  auto part_ids_it = craned_id_part_ids_map_.find(record.node_name());
+  if (part_ids_it == craned_id_part_ids_map_.end()) return;
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids_it->second.size());
+  auto partition_map = partition_meta_map_.GetMapSharedPtr();
+  for (const auto& partition_id : part_ids_it->second)
+    part_meta_ptrs.emplace_back(
+        partition_map->at(partition_id).GetExclusivePtr());
+
+  auto node_meta = craned_meta_map_.GetValueExclusivePtr(record.node_name());
+  if (!node_meta || !node_meta->static_meta.dynamic ||
+      node_meta->static_meta.generation != record.generation())
+    return;
+
+  auto& static_meta = node_meta->static_meta;
+  if (static_meta.ever_registered != record.ever_registered()) {
+    CRANE_ASSERT(node_meta->res_in_use.IsZero());
+    CRANE_ASSERT(node_meta->resv_in_node_map.empty());
+
+    const auto& spec =
+        record.has_effective_spec() ? record.effective_spec() : record.spec();
+    ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
+
+    for (auto& partition_meta : part_meta_ptrs) {
+      auto& global_meta = partition_meta->partition_global_meta;
+      global_meta.res_total -= static_meta.res;
+      global_meta.res_total += updated_resource;
+      global_meta.res_avail -= node_meta->res_avail;
+      global_meta.res_avail += updated_resource;
+      global_meta.res_total_inc_dead -= static_meta.res;
+      global_meta.res_total_inc_dead += updated_resource;
+    }
+    static_meta.res = updated_resource;
+    node_meta->res_total = updated_resource;
+    node_meta->res_avail = updated_resource;
+  }
+
+  static_meta.ever_registered = record.ever_registered();
+  static_meta.origin = record.origin();
+  static_meta.lifecycle = record.lifecycle();
+  static_meta.dynamic_power_state = record.power_state();
+  static_meta.pool = record.pool();
+  static_meta.physical_hostname = record.physical_hostname();
+  static_meta.provider = record.provider();
+  static_meta.provider_profile = record.provider_profile();
+  node_meta->remote_meta.network_interfaces.assign(
+      record.network_interfaces().begin(), record.network_interfaces().end());
+  if (auto power_state = CranedPowerStateFromDynamic(record.power_state()))
+    node_meta->power_state = *power_state;
+}
+
+std::unordered_map<CranedId, std::string>
+CranedMetaContainer::RemoveDynamicNodes(
     const std::vector<CranedId>& node_ids) {
   struct NodeToRemove {
     CranedId node_id;
@@ -482,24 +613,38 @@ std::expected<void, std::string> CranedMetaContainer::RemoveDynamicNodes(
   util::write_lock_guard topology_lock(topology_mtx_);
   auto partition_map = partition_meta_map_.GetMapExclusivePtr();
   auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+  std::unordered_map<CranedId, std::string> failures;
   std::vector<NodeToRemove> nodes_to_remove;
   nodes_to_remove.reserve(node_ids.size());
 
   for (const auto& node_id : node_ids) {
     auto it = craned_map->find(node_id);
-    if (it == craned_map->end())
-      return std::unexpected(fmt::format("Node {} does not exist", node_id));
+    if (it == craned_map->end()) {
+      failures.emplace(node_id, "Node does not exist");
+      continue;
+    }
 
     auto node_meta = it->second.GetExclusivePtr();
-    if (!node_meta->static_meta.dynamic)
-      return std::unexpected(fmt::format("Node {} is not dynamic", node_id));
-    if (node_meta->alive)
-      return std::unexpected(fmt::format("Node {} is still online", node_id));
-    if (!node_meta->rn_job_res_map.empty())
-      return std::unexpected(fmt::format("Node {} still has jobs", node_id));
-    if (!node_meta->resv_in_node_map.empty())
-      return std::unexpected(
-          fmt::format("Node {} is still referenced by a reservation", node_id));
+    if (!node_meta->static_meta.dynamic) {
+      failures.emplace(node_id, "Node is not dynamic");
+      continue;
+    }
+    if (node_meta->alive) {
+      failures.emplace(node_id, "Node is still online");
+      continue;
+    }
+    if (!node_meta->rn_job_res_map.empty()) {
+      failures.emplace(node_id, "Node still has jobs");
+      continue;
+    }
+    if (!node_meta->res_in_use.IsZero()) {
+      failures.emplace(node_id, "Node still has allocated resources");
+      continue;
+    }
+    if (!node_meta->resv_in_node_map.empty()) {
+      failures.emplace(node_id, "Node is still referenced by a reservation");
+      continue;
+    }
 
     nodes_to_remove.emplace_back(node_id, node_meta->static_meta.res,
                                  node_meta->static_meta.partition_ids);
@@ -521,37 +666,53 @@ std::expected<void, std::string> CranedMetaContainer::RemoveDynamicNodes(
     craned_map->erase(node.node_id);
   }
 
-  return {};
+  return failures;
 }
 
-std::expected<void, std::string> CranedMetaContainer::SetDynamicNodesDeleting(
+std::unordered_map<CranedId, std::string>
+CranedMetaContainer::SetDynamicNodesDeleting(
     const std::vector<CranedId>& node_ids) {
   absl::MutexLock event_lock(&m_res_reduce_events_mtx_);
   auto topology_lock = LockTopologyShared();
+  std::unordered_map<CranedId, std::string> failures;
   std::vector<CranedMetaPtr> node_metas;
   node_metas.reserve(node_ids.size());
 
   for (const auto& node_id : node_ids) {
     auto node_meta = craned_meta_map_.GetValueExclusivePtr(node_id);
-    if (!node_meta)
-      return std::unexpected(fmt::format("Node {} does not exist", node_id));
-    if (!node_meta->static_meta.dynamic)
-      return std::unexpected(fmt::format("Node {} is not dynamic", node_id));
-    if (node_meta->static_meta.deleting)
-      return std::unexpected(
-          fmt::format("Node {} is already being deleted", node_id));
-    if (node_meta->alive)
-      return std::unexpected(fmt::format("Node {} is still online", node_id));
-    if (!node_meta->rn_job_res_map.empty())
-      return std::unexpected(fmt::format("Node {} still has jobs", node_id));
-    if (!node_meta->resv_in_node_map.empty())
-      return std::unexpected(
-          fmt::format("Node {} is still referenced by a reservation", node_id));
+    if (!node_meta) {
+      failures.emplace(node_id, "Node does not exist");
+      continue;
+    }
+    if (!node_meta->static_meta.dynamic) {
+      failures.emplace(node_id, "Node is not dynamic");
+      continue;
+    }
+    if (node_meta->static_meta.deleting) {
+      failures.emplace(node_id, "Node is already being deleted");
+      continue;
+    }
+    if (node_meta->alive) {
+      failures.emplace(node_id, "Node is still online");
+      continue;
+    }
+    if (!node_meta->rn_job_res_map.empty()) {
+      failures.emplace(node_id, "Node still has jobs");
+      continue;
+    }
+    if (!node_meta->res_in_use.IsZero()) {
+      failures.emplace(node_id, "Node still has allocated resources");
+      continue;
+    }
+    if (!node_meta->resv_in_node_map.empty()) {
+      failures.emplace(node_id, "Node is still referenced by a reservation");
+      continue;
+    }
     node_metas.emplace_back(std::move(node_meta));
   }
 
   std::vector<CranedId> affected_nodes;
-  affected_nodes.reserve(node_ids.size());
+  affected_nodes.reserve(node_metas.size());
   for (auto& node_meta : node_metas) {
     node_meta->static_meta.deleting = true;
     affected_nodes.emplace_back(node_meta->static_meta.hostname);
@@ -561,7 +722,7 @@ std::expected<void, std::string> CranedMetaContainer::SetDynamicNodesDeleting(
     m_res_reduce_events_.emplace_back(ResReduceEvent{
         std::make_pair(absl::InfinitePast(), std::move(affected_nodes))});
   }
-  return {};
+  return failures;
 }
 
 void CranedMetaContainer::ClearDynamicNodesDeleting(
@@ -573,13 +734,6 @@ void CranedMetaContainer::ClearDynamicNodesDeleting(
     if (node_meta && node_meta->static_meta.dynamic)
       node_meta->static_meta.deleting = false;
   }
-}
-
-void CranedMetaContainer::SetDynamicNodeRegistered(const CranedId& node_id) {
-  auto topology_lock = LockTopologyShared();
-  auto node_meta = craned_meta_map_.GetValueExclusivePtr(node_id);
-  if (node_meta && node_meta->static_meta.dynamic)
-    node_meta->static_meta.ever_registered = true;
 }
 
 crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryAllCranedInfo() {
@@ -1337,6 +1491,14 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
 
   craned_info->set_dynamic(craned_meta.static_meta.dynamic);
   craned_info->set_generation(craned_meta.static_meta.generation);
+  craned_info->set_dynamic_origin(craned_meta.static_meta.origin);
+  craned_info->set_lifecycle(craned_meta.static_meta.lifecycle);
+  craned_info->set_dynamic_power_state(
+      craned_meta.static_meta.dynamic_power_state);
+  craned_info->set_dynamic_pool(craned_meta.static_meta.pool);
+  craned_info->set_physical_hostname(craned_meta.static_meta.physical_hostname);
+  craned_info->set_provider(craned_meta.static_meta.provider);
+  craned_info->set_provider_profile(craned_meta.static_meta.provider_profile);
   if (!craned_meta.static_meta.dynamic) {
     craned_info->set_dynamic_state(
         crane::grpc::DYNAMIC_NODE_RUNTIME_STATE_STATIC);
@@ -1346,7 +1508,9 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   } else if (craned_meta.alive) {
     craned_info->set_dynamic_state(
         crane::grpc::DYNAMIC_NODE_RUNTIME_STATE_ACTIVE);
-  } else if (craned_meta.static_meta.ever_registered) {
+  } else if (craned_meta.static_meta.ever_registered ||
+             craned_meta.static_meta.lifecycle ==
+                 crane::grpc::DYNAMIC_NODE_LIFECYCLE_DOWN) {
     craned_info->set_dynamic_state(
         crane::grpc::DYNAMIC_NODE_RUNTIME_STATE_DOWN);
   } else {

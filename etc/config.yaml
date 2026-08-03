@@ -47,7 +47,38 @@ CraneCtld:
   # Number of threads for scheduler RPC dispatch (0 = auto)
   SchedulerRpcThreadPoolSize: 0
   # Maximum number of static and dynamic nodes managed by CraneCtld
-  MaxNodeCount: 4096
+  # (default: number of static nodes, i.e. no room for dynamic nodes)
+  # MaxNodeCount: 4096
+  # All dynamic node modes require TLS to be enabled.
+  DynamicNodes:
+    # Enable runtime dynamic node definitions and registration
+    Enabled: false
+    # Allow unknown Craned instances to create their node definition
+    AutoCreate: false
+    # Lifetime of a PrepareCranedRegistration lease
+    RegistrationLeaseSeconds: 30
+    # Retention of deleted node tombstones before they are purged
+    TombstoneRetentionSeconds: 86400
+    # A power action (powering on/off, waking, sleeping) that has not
+    # completed within this timeout no longer blocks node deletion
+    PowerActionTimeoutSeconds: 300
+    # Maximum AUTO_CREATE definitions; 0 uses the global MaxNodeCount only
+    MaxAutoCreateNodes: 0
+    # AUTO_CREATE is default-deny and requires a matching pool.
+    # AutoCreatePools:
+    #   - Name: burst-cpu
+    #     NodeNamePattern: '^burst-cpu-[0-9]{4}$'
+    #     Partitions: [cpu]
+    #     RequiredFeatures: [burst]
+    #     AllowedFeatures: [burst]
+    #     MinCpu: 8
+    #     MaxCpu: 128
+    #     MinMemory: 16G
+    #     MaxMemory: 1024G
+    #     MinSockets: 1
+    #     MaxSockets: 8
+    #     MaxNodes: 200
+    #     Gres: []
   # Flush timeout (ms) for status change batching (default: 100)
   StatusChangeFlushTimeoutMs: 100
   # Batch size threshold for status change processing (default: 1000)

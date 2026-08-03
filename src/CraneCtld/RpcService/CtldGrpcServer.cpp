@@ -62,14 +62,15 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
   const auto& craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   auto begin_result = g_node_manager->BeginRegistration(
-      craned_id, request->generation(), request->token());
+      craned_id, request->generation(), request->token(),
+      request->registration_token());
   if (!begin_result) {
     CRANE_WARN("Reject register request from node {}: {}", craned_id,
                begin_result.error());
     return grpc::Status::OK;
   }
 
-  if (begin_result.value()) {
+  if (begin_result->connected) {
     // Before configure, craned should be connected but not online
     if (g_meta_container->CheckCranedOnline(craned_id)) {
       CRANE_TRACE(
@@ -84,7 +85,8 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
         stub->ConfigureCraned(craned_id, token);
       });
     } else {
-      g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
+      g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token(),
+                                             begin_result->connection_hostname);
     }
   }
 
@@ -96,7 +98,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     const crane::grpc::CranedRegisterRequest* request,
     crane::grpc::CranedRegisterReply* response) {
   auto validation = g_node_manager->ValidateRegistration(
-      request->craned_id(), request->generation(), request->remote_meta());
+      request->craned_id(), request->generation(), request->remote_meta(),
+      request->registration_token());
   if (!validation) {
     CRANE_WARN("Reject register request from node {}: {}", request->craned_id(),
                validation.error());
@@ -129,15 +132,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   if (!stub->CheckToken(request->token())) {
     CRANE_WARN("Reject register request from node {} with invalid token.",
                request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  auto mark_result = g_node_manager->MarkRegistered(request->craned_id(),
-                                                    request->generation());
-  if (!mark_result) {
-    CRANE_ERROR("Failed to register dynamic node {}: {}", request->craned_id(),
-                mark_result.error());
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -186,15 +180,55 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   stub->SetReady();
   if (!g_meta_container->CranedUp(request->craned_id(),
                                   request->remote_meta())) {
+    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
+                                                     request->generation());
+    if (!rollback)
+      CRANE_ERROR("Failed to roll back dynamic node {} registration: {}",
+                  request->craned_id(), rollback.error());
     response->set_ok(false);
     return grpc::Status::OK;
   }
   if (!stub->Connected()) {
     g_meta_container->CranedDown(request->craned_id());
+    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
+                                                     request->generation());
+    if (!rollback)
+      CRANE_ERROR("Failed to persist dynamic node {} disconnect: {}",
+                  request->craned_id(), rollback.error());
     response->set_ok(false);
     return grpc::Status::OK;
   }
+
+  auto mark_result = g_node_manager->MarkRegistered(
+      request->craned_id(), request->generation(), request->remote_meta(),
+      request->registration_token());
+  if (!mark_result) {
+    g_meta_container->CranedDown(request->craned_id());
+    auto rollback = g_node_manager->MarkDisconnected(request->craned_id(),
+                                                     request->generation());
+    if (!rollback)
+      CRANE_ERROR("Failed to roll back dynamic node {} registration: {}",
+                  request->craned_id(), rollback.error());
+    CRANE_ERROR("Failed to register dynamic node {}: {}", request->craned_id(),
+                mark_result.error());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  g_meta_container->PublishCranedState(request->craned_id());
   response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
+    grpc::ServerContext* context,
+    const crane::grpc::PrepareCranedRegistrationRequest* request,
+    crane::grpc::PrepareCranedRegistrationReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  *response = g_node_manager->PrepareCranedRegistration(*request);
   return grpc::Status::OK;
 }
 
@@ -246,18 +280,6 @@ grpc::Status CtldForInternalServiceImpl::QueryCranedInfo(
     *response = g_meta_container->QueryCranedInfo(request->craned_name());
   }
 
-  return grpc::Status::OK;
-}
-
-grpc::Status CtldForInternalServiceImpl::QueryDynamicNodeConfig(
-    grpc::ServerContext* context,
-    const crane::grpc::QueryDynamicNodeConfigRequest* request,
-    crane::grpc::QueryDynamicNodeConfigReply* response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  *response = g_node_manager->QueryDynamicNodeConfig(*request);
   return grpc::Status::OK;
 }
 
@@ -1123,11 +1145,20 @@ grpc::Status CraneCtldServiceImpl::CreateNodes(
 
   auto result = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!result) {
+    CRANE_WARN("Uid {} is not permitted to create dynamic nodes: {}",
+               request->uid(), CraneErrStr(result.error()));
     response->set_reason(CraneErrStr(result.error()));
     return grpc::Status::OK;
   }
 
   *response = g_node_manager->CreateNodes(*request);
+  if (response->ok())
+    CRANE_INFO("Dynamic nodes [{}] created by uid {}.",
+               util::HostNameListToStr(request->node_names()), request->uid());
+  else
+    CRANE_WARN("Uid {} failed to create dynamic nodes [{}]: {}",
+               request->uid(), util::HostNameListToStr(request->node_names()),
+               response->reason());
   return grpc::Status::OK;
 }
 
@@ -1143,11 +1174,24 @@ grpc::Status CraneCtldServiceImpl::DeleteNodes(
 
   auto result = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!result) {
-    response->set_reason(CraneErrStr(result.error()));
+    CRANE_WARN("Uid {} is not permitted to delete dynamic nodes: {}",
+               request->uid(), CraneErrStr(result.error()));
+    for (const auto& node_name : request->node_names()) {
+      response->add_not_deleted_nodes(node_name);
+      response->add_not_deleted_reasons(CraneErrStr(result.error()));
+    }
     return grpc::Status::OK;
   }
 
   *response = g_node_manager->DeleteNodes(*request);
+  if (!response->deleted_nodes().empty())
+    CRANE_INFO("Dynamic nodes [{}] deleted by uid {}.",
+               util::HostNameListToStr(response->deleted_nodes()),
+               request->uid());
+  for (int i = 0; i < response->not_deleted_nodes_size(); ++i)
+    CRANE_WARN("Uid {} failed to delete dynamic node {}: {}", request->uid(),
+               response->not_deleted_nodes(i),
+               response->not_deleted_reasons(i));
   return grpc::Status::OK;
 }
 
@@ -1494,8 +1538,9 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
                  crane::grpc::CranedControlState_Name(request->new_state()),
                  crane_id);
 
-      g_plugin_client->UpdatePowerStateHookAsync(crane_id,
-                                                 request->new_state());
+      g_plugin_client->UpdatePowerStateHookAsync(
+          crane_id, request->new_state(), true,
+          craned_meta->static_meta.dynamic, craned_meta->static_meta.provider);
       response->add_modified_nodes(crane_id);
     }
 
@@ -2861,6 +2906,15 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
              request->craned_id(),
              crane::grpc::CranedPowerState_Name(request->state()));
 
+  auto power_result =
+      g_node_manager->UpdatePowerState(request->craned_id(), request->state());
+  if (!power_result) {
+    CRANE_ERROR("Failed to persist power state of dynamic node {}: {}",
+                request->craned_id(), power_result.error());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
   auto craned_meta = g_meta_container->GetCranedMetaPtr(request->craned_id());
   if (!craned_meta) {
     response->set_ok(false);
@@ -2952,9 +3006,12 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
 
     // Use CRANE_NONE as a placeholder to leave the control state unchanged
     // while toggling auto-power control
+    auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+    CRANE_ASSERT(craned_meta);
     g_plugin_client->UpdatePowerStateHookAsync(
         craned_id, crane::grpc::CranedControlState::CRANE_NONE,
-        request->enable());
+        request->enable(), craned_meta->static_meta.dynamic,
+        craned_meta->static_meta.provider);
 
     response->add_modified_nodes(craned_id);
   }
@@ -3195,7 +3252,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf& listen_conf) {
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&internal_builder);
 
   if (listen_conf.TlsConfig.Enabled)
-    ServerBuilderAddTcpTlsListeningPort(
+    ServerBuilderAddTcpTlsListeningPortForInternal(
         &internal_builder, cranectld_listen_addr,
         listen_conf.CraneCtldForInternalListenPort,
         listen_conf.TlsConfig.InternalCerts, listen_conf.TlsConfig.CaContent);

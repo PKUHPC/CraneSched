@@ -200,10 +200,15 @@ class CranedKeeper {
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
-  void PutNodeIntoUnavailSet(const std::string &crane_id,
-                             const RegToken &token);
+  void PutNodeIntoUnavailSet(const std::string &crane_id, const RegToken &token,
+                             std::string connection_hostname);
 
  private:
+  struct PendingConnection {
+    RegToken token;
+    std::string hostname;
+  };
+
   struct CqTag {
     enum Type : uint8_t { kInitializingCraned, kEstablishedCraned };
     Type type;
@@ -214,7 +219,8 @@ class CranedKeeper {
   // `m_connect_craned_mtx_` held.
   static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
+  void ConnectCranedNode_(CranedId const &craned_id, RegToken token,
+                          std::string connection_hostname);
 
   CqTag *InitCranedStateMachine_(CranedStub *craned,
                                  grpc_connectivity_state new_state);
@@ -246,7 +252,7 @@ class CranedKeeper {
       m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
-  std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
+  std::unordered_map<CranedId, PendingConnection> m_unavail_craned_set_
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
   std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
       ABSL_GUARDED_BY(m_connect_craned_mtx_);

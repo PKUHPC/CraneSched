@@ -28,6 +28,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -61,6 +62,7 @@ class PluginClient {
     INSERT_EVENT,
     UPDATE_POWER_STATE,
     REGISTER_CRANED,
+    NODE_DEFINITION,
     UPDATE_LICENSES,
     TRACE,
     HookTypeCount,
@@ -74,6 +76,7 @@ class PluginClient {
   void InitChannelAndStub(
       const std::string& endpoint,
       size_t trace_hook_max_request_bytes = kDefaultTraceHookMaxRequestBytes);
+  void SetReconnectCallback(std::function<void()> callback);
   bool DrainTraceHooks(std::chrono::microseconds timeout) noexcept;
 
   // These functions are used to add HookEvent into the event queue.
@@ -91,11 +94,20 @@ class PluginClient {
 
   void UpdatePowerStateHookAsync(const std::string& craned_id,
                                  crane::grpc::CranedControlState state,
-                                 bool enable_auto_power_control = true);
+                                 bool enable_auto_power_control = true,
+                                 bool dynamic = false,
+                                 std::string_view provider = {});
 
   void RegisterCranedHookAsync(
       const std::string& craned_id,
-      const std::vector<crane::NetworkInterface>& interfaces);
+      const std::vector<crane::grpc::NetworkInterface>& interfaces,
+      bool dynamic, std::string_view provider,
+      crane::grpc::CranedPowerState power_state,
+      const std::vector<uint32_t>& running_job_ids);
+
+  void NodeDefinitionHookAsync(
+      const crane::grpc::DynamicNodeRecord& record,
+      crane::grpc::plugin::NodeDefinitionAction action);
 
   void UpdateLicensesHookAsync(
       const std::vector<crane::grpc::LicenseInfo>& licenses);
@@ -119,6 +131,8 @@ class PluginClient {
                                          google::protobuf::Message* msg);
   grpc::Status SendRegisterCranedHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
+  grpc::Status SendNodeDefinitionHook_(grpc::ClientContext* context,
+                                       google::protobuf::Message* msg);
 
   grpc::Status SendUpdateLicensesHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
@@ -135,6 +149,8 @@ class PluginClient {
 
   std::thread m_async_send_thread_;
   std::atomic<bool> m_thread_stop_{false};
+  std::mutex m_reconnect_callback_mutex_;
+  std::function<void()> m_reconnect_callback_;
 
   ConcurrentQueue<HookEvent> m_event_queue_;
   size_t m_trace_hook_max_request_bytes_{kDefaultTraceHookMaxRequestBytes};
@@ -152,6 +168,7 @@ class PluginClient {
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
            &PluginClient::SendRegisterCranedHook_,
+           &PluginClient::SendNodeDefinitionHook_,
            &PluginClient::SendUpdateLicensesHook_,
            &PluginClient::SendTraceHook_}};
 };

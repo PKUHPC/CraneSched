@@ -44,6 +44,7 @@ message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
   uint64 generation = 3;
+  string registration_token = 4;
 }
 
 message ConfigureCranedRequest {
@@ -101,10 +102,34 @@ message CranedRegisterRequest {
   CranedRemoteMeta remote_meta = 2;
   google.protobuf.Timestamp token = 3;
   uint64 generation = 4;
+  string registration_token = 5;
 }
 
 message CranedRegisterReply {
   bool ok = 1;
+}
+
+message PrepareCranedRegistrationRequest {
+  DynamicNodeRegistrationMode mode = 1;
+  string requested_node_name = 2;
+  string pool = 3;
+  string physical_hostname = 4;
+  DynamicNodeSpec reported_spec = 5;
+  repeated string requested_partitions = 6;
+  string client_nonce = 7;
+  uint64 generation = 8;
+}
+
+message PrepareCranedRegistrationReply {
+  bool ok = 1;
+  string reason = 2;
+  string node_name = 3;
+  uint64 generation = 4;
+  string registration_token = 5;
+  DynamicNodeSpec effective_spec = 6;
+  repeated string partition_names = 7;
+  google.protobuf.Timestamp expire_time = 8;
+  uint64 catalog_revision = 9;
 }
 
 message CranedPingRequest {
@@ -309,6 +334,12 @@ message CreateNodesRequest {
   repeated string node_names = 2;
   DynamicNodeSpec spec = 3;
   repeated string partition_names = 4;
+  DynamicNodeOrigin origin = 5;
+  DynamicNodeLifecycle lifecycle = 6;
+  string pool = 7;
+  DynamicNodePowerState power_state = 8;
+  string provider = 9;
+  string provider_profile = 10;
 }
 
 message CreateNodesReply {
@@ -322,18 +353,9 @@ message DeleteNodesRequest {
 }
 
 message DeleteNodesReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message QueryDynamicNodeConfigRequest { string node_name = 1; }
-
-message QueryDynamicNodeConfigReply {
-  bool ok = 1;
-  string reason = 2;
-  DynamicNodeSpec spec = 3;
-  repeated string partition_names = 4;
-  uint64 generation = 5;
+  repeated string deleted_nodes = 1;
+  repeated string not_deleted_nodes = 2;
+  repeated string not_deleted_reasons = 3;
 }
 
 message QueryPartitionInfoRequest {
@@ -1806,14 +1828,13 @@ service CraneCtldForInternal {
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+  rpc PrepareCranedRegistration(PrepareCranedRegistrationRequest)
+      returns (PrepareCranedRegistrationReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
   rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-
-  rpc QueryDynamicNodeConfig(QueryDynamicNodeConfigRequest)
-      returns (QueryDynamicNodeConfigReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);

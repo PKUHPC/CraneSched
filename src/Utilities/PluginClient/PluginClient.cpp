@@ -87,6 +87,11 @@ void PluginClient::InitChannelAndStub(const std::string& endpoint,
              m_trace_hook_max_request_bytes_);
 }
 
+void PluginClient::SetReconnectCallback(std::function<void()> callback) {
+  std::lock_guard lock(m_reconnect_callback_mutex_);
+  m_reconnect_callback_ = std::move(callback);
+}
+
 bool PluginClient::DrainTraceHooks(std::chrono::microseconds timeout) noexcept {
   auto target = m_trace_hooks_enqueued_.load(std::memory_order_acquire);
   if (m_trace_hooks_completed_.load(std::memory_order_acquire) >= target)
@@ -118,6 +123,7 @@ size_t PluginClient::CountTraceHookEvents_(const std::list<HookEvent>& events) {
 
 void PluginClient::AsyncSendThread_() {
   bool prev_conn_state = false;
+  bool ever_connected = false;
 
   while (true) {
     bool stopping = m_thread_stop_.load();
@@ -132,6 +138,11 @@ void PluginClient::AsyncSendThread_() {
 
     if (!prev_conn_state && connected) {
       CRANE_INFO("[Plugin] Plugind is connected.");
+      if (ever_connected) {
+        std::lock_guard lock(m_reconnect_callback_mutex_);
+        if (m_reconnect_callback_) m_reconnect_callback_();
+      }
+      ever_connected = true;
     }
     prev_conn_state = connected;
 
@@ -173,6 +184,7 @@ void PluginClient::AsyncSendThread_() {
             int(status.error_code()));
 
         if (status.error_code() == grpc::UNAVAILABLE) {
+          prev_conn_state = false;
           // During shutdown, drop unsent events instead of retrying
           if (stopping) {
             MarkTraceHooksCompleted_(CountTraceHookEvents_(events));
@@ -290,6 +302,20 @@ grpc::Status PluginClient::SendRegisterCranedHook_(
 
   CRANE_TRACE("[Plugin] Sending RegisterCranedHook.");
   return m_stub_->RegisterCranedHook(context, *request, &reply);
+}
+
+grpc::Status PluginClient::SendNodeDefinitionHook_(
+    grpc::ClientContext* context, google::protobuf::Message* msg) {
+  using crane::grpc::plugin::NodeDefinitionHookReply;
+  using crane::grpc::plugin::NodeDefinitionHookRequest;
+
+  auto* request = dynamic_cast<NodeDefinitionHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+
+  NodeDefinitionHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending NodeDefinitionHook.");
+  return m_stub_->NodeDefinitionHook(context, *request, &reply);
 }
 
 grpc::Status PluginClient::SendTraceHook_(grpc::ClientContext* context,
@@ -467,12 +493,14 @@ void PluginClient::NodeEventHookAsync(
 
 void PluginClient::UpdatePowerStateHookAsync(
     const std::string& craned_id, crane::grpc::CranedControlState state,
-    bool enable_auto_power_control) {
+    bool enable_auto_power_control, bool dynamic, std::string_view provider) {
   auto request =
       std::make_unique<crane::grpc::plugin::UpdatePowerStateHookRequest>();
   request->set_craned_id(craned_id);
   request->set_state(state);
   request->set_enable_auto_power_control(enable_auto_power_control);
+  request->set_dynamic(dynamic);
+  request->set_provider(provider);
 
   HookEvent e{HookType::UPDATE_POWER_STATE,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
@@ -481,16 +509,40 @@ void PluginClient::UpdatePowerStateHookAsync(
 
 void PluginClient::RegisterCranedHookAsync(
     const std::string& craned_id,
-    const std::vector<crane::NetworkInterface>& interfaces) {
+    const std::vector<crane::grpc::NetworkInterface>& interfaces, bool dynamic,
+    std::string_view provider, crane::grpc::CranedPowerState power_state,
+    const std::vector<uint32_t>& running_job_ids) {
   auto request =
       std::make_unique<crane::grpc::plugin::RegisterCranedHookRequest>();
   request->set_craned_id(craned_id);
+  request->set_dynamic(dynamic);
+  request->set_provider(provider);
+  request->set_power_state(power_state);
 
   for (const auto& interface : interfaces) {
     request->mutable_network_interfaces()->Add()->CopyFrom(interface);
   }
+  request->mutable_running_job_ids()->Assign(running_job_ids.begin(),
+                                             running_job_ids.end());
 
   HookEvent e{HookType::REGISTER_CRANED,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
+
+void PluginClient::NodeDefinitionHookAsync(
+    const crane::grpc::DynamicNodeRecord& record,
+    crane::grpc::plugin::NodeDefinitionAction action) {
+  auto request =
+      std::make_unique<crane::grpc::plugin::NodeDefinitionHookRequest>();
+  request->set_craned_id(record.node_name());
+  request->set_action(action);
+  request->set_lifecycle(record.lifecycle());
+  request->set_power_state(record.power_state());
+  request->set_provider(record.provider());
+  request->set_provider_profile(record.provider_profile());
+
+  HookEvent e{HookType::NODE_DEFINITION,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }

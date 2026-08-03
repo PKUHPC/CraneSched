@@ -25,6 +25,7 @@
 
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <set>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -41,6 +42,7 @@
 #include "Security/VaultClient.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/String.h"
 #include "crane/Tracing.h"
 #ifdef CRANE_ENABLE_TRACING
 #  include "crane/CraneSpanExporter.h"
@@ -98,6 +100,183 @@ void ParseCtldConfig(const YAML::Node& config) {
         ctld_cfg["MaxRequeueCount"], Ctld::kDefaultMaxRequeueCount);
     ctld_config.MaxNodeCount =
         YamlValueOr<uint32_t>(ctld_cfg["MaxNodeCount"], 0);
+
+    if (ctld_cfg["DynamicNodes"]) {
+      const auto& dynamic_cfg = ctld_cfg["DynamicNodes"];
+      ctld_config.DynamicNodes.Enabled =
+          YamlValueOr<bool>(dynamic_cfg["Enabled"], false);
+      ctld_config.DynamicNodes.AutoCreate =
+          YamlValueOr<bool>(dynamic_cfg["AutoCreate"], false);
+      ctld_config.DynamicNodes.RegistrationLeaseSeconds =
+          YamlValueOr<uint32_t>(dynamic_cfg["RegistrationLeaseSeconds"], 30);
+      ctld_config.DynamicNodes.MaxAutoCreateNodes =
+          YamlValueOr<uint32_t>(dynamic_cfg["MaxAutoCreateNodes"], 0);
+      ctld_config.DynamicNodes.TombstoneRetentionSeconds =
+          YamlValueOr<uint32_t>(dynamic_cfg["TombstoneRetentionSeconds"],
+                                24 * 60 * 60);
+      ctld_config.DynamicNodes.PowerActionTimeoutSeconds =
+          YamlValueOr<uint32_t>(dynamic_cfg["PowerActionTimeoutSeconds"], 300);
+      if (ctld_config.DynamicNodes.RegistrationLeaseSeconds == 0) {
+        CRANE_ERROR(
+            "CraneCtld.DynamicNodes.RegistrationLeaseSeconds must be greater "
+            "than zero.");
+        std::exit(1);
+      }
+      if (ctld_config.DynamicNodes.TombstoneRetentionSeconds == 0) {
+        CRANE_ERROR(
+            "CraneCtld.DynamicNodes.TombstoneRetentionSeconds must be greater "
+            "than zero.");
+        std::exit(1);
+      }
+      if (ctld_config.DynamicNodes.PowerActionTimeoutSeconds == 0) {
+        CRANE_ERROR(
+            "CraneCtld.DynamicNodes.PowerActionTimeoutSeconds must be greater "
+            "than zero.");
+        std::exit(1);
+      }
+
+      if (dynamic_cfg["AutoCreatePools"]) {
+        if (!dynamic_cfg["AutoCreatePools"].IsSequence()) {
+          CRANE_ERROR(
+              "CraneCtld.DynamicNodes.AutoCreatePools must be a sequence.");
+          std::exit(1);
+        }
+
+        std::unordered_set<std::string> pool_names;
+        for (const auto& pool_cfg : dynamic_cfg["AutoCreatePools"]) {
+          Ctld::Config::CraneCtldConf::DynamicNodeConfig::AutoCreatePool pool;
+          pool.Name = YamlValueOr<std::string>(pool_cfg["Name"], "");
+          pool.NodeNamePattern =
+              YamlValueOr<std::string>(pool_cfg["NodeNamePattern"], "");
+          if (pool.Name.empty() || !pool_names.emplace(pool.Name).second) {
+            CRANE_ERROR("Dynamic node AutoCreate pool names must be unique.");
+            std::exit(1);
+          }
+          if (pool.NodeNamePattern.empty()) {
+            CRANE_ERROR("AutoCreate pool {} requires NodeNamePattern.",
+                        pool.Name);
+            std::exit(1);
+          }
+          try {
+            static_cast<void>(std::regex(pool.NodeNamePattern));
+          } catch (const std::regex_error&) {
+            CRANE_ERROR("AutoCreate pool {} has an invalid NodeNamePattern.",
+                        pool.Name);
+            std::exit(1);
+          }
+
+          if (!pool_cfg["Partitions"] || !pool_cfg["Partitions"].IsSequence()) {
+            CRANE_ERROR("AutoCreate pool {} requires Partitions.", pool.Name);
+            std::exit(1);
+          }
+          std::unordered_set<std::string> partition_names;
+          for (auto partition :
+               pool_cfg["Partitions"].as<std::vector<std::string>>()) {
+            if (partition.empty() ||
+                !partition_names.emplace(partition).second) {
+              CRANE_ERROR(
+                  "AutoCreate pool {} contains an invalid partition list.",
+                  pool.Name);
+              std::exit(1);
+            }
+            pool.Partitions.emplace_back(std::move(partition));
+          }
+          if (pool.Partitions.empty()) {
+            CRANE_ERROR("AutoCreate pool {} requires Partitions.", pool.Name);
+            std::exit(1);
+          }
+
+          auto parse_features = [&](std::string_view key,
+                                    std::unordered_set<std::string>* output) {
+            if (!pool_cfg[std::string(key)]) return;
+            if (!pool_cfg[std::string(key)].IsSequence()) {
+              CRANE_ERROR("AutoCreate pool {} field {} must be a sequence.",
+                          pool.Name, key);
+              std::exit(1);
+            }
+            for (const auto& feature :
+                 pool_cfg[std::string(key)].as<std::vector<std::string>>()) {
+              if (feature.empty() || !output->emplace(feature).second) {
+                CRANE_ERROR(
+                    "AutoCreate pool {} field {} contains invalid features.",
+                    pool.Name, key);
+                std::exit(1);
+              }
+            }
+          };
+          parse_features("RequiredFeatures", &pool.RequiredFeatures);
+          if (pool_cfg["AllowedFeatures"])
+            parse_features("AllowedFeatures", &pool.AllowedFeatures);
+          else
+            pool.AllowedFeatures = pool.RequiredFeatures;
+          if (!std::ranges::all_of(
+                  pool.RequiredFeatures, [&](const auto& feature) {
+                    return pool.AllowedFeatures.contains(feature);
+                  })) {
+            CRANE_ERROR("AutoCreate pool {} RequiredFeatures must be allowed.",
+                        pool.Name);
+            std::exit(1);
+          }
+
+          pool.MinCpu = YamlValueOr<uint32_t>(pool_cfg["MinCpu"], 0);
+          pool.MaxCpu = YamlValueOr<uint32_t>(pool_cfg["MaxCpu"], 0);
+          pool.MinSockets = YamlValueOr<uint32_t>(pool_cfg["MinSockets"], 0);
+          pool.MaxSockets = YamlValueOr<uint32_t>(pool_cfg["MaxSockets"], 0);
+          pool.MaxNodes = YamlValueOr<uint32_t>(pool_cfg["MaxNodes"], 0);
+          if (!pool_cfg["MinMemory"] || !pool_cfg["MaxMemory"]) {
+            CRANE_ERROR("AutoCreate pool {} requires MinMemory and MaxMemory.",
+                        pool.Name);
+            std::exit(1);
+          }
+          auto min_memory =
+              util::ParseMemory(pool_cfg["MinMemory"].as<std::string>());
+          auto max_memory =
+              util::ParseMemory(pool_cfg["MaxMemory"].as<std::string>());
+          if (!min_memory || !max_memory) {
+            CRANE_ERROR("AutoCreate pool {} has invalid memory bounds.",
+                        pool.Name);
+            std::exit(1);
+          }
+          pool.MinMemoryBytes = *min_memory;
+          pool.MaxMemoryBytes = *max_memory;
+          if (pool.MinCpu == 0 || pool.MaxCpu < pool.MinCpu ||
+              pool.MinMemoryBytes == 0 ||
+              pool.MaxMemoryBytes < pool.MinMemoryBytes ||
+              pool.MinSockets == 0 || pool.MaxSockets < pool.MinSockets ||
+              pool.MaxSockets > pool.MaxCpu || pool.MaxNodes == 0) {
+            CRANE_ERROR("AutoCreate pool {} has invalid resource bounds.",
+                        pool.Name);
+            std::exit(1);
+          }
+
+          if (pool_cfg["Gres"]) {
+            if (!pool_cfg["Gres"].IsSequence()) {
+              CRANE_ERROR("AutoCreate pool {} Gres must be a sequence.",
+                          pool.Name);
+              std::exit(1);
+            }
+            std::set<std::pair<std::string, std::string>> gres_keys;
+            for (const auto& gres_cfg : pool_cfg["Gres"]) {
+              Ctld::Config::CraneCtldConf::DynamicNodeConfig::GresRange range{
+                  .Name = YamlValueOr<std::string>(gres_cfg["Name"], ""),
+                  .Type = YamlValueOr<std::string>(gres_cfg["Type"], ""),
+                  .Min = YamlValueOr<uint64_t>(gres_cfg["Min"], 0),
+                  .Max = YamlValueOr<uint64_t>(gres_cfg["Max"], 0)};
+              if (range.Name.empty() || range.Max == 0 ||
+                  range.Max < range.Min ||
+                  !gres_keys.emplace(range.Name, range.Type).second) {
+                CRANE_ERROR("AutoCreate pool {} contains invalid GRES bounds.",
+                            pool.Name);
+                std::exit(1);
+              }
+              pool.Gres.emplace_back(std::move(range));
+            }
+          }
+          ctld_config.DynamicNodes.AutoCreatePools.emplace_back(
+              std::move(pool));
+        }
+      }
+    }
   }
 
   g_config.CtldConf = std::move(ctld_config);
@@ -1069,6 +1248,31 @@ void ParseConfig(int argc, char** argv) {
         parsed_args["port"].as<std::string>();
   }
 
+  const auto& dynamic_nodes = g_config.CtldConf.DynamicNodes;
+  if (dynamic_nodes.Enabled && !g_config.ListenConf.TlsConfig.Enabled) {
+    CRANE_ERROR("DynamicNodes requires TLS to be enabled.");
+    std::exit(1);
+  }
+  if (dynamic_nodes.AutoCreate) {
+    if (!dynamic_nodes.Enabled) {
+      CRANE_ERROR("Dynamic node AutoCreate requires DynamicNodes.Enabled.");
+      std::exit(1);
+    }
+    if (dynamic_nodes.AutoCreatePools.empty()) {
+      CRANE_ERROR("Dynamic node AutoCreate requires at least one pool.");
+      std::exit(1);
+    }
+  }
+  for (const auto& pool : dynamic_nodes.AutoCreatePools) {
+    for (const auto& partition : pool.Partitions) {
+      if (!g_config.Partitions.contains(partition)) {
+        CRANE_ERROR("AutoCreate pool {} references unknown partition {}.",
+                    pool.Name, partition);
+        std::exit(1);
+      }
+    }
+  }
+
   if (crane::GetIpAddrVer(g_config.ListenConf.CraneCtldListenAddr) == -1) {
     CRANE_ERROR("Listening address is invalid.");
     std::exit(1);
@@ -1091,6 +1295,7 @@ void DestroyCtldGlobalVariables() {
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();
+  if (g_plugin_client != nullptr) g_plugin_client->SetReconnectCallback({});
   g_node_manager.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
@@ -1239,6 +1444,12 @@ void InitializeCtldGlobalVariables() {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
     // No need to worry disconnect before job scheduler init
     g_meta_container->CranedDown(craned_id);
+    if (g_node_manager) {
+      auto result = g_node_manager->MarkDisconnected(craned_id);
+      if (!result)
+        CRANE_WARN("Failed to persist dynamic node {} down state: {}",
+                   craned_id, result.error());
+    }
   });
 
   ok = g_db_client->Init();
@@ -1261,6 +1472,11 @@ void InitializeCtldGlobalVariables() {
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  g_node_manager->ReconcilePluginState();
+  if (g_plugin_client != nullptr) {
+    g_plugin_client->SetReconnectCallback(
+        [] { g_node_manager->ReconcilePluginState(); });
+  }
   util::SetCurrentThreadName("CraneCtldMain");
 }
 

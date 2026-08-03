@@ -1032,6 +1032,23 @@ bool LegacyEmbeddedDbClient::StoreDynamicNodeRecords(
   return m_node_db_->Commit(txn_id).has_value();
 }
 
+bool LegacyEmbeddedDbClient::DeleteDynamicNodeRecords(
+    const std::vector<CranedId>& node_names) {
+  auto txn_result = m_node_db_->Begin();
+  if (!txn_result) return false;
+
+  txn_id_t txn_id = txn_result.value();
+  for (const auto& node_name : node_names) {
+    auto result = m_node_db_->Delete(txn_id, node_name);
+    if (!result) {
+      m_node_db_->Abort(txn_id);
+      return false;
+    }
+  }
+
+  return m_node_db_->Commit(txn_id).has_value();
+}
+
 bool LegacyEmbeddedDbClient::AppendJobsToPendingAndAdvanceJobIds(
     const std::vector<JobInCtld*>& jobs,
     const std::vector<ExtraVariableWrite>& extra_variable_writes) {

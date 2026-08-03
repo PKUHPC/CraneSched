@@ -655,6 +655,11 @@ ResourceInNodeV3 operator+(const ResourceInNodeV3& lhs,
 ResourceInNodeV3 operator-(const ResourceInNodeV3& lhs,
                            const ResourceInNodeV3& rhs);
 bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs);
+bool operator==(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs);
+
+// Build the schedulable resources of a dynamic node from its approved spec.
+ResourceInNodeV3 ResourceInNodeFromDynamicSpec(
+    const crane::grpc::DynamicNodeSpec& spec);
 
 // ResourceV3: Cluster-level execution phase resource tracking
 // Maps node IDs to their specific resource allocations

@@ -31,6 +31,7 @@
 #include "Database/EmbeddedDbClient.h"
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
+#include "Node/NodeManager.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/Tracing.h"
@@ -7214,7 +7215,12 @@ void SchedulerAlgo::NodeSelect(
               continue;
             }
             if (!craned_meta->alive || craned_meta->drain ||
-                craned_meta->static_meta.deleting) {
+                (craned_meta->power_state != crane::grpc::CRANE_POWER_IDLE &&
+                 craned_meta->power_state != crane::grpc::CRANE_POWER_ACTIVE) ||
+                craned_meta->static_meta.deleting ||
+                (craned_meta->static_meta.dynamic &&
+                 craned_meta->static_meta.lifecycle !=
+                     crane::grpc::DYNAMIC_NODE_LIFECYCLE_ACTIVE)) {
               CRANE_TRACE("Craned {} is unavailable for scheduling, skip it",
                           craned_id);
               continue;
@@ -7455,6 +7461,73 @@ void SchedulerAlgo::NodeSelect(
         }
       }
     }
+  }
+
+  if (!g_config.CtldConf.DynamicNodes.Enabled || !g_config.Plugin.Enabled ||
+      g_plugin_client == nullptr)
+    return;
+  std::unordered_set<CranedId> reserved_scale_up_nodes;
+  for (const auto& job : job_ptr_vec) {
+    if (job->reason != "Resource" || !job->reservation.empty()) continue;
+
+    auto excluded_nodes = job->excluded_nodes;
+    excluded_nodes.insert(reserved_scale_up_nodes.begin(),
+                          reserved_scale_up_nodes.end());
+
+    std::vector<uint32_t> available_node_task_counts;
+    for (const auto* node_state :
+         part_node_state_ptrs_map.at(job->partition_id)) {
+      const auto& node_id = node_state->craned_id;
+      if ((!job->included_nodes.empty() &&
+           !job->included_nodes.contains(node_id)) ||
+          excluded_nodes.contains(node_id))
+        continue;
+
+      const auto& available = node_state->time_avail_res_map.begin()->second;
+      if (job->exclusive && !(node_state->res_total <= available)) continue;
+
+      ResourceInNodeV3 remaining =
+          job->exclusive ? node_state->res_total : available;
+      ResourceInNodeV3 feasible;
+      const ResourceView minimum =
+          job->req_node_res_view +
+          job->req_task_res_view * job->ntasks_per_node_min;
+      if (!minimum.GetFeasibleResourceInNode(remaining, &feasible)) continue;
+      remaining -= feasible;
+
+      uint32_t tasks = job->ntasks_per_node_min;
+      while (tasks < job->ntasks_per_node_max &&
+             job->req_task_res_view.GetFeasibleResourceInNode(remaining,
+                                                              &feasible)) {
+        ++tasks;
+        remaining -= feasible;
+      }
+      available_node_task_counts.emplace_back(tasks);
+    }
+
+    auto scale_up = g_node_manager->RequestScaleUp(
+        job->partition_id, job->req_node_res_view, job->req_task_res_view,
+        job->ntasks_per_node_min, job->ntasks_per_node_max, job->node_num,
+        job->ntasks, available_node_task_counts, job->included_nodes,
+        excluded_nodes);
+    if (!scale_up) {
+      CRANE_WARN("Failed to request scale-up for pending job #{}: {}",
+                 job->job_id, scale_up.error());
+      continue;
+    }
+    reserved_scale_up_nodes.insert(scale_up->reserved_nodes.begin(),
+                                   scale_up->reserved_nodes.end());
+    for (const auto& node_id : scale_up->nodes_to_wake) {
+      g_plugin_client->UpdatePowerStateHookAsync(
+          node_id, crane::grpc::CranedControlState::CRANE_WAKE, true, true,
+          kPowerControlProvider);
+    }
+    for (const auto& node_id : scale_up->nodes_to_power_on) {
+      g_plugin_client->UpdatePowerStateHookAsync(
+          node_id, crane::grpc::CranedControlState::CRANE_POWERON, true, true,
+          kPowerControlProvider);
+    }
+    if (scale_up->in_progress) job->reason = "PoweringUp";
   }
 }
 
@@ -8332,12 +8405,16 @@ void JobScheduler::TerminateJobsOnCraned(const CranedId& craned_id,
   }
 }
 
-bool JobScheduler::HasJobsOnNodes(const std::vector<CranedId>& node_ids) {
+std::unordered_set<CranedId> JobScheduler::FilterNodesWithJobs(
+    const std::vector<CranedId>& node_ids) {
   LockGuard indexes_guard(&m_job_indexes_mtx_);
-  return std::ranges::any_of(node_ids, [this](const CranedId& node_id) {
+  std::unordered_set<CranedId> busy_nodes;
+  for (const CranedId& node_id : node_ids) {
     auto it = m_node_to_jobs_map_.find(node_id);
-    return it != m_node_to_jobs_map_.end() && !it->second.empty();
-  });
+    if (it != m_node_to_jobs_map_.end() && !it->second.empty())
+      busy_nodes.emplace(node_id);
+  }
+  return busy_nodes;
 }
 
 void MultiFactorPriority::GetOrderedJobPtrVec(

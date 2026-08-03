@@ -293,6 +293,11 @@ class CtldForInternalServiceImpl final
       const crane::grpc::CranedRegisterRequest* request,
       crane::grpc::CranedRegisterReply* response) override;
 
+  grpc::Status PrepareCranedRegistration(
+      grpc::ServerContext* context,
+      const crane::grpc::PrepareCranedRegistrationRequest* request,
+      crane::grpc::PrepareCranedRegistrationReply* response) override;
+
   grpc::Status CranedPing(grpc::ServerContext* context,
                           const crane::grpc::CranedPingRequest* request,
                           crane::grpc::CranedPingReply* response) override;
@@ -306,11 +311,6 @@ class CtldForInternalServiceImpl final
       grpc::ServerContext* context,
       const crane::grpc::QueryCranedInfoRequest* request,
       crane::grpc::QueryCranedInfoReply* response) override;
-
-  grpc::Status QueryDynamicNodeConfig(
-      grpc::ServerContext* context,
-      const crane::grpc::QueryDynamicNodeConfigRequest* request,
-      crane::grpc::QueryDynamicNodeConfigReply* response) override;
 
   grpc::Status CforedStream(
       grpc::ServerContext* context,

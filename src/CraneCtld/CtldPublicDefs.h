@@ -81,6 +81,10 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
 constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
 
+// Provider name of dynamic nodes whose power is driven by the powerControl
+// plugin.
+constexpr std::string_view kPowerControlProvider = "powerControl";
+
 // Since Unqlite has a limitation of about 900000 jobs per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
@@ -112,6 +116,40 @@ struct Config {
     bool JobRequeue{kDefaultJobRequeue};
     int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
     uint32_t MaxNodeCount{0};
+
+    struct DynamicNodeConfig {
+      struct GresRange {
+        std::string Name;
+        std::string Type;
+        uint64_t Min{0};
+        uint64_t Max{0};
+      };
+
+      struct AutoCreatePool {
+        std::string Name;
+        std::string NodeNamePattern;
+        std::vector<PartitionId> Partitions;
+        std::unordered_set<std::string> RequiredFeatures;
+        std::unordered_set<std::string> AllowedFeatures;
+        uint32_t MinCpu{0};
+        uint32_t MaxCpu{0};
+        uint64_t MinMemoryBytes{0};
+        uint64_t MaxMemoryBytes{0};
+        uint32_t MinSockets{0};
+        uint32_t MaxSockets{0};
+        uint32_t MaxNodes{0};
+        std::vector<GresRange> Gres;
+      };
+
+      bool Enabled{false};
+      bool AutoCreate{false};
+      uint32_t RegistrationLeaseSeconds{30};
+      uint32_t MaxAutoCreateNodes{0};
+      uint32_t TombstoneRetentionSeconds{24 * 60 * 60};
+      uint32_t PowerActionTimeoutSeconds{300};
+      std::vector<AutoCreatePool> AutoCreatePools;
+    };
+    DynamicNodeConfig DynamicNodes;
   };
   CraneCtldConf CtldConf;
 

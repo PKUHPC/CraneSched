@@ -95,6 +95,8 @@ message UpdatePowerStateHookRequest {
   string craned_id = 1;
   CranedControlState state = 2;
   bool enable_auto_power_control = 3;
+  bool dynamic = 4;
+  string provider = 5;
 }
 
 message UpdatePowerStateHookReply {
@@ -104,9 +106,32 @@ message UpdatePowerStateHookReply {
 message RegisterCranedHookRequest {
   string craned_id = 1;
   repeated NetworkInterface network_interfaces = 2;
+  bool dynamic = 3;
+  string provider = 4;
+  CranedPowerState power_state = 5;
+  repeated uint32 running_job_ids = 6;
 }
 
 message RegisterCranedHookReply {
+  bool ok = 1;
+}
+
+enum NodeDefinitionAction {
+  NODE_DEFINITION_ACTION_UNSPECIFIED = 0;
+  NODE_DEFINITION_ACTION_UPSERT = 1;
+  NODE_DEFINITION_ACTION_REMOVE = 2;
+}
+
+message NodeDefinitionHookRequest {
+  string craned_id = 1;
+  NodeDefinitionAction action = 2;
+  DynamicNodeLifecycle lifecycle = 3;
+  DynamicNodePowerState power_state = 4;
+  string provider = 5;
+  string provider_profile = 6;
+}
+
+message NodeDefinitionHookReply {
   bool ok = 1;
 }
 
@@ -151,6 +176,7 @@ service CranePluginD {
   rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
   rpc UpdatePowerStateHook(UpdatePowerStateHookRequest) returns (UpdatePowerStateHookReply);
   rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
+  rpc NodeDefinitionHook(NodeDefinitionHookRequest) returns (NodeDefinitionHookReply);
   rpc UpdateLicensesHook(UpdateLicensesHookRequest) returns (UpdateLicensesHookReply);
   rpc TraceHook(TraceHookRequest) returns (TraceHookReply);
 

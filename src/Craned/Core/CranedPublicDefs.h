@@ -195,6 +195,15 @@ struct Config {
 
   bool CranedForeground{};
   bool Dynamic{};
+  crane::grpc::DynamicNodeRegistrationMode DynamicRegistrationMode{
+      crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED};
+  std::string DynamicPool;
+  std::vector<std::string> DynamicFeatures;
+  std::vector<std::string> DynamicPartitions;
+  std::string DynamicRegistrationToken;
+  std::string DynamicRegistrationNonce;
+  std::string PhysicalHostname;
+  crane::grpc::DynamicNodeSpec DynamicReportedSpec;
   uint64_t Generation{};
 
   std::string Hostname;
@@ -236,6 +245,25 @@ struct Config {
 };
 
 inline Config g_config{};
+
+// Build the two-phase registration request of this dynamic node from
+// g_config. Used for both the initial preparation and lease renewals.
+inline crane::grpc::PrepareCranedRegistrationRequest
+BuildPrepareCranedRegistrationRequest() {
+  crane::grpc::PrepareCranedRegistrationRequest request;
+  request.set_mode(g_config.DynamicRegistrationMode);
+  if (g_config.DynamicRegistrationMode !=
+      crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_FUTURE_POOL)
+    request.set_requested_node_name(g_config.Hostname);
+  request.set_pool(g_config.DynamicPool);
+  request.set_physical_hostname(g_config.PhysicalHostname);
+  *request.mutable_reported_spec() = g_config.DynamicReportedSpec;
+  request.mutable_requested_partitions()->Assign(
+      g_config.DynamicPartitions.begin(), g_config.DynamicPartitions.end());
+  request.set_client_nonce(g_config.DynamicRegistrationNonce);
+  request.set_generation(g_config.Generation);
+  return request;
+}
 
 struct RunTimeStatus {
   std::shared_ptr<spdlog::async_logger> conn_logger;
