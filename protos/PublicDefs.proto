@@ -740,7 +740,10 @@ message DynamicNodeSpec {
   uint32 cpu_count = 1;
   uint64 memory_bytes = 2;
   uint32 sockets = 3;
-  DedicatedResourceInNode gres = 4;
+  // GRES as name/type counts. Concrete device slots are only known to the
+  // craned; the controller synthesizes placeholder slots for nodes that
+  // have not registered yet.
+  GresMap gres = 4;
   repeated string features = 5;
 }
 
@@ -787,6 +790,8 @@ enum DynamicNodeRuntimeState {
   DYNAMIC_NODE_RUNTIME_STATE_DELETING = 4;
 }
 
+// The controller-internal persistence record of a dynamic node. It is never
+// sent to clients; query RPCs expose dynamic node state via CranedInfo.
 message DynamicNodeRecord {
   string node_name = 1;
   DynamicNodeSpec spec = 2;
@@ -800,7 +805,9 @@ message DynamicNodeRecord {
   DynamicNodeSpec effective_spec = 10;
   string pool = 11;
   string physical_hostname = 12;
-  string registration_token = 13;
+  // SHA-256 hex digest of the registration token. The raw token is only
+  // returned once in PrepareCranedRegistrationReply and never stored.
+  string registration_token_digest = 13;
   string registration_nonce = 14;
   google.protobuf.Timestamp lease_expire_time = 15;
   uint64 revision = 16;
@@ -809,6 +816,11 @@ message DynamicNodeRecord {
   repeated NetworkInterface network_interfaces = 19;
   google.protobuf.Timestamp tombstone_time = 20;
   google.protobuf.Timestamp power_state_change_time = 21;
+  uint32 schema_version = 22;
+  // The concrete GRES devices the craned bound at its last registration.
+  // They replace the placeholder slots synthesized from spec counts in the
+  // runtime topology.
+  DedicatedResourceInNode registered_gres = 23;
 }
 
 message PartitionInfo {
@@ -1038,6 +1050,10 @@ enum ErrCode {
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 109;     // Partition max_submit_jobs exceeded (user dimension)
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT = 110;  // Partition max_submit_jobs exceeded (account dimension)
   ERR_NODE_STALE_GENERATION = 111;                  // Dynamic node was deleted or recreated; the held identity is stale
+  ERR_NODE_ALREADY_EXISTS = 112;                    // Node name already exists in the cluster
+  ERR_NODE_NOT_DYNAMIC = 113;                       // Operation is only valid for dynamic nodes
+  ERR_NODE_BUSY = 114;                              // Node still has jobs, allocated resources or reservations
+  ERR_NODE_LIMIT_REACHED = 115;                     // MaxNodeCount or pool node limit reached
 }
 
 enum EntityType {

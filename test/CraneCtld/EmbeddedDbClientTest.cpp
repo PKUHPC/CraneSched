@@ -9,13 +9,12 @@
  */
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <unistd.h>
 
 #include "Database/EmbeddedDbClient.h"
 #include "crane/Logger.h"
@@ -102,6 +101,7 @@ void CleanupDbPath(const std::string& db_path) {
   fs::remove(db_path + "var");
   fs::remove(db_path + "fix");
   fs::remove(db_path + "resv");
+  fs::remove(db_path + "node");
   fs::remove(db_path + "step_var");
   fs::remove(db_path + "step_fix");
 }
@@ -137,7 +137,8 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
   const std::string db_path = DbBasePath(backend);
   CleanupDbPath(db_path);
 
-  auto client = std::make_unique<Ctld::EmbeddedDbClient>();
+  auto client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(client, nullptr);
   ASSERT_TRUE(client->Init(db_path));
 
   auto pending = MakeJob("pending-job", crane::grpc::Pending);
@@ -186,7 +187,8 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
 
   client.reset();
 
-  auto recovered_client = std::make_unique<Ctld::EmbeddedDbClient>();
+  auto recovered_client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(recovered_client, nullptr);
   ASSERT_TRUE(recovered_client->Init(db_path));
 
   Ctld::EmbeddedDbClient::DbSnapshot snapshot;
@@ -214,14 +216,92 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
   CleanupDbPath(db_path);
 }
 
+Ctld::EmbeddedDbClient::DynamicNodeRecord MakeDynamicNodeRecord(
+    const std::string& name, uint64_t generation) {
+  Ctld::EmbeddedDbClient::DynamicNodeRecord record;
+  record.set_node_name(name);
+  record.set_schema_version(1);
+  record.set_generation(generation);
+  record.set_origin(crane::grpc::DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN);
+  record.set_lifecycle(crane::grpc::DYNAMIC_NODE_LIFECYCLE_FUTURE);
+  record.set_power_state(crane::grpc::DYNAMIC_NODE_POWER_STATE_OFF);
+  record.mutable_spec()->set_cpu_count(4);
+  record.mutable_spec()->set_memory_bytes(uint64_t{8} << 30);
+  record.mutable_spec()->set_sockets(1);
+  record.add_partition_names("CPU");
+  return record;
+}
+
+void RunDynamicNodeRoundTrip(const std::string& backend) {
+  g_config.CraneEmbeddedDbBackend = backend;
+  g_config.RocksDb.SyncWrites = true;
+
+  const std::string db_path = DbBasePath(backend);
+  CleanupDbPath(db_path);
+
+  auto client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(client, nullptr);
+  ASSERT_TRUE(client->Init(db_path));
+
+  auto node1 = MakeDynamicNodeRecord("dyn1", 1);
+  auto node2 = MakeDynamicNodeRecord("dyn2", 3);
+  ASSERT_TRUE(client->StoreDynamicNodeRecords({node1, node2}));
+
+  // Reopen: keys must round-trip byte-exact and match the node names
+  // (BerkeleyDb historically wrote keys with their NUL terminator).
+  client.reset();
+  client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(client, nullptr);
+  ASSERT_TRUE(client->Init(db_path));
+
+  std::unordered_map<CranedId, Ctld::EmbeddedDbClient::DynamicNodeRecord>
+      records;
+  Ctld::EmbeddedDbClient::DynamicNodeGenerationMap watermarks;
+  ASSERT_TRUE(client->RetrieveDynamicNodeRecords(&records, &watermarks));
+  ASSERT_EQ(records.size(), 2);
+  ASSERT_TRUE(records.contains("dyn1"));
+  ASSERT_TRUE(records.contains("dyn2"));
+  EXPECT_EQ(records.at("dyn1").node_name(), "dyn1");
+  EXPECT_EQ(records.at("dyn2").generation(), 3);
+  EXPECT_EQ(watermarks.at("dyn1"), 1);
+  EXPECT_EQ(watermarks.at("dyn2"), 3);
+
+  // Deleting a record keeps its generation high watermark so that a later
+  // re-creation of the same name gets a strictly larger generation.
+  ASSERT_TRUE(client->DeleteDynamicNodeRecords({node2}));
+  records.clear();
+  watermarks.clear();
+  ASSERT_TRUE(client->RetrieveDynamicNodeRecords(&records, &watermarks));
+  EXPECT_EQ(records.size(), 1);
+  EXPECT_FALSE(records.contains("dyn2"));
+  EXPECT_EQ(watermarks.at("dyn2"), 3);
+
+  client.reset();
+  CleanupDbPath(db_path);
+}
+
 }  // namespace
 
 TEST(EmbeddedDbClientTest, UnqliteCurrentApiSmoke) {
   RunEmbeddedDbSmoke("Unqlite");
 }
 
+TEST(EmbeddedDbClientTest, UnqliteDynamicNodeRoundTrip) {
+  RunDynamicNodeRoundTrip("Unqlite");
+}
+
+#ifdef CRANE_HAVE_BERKELEY_DB
+TEST(EmbeddedDbClientTest, BerkeleyDbDynamicNodeRoundTrip) {
+  RunDynamicNodeRoundTrip("BerkeleyDB");
+}
+#endif
+
 #ifdef CRANE_HAVE_ROCKSDB
 TEST(EmbeddedDbClientTest, RocksDbCurrentApiSmoke) {
   RunEmbeddedDbSmoke("RocksDB");
+}
+
+TEST(EmbeddedDbClientTest, RocksDbDynamicNodeRoundTrip) {
+  RunDynamicNodeRoundTrip("RocksDB");
 }
 #endif

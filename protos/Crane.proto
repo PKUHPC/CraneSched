@@ -343,9 +343,12 @@ message CreateNodesRequest {
   string provider_profile = 10;
 }
 
+// Creation is all-or-nothing, so a single code/reason pair describes the
+// whole request.
 message CreateNodesReply {
   bool ok = 1;
   string reason = 2;
+  ErrCode code = 3;
 }
 
 message DeleteNodesRequest {
@@ -353,10 +356,16 @@ message DeleteNodesRequest {
   repeated string node_names = 2;
 }
 
+message NodeOperationResult {
+  string node_name = 1;
+  ErrCode code = 2;
+  string reason = 3;
+}
+
+// Deletion is per-node and may partially succeed.
 message DeleteNodesReply {
   repeated string deleted_nodes = 1;
-  repeated string not_deleted_nodes = 2;
-  repeated string not_deleted_reasons = 3;
+  repeated NodeOperationResult not_deleted_nodes = 2;
 }
 
 message QueryPartitionInfoRequest {
@@ -1373,6 +1382,7 @@ message PowerStateChangeRequest {
   CranedPowerState state = 2;
   string reason = 3;
   uint64 generation = 4;
+  uint32 uid = 5;
 }
 
 message PowerStateChangeReply {

@@ -386,8 +386,9 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   CraneRichError rich_err;
 
   rich_err.set_code(code);
-  rich_err.set_description(
-      std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
+  // std::make_format_args requires lvalues; the named parameters qualify
+  // even when the caller passes temporaries.
+  rich_err.set_description(std::vformat(fmt, std::make_format_args(args...)));
 
   return rich_err;
 }
@@ -658,8 +659,14 @@ bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs);
 bool operator==(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs);
 
 // Build the schedulable resources of a dynamic node from its approved spec.
+// GRES slots are synthesized placeholders derived from the spec counts; the
+// concrete devices replace them once the craned registers.
 ResourceInNodeV3 ResourceInNodeFromDynamicSpec(
     const crane::grpc::DynamicNodeSpec& spec);
+
+// Aggregate concrete GRES device slots into per-name/type counts.
+crane::grpc::GresMap GresCountsFromSlots(
+    const crane::grpc::DedicatedResourceInNode& devices);
 
 // ResourceV3: Cluster-level execution phase resource tracking
 // Maps node IDs to their specific resource allocations

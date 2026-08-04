@@ -46,6 +46,10 @@ class CranedStub {
   ~CranedStub() = default;
   void Fini();
 
+  // Tokens must be monotonically increasing. The craned side keeps its own
+  // token monotonic across clock adjustments in
+  // CtldClientStateMachine::ActionRequestConfig_; changing either side
+  // requires revisiting the other.
   [[nodiscard]] bool SetRegToken(const RegToken &token) {
     absl::MutexLock l(&m_lock_);
     if (m_latest_reg_token_.has_value()) {
@@ -90,13 +94,15 @@ class CranedStub {
   CraneErrCode UpdateTraceConfig(
       const crane::grpc::RuntimeTraceConfig &trace_config);
 
-  void SetReady(const RegToken &token) {
+  // Returns false if the token was superseded during registration; the
+  // caller must roll back the registration instead of reporting success.
+  [[nodiscard]] bool SetReady(const RegToken &token) {
     absl::MutexLock l(&m_lock_);
     if (m_active_reg_token_.has_value() && m_active_reg_token_.value() == token)
       m_active_reg_token_.reset();
     if (!m_token_.has_value() || m_token_.value() != token) {
       m_registered_.store(false, std::memory_order_release);
-      return;
+      return false;
     }
 
     CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
@@ -104,6 +110,7 @@ class CranedStub {
     m_token_.reset();
     m_registered_.store(true, std::memory_order_release);
     UpdateLastActiveTime();
+    return true;
   }
 
   [[nodiscard]] std::unique_lock<std::mutex> AcquireRegistrationLock() {

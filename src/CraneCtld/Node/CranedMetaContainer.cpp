@@ -23,6 +23,29 @@
 #include "protos/PublicDefs.pb.h"
 namespace Ctld {
 
+namespace {
+
+// Swap a dynamic node's resources in the accumulators of all its partitions.
+// The node must have no allocations, so the new resource becomes both the
+// total and the available amount.
+void SwapNodeResourceInPartitions(
+    std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr>&
+        part_meta_ptrs,
+    const ResourceInNodeV3& old_total, const ResourceInNodeV3& old_avail,
+    const ResourceInNodeV3& new_res) {
+  for (auto& partition_meta : part_meta_ptrs) {
+    auto& global_meta = partition_meta->partition_global_meta;
+    global_meta.res_total -= old_total;
+    global_meta.res_total += new_res;
+    global_meta.res_avail -= old_avail;
+    global_meta.res_avail += new_res;
+    global_meta.res_total_inc_dead -= old_total;
+    global_meta.res_total_inc_dead += new_res;
+  }
+}
+
+}  // namespace
+
 bool CranedMetaContainer::CranedUp(
     const CranedId& craned_id,
     const crane::grpc::CranedRemoteMeta& remote_meta) {
@@ -70,15 +93,8 @@ bool CranedMetaContainer::CranedUp(
           return false;
         }
 
-        for (auto& partition_meta : part_meta_ptrs) {
-          auto& global_meta = partition_meta->partition_global_meta;
-          global_meta.res_total -= node_meta->static_meta.res;
-          global_meta.res_total += bound_resource;
-          global_meta.res_avail -= node_meta->res_avail;
-          global_meta.res_avail += bound_resource;
-          global_meta.res_total_inc_dead -= node_meta->static_meta.res;
-          global_meta.res_total_inc_dead += bound_resource;
-        }
+        SwapNodeResourceInPartitions(part_meta_ptrs, node_meta->static_meta.res,
+                                     node_meta->res_avail, bound_resource);
         node_meta->static_meta.res = bound_resource;
         node_meta->res_total = bound_resource;
         node_meta->res_avail = bound_resource;
@@ -497,7 +513,13 @@ void CranedMetaContainer::AddDynamicNodes(
   auto craned_map = craned_meta_map_.GetMapExclusivePtr();
 
   for (const auto& record : records) {
-    if (craned_map->contains(record.node_name())) continue;
+    if (craned_map->contains(record.node_name())) {
+      // The caller guarantees the node is not in the topology yet; hitting
+      // this means the catalog and the topology have diverged.
+      CRANE_ERROR("Dynamic node {} already exists in the runtime topology.",
+                  record.node_name());
+      continue;
+    }
 
     CranedMeta craned_meta;
     craned_meta.remote_meta.craned_version = "unknown";
@@ -524,6 +546,10 @@ void CranedMetaContainer::AddDynamicNodes(
         record.has_effective_spec() ? record.effective_spec() : record.spec();
     static_meta.node_topo_info.sockets = spec.sockets();
     static_meta.res = ResourceInNodeFromDynamicSpec(spec);
+    // Ever-registered nodes carry the concrete devices of their last
+    // registration; they replace the placeholder slots.
+    if (record.has_registered_gres())
+      static_meta.res.GetGres() = record.registered_gres();
 
     craned_meta.res_total = static_meta.res;
     craned_meta.res_avail = static_meta.res;
@@ -571,20 +597,17 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
   const auto& spec =
       record.has_effective_spec() ? record.effective_spec() : record.spec();
   ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
+  // Keep the concrete devices installed by CranedUp; only records that never
+  // registered fall back to the synthesized placeholder slots.
+  if (record.has_registered_gres())
+    updated_resource.GetGres() = record.registered_gres();
   if (!(static_meta.res == updated_resource)) {
     CRANE_ASSERT(node_meta->res_in_use.IsZero());
     CRANE_ASSERT(node_meta->resv_in_node_map.empty());
     CRANE_ASSERT(node_meta->res_avail == node_meta->res_total);
 
-    for (auto& partition_meta : part_meta_ptrs) {
-      auto& global_meta = partition_meta->partition_global_meta;
-      global_meta.res_total -= static_meta.res;
-      global_meta.res_total += updated_resource;
-      global_meta.res_avail -= node_meta->res_avail;
-      global_meta.res_avail += updated_resource;
-      global_meta.res_total_inc_dead -= static_meta.res;
-      global_meta.res_total_inc_dead += updated_resource;
-    }
+    SwapNodeResourceInPartitions(part_meta_ptrs, static_meta.res,
+                                 node_meta->res_avail, updated_resource);
     static_meta.res = updated_resource;
     node_meta->res_total = updated_resource;
     node_meta->res_avail = updated_resource;
@@ -605,7 +628,7 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
     node_meta->power_state = *power_state;
 }
 
-std::unordered_map<CranedId, std::string>
+std::unordered_map<CranedId, CraneRichError>
 CranedMetaContainer::RemoveDynamicNodes(const std::vector<CranedId>& node_ids) {
   struct NodeToRemove {
     CranedId node_id;
@@ -616,36 +639,44 @@ CranedMetaContainer::RemoveDynamicNodes(const std::vector<CranedId>& node_ids) {
   util::write_lock_guard topology_lock(topology_mtx_);
   auto partition_map = partition_meta_map_.GetMapExclusivePtr();
   auto craned_map = craned_meta_map_.GetMapExclusivePtr();
-  std::unordered_map<CranedId, std::string> failures;
+  std::unordered_map<CranedId, CraneRichError> failures;
   std::vector<NodeToRemove> nodes_to_remove;
   nodes_to_remove.reserve(node_ids.size());
 
   for (const auto& node_id : node_ids) {
     auto it = craned_map->find(node_id);
     if (it == craned_map->end()) {
-      failures.emplace(node_id, "Node does not exist");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                              "Node does not exist"));
       continue;
     }
 
     auto node_meta = it->second.GetExclusivePtr();
     if (!node_meta->static_meta.dynamic) {
-      failures.emplace(node_id, "Node is not dynamic");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_NOT_DYNAMIC,
+                                              "Node is not dynamic"));
       continue;
     }
     if (node_meta->alive) {
-      failures.emplace(node_id, "Node is still online");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                              "Node is still online"));
       continue;
     }
     if (!node_meta->rn_job_res_map.empty()) {
-      failures.emplace(node_id, "Node still has jobs");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                              "Node still has jobs"));
       continue;
     }
     if (!node_meta->res_in_use.IsZero()) {
-      failures.emplace(node_id, "Node still has allocated resources");
+      failures.emplace(node_id,
+                       FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                     "Node still has allocated resources"));
       continue;
     }
     if (!node_meta->resv_in_node_map.empty()) {
-      failures.emplace(node_id, "Node is still referenced by a reservation");
+      failures.emplace(
+          node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                 "Node is still referenced by a reservation"));
       continue;
     }
 
@@ -672,43 +703,47 @@ CranedMetaContainer::RemoveDynamicNodes(const std::vector<CranedId>& node_ids) {
   return failures;
 }
 
-std::unordered_map<CranedId, std::string>
+std::unordered_map<CranedId, CraneRichError>
 CranedMetaContainer::SetDynamicNodesDeleting(
     const std::vector<CranedId>& node_ids) {
   absl::MutexLock event_lock(&m_res_reduce_events_mtx_);
   auto topology_lock = LockTopologyShared();
-  std::unordered_map<CranedId, std::string> failures;
+  std::unordered_map<CranedId, CraneRichError> failures;
   std::vector<CranedMetaPtr> node_metas;
   node_metas.reserve(node_ids.size());
 
   for (const auto& node_id : node_ids) {
     auto node_meta = craned_meta_map_.GetValueExclusivePtr(node_id);
     if (!node_meta) {
-      failures.emplace(node_id, "Node does not exist");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                              "Node does not exist"));
       continue;
     }
     if (!node_meta->static_meta.dynamic) {
-      failures.emplace(node_id, "Node is not dynamic");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_NOT_DYNAMIC,
+                                              "Node is not dynamic"));
       continue;
     }
     if (node_meta->static_meta.deleting) {
-      failures.emplace(node_id, "Node is already being deleted");
-      continue;
-    }
-    if (node_meta->alive) {
-      failures.emplace(node_id, "Node is still online");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                              "Node is already being deleted"));
       continue;
     }
     if (!node_meta->rn_job_res_map.empty()) {
-      failures.emplace(node_id, "Node still has jobs");
+      failures.emplace(node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                              "Node still has jobs"));
       continue;
     }
     if (!node_meta->res_in_use.IsZero()) {
-      failures.emplace(node_id, "Node still has allocated resources");
+      failures.emplace(node_id,
+                       FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                     "Node still has allocated resources"));
       continue;
     }
     if (!node_meta->resv_in_node_map.empty()) {
-      failures.emplace(node_id, "Node is still referenced by a reservation");
+      failures.emplace(
+          node_id, FormatRichErr(crane::grpc::ERR_NODE_BUSY,
+                                 "Node is still referenced by a reservation"));
       continue;
     }
     node_metas.emplace_back(std::move(node_meta));

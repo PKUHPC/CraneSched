@@ -6,6 +6,14 @@
  * it under the terms of the GNU Affero General Public License as
  * published by the Free Software Foundation, either version 3 of the
  * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "Node/NodeManager.h"
@@ -42,11 +50,16 @@ using crane::grpc::DYNAMIC_NODE_POWER_STATE_OFF;
 using crane::grpc::DYNAMIC_NODE_POWER_STATE_ON;
 using crane::grpc::DYNAMIC_NODE_POWER_STATE_UNSPECIFIED;
 
-std::expected<void, std::string> ValidateNodeName(const CranedId& node_id) {
+// Bump when the semantics of persisted DynamicNodeRecord fields change in a
+// way protobuf field evolution cannot express.
+constexpr uint32_t kDynamicNodeSchemaVersion = 1;
+
+CraneExpectedRich<void> ValidateNodeName(const CranedId& node_id) {
   std::list<std::string> expanded;
   if (!util::ParseHostList(node_id, &expanded) || expanded.size() != 1 ||
       expanded.front() != node_id) {
-    return std::unexpected(fmt::format("Invalid node name {}", node_id));
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid node name {}", node_id));
   }
   return {};
 }
@@ -60,19 +73,43 @@ bool HasDuplicates(const Range& values) {
   return false;
 }
 
-std::expected<void, std::string> ValidateGresDefinition(
+CraneExpectedRich<void> ValidateGresDefinition(
     const crane::grpc::DedicatedResourceInNode& gres) {
   std::unordered_set<std::string> slot_ids;
   for (const auto& [name, types] : gres.name_type_map()) {
     if (name.empty() || types.type_slots_map().empty())
-      return std::unexpected("Invalid GRES definition");
+      return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                           "Invalid GRES definition"));
     for (const auto& slots : types.type_slots_map() | std::views::values) {
-      if (slots.slots().empty()) return std::unexpected("Invalid GRES slots");
+      if (slots.slots().empty())
+        return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                             "Invalid GRES slots"));
       for (const auto& slot : slots.slots()) {
         if (slot.empty() || !slot_ids.emplace(slot).second)
-          return std::unexpected("Invalid GRES slots");
+          return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                               "Invalid GRES slots"));
       }
     }
+  }
+  return {};
+}
+
+CraneExpectedRich<void> ValidateGresCounts(const crane::grpc::GresMap& gres) {
+  for (const auto& [name, count] : gres.name_gres_map()) {
+    if (name.empty() || count.total() == 0)
+      return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                           "Invalid GRES definition"));
+    uint64_t typed_total = 0;
+    for (const auto& [type, type_count] : count.specified()) {
+      if (type.empty() || type_count == 0)
+        return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                             "Invalid GRES definition"));
+      typed_total += type_count;
+    }
+    if (typed_total > count.total())
+      return std::unexpected(
+          FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                        "Typed GRES counts exceed the total count"));
   }
   return {};
 }
@@ -91,7 +128,7 @@ bool IsDynamicRecordPresent(const DynamicNodeRecord& record) {
 
 void MarkRecordTombstone(DynamicNodeRecord* record) {
   record->set_lifecycle(DYNAMIC_NODE_LIFECYCLE_TOMBSTONE);
-  record->clear_registration_token();
+  record->clear_registration_token_digest();
   record->clear_registration_nonce();
   record->clear_lease_expire_time();
   record->mutable_tombstone_time()->set_seconds(
@@ -138,10 +175,10 @@ bool HasRequestedPartition(
 }
 
 bool ResetRegistrationState(DynamicNodeRecord* record) {
-  bool changed = !record->registration_token().empty() ||
+  bool changed = !record->registration_token_digest().empty() ||
                  !record->registration_nonce().empty() ||
                  record->has_lease_expire_time();
-  record->clear_registration_token();
+  record->clear_registration_token_digest();
   record->clear_registration_nonce();
   record->clear_lease_expire_time();
   if (record->ever_registered() ||
@@ -171,7 +208,8 @@ void PublishNodeDefinition(const DynamicNodeRecord& record,
 }  // namespace
 
 bool NodeManager::RegistrationLeaseExpired_(const DynamicNodeRecord& record) {
-  if (record.registration_token().empty() || !record.has_lease_expire_time())
+  if (record.registration_token_digest().empty() ||
+      !record.has_lease_expire_time())
     return true;
   return record.lease_expire_time().seconds() <=
          absl::ToUnixSeconds(absl::Now());
@@ -182,48 +220,32 @@ std::string NodeManager::GenerateRegistrationToken_() {
   return util::GenerateSecureRandomHex(kRegistrationTokenBytes);
 }
 
-bool NodeManager::GresMatch_(const DynamicNodeSpec& expected,
-                             const DynamicNodeSpec& reported) {
-  for (const auto& [name, expected_types] : expected.gres().name_type_map()) {
-    auto reported_name = reported.gres().name_type_map().find(name);
-    if (reported_name == reported.gres().name_type_map().end()) return false;
-    size_t expected_total = 0;
-    size_t reported_total = 0;
-    for (const auto& slots :
-         reported_name->second.type_slots_map() | std::views::values)
-      reported_total += slots.slots_size();
-    for (const auto& [type, expected_slots] : expected_types.type_slots_map()) {
-      expected_total += expected_slots.slots_size();
-      if (type.empty()) continue;
-      auto reported_type = reported_name->second.type_slots_map().find(type);
-      if (reported_type == reported_name->second.type_slots_map().end() ||
-          reported_type->second.slots_size() < expected_slots.slots_size())
+bool NodeManager::GresMatch_(const crane::grpc::GresMap& expected,
+                             const crane::grpc::GresMap& reported) {
+  for (const auto& [name, expected_count] : expected.name_gres_map()) {
+    auto reported_name = reported.name_gres_map().find(name);
+    if (reported_name == reported.name_gres_map().end()) return false;
+    const auto& reported_count = reported_name->second;
+    if (reported_count.total() < expected_count.total()) return false;
+    for (const auto& [type, count] : expected_count.specified()) {
+      auto reported_type = reported_count.specified().find(type);
+      if (reported_type == reported_count.specified().end() ||
+          reported_type->second < count)
         return false;
     }
-    if (reported_total < expected_total) return false;
   }
   return true;
 }
 
-bool NodeManager::GresAllocationMatch_(const DynamicNodeSpec& expected,
-                                       const DynamicNodeSpec& allocated) {
-  if (expected.gres().name_type_map_size() !=
-          allocated.gres().name_type_map_size() ||
+bool NodeManager::GresCountsMatch_(const crane::grpc::GresMap& expected,
+                                   const crane::grpc::GresMap& allocated) {
+  if (expected.name_gres_map_size() != allocated.name_gres_map_size() ||
       !GresMatch_(expected, allocated))
     return false;
 
-  for (const auto& [name, expected_types] : expected.gres().name_type_map()) {
-    size_t expected_total = 0;
-    for (const auto& slots :
-         expected_types.type_slots_map() | std::views::values)
-      expected_total += slots.slots_size();
-
-    size_t allocated_total = 0;
-    const auto& allocated_types =
-        allocated.gres().name_type_map().at(name).type_slots_map();
-    for (const auto& slots : allocated_types | std::views::values)
-      allocated_total += slots.slots_size();
-    if (allocated_total != expected_total) return false;
+  for (const auto& [name, expected_count] : expected.name_gres_map()) {
+    if (allocated.name_gres_map().at(name).total() != expected_count.total())
+      return false;
   }
   return true;
 }
@@ -238,58 +260,73 @@ bool NodeManager::FeaturesMatch_(const DynamicNodeSpec& expected,
   return true;
 }
 
-std::expected<void, std::string> NodeManager::ValidateReportedSpecStructure_(
+CraneExpectedRich<void> NodeManager::ValidateReportedSpecStructure_(
     const DynamicNodeSpec& reported) const {
   if (reported.cpu_count() == 0 || reported.memory_bytes() == 0 ||
       reported.sockets() == 0 || reported.sockets() > reported.cpu_count())
-    return std::unexpected("Invalid reported CPU, memory or sockets");
-  auto gres_validation = ValidateGresDefinition(reported.gres());
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Invalid reported CPU, memory or sockets"));
+  auto gres_validation = ValidateGresCounts(reported.gres());
   if (!gres_validation) return gres_validation;
   if (HasDuplicates(reported.features()) ||
       std::ranges::any_of(reported.features(),
                           [](const auto& feature) { return feature.empty(); }))
-    return std::unexpected("Invalid reported features");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid reported features"));
   return {};
 }
 
-std::expected<void, std::string> NodeManager::ValidateReportedSpec_(
+CraneExpectedRich<void> NodeManager::ValidateReportedSpec_(
     const DynamicNodeSpec& expected, const DynamicNodeSpec& reported) const {
   auto structure_validation = ValidateReportedSpecStructure_(reported);
   if (!structure_validation) return structure_validation;
   if (reported.cpu_count() < expected.cpu_count())
     return std::unexpected(
-        fmt::format("Reported CPU count {} is smaller than configured {}",
-                    reported.cpu_count(), expected.cpu_count()));
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Reported CPU count {} is smaller than configured {}",
+                      reported.cpu_count(), expected.cpu_count()));
   if (reported.memory_bytes() < expected.memory_bytes())
     return std::unexpected(
-        fmt::format("Reported memory {} is smaller than configured {}",
-                    reported.memory_bytes(), expected.memory_bytes()));
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Reported memory {} is smaller than configured {}",
+                      reported.memory_bytes(), expected.memory_bytes()));
   if (reported.sockets() != expected.sockets())
     return std::unexpected(
-        fmt::format("Reported socket count {} does not match configured {}",
-                    reported.sockets(), expected.sockets()));
-  if (!GresMatch_(expected, reported))
-    return std::unexpected("Reported GRES does not satisfy configured GRES");
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Reported socket count {} does not match configured {}",
+                      reported.sockets(), expected.sockets()));
+  if (!GresMatch_(expected.gres(), reported.gres()))
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Reported GRES does not satisfy configured GRES"));
   if (!FeaturesMatch_(expected, reported))
     return std::unexpected(
-        "Reported features do not satisfy configured features");
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Reported features do not satisfy configured features"));
   return {};
 }
 
-std::expected<void, std::string> NodeManager::ValidateRegistrationToken_(
+CraneExpectedRich<void> NodeManager::ValidateRegistrationToken_(
     const DynamicNodeRecord& record,
     std::string_view registration_token) const {
-  if (record.registration_token().empty())
-    return std::unexpected("Dynamic node has no active registration lease");
+  if (record.registration_token_digest().empty())
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Dynamic node has no active registration lease"));
   if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING)
-    return std::unexpected("Dynamic node is not registering");
-  if (registration_token.size() != record.registration_token().size() ||
-      CRYPTO_memcmp(registration_token.data(),
-                    record.registration_token().data(),
-                    registration_token.size()) != 0)
-    return std::unexpected("Invalid dynamic registration token");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Dynamic node is not registering"));
+  const std::string digest = util::Sha256Hex(registration_token);
+  if (digest.size() != record.registration_token_digest().size() ||
+      CRYPTO_memcmp(digest.data(), record.registration_token_digest().data(),
+                    digest.size()) != 0)
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid dynamic registration token"));
   if (RegistrationLeaseExpired_(record))
-    return std::unexpected("Dynamic registration token has expired");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Dynamic registration token has expired"));
   return {};
 }
 
@@ -305,13 +342,14 @@ std::optional<CranedId> NodeManager::FindNodeByPhysicalHostnameNoLock_(
   return std::nullopt;
 }
 
+// The raw registration token is not part of the record (only its digest is);
+// the caller sets it on the reply.
 void NodeManager::FillPreparationReply_(
     const DynamicNodeRecord& record,
     crane::grpc::PrepareCranedRegistrationReply* reply) {
   reply->set_ok(true);
   reply->set_node_name(record.node_name());
   reply->set_generation(record.generation());
-  reply->set_registration_token(record.registration_token());
   *reply->mutable_effective_spec() = EffectiveSpec(record);
   reply->mutable_partition_names()->CopyFrom(record.partition_names());
   if (record.has_lease_expire_time())
@@ -343,7 +381,17 @@ bool NodeManager::Init() {
                   node_id, record.node_name());
       return false;
     }
+    if (record.schema_version() > kDynamicNodeSchemaVersion) {
+      CRANE_ERROR(
+          "Dynamic node {} has schema version {} newer than supported {}.",
+          node_id, record.schema_version(), kDynamicNodeSchemaVersion);
+      return false;
+    }
     bool changed = false;
+    if (record.schema_version() != kDynamicNodeSchemaVersion) {
+      record.set_schema_version(kDynamicNodeSchemaVersion);
+      changed = true;
+    }
     if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DELETING) {
       MarkRecordTombstone(&record);
       changed = true;
@@ -384,7 +432,8 @@ bool NodeManager::Init() {
     } else {
       auto result = ValidatePresentRecord_(record);
       if (!result) {
-        CRANE_ERROR("Invalid dynamic node {}: {}", node_id, result.error());
+        CRANE_ERROR("Invalid dynamic node {}: {}", node_id,
+                    result.error().description());
         return false;
       }
     }
@@ -418,6 +467,13 @@ bool NodeManager::Init() {
     return false;
   }
 
+  if (!g_config.CtldConf.DynamicNodes.Enabled && present_node_count > 0)
+    CRANE_WARN(
+        "DynamicNodes is disabled but {} dynamic node records exist in the "
+        "embedded db. They are restored into the cluster topology; delete "
+        "them or re-enable DynamicNodes.",
+        present_node_count);
+
   records_ = std::move(records);
   generation_high_watermarks_ = std::move(generation_high_watermarks);
   quarantined_nodes_ = std::move(quarantined);
@@ -440,13 +496,23 @@ void NodeManager::ReconcileThreadFunc_() {
   util::SetCurrentThreadName("NodeReconcile");
   const absl::Duration period =
       absl::Seconds(g_config.CtldConf.DynamicNodes.RegistrationLeaseSeconds);
+  // Plugin hooks are dropped after their retries are exhausted; a sparse
+  // full re-publish converges the plugin back to the controller's state.
+  const absl::Duration plugin_reconcile_period = absl::Minutes(10);
+  absl::Time last_plugin_reconcile = absl::Now();
   while (!reconcile_stop_notification_.WaitForNotificationWithTimeout(period)) {
-    absl::MutexLock lock(&mutex_);
-    auto lease_result = ReleaseExpiredRegistrationLeasesNoLock_();
-    if (!lease_result)
-      CRANE_WARN("Failed to release expired dynamic registration leases: {}",
-                 lease_result.error());
-    CleanupExpiredTombstonesNoLock_();
+    {
+      absl::MutexLock lock(&mutex_);
+      auto lease_result = ReleaseExpiredRegistrationLeasesNoLock_();
+      if (!lease_result)
+        CRANE_WARN("Failed to release expired dynamic registration leases: {}",
+                   lease_result.error().description());
+      CleanupExpiredTombstonesNoLock_();
+    }
+    if (absl::Now() - last_plugin_reconcile >= plugin_reconcile_period) {
+      last_plugin_reconcile = absl::Now();
+      ReconcilePluginState();
+    }
   }
 }
 
@@ -511,39 +577,48 @@ void NodeManager::ReconcilePluginState() {
 crane::grpc::CreateNodesReply NodeManager::CreateNodes(
     const crane::grpc::CreateNodesRequest& request) {
   crane::grpc::CreateNodesReply reply;
+  const auto fail = [&reply](crane::grpc::ErrCode code,
+                             std::string_view reason) {
+    reply.set_code(code);
+    reply.set_reason(std::string(reason));
+  };
   absl::MutexLock lock(&mutex_);
   CleanupExpiredTombstonesNoLock_();
 
   if (!g_config.CtldConf.DynamicNodes.Enabled) {
-    reply.set_reason("Dynamic nodes are disabled");
+    fail(crane::grpc::ERR_GENERIC_FAILURE, "Dynamic nodes are disabled");
     return reply;
   }
   if (request.node_names().empty()) {
-    reply.set_reason("No node name specified");
+    fail(crane::grpc::ERR_INVALID_PARAM, "No node name specified");
     return reply;
   }
   if (HasDuplicates(request.node_names())) {
-    reply.set_reason("Duplicate node names are not allowed");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "Duplicate node names are not allowed");
     return reply;
   }
   if (!request.has_spec() || request.spec().cpu_count() == 0 ||
       request.spec().memory_bytes() == 0 || request.spec().sockets() == 0 ||
       request.spec().sockets() > request.spec().cpu_count()) {
-    reply.set_reason("CPU, memory and sockets must form a valid node spec");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "CPU, memory and sockets must form a valid node spec");
     return reply;
   }
   if (request.partition_names().empty()) {
-    reply.set_reason("At least one partition must be specified");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "At least one partition must be specified");
     return reply;
   }
   if (HasDuplicates(request.partition_names())) {
-    reply.set_reason("Duplicate partitions are not allowed");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "Duplicate partitions are not allowed");
     return reply;
   }
   for (const auto& partition_id : request.partition_names()) {
     if (!g_config.Partitions.contains(partition_id)) {
-      reply.set_reason(
-          fmt::format("Partition {} does not exist", partition_id));
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           fmt::format("Partition {} does not exist", partition_id));
       return reply;
     }
   }
@@ -554,8 +629,9 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
   if (g_config.CtldConf.MaxNodeCount != 0 &&
       g_config.Nodes.size() + dynamic_node_count + request.node_names_size() >
           g_config.CtldConf.MaxNodeCount) {
-    reply.set_reason(fmt::format("MaxNodeCount {} would be exceeded",
-                                 g_config.CtldConf.MaxNodeCount));
+    fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
+         fmt::format("MaxNodeCount {} would be exceeded",
+                     g_config.CtldConf.MaxNodeCount));
     return reply;
   }
 
@@ -564,29 +640,32 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
   for (const auto& node_id : request.node_names()) {
     auto name_result = ValidateNodeName(node_id);
     if (!name_result) {
-      reply.set_reason(name_result.error());
+      fail(name_result.error().code(), name_result.error().description());
       return reply;
     }
     if (g_config.Nodes.contains(node_id)) {
-      reply.set_reason(fmt::format("Node {} is static", node_id));
+      fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+           fmt::format("Node {} is static", node_id));
       return reply;
     }
 
     auto it = records_.find(node_id);
     if (it != records_.end()) {
       if (it->second.lifecycle() != DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) {
-        reply.set_reason(fmt::format("Node {} already exists", node_id));
+        fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+             fmt::format("Node {} already exists", node_id));
         return reply;
       }
     }
     auto generation = NextGenerationNoLock_(node_id);
     if (!generation) {
-      reply.set_reason(generation.error());
+      fail(generation.error().code(), generation.error().description());
       return reply;
     }
 
     DynamicNodeRecord record;
     record.set_node_name(node_id);
+    record.set_schema_version(kDynamicNodeSchemaVersion);
     *record.mutable_spec() = request.spec();
     record.mutable_partition_names()->CopyFrom(request.partition_names());
     record.set_generation(*generation);
@@ -595,8 +674,8 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
                           ? DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN
                           : request.origin());
     if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN) {
-      reply.set_reason(
-          "Only administrator-created dynamic nodes can be created");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Only administrator-created dynamic nodes can be created");
       return reply;
     }
     record.set_lifecycle(request.lifecycle() ==
@@ -604,12 +683,14 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
                              ? DYNAMIC_NODE_LIFECYCLE_FUTURE
                              : request.lifecycle());
     if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE) {
-      reply.set_reason("New dynamic nodes must start in FUTURE state");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "New dynamic nodes must start in FUTURE state");
       return reply;
     }
     if (request.power_state() != DYNAMIC_NODE_POWER_STATE_UNSPECIFIED &&
         request.power_state() != DYNAMIC_NODE_POWER_STATE_OFF) {
-      reply.set_reason("New dynamic nodes must start powered off");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "New dynamic nodes must start powered off");
       return reply;
     }
     record.set_power_state(DYNAMIC_NODE_POWER_STATE_OFF);
@@ -617,13 +698,13 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
     record.set_provider(request.provider());
     record.set_provider_profile(request.provider_profile());
     if (!record.provider_profile().empty() && record.provider().empty()) {
-      reply.set_reason("ProviderProfile requires Provider");
+      fail(crane::grpc::ERR_INVALID_PARAM, "ProviderProfile requires Provider");
       return reply;
     }
     *record.mutable_effective_spec() = record.spec();
     auto validation = ValidatePresentRecord_(record);
     if (!validation) {
-      reply.set_reason(validation.error());
+      fail(validation.error().code(), validation.error().description());
       return reply;
     }
     record.set_revision(++catalog_revision_);
@@ -631,7 +712,7 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
   }
 
   if (!g_embedded_db_client->StoreDynamicNodeRecords(new_records)) {
-    reply.set_reason("Failed to persist dynamic nodes");
+    fail(crane::grpc::ERR_SYSTEM_ERR, "Failed to persist dynamic nodes");
     return reply;
   }
   for (const auto& record : new_records) records_[record.node_name()] = record;
@@ -653,13 +734,17 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
   absl::MutexLock lock(&mutex_);
   CleanupExpiredTombstonesNoLock_();
 
-  auto reject = [&reply](const CranedId& node_id, std::string_view reason) {
-    reply.add_not_deleted_nodes(node_id);
-    reply.add_not_deleted_reasons(std::string(reason));
+  auto reject = [&reply](const CranedId& node_id, crane::grpc::ErrCode code,
+                         std::string_view reason) {
+    auto* result = reply.add_not_deleted_nodes();
+    result->set_node_name(node_id);
+    result->set_code(code);
+    result->set_reason(std::string(reason));
   };
   if (HasDuplicates(request.node_names())) {
     for (const auto& node_id : request.node_names())
-      reject(node_id, "Duplicate node names are not allowed");
+      reject(node_id, crane::grpc::ERR_INVALID_PARAM,
+             "Duplicate node names are not allowed");
     return reply;
   }
 
@@ -672,13 +757,13 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
   pending.reserve(request.node_names_size());
   for (const auto& node_id : request.node_names()) {
     if (g_config.Nodes.contains(node_id)) {
-      reject(node_id, "Node is static");
+      reject(node_id, crane::grpc::ERR_NODE_NOT_DYNAMIC, "Node is static");
       continue;
     }
     auto it = records_.find(node_id);
     if (it == records_.end() ||
         it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) {
-      reject(node_id, "Node does not exist");
+      reject(node_id, crane::grpc::ERR_INVALID_PARAM, "Node does not exist");
       continue;
     }
     const DynamicNodeRecord& record = it->second;
@@ -686,23 +771,22 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     if (!quarantined) {
       if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
           !RegistrationLeaseExpired_(record)) {
-        reject(node_id, "Node is still registering");
+        reject(node_id, crane::grpc::ERR_NODE_BUSY,
+               "Node is still registering");
         continue;
       }
       if (IsTransitionalPowerState(record.power_state())) {
         if (!PowerActionExpired(record)) {
-          reject(node_id, "Node has a power action in progress");
+          reject(node_id, crane::grpc::ERR_NODE_BUSY,
+                 "Node has a power action in progress");
           continue;
         }
       } else if (record.provider() == kPowerControlProvider &&
                  record.power_state() != DYNAMIC_NODE_POWER_STATE_OFF) {
-        reject(node_id, "Node must be powered off before deletion");
+        reject(node_id, crane::grpc::ERR_NODE_BUSY,
+               "Node must be powered off before deletion");
         continue;
       }
-    }
-    if (g_craned_keeper->IsCranedTracked(node_id)) {
-      reject(node_id, "Node is still connected");
-      continue;
     }
     // Quarantined nodes were never added to the runtime topology, so the
     // topology-side deleting steps must be skipped for them.
@@ -719,7 +803,8 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     auto busy_nodes = g_job_scheduler->FilterNodesWithJobs(pending_ids);
     std::erase_if(pending, [&](const PendingDeletion& node) {
       if (!busy_nodes.contains(node.node_id)) return false;
-      reject(node.node_id, "Node is still referenced by jobs");
+      reject(node.node_id, crane::grpc::ERR_NODE_BUSY,
+             "Node is still referenced by jobs");
       return true;
     });
   }
@@ -733,26 +818,31 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     std::erase_if(pending, [&](const PendingDeletion& node) {
       auto failure = failures.find(node.node_id);
       if (failure == failures.end()) return false;
-      reject(node.node_id, failure->second);
+      reject(node.node_id, failure->second.code(),
+             failure->second.description());
       return true;
     });
   }
 
-  std::erase_if(pending, [&](const PendingDeletion& node) {
-    if (g_craned_keeper->ForgetCraned(node.node_id)) return false;
-    if (node.newly_deleting)
-      g_meta_container->ClearDynamicNodesDeleting({node.node_id});
-    reject(node.node_id, "Node is still connected");
-    return true;
-  });
-  if (pending.empty()) return reply;
+  // An idle node may still be connected when it is deleted; no prior drain
+  // or disconnect is required. Take it offline now so the topology removal
+  // below sees it dead; the craned learns on its next ping renewal that its
+  // generation is stale and shuts itself down, and the leftover stub and
+  // address cache entry are dropped once the connection actually breaks.
+  for (const auto& node : pending) {
+    if (!g_craned_keeper->ForgetCraned(node.node_id))
+      g_meta_container->CranedDown(node.node_id);
+  }
 
   std::vector<DynamicNodeRecord> deleting_records;
   deleting_records.reserve(pending.size());
   for (const auto& node : pending) {
     DynamicNodeRecord record = node.record;
+    // The generation is kept as-is: the tombstone rejects any registration
+    // of this incarnation, and a re-created node gets a strictly larger
+    // generation from the persisted high watermark (NextGenerationNoLock_).
     record.set_lifecycle(DYNAMIC_NODE_LIFECYCLE_DELETING);
-    record.clear_registration_token();
+    record.clear_registration_token_digest();
     record.clear_registration_nonce();
     record.clear_lease_expire_time();
     record.set_revision(++catalog_revision_);
@@ -764,7 +854,8 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
       if (node.newly_deleting) newly_deleting.emplace_back(node.node_id);
     g_meta_container->ClearDynamicNodesDeleting(newly_deleting);
     for (const auto& node : pending)
-      reject(node.node_id, "Failed to persist dynamic node deletion intent");
+      reject(node.node_id, crane::grpc::ERR_SYSTEM_ERR,
+             "Failed to persist dynamic node deletion intent");
     return reply;
   }
   for (const auto& record : deleting_records)
@@ -796,11 +887,12 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
         auto failure = failures.find(node.node_id);
         if (failure == failures.end()) return false;
         reject(node.node_id,
+               restored ? failure->second.code() : crane::grpc::ERR_SYSTEM_ERR,
                restored
-                   ? failure->second
+                   ? failure->second.description()
                    : fmt::format(
                          "{}; failed to restore dynamic node deletion state",
-                         failure->second));
+                         failure->second.description()));
         return true;
       });
       if (pending.empty()) return reply;
@@ -817,7 +909,8 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
   }
   if (!g_embedded_db_client->StoreDynamicNodeRecords(tombstones)) {
     for (const auto& node : pending)
-      reject(node.node_id, "Failed to persist dynamic node tombstones");
+      reject(node.node_id, crane::grpc::ERR_SYSTEM_ERR,
+             "Failed to persist dynamic node tombstones");
     return reply;
   }
   for (const auto& record : tombstones) records_[record.node_name()] = record;
@@ -852,7 +945,7 @@ void NodeManager::CleanupExpiredTombstonesNoLock_() {
   for (const auto& record : expired) records_.erase(record.node_name());
 }
 
-std::expected<uint64_t, std::string> NodeManager::NextGenerationNoLock_(
+CraneExpectedRich<uint64_t> NodeManager::NextGenerationNoLock_(
     const CranedId& node_id) const {
   uint64_t high_watermark = 0;
   if (auto it = generation_high_watermarks_.find(node_id);
@@ -861,13 +954,13 @@ std::expected<uint64_t, std::string> NodeManager::NextGenerationNoLock_(
   if (auto it = records_.find(node_id); it != records_.end())
     high_watermark = std::max(high_watermark, it->second.generation());
   if (high_watermark == std::numeric_limits<uint64_t>::max())
-    return std::unexpected(
-        fmt::format("Node {} generation is exhausted", node_id));
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_GENERIC_FAILURE,
+                                         "Node {} generation is exhausted",
+                                         node_id));
   return high_watermark + 1;
 }
 
-std::expected<void, std::string>
-NodeManager::ReleaseExpiredRegistrationLeasesNoLock_() {
+CraneExpectedRich<void> NodeManager::ReleaseExpiredRegistrationLeasesNoLock_() {
   std::vector<DynamicNodeRecord> released_records;
   for (const auto& record : records_ | std::views::values) {
     if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
@@ -881,7 +974,9 @@ NodeManager::ReleaseExpiredRegistrationLeasesNoLock_() {
   }
   if (released_records.empty()) return {};
   if (!g_embedded_db_client->StoreDynamicNodeRecords(released_records))
-    return std::unexpected("Failed to release expired registration leases");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                      "Failed to release expired registration leases"));
   for (const auto& record : released_records)
     records_[record.node_name()] = record;
   for (const auto& record : released_records)
@@ -897,41 +992,52 @@ crane::grpc::PrepareCranedRegistrationReply
 NodeManager::PrepareCranedRegistration(
     const crane::grpc::PrepareCranedRegistrationRequest& request) {
   crane::grpc::PrepareCranedRegistrationReply reply;
+  const auto fail = [&reply](crane::grpc::ErrCode code,
+                             std::string_view reason) {
+    reply.set_code(code);
+    reply.set_reason(std::string(reason));
+  };
   if (!g_config.CtldConf.DynamicNodes.Enabled) {
-    reply.set_reason("Dynamic node registration is disabled");
+    fail(crane::grpc::ERR_GENERIC_FAILURE,
+         "Dynamic node registration is disabled");
     return reply;
   }
   if (!g_config.ListenConf.TlsConfig.Enabled) {
-    reply.set_reason("Dynamic node registration requires TLS");
+    fail(crane::grpc::ERR_GENERIC_FAILURE,
+         "Dynamic node registration requires TLS");
     return reply;
   }
   if (request.mode() ==
           crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_UNSPECIFIED ||
       request.physical_hostname().empty() || request.client_nonce().empty()) {
-    reply.set_reason("Registration mode, hostname and nonce are required");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "Registration mode, hostname and nonce are required");
     return reply;
   }
 
   const DynamicNodeSpec& reported_spec = request.reported_spec();
   auto reported_validation = ValidateReportedSpecStructure_(reported_spec);
   if (!reported_validation) {
-    reply.set_reason(reported_validation.error());
+    fail(reported_validation.error().code(),
+         reported_validation.error().description());
     return reply;
   }
   if (HasDuplicates(request.requested_partitions())) {
-    reply.set_reason("Duplicate partitions are not allowed");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "Duplicate partitions are not allowed");
     return reply;
   }
 
   if (g_config.Nodes.contains(request.physical_hostname())) {
-    reply.set_reason("Physical host is configured as a static node");
+    fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+         "Physical host is configured as a static node");
     return reply;
   }
 
   absl::MutexLock lock(&mutex_);
   auto lease_result = ReleaseExpiredRegistrationLeasesNoLock_();
   if (!lease_result) {
-    reply.set_reason(lease_result.error());
+    fail(lease_result.error().code(), lease_result.error().description());
     return reply;
   }
   const auto now = absl::Now();
@@ -944,105 +1050,116 @@ NodeManager::PrepareCranedRegistration(
     return timestamp;
   };
 
+  // Returns the raw registration token; only its digest is stored in the
+  // record. A retried preparation therefore always rotates the token.
   auto prepare_record = [&](DynamicNodeRecord* record) {
+    std::string token = GenerateRegistrationToken_();
     record->set_lifecycle(DYNAMIC_NODE_LIFECYCLE_REGISTERING);
     record->set_physical_hostname(request.physical_hostname());
     record->set_registration_nonce(request.client_nonce());
-    record->set_registration_token(GenerateRegistrationToken_());
+    record->set_registration_token_digest(util::Sha256Hex(token));
     *record->mutable_reported_spec() = reported_spec;
     record->set_revision(++catalog_revision_);
     *record->mutable_lease_expire_time() = make_expire_time();
     if (!record->has_effective_spec())
       *record->mutable_effective_spec() = record->spec();
+    return token;
   };
 
   if (request.mode() ==
       crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED) {
     if (request.requested_node_name().empty()) {
-      reply.set_reason("Precreated registration requires a node name");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Precreated registration requires a node name");
       return reply;
     }
     auto it = records_.find(request.requested_node_name());
     if (it == records_.end() || !IsDynamicRecordPresent(it->second)) {
-      if (request.generation() != 0)
-        reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
-      reply.set_reason("Dynamic node is not precreated");
+      fail(request.generation() != 0 ? crane::grpc::ERR_NODE_STALE_GENERATION
+                                     : crane::grpc::ERR_INVALID_PARAM,
+           "Dynamic node is not precreated");
       return reply;
     }
     if (quarantined_nodes_.contains(request.requested_node_name())) {
-      reply.set_reason(
-          "Dynamic node references a partition that no longer exists");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Dynamic node references a partition that no longer exists");
       return reply;
     }
     if (request.generation() != 0 &&
         request.generation() != it->second.generation()) {
-      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
-      reply.set_reason("Dynamic node generation has changed");
+      fail(crane::grpc::ERR_NODE_STALE_GENERATION,
+           "Dynamic node generation has changed");
       return reply;
     }
     if (it->second.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN) {
-      reply.set_reason("Node is not an administrator-created dynamic node");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Node is not an administrator-created dynamic node");
       return reply;
     }
     if (!request.pool().empty() && request.pool() != it->second.pool()) {
-      reply.set_reason("Requested pool does not match the precreated node");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Requested pool does not match the precreated node");
       return reply;
     }
     if (!HasRequestedPartition(request.requested_partitions(),
                                it->second.partition_names())) {
-      reply.set_reason("Requested partitions do not match the precreated node");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Requested partitions do not match the precreated node");
       return reply;
     }
     if (it->second.ever_registered() &&
         !it->second.physical_hostname().empty() &&
         it->second.physical_hostname() != request.physical_hostname()) {
-      reply.set_reason("Dynamic node is owned by another physical host");
+      fail(crane::grpc::ERR_NODE_BUSY,
+           "Dynamic node is owned by another physical host");
       return reply;
     }
     if (auto bound_node = FindNodeByPhysicalHostnameNoLock_(
             request.physical_hostname(), request.requested_node_name())) {
-      reply.set_reason(fmt::format("Physical host is already registered as {}",
-                                   *bound_node));
+      fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+           fmt::format("Physical host is already registered as {}",
+                       *bound_node));
       return reply;
     }
+    // A retry from the same client (same nonce and host) falls through and
+    // rotates the lease; only a lease held by a different client blocks.
     if (it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-        it->second.registration_nonce() == request.client_nonce() &&
-        it->second.physical_hostname() == request.physical_hostname() &&
-        !RegistrationLeaseExpired_(it->second)) {
-      FillPreparationReply_(it->second, &reply);
-      return reply;
-    }
-    if (it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-        !RegistrationLeaseExpired_(it->second)) {
-      reply.set_reason("Dynamic node is already registering");
+        !RegistrationLeaseExpired_(it->second) &&
+        (it->second.registration_nonce() != request.client_nonce() ||
+         it->second.physical_hostname() != request.physical_hostname())) {
+      fail(crane::grpc::ERR_NODE_BUSY, "Dynamic node is already registering");
       return reply;
     }
     auto result =
         ValidateReportedSpec_(EffectiveSpec(it->second), reported_spec);
     if (!result) {
-      reply.set_reason(result.error());
+      fail(result.error().code(), result.error().description());
       return reply;
     }
     DynamicNodeRecord prepared = it->second;
-    prepare_record(&prepared);
+    const std::string token = prepare_record(&prepared);
     if (!g_embedded_db_client->StoreDynamicNodeRecords({prepared})) {
-      reply.set_reason("Failed to persist dynamic registration lease");
+      fail(crane::grpc::ERR_SYSTEM_ERR,
+           "Failed to persist dynamic registration lease");
       return reply;
     }
     it->second = std::move(prepared);
     g_meta_container->UpdateDynamicNodeMetadata(it->second);
     FillPreparationReply_(it->second, &reply);
+    reply.set_registration_token(token);
     return reply;
   }
 
   if (request.mode() ==
       crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_AUTO_CREATE) {
     if (!g_config.CtldConf.DynamicNodes.AutoCreate) {
-      reply.set_reason("Dynamic auto-create registration is disabled");
+      fail(crane::grpc::ERR_GENERIC_FAILURE,
+           "Dynamic auto-create registration is disabled");
       return reply;
     }
     if (request.pool().empty()) {
-      reply.set_reason("Dynamic auto-create registration requires a pool");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Dynamic auto-create registration requires a pool");
       return reply;
     }
     const auto& policies = g_config.CtldConf.DynamicNodes.AutoCreatePools;
@@ -1050,7 +1167,8 @@ NodeManager::PrepareCranedRegistration(
       return policy.Name == request.pool();
     });
     if (policy_it == policies.end()) {
-      reply.set_reason("Dynamic auto-create pool is not allowed");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Dynamic auto-create pool is not allowed");
       return reply;
     }
     const auto& policy = *policy_it;
@@ -1080,21 +1198,24 @@ NodeManager::PrepareCranedRegistration(
     }
     if (auto bound_node = FindNodeByPhysicalHostnameNoLock_(
             request.physical_hostname(), node_name)) {
-      reply.set_reason(fmt::format("Physical host is already registered as {}",
-                                   *bound_node));
+      fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+           fmt::format("Physical host is already registered as {}",
+                       *bound_node));
       return reply;
     }
     auto name_result = ValidateNodeName(node_name);
     if (!name_result) {
-      reply.set_reason(name_result.error());
+      fail(name_result.error().code(), name_result.error().description());
       return reply;
     }
     if (!std::regex_match(node_name, std::regex(policy.NodeNamePattern))) {
-      reply.set_reason("Node name is outside the auto-create pool policy");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Node name is outside the auto-create pool policy");
       return reply;
     }
     if (g_config.Nodes.contains(node_name)) {
-      reply.set_reason("Auto-create node conflicts with a static node");
+      fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+           "Auto-create node conflicts with a static node");
       return reply;
     }
     if (reported_spec.cpu_count() < policy.MinCpu ||
@@ -1103,48 +1224,54 @@ NodeManager::PrepareCranedRegistration(
         reported_spec.memory_bytes() > policy.MaxMemoryBytes ||
         reported_spec.sockets() < policy.MinSockets ||
         reported_spec.sockets() > policy.MaxSockets) {
-      reply.set_reason(
-          "Reported resources are outside the auto-create pool bounds");
+      fail(crane::grpc::ERR_INVALID_PARAM,
+           "Reported resources are outside the auto-create pool bounds");
       return reply;
     }
     for (const auto& feature : policy.RequiredFeatures) {
       if (std::ranges::find(reported_spec.features(), feature) ==
           reported_spec.features().end()) {
-        reply.set_reason(
-            "Reported features do not satisfy the auto-create pool");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Reported features do not satisfy the auto-create pool");
         return reply;
       }
     }
     for (const auto& feature : reported_spec.features()) {
       if (!policy.AllowedFeatures.contains(feature)) {
-        reply.set_reason(
-            "Reported feature is not allowed by the auto-create "
-            "pool");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Reported feature is not allowed by the auto-create pool");
         return reply;
       }
     }
     for (const auto& partition : request.requested_partitions()) {
       if (std::ranges::find(policy.Partitions, partition) ==
           policy.Partitions.end()) {
-        reply.set_reason(
-            "Requested partition is not allowed by the auto-create pool");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Requested partition is not allowed by the auto-create pool");
         return reply;
       }
     }
 
     std::map<std::pair<std::string, std::string>, uint64_t> reported_gres;
-    for (const auto& [name, types] : reported_spec.gres().name_type_map()) {
-      for (const auto& [type, slots] : types.type_slots_map()) {
-        auto gres_policy =
-            std::ranges::find_if(policy.Gres, [&](const auto& range) {
-              return range.Name == name && range.Type == type;
-            });
-        if (gres_policy == policy.Gres.end()) {
-          reply.set_reason(
-              "Reported GRES is not allowed by the auto-create pool");
-          return reply;
-        }
-        reported_gres.emplace(std::pair{name, type}, slots.slots_size());
+    for (const auto& [name, count] : reported_spec.gres().name_gres_map()) {
+      uint64_t untyped = count.total();
+      for (const auto& [type, type_count] : count.specified()) {
+        untyped -= type_count;
+        reported_gres.emplace(std::pair{name, type}, type_count);
+      }
+      if (untyped > 0)
+        reported_gres.emplace(std::pair{name, std::string{}}, untyped);
+    }
+    for (const auto& [name_type, count] : reported_gres) {
+      auto gres_policy =
+          std::ranges::find_if(policy.Gres, [&](const auto& range) {
+            return range.Name == name_type.first &&
+                   range.Type == name_type.second;
+          });
+      if (gres_policy == policy.Gres.end()) {
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Reported GRES is not allowed by the auto-create pool");
+        return reply;
       }
     }
     for (const auto& range : policy.Gres) {
@@ -1153,8 +1280,8 @@ NodeManager::PrepareCranedRegistration(
           it != reported_gres.end())
         count = it->second;
       if (count < range.Min || count > range.Max) {
-        reply.set_reason(
-            "Reported GRES is outside the auto-create pool bounds");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Reported GRES is outside the auto-create pool bounds");
         return reply;
       }
     }
@@ -1162,12 +1289,13 @@ NodeManager::PrepareCranedRegistration(
     if (existing != records_.end() &&
         IsDynamicRecordPresent(existing->second)) {
       if (quarantined_nodes_.contains(existing->first)) {
-        reply.set_reason(
-            "Dynamic node references a partition that no longer exists");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Dynamic node references a partition that no longer exists");
         return reply;
       }
       if (existing->second.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_REGISTERED) {
-        reply.set_reason("Node name is reserved by a precreated dynamic node");
+        fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+             "Node name is reserved by a precreated dynamic node");
         return reply;
       }
       if (!std::ranges::all_of(
@@ -1175,67 +1303,71 @@ NodeManager::PrepareCranedRegistration(
                 return std::ranges::find(policy.Partitions, partition) !=
                        policy.Partitions.end();
               })) {
-        reply.set_reason(
-            "Dynamic node partitions are outside the auto-create pool");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Dynamic node partitions are outside the auto-create pool");
         return reply;
       }
       if (request.generation() != 0 &&
           request.generation() != existing->second.generation()) {
-        reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
-        reply.set_reason("Dynamic node generation has changed");
+        fail(crane::grpc::ERR_NODE_STALE_GENERATION,
+             "Dynamic node generation has changed");
         return reply;
       }
       if (request.pool() != existing->second.pool()) {
-        reply.set_reason("Requested pool does not match the dynamic node");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Requested pool does not match the dynamic node");
         return reply;
       }
       if (!HasRequestedPartition(request.requested_partitions(),
                                  existing->second.partition_names())) {
-        reply.set_reason("Requested partitions do not match the dynamic node");
+        fail(crane::grpc::ERR_INVALID_PARAM,
+             "Requested partitions do not match the dynamic node");
         return reply;
       }
+      // A retry from the same client (same nonce and host) falls through and
+      // rotates the lease; only a lease held by a different client blocks.
       if (existing->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-          existing->second.registration_nonce() == request.client_nonce() &&
-          existing->second.physical_hostname() == request.physical_hostname() &&
-          !RegistrationLeaseExpired_(existing->second)) {
-        FillPreparationReply_(existing->second, &reply);
-        return reply;
-      }
-      if (existing->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-          !RegistrationLeaseExpired_(existing->second)) {
-        reply.set_reason("Dynamic node is already registering");
+          !RegistrationLeaseExpired_(existing->second) &&
+          (existing->second.registration_nonce() != request.client_nonce() ||
+           existing->second.physical_hostname() !=
+               request.physical_hostname())) {
+        fail(crane::grpc::ERR_NODE_BUSY, "Dynamic node is already registering");
         return reply;
       }
       if (existing->second.physical_hostname() != request.physical_hostname()) {
-        reply.set_reason("Dynamic node is owned by another physical host");
+        fail(crane::grpc::ERR_NODE_BUSY,
+             "Dynamic node is owned by another physical host");
         return reply;
       }
       auto result =
           ValidateReportedSpec_(EffectiveSpec(existing->second), reported_spec);
       if (!result) {
-        reply.set_reason(result.error());
+        fail(result.error().code(), result.error().description());
         return reply;
       }
       DynamicNodeRecord prepared = existing->second;
-      prepare_record(&prepared);
+      const std::string token = prepare_record(&prepared);
       if (!g_embedded_db_client->StoreDynamicNodeRecords({prepared})) {
-        reply.set_reason("Failed to persist dynamic registration lease");
+        fail(crane::grpc::ERR_SYSTEM_ERR,
+             "Failed to persist dynamic registration lease");
         return reply;
       }
       existing->second = std::move(prepared);
       g_meta_container->UpdateDynamicNodeMetadata(existing->second);
       FillPreparationReply_(existing->second, &reply);
+      reply.set_registration_token(token);
       return reply;
     }
 
     if (request.generation() != 0) {
-      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
-      reply.set_reason("Dynamic node is no longer available");
+      fail(crane::grpc::ERR_NODE_STALE_GENERATION,
+           "Dynamic node is no longer available");
       return reply;
     }
     if (existing != records_.end() &&
         existing->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DELETING) {
-      reply.set_reason("Dynamic node deletion is still in progress");
+      fail(crane::grpc::ERR_NODE_BUSY,
+           "Dynamic node deletion is still in progress");
       return reply;
     }
 
@@ -1247,7 +1379,8 @@ NodeManager::PrepareCranedRegistration(
                    IsDynamicRecordPresent(entry.second);
           });
       if (auto_count >= g_config.CtldConf.DynamicNodes.MaxAutoCreateNodes) {
-        reply.set_reason("Dynamic auto-create node limit reached");
+        fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
+             "Dynamic auto-create node limit reached");
         return reply;
       }
     }
@@ -1259,7 +1392,8 @@ NodeManager::PrepareCranedRegistration(
                  IsDynamicRecordPresent(entry.second);
         });
     if (pool_node_count >= policy.MaxNodes) {
-      reply.set_reason("Dynamic auto-create pool node limit reached");
+      fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
+           "Dynamic auto-create pool node limit reached");
       return reply;
     }
     if (g_config.CtldConf.MaxNodeCount != 0 &&
@@ -1274,12 +1408,14 @@ NodeManager::PrepareCranedRegistration(
                      ? 1
                      : 0) >
             g_config.CtldConf.MaxNodeCount) {
-      reply.set_reason("MaxNodeCount would be exceeded");
+      fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
+           "MaxNodeCount would be exceeded");
       return reply;
     }
 
     DynamicNodeRecord record;
     record.set_node_name(node_name);
+    record.set_schema_version(kDynamicNodeSchemaVersion);
     *record.mutable_spec() = reported_spec;
     if (request.requested_partitions().empty())
       record.mutable_partition_names()->Assign(policy.Partitions.begin(),
@@ -1289,7 +1425,7 @@ NodeManager::PrepareCranedRegistration(
           request.requested_partitions());
     auto generation = NextGenerationNoLock_(node_name);
     if (!generation) {
-      reply.set_reason(generation.error());
+      fail(generation.error().code(), generation.error().description());
       return reply;
     }
     record.set_generation(*generation);
@@ -1300,12 +1436,13 @@ NodeManager::PrepareCranedRegistration(
     *record.mutable_effective_spec() = record.spec();
     auto validation = ValidatePresentRecord_(record);
     if (!validation) {
-      reply.set_reason(validation.error());
+      fail(validation.error().code(), validation.error().description());
       return reply;
     }
-    prepare_record(&record);
+    const std::string token = prepare_record(&record);
     if (!g_embedded_db_client->StoreDynamicNodeRecords({record})) {
-      reply.set_reason("Failed to persist auto-created dynamic node");
+      fail(crane::grpc::ERR_SYSTEM_ERR,
+           "Failed to persist auto-created dynamic node");
       return reply;
     }
     records_[node_name] = record;
@@ -1313,21 +1450,26 @@ NodeManager::PrepareCranedRegistration(
     g_meta_container->AddDynamicNodes({record});
     PublishNodeDefinition(record,
                           crane::grpc::plugin::NODE_DEFINITION_ACTION_UPSERT);
+    CRANE_INFO("Auto-created dynamic node {} in pool {} for host {}.",
+               node_name, policy.Name, request.physical_hostname());
     FillPreparationReply_(record, &reply);
+    reply.set_registration_token(token);
     return reply;
   }
 
   if (request.mode() !=
       crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_FUTURE_POOL) {
-    reply.set_reason("Unsupported dynamic registration mode");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "Unsupported dynamic registration mode");
     return reply;
   }
   if (request.pool().empty()) {
-    reply.set_reason("FUTURE registration requires a pool");
+    fail(crane::grpc::ERR_INVALID_PARAM, "FUTURE registration requires a pool");
     return reply;
   }
   if (!request.requested_node_name().empty()) {
-    reply.set_reason("FUTURE registration cannot request a node name");
+    fail(crane::grpc::ERR_INVALID_PARAM,
+         "FUTURE registration cannot request a node name");
     return reply;
   }
 
@@ -1336,13 +1478,25 @@ NodeManager::PrepareCranedRegistration(
     if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN ||
         quarantined_nodes_.contains(node_name))
       continue;
+    // A retry from the same client rotates its existing lease instead of
+    // leasing another FUTURE slot.
     if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
         record.registration_nonce() == request.client_nonce() &&
         record.physical_hostname() == request.physical_hostname() &&
         (request.generation() == 0 ||
          record.generation() == request.generation()) &&
         record.pool() == request.pool() && !RegistrationLeaseExpired_(record)) {
+      DynamicNodeRecord prepared = record;
+      const std::string token = prepare_record(&prepared);
+      if (!g_embedded_db_client->StoreDynamicNodeRecords({prepared})) {
+        fail(crane::grpc::ERR_SYSTEM_ERR,
+             "Failed to persist FUTURE node lease");
+        return reply;
+      }
+      record = std::move(prepared);
+      g_meta_container->UpdateDynamicNodeMetadata(record);
       FillPreparationReply_(record, &reply);
+      reply.set_registration_token(token);
       return reply;
     }
     const bool future_candidate =
@@ -1362,18 +1516,18 @@ NodeManager::PrepareCranedRegistration(
         record.physical_hostname() == request.physical_hostname() &&
         (request.generation() == 0 ||
          record.generation() == request.generation());
-    if (!IsDynamicRecordPresent(record) ||
-        (!future_candidate && !down_candidate && !active_candidate) ||
+    if ((!future_candidate && !down_candidate && !active_candidate) ||
         record.pool() != request.pool())
       continue;
-    if (!record.registration_token().empty() &&
+    if (!record.registration_token_digest().empty() &&
         !RegistrationLeaseExpired_(record))
       continue;
     const auto& expected = EffectiveSpec(record);
+    // CPU count, sockets and GRES must match exactly. Memory may exceed the
+    // configured value; the effective spec stays capped at it.
     if (!ValidateReportedSpec_(expected, reported_spec) ||
         reported_spec.cpu_count() != expected.cpu_count() ||
-        reported_spec.sockets() != expected.sockets() ||
-        !GresAllocationMatch_(expected, reported_spec))
+        !GresCountsMatch_(expected.gres(), reported_spec.gres()))
       continue;
     if (!HasRequestedPartition(request.requested_partitions(),
                                record.partition_names()))
@@ -1389,31 +1543,32 @@ NodeManager::PrepareCranedRegistration(
     return lhs.get().node_name() < rhs.get().node_name();
   });
   if (candidates.empty()) {
-    if (request.generation() != 0)
-      reply.set_code(crane::grpc::ERR_NODE_STALE_GENERATION);
-    reply.set_reason("No FUTURE node matches the reported resources");
+    fail(request.generation() != 0 ? crane::grpc::ERR_NODE_STALE_GENERATION
+                                   : crane::grpc::ERR_INVALID_PARAM,
+         "No FUTURE node matches the reported resources");
     return reply;
   }
   auto& record = candidates.front().get();
   if (auto bound_node = FindNodeByPhysicalHostnameNoLock_(
           request.physical_hostname(), record.node_name())) {
-    reply.set_reason(
-        fmt::format("Physical host is already registered as {}", *bound_node));
+    fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
+         fmt::format("Physical host is already registered as {}", *bound_node));
     return reply;
   }
   DynamicNodeRecord prepared = record;
-  prepare_record(&prepared);
+  const std::string token = prepare_record(&prepared);
   if (!g_embedded_db_client->StoreDynamicNodeRecords({prepared})) {
-    reply.set_reason("Failed to persist FUTURE node lease");
+    fail(crane::grpc::ERR_SYSTEM_ERR, "Failed to persist FUTURE node lease");
     return reply;
   }
   record = std::move(prepared);
   g_meta_container->UpdateDynamicNodeMetadata(record);
   FillPreparationReply_(record, &reply);
+  reply.set_registration_token(token);
   return reply;
 }
 
-std::expected<void, std::string> NodeManager::BeginRegistration(
+CraneExpectedRich<void> NodeManager::BeginRegistration(
     const CranedId& node_id, uint64_t generation, const RegToken& token,
     std::string_view registration_token) {
   absl::MutexLock lock(&mutex_);
@@ -1438,7 +1593,7 @@ std::expected<void, std::string> NodeManager::BeginRegistration(
   return {};
 }
 
-std::expected<void, std::string> NodeManager::ValidateRegistration(
+CraneExpectedRich<void> NodeManager::ValidateRegistration(
     const CranedId& node_id, uint64_t generation,
     const crane::grpc::CranedRemoteMeta& remote_meta,
     std::string_view registration_token) {
@@ -1447,16 +1602,17 @@ std::expected<void, std::string> NodeManager::ValidateRegistration(
   if (!result) return result;
   if (g_config.Nodes.contains(node_id)) return {};
 
+  // ValidateRegistrationNoLock_ guarantees a present record for non-static
+  // nodes.
   auto it = records_.find(node_id);
-  if (it == records_.end()) return {};
+  CRANE_ASSERT(it != records_.end());
   auto registered =
       BuildRegisteredRecord_(it->second, remote_meta, registration_token);
   if (!registered) return std::unexpected(registered.error());
   return {};
 }
 
-std::expected<DynamicNodeRecord, std::string>
-NodeManager::BuildRegisteredRecord_(
+CraneExpectedRich<DynamicNodeRecord> NodeManager::BuildRegisteredRecord_(
     const DynamicNodeRecord& record,
     const crane::grpc::CranedRemoteMeta& remote_meta,
     std::string_view registration_token) const {
@@ -1464,36 +1620,39 @@ NodeManager::BuildRegisteredRecord_(
   if (!token_result) return std::unexpected(token_result.error());
   if (remote_meta.physical_hostname().empty() ||
       remote_meta.physical_hostname() != record.physical_hostname())
-    return std::unexpected("Physical hostname does not match registration");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Physical hostname does not match registration"));
   if (!remote_meta.has_reported_spec())
-    return std::unexpected("Dynamic node did not report its resource spec");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Dynamic node did not report its resource spec"));
 
   DynamicNodeSpec reported = remote_meta.reported_spec();
   const auto& expected = record.spec();
   auto spec_result = ValidateReportedSpec_(expected, reported);
   if (!spec_result) return std::unexpected(spec_result.error());
 
-  DynamicNodeSpec allocated;
-  *allocated.mutable_gres() = remote_meta.dres_in_node();
-  auto gres_validation = ValidateGresDefinition(allocated.gres());
+  auto gres_validation = ValidateGresDefinition(remote_meta.dres_in_node());
   if (!gres_validation) return std::unexpected(gres_validation.error());
-  if (!GresAllocationMatch_(expected, allocated))
-    return std::unexpected(
-        "Registered GRES allocation does not match the effective node spec");
+  if (!GresCountsMatch_(expected.gres(),
+                        GresCountsFromSlots(remote_meta.dres_in_node())))
+    return std::unexpected(FormatRichErr(
+        crane::grpc::ERR_INVALID_PARAM,
+        "Registered GRES allocation does not match the effective node spec"));
 
   DynamicNodeRecord registered = record;
   *registered.mutable_reported_spec() = reported;
   if (!registered.ever_registered())
     *registered.mutable_effective_spec() = expected;
-  *registered.mutable_effective_spec()->mutable_gres() =
-      remote_meta.dres_in_node();
+  *registered.mutable_registered_gres() = remote_meta.dres_in_node();
   registered.set_physical_hostname(remote_meta.physical_hostname());
   registered.mutable_network_interfaces()->CopyFrom(
       remote_meta.network_interfaces());
   return registered;
 }
 
-std::expected<void, std::string> NodeManager::MarkRegistered(
+CraneExpectedRich<void> NodeManager::MarkRegistered(
     const CranedId& node_id, uint64_t generation,
     const crane::grpc::CranedRemoteMeta& remote_meta,
     std::string_view registration_token) {
@@ -1502,8 +1661,10 @@ std::expected<void, std::string> NodeManager::MarkRegistered(
   if (!result) return result;
   if (g_config.Nodes.contains(node_id)) return {};
 
+  // ValidateRegistrationNoLock_ guarantees a present record for non-static
+  // nodes.
   auto it = records_.find(node_id);
-  if (it == records_.end()) return {};
+  CRANE_ASSERT(it != records_.end());
 
   auto registered =
       BuildRegisteredRecord_(it->second, remote_meta, registration_token);
@@ -1512,21 +1673,28 @@ std::expected<void, std::string> NodeManager::MarkRegistered(
   record.set_ever_registered(true);
   record.set_lifecycle(DYNAMIC_NODE_LIFECYCLE_ACTIVE);
   record.set_power_state(DYNAMIC_NODE_POWER_STATE_ON);
-  record.clear_registration_token();
+  record.clear_registration_token_digest();
   record.clear_registration_nonce();
   record.clear_lease_expire_time();
   record.set_revision(++catalog_revision_);
   if (!g_embedded_db_client->StoreDynamicNodeRecords({record})) {
+    // Not dead code: CranedUp has already rebound the node's GRES to the
+    // freshly reported devices. Restore the runtime metadata from the
+    // unmodified record.
     g_meta_container->UpdateDynamicNodeMetadata(it->second);
-    return std::unexpected("Failed to persist dynamic node registration");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                      "Failed to persist dynamic node registration"));
   }
 
   it->second = std::move(record);
   g_meta_container->UpdateDynamicNodeMetadata(it->second);
+  CRANE_INFO("Dynamic node {} registered with generation {}.", node_id,
+             it->second.generation());
   return {};
 }
 
-std::expected<void, std::string> NodeManager::MarkRegistrationFailed(
+CraneExpectedRich<void> NodeManager::MarkRegistrationFailed(
     const CranedId& node_id, uint64_t generation,
     std::string_view registration_token) {
   absl::MutexLock lock(&mutex_);
@@ -1537,12 +1705,19 @@ std::expected<void, std::string> NodeManager::MarkRegistrationFailed(
   return MarkDisconnectedNoLock_(node_id, generation);
 }
 
-std::expected<void, std::string> NodeManager::MarkDisconnectedIfUntracked(
+CraneExpectedRich<void> NodeManager::MarkDisconnectedIfUntracked(
     const CranedId& node_id) {
   absl::MutexLock lock(&mutex_);
   if (g_craned_keeper->IsCranedTracked(node_id)) return {};
   g_meta_container->CranedDown(node_id);
   auto it = records_.find(node_id);
+  if (it != records_.end() &&
+      it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) {
+    // The node was deleted while still connected; drop the leftover address
+    // cache entry now that the connection is gone.
+    g_craned_keeper->ForgetCraned(node_id);
+    return {};
+  }
   // A delayed callback from the old connection must not revoke a new lease.
   if (it != records_.end() &&
       it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
@@ -1551,7 +1726,7 @@ std::expected<void, std::string> NodeManager::MarkDisconnectedIfUntracked(
   return MarkDisconnectedNoLock_(node_id, 0);
 }
 
-std::expected<void, std::string> NodeManager::MarkDisconnectedNoLock_(
+CraneExpectedRich<void> NodeManager::MarkDisconnectedNoLock_(
     const CranedId& node_id, uint64_t generation) {
   auto it = records_.find(node_id);
   if (it == records_.end()) return {};
@@ -1563,19 +1738,22 @@ std::expected<void, std::string> NodeManager::MarkDisconnectedNoLock_(
   if (!ResetRegistrationState(&record)) return {};
   record.set_revision(++catalog_revision_);
   if (!g_embedded_db_client->StoreDynamicNodeRecords({record}))
-    return std::unexpected("Failed to persist dynamic node down state");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                      "Failed to persist dynamic node down state"));
   it->second = record;
   g_meta_container->UpdateDynamicNodeMetadata(record);
   return {};
 }
 
-std::expected<bool, std::string> NodeManager::UpdatePowerState(
+CraneExpectedRich<bool> NodeManager::UpdatePowerState(
     const CranedId& node_id, uint64_t generation,
     crane::grpc::CranedPowerState power_state) {
   absl::MutexLock lock(&mutex_);
   auto dynamic_power_state = DynamicNodePowerStateFromCraned(power_state);
   if (!dynamic_power_state)
-    return std::unexpected("Invalid Craned power state");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid Craned power state"));
   if (g_config.Nodes.contains(node_id)) {
     // Ignore a delayed report from a former dynamic incarnation of this name.
     return generation != 0;
@@ -1593,14 +1771,30 @@ std::expected<bool, std::string> NodeManager::UpdatePowerState(
   SetRecordPowerState(&record, *dynamic_power_state);
   record.set_revision(++catalog_revision_);
   if (!g_embedded_db_client->StoreDynamicNodeRecords({record}))
-    return std::unexpected("Failed to persist dynamic node power state");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                      "Failed to persist dynamic node power state"));
   it->second = record;
   g_meta_container->UpdateDynamicNodeMetadata(record);
   return false;
 }
 
-std::expected<NodeManager::ScaleUpResult, std::string>
-NodeManager::RequestScaleUp(
+bool NodeManager::HasScalableNodes(const PartitionId& partition) {
+  absl::MutexLock lock(&mutex_);
+  return std::ranges::any_of(records_, [&](const auto& entry) {
+    const auto& record = entry.second;
+    return IsDynamicRecordPresent(record) &&
+           !quarantined_nodes_.contains(entry.first) &&
+           (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_FUTURE ||
+            record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
+            record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DOWN) &&
+           record.provider() == kPowerControlProvider &&
+           std::ranges::find(record.partition_names(), partition) !=
+               record.partition_names().end();
+  });
+}
+
+CraneExpectedRich<NodeManager::ScaleUpResult> NodeManager::RequestScaleUp(
     const PartitionId& partition, const ResourceView& node_resource,
     const ResourceView& task_resource, uint32_t min_tasks_per_node,
     uint32_t max_tasks_per_node, uint32_t node_count, uint32_t task_count,
@@ -1782,7 +1976,9 @@ NodeManager::RequestScaleUp(
     updated_records.emplace_back(std::move(record));
   }
   if (!g_embedded_db_client->StoreDynamicNodeRecords(updated_records))
-    return std::unexpected("Failed to persist dynamic node scale-up state");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                      "Failed to persist dynamic node scale-up state"));
 
   for (const auto& record : updated_records) {
     records_[record.node_name()] = record;
@@ -1791,46 +1987,57 @@ NodeManager::RequestScaleUp(
   return result;
 }
 
-std::expected<void, std::string> NodeManager::ValidateRegistrationNoLock_(
+CraneExpectedRich<void> NodeManager::ValidateRegistrationNoLock_(
     const CranedId& node_id, uint64_t generation) const {
   if (g_config.Nodes.contains(node_id)) {
     if (generation != 0)
-      return std::unexpected("Static node generation must be 0");
+      return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                           "Static node generation must be 0"));
     return {};
   }
   if (!g_config.CtldConf.DynamicNodes.Enabled)
-    return std::unexpected("Dynamic node registration is disabled");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_GENERIC_FAILURE,
+                      "Dynamic node registration is disabled"));
 
   auto it = records_.find(node_id);
   if (it == records_.end() || !IsDynamicRecordPresent(it->second))
-    return std::unexpected("Dynamic node is not available");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Dynamic node is not available"));
   if (quarantined_nodes_.contains(node_id))
-    return std::unexpected(
-        "Dynamic node references a partition that no longer exists");
+    return std::unexpected(FormatRichErr(
+        crane::grpc::ERR_INVALID_PARAM,
+        "Dynamic node references a partition that no longer exists"));
   if (it->second.generation() != generation)
-    return std::unexpected(fmt::format("Stale generation {}, expected {}",
-                                       generation, it->second.generation()));
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_NODE_STALE_GENERATION,
+                                         "Stale generation {}, expected {}",
+                                         generation, it->second.generation()));
   return {};
 }
 
-std::expected<void, std::string> NodeManager::ValidatePresentRecord_(
+CraneExpectedRich<void> NodeManager::ValidatePresentRecord_(
     const DynamicNodeRecord& record) const {
   auto name_result = ValidateNodeName(record.node_name());
   if (!name_result) return name_result;
   const auto& spec = EffectiveSpec(record);
   if (!record.has_spec() || spec.cpu_count() == 0 || spec.memory_bytes() == 0 ||
       spec.sockets() == 0 || spec.sockets() > spec.cpu_count())
-    return std::unexpected("Invalid CPU, memory or sockets");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid CPU, memory or sockets"));
   if (record.generation() == 0)
-    return std::unexpected("Dynamic node generation must be positive");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Dynamic node generation must be positive"));
   if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN &&
       record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_REGISTERED)
-    return std::unexpected("Invalid dynamic node origin");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid dynamic node origin"));
   if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE &&
       record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
       record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_ACTIVE &&
       record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DOWN)
-    return std::unexpected("Invalid dynamic node lifecycle");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid dynamic node lifecycle"));
   if (record.power_state() != DYNAMIC_NODE_POWER_STATE_ON &&
       record.power_state() != DYNAMIC_NODE_POWER_STATE_OFF &&
       record.power_state() !=
@@ -1840,22 +2047,29 @@ std::expected<void, std::string> NodeManager::ValidatePresentRecord_(
       record.power_state() != crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING &&
       record.power_state() != crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP &&
       record.power_state() != crane::grpc::DYNAMIC_NODE_POWER_STATE_TO_SLEEPING)
-    return std::unexpected("Invalid dynamic node power state");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Invalid dynamic node power state"));
   if (record.partition_names().empty())
-    return std::unexpected("No partition specified");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "No partition specified"));
   if (HasDuplicates(record.partition_names()))
-    return std::unexpected("Duplicate partitions are not allowed");
+    return std::unexpected(
+        FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                      "Duplicate partitions are not allowed"));
   for (const auto& partition_id : record.partition_names()) {
     if (!g_config.Partitions.contains(partition_id))
-      return std::unexpected(
-          fmt::format("Partition {} does not exist", partition_id));
+      return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                           "Partition {} does not exist",
+                                           partition_id));
   }
   if (HasDuplicates(spec.features()))
-    return std::unexpected("Duplicate features are not allowed");
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Duplicate features are not allowed"));
   if (std::ranges::any_of(spec.features(),
                           [](const auto& feature) { return feature.empty(); }))
-    return std::unexpected("Empty features are not allowed");
-  return ValidateGresDefinition(spec.gres());
+    return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
+                                         "Empty features are not allowed"));
+  return ValidateGresCounts(spec.gres());
 }
 
 }  // namespace Ctld

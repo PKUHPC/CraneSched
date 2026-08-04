@@ -779,6 +779,12 @@ void ParseConfig(int argc, char** argv) {
                     g_config.CtldConf.MaxNodeCount, g_config.Nodes.size());
         std::exit(1);
       }
+      if (g_config.CtldConf.DynamicNodes.Enabled &&
+          g_config.CtldConf.MaxNodeCount == g_config.Nodes.size())
+        CRANE_WARN(
+            "DynamicNodes is enabled but MaxNodeCount {} equals the static "
+            "node count; every dynamic node creation will be rejected.",
+            g_config.CtldConf.MaxNodeCount);
 
       std::unordered_set nodes_without_part = g_config.Nodes |
                                               ranges::views::keys |
@@ -1462,13 +1468,12 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
-    // No need to worry disconnect before job scheduler init
-    if (g_node_manager) {
-      auto result = g_node_manager->MarkDisconnectedIfUntracked(craned_id);
-      if (!result)
-        CRANE_WARN("Failed to persist dynamic node {} down state: {}",
-                   craned_id, result.error());
-    }
+    // g_node_manager outlives CranedKeeper: it is initialized before the
+    // keeper and reset after the keeper's shutdown.
+    auto result = g_node_manager->MarkDisconnectedIfUntracked(craned_id);
+    if (!result)
+      CRANE_WARN("Failed to persist dynamic node {} down state: {}", craned_id,
+                 result.error().description());
   });
 
   ok = g_db_client->Init();

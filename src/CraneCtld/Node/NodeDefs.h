@@ -24,9 +24,10 @@
 namespace Ctld {
 
 /**
- * The static information on a Craned (the static part of CranedMeta). This
- * structure is provided when a new Craned node is to be registered in
- * CranedMetaContainer.
+ * The configured identity and definition of a Craned (in contrast to the
+ * runtime state in CranedMeta). For dynamic nodes the catalog-mirrored
+ * fields below (deleting, lifecycle, dynamic_power_state, revision, ...)
+ * change at runtime, always under the node's element lock.
  */
 struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index

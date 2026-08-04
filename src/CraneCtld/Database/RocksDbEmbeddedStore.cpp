@@ -30,7 +30,6 @@ constexpr std::string_view kJobVarPrefix = "job_var/";
 constexpr std::string_view kStepFixedPrefix = "step_fixed/";
 constexpr std::string_view kStepVarPrefix = "step_var/";
 constexpr std::string_view kNextStepIdPrefix = "meta/next_step_id/";
-constexpr std::string_view kDynamicNodeGenerationPrefix = "\x01generation/";
 
 constexpr std::string_view kNextJobIdKey = "meta/next_job_id";
 constexpr std::string_view kNextJobDbIdKey = "meta/next_job_db_id";

@@ -21,6 +21,7 @@
 #include <absl/strings/str_split.h>
 #include <absl/strings/strip.h>
 #include <glob.h>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <pthread.h>
 
@@ -594,6 +595,22 @@ std::string GenerateSecureRandomHex(size_t byte_count) {
   hex.reserve(byte_count * 2);
   for (unsigned char byte : buffer)
     fmt::format_to(std::back_inserter(hex), "{:02x}", byte);
+  return hex;
+}
+
+std::string Sha256Hex(std::string_view data) {
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len = 0;
+  if (EVP_Digest(data.data(), data.size(), digest, &digest_len, EVP_sha256(),
+                 nullptr) != 1) {
+    CRANE_CRITICAL("Failed to compute a SHA-256 digest.");
+    std::terminate();
+  }
+
+  std::string hex;
+  hex.reserve(digest_len * 2);
+  for (unsigned int i = 0; i < digest_len; ++i)
+    fmt::format_to(std::back_inserter(hex), "{:02x}", digest[i]);
   return hex;
 }
 

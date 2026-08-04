@@ -7210,17 +7210,17 @@ void SchedulerAlgo::NodeSelect(
           auto it = node_state_map.find(craned_id);
           if (it == node_state_map.end()) {
             auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-            if (!craned_meta) {
-              CRANE_ERROR("Craned {} not found", craned_id);
-              continue;
-            }
+            // The power-state gate only applies to dynamic nodes: they are
+            // woken on demand below, while statically configured nodes under
+            // power management keep the pre-dynamic-nodes behavior.
             if (!craned_meta->alive || craned_meta->drain ||
-                (craned_meta->power_state != crane::grpc::CRANE_POWER_IDLE &&
-                 craned_meta->power_state != crane::grpc::CRANE_POWER_ACTIVE) ||
                 craned_meta->static_meta.deleting ||
                 (craned_meta->static_meta.dynamic &&
-                 craned_meta->static_meta.lifecycle !=
-                     crane::grpc::DYNAMIC_NODE_LIFECYCLE_ACTIVE)) {
+                 (craned_meta->static_meta.lifecycle !=
+                      crane::grpc::DYNAMIC_NODE_LIFECYCLE_ACTIVE ||
+                  (craned_meta->power_state != crane::grpc::CRANE_POWER_IDLE &&
+                   craned_meta->power_state !=
+                       crane::grpc::CRANE_POWER_ACTIVE)))) {
               CRANE_TRACE("Craned {} is unavailable for scheduling, skip it",
                           craned_id);
               continue;
@@ -7467,8 +7467,17 @@ void SchedulerAlgo::NodeSelect(
       g_plugin_client == nullptr)
     return;
   std::unordered_set<CranedId> reserved_scale_up_nodes;
+  // Partitions without any scalable dynamic node skip the per-job capacity
+  // computation entirely.
+  absl::flat_hash_map<PartitionId, bool> partition_scalable;
   for (const auto& job : job_ptr_vec) {
     if (job->reason != "Resource" || !job->reservation.empty()) continue;
+
+    auto [scalable_it, unseen] =
+        partition_scalable.try_emplace(job->partition_id, false);
+    if (unseen)
+      scalable_it->second = g_node_manager->HasScalableNodes(job->partition_id);
+    if (!scalable_it->second) continue;
 
     auto excluded_nodes = job->excluded_nodes;
     excluded_nodes.insert(reserved_scale_up_nodes.begin(),
@@ -7512,7 +7521,7 @@ void SchedulerAlgo::NodeSelect(
         excluded_nodes);
     if (!scale_up) {
       CRANE_WARN("Failed to request scale-up for pending job #{}: {}",
-                 job->job_id, scale_up.error());
+                 job->job_id, scale_up.error().description());
       continue;
     }
     reserved_scale_up_nodes.insert(scale_up->reserved_nodes.begin(),
@@ -8407,6 +8416,9 @@ void JobScheduler::TerminateJobsOnCraned(const CranedId& craned_id,
 
 std::unordered_set<CranedId> JobScheduler::FilterNodesWithJobs(
     const std::vector<CranedId>& node_ids) {
+  // Advisory check for node deletion: it rejects most busy nodes early with
+  // a precise reason. The authoritative occupancy re-check happens under the
+  // node element lock in CranedMetaContainer::SetDynamicNodesDeleting.
   LockGuard indexes_guard(&m_job_indexes_mtx_);
   std::unordered_set<CranedId> busy_nodes;
   for (const CranedId& node_id : node_ids) {

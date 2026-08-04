@@ -22,12 +22,6 @@
 
 namespace Ctld {
 
-namespace {
-
-constexpr std::string_view kDynamicNodeGenerationPrefix = "\x01generation/";
-
-}  // namespace
-
 #ifdef CRANE_HAVE_UNQLITE
 
 std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
@@ -1008,8 +1002,13 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
   bool parse_ok = true;
   auto result = m_node_db_->IterateAllKv([&](std::string&& key,
                                              std::vector<uint8_t>&& value) {
+    // BerkeleyDb writes keys with their NUL terminator (see BerkeleyDb::Store)
+    // but iterates them back verbatim. Strip it so keys match node names.
+    if (key.ends_with('\0')) key.pop_back();
+
     if (key.starts_with(kDynamicNodeGenerationPrefix)) {
       if (value.size() != sizeof(uint64_t)) {
+        CRANE_ERROR("Invalid dynamic node generation entry for key {}.", key);
         parse_ok = false;
         return true;
       }
@@ -1017,6 +1016,7 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
       std::memcpy(&generation, value.data(), sizeof(generation));
       std::string node_name = key.substr(kDynamicNodeGenerationPrefix.size());
       if (node_name.empty()) {
+        CRANE_ERROR("Empty node name in dynamic node generation entry.");
         parse_ok = false;
         return true;
       }
@@ -1028,8 +1028,10 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
     DynamicNodeRecord record;
     if (record.ParseFromArray(value.data(), value.size()))
       records->emplace(std::move(key), std::move(record));
-    else
+    else {
+      CRANE_ERROR("Failed to parse dynamic node record for key {}.", key);
       parse_ok = false;
+    }
     return true;
   });
 

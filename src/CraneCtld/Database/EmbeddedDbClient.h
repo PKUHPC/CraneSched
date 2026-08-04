@@ -35,6 +35,12 @@ inline bool IsValidCraneEmbeddedDbBackend(std::string_view backend) {
   return std::ranges::contains(kCraneEmbeddedDbBackendValues, backend);
 }
 
+// Key space of the dynamic node storage, shared by all backends: records are
+// keyed by their bare node name; generation high watermarks live under this
+// prefix, whose leading control byte cannot appear in a valid node name.
+inline constexpr std::string_view kDynamicNodeGenerationPrefix =
+    "\x01generation/";
+
 class EmbeddedDbClient {
  public:
   using db_id_t = job_db_id_t;
@@ -82,13 +88,20 @@ class EmbeddedDbClient {
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
           reservation_info_map) = 0;
 
+  // Loads all dynamic node records keyed by node name, together with the
+  // per-name generation high watermarks (see kDynamicNodeGenerationPrefix).
   virtual bool RetrieveDynamicNodeRecords(
       std::unordered_map<CranedId, DynamicNodeRecord>* records,
       DynamicNodeGenerationMap* generation_high_watermarks) = 0;
 
+  // Upserts the records and raises their generation high watermarks in one
+  // transaction.
   virtual bool StoreDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) = 0;
 
+  // Deletes the records but intentionally KEEPS (and updates) the generation
+  // high watermark of each name: a later re-creation of the same name must
+  // get a strictly larger generation so that stale craneds cannot re-attach.
   virtual bool DeleteDynamicNodeRecords(
       const std::vector<DynamicNodeRecord>& records) = 0;
 

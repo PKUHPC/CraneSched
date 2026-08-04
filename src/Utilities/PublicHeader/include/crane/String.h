@@ -144,6 +144,9 @@ std::expected<CertPair, std::string> ParseCertificate(
 // from a weak source.
 std::string GenerateSecureRandomHex(size_t byte_count);
 
+// SHA-256 digest of `data` as a lowercase hex string of 64 characters.
+std::string Sha256Hex(std::string_view data);
+
 template <typename YamlNode>
 std::optional<std::string> ParseCertConfig(const std::string& cert_name,
                                            const YamlNode& tls_config,

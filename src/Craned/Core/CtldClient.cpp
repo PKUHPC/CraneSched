@@ -288,6 +288,8 @@ void CtldClientStateMachine::ActionRequestConfig_() {
                      StateToString(m_state_));
   m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
+  // Keep the token monotonic across system clock adjustments: the ctld side
+  // rejects non-increasing tokens (CranedStub::SetRegToken).
   RegToken token = ToProtoTimestamp(std::chrono::system_clock::now());
   if (m_reg_token_.has_value() &&
       (token.seconds() < m_reg_token_->seconds() ||

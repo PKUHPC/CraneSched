@@ -597,12 +597,9 @@ void ParseConfig(int argc, char** argv) {
   }
 
   g_config.Dynamic = parsed_args.count("dynamic") > 0;
-  if (!g_config.Dynamic && parsed_args.count("node-name") > 0) {
-    fmt::print(stderr, "--node-name can only be used in dynamic mode.\n");
-    std::exit(1);
-  }
   if (!g_config.Dynamic &&
-      (parsed_args.count("registration-mode") > 0 ||
+      (parsed_args.count("node-name") > 0 ||
+       parsed_args.count("registration-mode") > 0 ||
        parsed_args.count("pool") > 0 || parsed_args.count("features") > 0 ||
        parsed_args.count("partitions") > 0)) {
     fmt::print(stderr,
@@ -1299,6 +1296,11 @@ void ParseConfig(int argc, char** argv) {
                           ? parsed_args["node-name"].as<std::string>()
                           : g_config.PhysicalHostname;
 
+  // Per name/type (typed) and per name (untyped) GRES counts of the approved
+  // effective spec that local devices still have to satisfy.
+  std::map<std::pair<std::string, std::string>, size_t> remaining_dynamic_gres;
+  std::map<std::string, size_t> remaining_untyped_dynamic_gres;
+
   if (g_config.Dynamic) {
     NodeSpecInfo node_real;
     if (!util::os::GetNodeInfo(&node_real)) {
@@ -1318,6 +1320,7 @@ void ParseConfig(int argc, char** argv) {
 
     uint32_t sockets = 0;
     std::set<std::string> socket_ids;
+    std::set<uint32_t> online_core_ids;
     const auto cpu_root = std::filesystem::path("/sys/devices/system/cpu");
     std::error_code cpu_error;
     if (std::filesystem::is_directory(cpu_root, cpu_error)) {
@@ -1333,6 +1336,8 @@ void ParseConfig(int argc, char** argv) {
         std::ifstream online_file(entry.path() / "online");
         int online;
         if (online_file >> online && online == 0) continue;
+        online_core_ids.emplace(
+            static_cast<uint32_t>(std::stoul(name.substr(3))));
         std::ifstream socket_file(entry.path() /
                                   "topology/physical_package_id");
         std::string socket_id;
@@ -1348,47 +1353,24 @@ void ParseConfig(int argc, char** argv) {
     reported_spec.mutable_features()->Assign(g_config.DynamicFeatures.begin(),
                                              g_config.DynamicFeatures.end());
 
+    // The GRES of a dynamic node comes from the explicit local device
+    // configuration; devices are never auto-detected.
     const auto device_config_key =
         g_config.DynamicRegistrationMode ==
                 crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED
             ? g_config.Hostname
             : g_config.PhysicalHostname;
     auto& physical_devices = each_node_device[device_config_key];
-    if (physical_devices.empty()) {
-      const std::filesystem::path dev_root("/dev");
-      std::error_code dev_error;
-      if (std::filesystem::is_directory(dev_root, dev_error)) {
-        for (std::filesystem::directory_iterator it(dev_root, dev_error), end;
-             it != end && !dev_error; it.increment(dev_error)) {
-          const auto& entry = *it;
-          const auto name = entry.path().filename().string();
-          if (!name.starts_with("nvidia") || name.size() <= 6 ||
-              !std::ranges::all_of(name.substr(6), [](unsigned char c) {
-                return std::isdigit(c) != 0;
-              }))
-            continue;
-          physical_devices.push_back({.name = "gpu",
-                                      .type = "auto",
-                                      .path = {entry.path().string()},
-                                      .EnvInjectorStr = std::string("nvidia"),
-                                      .CdiName = std::nullopt,
-                                      .CniPipeline = std::nullopt});
-        }
-      }
-      if (dev_error) {
-        CRANE_ERROR("Failed to inspect local devices: {}", dev_error.message());
-        std::exit(1);
-      }
-    }
     std::ranges::sort(physical_devices, [](const auto& lhs, const auto& rhs) {
       return std::tie(lhs.name, lhs.type, lhs.path) <
              std::tie(rhs.name, rhs.type, rhs.path);
     });
     for (const auto& device : physical_devices) {
-      auto& types =
-          (*reported_spec.mutable_gres()->mutable_name_type_map())[device.name];
-      auto& slots = (*types.mutable_type_slots_map())[device.type];
-      if (!device.path.empty()) slots.add_slots(device.path.front());
+      auto& gres_count =
+          (*reported_spec.mutable_gres()->mutable_name_gres_map())[device.name];
+      gres_count.set_total(gres_count.total() + 1);
+      if (!device.type.empty())
+        (*gres_count.mutable_specified())[device.type] += 1;
     }
     g_config.DynamicReportedSpec = reported_spec;
 
@@ -1450,7 +1432,8 @@ void ParseConfig(int argc, char** argv) {
     g_config.DynamicPartitions.assign(reply.partition_names().begin(),
                                       reply.partition_names().end());
     const auto& spec = reply.effective_spec();
-    if (node_real.cpu < spec.cpu_count()) {
+    if (node_real.cpu < spec.cpu_count() ||
+        online_core_ids.size() < spec.cpu_count()) {
       CRANE_ERROR("Dynamic node {} requires {} CPUs, but only {} are online.",
                   g_config.PhysicalHostname, spec.cpu_count(), node_real.cpu);
       std::exit(1);
@@ -1467,11 +1450,22 @@ void ParseConfig(int argc, char** argv) {
 
     auto node_res = std::make_shared<ResourceInNodeV3>();
     node_res->GetCpuSet().cpu_count = cpu_t(spec.cpu_count());
-    for (uint32_t i = 0; i < spec.cpu_count(); ++i)
-      node_res->GetCpuSet().core_ids.insert(i);
+    // Bind the first N actually online cores; core numbering may have gaps.
+    for (auto core_it = online_core_ids.begin();
+         node_res->GetCpuSet().core_ids.size() < spec.cpu_count(); ++core_it)
+      node_res->GetCpuSet().core_ids.insert(*core_it);
     node_res->SetMemoryBytes(spec.memory_bytes());
     node_res->SetMemorySwBytes(spec.memory_bytes());
-    node_res->GetGres() = spec.gres();
+    // GRES is filled below by claiming local devices against the approved
+    // counts.
+    for (const auto& [name, count] : spec.gres().name_gres_map()) {
+      uint64_t untyped = count.total();
+      for (const auto& [type, type_count] : count.specified()) {
+        untyped -= type_count;
+        remaining_dynamic_gres[{name, type}] = type_count;
+      }
+      if (untyped > 0) remaining_untyped_dynamic_gres[name] = untyped;
+    }
     g_config.CranedRes[g_config.Hostname] = std::move(node_res);
     g_config.node_topo_info.sockets = spec.sockets();
 
@@ -1511,21 +1505,6 @@ void ParseConfig(int argc, char** argv) {
   {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
-    std::map<std::pair<std::string, std::string>, size_t>
-        remaining_dynamic_gres;
-    std::map<std::string, size_t> remaining_untyped_dynamic_gres;
-    if (g_config.Dynamic) {
-      for (const auto& [name, types] :
-           node_res->GetGres().name_type_slots_map) {
-        for (const auto& [type, slots] : types.type_slots_map) {
-          if (type.empty())
-            remaining_untyped_dynamic_gres[name] = slots.size();
-          else
-            remaining_dynamic_gres[{name, type}] = slots.size();
-        }
-      }
-      node_res->GetGres() = DedicatedResourceInNode{};
-    }
     for (auto& dev_arg : devices) {
       auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
           dev_arg;

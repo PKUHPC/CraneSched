@@ -9,6 +9,8 @@ add_executable(embedded_db_client_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.cpp
 
         EmbeddedDbClientTest.cpp
         )
@@ -37,6 +39,11 @@ target_link_libraries(embedded_db_client_test
         )
 if (ENABLE_UNQLITE)
     target_compile_definitions(embedded_db_client_test PRIVATE CRANE_HAVE_UNQLITE)
+endif ()
+if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
+    target_compile_definitions(embedded_db_client_test PRIVATE CRANE_HAVE_BERKELEY_DB)
+    target_include_directories(embedded_db_client_test PRIVATE ${BERKELEY_DB_INCLUDE_DIR})
+    target_link_libraries(embedded_db_client_test ${BERKELEY_DB_CXX_LIBRARIES})
 endif ()
 if (ENABLE_ROCKSDB)
     target_sources(embedded_db_client_test PRIVATE

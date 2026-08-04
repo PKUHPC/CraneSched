@@ -78,11 +78,11 @@ class CranedMetaContainer final {
   void UpdateDynamicNodeMetadata(const crane::grpc::DynamicNodeRecord& record);
 
   // The returned maps contain the nodes that failed the operation and the
-  // per-node reasons; nodes not present in the map were applied.
-  std::unordered_map<CranedId, std::string> RemoveDynamicNodes(
+  // per-node errors; nodes not present in the map were applied.
+  std::unordered_map<CranedId, CraneRichError> RemoveDynamicNodes(
       const std::vector<CranedId>& node_ids);
 
-  std::unordered_map<CranedId, std::string> SetDynamicNodesDeleting(
+  std::unordered_map<CranedId, CraneRichError> SetDynamicNodesDeleting(
       const std::vector<CranedId>& node_ids);
 
   void ClearDynamicNodesDeleting(const std::vector<CranedId>& node_ids);

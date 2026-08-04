@@ -1100,7 +1100,10 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id, RegToken token,
   }
 
   auto *craned = new CranedStub(this);
-  CRANE_ASSERT(craned->SetRegToken(token));
+  // A fresh stub has no token yet, so setting one never fails. Keep the call
+  // outside CRANE_ASSERT: the macro drops its argument in NDEBUG builds.
+  bool token_set = craned->SetRegToken(token);
+  CRANE_ASSERT(token_set);
 
   // InitializingCraned: BEGIN -> IDLE
 

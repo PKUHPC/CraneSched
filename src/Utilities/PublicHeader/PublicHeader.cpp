@@ -904,8 +904,40 @@ ResourceInNodeV3 ResourceInNodeFromDynamicSpec(
     res.GetCpuSet().core_ids.insert(i);
   res.SetMemoryBytes(spec.memory_bytes());
   res.SetMemorySwBytes(spec.memory_bytes());
-  res.GetGres() = spec.gres();
+
+  crane::grpc::DedicatedResourceInNode placeholder_devices;
+  for (const auto& [name, count] : spec.gres().name_gres_map()) {
+    auto& type_slots = *(*placeholder_devices.mutable_name_type_map())[name]
+                            .mutable_type_slots_map();
+    uint64_t untyped = count.total();
+    for (const auto& [type, type_count] : count.specified()) {
+      untyped -= type_count;
+      auto& slots = type_slots[type];
+      for (uint64_t i = 0; i < type_count; ++i)
+        slots.add_slots(name + "-" + type + "-" + std::to_string(i));
+    }
+    if (untyped > 0) {
+      auto& slots = type_slots[std::string{}];
+      for (uint64_t i = 0; i < untyped; ++i)
+        slots.add_slots(name + "-" + std::to_string(i));
+    }
+  }
+  res.GetGres() = placeholder_devices;
   return res;
+}
+
+crane::grpc::GresMap GresCountsFromSlots(
+    const crane::grpc::DedicatedResourceInNode& devices) {
+  crane::grpc::GresMap counts;
+  for (const auto& [name, types] : devices.name_type_map()) {
+    auto& gres_count = (*counts.mutable_name_gres_map())[name];
+    for (const auto& [type, slots] : types.type_slots_map()) {
+      gres_count.set_total(gres_count.total() + slots.slots_size());
+      if (!type.empty())
+        (*gres_count.mutable_specified())[type] += slots.slots_size();
+    }
+  }
+  return counts;
 }
 
 // ==================== ResourceV3 ====================

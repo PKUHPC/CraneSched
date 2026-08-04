@@ -6,6 +6,14 @@
  * it under the terms of the GNU Affero General Public License as
  * published by the Free Software Foundation, either version 3 of the
  * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #pragma once
@@ -52,28 +60,30 @@ class NodeManager final {
   crane::grpc::PrepareCranedRegistrationReply PrepareCranedRegistration(
       const crane::grpc::PrepareCranedRegistrationRequest& request);
 
-  std::expected<void, std::string> BeginRegistration(
+  CraneExpectedRich<void> BeginRegistration(
       const CranedId& node_id, uint64_t generation, const RegToken& token,
       std::string_view registration_token = {});
-  std::expected<void, std::string> ValidateRegistration(
+  CraneExpectedRich<void> ValidateRegistration(
       const CranedId& node_id, uint64_t generation,
       const crane::grpc::CranedRemoteMeta& remote_meta,
       std::string_view registration_token = {});
-  std::expected<void, std::string> MarkRegistered(
+  CraneExpectedRich<void> MarkRegistered(
       const CranedId& node_id, uint64_t generation,
       const crane::grpc::CranedRemoteMeta& remote_meta,
       std::string_view registration_token = {});
-  std::expected<void, std::string> MarkRegistrationFailed(
+  CraneExpectedRich<void> MarkRegistrationFailed(
       const CranedId& node_id, uint64_t generation,
       std::string_view registration_token);
-  std::expected<void, std::string> MarkDisconnectedIfUntracked(
-      const CranedId& node_id);
+  CraneExpectedRich<void> MarkDisconnectedIfUntracked(const CranedId& node_id);
   // A true value means the report belongs to a stale dynamic incarnation and
   // must not reach the runtime state/event path.
-  std::expected<bool, std::string> UpdatePowerState(
+  CraneExpectedRich<bool> UpdatePowerState(
       const CranedId& node_id, uint64_t generation,
       crane::grpc::CranedPowerState power_state);
-  std::expected<ScaleUpResult, std::string> RequestScaleUp(
+  // Cheap prefilter for the scheduler: whether the partition has any dynamic
+  // node that RequestScaleUp could act on at all.
+  bool HasScalableNodes(const PartitionId& partition);
+  CraneExpectedRich<ScaleUpResult> RequestScaleUp(
       const PartitionId& partition, const ResourceView& node_resource,
       const ResourceView& task_resource, uint32_t min_tasks_per_node,
       uint32_t max_tasks_per_node, uint32_t node_count, uint32_t task_count,
@@ -84,28 +94,28 @@ class NodeManager final {
  private:
   void ReconcileThreadFunc_();
 
-  std::expected<void, std::string> ValidateRegistrationNoLock_(
-      const CranedId& node_id, uint64_t generation) const
+  CraneExpectedRich<void> ValidateRegistrationNoLock_(const CranedId& node_id,
+                                                      uint64_t generation) const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  std::expected<void, std::string> MarkDisconnectedNoLock_(
-      const CranedId& node_id, uint64_t generation)
+  CraneExpectedRich<void> MarkDisconnectedNoLock_(const CranedId& node_id,
+                                                  uint64_t generation)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  std::expected<void, std::string> ValidatePresentRecord_(
+  CraneExpectedRich<void> ValidatePresentRecord_(
       const DynamicNodeRecord& record) const;
-  std::expected<void, std::string> ReleaseExpiredRegistrationLeasesNoLock_()
+  CraneExpectedRich<void> ReleaseExpiredRegistrationLeasesNoLock_()
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupExpiredTombstonesNoLock_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  std::expected<uint64_t, std::string> NextGenerationNoLock_(
+  CraneExpectedRich<uint64_t> NextGenerationNoLock_(
       const CranedId& node_id) const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  std::expected<void, std::string> ValidateReportedSpecStructure_(
+  CraneExpectedRich<void> ValidateReportedSpecStructure_(
       const DynamicNodeSpec& reported) const;
-  std::expected<void, std::string> ValidateReportedSpec_(
+  CraneExpectedRich<void> ValidateReportedSpec_(
       const DynamicNodeSpec& expected, const DynamicNodeSpec& reported) const;
-  std::expected<void, std::string> ValidateRegistrationToken_(
+  CraneExpectedRich<void> ValidateRegistrationToken_(
       const DynamicNodeRecord& record,
       std::string_view registration_token) const;
-  std::expected<DynamicNodeRecord, std::string> BuildRegisteredRecord_(
+  CraneExpectedRich<DynamicNodeRecord> BuildRegisteredRecord_(
       const DynamicNodeRecord& record,
       const crane::grpc::CranedRemoteMeta& remote_meta,
       std::string_view registration_token) const;
@@ -116,10 +126,12 @@ class NodeManager final {
   static bool RegistrationLeaseExpired_(const DynamicNodeRecord& record);
   static bool FeaturesMatch_(const DynamicNodeSpec& expected,
                              const DynamicNodeSpec& reported);
-  static bool GresAllocationMatch_(const DynamicNodeSpec& expected,
-                                   const DynamicNodeSpec& allocated);
-  static bool GresMatch_(const DynamicNodeSpec& expected,
-                         const DynamicNodeSpec& reported);
+  // Exact per-name totals; typed counts must cover the expected ones.
+  static bool GresCountsMatch_(const crane::grpc::GresMap& expected,
+                               const crane::grpc::GresMap& allocated);
+  // Reported counts must be at least the expected ones.
+  static bool GresMatch_(const crane::grpc::GresMap& expected,
+                         const crane::grpc::GresMap& reported);
   static std::string GenerateRegistrationToken_();
   static void FillPreparationReply_(
       const DynamicNodeRecord& record,

@@ -120,8 +120,8 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
       craned_id, request->generation(), request->token(),
       request->registration_token());
   if (!begin_result) {
-    CRANE_WARN("Reject register request from node {}: {}", craned_id,
-               begin_result.error());
+    CRANE_WARN("Reject reverse-conn request from node {}: {}", craned_id,
+               begin_result.error().description());
     return grpc::Status::OK;
   }
 
@@ -137,7 +137,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
       request->registration_token());
   if (!validation) {
     CRANE_WARN("Reject register request from node {}: {}", request->craned_id(),
-               validation.error());
+               validation.error().description());
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -186,7 +186,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
         request->registration_token());
     if (!rollback)
       CRANE_ERROR("Failed to roll back dynamic node {} registration: {}",
-                  request->craned_id(), rollback.error());
+                  request->craned_id(), rollback.error().description());
   };
 
   if (!g_meta_container->CranedUp(request->craned_id(),
@@ -207,7 +207,19 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   if (!mark_result) {
     rollback_registration();
     CRANE_ERROR("Failed to register dynamic node {}: {}", request->craned_id(),
-                mark_result.error());
+                mark_result.error().description());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  // Mark the stub ready before any side effects on lost jobs/steps: a
+  // concurrent reverse-conn request may have superseded the token, in which
+  // case this registration must be rolled back and retried with the new
+  // token instead of reporting success with a non-ready stub.
+  if (!stub->SetReady(request->token())) {
+    rollback_registration();
+    CRANE_WARN("Registration token of craned {} was superseded before ready.",
+               request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -248,7 +260,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     }
   }
 
-  stub->SetReady(request->token());
   g_meta_container->PublishCranedState(request->craned_id());
   response->set_ok(true);
   return grpc::Status::OK;
@@ -269,6 +280,7 @@ grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
   if (!peer_address) {
     CRANE_WARN("Rejecting dynamic registration preparation from {}: {}",
                context->peer(), peer_address.error());
+    response->set_code(crane::grpc::ERR_INVALID_PARAM);
     response->set_reason("Failed to parse the peer address");
     return grpc::Status::OK;
   }
@@ -278,6 +290,7 @@ grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
         "Rejecting dynamic registration preparation: peer {} does not match "
         "claimed physical host {}.",
         context->peer(), request->physical_hostname());
+    response->set_code(crane::grpc::ERR_INVALID_PARAM);
     response->set_reason("Physical hostname does not match the peer address");
     return grpc::Status::OK;
   }
@@ -1201,6 +1214,7 @@ grpc::Status CraneCtldServiceImpl::CreateNodes(
   if (!result) {
     CRANE_WARN("Uid {} is not permitted to create dynamic nodes: {}",
                request->uid(), CraneErrStr(result.error()));
+    response->set_code(result.error());
     response->set_reason(CraneErrStr(result.error()));
     return grpc::Status::OK;
   }
@@ -1231,8 +1245,10 @@ grpc::Status CraneCtldServiceImpl::DeleteNodes(
     CRANE_WARN("Uid {} is not permitted to delete dynamic nodes: {}",
                request->uid(), CraneErrStr(result.error()));
     for (const auto& node_name : request->node_names()) {
-      response->add_not_deleted_nodes(node_name);
-      response->add_not_deleted_reasons(CraneErrStr(result.error()));
+      auto* not_deleted = response->add_not_deleted_nodes();
+      not_deleted->set_node_name(node_name);
+      not_deleted->set_code(result.error());
+      not_deleted->set_reason(CraneErrStr(result.error()));
     }
     return grpc::Status::OK;
   }
@@ -1242,10 +1258,9 @@ grpc::Status CraneCtldServiceImpl::DeleteNodes(
     CRANE_INFO("Dynamic nodes [{}] deleted by uid {}.",
                util::HostNameListToStr(response->deleted_nodes()),
                request->uid());
-  for (int i = 0; i < response->not_deleted_nodes_size(); ++i)
+  for (const auto& not_deleted : response->not_deleted_nodes())
     CRANE_WARN("Uid {} failed to delete dynamic node {}: {}", request->uid(),
-               response->not_deleted_nodes(i),
-               response->not_deleted_reasons(i));
+               not_deleted.node_name(), not_deleted.reason());
   return grpc::Status::OK;
 }
 
@@ -2956,6 +2971,16 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto admin_check = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!admin_check) {
+    CRANE_WARN("Uid {} is not permitted to report power state changes: {}",
+               request->uid(), CraneErrStr(admin_check.error()));
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
 
   CRANE_INFO("Received power state change request for node {}: {}",
              request->craned_id(),
@@ -2965,7 +2990,7 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
       request->craned_id(), request->generation(), request->state());
   if (!power_result) {
     CRANE_ERROR("Failed to persist power state of dynamic node {}: {}",
-                request->craned_id(), power_result.error());
+                request->craned_id(), power_result.error().description());
     response->set_ok(false);
     return grpc::Status::OK;
   }
