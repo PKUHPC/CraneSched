@@ -5,6 +5,19 @@ metadata:
   wirePrefix: flow/v1/
   heartbeatPoint: flow/v1/pipeline/heartbeat
   pipelineFaultPoint: flow/v1/pipeline/fault
+envelopeAttributes:
+  flow_schema: {type: string, required: always, missingReason: invalid_flow_schema}
+  flow_id: {type: string, required: business, missingReason: invalid_flow_id}
+  point: {type: string, required: always, missingReason: point_name_mismatch}
+  producer: {type: string, required: always, missingReason: missing_producer}
+  service_logical_instance: {type: string, required: always, missingReason: missing_service_logical_instance}
+  service_instance: {type: string, required: always, missingReason: missing_service_instance}
+  event_sequence: {type: int64, required: always, missingReason: invalid_event_sequence}
+storageAttributes:
+  flow_environment_id: {type: string, kind: tag, source: frontend, wire: false, minimum: null, maximum: null}
+  flow_slot: {type: int64, kind: tag, source: frontend, wire: false, minimum: 0, maximum: 63}
+  flow_instance_slot: {type: int64, kind: tag, source: frontend, wire: false, minimum: 0, maximum: 63}
+  event_time_unix_nano: {type: int64, kind: field, source: frontend, wire: false, minimum: 1, maximum: null}
 attributes:
   job_id: {type: int64}
   step_id: {type: int64}
@@ -105,6 +118,7 @@ enums:
     - producer_mismatch
     - requeue-attempt
     - requeue-enabled
+    - storage_capacity_exceeded
     - unexpected_attribute
     - unknown_point
 points:

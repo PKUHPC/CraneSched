@@ -344,6 +344,7 @@ enum class CgroupV2CleanupMode : uint8_t {
 };
 
 class CgroupV2FsBackend;
+class CgroupManagerTestPeer;
 
 #ifdef CRANE_ENABLE_BPF
 class BpfRuntimeInfo {
@@ -756,6 +757,8 @@ class CgroupManager {
   inline static spdlog::level::level_enum log_level;
 
  private:
+  friend class CgroupManagerTestPeer;
+
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
       const std::string& cgroup_str);
 

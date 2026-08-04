@@ -21,6 +21,7 @@
 #include <thread>
 #include <utility>
 
+#include "crane/ExecutionFlowSchema.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 
@@ -88,15 +89,26 @@ class ExecutionFlowEmitterLease {
 template <typename Span>
 void SetCommonAttributes(Span* span, std::string_view point,
                          const FlowProducerIdentity& identity) {
-  span->SetAttribute("flow_schema", std::string{kExecutionFlowSchemaVersion});
-  span->SetAttribute("point", std::string{point});
-  span->SetAttribute("producer", identity.producer);
-  span->SetAttribute("service_logical_instance",
-                     identity.service_logical_instance);
-  span->SetAttribute("service_instance", identity.service_instance);
-  span->SetAttribute("event_sequence",
-                     static_cast<int64_t>(g_execution_flow_sequence.fetch_add(
-                         1, std::memory_order_relaxed)));
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kFlowSchema).data(),
+      std::string{kExecutionFlowSchemaVersion});
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kPoint).data(),
+      std::string{point});
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kProducer).data(),
+      identity.producer);
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kServiceLogicalInstance)
+          .data(),
+      identity.service_logical_instance);
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kServiceInstance).data(),
+      identity.service_instance);
+  span->SetAttribute(
+      FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kEventSequence).data(),
+      static_cast<int64_t>(
+          g_execution_flow_sequence.fetch_add(1, std::memory_order_relaxed)));
 }
 
 void EmitPipelineHeartbeat() {
@@ -177,6 +189,23 @@ void ReconcileHeartbeatLocked() {
 
 namespace detail {
 
+class FlowContextBuilder {
+ public:
+  static void Node(std::optional<FlowContext>& context,
+                   std::string_view node_id) {
+    if (context) context->Node(node_id);
+  }
+
+  static void Status(std::optional<FlowContext>& context, int64_t status) {
+    if (context) context->Status(status);
+  }
+
+  static void NodeAndStatus(std::optional<FlowContext>& context,
+                            std::string_view node_id, int64_t status) {
+    if (context) context->Node(node_id).Status(status);
+  }
+};
+
 class ExecutionFlowPoint {
  public:
   ExecutionFlowPoint(FlowPoint point, const FlowContext& context,
@@ -225,17 +254,35 @@ class ExecutionFlowPoint {
                             context.service_logical_instance_,
                             context.service_instance_,
                         });
-    span_->SetAttribute("flow_id", std::string{context.flow_id_.Value()});
-    span_->SetAttribute("attempt", int64_t{0});
-    if (context.job_id_) span_->SetAttribute("job_id", *context.job_id_);
-    if (context.step_id_) span_->SetAttribute("step_id", *context.step_id_);
-    if (context.task_id_) span_->SetAttribute("task_id", *context.task_id_);
-    if (context.node_id_) span_->SetAttribute("node_id", *context.node_id_);
-    if (context.status_) span_->SetAttribute("status", *context.status_);
+    span_->SetAttribute(
+        FlowEnvelopeAttributeName(FlowEnvelopeAttribute::kFlowId).data(),
+        std::string{context.flow_id_.Value()});
+    span_->SetAttribute(FlowAttributeName(FlowAttribute::kAttempt).data(),
+                        int64_t{0});
+    if (context.job_id_)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kJobId).data(),
+                          *context.job_id_);
+    if (context.step_id_)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kStepId).data(),
+                          *context.step_id_);
+    if (context.task_id_)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kTaskId).data(),
+                          *context.task_id_);
+    if (context.node_id_)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kNodeId).data(),
+                          *context.node_id_);
+    if (context.status_)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kStatus).data(),
+                          *context.status_);
     if (operation)
-      span_->SetAttribute("operation", FlowOperationName(*operation));
-    if (outcome) span_->SetAttribute("outcome", FlowOutcomeName(*outcome));
-    if (reason) span_->SetAttribute("reason_code", FlowReasonCodeName(*reason));
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kOperation).data(),
+                          FlowOperationName(*operation));
+    if (outcome)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kOutcome).data(),
+                          FlowOutcomeName(*outcome));
+    if (reason)
+      span_->SetAttribute(FlowAttributeName(FlowAttribute::kReasonCode).data(),
+                          FlowReasonCodeName(*reason));
     if (failed) span_->SetStatus(StatusCode::kError);
   }
 
@@ -294,14 +341,14 @@ std::string MakeExecutionFlowServiceInstance(
   return instance;
 }
 
-std::optional<FlowReasonCode> ExecutionFlowJobUnsupportedReason(
+std::optional<FlowUnsupportedReason> ExecutionFlowJobUnsupportedReason(
     bool is_batch, bool is_container, bool is_array, bool no_requeue,
     int32_t requeue_count) {
-  if (is_container) return FlowReasonCode::kContainerJob;
-  if (!is_batch) return FlowReasonCode::kNonBatchJob;
-  if (is_array) return FlowReasonCode::kArrayJob;
-  if (!no_requeue) return FlowReasonCode::kRequeueEnabled;
-  if (requeue_count != 0) return FlowReasonCode::kRequeueAttempt;
+  if (is_container) return FlowUnsupportedReason::kContainerJob;
+  if (!is_batch) return FlowUnsupportedReason::kNonBatchJob;
+  if (is_array) return FlowUnsupportedReason::kArrayJob;
+  if (!no_requeue) return FlowUnsupportedReason::kRequeueEnabled;
+  if (requeue_count != 0) return FlowUnsupportedReason::kRequeueAttempt;
   return std::nullopt;
 }
 
@@ -398,10 +445,10 @@ void FlowEmitter::JobAllocationPersisted(std::optional<FlowContext> context) {
             FlowOperation::kEmbeddedDbCommit, FlowOutcome::kSuccess);
 }
 
-void FlowEmitter::EmitJobAllocRpcResult_(std::optional<FlowContext> context,
-                                         std::string_view node_id,
-                                         FlowOutcome outcome) {
-  if (context) context->Node(node_id);
+static void EmitJobAllocRpcResult_(std::optional<FlowContext> context,
+                                   std::string_view node_id,
+                                   FlowOutcome outcome) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(FlowPoint::kCtldJobAllocRpcResult, std::move(context),
             FlowOperation::kAllocJobs, outcome, std::nullopt,
             outcome != FlowOutcome::kSuccess);
@@ -453,34 +500,55 @@ void FlowEmitter::JobTerminal(std::optional<FlowContext> context,
             FlowOperation::kJobTerminal, FlowOutcome::kPersisted);
 }
 
-void EmitJobUnsupported(std::optional<FlowContext> context,
-                        FlowOperation operation, FlowReasonCode reason,
-                        std::optional<int64_t> step_id = std::nullopt) {
+static FlowReasonCode WireReasonFor(FlowUnsupportedReason reason) {
+  switch (reason) {
+  case FlowUnsupportedReason::kArrayJob:
+    return FlowReasonCode::kArrayJob;
+  case FlowUnsupportedReason::kCancelledBeforeAllocation:
+    return FlowReasonCode::kCancelledBeforeAllocation;
+  case FlowUnsupportedReason::kContainerJob:
+    return FlowReasonCode::kContainerJob;
+  case FlowUnsupportedReason::kExtraCommonStep:
+    return FlowReasonCode::kExtraCommonStep;
+  case FlowUnsupportedReason::kNonBatchJob:
+    return FlowReasonCode::kNonBatchJob;
+  case FlowUnsupportedReason::kRequeueAttempt:
+    return FlowReasonCode::kRequeueAttempt;
+  case FlowUnsupportedReason::kRequeueEnabled:
+    return FlowReasonCode::kRequeueEnabled;
+  }
+  return FlowReasonCode::kUnknownPoint;
+}
+
+static void EmitJobUnsupported(std::optional<FlowContext> context,
+                               FlowOperation operation,
+                               FlowUnsupportedReason reason,
+                               std::optional<int64_t> step_id = std::nullopt) {
   if (context && step_id) context->Step(*step_id);
   EmitPoint(FlowPoint::kCtldJobUnsupported, std::move(context), operation,
-            FlowOutcome::kUnsupported, reason);
+            FlowOutcome::kUnsupported, WireReasonFor(reason));
 }
 
 void FlowEmitter::JobUnsupportedAtSubmit(std::optional<FlowContext> context,
-                                         FlowReasonCode reason) {
+                                         FlowUnsupportedReason reason) {
   EmitJobUnsupported(std::move(context), FlowOperation::kSubmit, reason);
 }
 
 void FlowEmitter::JobUnsupportedAtPendingCancel(
-    std::optional<FlowContext> context, FlowReasonCode reason) {
+    std::optional<FlowContext> context, FlowUnsupportedReason reason) {
   EmitJobUnsupported(std::move(context), FlowOperation::kCancelPendingJob,
                      reason);
 }
 
 void FlowEmitter::JobUnsupportedAtStepSubmit(std::optional<FlowContext> context,
-                                             FlowReasonCode reason,
+                                             FlowUnsupportedReason reason,
                                              int64_t step_id) {
   EmitJobUnsupported(std::move(context), FlowOperation::kSubmitCommonStep,
                      reason, step_id);
 }
 
 void FlowEmitter::JobUnsupportedAtRequeue(std::optional<FlowContext> context,
-                                          FlowReasonCode reason) {
+                                          FlowUnsupportedReason reason) {
   EmitJobUnsupported(std::move(context), FlowOperation::kRequeue, reason);
 }
 
@@ -536,10 +604,9 @@ void FlowEmitter::StepAllCompleting(std::optional<FlowContext> context) {
   EmitStepAllCompleting(std::move(context), FlowOperation::kStepCleanup);
 }
 
-void FlowEmitter::EmitStepAllTerminal_(std::optional<FlowContext> context,
-                                       int64_t status,
-                                       FlowOperation operation) {
-  if (context) context->Status(status);
+static void EmitStepAllTerminal_(std::optional<FlowContext> context,
+                                 int64_t status, FlowOperation operation) {
+  detail::FlowContextBuilder::Status(context, status);
   EmitPoint(FlowPoint::kCtldStepAllTerminal, std::move(context), operation);
 }
 
@@ -555,10 +622,10 @@ void FlowEmitter::StepAllTerminal(std::optional<FlowContext> context,
                        FlowOperation::kStepTerminal);
 }
 
-void FlowEmitter::EmitStepAllocRpcResult_(std::optional<FlowContext> context,
-                                          std::string_view node_id,
-                                          FlowOutcome outcome) {
-  if (context) context->Node(node_id);
+static void EmitStepAllocRpcResult_(std::optional<FlowContext> context,
+                                    std::string_view node_id,
+                                    FlowOutcome outcome) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(FlowPoint::kCtldStepAllocRpcResult, std::move(context),
             FlowOperation::kAllocSteps, outcome, std::nullopt,
             outcome != FlowOutcome::kSuccess);
@@ -588,10 +655,10 @@ void FlowEmitter::StepExecuteRequested(std::optional<FlowContext> context,
             FlowOperation::kExecuteSteps, FlowOutcome::kRequested);
 }
 
-void FlowEmitter::EmitStepExecuteRpcResult_(std::optional<FlowContext> context,
-                                            std::string_view node_id,
-                                            FlowOutcome outcome) {
-  if (context) context->Node(node_id);
+static void EmitStepExecuteRpcResult_(std::optional<FlowContext> context,
+                                      std::string_view node_id,
+                                      FlowOutcome outcome) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(FlowPoint::kCtldStepExecuteRpcResult, std::move(context),
             FlowOperation::kExecuteSteps, outcome, std::nullopt,
             outcome != FlowOutcome::kSuccess);
@@ -620,10 +687,10 @@ void FlowEmitter::StepExecuteCranedDown(std::optional<FlowContext> context,
                             FlowOutcome::kCranedDown);
 }
 
-void FlowEmitter::EmitStepFreeRpcResult_(std::optional<FlowContext> context,
-                                         std::string_view node_id,
-                                         FlowOutcome outcome) {
-  if (context) context->Node(node_id);
+static void EmitStepFreeRpcResult_(std::optional<FlowContext> context,
+                                   std::string_view node_id,
+                                   FlowOutcome outcome) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(FlowPoint::kCtldStepFreeRpcResult, std::move(context),
             FlowOperation::kFreeSteps, outcome, std::nullopt,
             outcome != FlowOutcome::kSuccess);
@@ -686,20 +753,20 @@ void FlowEmitter::CranedStepFreeAccepted(std::optional<FlowContext> context,
             FlowOperation::kFreeStep, FlowOutcome::kAccepted);
 }
 
-void FlowEmitter::EmitCranedCleanupStarted_(FlowPoint point,
-                                            std::optional<FlowContext> context,
-                                            std::string_view node_id,
-                                            FlowOperation operation) {
-  if (context) context->Node(node_id);
+static void EmitCranedCleanupStarted_(FlowPoint point,
+                                      std::optional<FlowContext> context,
+                                      std::string_view node_id,
+                                      FlowOperation operation) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(point, std::move(context), operation);
 }
 
-void FlowEmitter::EmitCranedCleanupFinished_(FlowPoint point,
-                                             std::optional<FlowContext> context,
-                                             std::string_view node_id,
-                                             FlowOperation operation,
-                                             bool succeeded) {
-  if (context) context->Node(node_id);
+static void EmitCranedCleanupFinished_(FlowPoint point,
+                                       std::optional<FlowContext> context,
+                                       std::string_view node_id,
+                                       FlowOperation operation,
+                                       bool succeeded) {
+  detail::FlowContextBuilder::Node(context, node_id);
   EmitPoint(point, std::move(context), operation,
             succeeded ? FlowOutcome::kSuccess : FlowOutcome::kFailure,
             std::nullopt, !succeeded);
@@ -819,10 +886,10 @@ void FlowEmitter::SupervisorStepAllTasksFinalized(
             FlowOperation::kFinalizeStep);
 }
 
-void FlowEmitter::EmitSupervisorStepCompleting_(
-    std::optional<FlowContext> context, std::string_view node_id,
-    int64_t status, FlowOutcome outcome) {
-  if (context) context->Node(node_id).Status(status);
+static void EmitSupervisorStepCompleting_(std::optional<FlowContext> context,
+                                          std::string_view node_id,
+                                          int64_t status, FlowOutcome outcome) {
+  detail::FlowContextBuilder::NodeAndStatus(context, node_id, status);
   EmitPoint(FlowPoint::kSupervisorStepCompletingEnqueued, std::move(context),
             FlowOperation::kEnqueueStatus, outcome, std::nullopt,
             outcome == FlowOutcome::kPreStartFailure);

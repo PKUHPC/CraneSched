@@ -58,6 +58,14 @@
             }
         },
         {
+            "name": "ci-debug-flow-off",
+            "inherits": "ci-debug",
+            "binaryDir": "${sourceDir}/cmake-build-ci-debug-flow-off",
+            "cacheVariables": {
+                "CRANE_ENABLE_EXECUTION_FLOW": "OFF"
+            }
+        },
+        {
             "name": "release-tracing",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/cmake-build-release-tracing",
@@ -102,6 +110,11 @@
             "name": "ci-release",
             "inherits": "_base",
             "configurePreset": "ci-release"
+        },
+        {
+            "name": "ci-debug-flow-off",
+            "inherits": "_base",
+            "configurePreset": "ci-debug-flow-off"
         },
         {
             "name": "release-tracing",

@@ -34,6 +34,7 @@
 #include <cxxopts.hpp>
 
 #include "CgroupManager.h"
+#include "CleanupLifecycle.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
@@ -1669,20 +1670,20 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
-  // Drain physical cgroup deletion while execution-flow tracing is still
-  // available so queued cleanup completions can publish their final point.
-  // Keep this ordering independent of the execution-flow compile gate: the
-  // instrumentation must not change the cgroup shutdown lifecycle.
-  CgroupManager::ShutdownCpuPool();
-  CgroupManager::ShutdownCgroupV2FastPath();
-
-  CRANE_EXECUTION_FLOW_SHUTDOWN();
+  Craned::detail::RunCranedResourceShutdownSequence(
+      [] { CgroupManager::ShutdownCpuPool(); },
+      [] { CgroupManager::ShutdownCgroupV2FastPath(); },
+      [] { CRANE_EXECUTION_FLOW_SHUTDOWN(); },
+      [] {
 #ifdef CRANE_ENABLE_TRACING
-  crane::TracerManager::GetInstance().Shutdown();
+        crane::TracerManager::GetInstance().Shutdown();
 #endif
-  // Plugin client must be destroyed after the thread pool.
-  // It may be called in the thread pool.
-  g_plugin_client.reset();
+      },
+      [] {
+        // Plugin client must be destroyed after the thread pool. It may be
+        // called in the thread pool.
+        g_plugin_client.reset();
+      });
 
   std::exit(0);
 }

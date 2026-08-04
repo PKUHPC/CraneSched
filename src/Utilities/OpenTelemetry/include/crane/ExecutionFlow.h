@@ -16,13 +16,12 @@
 #include <string_view>
 #include <utility>
 
-#include "crane/ExecutionFlowSchema.h"
-
 namespace crane {
 
 namespace detail {
+class FlowContextBuilder;
 class ExecutionFlowPoint;
-}
+}  // namespace detail
 
 inline constexpr std::string_view kExecutionFlowIdEnvironmentVariable =
     "CRANE_EXECUTION_FLOW_ID";
@@ -66,6 +65,7 @@ class FlowContext {
 
  private:
   friend class detail::ExecutionFlowPoint;
+  friend class detail::FlowContextBuilder;
   friend class FlowEmitter;
 
   FlowContext& Node(std::string_view value) {
@@ -104,6 +104,19 @@ class FlowContext {
 struct ExecutionFlowRuntimeConfig {
   bool Enabled{false};
   uint32_t HeartbeatIntervalSeconds{5};
+};
+
+// Product-level reasons why a job cannot participate in the Batch execution
+// flow contract.  This deliberately does not expose the generated wire-schema
+// reason catalog, which also contains FrontEnd pipeline validation failures.
+enum class FlowUnsupportedReason {
+  kArrayJob,
+  kCancelledBeforeAllocation,
+  kContainerJob,
+  kExtraCommonStep,
+  kNonBatchJob,
+  kRequeueAttempt,
+  kRequeueEnabled,
 };
 
 inline constexpr bool kExecutionFlowCompiledIn =
@@ -166,7 +179,7 @@ template <typename Environment>
 std::string MakeExecutionFlowServiceInstance(std::string_view logical_instance,
                                              uint64_t process_id,
                                              uint64_t process_start_unix_nanos);
-std::optional<FlowReasonCode> ExecutionFlowJobUnsupportedReason(
+std::optional<FlowUnsupportedReason> ExecutionFlowJobUnsupportedReason(
     bool is_batch, bool is_container, bool is_array, bool no_requeue,
     int32_t requeue_count);
 
@@ -191,7 +204,7 @@ inline std::string MakeExecutionFlowServiceInstance(
   return std::string{logical_instance};
 }
 
-inline std::optional<FlowReasonCode> ExecutionFlowJobUnsupportedReason(
+inline std::optional<FlowUnsupportedReason> ExecutionFlowJobUnsupportedReason(
     bool, bool, bool, bool, int32_t) {
   return std::nullopt;
 }
@@ -267,16 +280,16 @@ class FlowEmitter {
                             int64_t status)
   CRANE_FLOW_EMITTER_METHOD(JobUnsupportedAtSubmit,
                             std::optional<FlowContext> context,
-                            FlowReasonCode reason)
+                            FlowUnsupportedReason reason)
   CRANE_FLOW_EMITTER_METHOD(JobUnsupportedAtPendingCancel,
                             std::optional<FlowContext> context,
-                            FlowReasonCode reason)
+                            FlowUnsupportedReason reason)
   CRANE_FLOW_EMITTER_METHOD(JobUnsupportedAtStepSubmit,
                             std::optional<FlowContext> context,
-                            FlowReasonCode reason, int64_t step_id)
+                            FlowUnsupportedReason reason, int64_t step_id)
   CRANE_FLOW_EMITTER_METHOD(JobUnsupportedAtRequeue,
                             std::optional<FlowContext> context,
-                            FlowReasonCode reason)
+                            FlowUnsupportedReason reason)
 
   CRANE_FLOW_EMITTER_METHOD(StatusReceived, std::optional<FlowContext> context,
                             std::string_view node_id, int64_t status)
@@ -416,37 +429,6 @@ class FlowEmitter {
   CRANE_FLOW_EMITTER_METHOD(SupervisorStepExiting,
                             std::optional<FlowContext> context,
                             std::string_view node_id, int64_t status)
-
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
- private:
-  static void EmitJobAllocRpcResult_(std::optional<FlowContext> context,
-                                     std::string_view node_id,
-                                     FlowOutcome outcome);
-  static void EmitStepAllTerminal_(std::optional<FlowContext> context,
-                                   int64_t status, FlowOperation operation);
-  static void EmitStepAllocRpcResult_(std::optional<FlowContext> context,
-                                      std::string_view node_id,
-                                      FlowOutcome outcome);
-  static void EmitStepExecuteRpcResult_(std::optional<FlowContext> context,
-                                        std::string_view node_id,
-                                        FlowOutcome outcome);
-  static void EmitStepFreeRpcResult_(std::optional<FlowContext> context,
-                                     std::string_view node_id,
-                                     FlowOutcome outcome);
-  static void EmitCranedCleanupStarted_(FlowPoint point,
-                                        std::optional<FlowContext> context,
-                                        std::string_view node_id,
-                                        FlowOperation operation);
-  static void EmitCranedCleanupFinished_(FlowPoint point,
-                                         std::optional<FlowContext> context,
-                                         std::string_view node_id,
-                                         FlowOperation operation,
-                                         bool succeeded);
-  static void EmitSupervisorStepCompleting_(std::optional<FlowContext> context,
-                                            std::string_view node_id,
-                                            int64_t status,
-                                            FlowOutcome outcome);
-#endif
 };
 
 #undef CRANE_FLOW_EMITTER_METHOD

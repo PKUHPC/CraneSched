@@ -63,6 +63,94 @@ class ExecutionFlowSchemaValidationTest(unittest.TestCase):
         ):
             GENERATOR._validate(schema)
 
+    def test_envelope_and_point_attributes_must_be_disjoint(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["attributes"]["flow_id"] = {"type": "string"}
+        with self.assertRaisesRegex(
+            ValueError,
+            r"envelope and point attributes must be disjoint: \['flow_id'\]",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_envelope_attributes_must_have_supported_types(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["envelopeAttributes"]["flow_id"]["type"] = "bytes"
+        with self.assertRaisesRegex(
+            ValueError,
+            r"envelope attribute 'flow_id' has an unsupported type",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_envelope_attributes_must_have_supported_requirements(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["envelopeAttributes"]["flow_id"]["required"] = "sometimes"
+        with self.assertRaisesRegex(
+            ValueError,
+            r"envelope attribute 'flow_id' has an unsupported requirement",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_envelope_missing_reason_must_be_canonical(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["envelopeAttributes"]["flow_id"]["missingReason"] = "not_real"
+        with self.assertRaisesRegex(
+            ValueError,
+            r"envelope attribute 'flow_id' references unknown missingReason 'not_real'",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_storage_contract_must_be_non_empty(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["storageAttributes"] = {}
+        with self.assertRaisesRegex(
+            ValueError,
+            "storageAttributes must be a non-empty mapping",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_storage_attribute_shape_is_strict(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        del schema["storageAttributes"]["flow_slot"]["kind"]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"storage attribute 'flow_slot' keys do not match the contract.*kind",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_storage_attributes_are_frontend_owned_and_non_wire(self) -> None:
+        for key, value, message in (
+            ("source", "backend", "unsupported source"),
+            ("wire", True, "must be non-wire"),
+        ):
+            with self.subTest(key=key):
+                schema = copy.deepcopy(self.schema)
+                schema["storageAttributes"]["flow_environment_id"][key] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    GENERATOR._validate(schema)
+
+    def test_storage_numeric_bounds_are_valid(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["storageAttributes"]["flow_slot"]["minimum"] = 64
+        with self.assertRaisesRegex(ValueError, "minimum exceeds maximum"):
+            GENERATOR._validate(schema)
+
+        schema = copy.deepcopy(self.schema)
+        schema["storageAttributes"]["flow_environment_id"]["maximum"] = 63
+        with self.assertRaisesRegex(
+            ValueError,
+            "string storage attribute.*cannot declare numeric bounds",
+        ):
+            GENERATOR._validate(schema)
+
+    def test_storage_and_wire_attributes_must_be_disjoint(self) -> None:
+        schema = copy.deepcopy(self.schema)
+        schema["attributes"]["flow_slot"] = {"type": "int64"}
+        with self.assertRaisesRegex(
+            ValueError,
+            r"storage-only attributes must be disjoint.*\['flow_slot'\]",
+        ):
+            GENERATOR._validate(schema)
+
     def test_point_symbol_must_not_collide_with_count_sentinel(self) -> None:
         schema = copy.deepcopy(self.schema)
         schema["points"][0]["symbol"] = "Count"
@@ -176,13 +264,13 @@ class ExecutionFlowSchemaCliTest(unittest.TestCase):
             "cpp": rf'kExecutionFlowSchemaSha256\s*=\s*"{digest}"',
             "frontend": rf'executionFlowSchemaSHA256\s*=\s*"{digest}"',
             "autotest": rf'\bSHA256\s*=\s*"{digest}"',
-            "autotest_python": rf'\bSHA256\s*=\s*"{digest}"',
+            "autotest_python": rf"\bSHA256\s*=\s*['\"]{digest}['\"]",
         }
         version_constants = {
             "cpp": r'kExecutionFlowSchemaVersion\s*=\s*"v1"',
             "frontend": r'executionFlowSchemaVersion\s*=\s*"v1"',
             "autotest": r'\bVersion\s*=\s*"v1"',
-            "autotest_python": r'\bVERSION\s*=\s*"v1"',
+            "autotest_python": r"\bVERSION\s*=\s*['\"]v1['\"]",
         }
         for name, output in self.outputs.items():
             with self.subTest(output=name):
@@ -198,6 +286,68 @@ class ExecutionFlowSchemaCliTest(unittest.TestCase):
             frontend,
         )
         self.assertNotIn("func init()", frontend)
+
+        for name, output in self.outputs.items():
+            with self.subTest(envelope_output=name):
+                content = output.read_text(encoding="utf-8")
+                self.assertIn("flow_id", content)
+                self.assertIn("event_sequence", content)
+                if name == "cpp":
+                    self.assertNotIn("flow_instance_slot", content)
+                    self.assertNotIn("flow_slot", content)
+                else:
+                    self.assertIn("flow_environment_id", content)
+                    self.assertIn("flow_instance_slot", content)
+                    self.assertIn("flow_slot", content)
+
+        cpp = self.outputs["cpp"].read_text(encoding="utf-8")
+        self.assertIn("FlowEnvelopeAttributeName", cpp)
+        self.assertIn("FlowAttributeWireType", cpp)
+        self.assertIn("FlowEnvelopeAttributeWireType", cpp)
+        self.assertIn("FlowEnvelopeAttributeRequirement", cpp)
+        self.assertIn("FlowEnvelopeAttributeMissingReason", cpp)
+        self.assertIn("FlowEnvelopeAttribute::kEventSequence", cpp)
+
+        self.assertIn("AllowsEnvelopeAttribute", frontend)
+        self.assertIn("EnvelopeAttributeType", frontend)
+        self.assertIn("EnvelopeAttributes", frontend)
+        self.assertIn("AllowsStorageAttribute", frontend)
+        self.assertIn("StorageAttribute", frontend)
+        self.assertIn("StorageAttributes", frontend)
+        self.assertIn("Wire: false", frontend)
+        self.assertIn("Maximum: 63", frontend)
+
+        autotest = self.outputs["autotest"].read_text(encoding="utf-8")
+        self.assertIn("func EnvelopeAttribute(", autotest)
+        self.assertIn("func EnvelopeAttributeNames(", autotest)
+        self.assertIn("func StorageAttribute(", autotest)
+        self.assertIn("func StorageAttributeNames(", autotest)
+        self.assertIn("StorageFlowEnvironmentID", autotest)
+        self.assertIn("HasMaximum: true", autotest)
+
+        autotest_python = self.outputs["autotest_python"].read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("# fmt: off\nAPI_VERSION", autotest_python)
+        self.assertIn("\n# fmt: on\n\n__all__", autotest_python)
+        self.assertIn("ENVELOPE_ATTRIBUTES", autotest_python)
+        self.assertIn("'required': 'business'", autotest_python)
+        self.assertIn("STORAGE_ATTRIBUTES", autotest_python)
+        self.assertIn("'source': 'frontend'", autotest_python)
+        self.assertIn("'wire': False", autotest_python)
+        self.assertIn("'maximum': None", autotest_python)
+
+        generated_spec = importlib.util.spec_from_file_location(
+            "generated_execution_flow_schema",
+            self.outputs["autotest_python"],
+        )
+        assert generated_spec is not None and generated_spec.loader is not None
+        generated_module = importlib.util.module_from_spec(generated_spec)
+        generated_spec.loader.exec_module(generated_module)
+        environment = generated_module.STORAGE_ATTRIBUTES["flow_environment_id"]
+        self.assertIs(environment["wire"], False)
+        self.assertIsNone(environment["minimum"])
+        self.assertIsNone(environment["maximum"])
 
         checked = self._run(check=True)
         self.assertEqual(checked.returncode, 0, checked.stderr)

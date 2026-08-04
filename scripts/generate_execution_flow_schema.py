@@ -31,9 +31,30 @@ PRODUCER_POINT_PREFIXES = {
     "frontend": "pipeline/",
     "supervisor": "supervisor/",
 }
-TOP_LEVEL_KEYS = {"apiVersion", "kind", "metadata", "attributes", "enums", "points"}
+TOP_LEVEL_KEYS = {
+    "apiVersion",
+    "kind",
+    "metadata",
+    "envelopeAttributes",
+    "storageAttributes",
+    "attributes",
+    "enums",
+    "points",
+}
 METADATA_KEYS = {"name", "wirePrefix", "heartbeatPoint", "pipelineFaultPoint"}
 POINT_KEYS = {"symbol", "id", "producer", "requiredAttributes"}
+ENVELOPE_ATTRIBUTE_KEYS = {"type", "required", "missingReason"}
+ENVELOPE_REQUIREMENTS = {"always", "business", "optional"}
+STORAGE_ATTRIBUTE_KEYS = {
+    "type",
+    "kind",
+    "source",
+    "wire",
+    "minimum",
+    "maximum",
+}
+STORAGE_KINDS = {"field", "tag"}
+STORAGE_SOURCES = {"frontend"}
 ATTRIBUTE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 ENUM_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 POINT_ID_PATTERN = re.compile(
@@ -85,6 +106,11 @@ _UniqueKeyLoader.add_constructor(
 
 def _enum_symbol(value: str) -> str:
     return "".join(part.capitalize() for part in value.replace("_", "-").split("-"))
+
+
+def _go_symbol(value: str) -> str:
+    """Return a Go identifier while preserving the conventional ID initialism."""
+    return _enum_symbol(value).replace("Id", "ID")
 
 
 def _validate_generated_symbols(owner: str, values: list[str]) -> None:
@@ -159,6 +185,83 @@ def _validate(data: dict[str, object]) -> list[dict[str, object]]:
     if metadata["heartbeatPoint"] == metadata["pipelineFaultPoint"]:
         raise ValueError("pipeline heartbeat and fault points must differ")
 
+    envelope_attributes = data.get("envelopeAttributes")
+    if not isinstance(envelope_attributes, dict) or not envelope_attributes:
+        raise ValueError("envelopeAttributes must be a non-empty mapping")
+    for name, definition in envelope_attributes.items():
+        if (
+            not isinstance(name, str)
+            or ATTRIBUTE_NAME_PATTERN.fullmatch(name) is None
+            or not isinstance(definition, dict)
+        ):
+            raise ValueError("envelope attribute definitions must be mappings")
+        if set(definition) != ENVELOPE_ATTRIBUTE_KEYS:
+            raise ValueError(
+                f"envelope attribute {name!r} keys do not match the contract: "
+                f"missing={sorted(ENVELOPE_ATTRIBUTE_KEYS - set(definition))}, "
+                f"unknown={sorted(set(definition) - ENVELOPE_ATTRIBUTE_KEYS)}"
+            )
+        if definition.get("type") not in ATTRIBUTE_TYPES:
+            raise ValueError(f"envelope attribute {name!r} has an unsupported type")
+        if definition.get("required") not in ENVELOPE_REQUIREMENTS:
+            raise ValueError(
+                f"envelope attribute {name!r} has an unsupported requirement"
+            )
+        missing_reason = definition.get("missingReason")
+        if (
+            not isinstance(missing_reason, str)
+            or ENUM_VALUE_PATTERN.fullmatch(missing_reason) is None
+        ):
+            raise ValueError(
+                f"envelope attribute {name!r} has an invalid missingReason"
+            )
+    _validate_generated_symbols("envelope attribute", list(envelope_attributes))
+
+    storage_attributes = data.get("storageAttributes")
+    if not isinstance(storage_attributes, dict) or not storage_attributes:
+        raise ValueError("storageAttributes must be a non-empty mapping")
+    for name, definition in storage_attributes.items():
+        if (
+            not isinstance(name, str)
+            or ATTRIBUTE_NAME_PATTERN.fullmatch(name) is None
+            or not isinstance(definition, dict)
+        ):
+            raise ValueError("storage attribute definitions must be mappings")
+        if set(definition) != STORAGE_ATTRIBUTE_KEYS:
+            raise ValueError(
+                f"storage attribute {name!r} keys do not match the contract: "
+                f"missing={sorted(STORAGE_ATTRIBUTE_KEYS - set(definition))}, "
+                f"unknown={sorted(set(definition) - STORAGE_ATTRIBUTE_KEYS)}"
+            )
+        if definition.get("type") not in {"int64", "string"}:
+            raise ValueError(f"storage attribute {name!r} has an unsupported type")
+        if definition.get("kind") not in STORAGE_KINDS:
+            raise ValueError(f"storage attribute {name!r} has an unsupported kind")
+        if definition.get("source") not in STORAGE_SOURCES:
+            raise ValueError(f"storage attribute {name!r} has an unsupported source")
+        if definition.get("wire") is not False:
+            raise ValueError(f"storage attribute {name!r} must be non-wire")
+        minimum = definition.get("minimum")
+        maximum = definition.get("maximum")
+        for boundary_name, boundary in (("minimum", minimum), ("maximum", maximum)):
+            if boundary is not None and (
+                isinstance(boundary, bool) or not isinstance(boundary, int)
+            ):
+                raise ValueError(
+                    f"storage attribute {name!r} {boundary_name} must be an integer or null"
+                )
+        if definition.get("type") == "string" and (
+            minimum is not None or maximum is not None
+        ):
+            raise ValueError(
+                f"string storage attribute {name!r} cannot declare numeric bounds"
+            )
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise ValueError(
+                f"storage attribute {name!r} minimum exceeds maximum"
+            )
+    _validate_generated_symbols("storage attribute", list(storage_attributes))
+
     attributes = data.get("attributes")
     if not isinstance(attributes, dict) or not attributes:
         raise ValueError("attributes must be a non-empty mapping")
@@ -179,6 +282,20 @@ def _validate(data: dict[str, object]) -> list[dict[str, object]]:
         if definition.get("type") not in ATTRIBUTE_TYPES:
             raise ValueError(f"attribute {name!r} has an unsupported type")
     _validate_generated_symbols("attribute", list(attributes))
+    overlap = set(envelope_attributes) & set(attributes)
+    if overlap:
+        raise ValueError(
+            "envelope and point attributes must be disjoint: "
+            f"{sorted(overlap)}"
+        )
+    storage_overlap = set(storage_attributes) & (
+        set(envelope_attributes) | set(attributes)
+    )
+    if storage_overlap:
+        raise ValueError(
+            "storage-only attributes must be disjoint from wire attributes: "
+            f"{sorted(storage_overlap)}"
+        )
 
     enums = data.get("enums")
     if not isinstance(enums, dict):
@@ -212,6 +329,13 @@ def _validate(data: dict[str, object]) -> list[dict[str, object]]:
                 "enum 'reason_code'",
                 values,
                 FRONTEND_REASON_SYMBOL_RESERVED,
+            )
+    reason_codes = set(enums.get("reason_code", []))
+    for name, definition in envelope_attributes.items():
+        if definition["missingReason"] not in reason_codes:
+            raise ValueError(
+                f"envelope attribute {name!r} references unknown missingReason "
+                f"{definition['missingReason']!r}"
             )
 
     points = data.get("points")
@@ -308,15 +432,68 @@ def _render_cpp(
 ) -> str:
     digest = hashlib.sha256(schema_bytes).hexdigest()
     metadata = data["metadata"]
+    envelope_attributes = data["envelopeAttributes"]
     attributes = data["attributes"]
     assert isinstance(metadata, dict)
+    assert isinstance(envelope_attributes, dict)
     assert isinstance(attributes, dict)
     schema_name = str(metadata["name"])
     schema_version = schema_name.rsplit("/", maxsplit=1)[-1]
     sorted_attributes = sorted(attributes)
+    sorted_envelope_attributes = sorted(envelope_attributes)
+    wire_type_symbols = {
+        "int64": "FlowWireType::kInt64",
+        "string": "FlowWireType::kString",
+        "enum": "FlowWireType::kEnum",
+    }
+    envelope_requirement_symbols = {
+        "always": "FlowEnvelopeRequirement::kAlways",
+        "business": "FlowEnvelopeRequirement::kBusiness",
+        "optional": "FlowEnvelopeRequirement::kOptional",
+    }
+    envelope_attribute_enum_lines = "\n".join(
+        f"  k{_enum_symbol(name)}," for name in sorted_envelope_attributes
+    )
+    envelope_attribute_name_lines = "\n".join(
+        '    case FlowEnvelopeAttribute::k{}: return "{}";'.format(
+            _enum_symbol(name), name
+        )
+        for name in sorted_envelope_attributes
+    )
+    envelope_attribute_type_lines = "\n".join(
+        "    case FlowEnvelopeAttribute::k{}: return {};".format(
+            _enum_symbol(name), wire_type_symbols[envelope_attributes[name]["type"]]
+        )
+        for name in sorted_envelope_attributes
+    )
+    envelope_attribute_requirement_lines = "\n".join(
+        "    case FlowEnvelopeAttribute::k{}: return {};".format(
+            _enum_symbol(name),
+            envelope_requirement_symbols[envelope_attributes[name]["required"]],
+        )
+        for name in sorted_envelope_attributes
+    )
+    envelope_attribute_missing_reason_lines = "\n".join(
+        '    case FlowEnvelopeAttribute::k{}: return "{}";'.format(
+            _enum_symbol(name), envelope_attributes[name]["missingReason"]
+        )
+        for name in sorted_envelope_attributes
+    )
     attribute_enum_lines = "\n".join(
         f"  k{_enum_symbol(name)} = FlowAttributeMask{{1}} << {index},"
         for index, name in enumerate(sorted_attributes)
+    )
+    attribute_name_lines = "\n".join(
+        '    case FlowAttribute::k{}: return "{}";'.format(
+            _enum_symbol(name), name
+        )
+        for name in sorted_attributes
+    )
+    attribute_type_lines = "\n".join(
+        "    case FlowAttribute::k{}: return {};".format(
+            _enum_symbol(name), wire_type_symbols[attributes[name]["type"]]
+        )
+        for name in sorted_attributes
     )
     enum_lines = "\n".join(f"  k{point['symbol']}," for point in points)
     case_lines = "\n".join(
@@ -368,11 +545,80 @@ inline constexpr std::string_view kExecutionFlowWirePrefix = "{metadata["wirePre
 inline constexpr std::string_view kExecutionFlowHeartbeatPoint = "{metadata["heartbeatPoint"]}";
 inline constexpr std::string_view kExecutionFlowPipelineFaultPoint = "{metadata["pipelineFaultPoint"]}";
 
+enum class FlowWireType {{
+  kInt64,
+  kString,
+  kEnum,
+}};
+
+enum class FlowEnvelopeRequirement {{
+  kAlways,
+  kBusiness,
+  kOptional,
+}};
+
+enum class FlowEnvelopeAttribute {{
+{envelope_attribute_enum_lines}
+  kCount,
+}};
+
+[[nodiscard]] constexpr std::string_view FlowEnvelopeAttributeName(
+    FlowEnvelopeAttribute attribute) {{
+  switch (attribute) {{
+{envelope_attribute_name_lines}
+    case FlowEnvelopeAttribute::kCount: break;
+  }}
+  return {{}};
+}}
+
+[[nodiscard]] constexpr FlowWireType FlowEnvelopeAttributeWireType(
+    FlowEnvelopeAttribute attribute) {{
+  switch (attribute) {{
+{envelope_attribute_type_lines}
+    case FlowEnvelopeAttribute::kCount: break;
+  }}
+  return FlowWireType::kString;
+}}
+
+[[nodiscard]] constexpr FlowEnvelopeRequirement
+FlowEnvelopeAttributeRequirement(FlowEnvelopeAttribute attribute) {{
+  switch (attribute) {{
+{envelope_attribute_requirement_lines}
+    case FlowEnvelopeAttribute::kCount: break;
+  }}
+  return FlowEnvelopeRequirement::kOptional;
+}}
+
+[[nodiscard]] constexpr std::string_view FlowEnvelopeAttributeMissingReason(
+    FlowEnvelopeAttribute attribute) {{
+  switch (attribute) {{
+{envelope_attribute_missing_reason_lines}
+    case FlowEnvelopeAttribute::kCount: break;
+  }}
+  return {{}};
+}}
+
 using FlowAttributeMask = std::uint16_t;
 
 enum class FlowAttribute : FlowAttributeMask {{
 {attribute_enum_lines}
 }};
+
+[[nodiscard]] constexpr std::string_view FlowAttributeName(
+    FlowAttribute attribute) {{
+  switch (attribute) {{
+{attribute_name_lines}
+  }}
+  return {{}};
+}}
+
+[[nodiscard]] constexpr FlowWireType FlowAttributeWireType(
+    FlowAttribute attribute) {{
+  switch (attribute) {{
+{attribute_type_lines}
+  }}
+  return FlowWireType::kString;
+}}
 
 [[nodiscard]] constexpr FlowAttributeMask FlowAttributeBit(
     FlowAttribute attribute) {{
@@ -457,15 +703,68 @@ def _render_frontend_go(
     points: list[dict[str, object]],
 ) -> str:
     digest = hashlib.sha256(schema_bytes).hexdigest()
+    envelope_attributes = data["envelopeAttributes"]
+    storage_attributes = data["storageAttributes"]
     attributes = data["attributes"]
     enums = data["enums"]
     metadata = data["metadata"]
+    assert isinstance(envelope_attributes, dict)
+    assert isinstance(storage_attributes, dict)
     assert isinstance(attributes, dict)
     assert isinstance(enums, dict)
     assert isinstance(metadata, dict)
     schema_name = str(metadata["name"])
     schema_version = schema_name.rsplit("/", maxsplit=1)[-1]
 
+    envelope_constant_lines = "\n".join(
+        "\texecutionFlowEnvelope{} = {}".format(
+            _go_symbol(name), _go_string(name)
+        )
+        for name in sorted(envelope_attributes)
+    )
+    envelope_attribute_lines = "\n".join(
+        "\t{}: {{Name: {}, Type: {}, Requirement: "
+        "executionFlowEnvelopeRequired{}, MissingReason: "
+        "executionFlowReason{}}},".format(
+            _go_string(name),
+            _go_string(name),
+            _go_string(definition["type"]),
+            _enum_symbol(definition["required"]),
+            _enum_symbol(definition["missingReason"]),
+        )
+        for name, definition in sorted(envelope_attributes.items())
+    )
+    envelope_attribute_list_lines = "\n".join(
+        f"\t\tgeneratedExecutionFlowEnvelopeAttributes[{_go_string(name)}],"
+        for name in sorted(envelope_attributes)
+    )
+    storage_constant_lines = "\n".join(
+        "\texecutionFlowStorage{} = {}".format(
+            _go_symbol(name), _go_string(name)
+        )
+        for name in sorted(storage_attributes)
+    )
+    storage_attribute_lines = "\n".join(
+        "\t{}: {{Name: {}, Type: {}, Kind: executionFlowStorage{}, "
+        "Source: {}, Wire: {}, Minimum: {}, Maximum: {}, "
+        "HasMinimum: {}, HasMaximum: {}}},".format(
+            _go_string(name),
+            _go_string(name),
+            _go_string(definition["type"]),
+            _enum_symbol(definition["kind"]),
+            _go_string(definition["source"]),
+            json.dumps(definition["wire"]),
+            definition["minimum"] if definition["minimum"] is not None else 0,
+            definition["maximum"] if definition["maximum"] is not None else 0,
+            json.dumps(definition["minimum"] is not None),
+            json.dumps(definition["maximum"] is not None),
+        )
+        for name, definition in sorted(storage_attributes.items())
+    )
+    storage_attribute_list_lines = "\n".join(
+        f"\t\tgeneratedExecutionFlowStorageAttributes[{_go_string(name)}],"
+        for name in sorted(storage_attributes)
+    )
     attribute_lines = "\n".join(
         f"\t{_go_string(name)}: {_go_string(definition['type'])},"
         for name, definition in sorted(attributes.items())
@@ -504,6 +803,8 @@ const (
 \texecutionFlowWirePrefix = {_go_string(metadata["wirePrefix"])}
 \texecutionFlowHeartbeatPoint = {_go_string(metadata["heartbeatPoint"])}
 \texecutionFlowPipelineFaultPoint = {_go_string(metadata["pipelineFaultPoint"])}
+{envelope_constant_lines}
+{storage_constant_lines}
 )
 
 type executionFlowReasonCode string
@@ -511,6 +812,14 @@ type executionFlowReasonCode string
 const (
 {reason_code_lines}
 )
+
+var generatedExecutionFlowEnvelopeAttributes = map[string]executionFlowEnvelopeAttributeSpec{{
+{envelope_attribute_lines}
+}}
+
+var generatedExecutionFlowStorageAttributes = map[string]executionFlowStorageAttributeSpec{{
+{storage_attribute_lines}
+}}
 
 var generatedExecutionFlowAttributeTypes = map[string]string{{
 {attribute_lines}
@@ -562,6 +871,38 @@ func (generatedExecutionFlowCatalogData) Point(name string) (executionFlowPointS
 \treturn point, ok
 }}
 
+func (generatedExecutionFlowCatalogData) EnvelopeAttributeType(name string) (string, bool) {{
+\tattribute, ok := generatedExecutionFlowEnvelopeAttributes[name]
+\treturn attribute.Type, ok
+}}
+
+func (generatedExecutionFlowCatalogData) AllowsEnvelopeAttribute(name string) bool {{
+\t_, ok := generatedExecutionFlowEnvelopeAttributes[name]
+\treturn ok
+}}
+
+func (generatedExecutionFlowCatalogData) EnvelopeAttributes() []executionFlowEnvelopeAttributeSpec {{
+\treturn []executionFlowEnvelopeAttributeSpec{{
+{envelope_attribute_list_lines}
+\t}}
+}}
+
+func (generatedExecutionFlowCatalogData) StorageAttribute(name string) (executionFlowStorageAttributeSpec, bool) {{
+\tattribute, ok := generatedExecutionFlowStorageAttributes[name]
+\treturn attribute, ok
+}}
+
+func (generatedExecutionFlowCatalogData) AllowsStorageAttribute(name string) bool {{
+\t_, ok := generatedExecutionFlowStorageAttributes[name]
+\treturn ok
+}}
+
+func (generatedExecutionFlowCatalogData) StorageAttributes() []executionFlowStorageAttributeSpec {{
+\treturn []executionFlowStorageAttributeSpec{{
+{storage_attribute_list_lines}
+\t}}
+}}
+
 func (generatedExecutionFlowCatalogData) AttributeType(name string) (string, bool) {{
 \tattributeType, ok := generatedExecutionFlowAttributeTypes[name]
 \treturn attributeType, ok
@@ -591,9 +932,13 @@ def _render_autotest_go(
 ) -> str:
     digest = hashlib.sha256(schema_bytes).hexdigest()
     metadata = data["metadata"]
+    envelope_attributes = data["envelopeAttributes"]
+    storage_attributes = data["storageAttributes"]
     attributes = data["attributes"]
     enums = data["enums"]
     assert isinstance(metadata, dict)
+    assert isinstance(envelope_attributes, dict)
+    assert isinstance(storage_attributes, dict)
     assert isinstance(attributes, dict)
     assert isinstance(enums, dict)
     wire_prefix = str(metadata["wirePrefix"])
@@ -605,6 +950,49 @@ def _render_autotest_go(
         "string": "AttributeString",
         "enum": "AttributeEnum",
     }
+    envelope_constant_lines = "\n".join(
+        "\tEnvelope{} = {}".format(_go_symbol(name), _go_string(name))
+        for name in sorted(envelope_attributes)
+    )
+    envelope_requirement_symbols = {
+        "always": "EnvelopeRequiredAlways",
+        "business": "EnvelopeRequiredBusiness",
+        "optional": "EnvelopeOptional",
+    }
+    envelope_attribute_lines = "\n".join(
+        "\t{}: {{Type: {}, Requirement: {}, MissingReason: {}}},".format(
+            _go_string(name),
+            attribute_type_symbols[definition["type"]],
+            envelope_requirement_symbols[definition["required"]],
+            _go_string(definition["missingReason"]),
+        )
+        for name, definition in sorted(envelope_attributes.items())
+    )
+    envelope_name_lines = "\n".join(
+        f"\t\t{_go_string(name)}," for name in sorted(envelope_attributes)
+    )
+    storage_constant_lines = "\n".join(
+        "\tStorage{} = {}".format(_go_symbol(name), _go_string(name))
+        for name in sorted(storage_attributes)
+    )
+    storage_attribute_lines = "\n".join(
+        "\t{}: {{Type: {}, Kind: Storage{}, Source: {}, Wire: {}, "
+        "Minimum: {}, Maximum: {}, HasMinimum: {}, HasMaximum: {}}},".format(
+            _go_string(name),
+            attribute_type_symbols[definition["type"]],
+            _enum_symbol(definition["kind"]),
+            _go_string(definition["source"]),
+            json.dumps(definition["wire"]),
+            definition["minimum"] if definition["minimum"] is not None else 0,
+            definition["maximum"] if definition["maximum"] is not None else 0,
+            json.dumps(definition["minimum"] is not None),
+            json.dumps(definition["maximum"] is not None),
+        )
+        for name, definition in sorted(storage_attributes.items())
+    )
+    storage_name_lines = "\n".join(
+        f"\t\t{_go_string(name)}," for name in sorted(storage_attributes)
+    )
     attribute_lines = "\n".join(
         f"\t{_go_string(name)}: {{Type: {attribute_type_symbols[definition['type']]} }},"
         for name, definition in sorted(attributes.items())
@@ -644,6 +1032,8 @@ const (
 \tHeartbeatPoint = {_go_string(metadata["heartbeatPoint"])}
 \tPipelineFaultPoint = {_go_string(metadata["pipelineFaultPoint"])}
 \tSHA256 = {_go_string(digest)}
+{envelope_constant_lines}
+{storage_constant_lines}
 )
 
 type AttributeType string
@@ -658,10 +1048,50 @@ type AttributeDefinition struct {{
 \tType AttributeType
 }}
 
+type EnvelopeRequirement string
+
+const (
+\tEnvelopeRequiredAlways EnvelopeRequirement = "always"
+\tEnvelopeRequiredBusiness EnvelopeRequirement = "business"
+\tEnvelopeOptional EnvelopeRequirement = "optional"
+)
+
+type EnvelopeAttributeDefinition struct {{
+\tType AttributeType
+\tRequirement EnvelopeRequirement
+\tMissingReason string
+}}
+
+type StorageKind string
+
+const (
+\tStorageField StorageKind = "field"
+\tStorageTag StorageKind = "tag"
+)
+
+type StorageAttributeDefinition struct {{
+\tType AttributeType
+\tKind StorageKind
+\tSource string
+\tWire bool
+\tMinimum int64
+\tMaximum int64
+\tHasMinimum bool
+\tHasMaximum bool
+}}
+
 type PointDefinition struct {{
 \tID string
 \tProducer string
 \tRequiredAttributes []string
+}}
+
+var envelopeAttributes = map[string]EnvelopeAttributeDefinition{{
+{envelope_attribute_lines}
+}}
+
+var storageAttributes = map[string]StorageAttributeDefinition{{
+{storage_attribute_lines}
 }}
 
 var attributes = map[string]AttributeDefinition{{
@@ -691,6 +1121,28 @@ func PointNames() []string {{
 \t}}
 }}
 
+func EnvelopeAttribute(name string) (EnvelopeAttributeDefinition, bool) {{
+\tattribute, ok := envelopeAttributes[name]
+\treturn attribute, ok
+}}
+
+func EnvelopeAttributeNames() []string {{
+\treturn []string{{
+{envelope_name_lines}
+\t}}
+}}
+
+func StorageAttribute(name string) (StorageAttributeDefinition, bool) {{
+\tattribute, ok := storageAttributes[name]
+\treturn attribute, ok
+}}
+
+func StorageAttributeNames() []string {{
+\treturn []string{{
+{storage_name_lines}
+\t}}
+}}
+
 func Attribute(name string) (AttributeDefinition, bool) {{
 \tattribute, ok := attributes[name]
 \treturn attribute, ok
@@ -713,7 +1165,11 @@ def _render_autotest_python(
 ) -> str:
     digest = hashlib.sha256(schema_bytes).hexdigest()
     metadata = data["metadata"]
+    envelope_attributes = data["envelopeAttributes"]
+    storage_attributes = data["storageAttributes"]
     assert isinstance(metadata, dict)
+    assert isinstance(envelope_attributes, dict)
+    assert isinstance(storage_attributes, dict)
     schema_name = str(metadata["name"])
     schema_version = schema_name.rsplit("/", maxsplit=1)[-1]
     values = {
@@ -724,17 +1180,38 @@ def _render_autotest_python(
         "HEARTBEAT_POINT": metadata["heartbeatPoint"],
         "PIPELINE_FAULT_POINT": metadata["pipelineFaultPoint"],
         "SHA256": digest,
+        "ENVELOPE_ATTRIBUTES": {
+            name: {
+                "type": definition["type"],
+                "required": definition["required"],
+                "missing_reason": definition["missingReason"],
+            }
+            for name, definition in sorted(envelope_attributes.items())
+        },
+        "STORAGE_ATTRIBUTES": {
+            name: {
+                "type": definition["type"],
+                "kind": definition["kind"],
+                "source": definition["source"],
+                "wire": definition["wire"],
+                "minimum": definition["minimum"],
+                "maximum": definition["maximum"],
+            }
+            for name, definition in sorted(storage_attributes.items())
+        },
     }
-    assignments = "\n".join(
-        f"{name} = {json.dumps(value, ensure_ascii=True)}"
-        for name, value in values.items()
-    )
+    # This target is Python source, not JSON. repr() keeps booleans and nulls
+    # importable as False/True/None. The sorted nested inputs above make the
+    # generated dictionaries deterministic.
+    assignments = "\n".join(f"{name} = {value!r}" for name, value in values.items())
     exports = ",\n    ".join(json.dumps(name) for name in sorted(values))
     return f'''# Code generated by CraneSched/scripts/generate_execution_flow_schema.py. DO NOT EDIT.
 # Source: CraneSched/schemas/execution-flow/v1.yaml
 # SHA256: {digest}
 
+# fmt: off
 {assignments}
+# fmt: on
 
 __all__ = (
     {exports},

@@ -64,6 +64,26 @@ if (CRANE_ENABLE_EXECUTION_FLOW AND NOT CRANE_ENABLE_TRACING)
 endif ()
 if (CRANE_ENABLE_EXECUTION_FLOW)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH "$ENV{PYTHONPATH}" CACHE STRING
+            "Python module path used by the execution-flow schema generator")
+    mark_as_advanced(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+    if (CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+        set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND
+                "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH}"
+                "${Python3_EXECUTABLE}")
+    endif ()
+    execute_process(
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
+                    -c "import yaml"
+            RESULT_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT
+            ERROR_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR)
+    if (NOT CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT EQUAL 0)
+        message(FATAL_ERROR
+                "Execution-flow schema generation requires PyYAML for "
+                "${Python3_EXECUTABLE}: ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR}")
+    endif ()
     set(CRANE_EXECUTION_FLOW_SCHEMA
             "${CMAKE_CURRENT_SOURCE_DIR}/schemas/execution-flow/v1.yaml")
     set(CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR
@@ -74,7 +94,7 @@ if (CRANE_ENABLE_EXECUTION_FLOW)
             "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/crane_execution_flow_schema_check.stamp")
     add_custom_command(
             OUTPUT "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}"
-            COMMAND "${Python3_EXECUTABLE}"
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
                     "${CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR}"
                     --schema "${CRANE_EXECUTION_FLOW_SCHEMA}"
                     --output "${CRANE_EXECUTION_FLOW_SCHEMA_CATALOG}"

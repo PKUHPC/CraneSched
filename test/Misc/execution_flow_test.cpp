@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "crane/ExecutionFlow.h"
+#include "crane/ExecutionFlowSchema.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 #include "gtest/gtest.h"
@@ -509,26 +510,27 @@ TEST_F(ExecutionFlowRuntimeTest, EverySemanticEmitterMatchesCanonicalCatalog) {
                   crane::FlowOperation::kJobTerminal,
                   crane::FlowOutcome::kPersisted,
                   crane::FlowEmitter::JobTerminal(std::move(context), 3));
-  EXPECT_SEMANTIC(job_context, crane::FlowPoint::kCtldJobUnsupported,
-                  crane::FlowOperation::kSubmit,
-                  crane::FlowOutcome::kUnsupported,
-                  crane::FlowEmitter::JobUnsupportedAtSubmit(
-                      std::move(context), crane::FlowReasonCode::kNonBatchJob));
-  EXPECT_SEMANTIC(job_context, crane::FlowPoint::kCtldJobUnsupported,
-                  crane::FlowOperation::kCancelPendingJob,
-                  crane::FlowOutcome::kUnsupported,
-                  crane::FlowEmitter::JobUnsupportedAtPendingCancel(
-                      std::move(context), crane::FlowReasonCode::kNonBatchJob));
   EXPECT_SEMANTIC(
       job_context, crane::FlowPoint::kCtldJobUnsupported,
-      crane::FlowOperation::kSubmitCommonStep, crane::FlowOutcome::kUnsupported,
-      crane::FlowEmitter::JobUnsupportedAtStepSubmit(
-          std::move(context), crane::FlowReasonCode::kExtraCommonStep, 2));
+      crane::FlowOperation::kSubmit, crane::FlowOutcome::kUnsupported,
+      crane::FlowEmitter::JobUnsupportedAtSubmit(
+          std::move(context), crane::FlowUnsupportedReason::kNonBatchJob));
+  EXPECT_SEMANTIC(
+      job_context, crane::FlowPoint::kCtldJobUnsupported,
+      crane::FlowOperation::kCancelPendingJob, crane::FlowOutcome::kUnsupported,
+      crane::FlowEmitter::JobUnsupportedAtPendingCancel(
+          std::move(context), crane::FlowUnsupportedReason::kNonBatchJob));
+  EXPECT_SEMANTIC(job_context, crane::FlowPoint::kCtldJobUnsupported,
+                  crane::FlowOperation::kSubmitCommonStep,
+                  crane::FlowOutcome::kUnsupported,
+                  crane::FlowEmitter::JobUnsupportedAtStepSubmit(
+                      std::move(context),
+                      crane::FlowUnsupportedReason::kExtraCommonStep, 2));
   EXPECT_SEMANTIC(
       job_context, crane::FlowPoint::kCtldJobUnsupported,
       crane::FlowOperation::kRequeue, crane::FlowOutcome::kUnsupported,
       crane::FlowEmitter::JobUnsupportedAtRequeue(
-          std::move(context), crane::FlowReasonCode::kRequeueAttempt));
+          std::move(context), crane::FlowUnsupportedReason::kRequeueAttempt));
   EXPECT_SEMANTIC(
       step_context, crane::FlowPoint::kCtldStatusReceived,
       crane::FlowOperation::kStatusChange, std::nullopt,
@@ -806,19 +808,19 @@ TEST(ExecutionFlowTest, ClassifiesUnsupportedBatchContractBranches) {
           .has_value());
   EXPECT_EQ(
       crane::ExecutionFlowJobUnsupportedReason(false, false, false, true, 0),
-      crane::FlowReasonCode::kNonBatchJob);
+      crane::FlowUnsupportedReason::kNonBatchJob);
   EXPECT_EQ(
       crane::ExecutionFlowJobUnsupportedReason(false, true, false, true, 0),
-      crane::FlowReasonCode::kContainerJob);
+      crane::FlowUnsupportedReason::kContainerJob);
   EXPECT_EQ(
       crane::ExecutionFlowJobUnsupportedReason(true, false, true, true, 0),
-      crane::FlowReasonCode::kArrayJob);
+      crane::FlowUnsupportedReason::kArrayJob);
   EXPECT_EQ(
       crane::ExecutionFlowJobUnsupportedReason(true, false, false, false, 0),
-      crane::FlowReasonCode::kRequeueEnabled);
+      crane::FlowUnsupportedReason::kRequeueEnabled);
   EXPECT_EQ(
       crane::ExecutionFlowJobUnsupportedReason(true, false, false, true, 1),
-      crane::FlowReasonCode::kRequeueAttempt);
+      crane::FlowUnsupportedReason::kRequeueAttempt);
 }
 
 TEST(ExecutionFlowTest, GeneratedCatalogUsesCanonicalWireNames) {
@@ -836,6 +838,31 @@ TEST(ExecutionFlowTest, GeneratedCatalogUsesCanonicalWireNames) {
   EXPECT_EQ(crane::kExecutionFlowHeartbeatPoint, "flow/v1/pipeline/heartbeat");
   EXPECT_EQ(crane::kExecutionFlowPipelineFaultPoint, "flow/v1/pipeline/fault");
   EXPECT_EQ(crane::kExecutionFlowSchemaSha256.size(), 64);
+  EXPECT_EQ(crane::FlowEnvelopeAttributeName(
+                crane::FlowEnvelopeAttribute::kEventSequence),
+            "event_sequence");
+  EXPECT_EQ(crane::FlowEnvelopeAttributeWireType(
+                crane::FlowEnvelopeAttribute::kEventSequence),
+            crane::FlowWireType::kInt64);
+  EXPECT_EQ(
+      crane::FlowEnvelopeAttributeName(crane::FlowEnvelopeAttribute::kFlowId),
+      "flow_id");
+  EXPECT_EQ(crane::FlowEnvelopeAttributeWireType(
+                crane::FlowEnvelopeAttribute::kFlowId),
+            crane::FlowWireType::kString);
+  EXPECT_EQ(crane::FlowEnvelopeAttributeRequirement(
+                crane::FlowEnvelopeAttribute::kFlowId),
+            crane::FlowEnvelopeRequirement::kBusiness);
+  EXPECT_EQ(crane::FlowEnvelopeAttributeRequirement(
+                crane::FlowEnvelopeAttribute::kProducer),
+            crane::FlowEnvelopeRequirement::kAlways);
+  EXPECT_EQ(crane::FlowEnvelopeAttributeMissingReason(
+                crane::FlowEnvelopeAttribute::kFlowId),
+            "invalid_flow_id");
+  EXPECT_EQ(crane::FlowAttributeName(crane::FlowAttribute::kOperation),
+            "operation");
+  EXPECT_EQ(crane::FlowAttributeWireType(crane::FlowAttribute::kOperation),
+            crane::FlowWireType::kEnum);
 }
 
 TEST(ExecutionFlowTest, GeneratedCatalogDefinesRequiredAttributeContract) {

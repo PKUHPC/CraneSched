@@ -13,9 +13,27 @@
 #include <fstream>
 #include <thread>
 
+namespace Craned::Common {
+
+class CgroupManagerTestPeer {
+ public:
+  static void InstallFastPathBackend(
+      std::shared_ptr<CgroupV2FsBackend> backend) {
+    CgroupManager::m_v2_fs_backend_ = std::move(backend);
+  }
+
+  [[nodiscard]] static bool HasFastPathBackend() {
+    return CgroupManager::m_v2_fs_backend_ != nullptr;
+  }
+};
+
+}  // namespace Craned::Common
+
 namespace {
 
 using Craned::Common::CG_V2_REQUIRED_CONTROLLERS;
+using Craned::Common::CgroupManager;
+using Craned::Common::CgroupManagerTestPeer;
 using Craned::Common::CgroupV2CleanupMode;
 using Craned::Common::CgroupV2FsBackend;
 using Craned::Common::CgConstant::ControllerFile;
@@ -212,6 +230,80 @@ TEST(CgroupV2FsBackendTest, DestructorDrainsRetryBeforeStoppingJanitor) {
   EXPECT_FALSE(std::filesystem::exists(path));
   EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
   EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+}
+
+TEST(CgroupV2FsBackendTest,
+     StopAcceptingRejectsNewCleanupAndCompletesItExactlyOnce) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  WriteText(path / "regular-file-blocks-rmdir", "block");
+
+  CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+  std::atomic_uint first_completion_count{0};
+  std::atomic_bool first_completion_succeeded{true};
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    first_completion_succeeded.store(succeeded, std::memory_order_release);
+    first_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+
+  EXPECT_FALSE(
+      backend.StopAcceptingAndDrainJanitor(std::chrono::milliseconds{0}));
+  EXPECT_FALSE(first_completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(first_completion_count.load(std::memory_order_acquire), 1U);
+
+  std::atomic_uint rejected_completion_count{0};
+  EXPECT_FALSE(backend.Destroy("crane/job_2", [&](bool succeeded) {
+    EXPECT_FALSE(succeeded);
+    rejected_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+  EXPECT_EQ(rejected_completion_count.load(std::memory_order_acquire), 1U);
+}
+
+TEST(CgroupV2FsBackendTest,
+     ManagerShutdownDrainsBeforeResetWithOutstandingCgroupOwner) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  auto blocker = path / "regular-file-blocks-rmdir";
+  WriteText(blocker, "block");
+
+  auto backend = std::make_shared<CgroupV2FsBackend>(
+      CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+  auto live_cgroup = std::make_unique<Craned::Common::CgroupV2>(
+      "crane/job_1", nullptr, 1, backend);
+  CgroupManagerTestPeer::InstallFastPathBackend(backend);
+  ASSERT_TRUE(CgroupManagerTestPeer::HasFastPathBackend());
+  ASSERT_EQ(backend.use_count(), 3);
+
+  std::atomic_uint completion_count{0};
+  std::atomic_bool completion_succeeded{false};
+  ASSERT_TRUE(backend->Destroy("crane/job_1", [&](bool succeeded) {
+    completion_succeeded.store(succeeded, std::memory_order_release);
+    completion_count.fetch_add(1, std::memory_order_release);
+  }));
+
+  std::jthread unblocker([blocker] {
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+  });
+  CgroupManager::ShutdownCgroupV2FastPath();
+  unblocker.join();
+
+  EXPECT_FALSE(CgroupManagerTestPeer::HasFastPathBackend());
+  EXPECT_EQ(backend.use_count(), 2);
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+
+  std::atomic_uint rejected_completion_count{0};
+  EXPECT_FALSE(live_cgroup->Destroy([&](bool succeeded) {
+    EXPECT_FALSE(succeeded);
+    rejected_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+  EXPECT_EQ(rejected_completion_count.load(std::memory_order_acquire), 1U);
+  live_cgroup.reset();
 }
 
 TEST(CgroupV2FsBackendTest, SyncRmdirCompletesAfterPhysicalRemoval) {

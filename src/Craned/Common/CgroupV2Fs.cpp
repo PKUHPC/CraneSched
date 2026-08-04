@@ -205,15 +205,12 @@ class CgroupV2FsBackend::Janitor {
   ~Janitor() { Stop(); }
 
   bool Enqueue(std::filesystem::path path, CgroupDestroyCompletion completion) {
-    return EnqueueItem_({std::move(path), 0, std::chrono::steady_clock::now(),
-                         std::move(completion)});
-  }
-
-  bool EnqueueItem_(Item item) {
+    Item item{std::move(path), 0, std::chrono::steady_clock::now(),
+              std::move(completion)};
     bool accepted = false;
     {
       std::lock_guard lk(mu_);
-      if (!stopped_) {
+      if (accepting_) {
         queue_.push_back(std::move(item));
         accepted = true;
         cv_.notify_one();
@@ -224,26 +221,34 @@ class CgroupV2FsBackend::Janitor {
   }
 
   bool Drain(std::chrono::milliseconds timeout) {
-    auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-      {
-        std::lock_guard lk(mu_);
-        if (queue_.empty() && in_flight_ == 0) return true;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds{20});
-    }
-    return false;
+    std::unique_lock lk(mu_);
+    return drained_cv_.wait_for(
+        lk, timeout, [this] { return queue_.empty() && in_flight_ == 0; });
   }
 
-  void Stop() {
+  bool StopAcceptingAndDrain(std::chrono::milliseconds timeout) {
     {
       std::lock_guard lk(mu_);
-      if (stopped_) return;
-      stopped_ = true;
-      cv_.notify_all();
+      accepting_ = false;
+    }
+
+    const bool drained = Drain(timeout);
+    std::deque<Item> abandoned;
+    {
+      std::lock_guard lk(mu_);
+      stopping_ = true;
+      if (!drained) abandoned.swap(queue_);
+    }
+    cv_.notify_all();
+
+    for (auto& item : abandoned) {
+      if (item.completion) item.completion(false);
     }
     if (worker_.joinable()) worker_.join();
+    return drained;
   }
+
+  void Stop() { (void)StopAcceptingAndDrain(std::chrono::seconds{5}); }
 
  private:
   void WorkerLoop_() {
@@ -251,9 +256,9 @@ class CgroupV2FsBackend::Janitor {
       Item item;
       {
         std::unique_lock lk(mu_);
-        cv_.wait(lk, [this] { return stopped_ || !queue_.empty(); });
+        cv_.wait(lk, [this] { return stopping_ || !queue_.empty(); });
         if (queue_.empty()) {
-          if (stopped_) break;
+          if (stopping_) break;
           continue;
         }
         item = std::move(queue_.front());
@@ -275,24 +280,34 @@ class CgroupV2FsBackend::Janitor {
         if (item.completion) item.completion(true);
       } else {
         span.SetStatus(crane::StatusCode::kError, "delete_failed");
-        bool stopping = false;
+        bool requeued = false;
         {
-          std::lock_guard lk(mu_);
-          stopping = stopped_;
+          std::unique_lock lk(mu_);
+          if (!stopping_ && item.retry_count < kJanitorMaxRetries) {
+            const auto backoff = std::min(
+                std::chrono::milliseconds{5000},
+                std::chrono::milliseconds{200 * (item.retry_count + 1)});
+            cv_.wait_for(lk, backoff, [this] { return stopping_; });
+            if (!stopping_) {
+              ++item.retry_count;
+              queue_.push_back(std::move(item));
+              requeued = true;
+              cv_.notify_one();
+            }
+          }
         }
-        if (stopping || item.retry_count >= kJanitorMaxRetries) {
+        if (!requeued) {
+          bool stopping = false;
+          {
+            std::lock_guard lk(mu_);
+            stopping = stopping_;
+          }
           if (!stopping) {
             CRANE_WARN(
                 "Cgroup v2 janitor gave up deleting {} after {} retries: {}",
                 item.path.string(), item.retry_count, strerror(err));
           }
           if (item.completion) item.completion(false);
-        } else {
-          std::this_thread::sleep_for(std::min(
-              std::chrono::milliseconds{5000},
-              std::chrono::milliseconds{200 * (item.retry_count + 1)}));
-          item.retry_count++;
-          (void)EnqueueItem_(std::move(item));
         }
       }
 
@@ -300,6 +315,7 @@ class CgroupV2FsBackend::Janitor {
         std::lock_guard lk(mu_);
         --in_flight_;
         span.SetAttribute("queue_len", static_cast<int64_t>(queue_.size()));
+        if (queue_.empty() && in_flight_ == 0) drained_cv_.notify_all();
       }
     }
   }
@@ -307,9 +323,11 @@ class CgroupV2FsBackend::Janitor {
   CgroupV2FsBackend* backend_;
   std::mutex mu_;
   std::condition_variable cv_;
+  std::condition_variable drained_cv_;
   std::deque<Item> queue_;
   size_t in_flight_{0};
-  bool stopped_{false};
+  bool accepting_{true};
+  bool stopping_{false};
   std::thread worker_;
 };
 
@@ -323,12 +341,8 @@ CgroupV2FsBackend::CgroupV2FsBackend(CgroupV2CleanupMode cleanup_mode,
 }
 
 CgroupV2FsBackend::~CgroupV2FsBackend() {
-  if (janitor_) {
-    if (!janitor_->Drain(std::chrono::seconds{5})) {
-      CRANE_WARN("Cgroup v2 janitor did not drain before backend shutdown");
-    }
-    janitor_->Stop();
-  }
+  if (janitor_ && !janitor_->StopAcceptingAndDrain(std::chrono::seconds{5}))
+    CRANE_WARN("Cgroup v2 janitor did not drain before backend shutdown");
 }
 
 bool CgroupV2FsBackend::Probe(ControllerFlags mounted_controllers) {
@@ -506,6 +520,11 @@ bool CgroupV2FsBackend::Destroy(const std::string& cgroup_name,
 
 bool CgroupV2FsBackend::DrainJanitor(std::chrono::milliseconds timeout) {
   return janitor_ == nullptr || janitor_->Drain(timeout);
+}
+
+bool CgroupV2FsBackend::StopAcceptingAndDrainJanitor(
+    std::chrono::milliseconds timeout) {
+  return janitor_ == nullptr || janitor_->StopAcceptingAndDrain(timeout);
 }
 
 std::filesystem::path CgroupV2FsBackend::FullPath_(

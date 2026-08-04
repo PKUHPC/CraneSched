@@ -1,12 +1,14 @@
 // Parse generated CRI enums before GTest defines signal-related macros.
 // clang-format off
 #include "CgroupManager.h"
+#include "CleanupLifecycle.h"
 #include "crane/ExecutionFlow.h"
 #include <gtest/gtest.h>
 // clang-format on
 
 #include <csignal>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -86,6 +88,74 @@ class RecordingCgroup final : public CgroupInterface {
   int* last_signal_;
 };
 
+class DeferredDestroyCgroup final : public CgroupInterface {
+ public:
+  DeferredDestroyCgroup(std::vector<std::string>* calls,
+                        CgroupDestroyCompletion* deferred)
+      : CgroupInterface("crane/job_1/step_1/system", nullptr),
+        calls_(calls),
+        deferred_(deferred) {}
+
+  bool SetCpuCoreLimit(double) override { return true; }
+  bool SetCpuShares(uint64_t) override { return true; }
+  bool SetCpuSet(const std::unordered_set<uint32_t>&) override { return true; }
+  bool SetCpusetMems(const std::string&) override { return true; }
+  bool SetMemoryLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySwLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySoftLimitBytes(uint64_t) override { return true; }
+  bool SetBlockioWeight(uint64_t) override { return true; }
+  bool SetDeviceAccess(const std::unordered_set<SlotId>&, bool, bool,
+                       bool) override {
+    return true;
+  }
+  bool KillAllProcesses(int) override { return true; }
+  bool Empty() override {
+    calls_->emplace_back("empty");
+    return true;
+  }
+  bool Destroy(CgroupDestroyCompletion completion) override {
+    calls_->emplace_back("destroy-submitted");
+    *deferred_ = std::move(completion);
+    return true;
+  }
+
+ private:
+  std::vector<std::string>* calls_;
+  CgroupDestroyCompletion* deferred_;
+};
+
+class RejectedDestroyCgroup final : public CgroupInterface {
+ public:
+  explicit RejectedDestroyCgroup(std::vector<std::string>* calls)
+      : CgroupInterface("crane/job_1/step_1/system", nullptr), calls_(calls) {}
+
+  bool SetCpuCoreLimit(double) override { return true; }
+  bool SetCpuShares(uint64_t) override { return true; }
+  bool SetCpuSet(const std::unordered_set<uint32_t>&) override { return true; }
+  bool SetCpusetMems(const std::string&) override { return true; }
+  bool SetMemoryLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySwLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySoftLimitBytes(uint64_t) override { return true; }
+  bool SetBlockioWeight(uint64_t) override { return true; }
+  bool SetDeviceAccess(const std::unordered_set<SlotId>&, bool, bool,
+                       bool) override {
+    return true;
+  }
+  bool KillAllProcesses(int) override { return true; }
+  bool Empty() override {
+    calls_->emplace_back("empty");
+    return true;
+  }
+  bool Destroy(CgroupDestroyCompletion completion) override {
+    calls_->emplace_back("destroy-rejected");
+    if (completion) completion(false);
+    return false;
+  }
+
+ private:
+  std::vector<std::string>* calls_;
+};
+
 TEST(CgroupCleanupContractTest, DrainsBeforeDestroyAndCompletesAfterDestroy) {
   std::vector<std::string> calls;
   std::optional<CgroupManager::CgroupCleanupResult> result;
@@ -127,6 +197,187 @@ TEST(CgroupCleanupContractTest, PropagatesDestroyFailureExactlyOnce) {
   EXPECT_TRUE(result->processes_drained);
   EXPECT_FALSE(result->cgroup_destroyed);
   EXPECT_FALSE(result->Succeeded());
+}
+
+struct StepResult {
+  bool processes_drained{true};
+  bool cgroup_destroyed{true};
+  bool step_directory_removed{true};
+};
+
+TEST(CgroupCleanupContractTest,
+     StepDirectoryRemovalRunsOnlyAfterPhysicalDestroyCompletion) {
+  std::vector<std::string> calls;
+  CgroupDestroyCompletion deferred;
+  std::optional<StepResult> result;
+
+  Craned::detail::CoordinateCgroupCleanup(
+      [&](CgroupManager::CgroupCleanupCompletion completion) {
+        CgroupManager::KillAndDestroyCgroup(
+            std::make_unique<DeferredDestroyCgroup>(&calls, &deferred),
+            std::move(completion));
+      },
+      [&](const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        return Craned::detail::FinalizeStepCgroupCleanup<StepResult>(
+            cgroup_result, [&] {
+              calls.emplace_back("remove-step-directory");
+              return true;
+            });
+      },
+      std::function<void(StepResult)>{[&](StepResult cleanup_result) {
+        calls.emplace_back("completion");
+        result = cleanup_result;
+      }});
+
+  EXPECT_EQ(calls, (std::vector<std::string>{"empty", "destroy-submitted"}));
+  EXPECT_FALSE(result.has_value());
+  ASSERT_TRUE(static_cast<bool>(deferred));
+
+  deferred(true);
+
+  EXPECT_EQ(calls,
+            (std::vector<std::string>{"empty", "destroy-submitted",
+                                      "remove-step-directory", "completion"}));
+  ASSERT_TRUE(result.has_value());
+  EXPECT_TRUE(result->processes_drained);
+  EXPECT_TRUE(result->cgroup_destroyed);
+  EXPECT_TRUE(result->step_directory_removed);
+}
+
+TEST(CgroupCleanupContractTest,
+     DeferredDestroyFailureSkipsParentRemovalAndCompletesOnce) {
+  std::vector<std::string> calls;
+  CgroupDestroyCompletion deferred;
+  std::optional<StepResult> result;
+  int completion_count = 0;
+
+  Craned::detail::CoordinateCgroupCleanup(
+      [&](CgroupManager::CgroupCleanupCompletion completion) {
+        CgroupManager::KillAndDestroyCgroup(
+            std::make_unique<DeferredDestroyCgroup>(&calls, &deferred),
+            std::move(completion));
+      },
+      [&](const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        return Craned::detail::FinalizeStepCgroupCleanup<StepResult>(
+            cgroup_result, [&] {
+              calls.emplace_back("remove-step-directory");
+              return true;
+            });
+      },
+      std::function<void(StepResult)>{[&](StepResult cleanup_result) {
+        ++completion_count;
+        calls.emplace_back("completion");
+        result = cleanup_result;
+      }});
+
+  ASSERT_TRUE(static_cast<bool>(deferred));
+  deferred(false);
+
+  EXPECT_EQ(calls, (std::vector<std::string>{"empty", "destroy-submitted",
+                                             "completion"}));
+  EXPECT_EQ(completion_count, 1);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_TRUE(result->processes_drained);
+  EXPECT_FALSE(result->cgroup_destroyed);
+  EXPECT_FALSE(result->step_directory_removed);
+}
+
+TEST(CgroupCleanupContractTest,
+     RejectedDestroySkipsParentRemovalAndCompletesOnce) {
+  std::vector<std::string> calls;
+  std::optional<StepResult> result;
+  int completion_count = 0;
+
+  Craned::detail::CoordinateCgroupCleanup(
+      [&](CgroupManager::CgroupCleanupCompletion completion) {
+        CgroupManager::KillAndDestroyCgroup(
+            std::make_unique<RejectedDestroyCgroup>(&calls),
+            std::move(completion));
+      },
+      [&](const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        return Craned::detail::FinalizeStepCgroupCleanup<StepResult>(
+            cgroup_result, [&] {
+              calls.emplace_back("remove-step-directory");
+              return true;
+            });
+      },
+      std::function<void(StepResult)>{[&](StepResult cleanup_result) {
+        ++completion_count;
+        calls.emplace_back("completion");
+        result = cleanup_result;
+      }});
+
+  EXPECT_EQ(calls, (std::vector<std::string>{"empty", "destroy-rejected",
+                                             "completion"}));
+  EXPECT_EQ(completion_count, 1);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_TRUE(result->processes_drained);
+  EXPECT_FALSE(result->cgroup_destroyed);
+  EXPECT_FALSE(result->step_directory_removed);
+}
+
+TEST(CgroupCleanupContractTest, CoordinatorAdaptsJobCleanupResultExactlyOnce) {
+  std::vector<std::string> calls;
+  CgroupDestroyCompletion deferred;
+  std::vector<bool> results;
+
+  Craned::detail::CoordinateCgroupCleanup(
+      [&](CgroupManager::CgroupCleanupCompletion completion) {
+        CgroupManager::KillAndDestroyCgroup(
+            std::make_unique<DeferredDestroyCgroup>(&calls, &deferred),
+            std::move(completion));
+      },
+      [&](const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        calls.emplace_back("adapt-job-result");
+        return cgroup_result.Succeeded();
+      },
+      std::function<void(bool)>{[&](bool succeeded) {
+        calls.emplace_back("completion");
+        results.push_back(succeeded);
+      }});
+
+  EXPECT_EQ(calls, (std::vector<std::string>{"empty", "destroy-submitted"}));
+  deferred(true);
+  EXPECT_EQ(calls,
+            (std::vector<std::string>{"empty", "destroy-submitted",
+                                      "adapt-job-result", "completion"}));
+  EXPECT_EQ(results, (std::vector<bool>{true}));
+}
+
+TEST(CgroupCleanupContractTest, AggregatesDaemonCleanupCompletionsExactlyOnce) {
+  std::vector<bool> results;
+  Craned::detail::CleanupCompletionBarrier barrier(
+      2, true, [&](bool succeeded) { results.push_back(succeeded); });
+  barrier.Complete(true);
+  EXPECT_TRUE(results.empty());
+  barrier.Complete(false);
+  EXPECT_EQ(results, (std::vector<bool>{false}));
+}
+
+TEST(CgroupCleanupContractTest, PreservesDaemonCleanupAndWaiterOrder) {
+  std::vector<std::string> calls;
+  Craned::detail::RunDaemonCleanupSequence(
+      [&] { calls.emplace_back("step-cleanup"); },
+      [&] { calls.emplace_back("epilog-and-job-cleanup"); },
+      [&] { calls.emplace_back("erase-step"); },
+      [&] { calls.emplace_back("terminal-status"); },
+      [&] { calls.emplace_back("resolve-waiters"); });
+  EXPECT_EQ(calls, (std::vector<std::string>{
+                       "step-cleanup", "epilog-and-job-cleanup", "erase-step",
+                       "terminal-status", "resolve-waiters"}));
+}
+
+TEST(CgroupCleanupContractTest, PreservesDaemonResourceShutdownOrder) {
+  std::vector<std::string> calls;
+  Craned::detail::RunCranedResourceShutdownSequence(
+      [&] { calls.emplace_back("cpu-pool"); },
+      [&] { calls.emplace_back("cgroup-fast-path"); },
+      [&] { calls.emplace_back("execution-flow"); },
+      [&] { calls.emplace_back("tracing"); },
+      [&] { calls.emplace_back("plugin"); });
+  EXPECT_EQ(calls,
+            (std::vector<std::string>{"cpu-pool", "cgroup-fast-path",
+                                      "execution-flow", "tracing", "plugin"}));
 }
 
 }  // namespace

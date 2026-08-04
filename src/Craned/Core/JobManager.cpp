@@ -27,6 +27,7 @@
 #include <set>
 #include <utility>
 
+#include "CleanupLifecycle.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "crane/ExecutionFlow.h"
@@ -47,26 +48,6 @@ constexpr uint64_t kPendingSigkillMask = 1ULL << (SIGKILL - 1);
 constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
 constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
-
-class CleanupCompletionBarrier {
- public:
-  CleanupCompletionBarrier(std::size_t pending, bool succeeded,
-                           std::function<void(bool)> completion)
-      : pending_(pending),
-        succeeded_(succeeded),
-        completion_(std::move(completion)) {}
-
-  void Complete(bool succeeded) {
-    if (!succeeded) succeeded_.store(false, std::memory_order_release);
-    if (pending_.fetch_sub(1, std::memory_order_acq_rel) == 1 && completion_)
-      completion_(succeeded_.load(std::memory_order_acquire));
-  }
-
- private:
-  std::atomic<std::size_t> pending_;
-  std::atomic_bool succeeded_;
-  std::function<void(bool)> completion_;
-};
 
 std::filesystem::path GetV1ControllerPath_(
     const std::string& cg_path, Common::CgConstant::Controller ctrl) {
@@ -1161,11 +1142,11 @@ bool JobManager::EvCheckSupervisorRunning_() {
         }
       }
 
-      std::shared_ptr<CleanupCompletionBarrier> flow_cleanup_latch;
+      std::shared_ptr<detail::CleanupCompletionBarrier> flow_cleanup_latch;
       if (step != nullptr && flow_context) {
         const std::size_t pending_cleanup_count =
             1 + static_cast<std::size_t>(cleanup_ctx.has_value());
-        flow_cleanup_latch = std::make_shared<CleanupCompletionBarrier>(
+        flow_cleanup_latch = std::make_shared<detail::CleanupCompletionBarrier>(
             pending_cleanup_count, cleanup_succeeded,
             [flow_context](bool succeeded) {
               CRANE_FLOW_EMIT(CranedJobCleanupFinished, flow_context,
@@ -1173,48 +1154,50 @@ bool JobManager::EvCheckSupervisorRunning_() {
             });
       }
 
-      if (step != nullptr) {
-        CRANE_FLOW_EMIT(CranedJobCleanupStarted, flow_context,
-                        g_config.Hostname);
-        StepInstance::CleanupCompletion step_completion;
-        if (flow_cleanup_latch) {
-          step_completion =
-              [flow_cleanup_latch](StepInstance::CleanupResult result) {
-                flow_cleanup_latch->Complete(result.Succeeded());
+      detail::RunDaemonCleanupSequence(
+          [&] {
+            if (step == nullptr) return;
+            CRANE_FLOW_EMIT(CranedJobCleanupStarted, flow_context,
+                            g_config.Hostname);
+            StepInstance::CleanupCompletion step_completion;
+            if (flow_cleanup_latch) {
+              step_completion =
+                  [flow_cleanup_latch](StepInstance::CleanupResult result) {
+                    flow_cleanup_latch->Complete(result.Succeeded());
+                  };
+            }
+            step->CleanUp(false, std::move(step_completion));
+          },
+          [&] {
+            if (!cleanup_ctx.has_value()) return;
+            JobCleanupCompletion job_completion;
+            if (flow_cleanup_latch) {
+              job_completion = [flow_cleanup_latch](bool succeeded) {
+                flow_cleanup_latch->Complete(succeeded);
               };
-        }
-        step->CleanUp(false, std::move(step_completion));
-      }
-      if (cleanup_ctx.has_value()) {
-        JobCleanupCompletion job_completion;
-        if (flow_cleanup_latch) {
-          job_completion = [flow_cleanup_latch](bool succeeded) {
-            flow_cleanup_latch->Complete(succeeded);
-          };
-        }
-        CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx), true,
-                               std::move(job_completion));
-      }
-
-      {
-        auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
-        if (job_ptr) {
-          absl::MutexLock lk(job_ptr->step_map_mtx.get());
-          job_ptr->step_map.erase(request.step_id);
-        }
-      }
-
-      if (request.terminal.has_value()) {
-        CRANE_INFO(
-            "[Step #{}.{}] Daemon cleanup completed, sending terminal "
-            "status {}.",
-            request.job_id, request.step_id, request.terminal->new_status);
-        g_ctld_client->StepStatusChangeAsync(
-            std::move(request.terminal.value()));
-      }
-
-      ResolveStepCleanupWaiters_(StepKey{request.job_id, request.step_id},
-                                 cleanup_result);
+            }
+            CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx),
+                                   true, std::move(job_completion));
+          },
+          [&] {
+            auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
+            if (!job_ptr) return;
+            absl::MutexLock lk(job_ptr->step_map_mtx.get());
+            job_ptr->step_map.erase(request.step_id);
+          },
+          [&] {
+            if (!request.terminal.has_value()) return;
+            CRANE_INFO(
+                "[Step #{}.{}] Daemon cleanup completed, sending terminal "
+                "status {}.",
+                request.job_id, request.step_id, request.terminal->new_status);
+            g_ctld_client->StepStatusChangeAsync(
+                std::move(request.terminal.value()));
+          },
+          [&] {
+            ResolveStepCleanupWaiters_(StepKey{request.job_id, request.step_id},
+                                       cleanup_result);
+          });
     });
   }
 
@@ -1607,12 +1590,17 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
                                             ctx.job_cgroup->CgroupName());
   }
 
-  CgroupManager::KillAndDestroyCgroup(
-      std::move(ctx.job_cgroup),
-      [cleanup_succeeded, completion = std::move(completion)](
-          CgroupManager::CgroupCleanupResult result) mutable {
-        if (completion) completion(cleanup_succeeded && result.Succeeded());
-      });
+  detail::CoordinateCgroupCleanup(
+      [job_cgroup = std::move(ctx.job_cgroup)](
+          CgroupManager::CgroupCleanupCompletion cleanup_completion) mutable {
+        CgroupManager::KillAndDestroyCgroup(std::move(job_cgroup),
+                                            std::move(cleanup_completion));
+      },
+      [cleanup_succeeded](
+          const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        return cleanup_succeeded && cgroup_result.Succeeded();
+      },
+      std::move(completion));
 }
 
 void JobManager::ResolveStepCleanupWaiters_(const StepKey& key,

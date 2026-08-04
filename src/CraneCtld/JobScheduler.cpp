@@ -5139,9 +5139,10 @@ void JobScheduler::CleanCancelJobQueueCb_() {
   if (!pending_job_ptr_vec.empty()) {
     for (auto& job : pending_job_ptr_vec) {
       if (!job->ExecutionFlowUnsupportedReason().has_value()) {
-        CRANE_FLOW_EMIT(JobUnsupportedAtPendingCancel,
-                        job->RequestedExecutionFlowContext(job->Traceparent()),
-                        crane::FlowReasonCode::kCancelledBeforeAllocation);
+        CRANE_FLOW_EMIT(
+            JobUnsupportedAtPendingCancel,
+            job->RequestedExecutionFlowContext(job->Traceparent()),
+            crane::FlowUnsupportedReason::kCancelledBeforeAllocation);
       }
       job->SetStartTime(cancel_time);
       job->SetEndTime(cancel_time);
@@ -5515,7 +5516,7 @@ void JobScheduler::CleanStepSubmitQueueCb_() {
                           ->job->RequestedExecutionFlowContext(
                               static_cast<CommonStepInCtld*>(step.get())
                                   ->job->Traceparent()),
-                      crane::FlowReasonCode::kExtraCommonStep,
+                      crane::FlowUnsupportedReason::kExtraCommonStep,
                       static_cast<CommonStepInCtld*>(step.get())->StepId());
       promise.set_value(step->StepId());
       m_job_pending_step_num_map_[step->job_id]++;

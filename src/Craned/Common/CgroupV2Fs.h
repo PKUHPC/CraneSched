@@ -58,6 +58,7 @@ class CgroupV2FsBackend {
                CgroupDestroyCompletion completion = {});
 
   bool DrainJanitor(std::chrono::milliseconds timeout);
+  bool StopAcceptingAndDrainJanitor(std::chrono::milliseconds timeout);
   CgroupV2CleanupMode CleanupMode() const { return cleanup_mode_; }
 
  private:

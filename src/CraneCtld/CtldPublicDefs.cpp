@@ -1723,9 +1723,9 @@ std::string JobInCtld::ExecutionFlowIdValue() const {
   return crane::FlowEmitter::CorrelationValue(requested_execution_flow_id_);
 }
 
-std::optional<crane::FlowReasonCode> JobInCtld::ExecutionFlowUnsupportedReason()
-    const {
-  if (!m_steps_.empty()) return crane::FlowReasonCode::kExtraCommonStep;
+std::optional<crane::FlowUnsupportedReason>
+JobInCtld::ExecutionFlowUnsupportedReason() const {
+  if (!m_steps_.empty()) return crane::FlowUnsupportedReason::kExtraCommonStep;
   return crane::ExecutionFlowJobUnsupportedReason(
       IsBatch(), IsContainer(), IsArrayParent() || IsArrayChild(),
       job_to_ctld.no_requeue(), RequeueCount());
@@ -1737,7 +1737,7 @@ void JobInCtld::ResetForRequeue() {
 
   CRANE_FLOW_EMIT(JobUnsupportedAtRequeue,
                   RequestedExecutionFlowContext(Traceparent()),
-                  crane::FlowReasonCode::kRequeueAttempt);
+                  crane::FlowUnsupportedReason::kRequeueAttempt);
 
   requeue_requested = false;
   runtime_attr.set_requeue_requested(false);

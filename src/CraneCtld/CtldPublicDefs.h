@@ -1147,7 +1147,7 @@ struct JobInCtld {
   [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContextForStep(
       step_id_t step_id) const;
   [[nodiscard]] std::string ExecutionFlowIdValue() const;
-  [[nodiscard]] std::optional<crane::FlowReasonCode>
+  [[nodiscard]] std::optional<crane::FlowUnsupportedReason>
   ExecutionFlowUnsupportedReason() const;
 
   bool ShouldRequeue() const;

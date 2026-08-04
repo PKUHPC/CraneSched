@@ -54,6 +54,7 @@ constexpr char kCgroupOpConcurrencyEnv[] = "CRANE_CGROUP_OP_CONCURRENCY";
 constexpr char kCgroupOpSemaphoreEnv[] = "CRANE_CGROUP_OP_SEM_NAME";
 constexpr char kCgroupV2FastPathEnv[] = "CRANE_CGROUP_V2_FAST_PATH";
 constexpr char kCgroupV2CleanupModeEnv[] = "CRANE_CGROUP_V2_CLEANUP_MODE";
+constexpr std::chrono::seconds kCgroupV2JanitorShutdownTimeout{5};
 
 int64_t MsSince(std::chrono::steady_clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -407,8 +408,14 @@ void CgroupManager::ConfigureCgroupV2CleanupMode(std::string_view mode) {
 
 void CgroupManager::ShutdownCgroupV2FastPath() {
   if (!m_v2_fs_backend_) return;
-  // CgroupV2FsBackend's destructor performs the bounded drain before stopping
-  // the worker. Avoid waiting through the same drain window twice.
+  // CgroupV2 instances retain their own shared backend reference. Stop new
+  // janitor submissions and drain the work accepted by the manager before
+  // dropping its owner; relying on the backend destructor would skip this
+  // boundary while any cgroup lives.
+  if (!m_v2_fs_backend_->StopAcceptingAndDrainJanitor(
+          kCgroupV2JanitorShutdownTimeout)) {
+    CRANE_WARN("Cgroup v2 janitor did not drain before fast-path shutdown");
+  }
   m_v2_fs_backend_.reset();
 }
 

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 
+#include "CleanupLifecycle.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
@@ -32,6 +33,45 @@
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
+
+namespace {
+bool RemoveStepCgroupDirectory(job_id_t job_id, step_id_t step_id,
+                               const std::string& step_cg_str) {
+  if (step_cg_str.empty()) return true;
+
+  // step_cg_str is e.g. "overflow/job_1/step_0/system". This helper is called
+  // only from the system-cgroup destroy completion, after an asynchronous v2
+  // janitor has physically removed the child directory.
+  auto step_cg_path =
+      (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+       Common::CgConstant::kRootCgNamePrefix / step_cg_str)
+          .parent_path();
+
+  std::error_code ec;
+  if (std::filesystem::exists(step_cg_path, ec)) {
+    const bool removed = std::filesystem::remove(step_cg_path, ec);
+    if (!removed || ec) {
+      CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
+                  job_id, step_id, step_cg_path,
+                  ec ? ec.message() : "directory is not empty");
+      return false;
+    }
+    CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id, step_id,
+                step_cg_path);
+    return true;
+  }
+  if (ec) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
+        job_id, step_id, step_cg_path, ec.message());
+    return false;
+  }
+  CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
+              job_id, step_id, step_cg_path);
+  return true;
+}
+
+}  // namespace
 
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
     : job_id(step_to_d.job_id()),
@@ -85,52 +125,20 @@ void StepInstance::CleanUp(bool async, CleanupCompletion completion) {
   auto clean_step_cgroup = [job_id = job_id, step_id = step_id, cgroup,
                             step_cg_str = this->cg_str,
                             completion = std::move(completion)]() mutable {
-    CgroupManager::KillAndDestroyCgroup(
-        std::unique_ptr<CgroupInterface>{cgroup},
-        [job_id, step_id, step_cg_str = std::move(step_cg_str),
-         completion = std::move(completion)](
-            CgroupManager::CgroupCleanupResult cgroup_result) mutable {
-          CleanupResult result;
-          result.processes_drained = cgroup_result.processes_drained;
-          result.cgroup_destroyed = cgroup_result.cgroup_destroyed;
-
-          // step_cg_str is e.g. "overflow/job_1/step_0/system". Remove
-          // step_N only after the asynchronous cgroup backend has finished.
-          if (step_cg_str.empty()) {
-            if (completion) completion(result);
-            return;
-          }
-          auto step_cg_path =
-              (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-               Common::CgConstant::kRootCgNamePrefix / step_cg_str)
-                  .parent_path();
-
-          std::error_code ec;
-          if (std::filesystem::exists(step_cg_path, ec)) {
-            const bool removed = std::filesystem::remove(step_cg_path, ec);
-            result.step_directory_removed = removed && !ec;
-            if (!result.step_directory_removed) {
-              CRANE_ERROR(
-                  "[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                  job_id, step_id, step_cg_path,
-                  ec ? ec.message() : "directory is not empty");
-            } else {
-              CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
-                          step_id, step_cg_path);
-            }
-          } else if (ec) {
-            result.step_directory_removed = false;
-            CRANE_ERROR(
-                "[Step #{}.{}] Failed to check existence of step cgroup dir "
-                "{}: {}",
-                job_id, step_id, step_cg_path, ec.message());
-          } else {
-            CRANE_DEBUG(
-                "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-                job_id, step_id, step_cg_path);
-          }
-          if (completion) completion(result);
-        });
+    detail::CoordinateCgroupCleanup(
+        [cgroup](CgroupManager::CgroupCleanupCompletion cleanup_completion) {
+          CgroupManager::KillAndDestroyCgroup(
+              std::unique_ptr<CgroupInterface>{cgroup},
+              std::move(cleanup_completion));
+        },
+        [job_id, step_id, step_cg_str = std::move(step_cg_str)](
+            const CgroupManager::CgroupCleanupResult& cgroup_result) {
+          return detail::FinalizeStepCgroupCleanup<CleanupResult>(
+              cgroup_result, [job_id, step_id, &step_cg_str] {
+                return RemoveStepCgroupDirectory(job_id, step_id, step_cg_str);
+              });
+        },
+        std::move(completion));
   };
 
   if (async) {

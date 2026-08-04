@@ -48,8 +48,7 @@ TEST(TracerManagerTest, InitializeAndExportSpan) {
   crane::g_tracing_enabled.store(true, std::memory_order_release);
 
   {
-    crane::ScopedSpan span(
-        "test-span", manager.GetTracerSafe());
+    crane::ScopedSpan span("test-span", manager.GetTracerSafe());
     span.SetAttribute("key", "value");
   }
 
@@ -107,8 +106,32 @@ TEST(TracerManagerTest, SerializeDeserializeTraceParent) {
 TEST(TracerManagerTest, ServiceName) {
   auto& manager = crane::TracerManager::GetInstance();
   auto counter = std::make_shared<std::atomic<int>>(0);
-  ASSERT_TRUE(
-      manager.Initialize("MyService", std::make_unique<CountingExporter>(counter)));
+  ASSERT_TRUE(manager.Initialize("MyService",
+                                 std::make_unique<CountingExporter>(counter)));
   EXPECT_EQ(manager.ServiceName(), "MyService");
   manager.Shutdown();
+}
+
+TEST(TracerManagerTest, ConcurrentTracerSnapshotsObserveShutdownSafely) {
+  auto& manager = crane::TracerManager::GetInstance();
+  auto counter = std::make_shared<std::atomic<int>>(0);
+  ASSERT_TRUE(manager.Initialize("ConcurrentSnapshotTest",
+                                 std::make_unique<CountingExporter>(counter)));
+  crane::g_tracing_enabled.store(true, std::memory_order_release);
+
+  std::atomic_bool stop{false};
+  std::atomic_uint snapshots{0};
+  std::jthread reader([&] {
+    while (!stop.load(std::memory_order_acquire)) {
+      auto tracer = manager.GetTracerSafe();
+      if (tracer) snapshots.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+
+  manager.Shutdown();
+  stop.store(true, std::memory_order_release);
+  reader.join();
+
+  EXPECT_GT(snapshots.load(std::memory_order_relaxed), 0U);
+  EXPECT_FALSE(manager.GetTracerSafe());
 }

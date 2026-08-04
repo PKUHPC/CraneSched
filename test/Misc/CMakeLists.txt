@@ -50,6 +50,8 @@ function(add_cgroup_cleanup_contract_variant variant flow_enabled)
     add_executable(${test_target}
             cgroup_cleanup_contract_test.cpp
             $<TARGET_OBJECTS:${impl_target}>)
+    target_include_directories(${test_target} PRIVATE
+            "${PROJECT_SOURCE_DIR}/src/Craned/Core")
     target_link_libraries(${test_target}
             GTest::gtest GTest::gtest_main
             craned_common)
@@ -102,7 +104,7 @@ endif ()
 if (CRANE_ENABLE_EXECUTION_FLOW)
     add_test(
             NAME misc_execution_flow_schema_generator_test
-            COMMAND "${Python3_EXECUTABLE}"
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
                     "${PROJECT_SOURCE_DIR}/scripts/test_generate_execution_flow_schema.py"
     )
     set_tests_properties(
