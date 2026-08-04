@@ -34,6 +34,45 @@ target_link_libraries(misc_cgroup_v2_fs_test
 )
 gtest_discover_tests(misc_cgroup_v2_fs_test)
 
+# Compile the production cleanup implementation twice so the same behavioral
+# contract runs with execution-flow instrumentation both compiled in and out.
+# Linking craned_common supplies the implementation's normal usage requirements;
+# the direct object is selected before the archive, so its CgroupManager symbols
+# are the ones exercised by each test executable.
+function(add_cgroup_cleanup_contract_variant variant flow_enabled)
+    set(impl_target "cgroup_cleanup_contract_${variant}_impl")
+    set(test_target "misc_cgroup_cleanup_contract_${variant}_test")
+
+    add_library(${impl_target} OBJECT EXCLUDE_FROM_ALL
+            "${PROJECT_SOURCE_DIR}/src/Craned/Common/CgroupManager.cpp")
+    target_link_libraries(${impl_target} PRIVATE craned_common)
+
+    add_executable(${test_target}
+            cgroup_cleanup_contract_test.cpp
+            $<TARGET_OBJECTS:${impl_target}>)
+    target_link_libraries(${test_target}
+            GTest::gtest GTest::gtest_main
+            craned_common)
+
+    foreach(target IN ITEMS ${impl_target} ${test_target})
+        target_compile_options(${target} PRIVATE
+                $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-UCRANE_ENABLE_EXECUTION_FLOW>)
+        if (flow_enabled)
+            target_compile_options(${target} PRIVATE
+                    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-DCRANE_ENABLE_EXECUTION_FLOW>)
+        endif ()
+        target_compile_definitions(${target} PRIVATE
+                CRANE_CGROUP_CLEANUP_FLOW_EXPECTED=$<BOOL:${flow_enabled}>)
+    endforeach()
+
+    gtest_discover_tests(${test_target}
+            TEST_PREFIX "execution_flow_cleanup.${variant}."
+            PROPERTIES LABELS execution-flow-cleanup-matrix)
+endfunction()
+
+add_cgroup_cleanup_contract_variant(flow_on TRUE)
+add_cgroup_cleanup_contract_variant(flow_off FALSE)
+
 add_executable(misc_task_lifecycle_test task_lifecycle_test.cpp)
 target_include_directories(misc_task_lifecycle_test
         PRIVATE ${PROJECT_SOURCE_DIR}/src/Craned/Supervisor)
