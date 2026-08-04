@@ -797,17 +797,17 @@ void ParseConfig(int argc, char** argv) {
         if (tracing_config["Level"])
           g_config.Tracing.Level = crane::TraceLevelFromString(
               tracing_config["Level"].as<std::string>());
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-        if (tracing_config["ExecutionFlow"]) {
-          const auto& flow_config = tracing_config["ExecutionFlow"];
-          if (flow_config["Enabled"])
-            g_config.Tracing.ExecutionFlow.Enabled =
-                flow_config["Enabled"].as<bool>();
-          if (flow_config["HeartbeatIntervalSeconds"])
-            g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
-                flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
-        }
-#endif
+        CRANE_EXECUTION_FLOW_IF_COMPILED({
+          if (tracing_config["ExecutionFlow"]) {
+            const auto& flow_config = tracing_config["ExecutionFlow"];
+            if (flow_config["Enabled"])
+              g_config.Tracing.ExecutionFlow.Enabled =
+                  flow_config["Enabled"].as<bool>();
+            if (flow_config["HeartbeatIntervalSeconds"])
+              g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
+                  flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
+          }
+        });
       }
 
       if (config["Preempt"]) {
@@ -1168,13 +1168,13 @@ void InitializeCtldGlobalVariables() {
         crane::TraceLevelToString(trace_config.effective_level));
   }
 #endif
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
-    CRANE_WARN(
-        "Execution flow requested while tracing is disabled; execution "
-        "flow remains inactive until tracing is enabled.");
-  }
-#endif
+  CRANE_EXECUTION_FLOW_IF_COMPILED({
+    if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
+      CRANE_WARN(
+          "Execution flow requested while tracing is disabled; execution "
+          "flow remains inactive until tracing is enabled.");
+    }
+  });
   CRANE_EXECUTION_FLOW_INITIALIZE(
       g_config.Tracing.ExecutionFlow.Enabled,
       g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds, "cranectld",

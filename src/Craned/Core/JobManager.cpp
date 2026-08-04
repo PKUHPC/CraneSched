@@ -48,11 +48,10 @@ constexpr uint64_t kPendingSigchldMask = 1ULL << (SIGCHLD - 1);
 constexpr uint64_t kPendingThawMask = kPendingSigkillMask | kPendingSigchldMask;
 constexpr int kUnexpectedSupervisorExitGraceRetryCount = 10;
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-class FlowCleanupLatch {
+class CleanupCompletionBarrier {
  public:
-  FlowCleanupLatch(std::size_t pending, bool succeeded,
-                   std::function<void(bool)> completion)
+  CleanupCompletionBarrier(std::size_t pending, bool succeeded,
+                           std::function<void(bool)> completion)
       : pending_(pending),
         succeeded_(succeeded),
         completion_(std::move(completion)) {}
@@ -68,7 +67,6 @@ class FlowCleanupLatch {
   std::atomic_bool succeeded_;
   std::function<void(bool)> completion_;
 };
-#endif
 
 std::filesystem::path GetV1ControllerPath_(
     const std::string& cg_path, Common::CgConstant::Controller ctrl) {
@@ -329,12 +327,10 @@ EnvMap JobInD::GetJobEnvMap() {
   return env_map;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-std::string JobInD::ExecutionFlowId() const {
-  auto parsed = crane::ParseExecutionFlowId(job_to_d.execution_flow_id());
-  return parsed.value_or(std::string{});
+std::optional<crane::FlowContext> JobInD::ExecutionFlowContext() const {
+  return crane::MakeExecutionFlowContext(execution_flow_id_,
+                                         job_to_d.traceparent(), job_id);
 }
-#endif
 
 JobManager::JobManager() {
   m_uvw_loop_ = uvw::loop::create();
@@ -545,18 +541,9 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     }
 
     job_map_ptr->emplace(job_id, std::move(job));
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    if (crane::ExecutionFlowEnabled()) {
-      auto* installed_job = job_map_ptr->at(job_id).RawPtr();
-      CRANE_FLOW_POINT(
-          "craned/job/installed", installed_job->ExecutionFlowId(),
-          installed_job->job_to_d.traceparent(),
-          CRANE_FLOW_SET_ATTR("job_id", job_id);
-          CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-          CRANE_FLOW_SET_ATTR("operation", "install-job");
-          CRANE_FLOW_SET_ATTR("outcome", "success"););
-    }
-#endif
+    CRANE_FLOW_EMIT(CranedJobInstalled,
+                    job_map_ptr->at(job_id).RawPtr()->ExecutionFlowContext(),
+                    g_config.Hostname);
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
     } else {
@@ -663,12 +650,8 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
       span.SetAttribute("job_id", job_id);
     }
 
-    CRANE_FLOW_POINT(
-        "craned/job/removed", job->ExecutionFlowId(),
-        job->job_to_d.traceparent(), CRANE_FLOW_SET_ATTR("job_id", job_id);
-        CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-        CRANE_FLOW_SET_ATTR("operation", "remove-job");
-        CRANE_FLOW_SET_ATTR("outcome", "success"););
+    CRANE_FLOW_EMIT(CranedJobRemoved, job->ExecutionFlowContext(),
+                    g_config.Hostname);
 
     m_free_jobs_queue_.enqueue(FreeJobElem{
         .job = std::move(job.value()),
@@ -718,14 +701,8 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
       step_inst->traceparent = job_ptr->job_to_d.traceparent();
-      CRANE_FLOW_POINT(
-          "craned/step/install_accepted", step_inst->ExecutionFlowId(),
-          step_inst->traceparent,
-          CRANE_FLOW_SET_ATTR("job_id", step_inst->job_id);
-          CRANE_FLOW_SET_ATTR("step_id", step_inst->step_id);
-          CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-          CRANE_FLOW_SET_ATTR("operation", "install-step");
-          CRANE_FLOW_SET_ATTR("outcome", "accepted"););
+      CRANE_FLOW_EMIT(CranedStepInstallAccepted,
+                      step_inst->ExecutionFlowContext(), g_config.Hostname);
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
                                    .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
@@ -1115,13 +1092,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
           continue;
         }
       }
-      CRANE_FLOW_POINT(
-          "craned/supervisor/exit_observed", step->ExecutionFlowId(),
-          step->traceparent, CRANE_FLOW_SET_ATTR("job_id", job_id);
-          CRANE_FLOW_SET_ATTR("step_id", step_id);
-          CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-          CRANE_FLOW_SET_ATTR("operation", "observe-supervisor-exit");
-          CRANE_FLOW_SET_ATTR("outcome", "exited"););
+      CRANE_FLOW_EMIT(CranedSupervisorExitObserved,
+                      step->ExecutionFlowContext(), g_config.Hostname);
       exit_steps.push_back(step_key);
     }
     for (const auto& step_key : exit_steps) {
@@ -1142,13 +1114,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
               .exit_code = pt.exit_code,
               .reason = pt.reason,
               .timestamp = pt.timestamp,
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-              .execution_flow_id = crane::ExecutionFlowEnabled()
-                                       ? step->ExecutionFlowId()
-                                       : std::string{},
-              .traceparent = crane::ExecutionFlowEnabled() ? step->traceparent
-                                                           : std::string{},
-#endif
+              .execution_flow_context = step->ExecutionFlowContext(),
           };
         }
         daemon_cleanup_requests.emplace_back(
@@ -1167,11 +1133,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
       StepInstance* step = nullptr;
       std::optional<StepInstance::DaemonJobCleanupCtx> cleanup_ctx;
       CraneErrCode cleanup_result = CraneErrCode::SUCCESS;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
       bool cleanup_succeeded = true;
-      std::string execution_flow_id;
-      std::string traceparent;
-#endif
+      std::optional<crane::FlowContext> flow_context;
       {
         auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
         if (!job_ptr) {
@@ -1185,81 +1148,52 @@ bool JobManager::EvCheckSupervisorRunning_() {
                        request.job_id, request.step_id);
           } else {
             step = step_it->second.get();
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-            if (crane::ExecutionFlowEnabled()) {
-              execution_flow_id = step->ExecutionFlowId();
-              traceparent = step->traceparent;
-            }
-#endif
+            flow_context = step->ExecutionFlowContext();
             if (step->daemon_job_cleanup.has_value()) {
               cleanup_ctx.emplace(std::move(*step->daemon_job_cleanup));
             } else {
               CRANE_WARN("[Step #{}.{}] Daemon cleanup context not found.",
                          request.job_id, request.step_id);
               cleanup_result = CraneErrCode::ERR_SYSTEM_ERR;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
               cleanup_succeeded = false;
-#endif
             }
           }
         }
       }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-      std::shared_ptr<FlowCleanupLatch> flow_cleanup_latch;
-      if (step != nullptr && !execution_flow_id.empty()) {
+      std::shared_ptr<CleanupCompletionBarrier> flow_cleanup_latch;
+      if (step != nullptr && flow_context) {
         const std::size_t pending_cleanup_count =
             1 + static_cast<std::size_t>(cleanup_ctx.has_value());
-        flow_cleanup_latch = std::make_shared<FlowCleanupLatch>(
+        flow_cleanup_latch = std::make_shared<CleanupCompletionBarrier>(
             pending_cleanup_count, cleanup_succeeded,
-            [job_id = request.job_id, step_id = request.step_id,
-             execution_flow_id, traceparent](bool succeeded) {
-              CRANE_FLOW_POINT(
-                  "craned/step/cleanup_finished", execution_flow_id,
-                  traceparent, CRANE_FLOW_SET_ATTR("job_id", job_id);
-                  CRANE_FLOW_SET_ATTR("step_id", step_id); CRANE_FLOW_SET_ATTR(
-                      "node_id", std::string{g_config.Hostname});
-                  CRANE_FLOW_SET_ATTR("operation", "job-cleanup");
-                  CRANE_FLOW_SET_ATTR("outcome",
-                                      succeeded ? "success" : "failure");
-                  if (!succeeded) CRANE_FLOW_SET_ERROR(););
+            [flow_context](bool succeeded) {
+              CRANE_FLOW_EMIT(CranedJobCleanupFinished, flow_context,
+                              g_config.Hostname, succeeded);
             });
       }
-#endif
 
       if (step != nullptr) {
-        CRANE_FLOW_POINT(
-            "craned/step/cleanup_started", execution_flow_id, traceparent,
-            CRANE_FLOW_SET_ATTR("job_id", request.job_id);
-            CRANE_FLOW_SET_ATTR("step_id", request.step_id);
-            CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-            CRANE_FLOW_SET_ATTR("operation", "job-cleanup"););
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
+        CRANE_FLOW_EMIT(CranedJobCleanupStarted, flow_context,
+                        g_config.Hostname);
+        StepInstance::CleanupCompletion step_completion;
         if (flow_cleanup_latch) {
-          step->CleanUp(
-              false, [flow_cleanup_latch](StepInstance::CleanupResult result) {
+          step_completion =
+              [flow_cleanup_latch](StepInstance::CleanupResult result) {
                 flow_cleanup_latch->Complete(result.Succeeded());
-              });
-        } else {
-          step->CleanUp(false);
+              };
         }
-#else
-        step->CleanUp(false);
-#endif
+        step->CleanUp(false, std::move(step_completion));
       }
       if (cleanup_ctx.has_value()) {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
+        JobCleanupCompletion job_completion;
         if (flow_cleanup_latch) {
-          CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx), true,
-                                 [flow_cleanup_latch](bool succeeded) {
-                                   flow_cleanup_latch->Complete(succeeded);
-                                 });
-        } else {
-          CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx));
+          job_completion = [flow_cleanup_latch](bool succeeded) {
+            flow_cleanup_latch->Complete(succeeded);
+          };
         }
-#else
-        CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx));
-#endif
+        CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx), true,
+                               std::move(job_completion));
       }
 
       {
@@ -1577,13 +1511,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       continue;
     }
     step_it->second->wait_execute_span.End();
-    CRANE_FLOW_POINT(
-        "craned/step/execute_accepted", step_it->second->ExecutionFlowId(),
-        step_it->second->traceparent, CRANE_FLOW_SET_ATTR("job_id", job_id);
-        CRANE_FLOW_SET_ATTR("step_id", step_id);
-        CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-        CRANE_FLOW_SET_ATTR("operation", "execute-step");
-        CRANE_FLOW_SET_ATTR("outcome", "accepted"););
+    CRANE_FLOW_EMIT(CranedStepExecuteAccepted,
+                    step_it->second->ExecutionFlowContext(), g_config.Hostname);
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1617,20 +1546,12 @@ std::optional<JobInD> JobManager::FreeJobInfoNoLock_(
   return job_opt;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
                                         StepInstance::DaemonJobCleanupCtx&& ctx,
                                         bool run_epilog,
                                         JobCleanupCompletion completion) {
-#else
-void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
-                                        StepInstance::DaemonJobCleanupCtx&& ctx,
-                                        bool run_epilog) {
-#endif
   CRANE_DEBUG("[Job #{}] Cleaning up job environment.", job_id);
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   bool cleanup_succeeded = true;
-#endif
 
   if (run_epilog && !g_config.JobLifecycleHook.Epilogs.empty() &&
       !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
@@ -1663,9 +1584,7 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
 
     auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
     if (!result) {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
       cleanup_succeeded = false;
-#endif
       auto status = result.error();
       CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
                   status.exit_code, status.signal_num);
@@ -1679,12 +1598,8 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
   CgroupManager::ReleaseJobCpuPool(job_id, ctx.resource);
 
   if (ctx.job_cgroup == nullptr) {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
     if (completion) completion(cleanup_succeeded);
     return;
-#else
-    return;
-#endif
   }
 
   if (g_config.Plugin.Enabled && g_plugin_client) {
@@ -1692,20 +1607,12 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
                                             ctx.job_cgroup->CgroupName());
   }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (!completion) {
-    CgroupManager::KillAndDestroyCgroup(std::move(ctx.job_cgroup));
-    return;
-  }
   CgroupManager::KillAndDestroyCgroup(
       std::move(ctx.job_cgroup),
       [cleanup_succeeded, completion = std::move(completion)](
           CgroupManager::CgroupCleanupResult result) mutable {
         if (completion) completion(cleanup_succeeded && result.Succeeded());
       });
-#else
-  (void)CgroupManager::KillAndDestroyCgroup(std::move(ctx.job_cgroup));
-#endif
 }
 
 void JobManager::ResolveStepCleanupWaiters_(const StepKey& key,
@@ -1729,44 +1636,22 @@ void JobManager::FreeStepAllocation_(
   for (auto& step : steps) {
     job_id_t job_id = step->job_id;
     step_id_t step_id = step->step_id;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    std::string execution_flow_id;
-    std::string traceparent;
-    if (crane::ExecutionFlowEnabled()) {
-      execution_flow_id = step->ExecutionFlowId();
-      traceparent = step->traceparent;
-    }
-#endif
-    CRANE_FLOW_POINT(
-        "craned/step/cleanup_started", execution_flow_id, traceparent,
-        CRANE_FLOW_SET_ATTR("job_id", job_id);
-        CRANE_FLOW_SET_ATTR("step_id", step_id);
-        CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-        CRANE_FLOW_SET_ATTR("operation", "step-cleanup"););
+    std::optional<crane::FlowContext> flow_context =
+        step->ExecutionFlowContext();
+    CRANE_FLOW_EMIT(CranedStepCleanupStarted, flow_context, g_config.Hostname);
     std::optional<StepInstance::PendingTerminalStatus> terminal_status =
         std::nullopt;
     if (step->pending_terminal_status.has_value() && !step->silent_cleanup) {
       terminal_status = step->pending_terminal_status.value();
     }
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    if (!execution_flow_id.empty()) {
-      step->CleanUp(true, [job_id, step_id, execution_flow_id,
-                           traceparent](StepInstance::CleanupResult result) {
-        CRANE_FLOW_POINT(
-            "craned/step/cleanup_finished", execution_flow_id, traceparent,
-            CRANE_FLOW_SET_ATTR("job_id", job_id);
-            CRANE_FLOW_SET_ATTR("step_id", step_id);
-            CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-            CRANE_FLOW_SET_ATTR("operation", "step-cleanup");
-            CRANE_FLOW_SET_ATTR("outcome", result.Outcome());
-            if (!result.Succeeded()) CRANE_FLOW_SET_ERROR(););
-      });
-    } else {
-      step->CleanUp();
+    StepInstance::CleanupCompletion completion;
+    if (flow_context) {
+      completion = [flow_context](StepInstance::CleanupResult result) {
+        CRANE_FLOW_EMIT(CranedStepCleanupFinished, flow_context,
+                        g_config.Hostname, result.Succeeded());
+      };
     }
-#else
-    step->CleanUp();
-#endif
+    step->CleanUp(true, std::move(completion));
     step.reset();
 
     // Preserve the existing state-machine ordering. CleanUp() queues physical
@@ -1782,10 +1667,7 @@ void JobManager::FreeStepAllocation_(
           .exit_code = pt.exit_code,
           .reason = std::move(pt.reason),
           .timestamp = std::move(pt.timestamp),
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-          .execution_flow_id = std::move(execution_flow_id),
-          .traceparent = std::move(traceparent),
-#endif
+          .execution_flow_context = std::move(flow_context),
       });
     }
     ResolveStepCleanupWaiters_(StepKey{job_id, step_id}, CraneErrCode::SUCCESS);
@@ -1906,12 +1788,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     absl::MutexLock lk(job->step_map_mtx.get());
     job->step_map.emplace(step->step_id, std::move(step));
   }
-  CRANE_FLOW_POINT("craned/step/installed", step_ptr->ExecutionFlowId(),
-                   step_ptr->traceparent, CRANE_FLOW_SET_ATTR("job_id", job_id);
-                   CRANE_FLOW_SET_ATTR("step_id", step_id); CRANE_FLOW_SET_ATTR(
-                       "node_id", std::string{g_config.Hostname});
-                   CRANE_FLOW_SET_ATTR("operation", "install-step");
-                   CRANE_FLOW_SET_ATTR("outcome", "success"););
+  CRANE_FLOW_EMIT(CranedStepInstalled, step_ptr->ExecutionFlowContext(),
+                  g_config.Hostname);
 
   // SpawnSupervisor reports failure before registering a supervisor when
   // setup, fork, or process-group isolation fails. In these cases, report the
@@ -1978,12 +1856,7 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
     auto update_step = [&](StepInstance* step) {
       step->GotNewStatus(status_change.new_status);
       should_forward = !step->silent_cleanup;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-      if (crane::ExecutionFlowEnabled()) {
-        status_change.execution_flow_id = step->ExecutionFlowId();
-        status_change.traceparent = step->traceparent;
-      }
-#endif
+      status_change.execution_flow_context = step->ExecutionFlowContext();
       if (pending_terminal) {
         step->pending_terminal_status = *pending_terminal;
       } else if (step->err_before_supv_start && !step->IsDaemonStep() &&
@@ -2526,13 +2399,8 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       }
 
       auto& step = job->step_map.at(elem.step_id);
-      CRANE_FLOW_POINT(
-          "craned/step/free_accepted", step->ExecutionFlowId(),
-          step->traceparent, CRANE_FLOW_SET_ATTR("job_id", elem.job_id);
-          CRANE_FLOW_SET_ATTR("step_id", elem.step_id);
-          CRANE_FLOW_SET_ATTR("node_id", std::string{g_config.Hostname});
-          CRANE_FLOW_SET_ATTR("operation", "free-step");
-          CRANE_FLOW_SET_ATTR("outcome", "accepted"););
+      CRANE_FLOW_EMIT(CranedStepFreeAccepted, step->ExecutionFlowContext(),
+                      g_config.Hostname);
       if (step->IsDaemonStep()) {
         if (step->daemon_job_cleanup.has_value()) {
           CRANE_DEBUG("[Step #{}.{}] Daemon step is already cleaning.",

@@ -11,6 +11,10 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <utility>
 
 namespace Craned::Supervisor::detail {
 
@@ -19,16 +23,75 @@ namespace Craned::Supervisor::detail {
   return message_received && child_ready;
 }
 
-class TaskFinalizationGate {
+template <typename Cause>
+struct TaskFinalizationUpdate {
+  std::optional<Cause> cause;
+  std::optional<std::string> reason;
+};
+
+// Finalization has two distinct phases. An explicit intent (cancel, timeout,
+// spawn failure, ...) may be recorded before the process exit is observed;
+// the later notification then consumes that intent and finalizes exactly once.
+// The first explicit intent wins, while a natural-exit notification never
+// overwrites an already-recorded intent.
+template <typename Cause>
+class TaskFinalizationState {
  public:
-  [[nodiscard]] bool TryEnter() {
-    bool expected = false;
-    return m_entered_.compare_exchange_strong(
-        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+  using Update = TaskFinalizationUpdate<Cause>;
+
+  [[nodiscard]] bool RecordIntent(Update update) {
+    if (!update.cause.has_value()) return false;
+
+    std::lock_guard lock{mutex_};
+    if (finalized_ || intent_.cause.has_value()) return false;
+    intent_ = std::move(update);
+    return true;
+  }
+
+  [[nodiscard]] std::optional<Update> TryFinalize() {
+    std::lock_guard lock{mutex_};
+    if (finalized_) return std::nullopt;
+
+    finalized_ = true;
+    return intent_;
+  }
+
+  [[nodiscard]] bool HasIntent() const {
+    std::lock_guard lock{mutex_};
+    return intent_.cause.has_value();
   }
 
  private:
-  std::atomic_bool m_entered_{false};
+  mutable std::mutex mutex_;
+  Update intent_;
+  bool finalized_{false};
+};
+
+template <typename TaskId>
+struct TaskFinalizationRequest {
+  TaskId task_id{};
+};
+
+template <typename Request, typename Queue>
+class TaskFinalizationMailbox {
+ public:
+  [[nodiscard]] bool Enqueue(Request request) {
+    if (queue_.enqueue(std::move(request))) return true;
+    enqueue_failed_.store(true, std::memory_order_release);
+    return false;
+  }
+
+  [[nodiscard]] bool TryDequeue(Request* request) {
+    return request != nullptr && queue_.try_dequeue(*request);
+  }
+
+  [[nodiscard]] bool ConsumeEnqueueFailure() {
+    return enqueue_failed_.exchange(false, std::memory_order_acq_rel);
+  }
+
+ private:
+  Queue queue_;
+  std::atomic_bool enqueue_failed_{false};
 };
 
 }  // namespace Craned::Supervisor::detail

@@ -160,6 +160,10 @@
 #include <string_view>
 #include <utility>
 
+#ifdef CRANE_ENABLE_EXECUTION_FLOW
+#  include "crane/ExecutionFlowSchema.h"
+#endif
+
 #ifdef CRANE_ENABLE_TRACING
 #  include "crane/TracerManager.h"
 #  include "opentelemetry/trace/propagation/http_trace_context.h"
@@ -279,7 +283,7 @@ inline RuntimeTraceConfig ApplyRuntimeTraceConfig(bool enabled,
 
 inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
 #ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (name.starts_with("flow/v1/")) return TraceSpanClass::Core;
+  if (name.starts_with(kExecutionFlowWirePrefix)) return TraceSpanClass::Core;
 #endif
 
   switch (name.size()) {

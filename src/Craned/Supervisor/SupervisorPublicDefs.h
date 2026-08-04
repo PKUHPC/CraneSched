@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 
@@ -96,19 +97,10 @@ struct Config {
   PluginConfig Plugin;
 
   struct TracingConfig {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    struct ExecutionFlowConfig {
-      bool Enabled{false};
-      uint32_t HeartbeatIntervalSeconds{5};
-    };
-#endif
-
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
     std::string Traceparent;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    ExecutionFlowConfig ExecutionFlow;
-#endif
+    crane::ExecutionFlowRuntimeConfig ExecutionFlow;
   };
   TracingConfig Tracing;
 

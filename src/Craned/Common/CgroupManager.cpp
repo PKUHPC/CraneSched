@@ -407,9 +407,8 @@ void CgroupManager::ConfigureCgroupV2CleanupMode(std::string_view mode) {
 
 void CgroupManager::ShutdownCgroupV2FastPath() {
   if (!m_v2_fs_backend_) return;
-  if (!m_v2_fs_backend_->DrainJanitor(std::chrono::seconds{5})) {
-    CRANE_WARN("Cgroup v2 janitor did not drain during cgroup shutdown");
-  }
+  // CgroupV2FsBackend's destructor performs the bounded drain before stopping
+  // the worker. Avoid waiting through the same drain window twice.
   m_v2_fs_backend_.reset();
 }
 
@@ -1128,7 +1127,6 @@ Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 void CgroupManager::KillAndDestroyCgroup(
     std::unique_ptr<CgroupInterface> cgroup,
     CgroupCleanupCompletion completion) {
@@ -1161,12 +1159,6 @@ void CgroupManager::KillAndDestroyCgroup(
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
   }
 
-  if (!completion) {
-    (void)cgroup->Destroy();
-    CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
-    return;
-  }
-
   (void)cgroup->Destroy(
       [result, cgroup_path,
        completion = std::move(completion)](bool destroyed) mutable {
@@ -1175,35 +1167,6 @@ void CgroupManager::KillAndDestroyCgroup(
         if (completion) completion(result);
       });
 }
-#else
-void CgroupManager::KillAndDestroyCgroup(
-    std::unique_ptr<CgroupInterface> cgroup) {
-  if (cgroup == nullptr) return;
-
-  const auto cgroup_name = cgroup->CgroupName();
-  const auto cgroup_path = cgroup->CgroupPath().string();
-  CRANE_TRACE("Destroying cgroup {}.", cgroup_path);
-
-  int cnt = 0;
-  while (true) {
-    if (cgroup->Empty()) break;
-    if (cnt >= 5) {
-      CRANE_ERROR(
-          "Couldn't kill the processes in cgroup {} after {} times. "
-          "Skipping it.",
-          cgroup_name, cnt);
-      break;
-    }
-
-    cgroup->KillAllProcesses(SIGKILL);
-    ++cnt;
-    std::this_thread::sleep_for(std::chrono::milliseconds{100});
-  }
-
-  (void)cgroup->Destroy();
-  CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
-}
-#endif
 
 CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
@@ -1603,12 +1566,8 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
   return true;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 bool Cgroup::Destroy() {
   bool removed = true;
-#else
-void Cgroup::Destroy() {
-#endif
   if (m_cgroup_ != nullptr) {
     auto begin_time = std::chrono::steady_clock::now();
     CgroupOpGate gate;
@@ -1619,9 +1578,7 @@ void Cgroup::Destroy() {
     int err = cgroup_delete_cgroup_ext(
         m_cgroup_, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION);
     if (err != 0) {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
       removed = false;
-#endif
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
       remove_span.SetAttribute("libcgroup_errno", err);
@@ -1632,20 +1589,14 @@ void Cgroup::Destroy() {
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
   }
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   return removed;
-#endif
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 bool CgroupInterface::Destroy(CgroupDestroyCompletion completion) {
   const bool removed = m_cgroup_info_.Destroy();
   if (completion) completion(removed);
   return removed;
 }
-#else
-void CgroupInterface::Destroy() { m_cgroup_info_.Destroy(); }
-#endif
 
 bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgConstant::Controller;
@@ -1863,13 +1814,9 @@ bool CgroupV1::Empty() {
   return false;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 bool CgroupV1::Destroy(CgroupDestroyCompletion completion) {
   return CgroupInterface::Destroy(std::move(completion));
 }
-#else
-void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
-#endif
 
 #ifdef CRANE_ENABLE_BPF
 
@@ -2419,11 +2366,7 @@ bool CgroupV2::Empty() {
   return false;
 }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
 bool CgroupV2::Destroy(CgroupDestroyCompletion completion) {
-#else
-void CgroupV2::Destroy() {
-#endif
   if (m_v2_fs_backend_) {
 #ifdef CRANE_ENABLE_BPF
     if (!m_cgroup_bpf_devices.empty()) {
@@ -2431,28 +2374,17 @@ void CgroupV2::Destroy() {
     }
     CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
     return m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName(),
                                      std::move(completion));
-#else
-    (void)m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
-    return;
-#endif
   }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   const bool removed = CgroupInterface::Destroy();
-#else
-  CgroupInterface::Destroy();
-#endif
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) EraseBpfDeviceMap();
   CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   if (completion) completion(removed);
   return removed;
-#endif
 }
 
 bool CgroupV2::MigrateProcIn(pid_t pid) {

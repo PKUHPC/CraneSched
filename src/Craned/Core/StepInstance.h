@@ -24,6 +24,7 @@
 #include <functional>
 
 #include "SupervisorStub.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Tracing.h"
 
 namespace Craned {
@@ -82,7 +83,6 @@ struct StepInstance {
                         std::shared_ptr<SupervisorStub> supervisor_stub);
   ~StepInstance() = default;
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   struct CleanupResult {
     bool cgroup_present{true};
     bool processes_drained{true};
@@ -90,25 +90,15 @@ struct StepInstance {
     bool step_directory_removed{true};
 
     [[nodiscard]] bool Succeeded() const {
-      return cgroup_present && processes_drained && cgroup_destroyed &&
-             step_directory_removed;
-    }
-
-    [[nodiscard]] std::string_view Outcome() const {
-      if (!cgroup_present) return "cgroup-missing";
-      if (!processes_drained) return "processes-remain";
-      if (!cgroup_destroyed) return "cgroup-destroy-failed";
-      if (!step_directory_removed) return "step-directory-remove-failed";
-      return "success";
+      // An absent cgroup is an idempotent no-op (for example after recovery or
+      // duplicate cleanup), not a cleanup failure.
+      return processes_drained && cgroup_destroyed && step_directory_removed;
     }
   };
 
   using CleanupCompletion = std::function<void(CleanupResult)>;
   void CleanUp(bool async = true, CleanupCompletion completion = {});
-  [[nodiscard]] std::string ExecutionFlowId() const;
-#else
-  void CleanUp(bool async = true);
-#endif
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContext() const;
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
@@ -137,5 +127,7 @@ struct StepInstance {
   // Not implemented yet.
   CraneExpected<void> TerminateStep(
       crane::grpc::TerminateSource terminate_source);
+
+  std::optional<crane::FlowId> execution_flow_id_;
 };
 }  // namespace Craned

@@ -4,6 +4,7 @@ if(CRANE_ENABLE_TRACING)
   add_library(crane_tracer STATIC TracerManager.cpp CraneSpanExporter.cpp)
   if(CRANE_ENABLE_EXECUTION_FLOW)
     target_sources(crane_tracer PRIVATE ExecutionFlow.cpp)
+    add_dependencies(crane_tracer crane_execution_flow_schema_check)
   endif()
   target_include_directories(crane_tracer PUBLIC
                              ${CMAKE_CURRENT_SOURCE_DIR}/include)

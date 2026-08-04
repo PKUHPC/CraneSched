@@ -682,6 +682,16 @@ TEST_F(StepLifecycleTest, DaemonNormalConfigureToRunningCreatesPrimaryStep) {
   EXPECT_NE(job.PrimaryStep(), nullptr);
   EXPECT_EQ(job.PrimaryStep()->StepType(), crane::grpc::StepType::PRIMARY);
   EXPECT_FALSE(context.craned_step_alloc_map.empty());
+
+  // The primary step has only requested allocation at this point. Its job
+  // correlation must still be copied before AllocSteps runs asynchronously.
+  EXPECT_TRUE(context.craned_step_exec_map.empty());
+  EXPECT_TRUE(context.craned_step_free_map.empty());
+  EXPECT_TRUE(context.craned_jobs_to_free.empty());
+  std::unordered_set<job_id_t> correlation_job_ids;
+  Ctld::ForEachDetachedRpcCorrelationJobId(
+      context, [&](job_id_t job_id) { correlation_job_ids.insert(job_id); });
+  EXPECT_EQ(correlation_job_ids, std::unordered_set<job_id_t>{kJobId});
 }
 
 TEST_F(StepLifecycleTest, FullJobLifecycleDaemonAndPrimary) {

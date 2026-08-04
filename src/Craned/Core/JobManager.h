@@ -56,6 +56,8 @@ struct JobInD {
   explicit JobInD(crane::grpc::JobToD const& job_to_d)
       : job_id(job_to_d.job_id()), job_to_d(job_to_d) {
     step_map_mtx = std::make_unique<absl::Mutex>();
+    execution_flow_id_ =
+        crane::ExecutionFlowIdFromString(job_to_d.execution_flow_id());
   }
 
   ~JobInD() = default;
@@ -68,9 +70,7 @@ struct JobInD {
 
   uid_t Uid() const { return job_to_d.uid(); }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  [[nodiscard]] std::string ExecutionFlowId() const;
-#endif
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContext() const;
 
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
@@ -85,6 +85,8 @@ struct JobInD {
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
   bool is_prolog_run{false};
+
+  std::optional<crane::FlowId> execution_flow_id_;
 
   EnvMap GetJobEnvMap();
 };
@@ -244,18 +246,12 @@ class JobManager {
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
       UidMap::MapExclusivePtr& uid_map_ptr);
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   using JobCleanupCompletion = std::function<void(bool)>;
 
   void CleanUpJobEnvironment_(job_id_t job_id,
                               StepInstance::DaemonJobCleanupCtx&& ctx,
                               bool run_epilog = true,
                               JobCleanupCompletion completion = {});
-#else
-  void CleanUpJobEnvironment_(job_id_t job_id,
-                              StepInstance::DaemonJobCleanupCtx&& ctx,
-                              bool run_epilog = true);
-#endif
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 

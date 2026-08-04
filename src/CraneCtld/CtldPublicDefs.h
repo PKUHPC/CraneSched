@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 
+#include "crane/ExecutionFlow.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
@@ -192,18 +193,9 @@ struct Config {
   PluginConfig Plugin;
 
   struct TracingConfig {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    struct ExecutionFlowConfig {
-      bool Enabled{false};
-      uint32_t HeartbeatIntervalSeconds{5};
-    };
-#endif
-
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-    ExecutionFlowConfig ExecutionFlow;
-#endif
+    crane::ExecutionFlowRuntimeConfig ExecutionFlow;
   };
   TracingConfig Tracing;
 
@@ -555,10 +547,8 @@ struct StepStatusChangeContext {
 
   // Trace context lookup for RPC worker threads (job_id -> traceparent)
   std::unordered_map<job_id_t, std::string> job_traceparents;
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   // Flow correlation copied before completed jobs leave the running map.
-  std::unordered_map<job_id_t, std::string> job_execution_flow_ids;
-#endif
+  std::unordered_map<job_id_t, crane::FlowContext> job_execution_flow_contexts;
 
   // Jobs whose primary steps need batch AppendSteps after the main loop.
   std::vector<JobInCtld*> pending_append_steps_jobs;
@@ -567,6 +557,26 @@ struct StepStatusChangeContext {
   // release)
   std::vector<std::unique_ptr<JobInCtld>> requeue_jobs;
 };
+
+// Visit every job whose correlation must outlive the status-change callback
+// because its RPC work is detached. A job can be visited more than once when
+// the same status transition schedules multiple RPC operations.
+template <typename Visitor>
+void ForEachDetachedRpcCorrelationJobId(const StepStatusChangeContext& context,
+                                        Visitor&& visitor) {
+  for (const auto& craned_entry : context.craned_step_alloc_map) {
+    for (const auto& step : craned_entry.second) visitor(step.job_id());
+  }
+  for (const auto& craned_entry : context.craned_step_exec_map) {
+    for (const auto& job_entry : craned_entry.second) visitor(job_entry.first);
+  }
+  for (const auto& craned_entry : context.craned_step_free_map) {
+    for (const auto& job_entry : craned_entry.second) visitor(job_entry.first);
+  }
+  for (const auto& craned_entry : context.craned_jobs_to_free) {
+    for (const auto job_id : craned_entry.second) visitor(job_id);
+  }
+}
 
 // Abstract interface of all the steps in Ctld.
 struct StepInCtld {
@@ -974,6 +984,10 @@ struct JobInCtld {
   // Hex trace_id from D1 root span, used to correlate D1↔D3 dimensions.
   std::string submit_id_;
 
+  // Parsed exactly once at the JobToCtld boundary. Flow points derive typed
+  // contexts from this value rather than reparsing the environment.
+  std::optional<crane::FlowId> requested_execution_flow_id_;
+
   // Non-RAII lifecycle span covering the entire job execution.
   // Created at alloc time, End() called when job completes.
   crane::ManualSpan lifecycle_span_;
@@ -1125,12 +1139,16 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  [[nodiscard]] std::string RequestedExecutionFlowId() const;
-  [[nodiscard]] std::string ExecutionFlowId() const;
-  [[nodiscard]] std::string ExecutionFlowIdForStep(step_id_t step_id) const;
-  [[nodiscard]] std::string_view ExecutionFlowUnsupportedReason() const;
-#endif
+  [[nodiscard]] std::optional<crane::FlowContext>
+  RequestedExecutionFlowContext() const;
+  [[nodiscard]] std::optional<crane::FlowContext> RequestedExecutionFlowContext(
+      std::string_view traceparent) const;
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContext() const;
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContextForStep(
+      step_id_t step_id) const;
+  [[nodiscard]] std::string ExecutionFlowIdValue() const;
+  [[nodiscard]] std::optional<crane::FlowReasonCode>
+  ExecutionFlowUnsupportedReason() const;
 
   bool ShouldRequeue() const;
   void ResetForRequeue();

@@ -40,6 +40,7 @@ target_include_directories(misc_task_lifecycle_test
 target_link_libraries(misc_task_lifecycle_test
         GTest::gtest GTest::gtest_main
         Threads::Threads
+        concurrentqueue
 )
 gtest_discover_tests(misc_task_lifecycle_test)
 
@@ -57,4 +58,16 @@ if (CRANE_ENABLE_TRACING)
             crane_tracer
     )
     gtest_discover_tests(misc_tracer_manager_test)
+endif ()
+
+if (CRANE_ENABLE_EXECUTION_FLOW)
+    add_test(
+            NAME misc_execution_flow_schema_generator_test
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/scripts/test_generate_execution_flow_schema.py"
+    )
+    set_tests_properties(
+            misc_execution_flow_schema_generator_test
+            PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    )
 endif ()

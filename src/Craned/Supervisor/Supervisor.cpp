@@ -200,13 +200,13 @@ int InitFromStdin(int argc, char** argv) {
                                ? crane::TraceLevel::Debug
                                : crane::TraceLevelFromString(msg.trace_level());
   g_config.Tracing.Traceparent = msg.traceparent();
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  g_config.Tracing.ExecutionFlow.Enabled = msg.execution_flow_enabled();
-  g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
-      msg.execution_flow_heartbeat_interval_seconds() == 0
-          ? 1
-          : msg.execution_flow_heartbeat_interval_seconds();
-#endif
+  CRANE_EXECUTION_FLOW_IF_COMPILED({
+    g_config.Tracing.ExecutionFlow.Enabled = msg.execution_flow_enabled();
+    g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
+        msg.execution_flow_heartbeat_interval_seconds() == 0
+            ? 1
+            : msg.execution_flow_heartbeat_interval_seconds();
+  });
 
   g_config.SupervisorLogFile =
       std::filesystem::path(msg.log_dir()) /
@@ -413,13 +413,13 @@ void GlobalVariableInit(int grpc_output_fd) {
         crane::TraceLevelToString(trace_config.effective_level));
   }
 #endif
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
-    CRANE_WARN(
-        "Execution flow requested while tracing is disabled; execution "
-        "flow remains inactive until tracing is enabled.");
-  }
-#endif
+  CRANE_EXECUTION_FLOW_IF_COMPILED({
+    if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
+      CRANE_WARN(
+          "Execution flow requested while tracing is disabled; execution "
+          "flow remains inactive until tracing is enabled.");
+    }
+  });
   CRANE_EXECUTION_FLOW_INITIALIZE(
       g_config.Tracing.ExecutionFlow.Enabled,
       g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds, "supervisor",

@@ -1199,18 +1199,10 @@ bool CtldClient::SendStatusChanges_(
                               static_cast<int64_t>(status.error_code()));
     forward_span.SetAttribute("grpc_status_ok", status.ok());
     forward_span.SetAttribute("reply_ok", status.ok() && reply.ok());
-    CRANE_FLOW_POINT(
-        "craned/status/send_result", status_change.execution_flow_id,
-        status_change.traceparent,
-        CRANE_FLOW_SET_ATTR("job_id", status_change.job_id);
-        CRANE_FLOW_SET_ATTR("step_id", status_change.step_id);
-        CRANE_FLOW_SET_ATTR("node_id", std::string{m_craned_id_});
-        CRANE_FLOW_SET_ATTR("status",
-                            static_cast<int64_t>(status_change.new_status));
-        CRANE_FLOW_SET_ATTR("operation", "send-status-change");
-        CRANE_FLOW_SET_ATTR("outcome",
-                            status.ok() && reply.ok() ? "success" : "failure");
-        if (!status.ok() || !reply.ok()) CRANE_FLOW_SET_ERROR(););
+    CRANE_FLOW_EMIT(StatusSendResult, status_change.execution_flow_context,
+                    m_craned_id_,
+                    static_cast<int64_t>(status_change.new_status),
+                    status.ok() && reply.ok());
     if (!status.ok()) {
       CRANE_ERROR(
           "Failed to send StepStatusChange: "

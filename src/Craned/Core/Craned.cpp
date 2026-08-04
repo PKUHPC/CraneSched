@@ -1134,17 +1134,17 @@ void ParseConfig(int argc, char** argv) {
         if (tracing_config["Level"])
           g_config.Tracing.Level = crane::TraceLevelFromString(
               tracing_config["Level"].as<std::string>());
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-        if (tracing_config["ExecutionFlow"]) {
-          const auto& flow_config = tracing_config["ExecutionFlow"];
-          if (flow_config["Enabled"])
-            g_config.Tracing.ExecutionFlow.Enabled =
-                flow_config["Enabled"].as<bool>();
-          if (flow_config["HeartbeatIntervalSeconds"])
-            g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
-                flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
-        }
-#endif
+        CRANE_EXECUTION_FLOW_IF_COMPILED({
+          if (tracing_config["ExecutionFlow"]) {
+            const auto& flow_config = tracing_config["ExecutionFlow"];
+            if (flow_config["Enabled"])
+              g_config.Tracing.ExecutionFlow.Enabled =
+                  flow_config["Enabled"].as<bool>();
+            if (flow_config["HeartbeatIntervalSeconds"])
+              g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds =
+                  flow_config["HeartbeatIntervalSeconds"].as<uint32_t>();
+          }
+        });
       }
 
     } catch (YAML::BadFile& e) {
@@ -1609,13 +1609,13 @@ void GlobalVariableInit() {
         crane::TraceLevelToString(trace_config.effective_level));
   }
 #endif
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
-    CRANE_WARN(
-        "Execution flow requested while tracing is disabled; execution "
-        "flow remains inactive until tracing is enabled.");
-  }
-#endif
+  CRANE_EXECUTION_FLOW_IF_COMPILED({
+    if (g_config.Tracing.ExecutionFlow.Enabled && !g_config.Tracing.Enabled) {
+      CRANE_WARN(
+          "Execution flow requested while tracing is disabled; execution "
+          "flow remains inactive until tracing is enabled.");
+    }
+  });
   CRANE_EXECUTION_FLOW_INITIALIZE(
       g_config.Tracing.ExecutionFlow.Enabled,
       g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds, "craned",
@@ -1669,12 +1669,12 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
   // Drain physical cgroup deletion while execution-flow tracing is still
   // available so queued cleanup completions can publish their final point.
+  // Keep this ordering independent of the execution-flow compile gate: the
+  // instrumentation must not change the cgroup shutdown lifecycle.
   CgroupManager::ShutdownCpuPool();
   CgroupManager::ShutdownCgroupV2FastPath();
-#endif
 
   CRANE_EXECUTION_FLOW_SHUTDOWN();
 #ifdef CRANE_ENABLE_TRACING
@@ -1683,11 +1683,6 @@ void WaitForStopAndDoGvarFini() {
   // Plugin client must be destroyed after the thread pool.
   // It may be called in the thread pool.
   g_plugin_client.reset();
-
-#ifndef CRANE_ENABLE_EXECUTION_FLOW
-  CgroupManager::ShutdownCpuPool();
-  CgroupManager::ShutdownCgroupV2FastPath();
-#endif
 
   std::exit(0);
 }
