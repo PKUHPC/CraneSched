@@ -2281,19 +2281,27 @@ void JobScheduler::StepScheduleThread_() {
 
         auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
 
+        std::unordered_set<CommonStepInCtld*> db_update_failed_steps;
+        std::vector<std::tuple<job_id_t, step_id_t, CranedId>>
+            db_update_failed_step_nodes;
         for (const auto& step : scheduled_steps) {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
-            CRANE_ERROR("Failed to update steps to embedded database.");
-            StepCompletingAndStatusChangeAsync(step->job_id, step->StepId(), "",
-                                               crane::grpc::JobStatus::Failed,
-                                               0, "DbUpdateError", now);
+            CRANE_ERROR(
+                "[Step #{}.{}] Failed to update step in embedded database.",
+                step->job_id, step->StepId());
+            db_update_failed_steps.emplace(step);
+            for (const auto& craned_id : step->ExecutionNodes()) {
+              db_update_failed_step_nodes.emplace_back(
+                  step->job_id, step->StepId(), craned_id);
+            }
           }
         }
 
         absl::flat_hash_map<CranedId, std::vector<crane::grpc::StepToD>>
             craned_alloc_steps;
         for (auto* step : scheduled_steps) {
+          if (db_update_failed_steps.contains(step)) continue;
           for (const auto& craned_id : step->CranedIds()) {
             craned_alloc_steps[craned_id].emplace_back(
                 step->GetStepToD(craned_id));
@@ -2319,6 +2327,13 @@ void JobScheduler::StepScheduleThread_() {
             sched_span.SetAttribute("job_id", step->job_id);
             sched_span.SetAttribute("step_id", step->StepId());
           }
+        }
+
+        for (const auto& [job_id, step_id, craned_id] :
+             db_update_failed_step_nodes) {
+          StepCompletingAndStatusChangeAsync(job_id, step_id, craned_id,
+                                             crane::grpc::JobStatus::Failed, 0,
+                                             "DbUpdateError", now);
         }
 
         Mutex thread_pool_mtx;
@@ -5912,8 +5927,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
               craned_index, exit_code, reason);
           continue;
         }
-        CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
-                    job_id, step_id, new_status);
+
         job_finished_status = step->StepStatusChange(
             new_status, exit_code, reason, craned_index, timestamp, &context);
       }

@@ -799,6 +799,67 @@ TEST(CtldStepStateMachineTest, DaemonPartialCompletingDoesNotTriggerCleanup) {
   EXPECT_TRUE(context.craned_step_free_map.empty());
 }
 
+TEST(CtldStepStateMachineTest, DaemonIgnoresCompletingFromNonExecutionNode) {
+  constexpr job_id_t kJobId = 56;
+  const std::vector<CranedId> craned_ids{"node-a", "node-b"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto* daemon_step = job.DaemonStep();
+
+  auto result =
+      daemon_step->StepStatusChange(crane::grpc::JobStatus::Completing, 0U, "",
+                                    "node-foreign", TimestampAt(512), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Running);
+  EXPECT_TRUE(context.craned_step_free_map.empty());
+  EXPECT_TRUE(context.rn_step_raw_ptrs.empty());
+
+  daemon_step->StepStatusChange(crane::grpc::JobStatus::Completing, 0U, "",
+                                "node-a", TimestampAt(513), &context);
+  daemon_step->StepStatusChange(crane::grpc::JobStatus::Completing, 0U, "",
+                                "node-b", TimestampAt(514), &context);
+  EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Completing);
+  ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
+  ExpectStepFreeRequested(context, "node-b", kJobId, kDaemonStepId);
+}
+
+TEST(CtldStepStateMachineTest, CommonIgnoresStatusFromNonExecutionNode) {
+  constexpr job_id_t kJobId = 57;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+  job.PrimaryStep()->SetConfiguringNodes({});
+  job.PrimaryStep()->SetStatus(crane::grpc::JobStatus::Running);
+
+  Ctld::StepStatusChangeContext context;
+  auto* primary_step = job.PrimaryStep();
+  auto result = primary_step->StepStatusChange(
+      crane::grpc::JobStatus::Failed, 99U, "foreign status", "node-foreign",
+      TimestampAt(515), &context);
+
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Running);
+  EXPECT_FALSE(primary_step->PendingFinalStatus().has_value());
+  EXPECT_EQ(primary_step->RunningNodes(),
+            std::unordered_set<CranedId>{"node-a"});
+  EXPECT_TRUE(context.craned_step_free_map.empty());
+  EXPECT_TRUE(context.rn_step_raw_ptrs.empty());
+}
+
 TEST(CtldStepStateMachineTest,
      DaemonRunningRejectsNonCompletingNonTerminalStatus) {
   constexpr job_id_t kJobId = 55;
@@ -956,6 +1017,7 @@ class StepLifecycleTest : public ::testing::Test {
     ASSERT_TRUE(g_embedded_db_client->Init(tmp_dir_.string()));
   }
   void TearDown() override {
+    g_config.JobLifecycleHook.CranectldPrologs.clear();
     g_embedded_db_client.reset();
     std::filesystem::remove_all(tmp_dir_);
   }
@@ -987,6 +1049,36 @@ TEST_F(StepLifecycleTest, DaemonNormalConfigureToRunningCreatesPrimaryStep) {
   EXPECT_NE(job.PrimaryStep(), nullptr);
   EXPECT_EQ(job.PrimaryStep()->StepType(), crane::grpc::StepType::PRIMARY);
   EXPECT_FALSE(context.craned_step_alloc_map.empty());
+}
+
+TEST_F(StepLifecycleTest, DaemonAcceptsInternalCtldPrologStatus) {
+  constexpr job_id_t kJobId = 62;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::JobStatus::Configuring);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.time_limit = absl::Hours(1);
+  SetupJobAllocation(job, craned_ids);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetCtldPrologPending(true);
+  g_config.JobLifecycleHook.CranectldPrologs = {"echo"};
+  ASSERT_TRUE(g_embedded_db_client->AppendSteps({job.DaemonStep()}));
+
+  Ctld::StepStatusChangeContext context;
+  auto* daemon_step = job.DaemonStep();
+  daemon_step->StepStatusChange(crane::grpc::JobStatus::Running, 0U, "",
+                                "node-a", TimestampAt(610), &context);
+  EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Configuring);
+
+  auto result = daemon_step->StepStatusChange(
+      crane::grpc::JobStatus::Running, 0U, "", kCtldPrologInternalNodeIndex,
+      TimestampAt(611), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(daemon_step->Status(), crane::grpc::JobStatus::Running);
+  EXPECT_NE(job.PrimaryStep(), nullptr);
 }
 
 TEST_F(StepLifecycleTest, FullJobLifecycleDaemonAndPrimary) {

@@ -633,6 +633,14 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                    const CranedId& craned_id,
                                    const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
+  const bool is_ctld_prolog_event = craned_id == kCtldPrologInternalNodeIndex;
+  if (!is_ctld_prolog_event && !m_execute_nodes_.contains(craned_id)) {
+    CRANE_WARN("[Step #{}.{}] Ignoring status {} from non-execution node {}.",
+               job_id, this->StepId(), util::StepStatusToString(new_status),
+               craned_id);
+    return std::nullopt;
+  }
+
   enum class DaemonStepAction {
     None,
     StartCleanup,
@@ -1325,6 +1333,13 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                    const CranedId& craned_id,
                                    const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
+  if (!m_execute_nodes_.contains(craned_id)) {
+    CRANE_WARN("[Step #{}.{}] Ignoring status {} from non-execution node {}.",
+               job_id, this->StepId(), util::StepStatusToString(new_status),
+               craned_id);
+    return std::nullopt;
+  }
+
   /**
    * Step final status
    * finished: step configured successfully, got all step execution status
