@@ -173,7 +173,7 @@ struct Config {
     std::filesystem::path LogDir;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
-    uint32_t ThreadPoolSize{0};
+    uint32_t ThreadPoolSize{kDefaultSupervisorThreadPoolSize};
   };
   SupervisorConfig Supervisor;
 

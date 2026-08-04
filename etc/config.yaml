@@ -260,8 +260,8 @@ Supervisor:
   MaxLogFileSize: 50M
   # max files of supervisor log file
   MaxLogFileNum: 3
-  # Number of threads in the supervisor thread pool (0 = auto, uses hardware_concurrency)
-  ThreadPoolSize: 0
+  # Number of threads in each supervisor process (0 = auto, uses hardware_concurrency)
+  ThreadPoolSize: 4
 
 Tracing:
   # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)

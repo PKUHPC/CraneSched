@@ -368,6 +368,7 @@ void GlobalVariableInit(int grpc_output_fd) {
     uint32_t pool_size = g_config.ThreadPoolSize > 0
                              ? g_config.ThreadPoolSize
                              : std::thread::hardware_concurrency();
+    CRANE_INFO("Supervisor thread pool size: {}", pool_size);
     g_thread_pool = std::make_unique<BS::thread_pool>(
         pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
   }
