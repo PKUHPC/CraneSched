@@ -26,24 +26,21 @@
 #include <future>
 
 #include "StepInstance.h"
+#include "SupervisorProcessTracker.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 
 namespace Craned {
 
-constexpr int kMaxSupervisorCheckRetryCount = 10;
-constexpr int kMaxStatusWaitRetryCount = 50;  // 50 * 200ms = 10s
-
-using StepKey = std::pair<job_id_t, step_id_t>;
 using StepCleanupFutureMap = std::unordered_map<
     job_id_t, std::unordered_map<step_id_t, std::future<CraneErrCode>>>;
 using JobCleanupFutureMap =
     std::unordered_map<job_id_t, std::future<CraneErrCode>>;
 
-struct CompletingStepState {
-  StepInstance* step = nullptr;
-  int alive_check_count = 0;
-  int status_wait_count = 0;
+struct StepCleanupState {
+  std::unique_ptr<StepInstance> step;
+  std::chrono::steady_clock::time_point cleanup_started_at{
+      std::chrono::steady_clock::now()};
   bool sigkill_sent = false;
 };
 
@@ -120,7 +117,7 @@ class JobManager {
 
   JobCleanupFutureMap FreeInvalidJobs(std::set<job_id_t>&& job_ids);
 
-  CraneErrCode ExecuteStepAsync(
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
       std::unordered_map<job_id_t, std::string> traceparents = {});
 
@@ -166,19 +163,21 @@ class JobManager {
 
   void MarkStepSilentCleanup(job_id_t job_id, step_id_t step_id);
 
-  // Send Completing + Terminal as two separate status changes.
-  // Used for error paths where Craned detects failure and needs to
-  // drive both AllNodesCompleting and AllNodesFinished on CraneCtld.
-  void SendCompletingAndTerminal_(job_id_t job_id, step_id_t step_id,
-                                  crane::grpc::JobStatus terminal_status,
-                                  uint32_t exit_code, std::string reason);
+  // Complete an existing local step. The optional pid identifies a Supervisor
+  // that Craned must stop after claiming the completion.
+  void EnqueueAllocatedStepCompletion(
+      job_id_t job_id, step_id_t step_id,
+      crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+      std::string reason,
+      std::optional<pid_t> supervisor_pid_to_stop = std::nullopt);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
                              std::optional<crane::grpc::JobStatus> final_status,
-                             const google::protobuf::Timestamp& timestamp);
+                             const google::protobuf::Timestamp& timestamp,
+                             pid_t supervisor_pid);
 
   // Wait internal libuv base loop to exit...
   void Wait();
@@ -231,10 +230,17 @@ class JobManager {
     std::promise<void> terminate_prom;
   };
 
-  struct UnexpectedSupervisorExitInfo {
-    uint32_t exit_code;
-    std::string reason;
-    int retry_count{0};
+  enum class StepStatusEventSource : uint8_t {
+    SupervisorReport,
+    CranedCompletion,
+    UnallocatedCompletion,
+    SupervisorExit,
+  };
+
+  struct StepStatusEvent {
+    StepStatusChangeQueueElem status_change;
+    StepStatusEventSource source;
+    std::optional<pid_t> supervisor_pid;
   };
 
   std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
@@ -242,9 +248,9 @@ class JobManager {
       job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
       UidMap::MapExclusivePtr& uid_map_ptr);
 
-  void CleanUpJobEnvironment_(job_id_t job_id,
-                              StepInstance::DaemonJobCleanupCtx&& ctx,
-                              bool run_epilog = true);
+  std::future<CraneErrCode> CleanUpJobEnvironment_(
+      job_id_t job_id, StepInstance::DaemonJobCleanupCtx&& ctx,
+      bool run_epilog = true);
 
   void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 
@@ -264,18 +270,28 @@ class JobManager {
    *  failed. (EvSigchldCb_)
    * 3. A job cannot be created because of various reasons.
    */
-  void ActivateStepStatusChangeAsync_(
-      job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
-      uint32_t exit_code, std::optional<std::string> reason,
-      std::optional<crane::grpc::JobStatus> final_status,
-      const google::protobuf::Timestamp& timestamp);
+  void EnqueueStepStatusEvent_(StepStatusEvent&& event);
+  // Returns true when this event was accepted. For a completion event, this
+  // means it claimed the step's pending terminal status.
+  bool HandleStepStatusEvent_(StepStatusEvent&& event);
+
+  // Use when no local StepInstance exists, either because allocation failed
+  // before the step was inserted into the job's step map or because a
+  // terminate request refers to an already absent job/step. This reports both
+  // Completing and the terminal status immediately because no local cleanup
+  // is required. Existing steps must use EnqueueAllocatedStepCompletion() so
+  // that terminal-status arbitration and cleanup ordering are preserved.
+  void CompleteUnallocatedStepAsync_(job_id_t job_id, step_id_t step_id,
+                                     crane::grpc::JobStatus terminal_status,
+                                     uint32_t exit_code, std::string reason);
+  void CompleteStepAfterSupervisorExit_(SupervisorExitEvent event);
 
   // Contains all the jobs that are running on this Craned node.
   JobMap m_job_map_;
 
   UidMap m_uid_to_job_ids_map_;
 
-  bool EvCheckSupervisorRunning_();
+  bool EvProcessStepCleanup_();
 
   void EvSigchldCb_();
 
@@ -286,12 +302,9 @@ class JobManager {
 
   void EvCleanGrpcExecuteStepQueueCb_();
 
-  void EvCleanStepStatusChangeQueueCb_();
+  void EvCleanStepStatusEventQueueCb_();
 
   void EvCleanTerminateStepQueueCb_();
-
-  void RecordUnexpectedSupervisorExit_(pid_t pid, int status);
-  void HandleUnexpectedSupervisorExits_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -304,20 +317,16 @@ class JobManager {
 
   absl::Mutex m_free_job_step_mtx_;
   // Step ownership remains in m_job_map_ or in the cleanup caller; this map
-  // only tracks cleanup polling state.
-  absl::flat_hash_map<StepKey, CompletingStepState> m_completing_step_retry_map_
+  // only tracks cleanup state.
+  absl::flat_hash_map<StepKey, StepCleanupState> m_step_cleanup_map_
       ABSL_GUARDED_BY(m_free_job_step_mtx_);
   using StepCleanupPromise = std::shared_ptr<std::promise<CraneErrCode>>;
   absl::flat_hash_map<StepKey, std::vector<StepCleanupPromise>>
       m_step_cleanup_waiters_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
 
-  absl::Mutex m_unexpected_supervisor_exit_mtx_;
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      UnexpectedSupervisorExitInfo>
-      m_unexpected_supervisor_exit_map_
-          ABSL_GUARDED_BY(m_unexpected_supervisor_exit_mtx_);
+  SupervisorProcessTracker m_supervisor_tracker_;
 
-  std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
+  std::shared_ptr<uvw::timer_handle> m_step_cleanup_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
   ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
@@ -326,9 +335,9 @@ class JobManager {
   // A custom event that handles the ExecuteStep RPC.
   ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_step_status_change_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_step_status_change_timer_handle_;
-  ConcurrentQueue<StepStatusChangeQueueElem> m_step_status_change_queue_;
+  std::shared_ptr<uvw::async_handle> m_step_status_event_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_step_status_event_timer_handle_;
+  ConcurrentQueue<StepStatusEvent> m_step_status_event_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;

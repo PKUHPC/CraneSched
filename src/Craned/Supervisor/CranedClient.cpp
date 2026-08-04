@@ -48,6 +48,7 @@ CranedClient::~CranedClient() {
 void CranedClient::Shutdown() {
   m_thread_stop_ = true;
   m_cv_.Signal();
+  if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
 void CranedClient::InitChannelAndStub(const std::string& endpoint) {
@@ -57,20 +58,28 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CranedClient::StepStatusChangeAsync(
-    crane::grpc::JobStatus new_status, uint32_t exit_code,
-    std::optional<std::string> reason,
-    std::optional<crane::grpc::JobStatus> final_status) {
-  const auto enqueue_steady_time = std::chrono::steady_clock::now();
-  const auto enqueue_ts_ms = NowUnixMs();
-  StepStatusChangeQueueElem elem{
-      .new_status = new_status,
+void CranedClient::StepStatusChangeAsync(crane::grpc::JobStatus new_status) {
+  EnqueueStepStatusChange_(StepStatusChangeQueueElem{.new_status = new_status});
+}
+
+void CranedClient::StepCompletionAsync(crane::grpc::JobStatus final_status,
+                                       uint32_t exit_code,
+                                       std::optional<std::string> reason) {
+  EnqueueStepStatusChange_(StepStatusChangeQueueElem{
+      .new_status = crane::grpc::JobStatus::Completing,
       .exit_code = exit_code,
       .reason = std::move(reason),
-      .final_status = final_status,
-      .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime(),
-      .enqueue_steady_time = enqueue_steady_time,
-      .enqueue_ts_ms = enqueue_ts_ms};
+      .final_status = final_status});
+}
+
+void CranedClient::EnqueueStepStatusChange_(StepStatusChangeQueueElem&& elem) {
+  elem.timestamp = google::protobuf::util::TimeUtil::GetCurrentTime();
+  elem.enqueue_steady_time = std::chrono::steady_clock::now();
+  elem.enqueue_ts_ms = NowUnixMs();
+  const auto new_status = elem.new_status;
+  const auto exit_code = elem.exit_code;
+  const auto final_status = elem.final_status;
+  const auto enqueue_ts_ms = elem.enqueue_ts_ms;
   int64_t queue_len = 0;
   {
     absl::MutexLock lock(&m_mutex_);
@@ -113,7 +122,6 @@ void CranedClient::AsyncSendThread_() {
       // Interruptible sleep: wake up immediately on Shutdown()
       absl::MutexLock lock(&m_mutex_);
       m_cv_.WaitWithTimeout(&m_mutex_, absl::Seconds(10));
-      if (m_thread_stop_) break;
       continue;
     }
 
@@ -129,6 +137,8 @@ void CranedClient::AsyncSendThread_() {
       while (!elems.empty()) {
         auto& elem = elems.front();
         grpc::ClientContext context;
+        context.set_deadline(std::chrono::system_clock::now() +
+                             std::chrono::seconds(kCranedRpcTimeoutSeconds));
         crane::grpc::StepStatusChangeRequest request;
         crane::grpc::StepStatusChangeReply reply;
         grpc::Status status;
@@ -158,6 +168,7 @@ void CranedClient::AsyncSendThread_() {
 
         request.set_job_id(g_config.JobId);
         request.set_step_id(g_config.StepId);
+        request.set_supervisor_pid(static_cast<uint32_t>(getpid()));
         request.set_new_status(elem.new_status);
         request.set_exit_code(elem.exit_code);
         *request.mutable_timestamp() = elem.timestamp;
@@ -174,11 +185,12 @@ void CranedClient::AsyncSendThread_() {
                                static_cast<int64_t>(status.error_code()));
         send_span.SetAttribute("grpc_status_ok", status.ok());
         send_span.SetAttribute("reply_ok", status.ok() && reply.ok());
-        if (!status.ok()) {
+        if (!status.ok() || !reply.ok()) {
           CRANE_ERROR(
               "Failed to send StepStatusChange: "
-              "new_status: {}, reason: {} | {}, code: {}",
-              elem.new_status, status.error_message(),
+              "new_status: {}, transport_reason: {}, reply_ok: {} | {}, "
+              "code: {}",
+              elem.new_status, status.error_message(), reply.ok(),
               context.debug_error_string(), int(status.error_code()));
           break;
         }

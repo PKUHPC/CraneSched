@@ -70,8 +70,7 @@ SupervisorStub::InitAndGetRecoveredMap() {
         auto sock_path = fmt::format("unix://{}", file.string());
         std::shared_ptr stub = std::make_shared<SupervisorStub>(sock_path);
 
-        CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
-            supv_ids = stub->CheckStatus();
+        auto supv_ids = stub->CheckStatus();
         if (!supv_ids) {
           CRANE_ERROR("CheckStepStatus for {} failed, removing it.",
                       file.string());
@@ -87,9 +86,12 @@ SupervisorStub::InitAndGetRecoveredMap() {
         auto [job_id, step_id, pid, status] = supv_ids.value();
         CRANE_DEBUG("[Step #{}.{}] Supervisor socket {} recovered, pid: {}",
                     job_id, step_id, file.string(), pid);
-        absl::MutexLock lock(&mtx);
-        supervisor_status_map.emplace(std::make_pair(job_id, step_id),
-                                      SupervisorRecoverInfo{pid, status, stub});
+        {
+          absl::MutexLock lock(&mtx);
+          supervisor_status_map.emplace(
+              std::make_pair(job_id, step_id),
+              SupervisorRecoverInfo{pid, status, stub});
+        }
 
         latch.count_down();
       });
@@ -105,10 +107,6 @@ SupervisorStub::InitAndGetRecoveredMap() {
 }
 
 CraneErrCode SupervisorStub::ExecuteStep() {
-  return ExecuteStepWithStatus().code;
-}
-
-ExecuteStepRpcResult SupervisorStub::ExecuteStepWithStatus() {
   ClientContext context;
   context.set_wait_for_ready(true);
   context.set_deadline(std::chrono::system_clock::now() +
@@ -120,13 +118,10 @@ ExecuteStepRpcResult SupervisorStub::ExecuteStepWithStatus() {
   if (!ok.ok()) {
     CRANE_ERROR("ExecuteStep failed: reply {},{}, code: {}", ok.ok(),
                 ok.error_message(), static_cast<int>(ok.error_code()));
-    return ExecuteStepRpcResult{.code = CraneErrCode::ERR_RPC_FAILURE,
-                                .grpc_status = ok.error_code(),
-                                .error_message = ok.error_message()};
+    return CraneErrCode::ERR_RPC_FAILURE;
   }
 
-  return ExecuteStepRpcResult{.code = static_cast<CraneErrCode>(reply.code()),
-                              .grpc_status = grpc::StatusCode::OK};
+  return static_cast<CraneErrCode>(reply.code());
 }
 
 CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {
@@ -138,13 +133,14 @@ CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {
   crane::grpc::supervisor::QueryStepEnvReply reply;
 
   auto ok = m_stub_->QueryEnvMap(&context, request, &reply);
-  if (ok.ok()) {
+  if (ok.ok() && reply.ok()) {
     return std::unordered_map(reply.env().begin(), reply.env().end());
   }
 
   CRANE_ERROR("QueryStepEnv failed: reply {},{}", reply.ok(),
               ok.error_message());
-  return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
+  return std::unexpected(ok.ok() ? CraneErrCode::ERR_GENERIC_FAILURE
+                                 : CraneErrCode::ERR_RPC_FAILURE);
 }
 
 CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
@@ -250,6 +246,9 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
 CraneErrCode SupervisorStub::ReceivePmixPort(
     const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
   ClientContext context;
+  context.set_wait_for_ready(true);
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
   crane::grpc::supervisor::ReceivePmixPortRequest request;
   crane::grpc::supervisor::ReceivePmixPortReply reply;
 

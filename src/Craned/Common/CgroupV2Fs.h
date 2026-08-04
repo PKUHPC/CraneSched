@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -54,7 +55,7 @@ class CgroupV2FsBackend {
   bool SignalAllProcesses(const std::string& cgroup_name, int signum);
   bool KillAllProcesses(const std::string& cgroup_name, int signum);
   bool Empty(const std::string& cgroup_name);
-  bool Destroy(const std::string& cgroup_name);
+  std::future<CraneErrCode> Destroy(const std::string& cgroup_name);
 
   bool DrainJanitor(std::chrono::milliseconds timeout);
   CgroupV2CleanupMode CleanupMode() const { return cleanup_mode_; }

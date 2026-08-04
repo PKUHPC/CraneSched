@@ -100,8 +100,13 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
 
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
-  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
-                              std::move(traceparents));
+  auto failed_steps = g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
+                                                  std::move(traceparents));
+  auto &failed_map = *response->mutable_failed_job_step_ids_map();
+  for (const auto &[job_id, step_ids] : failed_steps) {
+    failed_map[job_id].mutable_steps()->Assign(step_ids.begin(),
+                                               step_ids.end());
+  }
 
   return Status::OK;
 }
@@ -692,10 +697,10 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   }
   std::optional<crane::grpc::JobStatus> final_status;
   if (request->has_final_status()) final_status = request->final_status();
-  g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
-                                   request->new_status(), request->exit_code(),
-                                   request->reason(), final_status,
-                                   request->timestamp());
+  g_job_mgr->StepStatusChangeAsync(
+      request->job_id(), request->step_id(), request->new_status(),
+      request->exit_code(), request->reason(), final_status,
+      request->timestamp(), static_cast<pid_t>(request->supervisor_pid()));
   response->set_ok(true);
   return Status::OK;
 }

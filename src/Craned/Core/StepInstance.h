@@ -79,7 +79,7 @@ struct StepInstance {
                         StepStatus status,
                         std::shared_ptr<SupervisorStub> supervisor_stub);
   ~StepInstance() = default;
-  void CleanUp(bool async = true);
+  std::future<CraneErrCode> CleanUp();
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;

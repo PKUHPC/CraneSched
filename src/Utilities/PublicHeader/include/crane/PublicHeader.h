@@ -115,6 +115,7 @@ inline constexpr uint64_t kDefaultSupervisorMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
 inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 inline constexpr uint32_t kDefaultSupervisorThreadPoolSize = 4;
+inline constexpr uint32_t kDefaultCgroupOpConcurrency = 4;
 inline constexpr uint32_t kDefaultAsyncLogQueueSize = 8192;
 inline constexpr uint32_t kDefaultAsyncLogThreadCount = 1;
 inline constexpr bool kDefaultAsyncLogBlockWhenFull = true;

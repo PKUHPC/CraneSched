@@ -33,12 +33,14 @@ namespace Craned {
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
+constexpr uint32_t kDefaultSupervisorExitTimeoutSec = 120;
 
 using ::Craned::Common::CgroupInterface;
 using ::Craned::Common::CgroupManager;
 using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
 using StepStatus = crane::grpc::JobStatus;
+using StepKey = std::pair<job_id_t, step_id_t>;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
 
@@ -82,12 +84,13 @@ struct Partition {
 struct Config {
   struct CranedConfig {
     uint32_t PingIntervalSec;
+    uint32_t PingTimeoutSec;
     uint32_t CtldTimeoutSec;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
     uint32_t NodeHealthCheckInterval;
     uint32_t ThreadPoolSize{0};
-    uint32_t CgroupOpConcurrency{0};
+    uint32_t CgroupOpConcurrency{kDefaultCgroupOpConcurrency};
     bool CgroupV2FastPath{true};
     std::string CgroupV2CleanupMode{"sync_rmdir"};
   };
@@ -174,6 +177,7 @@ struct Config {
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
     uint32_t ThreadPoolSize{kDefaultSupervisorThreadPoolSize};
+    uint32_t ExitTimeoutSec{kDefaultSupervisorExitTimeoutSec};
   };
   SupervisorConfig Supervisor;
 

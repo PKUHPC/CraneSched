@@ -28,6 +28,8 @@
 
 namespace Craned::Supervisor {
 
+inline constexpr int64_t kCranedRpcTimeoutSeconds = 5;
+
 using Common::CgroupManager;
 using Common::EnvMap;
 

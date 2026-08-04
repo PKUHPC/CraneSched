@@ -24,9 +24,12 @@
 #include "CgroupManager.h"
 
 #include <fcntl.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 
 #include <bit>
 #include <cctype>
+#include <limits>
 
 #include "CgroupV2Fs.h"
 
@@ -51,14 +54,65 @@ namespace Craned::Common {
 namespace {
 
 constexpr char kCgroupOpConcurrencyEnv[] = "CRANE_CGROUP_OP_CONCURRENCY";
-constexpr char kCgroupOpSemaphoreEnv[] = "CRANE_CGROUP_OP_SEM_NAME";
+constexpr char kCgroupOpSemaphoreEnv[] = "CRANE_CGROUP_OP_SEM_ID";
 constexpr char kCgroupV2FastPathEnv[] = "CRANE_CGROUP_V2_FAST_PATH";
 constexpr char kCgroupV2CleanupModeEnv[] = "CRANE_CGROUP_V2_CLEANUP_MODE";
+constexpr unsigned short kCgroupOpTokenSem = 0;
+constexpr unsigned short kCgroupOpCapacitySem = 1;
+constexpr unsigned short kCgroupOpMagicSem = 2;
+constexpr int kCgroupOpSemaphoreCount = 3;
+constexpr int kCgroupOpSemaphoreMagic = 0x4352;
+constexpr int kCgroupKillMaxAttempts = 5;
+constexpr auto kCgroupKillRetryInterval = std::chrono::milliseconds{100};
+
+thread_local uint32_t g_cgroup_op_gate_nesting_depth = 0;
+
+union SemctlArg {
+  int val;
+  struct semid_ds* buf;
+  unsigned short* array;
+  struct seminfo* info;
+};
+
+key_t CgroupOpSemaphoreKey() {
+  auto hostname_expt = util::os::GetHostname();
+  std::string identity = hostname_expt.value_or("unknown-host");
+  identity += fmt::format(":{}:crane-cgroup-ops", getuid());
+
+  uint32_t hash = 2166136261U;
+  for (unsigned char ch : identity) {
+    hash ^= ch;
+    hash *= 16777619U;
+  }
+  key_t key = static_cast<key_t>(hash & 0x7fffffffU);
+  return key == IPC_PRIVATE ? 1 : key;
+}
+
+bool IsCgroupOpSemaphore(int sem_id) {
+  return sem_id >= 0 &&
+         semctl(sem_id, kCgroupOpMagicSem, GETVAL) == kCgroupOpSemaphoreMagic;
+}
+
+bool InitializeCgroupOpSemaphore(int sem_id, uint32_t concurrency) {
+  SemctlArg arg{};
+  arg.val = static_cast<int>(concurrency);
+  if (semctl(sem_id, kCgroupOpTokenSem, SETVAL, arg) == -1) return false;
+  if (semctl(sem_id, kCgroupOpCapacitySem, SETVAL, arg) == -1) return false;
+  arg.val = kCgroupOpSemaphoreMagic;
+  return semctl(sem_id, kCgroupOpMagicSem, SETVAL, arg) != -1;
+}
 
 int64_t MsSince(std::chrono::steady_clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now() - start)
       .count();
+}
+
+std::future<CraneErrCode> MakeReadyFuture(CraneErrCode result) {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+  promise.set_value(result);
+  return future;
 }
 
 int64_t CgroupVersionInt() {
@@ -133,22 +187,38 @@ void SetCgroupSpanAttrs(SpanT& span, const std::string& cgroup_name,
 
 class CgroupOpGate {
  public:
+  CgroupOpGate(const CgroupOpGate&) = delete;
+  CgroupOpGate& operator=(const CgroupOpGate&) = delete;
+
   CgroupOpGate() {
-    sem_t* sem = CgroupManager::CgroupOpSemaphore();
-    if (sem == SEM_FAILED) return;
-    sem_ = sem;
+    int sem_id = CgroupManager::CgroupOpSemaphoreId();
+    if (sem_id < 0) return;
+    entered_ = true;
+    if (++g_cgroup_op_gate_nesting_depth > 1) return;
+
+    sem_id_ = sem_id;
+    struct sembuf acquire_op{.sem_num = kCgroupOpTokenSem,
+                             .sem_op = -1,
+                             .sem_flg = SEM_UNDO};
     auto wait_begin = std::chrono::steady_clock::now();
-    while (sem_wait(sem_) == -1) {
+    while (semop(sem_id_, &acquire_op, 1) == -1) {
       if (errno == EINTR) continue;
       CRANE_WARN("Failed to wait cgroup op semaphore: {}", strerror(errno));
-      sem_ = SEM_FAILED;
+      sem_id_ = -1;
+      --g_cgroup_op_gate_nesting_depth;
+      entered_ = false;
       return;
     }
     wait_ms_ = MsSince(wait_begin);
   }
 
   ~CgroupOpGate() {
-    if (sem_ != SEM_FAILED && sem_post(sem_) == -1) {
+    if (!entered_) return;
+    if (--g_cgroup_op_gate_nesting_depth > 0) return;
+    struct sembuf release_op{.sem_num = kCgroupOpTokenSem,
+                             .sem_op = 1,
+                             .sem_flg = SEM_UNDO};
+    if (sem_id_ >= 0 && semop(sem_id_, &release_op, 1) == -1) {
       CRANE_WARN("Failed to post cgroup op semaphore: {}", strerror(errno));
     }
   }
@@ -156,9 +226,83 @@ class CgroupOpGate {
   int64_t WaitMs() const { return wait_ms_; }
 
  private:
-  sem_t* sem_{SEM_FAILED};
+  int sem_id_{-1};
   int64_t wait_ms_{0};
+  bool entered_{false};
 };
+
+bool ReadCgroupProcesses(const std::filesystem::path& cgroup_path,
+                         std::unordered_set<pid_t>* pids) {
+  std::ifstream procs(cgroup_path / "cgroup.procs");
+  if (!procs.is_open()) {
+    if (errno == ENOENT) return true;
+    CRANE_WARN("Failed to open cgroup.procs under {}: {}", cgroup_path,
+               strerror(errno));
+    return false;
+  }
+
+  pid_t pid;
+  while (procs >> pid) {
+    if (pid > 0) pids->emplace(pid);
+  }
+  if (procs.bad()) {
+    CRANE_WARN("Failed to read cgroup.procs under {}", cgroup_path);
+    return false;
+  }
+  return true;
+}
+
+bool ListCgroupTreeProcesses(const std::string& cgroup_name,
+                             std::unordered_set<pid_t>* pids) {
+  pids->clear();
+  if (CgroupManager::IsCgV2()) {
+    const auto root =
+        CgConstant::kSystemCgPathPrefix / std::filesystem::path{cgroup_name};
+    std::error_code ec;
+    if (!std::filesystem::exists(root, ec)) return !ec;
+    if (!ReadCgroupProcesses(root, pids)) return false;
+
+    std::filesystem::recursive_directory_iterator it(
+        root, std::filesystem::directory_options::skip_permission_denied, ec);
+    const std::filesystem::recursive_directory_iterator end;
+    while (!ec && it != end) {
+      if (it->is_directory(ec) && !ec &&
+          !ReadCgroupProcesses(it->path(), pids)) {
+        return false;
+      }
+      it.increment(ec);
+    }
+    if (ec) {
+      CRANE_WARN("Failed to walk cgroup tree {}: {}", root, ec.message());
+      return false;
+    }
+    return true;
+  }
+
+  void* handle = nullptr;
+  cgroup_file_info info{};
+  int base_level = 0;
+  const char* controller = CgConstant::GetControllerStringView(
+                               CgConstant::Controller::CPU_CONTROLLER)
+                               .data();
+  int ret = cgroup_walk_tree_begin(controller, cgroup_name.c_str(), 0, &handle,
+                                   &info, &base_level);
+  while (ret == 0) {
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
+        !ReadCgroupProcesses(info.full_path, pids)) {
+      cgroup_walk_tree_end(&handle);
+      return false;
+    }
+    ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
+  }
+  if (handle != nullptr) cgroup_walk_tree_end(&handle);
+  if (ret != ECGEOF) {
+    CRANE_WARN("Failed to walk cgroup v1 tree {}: {}", cgroup_name,
+               cgroup_strerror(ret));
+    return false;
+  }
+  return true;
+}
 
 }  // namespace
 
@@ -185,15 +329,30 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
         static_cast<uint32_t>(std::strtoul(concurrency_env, nullptr, 10));
   }
   if (m_cgroup_op_concurrency_ > 0) {
-    if (const char* sem_name_env = getenv(kCgroupOpSemaphoreEnv);
-        sem_name_env != nullptr && sem_name_env[0] != '\0') {
-      m_cgroup_op_sem_name_ = sem_name_env;
-      m_cgroup_op_sem_ = sem_open(m_cgroup_op_sem_name_.c_str(), 0);
-      if (m_cgroup_op_sem_ == SEM_FAILED) {
-        CRANE_WARN("Failed to open cgroup semaphore {}: {}",
-                   m_cgroup_op_sem_name_, strerror(errno));
+    if (const char* sem_id_env = getenv(kCgroupOpSemaphoreEnv);
+        sem_id_env != nullptr && sem_id_env[0] != '\0') {
+      char* end = nullptr;
+      errno = 0;
+      long sem_id = std::strtol(sem_id_env, &end, 10);
+      if (errno == 0 && end != sem_id_env && *end == '\0' && sem_id >= 0 &&
+          sem_id <= std::numeric_limits<int>::max()) {
+        m_cgroup_op_sem_id_ = static_cast<int>(sem_id);
+      }
+      int capacity =
+          m_cgroup_op_sem_id_ < 0
+              ? -1
+              : semctl(m_cgroup_op_sem_id_, kCgroupOpCapacitySem, GETVAL);
+      if (!IsCgroupOpSemaphore(m_cgroup_op_sem_id_) || capacity < 1 ||
+          static_cast<uint32_t>(capacity) != m_cgroup_op_concurrency_) {
+        CRANE_WARN("Failed to use cgroup semaphore id {}: {}", sem_id_env,
+                   m_cgroup_op_sem_id_ < 0 ? "invalid semaphore id"
+                                           : "invalid semaphore metadata");
+        m_cgroup_op_sem_id_ = -1;
         m_cgroup_op_concurrency_ = 0;
       }
+    } else {
+      CRANE_WARN("Cgroup operation concurrency is set without a semaphore");
+      m_cgroup_op_concurrency_ = 0;
     }
   }
 #ifdef CRANE_ENABLE_CGROUP_V2
@@ -363,35 +522,86 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
 }
 
 void CgroupManager::ConfigureCgroupOpConcurrency(uint32_t concurrency) {
+  ShutdownCgroupOpConcurrency();
   m_cgroup_op_concurrency_ = concurrency;
   if (concurrency == 0) {
-    unsetenv(kCgroupOpConcurrencyEnv);
-    unsetenv(kCgroupOpSemaphoreEnv);
     return;
   }
 
-  auto hostname_expt = util::os::GetHostname();
-  std::string host_key = hostname_expt.has_value() ? hostname_expt.value()
-                                                   : std::to_string(getpid());
-  std::ranges::replace(host_key, '/', '_');
-  m_cgroup_op_sem_name_ =
-      fmt::format("/crane_cgroup_ops_{}_{}", host_key, getuid());
-  m_cgroup_op_sem_ =
-      sem_open(m_cgroup_op_sem_name_.c_str(), O_CREAT, 0600, concurrency);
-  if (m_cgroup_op_sem_ == SEM_FAILED) {
-    CRANE_WARN("Failed to create cgroup semaphore {} concurrency={}: {}",
-               m_cgroup_op_sem_name_, concurrency, strerror(errno));
+  key_t sem_key = CgroupOpSemaphoreKey();
+  bool reused = false;
+  bool failure_logged = false;
+  m_cgroup_op_sem_id_ =
+      semget(sem_key, kCgroupOpSemaphoreCount, IPC_CREAT | IPC_EXCL | 0600);
+  if (m_cgroup_op_sem_id_ == -1 && errno == EEXIST) {
+    m_cgroup_op_sem_id_ = semget(sem_key, 0, 0600);
+    if (m_cgroup_op_sem_id_ == -1) {
+      CRANE_WARN("Failed to open existing cgroup semaphore key={:#x}: {}",
+                 static_cast<uint32_t>(sem_key), strerror(errno));
+      failure_logged = true;
+    } else if (!IsCgroupOpSemaphore(m_cgroup_op_sem_id_)) {
+      CRANE_WARN(
+          "Cannot reuse cgroup semaphore key={:#x}: invalid Crane metadata",
+          static_cast<uint32_t>(sem_key));
+      failure_logged = true;
+      m_cgroup_op_sem_id_ = -1;
+    } else {
+      int existing_capacity =
+          semctl(m_cgroup_op_sem_id_, kCgroupOpCapacitySem, GETVAL);
+      int available = semctl(m_cgroup_op_sem_id_, kCgroupOpTokenSem, GETVAL);
+      if (existing_capacity < 1 || available < 0 ||
+          available > existing_capacity) {
+        CRANE_WARN(
+            "Cannot reuse cgroup semaphore id={}: invalid capacity metadata",
+            m_cgroup_op_sem_id_);
+        failure_logged = true;
+        m_cgroup_op_sem_id_ = -1;
+      } else {
+        reused = true;
+        if (static_cast<uint32_t>(existing_capacity) != concurrency) {
+          CRANE_WARN(
+              "Cgroup semaphore requested concurrency={} but existing "
+              "capacity={}; reusing the existing capacity",
+              concurrency, existing_capacity);
+        }
+        m_cgroup_op_concurrency_ = static_cast<uint32_t>(existing_capacity);
+      }
+    }
+  } else if (m_cgroup_op_sem_id_ >= 0 &&
+             !InitializeCgroupOpSemaphore(m_cgroup_op_sem_id_, concurrency)) {
+    CRANE_WARN("Failed to initialize cgroup semaphore id={} concurrency={}: {}",
+               m_cgroup_op_sem_id_, concurrency, strerror(errno));
+    failure_logged = true;
+    semctl(m_cgroup_op_sem_id_, 0, IPC_RMID);
+    m_cgroup_op_sem_id_ = -1;
+  }
+
+  if (m_cgroup_op_sem_id_ == -1) {
+    if (!failure_logged) {
+      CRANE_WARN(
+          "Failed to create or reuse cgroup semaphore concurrency={}: {}",
+          concurrency, strerror(errno));
+    }
     m_cgroup_op_concurrency_ = 0;
     unsetenv(kCgroupOpConcurrencyEnv);
     unsetenv(kCgroupOpSemaphoreEnv);
     return;
   }
-
-  setenv(kCgroupOpConcurrencyEnv, std::to_string(concurrency).c_str(), 1);
-  setenv(kCgroupOpSemaphoreEnv, m_cgroup_op_sem_name_.c_str(), 1);
+  setenv(kCgroupOpConcurrencyEnv,
+         std::to_string(m_cgroup_op_concurrency_).c_str(), 1);
+  setenv(kCgroupOpSemaphoreEnv, std::to_string(m_cgroup_op_sem_id_).c_str(), 1);
   CRANE_INFO(
-      "Cgroup operation concurrency limit enabled: concurrency={} sem={}",
-      concurrency, m_cgroup_op_sem_name_);
+      "Cgroup operation concurrency limit enabled: concurrency={} sem_id={} "
+      "key={:#x} reused={} undo=true",
+      m_cgroup_op_concurrency_, m_cgroup_op_sem_id_,
+      static_cast<uint32_t>(sem_key), reused);
+}
+
+void CgroupManager::ShutdownCgroupOpConcurrency() {
+  m_cgroup_op_concurrency_ = 0;
+  m_cgroup_op_sem_id_ = -1;
+  unsetenv(kCgroupOpConcurrencyEnv);
+  unsetenv(kCgroupOpSemaphoreEnv);
 }
 
 void CgroupManager::ConfigureCgroupV2FastPath(bool enabled) {
@@ -413,9 +623,9 @@ void CgroupManager::ShutdownCgroupV2FastPath() {
   m_v2_fs_backend_.reset();
 }
 
-sem_t* CgroupManager::CgroupOpSemaphore() {
-  if (m_cgroup_op_concurrency_ == 0) return SEM_FAILED;
-  return m_cgroup_op_sem_;
+int CgroupManager::CgroupOpSemaphoreId() {
+  if (m_cgroup_op_concurrency_ == 0) return -1;
+  return m_cgroup_op_sem_id_;
 }
 
 void CgroupManager::ControllersMounted() {
@@ -803,6 +1013,7 @@ CgroupManager::AllocateAndGetCgroup(
     const std::string& cgroup_str,
     const crane::grpc::ResourceInNodeV3& resource, bool recover,
     std::uint64_t min_mem, bool is_int_job) {
+  CgroupOpGate gate;
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -896,6 +1107,7 @@ CgroupManager::CreateOrOpenCgroup(const std::string& cgroup_str,
 CraneErrCode CgroupManager::SetCgroupResource(
     CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource,
     std::uint64_t min_mem) {
+  CgroupOpGate gate;
   auto begin_time = std::chrono::steady_clock::now();
   CRANE_TRACE_SCOPE_NAMED(resource_span, "cgroup/set_resource");
   if (cg != nullptr) SetCgroupSpanAttrs(resource_span, cg->CgroupName());
@@ -1128,9 +1340,9 @@ Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-void CgroupManager::KillAndDestroyCgroup(
+std::future<CraneErrCode> CgroupManager::KillAndDestroyCgroup(
     std::unique_ptr<CgroupInterface> cgroup) {
-  if (cgroup == nullptr) return;
+  if (cgroup == nullptr) return MakeReadyFuture(CraneErrCode::SUCCESS);
 
   const auto cgroup_name = cgroup->CgroupName();
   const auto cgroup_path = cgroup->CgroupPath().string();
@@ -1152,8 +1364,50 @@ void CgroupManager::KillAndDestroyCgroup(
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
   }
 
-  cgroup->Destroy();
-  CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
+  auto future = cgroup->Destroy();
+  CRANE_DEBUG("Cgroup {} destruction requested.", cgroup_path);
+  return future;
+}
+
+std::future<CraneErrCode> CgroupManager::KillAndDestroyCgroupTree(
+    const std::string& cgroup_str) {
+  CgroupOpGate gate;
+  auto cgroup_expt = CreateOrOpenCgroup(cgroup_str, true);
+  if (!cgroup_expt.has_value() || cgroup_expt.value() == nullptr) {
+    CRANE_DEBUG("Cgroup tree {} no longer exists.", cgroup_str);
+    return MakeReadyFuture(CraneErrCode::SUCCESS);
+  }
+
+  auto cgroup = std::move(cgroup_expt.value());
+  const auto cgroup_name = cgroup->CgroupName();
+  cgroup->KillAllProcesses(SIGKILL);
+
+  std::unordered_set<pid_t> pids;
+  for (int attempt = 0; attempt < kCgroupKillMaxAttempts; ++attempt) {
+    if (!ListCgroupTreeProcesses(cgroup_name, &pids)) break;
+    if (pids.empty()) break;
+
+    for (pid_t pid : pids) {
+      if (pid == getpid()) {
+        CRANE_ERROR("Refusing to kill Craned pid {} found in cgroup tree {}.",
+                    pid, cgroup_name);
+        continue;
+      }
+      if (kill(pid, SIGKILL) == -1 && errno != ESRCH) {
+        CRANE_WARN("Failed to kill pid {} in cgroup tree {}: {}", pid,
+                   cgroup_name, strerror(errno));
+      }
+    }
+    std::this_thread::sleep_for(kCgroupKillRetryInterval);
+  }
+
+  if (ListCgroupTreeProcesses(cgroup_name, &pids) && !pids.empty()) {
+    CRANE_ERROR("Couldn't kill {} processes in cgroup tree {}.", pids.size(),
+                cgroup_name);
+  }
+  auto future = cgroup->Destroy();
+  CRANE_DEBUG("Cgroup tree {} destruction requested.", cgroup_name);
+  return future;
 }
 
 CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
@@ -1554,7 +1808,8 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
   return true;
 }
 
-void Cgroup::Destroy() {
+CraneErrCode Cgroup::Destroy() {
+  CraneErrCode result = CraneErrCode::SUCCESS;
   if (m_cgroup_ != nullptr) {
     auto begin_time = std::chrono::steady_clock::now();
     CgroupOpGate gate;
@@ -1569,15 +1824,19 @@ void Cgroup::Destroy() {
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
       remove_span.SetAttribute("libcgroup_errno", err);
       remove_span.SetStatus(crane::StatusCode::kError, "remove_failed");
+      result = CraneErrCode::ERR_CGROUP;
     }
     remove_span.SetAttribute("elapsed_ms", MsSince(begin_time));
 
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
   }
+  return result;
 }
 
-void CgroupInterface::Destroy() { m_cgroup_info_.Destroy(); }
+std::future<CraneErrCode> CgroupInterface::Destroy() {
+  return MakeReadyFuture(m_cgroup_info_.Destroy());
+}
 
 bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgConstant::Controller;
@@ -1795,7 +2054,9 @@ bool CgroupV1::Empty() {
   return false;
 }
 
-void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
+std::future<CraneErrCode> CgroupV1::Destroy() {
+  return CgroupInterface::Destroy();
+}
 
 #ifdef CRANE_ENABLE_BPF
 
@@ -1989,13 +2250,11 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 #endif
 
 CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id)
-    : CgroupInterface(name, handle, id) {
+    : CgroupInterface(name, handle, id) {}
+
+CgroupV2::~CgroupV2() {
 #ifdef CRANE_ENABLE_BPF
-  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
-    CRANE_TRACE("Bpf object initialization succeed");
-  } else {
-    CRANE_TRACE("Bpf object initialization failed");
-  }
+  ReleaseBpfObject_();
 #endif
 }
 
@@ -2011,7 +2270,26 @@ CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
                    std::vector<BpfDeviceMeta>& cgroup_bpf_devices)
     : CgroupV2(name, handle, id) {
   m_cgroup_bpf_devices = std::move(cgroup_bpf_devices);
-  m_bpf_attached_ = true;
+  m_bpf_attached_ = EnsureBpfObject_();
+}
+#endif
+
+#ifdef CRANE_ENABLE_BPF
+bool CgroupV2::EnsureBpfObject_() {
+  if (m_bpf_object_ref_) return true;
+  if (!CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
+    CRANE_TRACE("Bpf object initialization failed");
+    return false;
+  }
+  m_bpf_object_ref_ = true;
+  CRANE_TRACE("Bpf object initialization succeed");
+  return true;
+}
+
+void CgroupV2::ReleaseBpfObject_() {
+  if (!m_bpf_object_ref_) return;
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
+  m_bpf_object_ref_ = false;
 }
 #endif
 
@@ -2123,7 +2401,7 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
+  if (!EnsureBpfObject_()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -2207,7 +2485,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
 #ifdef CRANE_ENABLE_BPF
 bool CgroupV2::RecoverFromCgSpec(
     const crane::grpc::ResourceInNodeV3& resource) {
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
+  if (!EnsureBpfObject_()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -2345,25 +2623,26 @@ bool CgroupV2::Empty() {
   return false;
 }
 
-void CgroupV2::Destroy() {
+std::future<CraneErrCode> CgroupV2::Destroy() {
   if (m_v2_fs_backend_) {
+    CgroupOpGate gate;
 #ifdef CRANE_ENABLE_BPF
     if (!m_cgroup_bpf_devices.empty()) {
       EraseBpfDeviceMap();
     }
-    CgroupManager::bpf_runtime_info.CloseBpfObj();
+    ReleaseBpfObject_();
 #endif
-    m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
-    return;
+    return m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
   }
 
-  CgroupInterface::Destroy();
+  auto future = CgroupInterface::Destroy();
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  CgroupManager::bpf_runtime_info.CloseBpfObj();
+  ReleaseBpfObject_();
 #endif
+  return future;
 }
 
 bool CgroupV2::MigrateProcIn(pid_t pid) {
@@ -2573,7 +2852,7 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
 
 void CgroupManager::ShutdownCpuPool() {
   if (m_overflow_cg_) {
-    m_overflow_cg_->Destroy();
+    m_overflow_cg_->Destroy().wait();
     m_overflow_cg_.reset();
   }
   m_overflow_bits_.clear();

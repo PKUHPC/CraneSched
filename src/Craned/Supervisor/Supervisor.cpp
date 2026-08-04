@@ -494,6 +494,7 @@ void StartServer(int grpc_output_fd) {
 
   g_craned_client.reset();
   Craned::Common::CgroupManager::ShutdownCgroupV2FastPath();
+  Craned::Common::CgroupManager::ShutdownCgroupOpConcurrency();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif

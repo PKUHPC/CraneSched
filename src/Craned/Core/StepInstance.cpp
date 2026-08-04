@@ -46,7 +46,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       status(status),
       supervisor_stub(supervisor_stub) {}
 
-void StepInstance::CleanUp(bool async) {
+std::future<CraneErrCode> StepInstance::CleanUp() {
   if (this->status != StepStatus::Completing &&
       !IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
@@ -55,49 +55,14 @@ void StepInstance::CleanUp(bool async) {
         job_id, step_id, static_cast<int>(this->status));
   }
 
-  auto* cgroup = crane_cgroup.release();
-  if (cgroup == nullptr) return;
+  auto system_cleanup =
+      CgroupManager::KillAndDestroyCgroup(std::move(crane_cgroup));
+  if (cg_str.empty()) return system_cleanup;
 
-  auto clean_step_cgroup = [job_id = job_id, step_id = step_id, cgroup,
-                            step_cg_str = this->cg_str] {
-    CgroupManager::KillAndDestroyCgroup(
-        std::unique_ptr<CgroupInterface>{cgroup});
-
-    // step_cg_str is e.g. "overflow/job_1/step_0/system"
-    // We want to remove the step_N directory (parent of system/user).
-    auto step_cg_path =
-        (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-         Common::CgConstant::kRootCgNamePrefix / step_cg_str)
-            .parent_path();
-
-    std::error_code ec;
-    if (std::filesystem::exists(step_cg_path, ec)) {
-      std::filesystem::remove(step_cg_path, ec);
-      if (ec) {
-        CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                    job_id, step_id, step_cg_path, ec.message());
-      } else {
-        CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
-                    step_id, step_cg_path);
-      }
-    } else {
-      if (ec) {
-        CRANE_ERROR(
-            "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
-            job_id, step_id, step_cg_path, ec.message());
-      } else {
-        CRANE_DEBUG(
-            "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-            job_id, step_id, step_cg_path);
-      }
-    }
-  };
-
-  if (async) {
-    g_thread_pool->detach_task(std::move(clean_step_cgroup));
-  } else {
-    clean_step_cgroup();
-  }
+  // cg_str points to step_N/system. The parent also owns user/task_* and must
+  // be killed recursively when Supervisor exits before doing its own cleanup.
+  auto step_cg_str = std::filesystem::path{cg_str}.parent_path().string();
+  return CgroupManager::KillAndDestroyCgroupTree(step_cg_str);
 }
 
 CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
@@ -591,65 +556,20 @@ void StepInstance::ExecuteStepAsync() {
   this->GotNewStatus(StepStatus::Running);
 
   g_thread_pool->detach_task([job_id = job_id, step_id = step_id,
+                              supervisor_pid = supv_pid,
                               stub = supervisor_stub] {
-    auto result = stub->ExecuteStepWithStatus();
-    if (result.Ok()) return;
+    auto err = stub->ExecuteStep();
+    if (err == CraneErrCode::SUCCESS) return;
 
-    if (result.grpc_status == grpc::StatusCode::DEADLINE_EXCEEDED) {
-      CRANE_WARN(
-          "[Step #{}.{}] Supervisor ExecuteStep ack deadline exceeded; "
-          "checking supervisor status before marking RPC failure.",
-          job_id, step_id);
-
-      for (int attempt = 1; attempt <= kCranedRpcTimeoutSeconds; ++attempt) {
-        std::this_thread::sleep_for(1s);
-        auto status = stub->CheckStatus();
-        if (status.has_value()) {
-          auto step_status = std::get<3>(*status);
-          if (step_status == StepStatus::Running ||
-              step_status == StepStatus::Completing ||
-              IsFinishedStepStatus(step_status)) {
-            CRANE_WARN(
-                "[Step #{}.{}] ExecuteStep ack deadline treated as accepted; "
-                "supervisor status is {}.",
-                job_id, step_id, step_status);
-            return;
-          }
-          CRANE_WARN(
-              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
-              "{}/{}; "
-              "supervisor status is {}.",
-              job_id, step_id, attempt, kCranedRpcTimeoutSeconds, step_status);
-        } else {
-          CRANE_WARN(
-              "[Step #{}.{}] ExecuteStep ack still unknown after attempt "
-              "{}/{}; "
-              "supervisor status query failed.",
-              job_id, step_id, attempt, kCranedRpcTimeoutSeconds);
-        }
-      }
-
-      CRANE_ERROR(
-          "[Step #{}.{}] ExecuteStep ack was not confirmed within {}s grace, "
-          "marking step failed.",
-          job_id, step_id, kCranedRpcTimeoutSeconds);
-    } else {
-      CRANE_ERROR(
-          "[Step #{}.{}] Supervisor failed to accept ExecuteStep, code:{}, "
-          "grpc_status:{}, error:{}.",
-          job_id, step_id, static_cast<int>(result.code),
-          static_cast<int>(result.grpc_status), result.error_message);
-    }
-
-    if (result.code != CraneErrCode::SUCCESS ||
-        result.grpc_status != grpc::StatusCode::OK) {
-      g_job_mgr->SendCompletingAndTerminal_(
-          job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
-          "Supervisor not responding when execute step");
-      // Ctld will send ShutdownSupervisor after status change from
-      // daemon supervisor, for common step, will shut down itself when all
-      // steps finished locally.
-    }
+    CRANE_ERROR(
+        "[Step #{}.{}] Supervisor ExecuteStep RPC failed, code:{}; failing "
+        "the step without retry.",
+        job_id, step_id, static_cast<int>(err));
+    g_job_mgr->EnqueueAllocatedStepCompletion(
+        job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+        fmt::format("Supervisor ExecuteStep RPC failed, code: {}",
+                    static_cast<int>(err)),
+        supervisor_pid);
   });
 }
 

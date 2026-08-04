@@ -30,13 +30,12 @@ class CranedClient {
   ~CranedClient();
   void Shutdown();
   void InitChannelAndStub(const std::string& endpoint);
-  void StepStatusChangeAsync(
-      crane::grpc::JobStatus new_status, uint32_t exit_code,
-      std::optional<std::string> reason,
-      std::optional<crane::grpc::JobStatus> final_status = std::nullopt);
+  void StepStatusChangeAsync(crane::grpc::JobStatus new_status);
+  void StepCompletionAsync(crane::grpc::JobStatus final_status,
+                           uint32_t exit_code,
+                           std::optional<std::string> reason);
 
  private:
-  void AsyncSendThread_();
   struct StepStatusChangeQueueElem {
     crane::grpc::JobStatus new_status{};
     uint32_t exit_code{};
@@ -47,13 +46,15 @@ class CranedClient {
     int64_t enqueue_ts_ms{};
     int64_t queue_len_at_enqueue{};
   };
+  void EnqueueStepStatusChange_(StepStatusChangeQueueElem&& elem);
+  void AsyncSendThread_();
   absl::Mutex m_mutex_;
   absl::CondVar m_cv_;
   std::list<StepStatusChangeQueueElem> m_task_status_change_queue_
       ABSL_GUARDED_BY(m_mutex_);
 
   std::thread m_async_send_thread_;
-  std::atomic_bool m_thread_stop_;
+  std::atomic_bool m_thread_stop_{false};
   int m_finished_tasks_{0};
   std::shared_ptr<grpc::Channel> m_channel_;
   std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
