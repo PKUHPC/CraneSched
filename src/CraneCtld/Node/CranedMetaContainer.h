@@ -112,6 +112,11 @@ class CranedMetaContainer final {
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
 
+  // Only called by NodeManager::UpdatePowerState, which owns the ordering
+  // of power state reports.
+  bool UpdateCranedPowerState(const CranedId& craned_id,
+                              crane::grpc::CranedPowerState state);
+
   CraneExpected<void> ModifyPartitionAcl(
       const std::string& partition_name, bool is_allowed_list,
       std::unordered_set<std::string>&& accounts);
@@ -121,8 +126,16 @@ class CranedMetaContainer final {
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
 
+  // Applies the registration's remote meta and (for dynamic nodes) rebinds
+  // resources. The node stays !alive and unschedulable until
+  // MarkCranedAlive publishes it, so a failed registration needs no
+  // runtime-state rollback.
   bool CranedUp(const CranedId& craned_id,
                 const crane::grpc::CranedRemoteMeta& remote_meta);
+
+  // Final step of a successful registration: makes the node alive and
+  // therefore schedulable. Fails if the node is being deleted.
+  bool MarkCranedAlive(const CranedId& craned_id);
 
   void CranedDown(const CranedId& craned_id);
 

@@ -200,7 +200,11 @@ struct Config {
   std::string DynamicPool;
   std::vector<std::string> DynamicFeatures;
   std::vector<std::string> DynamicPartitions;
-  std::string DynamicRegistrationToken;
+  // Lease of the startup preparation, consumed once by CtldClient::Init()
+  // and handed to the connection state machine; runtime lease renewal never
+  // goes through g_config. Written only during single-threaded startup.
+  std::string DynamicInitialLeaseToken;
+  int64_t DynamicInitialLeaseExpireUnixSec{};
   std::string DynamicRegistrationNonce;
   std::string PhysicalHostname;
   crane::grpc::DynamicNodeSpec DynamicReportedSpec;

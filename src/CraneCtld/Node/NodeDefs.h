@@ -151,4 +151,12 @@ std::optional<crane::grpc::CranedPowerState> CranedPowerStateFromDynamic(
 std::optional<crane::grpc::DynamicNodePowerState>
 DynamicNodePowerStateFromCraned(crane::grpc::CranedPowerState state);
 
+// The spec a dynamic node's runtime resources derive from: the effective
+// spec captured at its first registration, or the configured spec before
+// that.
+inline const crane::grpc::DynamicNodeSpec& EffectiveSpec(
+    const crane::grpc::DynamicNodeRecord& record) {
+  return record.has_effective_spec() ? record.effective_spec() : record.spec();
+}
+
 }  // namespace Ctld

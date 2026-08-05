@@ -101,8 +101,6 @@ bool CranedMetaContainer::CranedUp(
       }
     }
 
-    node_meta->alive = true;
-
     node_meta->remote_meta = CranedRemoteMeta(remote_meta);
     if (!node_meta->static_meta.dynamic && remote_meta.has_node_topo_info() &&
         remote_meta.node_topo_info().sockets() != 0) {
@@ -117,19 +115,56 @@ bool CranedMetaContainer::CranedUp(
     }
     if (node_meta->static_meta.dynamic) {
       node_meta->static_meta.ever_registered = true;
-      node_meta->static_meta.dynamic_power_state =
-          crane::grpc::DYNAMIC_NODE_POWER_STATE_ON;
       node_meta->static_meta.physical_hostname =
           remote_meta.physical_hostname();
-      node_meta->power_state = node_meta->rn_job_res_map.empty()
-                                   ? crane::grpc::CRANE_POWER_IDLE
-                                   : crane::grpc::CRANE_POWER_ACTIVE;
     }
-    for (auto& partition_meta : part_meta_ptrs) {
-      PartitionGlobalMeta& part_global_meta =
-          partition_meta->partition_global_meta;
-      part_global_meta.alive_craned_cnt++;
-    }
+  }
+
+  return true;
+}
+
+bool CranedMetaContainer::MarkCranedAlive(const CranedId& craned_id) {
+  auto topology_lock = LockTopologyShared();
+  if (!craned_id_part_ids_map_.contains(craned_id)) return false;
+
+  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  auto node_meta = craned_meta_map_[craned_id];
+  CRANE_ASSERT(node_meta);
+  if (node_meta->static_meta.deleting) {
+    CRANE_WARN("Reject bringing up dynamic node {} while it is being deleted.",
+               craned_id);
+    return false;
+  }
+  if (node_meta->alive) {
+    CRANE_TRACE("Craned {} is already alive, skip marking it alive.",
+                craned_id);
+    return true;
+  }
+
+  node_meta->alive = true;
+  if (node_meta->static_meta.dynamic) {
+    node_meta->static_meta.dynamic_power_state =
+        crane::grpc::DYNAMIC_NODE_POWER_STATE_ON;
+    node_meta->power_state = node_meta->rn_job_res_map.empty()
+                                 ? crane::grpc::CRANE_POWER_IDLE
+                                 : crane::grpc::CRANE_POWER_ACTIVE;
+  }
+  for (auto& partition_meta : part_meta_ptrs) {
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
+    part_global_meta.alive_craned_cnt++;
   }
 
   CRANE_INFO("Craned {} is up now.", craned_id);
@@ -542,8 +577,7 @@ void CranedMetaContainer::AddDynamicNodes(
     static_meta.provider_profile = record.provider_profile();
     craned_meta.remote_meta.network_interfaces.assign(
         record.network_interfaces().begin(), record.network_interfaces().end());
-    const auto& spec =
-        record.has_effective_spec() ? record.effective_spec() : record.spec();
+    const auto& spec = EffectiveSpec(record);
     static_meta.node_topo_info.sockets = spec.sockets();
     static_meta.res = ResourceInNodeFromDynamicSpec(spec);
     // Ever-registered nodes carry the concrete devices of their last
@@ -575,11 +609,57 @@ void CranedMetaContainer::AddDynamicNodes(
   }
 }
 
+bool CranedMetaContainer::UpdateCranedPowerState(
+    const CranedId& craned_id, crane::grpc::CranedPowerState state) {
+  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  if (!craned_meta) return false;
+  craned_meta->power_state = state;
+  return true;
+}
+
 void CranedMetaContainer::UpdateDynamicNodeMetadata(
     const crane::grpc::DynamicNodeRecord& record) {
   auto topology_lock = LockTopologyShared();
   auto part_ids_it = craned_id_part_ids_map_.find(record.node_name());
   if (part_ids_it == craned_id_part_ids_map_.end()) return;
+
+  const auto& spec = EffectiveSpec(record);
+  ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
+  // Keep the concrete devices installed by CranedUp; only records that never
+  // registered fall back to the synthesized placeholder slots.
+  if (record.has_registered_gres())
+    updated_resource.GetGres() = record.registered_gres();
+
+  auto apply_metadata = [&](CranedMeta* node_meta) {
+    auto& static_meta = node_meta->static_meta;
+    static_meta.ever_registered = record.ever_registered();
+    static_meta.revision = record.revision();
+    static_meta.origin = record.origin();
+    static_meta.lifecycle = record.lifecycle();
+    static_meta.dynamic_power_state = record.power_state();
+    static_meta.pool = record.pool();
+    static_meta.physical_hostname = record.physical_hostname();
+    static_meta.provider = record.provider();
+    static_meta.provider_profile = record.provider_profile();
+    node_meta->remote_meta.network_interfaces.assign(
+        record.network_interfaces().begin(), record.network_interfaces().end());
+    if (auto power_state = CranedPowerStateFromDynamic(record.power_state()))
+      node_meta->power_state = *power_state;
+  };
+
+  // Most updates (lifecycle/power metadata) leave the resources untouched
+  // and need no partition locks; only a resource change takes them, in the
+  // documented order (partition locks before the craned element lock).
+  {
+    auto node_meta = craned_meta_map_.GetValueExclusivePtr(record.node_name());
+    if (!node_meta || !node_meta->static_meta.dynamic ||
+        node_meta->static_meta.generation != record.generation())
+      return;
+    if (node_meta->static_meta.res == updated_resource) {
+      apply_metadata(node_meta.get());
+      return;
+    }
+  }
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids_it->second.size());
@@ -594,13 +674,6 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
     return;
 
   auto& static_meta = node_meta->static_meta;
-  const auto& spec =
-      record.has_effective_spec() ? record.effective_spec() : record.spec();
-  ResourceInNodeV3 updated_resource = ResourceInNodeFromDynamicSpec(spec);
-  // Keep the concrete devices installed by CranedUp; only records that never
-  // registered fall back to the synthesized placeholder slots.
-  if (record.has_registered_gres())
-    updated_resource.GetGres() = record.registered_gres();
   if (!(static_meta.res == updated_resource)) {
     CRANE_ASSERT(node_meta->res_in_use.IsZero());
     CRANE_ASSERT(node_meta->resv_in_node_map.empty());
@@ -612,20 +685,7 @@ void CranedMetaContainer::UpdateDynamicNodeMetadata(
     node_meta->res_total = updated_resource;
     node_meta->res_avail = updated_resource;
   }
-
-  static_meta.ever_registered = record.ever_registered();
-  static_meta.revision = record.revision();
-  static_meta.origin = record.origin();
-  static_meta.lifecycle = record.lifecycle();
-  static_meta.dynamic_power_state = record.power_state();
-  static_meta.pool = record.pool();
-  static_meta.physical_hostname = record.physical_hostname();
-  static_meta.provider = record.provider();
-  static_meta.provider_profile = record.provider_profile();
-  node_meta->remote_meta.network_interfaces.assign(
-      record.network_interfaces().begin(), record.network_interfaces().end());
-  if (auto power_state = CranedPowerStateFromDynamic(record.power_state()))
-    node_meta->power_state = *power_state;
+  apply_metadata(node_meta.get());
 }
 
 std::unordered_map<CranedId, CraneRichError>

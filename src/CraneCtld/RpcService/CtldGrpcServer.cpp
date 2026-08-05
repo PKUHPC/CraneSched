@@ -102,6 +102,16 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
+  if (!g_node_manager->ValidateUplinkSession(request->craned_id(),
+                                             request->session_token())) {
+    CRANE_WARN(
+        "Reject step status change of step #{}.{} from a stale incarnation "
+        "of craned {}.",
+        request->job_id(), request->step_id(), request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
   g_job_scheduler->StepStatusChangeAsync(
       request->job_id(), request->step_id(), request->craned_id(),
       request->new_status(), request->exit_code(), request->reason(),
@@ -179,8 +189,10 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
+  // Until MarkCranedAlive below, the node stays !alive and invisible to the
+  // scheduler, so failures before that point only need to reset the
+  // persisted lease state.
   auto rollback_registration = [&] {
-    g_meta_container->CranedDown(request->craned_id());
     auto rollback = g_node_manager->MarkRegistrationFailed(
         request->craned_id(), request->generation(),
         request->registration_token());
@@ -211,14 +223,34 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     response->set_ok(false);
     return grpc::Status::OK;
   }
+  const std::string& session_token = mark_result.value();
 
-  // Mark the stub ready before any side effects on lost jobs/steps: a
-  // concurrent reverse-conn request may have superseded the token, in which
-  // case this registration must be rolled back and retried with the new
-  // token instead of reporting success with a non-ready stub.
+  // The registration is now persisted; later failures must be undone with
+  // the session-fenced revocation so a concurrent newer registration is
+  // never rolled back by mistake.
+  auto revoke_registration = [&] {
+    auto revoke = g_node_manager->RevokeRegistration(
+        request->craned_id(), request->generation(), session_token);
+    if (!revoke)
+      CRANE_ERROR("Failed to revoke dynamic node {} registration: {}",
+                  request->craned_id(), revoke.error().description());
+  };
+
+  // Mark the stub ready before publishing the node: a concurrent
+  // reverse-conn request may have superseded the token, in which case this
+  // registration must be revoked and retried with the new token instead of
+  // reporting success with a non-ready stub.
   if (!stub->SetReady(request->token())) {
-    rollback_registration();
+    revoke_registration();
     CRANE_WARN("Registration token of craned {} was superseded before ready.",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!g_meta_container->MarkCranedAlive(request->craned_id())) {
+    revoke_registration();
+    CRANE_WARN("Craned {} was deleted before becoming alive.",
                request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
@@ -261,6 +293,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   }
 
   g_meta_container->PublishCranedState(request->craned_id());
+  response->set_session_token(session_token);
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -273,9 +306,10 @@ grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  // Bind the claimed physical hostname to the connection's peer address:
-  // registration tokens are issued by this RPC, so a host must not be able
-  // to obtain a lease for a machine other than itself.
+  // The peer address observed here is recorded as the node's connect-back
+  // address: the claimed physical hostname is an identity label and may not
+  // resolve to the connection source at all (NAT, multi-homing). The
+  // registration token is only returned over this same connection.
   auto peer_address = ParseGrpcPeerAddress(context->peer());
   if (!peer_address) {
     CRANE_WARN("Rejecting dynamic registration preparation from {}: {}",
@@ -284,24 +318,27 @@ grpc::Status CtldForInternalServiceImpl::PrepareCranedRegistration(
     response->set_reason("Failed to parse the peer address");
     return grpc::Status::OK;
   }
-  if (!PeerAddressMatchesHostname(*peer_address,
-                                  request->physical_hostname())) {
-    CRANE_WARN(
-        "Rejecting dynamic registration preparation: peer {} does not match "
-        "claimed physical host {}.",
-        context->peer(), request->physical_hostname());
-    response->set_code(crane::grpc::ERR_INVALID_PARAM);
-    response->set_reason("Physical hostname does not match the peer address");
-    return grpc::Status::OK;
-  }
 
-  *response = g_node_manager->PrepareCranedRegistration(*request);
+  const std::string observed_peer =
+      std::holds_alternative<ipv4_t>(*peer_address)
+          ? crane::Ipv4ToStr(std::get<ipv4_t>(*peer_address))
+          : crane::Ipv6ToStr(std::get<ipv6_t>(*peer_address));
+
+  *response =
+      g_node_manager->PrepareCranedRegistration(*request, observed_peer);
   return grpc::Status::OK;
 }
 
 grpc::Status CtldForInternalServiceImpl::CranedPing(
     grpc::ServerContext* context, const crane::grpc::CranedPingRequest* request,
     crane::grpc::CranedPingReply* response) {
+  if (!g_node_manager->ValidateUplinkSession(request->craned_id(),
+                                             request->session_token())) {
+    CRANE_WARN("Reject ping from a stale incarnation of craned {}.",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
   if (!g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject ping from offline node {}", request->craned_id());
     response->set_ok(false);
@@ -2987,24 +3024,19 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
              crane::grpc::CranedPowerState_Name(request->state()));
 
   auto power_result = g_node_manager->UpdatePowerState(
-      request->craned_id(), request->generation(), request->state());
+      request->craned_id(), request->generation(), request->state(),
+      request->report_sequence());
   if (!power_result) {
-    CRANE_ERROR("Failed to persist power state of dynamic node {}: {}",
+    CRANE_ERROR("Failed to apply power state of node {}: {}",
                 request->craned_id(), power_result.error().description());
     response->set_ok(false);
     return grpc::Status::OK;
   }
   if (*power_result) {
+    // Stale incarnation or out-of-order report; acknowledged but ignored.
     response->set_ok(true);
     return grpc::Status::OK;
   }
-
-  auto craned_meta = g_meta_container->GetCranedMetaPtr(request->craned_id());
-  if (!craned_meta) {
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-  craned_meta->power_state = request->state();
 
   if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
     std::vector<crane::grpc::plugin::CranedEventInfo> event_list;

@@ -801,7 +801,7 @@ message DynamicNodeRecord {
   DynamicNodeOrigin origin = 6;
   DynamicNodeLifecycle lifecycle = 7;
   DynamicNodePowerState power_state = 8;
-  DynamicNodeSpec reported_spec = 9;
+  reserved 9;  // was reported_spec, never consumed once persisted
   DynamicNodeSpec effective_spec = 10;
   string pool = 11;
   string physical_hostname = 12;
@@ -821,6 +821,11 @@ message DynamicNodeRecord {
   // They replace the placeholder slots synthesized from spec counts in the
   // runtime topology.
   DedicatedResourceInNode registered_gres = 23;
+  // Peer address observed by the controller on the last Prepare/Register
+  // RPC. Used to reach the craned instead of resolving physical_hostname,
+  // which may not resolve to the connection source (NAT, multi-homing).
+  // Refreshed on every registration.
+  string observed_peer_address = 24;
 }
 
 message PartitionInfo {

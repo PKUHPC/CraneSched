@@ -7372,6 +7372,24 @@ void SchedulerAlgo::NodeSelect(
   for (const auto& job : job_ptr_vec) {
     if (!job->reason.empty()) continue;
 
+    // A job pinned to specific nodes can never start while fewer of them
+    // exist in the partition than the job needs, e.g. after pinned dynamic
+    // nodes were deleted. Distinguish this from a transient "Resource"
+    // shortage; re-creating the nodes makes the job schedulable again.
+    if (!job->included_nodes.empty() && job->reservation.empty()) {
+      size_t existing_nodes = 0;
+      if (auto it = part_node_ids_map.find(job->partition_id);
+          it != part_node_ids_map.end())
+        existing_nodes =
+            std::ranges::count_if(it->second, [&](const CranedId& craned_id) {
+              return job->included_nodes.contains(craned_id);
+            });
+      if (existing_nodes < job->node_num) {
+        job->reason = "BadConstraints";
+        continue;
+      }
+    }
+
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
       auto it = part_scheduler_map.find(job->partition_id);
@@ -7466,10 +7484,17 @@ void SchedulerAlgo::NodeSelect(
   if (!g_config.CtldConf.DynamicNodes.Enabled || !g_config.Plugin.Enabled ||
       g_plugin_client == nullptr)
     return;
-  std::unordered_set<CranedId> reserved_scale_up_nodes;
   // Partitions without any scalable dynamic node skip the per-job capacity
   // computation entirely.
   absl::flat_hash_map<PartitionId, bool> partition_scalable;
+
+  // Collect this round's demands and hand them to NodeManager in one batch
+  // (one lock, one persistence batch) in priority order: nodes claimed for
+  // an earlier job are not offered to later ones. Waking/powering nodes are
+  // never alive, so deferring the claims does not affect the normal node
+  // selection above.
+  std::vector<NodeManager::ScaleUpRequest> scale_up_requests;
+  std::vector<PdJobInScheduler*> scale_up_jobs;
   for (const auto& job : job_ptr_vec) {
     if (job->reason != "Resource" || !job->reservation.empty()) continue;
 
@@ -7479,17 +7504,13 @@ void SchedulerAlgo::NodeSelect(
       scalable_it->second = g_node_manager->HasScalableNodes(job->partition_id);
     if (!scalable_it->second) continue;
 
-    auto excluded_nodes = job->excluded_nodes;
-    excluded_nodes.insert(reserved_scale_up_nodes.begin(),
-                          reserved_scale_up_nodes.end());
-
     std::vector<uint32_t> available_node_task_counts;
     for (const auto* node_state :
          part_node_state_ptrs_map.at(job->partition_id)) {
       const auto& node_id = node_state->craned_id;
       if ((!job->included_nodes.empty() &&
            !job->included_nodes.contains(node_id)) ||
-          excluded_nodes.contains(node_id))
+          job->excluded_nodes.contains(node_id))
         continue;
 
       const auto& available = node_state->time_avail_res_map.begin()->second;
@@ -7514,29 +7535,40 @@ void SchedulerAlgo::NodeSelect(
       available_node_task_counts.emplace_back(tasks);
     }
 
-    auto scale_up = g_node_manager->RequestScaleUp(
-        job->partition_id, job->req_node_res_view, job->req_task_res_view,
-        job->ntasks_per_node_min, job->ntasks_per_node_max, job->node_num,
-        job->ntasks, available_node_task_counts, job->included_nodes,
-        excluded_nodes);
-    if (!scale_up) {
-      CRANE_WARN("Failed to request scale-up for pending job #{}: {}",
-                 job->job_id, scale_up.error().description());
-      continue;
-    }
-    reserved_scale_up_nodes.insert(scale_up->reserved_nodes.begin(),
-                                   scale_up->reserved_nodes.end());
-    for (const auto& target : scale_up->nodes_to_wake) {
+    scale_up_requests.emplace_back(NodeManager::ScaleUpRequest{
+        .partition = job->partition_id,
+        .node_resource = job->req_node_res_view,
+        .task_resource = job->req_task_res_view,
+        .min_tasks_per_node = job->ntasks_per_node_min,
+        .max_tasks_per_node = job->ntasks_per_node_max,
+        .node_count = job->node_num,
+        .task_count = job->ntasks,
+        .available_node_task_counts = std::move(available_node_task_counts),
+        .included_nodes = job->included_nodes,
+        .excluded_nodes = job->excluded_nodes});
+    scale_up_jobs.emplace_back(job);
+  }
+  if (scale_up_requests.empty()) return;
+
+  auto scale_up = g_node_manager->RequestScaleUp(scale_up_requests);
+  if (!scale_up) {
+    CRANE_WARN("Failed to request scale-up for {} pending jobs: {}",
+               scale_up_requests.size(), scale_up.error().description());
+    return;
+  }
+  for (size_t i = 0; i < scale_up->size(); ++i) {
+    const auto& result = (*scale_up)[i];
+    for (const auto& target : result.nodes_to_wake) {
       g_plugin_client->UpdatePowerStateHookAsync(
           target.node_id, crane::grpc::CranedControlState::CRANE_WAKE, true,
           true, kPowerControlProvider, target.generation);
     }
-    for (const auto& target : scale_up->nodes_to_power_on) {
+    for (const auto& target : result.nodes_to_power_on) {
       g_plugin_client->UpdatePowerStateHookAsync(
           target.node_id, crane::grpc::CranedControlState::CRANE_POWERON, true,
           true, kPowerControlProvider, target.generation);
     }
-    if (scale_up->in_progress) job->reason = "PoweringUp";
+    if (result.in_progress) scale_up_jobs[i]->reason = "PoweringUp";
   }
 }
 

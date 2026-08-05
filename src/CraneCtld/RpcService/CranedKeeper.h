@@ -233,6 +233,15 @@ class CranedKeeper {
 
   bool ForgetCraned(const CranedId &craned_id);
 
+  // Forcibly stops tracking the craned's connection, e.g. when the node is
+  // deleted: the stub is marked dead and unmapped so a same-name node
+  // re-created on another host can never reuse the connection to the old
+  // physical machine. Does not take the stub's registration lock (callers
+  // may hold NodeManager's mutex, which an in-flight registration acquires
+  // under that lock); NodeManager's record state is the authority that
+  // fences a racing registration.
+  void DisconnectCraned(const CranedId &craned_id);
+
   /**
    * Get the pointer to CranedStub.
    * @param craned_id the index of CranedStub
@@ -301,6 +310,13 @@ class CranedKeeper {
   Mutex m_connect_craned_mtx_ ABSL_ACQUIRED_BEFORE(m_unavail_craned_set_mtx_);
   NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connect_craned_mtx_);
+
+  // Stubs force-disconnected by DisconnectCraned. Their completion-queue
+  // state machine still holds a raw pointer via the in-flight tag, so they
+  // are parked here until that tag drains and the teardown path in the
+  // monitor thread releases them.
+  std::vector<std::shared_ptr<CranedStub>> m_zombie_stubs_
+      ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
   std::unordered_map<CranedId, PendingConnection> m_unavail_craned_set_

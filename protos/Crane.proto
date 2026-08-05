@@ -34,6 +34,10 @@ message StepStatusChangeRequest {
   string reason = 6;
   google.protobuf.Timestamp timestamp = 7;
   optional JobStatus final_status = 8;
+  // Session issued in CranedRegisterReply. Fences out uplink RPCs from a
+  // stale craned incarnation after the node was deleted or re-registered.
+  // Empty for static nodes.
+  string session_token = 9;
 }
 
 message StepStatusChangeReply {
@@ -107,6 +111,11 @@ message CranedRegisterRequest {
 
 message CranedRegisterReply {
   bool ok = 1;
+  // Session for this registration of a dynamic node; must be echoed in
+  // subsequent uplink RPCs (CranedPing, StepStatusChange). Rotates on every
+  // successful registration, so RPCs from a previous incarnation are
+  // rejected even within the same generation. Empty for static nodes.
+  string session_token = 2;
 }
 
 message PrepareCranedRegistrationRequest {
@@ -116,6 +125,11 @@ message PrepareCranedRegistrationRequest {
   string physical_hostname = 4;
   DynamicNodeSpec reported_spec = 5;
   repeated string requested_partitions = 6;
+  // Random identifier of one craned bootstrap attempt. A retry with the same
+  // nonce and physical hostname re-claims the pending lease (e.g. after the
+  // reply was lost) instead of leasing another node. Each retry still
+  // rotates the registration token: only its digest is stored server-side,
+  // so the original token cannot be returned twice.
   string client_nonce = 7;
   uint64 generation = 8;
 }
@@ -135,6 +149,8 @@ message PrepareCranedRegistrationReply {
 
 message CranedPingRequest {
   string craned_id = 1;
+  // See StepStatusChangeRequest.session_token.
+  string session_token = 2;
 }
 
 message CranedPingReply {
@@ -330,17 +346,17 @@ message QueryCranedInfoReply {
   repeated CranedInfo craned_info_list = 1;
 }
 
+// Admin-created nodes always start as powered-off FUTURE nodes with origin
+// DYNAMIC_ADMIN; the initial lifecycle and power state are therefore not
+// part of the request.
 message CreateNodesRequest {
   uint32 uid = 1;
   repeated string node_names = 2;
   DynamicNodeSpec spec = 3;
   repeated string partition_names = 4;
-  DynamicNodeOrigin origin = 5;
-  DynamicNodeLifecycle lifecycle = 6;
-  string pool = 7;
-  DynamicNodePowerState power_state = 8;
-  string provider = 9;
-  string provider_profile = 10;
+  string pool = 5;
+  string provider = 6;
+  string provider_profile = 7;
 }
 
 // Creation is all-or-nothing, so a single code/reason pair describes the
@@ -1383,6 +1399,11 @@ message PowerStateChangeRequest {
   string reason = 3;
   uint64 generation = 4;
   uint32 uid = 5;
+  // Per-node monotonic sequence assigned by the reporter. The controller
+  // rejects reports whose sequence is not greater than the last accepted
+  // one for the same generation, so reordered reports cannot regress the
+  // node's power state.
+  uint64 report_sequence = 6;
 }
 
 message PowerStateChangeReply {

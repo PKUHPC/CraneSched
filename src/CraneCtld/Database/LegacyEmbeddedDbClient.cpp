@@ -999,7 +999,6 @@ bool LegacyEmbeddedDbClient::RetrieveReservationInfo(
 bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
     std::unordered_map<CranedId, DynamicNodeRecord>* records,
     DynamicNodeGenerationMap* generation_high_watermarks) {
-  bool parse_ok = true;
   auto result = m_node_db_->IterateAllKv([&](std::string&& key,
                                              std::vector<uint8_t>&& value) {
     // BerkeleyDb writes keys with their NUL terminator (see BerkeleyDb::Store)
@@ -1009,7 +1008,6 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
     if (key.starts_with(kDynamicNodeGenerationPrefix)) {
       if (value.size() != sizeof(uint64_t)) {
         CRANE_ERROR("Invalid dynamic node generation entry for key {}.", key);
-        parse_ok = false;
         return true;
       }
       uint64_t generation;
@@ -1017,7 +1015,6 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
       std::string node_name = key.substr(kDynamicNodeGenerationPrefix.size());
       if (node_name.empty()) {
         CRANE_ERROR("Empty node name in dynamic node generation entry.");
-        parse_ok = false;
         return true;
       }
       auto& high_watermark = (*generation_high_watermarks)[node_name];
@@ -1028,14 +1025,18 @@ bool LegacyEmbeddedDbClient::RetrieveDynamicNodeRecords(
     DynamicNodeRecord record;
     if (record.ParseFromArray(value.data(), value.size()))
       records->emplace(std::move(key), std::move(record));
-    else {
-      CRANE_ERROR("Failed to parse dynamic node record for key {}.", key);
-      parse_ok = false;
-    }
+    else
+      // A corrupt value must not keep the controller from starting. The
+      // record stays invisible until it is overwritten by re-creating the
+      // node; its generation high watermark is a separate key and survives.
+      CRANE_ERROR(
+          "Failed to parse dynamic node record for key {}; the record is "
+          "ignored.",
+          key);
     return true;
   });
 
-  if (!result || !parse_ok) {
+  if (!result) {
     CRANE_ERROR("Failed to restore dynamic node records from embedded db.");
     return false;
   }

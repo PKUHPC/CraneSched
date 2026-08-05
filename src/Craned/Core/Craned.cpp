@@ -1389,9 +1389,9 @@ void ParseConfig(int argc, char** argv) {
     }
 
     auto stub = crane::grpc::CraneCtldForInternal::NewStub(channel);
-    // The nonce keys idempotent replay of the preparation request, and a
-    // replayed request returns the registration token, so it must be
-    // unguessable.
+    // The nonce identifies this bootstrap attempt: a retry with the same
+    // nonce re-claims the pending lease instead of leasing another node.
+    // Every preparation still rotates the registration token.
     g_config.DynamicRegistrationNonce = util::GenerateSecureRandomHex(16);
     crane::grpc::PrepareCranedRegistrationRequest request =
         Craned::BuildPrepareCranedRegistrationRequest();
@@ -1427,7 +1427,8 @@ void ParseConfig(int argc, char** argv) {
       g_config.DynamicRegistrationMode =
           crane::grpc::DYNAMIC_NODE_REGISTRATION_MODE_PRECREATED;
     }
-    g_config.DynamicRegistrationToken = reply.registration_token();
+    g_config.DynamicInitialLeaseToken = reply.registration_token();
+    g_config.DynamicInitialLeaseExpireUnixSec = reply.expire_time().seconds();
     g_config.Generation = reply.generation();
     g_config.DynamicPartitions.assign(reply.partition_names().begin(),
                                       reply.partition_names().end());

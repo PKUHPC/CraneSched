@@ -23,6 +23,7 @@
 
 #include <limits>
 #include <memory>
+#include <regex>
 
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
@@ -128,6 +129,9 @@ struct Config {
       struct AutoCreatePool {
         std::string Name;
         std::string NodeNamePattern;
+        // Compiled once at config load; every AUTO_CREATE preparation
+        // matches against it.
+        std::regex NodeNameRegex;
         std::vector<PartitionId> Partitions;
         std::unordered_set<std::string> RequiredFeatures;
         std::unordered_set<std::string> AllowedFeatures;

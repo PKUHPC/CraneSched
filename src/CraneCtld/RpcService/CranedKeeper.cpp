@@ -731,11 +731,25 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
             WriterLock lock(&m_connect_craned_mtx_);
             auto it = m_connected_craned_id_stub_map_.find(craned_id);
             if (it != m_connected_craned_id_stub_map_.end() &&
-                it->second.get() == craned)
+                it->second.get() == craned) {
               retained_stub = it->second;
+              m_connected_craned_id_stub_map_.erase(it);
+              disconnected_cb = m_craned_disconnected_cb_;
+            } else {
+              // The stub was force-disconnected (DisconnectCraned, which
+              // already fired the callback) or a newer stub took the name;
+              // the newer entry must not be erased. Release a parked zombie
+              // now that its tag chain has drained, but keep it alive via
+              // retained_stub until the registration lock is dropped.
+              auto zombie = std::ranges::find_if(
+                  m_zombie_stubs_,
+                  [craned](const auto &stub) { return stub.get() == craned; });
+              if (zombie != m_zombie_stubs_.end()) {
+                retained_stub = std::move(*zombie);
+                m_zombie_stubs_.erase(zombie);
+              }
+            }
             craned->Fini();
-            m_connected_craned_id_stub_map_.erase(craned_id);
-            disconnected_cb = m_craned_disconnected_cb_;
           }
           if (disconnected_cb)
             g_thread_pool->detach_task([callback = std::move(disconnected_cb),
@@ -951,11 +965,22 @@ bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
                        "Craned {} stub destroyed: timeout.", craned_id);
     auto it = m_connected_craned_id_stub_map_.find(craned_id);
     if (it != m_connected_craned_id_stub_map_.end() &&
-        it->second.get() == craned)
+        it->second.get() == craned) {
       retained_stub = it->second;
+      m_connected_craned_id_stub_map_.erase(it);
+      disconnected_cb = m_craned_disconnected_cb_;
+    } else {
+      // Force-disconnected or replaced by a newer stub of the same name;
+      // see the same branch in StateMonitorThreadFunc_.
+      auto zombie = std::ranges::find_if(
+          m_zombie_stubs_,
+          [craned](const auto &stub) { return stub.get() == craned; });
+      if (zombie != m_zombie_stubs_.end()) {
+        retained_stub = std::move(*zombie);
+        m_zombie_stubs_.erase(zombie);
+      }
+    }
     craned->Fini();
-    m_connected_craned_id_stub_map_.erase(craned_id);
-    disconnected_cb = m_craned_disconnected_cb_;
   }
   if (disconnected_cb)
     g_thread_pool->detach_task([callback = std::move(disconnected_cb),
@@ -993,6 +1018,35 @@ bool CranedKeeper::ForgetCraned(const CranedId &craned_id) {
   util::lock_guard cache_lock(m_craned_id_to_ip_cache_map_mtx_);
   m_craned_id_to_ip_cache_map_.erase(craned_id);
   return true;
+}
+
+void CranedKeeper::DisconnectCraned(const CranedId &craned_id) {
+  std::function<void(CranedId)> disconnected_cb;
+  {
+    WriterLock connect_lock(&m_connect_craned_mtx_);
+    {
+      util::lock_guard unavail_lock(m_unavail_craned_set_mtx_);
+      m_unavail_craned_set_.erase(craned_id);
+    }
+    {
+      util::lock_guard cache_lock(m_craned_id_to_ip_cache_map_mtx_);
+      m_craned_id_to_ip_cache_map_.erase(craned_id);
+    }
+
+    auto it = m_connected_craned_id_stub_map_.find(craned_id);
+    if (it == m_connected_craned_id_stub_map_.end()) return;
+
+    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                       "Craned {} stub force-disconnected.", craned_id);
+    it->second->m_disconnected_ = true;
+    it->second->m_registered_ = false;
+    m_zombie_stubs_.emplace_back(std::move(it->second));
+    m_connected_craned_id_stub_map_.erase(it);
+    disconnected_cb = m_craned_disconnected_cb_;
+  }
+  if (disconnected_cb)
+    g_thread_pool->detach_task([callback = std::move(disconnected_cb),
+                                craned_id] { callback(craned_id); });
 }
 
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(

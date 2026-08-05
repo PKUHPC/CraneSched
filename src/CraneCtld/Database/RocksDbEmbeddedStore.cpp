@@ -394,14 +394,14 @@ bool RocksDbEmbeddedStore::RetrieveDynamicNodeRecords(
     if (key.starts_with(kDynamicNodeGenerationPrefix)) {
       if (it->value().size() != sizeof(uint64_t)) {
         CRANE_ERROR("Invalid dynamic node generation marker {}", key);
-        return false;
+        continue;
       }
       uint64_t generation;
       std::memcpy(&generation, it->value().data(), sizeof(generation));
       std::string node_name = key.substr(kDynamicNodeGenerationPrefix.size());
       if (node_name.empty()) {
         CRANE_ERROR("Dynamic node generation marker has an empty node name");
-        return false;
+        continue;
       }
       auto& high_watermark = (*generation_high_watermarks)[node_name];
       high_watermark = std::max(high_watermark, generation);
@@ -409,7 +409,16 @@ bool RocksDbEmbeddedStore::RetrieveDynamicNodeRecords(
     }
 
     DynamicNodeRecord record;
-    if (!ParseProto_(it->value().ToString(), &record, key)) return false;
+    if (!ParseProto_(it->value().ToString(), &record, key)) {
+      // A corrupt value must not keep the controller from starting. The
+      // record stays invisible until it is overwritten by re-creating the
+      // node; its generation high watermark is a separate key and survives.
+      CRANE_ERROR(
+          "Failed to parse dynamic node record for key {}; the record is "
+          "ignored.",
+          key);
+      continue;
+    }
     records->emplace(std::move(key), std::move(record));
   }
   if (!it->status().ok()) {

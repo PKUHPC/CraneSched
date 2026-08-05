@@ -61,9 +61,33 @@ class CtldClientStateMachine {
 
   struct RegisterArg {
     RegToken token;
+    // Registration token of the dynamic lease adopted by this handshake;
+    // empty for static nodes.
+    std::string registration_token;
     std::set<job_id_t> lost_jobs;
     std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps;
   };
+
+  // Lease returned by one PrepareCranedRegistration RPC. A lease is bound
+  // to the handshake (identified by its RegToken) that negotiated it and is
+  // consumed by that handshake's register step.
+  struct DynamicLease {
+    std::string registration_token;
+    std::chrono::system_clock::time_point expire_time;
+  };
+
+  // Installs the lease of the startup preparation before the first
+  // handshake runs, so the first handshake does not prepare again.
+  void SetInitialDynamicLease(DynamicLease&& lease);
+
+  // Adopts the lease negotiated by the Prepare RPC of the handshake
+  // identified by epoch_token. Returns false and discards the lease if a
+  // newer handshake has started meanwhile.
+  bool AdoptDynamicLease(const RegToken& epoch_token, DynamicLease&& lease);
+
+  // Returns the stored unexpired lease token if the handshake identified by
+  // epoch_token is still the current one.
+  std::optional<std::string> GetDynamicLeaseToken(const RegToken& epoch_token);
 
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
@@ -138,6 +162,7 @@ class CtldClientStateMachine {
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
+  std::optional<DynamicLease> m_dynamic_lease_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
 
@@ -218,8 +243,15 @@ class CtldClient {
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(
-      RegToken const& token, std::set<job_id_t> const& lost_jobs,
+      RegToken const& token, std::string const& registration_token,
+      std::set<job_id_t> const& lost_jobs,
       std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps);
+
+  // Session of the current registration, echoed in uplink RPCs so the
+  // controller can fence out a stale incarnation of this node. Written by
+  // CranedRegister_, read by the ping/status-change senders.
+  void SetSessionToken_(std::string token);
+  std::string GetSessionToken_();
 
   void AsyncSendThread_();
   bool Ping_();
@@ -244,6 +276,15 @@ class CtldClient {
   std::unique_ptr<CraneCtldForInternal::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  absl::Mutex m_session_token_mtx_;
+  std::string m_session_token_ ABSL_GUARDED_BY(m_session_token_mtx_);
+
+  // Consecutive permanent (parameter/spec mismatch) preparation rejections.
+  // Such rejections do not resolve by retrying; craned exits after a few of
+  // them instead of hammering the controller forever.
+  static constexpr uint32_t kMaxPermanentPrepareRejects = 5;
+  std::atomic_uint32_t m_permanent_prepare_rejects_{0};
 
   std::atomic<bool> m_grpc_has_initialized_;
   std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;

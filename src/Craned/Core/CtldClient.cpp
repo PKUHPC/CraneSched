@@ -281,6 +281,34 @@ bool CtldClientStateMachine::IsReadyNow() {
   return m_state_ == State::READY;
 }
 
+void CtldClientStateMachine::SetInitialDynamicLease(DynamicLease&& lease) {
+  absl::MutexLock lk(&m_mtx_);
+  m_dynamic_lease_ = std::move(lease);
+}
+
+bool CtldClientStateMachine::AdoptDynamicLease(const RegToken& epoch_token,
+                                               DynamicLease&& lease) {
+  absl::MutexLock lk(&m_mtx_);
+  if (!m_reg_token_.has_value() || m_reg_token_.value() != epoch_token) {
+    CRANE_LOGGER_DEBUG(m_logger_,
+                       "Discard the dynamic lease of a superseded handshake.");
+    return false;
+  }
+  m_dynamic_lease_ = std::move(lease);
+  return true;
+}
+
+std::optional<std::string> CtldClientStateMachine::GetDynamicLeaseToken(
+    const RegToken& epoch_token) {
+  absl::MutexLock lk(&m_mtx_);
+  if (!m_reg_token_.has_value() || m_reg_token_.value() != epoch_token)
+    return std::nullopt;
+  if (!m_dynamic_lease_.has_value() ||
+      m_dynamic_lease_->expire_time <= std::chrono::system_clock::now())
+    return std::nullopt;
+  return m_dynamic_lease_->registration_token;
+}
+
 void CtldClientStateMachine::ActionRequestConfig_() {
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ctld client state machine has entered state {}, start "
@@ -340,12 +368,23 @@ void CtldClientStateMachine::ActionRegister_(
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ctld client state machine has entered state {}",
                      StateToString(m_state_));
+
+  // Consume the lease negotiated by this handshake: whatever the register
+  // outcome is, a following handshake has to prepare a fresh lease.
+  std::string registration_token;
+  if (m_dynamic_lease_.has_value()) {
+    registration_token = std::move(m_dynamic_lease_->registration_token);
+    m_dynamic_lease_.reset();
+  }
+
   if (m_action_register_cb_)
-    g_thread_pool->detach_task(
-        [tok = m_reg_token_.value(), lost_jobs, lost_steps, this] mutable {
-          m_action_register_cb_(
-              {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_steps});
-        });
+    g_thread_pool->detach_task([tok = m_reg_token_.value(), registration_token,
+                                lost_jobs, lost_steps, this] mutable {
+      m_action_register_cb_({.token = tok,
+                             .registration_token = registration_token,
+                             .lost_jobs = lost_jobs,
+                             .lost_steps = lost_steps});
+    });
 }
 
 void CtldClientStateMachine::ActionReady_() {
@@ -505,6 +544,13 @@ CtldClient::~CtldClient() {
 }
 
 void CtldClient::Init() {
+  if (g_config.Dynamic && !g_config.DynamicInitialLeaseToken.empty()) {
+    g_ctld_client_sm->SetInitialDynamicLease(
+        {std::move(g_config.DynamicInitialLeaseToken),
+         std::chrono::system_clock::time_point(
+             std::chrono::seconds(g_config.DynamicInitialLeaseExpireUnixSec))});
+  }
+
   g_ctld_client_sm->SetActionRequestConfigCb(
       [this](RegToken const& token) { RequestConfigFromCtld_(token); });
 
@@ -868,7 +914,8 @@ void CtldClient::Init() {
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
+        CranedRegister_(arg.token, arg.registration_token, arg.lost_jobs,
+                        arg.lost_steps);
       });
 }
 
@@ -996,56 +1043,91 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                      "Requesting config from CraneCtld...");
 
+  std::string registration_token;
   if (g_config.Dynamic) {
-    crane::grpc::PrepareCranedRegistrationRequest prepare_request =
-        BuildPrepareCranedRegistrationRequest();
+    // Reuse the unconsumed lease of this handshake epoch if there is one
+    // (the startup preparation, or a handshake that never reached the
+    // register step); otherwise negotiate a fresh lease.
+    auto lease_token = g_ctld_client_sm->GetDynamicLeaseToken(token);
+    if (lease_token.has_value()) {
+      registration_token = std::move(lease_token.value());
+    } else {
+      crane::grpc::PrepareCranedRegistrationRequest prepare_request =
+          BuildPrepareCranedRegistrationRequest();
 
-    grpc::ClientContext prepare_context;
-    prepare_context.set_deadline(
-        std::chrono::system_clock::now() +
-        std::chrono::seconds(kCranedRpcTimeoutSeconds));
-    crane::grpc::PrepareCranedRegistrationReply prepare_reply;
-    auto prepare_status = m_stub_->PrepareCranedRegistration(
-        &prepare_context, prepare_request, &prepare_reply);
-    if (!prepare_status.ok() || !prepare_reply.ok()) {
-      if (prepare_status.ok() &&
-          prepare_reply.code() == crane::grpc::ERR_NODE_STALE_GENERATION) {
+      grpc::ClientContext prepare_context;
+      prepare_context.set_deadline(
+          std::chrono::system_clock::now() +
+          std::chrono::seconds(kCranedRpcTimeoutSeconds));
+      crane::grpc::PrepareCranedRegistrationReply prepare_reply;
+      auto prepare_status = m_stub_->PrepareCranedRegistration(
+          &prepare_context, prepare_request, &prepare_reply);
+      if (!prepare_status.ok() || !prepare_reply.ok()) {
+        if (prepare_status.ok() &&
+            prepare_reply.code() == crane::grpc::ERR_NODE_STALE_GENERATION) {
+          CRANE_LOGGER_ERROR(
+              g_runtime_status.conn_logger,
+              "Dynamic node {} generation {} is stale: {}. Shutting down to "
+              "negotiate a new identity on restart; craned must run under a "
+              "service manager that restarts it automatically.",
+              g_config.CranedIdOfThisNode, g_config.Generation,
+              prepare_reply.reason());
+          raise(SIGTERM);
+          return false;
+        }
+        if (prepare_status.ok() &&
+            prepare_reply.code() == crane::grpc::ERR_INVALID_PARAM &&
+            ++m_permanent_prepare_rejects_ >= kMaxPermanentPrepareRejects) {
+          CRANE_LOGGER_ERROR(
+              g_runtime_status.conn_logger,
+              "Dynamic registration of {} was rejected {} consecutive times "
+              "with a permanent error: {}. Shutting down; fix the node "
+              "definition or the local configuration before restarting.",
+              g_config.CranedIdOfThisNode, kMaxPermanentPrepareRejects,
+              prepare_reply.reason());
+          raise(SIGTERM);
+          return false;
+        }
+        CRANE_LOGGER_WARN(g_runtime_status.conn_logger,
+                          "Failed to renew dynamic registration for {}: {}",
+                          g_config.CranedIdOfThisNode,
+                          prepare_status.ok() ? prepare_reply.reason()
+                                              : prepare_status.error_message());
+        return false;
+      }
+      m_permanent_prepare_rejects_ = 0;
+      // Only reachable with a runtime mode of AUTO_CREATE: the precreated
+      // mode requests its own name back and fails above otherwise.
+      if (prepare_reply.node_name() != g_config.CranedIdOfThisNode ||
+          prepare_reply.generation() != g_config.Generation) {
         CRANE_LOGGER_ERROR(
             g_runtime_status.conn_logger,
-            "Dynamic node {} generation {} is stale: {}. Shutting down to "
-            "negotiate a new identity on restart.",
+            "Dynamic registration identity changed from {} generation {} to "
+            "{} generation {}. Shutting down to adopt the new identity on "
+            "restart; craned must run under a service manager that restarts "
+            "it automatically.",
             g_config.CranedIdOfThisNode, g_config.Generation,
-            prepare_reply.reason());
+            prepare_reply.node_name(), prepare_reply.generation());
         raise(SIGTERM);
         return false;
       }
-      CRANE_LOGGER_WARN(g_runtime_status.conn_logger,
-                        "Failed to renew dynamic registration for {}: {}",
-                        g_config.CranedIdOfThisNode,
-                        prepare_status.ok() ? prepare_reply.reason()
-                                            : prepare_status.error_message());
-      return false;
+      registration_token = prepare_reply.registration_token();
+      if (!g_ctld_client_sm->AdoptDynamicLease(
+              token,
+              {registration_token,
+               std::chrono::system_clock::time_point(std::chrono::seconds(
+                   prepare_reply.expire_time().seconds()))})) {
+        // A newer handshake owns the connection; abandon this one.
+        return false;
+      }
     }
-    if (prepare_reply.node_name() != g_config.CranedIdOfThisNode ||
-        prepare_reply.generation() != g_config.Generation) {
-      CRANE_LOGGER_ERROR(
-          g_runtime_status.conn_logger,
-          "Dynamic registration identity changed from {} generation {} to {} "
-          "generation {}. Shutting down to adopt the new identity on restart.",
-          g_config.CranedIdOfThisNode, g_config.Generation,
-          prepare_reply.node_name(), prepare_reply.generation());
-      raise(SIGTERM);
-      return false;
-    }
-    g_config.DynamicRegistrationToken = prepare_reply.registration_token();
   }
 
   crane::grpc::CranedTriggerReverseConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
   req.set_generation(g_config.Generation);
-  if (g_config.Dynamic)
-    req.set_registration_token(g_config.DynamicRegistrationToken);
+  if (g_config.Dynamic) req.set_registration_token(registration_token);
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -1065,7 +1147,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 }
 
 bool CtldClient::CranedRegister_(
-    RegToken const& token, std::set<job_id_t> const& lost_jobs,
+    RegToken const& token, std::string const& registration_token,
+    std::set<job_id_t> const& lost_jobs,
     std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps) {
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger, "Sending CranedRegister.");
 
@@ -1074,7 +1157,7 @@ bool CtldClient::CranedRegister_(
   *ready_request.mutable_token() = token;
   ready_request.set_generation(g_config.Generation);
   if (g_config.Dynamic)
-    ready_request.set_registration_token(g_config.DynamicRegistrationToken);
+    ready_request.set_registration_token(registration_token);
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
   auto& dres = g_config.CranedRes.at(g_config.CranedIdOfThisNode)->GetGres();
@@ -1123,7 +1206,21 @@ bool CtldClient::CranedRegister_(
     return false;
   }
 
+  // Adopt the session before the state machine turns READY and the uplink
+  // senders (ping, step status changes) start using it.
+  if (ready_reply.ok()) SetSessionToken_(ready_reply.session_token());
+
   return g_ctld_client_sm->EvGetRegisterReply(ready_reply, token);
+}
+
+void CtldClient::SetSessionToken_(std::string token) {
+  absl::MutexLock lock(&m_session_token_mtx_);
+  m_session_token_ = std::move(token);
+}
+
+std::string CtldClient::GetSessionToken_() {
+  absl::MutexLock lock(&m_session_token_mtx_);
+  return m_session_token_;
 }
 
 void CtldClient::AsyncSendThread_() {
@@ -1249,6 +1346,7 @@ bool CtldClient::SendStatusChanges_(
     forward_span.SetAttribute("enqueue_ts_ms", status_change.enqueue_ts_ms);
 
     request.set_craned_id(m_craned_id_);
+    request.set_session_token(GetSessionToken_());
     request.set_job_id(status_change.job_id);
     request.set_step_id(status_change.step_id);
     request.set_new_status(status_change.new_status);
@@ -1417,6 +1515,7 @@ bool CtldClient::Ping_() {
 
   crane::grpc::CranedPingRequest req;
   req.set_craned_id(m_craned_id_);
+  req.set_session_token(GetSessionToken_());
   crane::grpc::CranedPingReply reply;
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                      "Sending CranedPing request to CraneCtlD.");

@@ -161,11 +161,9 @@ bool PowerActionExpired(const DynamicNodeRecord& record) {
          absl::ToUnixSeconds(absl::Now());
 }
 
-const DynamicNodeSpec& EffectiveSpec(const DynamicNodeRecord& record) {
-  return record.has_effective_spec() ? record.effective_spec() : record.spec();
-}
-
-bool HasRequestedPartition(
+// Whether every requested partition is available on the node; an empty
+// request imposes no constraint.
+bool RequestedPartitionsAreSubset(
     const google::protobuf::RepeatedPtrField<std::string>& requested,
     const google::protobuf::RepeatedPtrField<std::string>& available) {
   if (requested.empty()) return true;
@@ -190,12 +188,12 @@ bool ResetRegistrationState(DynamicNodeRecord* record) {
 
   changed |= record->lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE ||
              record->power_state() != DYNAMIC_NODE_POWER_STATE_OFF ||
-             record->has_reported_spec() ||
-             !record->physical_hostname().empty();
+             !record->physical_hostname().empty() ||
+             !record->observed_peer_address().empty();
   record->set_lifecycle(DYNAMIC_NODE_LIFECYCLE_FUTURE);
   record->set_power_state(DYNAMIC_NODE_POWER_STATE_OFF);
-  record->clear_reported_spec();
   record->clear_physical_hostname();
+  record->clear_observed_peer_address();
   return changed;
 }
 
@@ -291,10 +289,12 @@ CraneExpectedRich<void> NodeManager::ValidateReportedSpec_(
         FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
                       "Reported memory {} is smaller than configured {}",
                       reported.memory_bytes(), expected.memory_bytes()));
-  if (reported.sockets() != expected.sockets())
+  // Like CPU and memory, more sockets than configured are acceptable:
+  // virtualized nodes often cannot report their physical topology.
+  if (reported.sockets() < expected.sockets())
     return std::unexpected(
         FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
-                      "Reported socket count {} does not match configured {}",
+                      "Reported socket count {} is smaller than configured {}",
                       reported.sockets(), expected.sockets()));
   if (!GresMatch_(expected.gres(), reported.gres()))
     return std::unexpected(
@@ -376,16 +376,25 @@ bool NodeManager::Init() {
   std::unordered_set<CranedId> quarantined;
   size_t present_node_count = 0;
   for (auto& [node_id, record] : records) {
-    if (node_id != record.node_name()) {
-      CRANE_ERROR("Dynamic node record key {} does not match node name {}.",
-                  node_id, record.node_name());
-      return false;
-    }
+    // A record newer than this binary cannot be interpreted safely; this is
+    // the only condition that refuses startup. Every other invalid record
+    // is quarantined instead: kept out of the runtime topology, barred from
+    // registration and leasing, but still deletable, so one bad record can
+    // never make the whole controller unavailable.
     if (record.schema_version() > kDynamicNodeSchemaVersion) {
       CRANE_ERROR(
           "Dynamic node {} has schema version {} newer than supported {}.",
           node_id, record.schema_version(), kDynamicNodeSchemaVersion);
       return false;
+    }
+    if (node_id != record.node_name()) {
+      CRANE_ERROR(
+          "Dynamic node record key {} does not match node name {}; the node "
+          "is quarantined and can only be deleted.",
+          node_id, record.node_name());
+      quarantined.emplace(node_id);
+      ++present_node_count;
+      continue;
     }
     bool changed = false;
     if (record.schema_version() != kDynamicNodeSchemaVersion) {
@@ -407,15 +416,23 @@ bool NodeManager::Init() {
       continue;
     }
     if (g_config.Nodes.contains(node_id)) {
-      CRANE_ERROR("Dynamic node {} conflicts with a static node.", node_id);
-      return false;
+      CRANE_ERROR(
+          "Dynamic node {} conflicts with a static node; the node is "
+          "quarantined and can only be deleted.",
+          node_id);
+      quarantined.emplace(node_id);
+      ++present_node_count;
+      continue;
     }
     if (!record.physical_hostname().empty() &&
         g_config.Nodes.contains(record.physical_hostname())) {
       CRANE_ERROR(
-          "Physical host {} of dynamic node {} is configured as static.",
+          "Physical host {} of dynamic node {} is configured as static; the "
+          "node is quarantined and can only be deleted.",
           record.physical_hostname(), node_id);
-      return false;
+      quarantined.emplace(node_id);
+      ++present_node_count;
+      continue;
     }
 
     auto missing_partition = std::ranges::find_if(
@@ -432,18 +449,26 @@ bool NodeManager::Init() {
     } else {
       auto result = ValidatePresentRecord_(record);
       if (!result) {
-        CRANE_ERROR("Invalid dynamic node {}: {}", node_id,
-                    result.error().description());
-        return false;
+        CRANE_ERROR(
+            "Invalid dynamic node {}: {}. The node is quarantined and can "
+            "only be deleted.",
+            node_id, result.error().description());
+        quarantined.emplace(node_id);
+        ++present_node_count;
+        continue;
       }
     }
     if (!record.physical_hostname().empty()) {
       auto [it, inserted] =
           physical_hosts.emplace(record.physical_hostname(), node_id);
       if (!inserted) {
-        CRANE_ERROR("Dynamic nodes {} and {} use the same physical host {}.",
-                    it->second, node_id, record.physical_hostname());
-        return false;
+        CRANE_ERROR(
+            "Dynamic nodes {} and {} use the same physical host {}; node {} "
+            "is quarantined and can only be deleted.",
+            it->second, node_id, record.physical_hostname(), node_id);
+        quarantined.emplace(node_id);
+        ++present_node_count;
+        continue;
       }
     }
     ++present_node_count;
@@ -508,6 +533,7 @@ void NodeManager::ReconcileThreadFunc_() {
         CRANE_WARN("Failed to release expired dynamic registration leases: {}",
                    lease_result.error().description());
       CleanupExpiredTombstonesNoLock_();
+      ReconcileDisconnectedNodesNoLock_();
     }
     if (absl::Now() - last_plugin_reconcile >= plugin_reconcile_period) {
       last_plugin_reconcile = absl::Now();
@@ -598,36 +624,13 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
          "Duplicate node names are not allowed");
     return reply;
   }
-  if (!request.has_spec() || request.spec().cpu_count() == 0 ||
-      request.spec().memory_bytes() == 0 || request.spec().sockets() == 0 ||
-      request.spec().sockets() > request.spec().cpu_count()) {
-    fail(crane::grpc::ERR_INVALID_PARAM,
-         "CPU, memory and sockets must form a valid node spec");
-    return reply;
-  }
-  if (request.partition_names().empty()) {
-    fail(crane::grpc::ERR_INVALID_PARAM,
-         "At least one partition must be specified");
-    return reply;
-  }
-  if (HasDuplicates(request.partition_names())) {
-    fail(crane::grpc::ERR_INVALID_PARAM,
-         "Duplicate partitions are not allowed");
-    return reply;
-  }
-  for (const auto& partition_id : request.partition_names()) {
-    if (!g_config.Partitions.contains(partition_id)) {
-      fail(crane::grpc::ERR_INVALID_PARAM,
-           fmt::format("Partition {} does not exist", partition_id));
-      return reply;
-    }
-  }
+  // Spec, partition and feature validity are checked per record by
+  // ValidatePresentRecord_ below, the same authority the startup recovery
+  // uses.
 
-  size_t dynamic_node_count = std::ranges::count_if(
-      records_,
-      [](const auto& entry) { return IsDynamicRecordPresent(entry.second); });
   if (g_config.CtldConf.MaxNodeCount != 0 &&
-      g_config.Nodes.size() + dynamic_node_count + request.node_names_size() >
+      g_config.Nodes.size() + CountPresentNodesNoLock_() +
+              request.node_names_size() >
           g_config.CtldConf.MaxNodeCount) {
     fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
          fmt::format("MaxNodeCount {} would be exceeded",
@@ -638,11 +641,6 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
   std::vector<DynamicNodeRecord> new_records;
   new_records.reserve(request.node_names_size());
   for (const auto& node_id : request.node_names()) {
-    auto name_result = ValidateNodeName(node_id);
-    if (!name_result) {
-      fail(name_result.error().code(), name_result.error().description());
-      return reply;
-    }
     if (g_config.Nodes.contains(node_id)) {
       fail(crane::grpc::ERR_NODE_ALREADY_EXISTS,
            fmt::format("Node {} is static", node_id));
@@ -669,30 +667,8 @@ crane::grpc::CreateNodesReply NodeManager::CreateNodes(
     *record.mutable_spec() = request.spec();
     record.mutable_partition_names()->CopyFrom(request.partition_names());
     record.set_generation(*generation);
-    record.set_origin(request.origin() ==
-                              crane::grpc::DYNAMIC_NODE_ORIGIN_UNSPECIFIED
-                          ? DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN
-                          : request.origin());
-    if (record.origin() != DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN) {
-      fail(crane::grpc::ERR_INVALID_PARAM,
-           "Only administrator-created dynamic nodes can be created");
-      return reply;
-    }
-    record.set_lifecycle(request.lifecycle() ==
-                                 crane::grpc::DYNAMIC_NODE_LIFECYCLE_UNSPECIFIED
-                             ? DYNAMIC_NODE_LIFECYCLE_FUTURE
-                             : request.lifecycle());
-    if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE) {
-      fail(crane::grpc::ERR_INVALID_PARAM,
-           "New dynamic nodes must start in FUTURE state");
-      return reply;
-    }
-    if (request.power_state() != DYNAMIC_NODE_POWER_STATE_UNSPECIFIED &&
-        request.power_state() != DYNAMIC_NODE_POWER_STATE_OFF) {
-      fail(crane::grpc::ERR_INVALID_PARAM,
-           "New dynamic nodes must start powered off");
-      return reply;
-    }
+    record.set_origin(DYNAMIC_NODE_ORIGIN_DYNAMIC_ADMIN);
+    record.set_lifecycle(DYNAMIC_NODE_LIFECYCLE_FUTURE);
     record.set_power_state(DYNAMIC_NODE_POWER_STATE_OFF);
     record.set_pool(request.pool());
     record.set_provider(request.provider());
@@ -756,18 +732,22 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
   std::vector<PendingDeletion> pending;
   pending.reserve(request.node_names_size());
   for (const auto& node_id : request.node_names()) {
-    if (g_config.Nodes.contains(node_id)) {
+    auto it = records_.find(node_id);
+    const bool quarantined = quarantined_nodes_.contains(node_id);
+    // A quarantined record may carry a name that collides with a static
+    // node (that is why it was quarantined); deleting it must stay
+    // possible, so the catalog is consulted before the static check.
+    if (g_config.Nodes.contains(node_id) &&
+        !(quarantined && it != records_.end())) {
       reject(node_id, crane::grpc::ERR_NODE_NOT_DYNAMIC, "Node is static");
       continue;
     }
-    auto it = records_.find(node_id);
     if (it == records_.end() ||
         it->second.lifecycle() == DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) {
       reject(node_id, crane::grpc::ERR_INVALID_PARAM, "Node does not exist");
       continue;
     }
     const DynamicNodeRecord& record = it->second;
-    const bool quarantined = quarantined_nodes_.contains(node_id);
     if (!quarantined) {
       if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
           !RegistrationLeaseExpired_(record)) {
@@ -824,16 +804,6 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     });
   }
 
-  // An idle node may still be connected when it is deleted; no prior drain
-  // or disconnect is required. Take it offline now so the topology removal
-  // below sees it dead; the craned learns on its next ping renewal that its
-  // generation is stale and shuts itself down, and the leftover stub and
-  // address cache entry are dropped once the connection actually breaks.
-  for (const auto& node : pending) {
-    if (!g_craned_keeper->ForgetCraned(node.node_id))
-      g_meta_container->CranedDown(node.node_id);
-  }
-
   std::vector<DynamicNodeRecord> deleting_records;
   deleting_records.reserve(pending.size());
   for (const auto& node : pending) {
@@ -849,6 +819,9 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     deleting_records.emplace_back(std::move(record));
   }
   if (!g_embedded_db_client->StoreDynamicNodeRecords(deleting_records)) {
+    // Full rollback: nothing has been taken offline or removed yet, and the
+    // res-reduce event emitted with the deleting fence is conservative — it
+    // only voids the in-flight scheduling round's selections of the node.
     std::vector<CranedId> newly_deleting;
     for (const auto& node : pending)
       if (node.newly_deleting) newly_deleting.emplace_back(node.node_id);
@@ -860,6 +833,16 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
   }
   for (const auto& record : deleting_records)
     records_[record.node_name()] = record;
+
+  // The deletion intent is durable; only now take runtime side effects. An
+  // idle node may still be connected when it is deleted; no prior drain or
+  // disconnect is required. Close its connection and take it offline so the
+  // topology removal below sees it dead; the craned learns on its next
+  // handshake that its generation is stale and shuts itself down.
+  for (const auto& node : pending) {
+    g_craned_keeper->DisconnectCraned(node.node_id);
+    g_meta_container->CranedDown(node.node_id);
+  }
 
   {
     std::vector<CranedId> runtime_nodes;
@@ -918,6 +901,10 @@ crane::grpc::DeleteNodesReply NodeManager::DeleteNodes(
     PublishNodeDefinition(record,
                           crane::grpc::plugin::NODE_DEFINITION_ACTION_REMOVE);
   }
+  {
+    absl::MutexLock session_lock(&session_mtx_);
+    for (const auto& node : pending) sessions_.erase(node.node_id);
+  }
   for (const auto& node : pending) {
     quarantined_nodes_.erase(node.node_id);
     reply.add_deleted_nodes(node.node_id);
@@ -933,8 +920,14 @@ void NodeManager::CleanupExpiredTombstonesNoLock_() {
   std::vector<DynamicNodeRecord> expired;
   for (const auto& record : records_ | std::views::values) {
     if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_TOMBSTONE) continue;
-    if (!record.has_tombstone_time() ||
-        record.tombstone_time().seconds() <= expire_before)
+    // MarkRecordTombstone always stamps the time; a missing one indicates
+    // corrupt data and the record is kept rather than silently purged.
+    if (!record.has_tombstone_time()) {
+      CRANE_ERROR("Tombstone of dynamic node {} has no tombstone time.",
+                  record.node_name());
+      continue;
+    }
+    if (record.tombstone_time().seconds() <= expire_before)
       expired.emplace_back(record);
   }
   if (expired.empty()) return;
@@ -943,6 +936,12 @@ void NodeManager::CleanupExpiredTombstonesNoLock_() {
     return;
   }
   for (const auto& record : expired) records_.erase(record.node_name());
+}
+
+size_t NodeManager::CountPresentNodesNoLock_() const {
+  return std::ranges::count_if(records_, [](const auto& entry) {
+    return IsDynamicRecordPresent(entry.second);
+  });
 }
 
 CraneExpectedRich<uint64_t> NodeManager::NextGenerationNoLock_(
@@ -990,7 +989,8 @@ CraneExpectedRich<void> NodeManager::ReleaseExpiredRegistrationLeasesNoLock_() {
 
 crane::grpc::PrepareCranedRegistrationReply
 NodeManager::PrepareCranedRegistration(
-    const crane::grpc::PrepareCranedRegistrationRequest& request) {
+    const crane::grpc::PrepareCranedRegistrationRequest& request,
+    const std::string& observed_peer_address) {
   crane::grpc::PrepareCranedRegistrationReply reply;
   const auto fail = [&reply](crane::grpc::ErrCode code,
                              std::string_view reason) {
@@ -1056,9 +1056,9 @@ NodeManager::PrepareCranedRegistration(
     std::string token = GenerateRegistrationToken_();
     record->set_lifecycle(DYNAMIC_NODE_LIFECYCLE_REGISTERING);
     record->set_physical_hostname(request.physical_hostname());
+    record->set_observed_peer_address(observed_peer_address);
     record->set_registration_nonce(request.client_nonce());
     record->set_registration_token_digest(util::Sha256Hex(token));
-    *record->mutable_reported_spec() = reported_spec;
     record->set_revision(++catalog_revision_);
     *record->mutable_lease_expire_time() = make_expire_time();
     if (!record->has_effective_spec())
@@ -1101,8 +1101,8 @@ NodeManager::PrepareCranedRegistration(
            "Requested pool does not match the precreated node");
       return reply;
     }
-    if (!HasRequestedPartition(request.requested_partitions(),
-                               it->second.partition_names())) {
+    if (!RequestedPartitionsAreSubset(request.requested_partitions(),
+                                      it->second.partition_names())) {
       fail(crane::grpc::ERR_INVALID_PARAM,
            "Requested partitions do not match the precreated node");
       return reply;
@@ -1208,7 +1208,7 @@ NodeManager::PrepareCranedRegistration(
       fail(name_result.error().code(), name_result.error().description());
       return reply;
     }
-    if (!std::regex_match(node_name, std::regex(policy.NodeNamePattern))) {
+    if (!std::regex_match(node_name, policy.NodeNameRegex)) {
       fail(crane::grpc::ERR_INVALID_PARAM,
            "Node name is outside the auto-create pool policy");
       return reply;
@@ -1318,8 +1318,8 @@ NodeManager::PrepareCranedRegistration(
              "Requested pool does not match the dynamic node");
         return reply;
       }
-      if (!HasRequestedPartition(request.requested_partitions(),
-                                 existing->second.partition_names())) {
+      if (!RequestedPartitionsAreSubset(request.requested_partitions(),
+                                        existing->second.partition_names())) {
         fail(crane::grpc::ERR_INVALID_PARAM,
              "Requested partitions do not match the dynamic node");
         return reply;
@@ -1396,17 +1396,10 @@ NodeManager::PrepareCranedRegistration(
            "Dynamic auto-create pool node limit reached");
       return reply;
     }
+    // The existing-and-present case returned above, so this preparation
+    // always adds one node.
     if (g_config.CtldConf.MaxNodeCount != 0 &&
-        g_config.Nodes.size() +
-                std::ranges::count_if(records_,
-                                      [](const auto& entry) {
-                                        return IsDynamicRecordPresent(
-                                            entry.second);
-                                      }) +
-                (existing == records_.end() ||
-                         !IsDynamicRecordPresent(existing->second)
-                     ? 1
-                     : 0) >
+        g_config.Nodes.size() + CountPresentNodesNoLock_() + 1 >
             g_config.CtldConf.MaxNodeCount) {
       fail(crane::grpc::ERR_NODE_LIMIT_REACHED,
            "MaxNodeCount would be exceeded");
@@ -1529,8 +1522,8 @@ NodeManager::PrepareCranedRegistration(
         reported_spec.cpu_count() != expected.cpu_count() ||
         !GresCountsMatch_(expected.gres(), reported_spec.gres()))
       continue;
-    if (!HasRequestedPartition(request.requested_partitions(),
-                               record.partition_names()))
+    if (!RequestedPartitionsAreSubset(request.requested_partitions(),
+                                      record.partition_names()))
       continue;
     candidates.emplace_back(record);
   }
@@ -1581,7 +1574,11 @@ CraneExpectedRich<void> NodeManager::BeginRegistration(
     auto token_result =
         ValidateRegistrationToken_(it->second, registration_token);
     if (!token_result) return std::unexpected(token_result.error());
-    connection_hostname = it->second.physical_hostname();
+    // Prefer the peer address observed at preparation over the claimed
+    // hostname, which may not resolve to the connection source.
+    connection_hostname = it->second.observed_peer_address().empty()
+                              ? it->second.physical_hostname()
+                              : it->second.observed_peer_address();
   }
 
   if (!g_craned_keeper->PutNodeIntoUnavailSet(node_id, token,
@@ -1642,7 +1639,6 @@ CraneExpectedRich<DynamicNodeRecord> NodeManager::BuildRegisteredRecord_(
         "Registered GRES allocation does not match the effective node spec"));
 
   DynamicNodeRecord registered = record;
-  *registered.mutable_reported_spec() = reported;
   if (!registered.ever_registered())
     *registered.mutable_effective_spec() = expected;
   *registered.mutable_registered_gres() = remote_meta.dres_in_node();
@@ -1652,14 +1648,14 @@ CraneExpectedRich<DynamicNodeRecord> NodeManager::BuildRegisteredRecord_(
   return registered;
 }
 
-CraneExpectedRich<void> NodeManager::MarkRegistered(
+CraneExpectedRich<std::string> NodeManager::MarkRegistered(
     const CranedId& node_id, uint64_t generation,
     const crane::grpc::CranedRemoteMeta& remote_meta,
     std::string_view registration_token) {
   absl::MutexLock lock(&mutex_);
   auto result = ValidateRegistrationNoLock_(node_id, generation);
-  if (!result) return result;
-  if (g_config.Nodes.contains(node_id)) return {};
+  if (!result) return std::unexpected(result.error());
+  if (g_config.Nodes.contains(node_id)) return std::string{};
 
   // ValidateRegistrationNoLock_ guarantees a present record for non-static
   // nodes.
@@ -1689,9 +1685,15 @@ CraneExpectedRich<void> NodeManager::MarkRegistered(
 
   it->second = std::move(record);
   g_meta_container->UpdateDynamicNodeMetadata(it->second);
+
+  std::string session_token = util::GenerateSecureRandomHex(32);
+  {
+    absl::MutexLock session_lock(&session_mtx_);
+    sessions_[node_id] = session_token;
+  }
   CRANE_INFO("Dynamic node {} registered with generation {}.", node_id,
              it->second.generation());
-  return {};
+  return session_token;
 }
 
 CraneExpectedRich<void> NodeManager::MarkRegistrationFailed(
@@ -1703,6 +1705,32 @@ CraneExpectedRich<void> NodeManager::MarkRegistrationFailed(
       !ValidateRegistrationToken_(it->second, registration_token))
     return {};
   return MarkDisconnectedNoLock_(node_id, generation);
+}
+
+CraneExpectedRich<void> NodeManager::RevokeRegistration(
+    const CranedId& node_id, uint64_t generation,
+    std::string_view session_token) {
+  absl::MutexLock lock(&mutex_);
+  {
+    absl::MutexLock session_lock(&session_mtx_);
+    auto session = sessions_.find(node_id);
+    if (session == sessions_.end() || session->second != session_token)
+      return {};
+    sessions_.erase(session);
+  }
+  auto it = records_.find(node_id);
+  if (it == records_.end() || it->second.generation() != generation) return {};
+  return MarkDisconnectedNoLock_(node_id, generation);
+}
+
+bool NodeManager::ValidateUplinkSession(const CranedId& node_id,
+                                        std::string_view session_token) const {
+  if (g_config.Nodes.contains(node_id)) return true;
+  absl::MutexLock lock(&session_mtx_);
+  auto it = sessions_.find(node_id);
+  return it != sessions_.end() && it->second.size() == session_token.size() &&
+         CRYPTO_memcmp(it->second.data(), session_token.data(),
+                       it->second.size()) == 0;
 }
 
 CraneExpectedRich<void> NodeManager::MarkDisconnectedIfUntracked(
@@ -1724,6 +1752,22 @@ CraneExpectedRich<void> NodeManager::MarkDisconnectedIfUntracked(
       !RegistrationLeaseExpired_(it->second))
     return {};
   return MarkDisconnectedNoLock_(node_id, 0);
+}
+
+// The disconnect callback only logs when persisting the DOWN transition
+// fails; converge such records here so a node cannot stay ACTIVE in the
+// catalog forever after its craned went away. A registration that is
+// between MarkRegistered and MarkCranedAlive keeps a tracked stub, so it is
+// never swept up here.
+void NodeManager::ReconcileDisconnectedNodesNoLock_() {
+  for (const auto& [node_id, record] : records_) {
+    if (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_ACTIVE) continue;
+    if (g_craned_keeper->IsCranedTracked(node_id)) continue;
+    auto result = MarkDisconnectedNoLock_(node_id, record.generation());
+    if (!result)
+      CRANE_WARN("Failed to reconcile disconnected dynamic node {}: {}",
+                 node_id, result.error().description());
+  }
 }
 
 CraneExpectedRich<void> NodeManager::MarkDisconnectedNoLock_(
@@ -1748,34 +1792,62 @@ CraneExpectedRich<void> NodeManager::MarkDisconnectedNoLock_(
 
 CraneExpectedRich<bool> NodeManager::UpdatePowerState(
     const CranedId& node_id, uint64_t generation,
-    crane::grpc::CranedPowerState power_state) {
+    crane::grpc::CranedPowerState power_state, uint64_t report_sequence) {
   absl::MutexLock lock(&mutex_);
   auto dynamic_power_state = DynamicNodePowerStateFromCraned(power_state);
   if (!dynamic_power_state)
     return std::unexpected(FormatRichErr(crane::grpc::ERR_INVALID_PARAM,
                                          "Invalid Craned power state"));
+
+  // A sequence of 0 marks a reporter without ordering needs and is always
+  // accepted.
+  auto accept_sequence = [&]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    if (report_sequence == 0) return true;
+    auto progress = power_report_progress_.find(node_id);
+    if (progress != power_report_progress_.end() &&
+        progress->second.first == generation &&
+        report_sequence <= progress->second.second)
+      return false;
+    power_report_progress_[node_id] = {generation, report_sequence};
+    return true;
+  };
+
   if (g_config.Nodes.contains(node_id)) {
     // Ignore a delayed report from a former dynamic incarnation of this name.
-    return generation != 0;
+    if (generation != 0) return true;
+    if (!accept_sequence()) return true;
+    if (!g_meta_container->UpdateCranedPowerState(node_id, power_state))
+      return std::unexpected(
+          FormatRichErr(crane::grpc::ERR_INVALID_PARAM, "Node does not exist"));
+    return false;
   }
 
   auto it = records_.find(node_id);
-  if (it == records_.end()) return generation != 0;
+  if (it == records_.end())
+    return generation != 0
+               ? CraneExpectedRich<bool>(true)
+               : CraneExpectedRich<bool>(std::unexpected(FormatRichErr(
+                     crane::grpc::ERR_INVALID_PARAM, "Node does not exist")));
   if (quarantined_nodes_.contains(node_id) ||
       !IsDynamicRecordPresent(it->second) ||
       it->second.generation() != generation)
     return true;
+  if (!accept_sequence()) return true;
 
-  if (it->second.power_state() == *dynamic_power_state) return false;
-  DynamicNodeRecord record = it->second;
-  SetRecordPowerState(&record, *dynamic_power_state);
-  record.set_revision(++catalog_revision_);
-  if (!g_embedded_db_client->StoreDynamicNodeRecords({record}))
-    return std::unexpected(
-        FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
-                      "Failed to persist dynamic node power state"));
-  it->second = record;
-  g_meta_container->UpdateDynamicNodeMetadata(record);
+  if (it->second.power_state() != *dynamic_power_state) {
+    DynamicNodeRecord record = it->second;
+    SetRecordPowerState(&record, *dynamic_power_state);
+    record.set_revision(++catalog_revision_);
+    if (!g_embedded_db_client->StoreDynamicNodeRecords({record}))
+      return std::unexpected(
+          FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
+                        "Failed to persist dynamic node power state"));
+    it->second = record;
+    g_meta_container->UpdateDynamicNodeMetadata(record);
+  }
+  // The record only holds the coarse power state; apply the reported
+  // fine-grained state (e.g. idle vs. active) last so it wins.
+  g_meta_container->UpdateCranedPowerState(node_id, power_state);
   return false;
 }
 
@@ -1783,8 +1855,9 @@ bool NodeManager::HasScalableNodes(const PartitionId& partition) {
   absl::MutexLock lock(&mutex_);
   return std::ranges::any_of(records_, [&](const auto& entry) {
     const auto& record = entry.second;
-    return IsDynamicRecordPresent(record) &&
-           !quarantined_nodes_.contains(entry.first) &&
+    // The scalable lifecycles are a subset of the present ones, so no
+    // separate present check is needed.
+    return !quarantined_nodes_.contains(entry.first) &&
            (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_FUTURE ||
             record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
             record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_DOWN) &&
@@ -1794,187 +1867,195 @@ bool NodeManager::HasScalableNodes(const PartitionId& partition) {
   });
 }
 
-CraneExpectedRich<NodeManager::ScaleUpResult> NodeManager::RequestScaleUp(
-    const PartitionId& partition, const ResourceView& node_resource,
-    const ResourceView& task_resource, uint32_t min_tasks_per_node,
-    uint32_t max_tasks_per_node, uint32_t node_count, uint32_t task_count,
-    const std::vector<uint32_t>& available_node_task_counts,
-    const std::unordered_set<std::string>& included_nodes,
-    const std::unordered_set<std::string>& excluded_nodes) {
-  ScaleUpResult result;
-  if (node_count == 0 || task_count == 0) return result;
+CraneExpectedRich<std::vector<NodeManager::ScaleUpResult>>
+NodeManager::RequestScaleUp(const std::vector<ScaleUpRequest>& requests) {
+  std::vector<ScaleUpResult> results(requests.size());
+  if (requests.empty()) return results;
 
   absl::MutexLock lock(&mutex_);
-  auto lease_result = ReleaseExpiredRegistrationLeasesNoLock_();
-  if (!lease_result) return std::unexpected(lease_result.error());
 
   struct Candidate {
     CranedId node_id;
     uint32_t task_count;
   };
-  std::vector<Candidate> power_on_candidates;
-  std::vector<Candidate> wake_candidates;
-  std::vector<Candidate> in_progress_candidates;
 
-  auto task_capacity = [&](const DynamicNodeSpec& spec) {
-    ResourceInNodeV3 available = ResourceInNodeFromDynamicSpec(spec);
-
-    ResourceInNodeV3 feasible;
-    const ResourceView minimum =
-        node_resource + task_resource * min_tasks_per_node;
-    if (!minimum.GetFeasibleResourceInNode(available, &feasible)) return 0U;
-    available -= feasible;
-
-    uint32_t tasks = min_tasks_per_node;
-    while (tasks < max_tasks_per_node &&
-           task_resource.GetFeasibleResourceInNode(available, &feasible)) {
-      ++tasks;
-      available -= feasible;
-    }
-    return tasks;
-  };
-
-  for (const auto& [node_id, record] : records_) {
-    if (!IsDynamicRecordPresent(record) ||
-        quarantined_nodes_.contains(node_id) ||
-        (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE &&
-         record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
-         record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DOWN) ||
-        record.provider() != kPowerControlProvider ||
-        std::ranges::find(record.partition_names(), partition) ==
-            record.partition_names().end() ||
-        (!included_nodes.empty() && !included_nodes.contains(node_id)) ||
-        excluded_nodes.contains(node_id))
-      continue;
-
-    const uint32_t tasks = task_capacity(EffectiveSpec(record));
-    if (tasks == 0) continue;
-
-    if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
-        ((record.power_state() ==
-              crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON ||
-          record.power_state() ==
-              crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) &&
-         !PowerActionExpired(record))) {
-      in_progress_candidates.emplace_back(node_id, tasks);
-    } else if (record.power_state() == DYNAMIC_NODE_POWER_STATE_OFF ||
-               record.power_state() ==
-                   crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON) {
-      power_on_candidates.emplace_back(node_id, tasks);
-    } else if (record.power_state() ==
-                   crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING ||
-               record.power_state() ==
-                   crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) {
-      wake_candidates.emplace_back(node_id, tasks);
-    }
-  }
-
-  auto by_capacity = [](const Candidate& lhs, const Candidate& rhs) {
-    if (lhs.task_count != rhs.task_count)
-      return lhs.task_count > rhs.task_count;
-    return lhs.node_id < rhs.node_id;
-  };
-  std::ranges::sort(in_progress_candidates, by_capacity);
-  std::ranges::sort(wake_candidates, by_capacity);
-  std::ranges::sort(power_on_candidates, by_capacity);
-
-  enum class SelectionKind : uint8_t {
-    kAvailable,
-    kInProgress,
-    kWake,
-    kPowerOn,
-  };
-  struct Selection {
-    uint32_t task_count;
-    SelectionKind kind;
-    CranedId node_id;
-  };
-  auto better_selection = [](const Selection& lhs, const Selection& rhs) {
-    if (lhs.task_count != rhs.task_count)
-      return lhs.task_count > rhs.task_count;
-    if (lhs.kind != rhs.kind) return lhs.kind < rhs.kind;
-    return lhs.node_id < rhs.node_id;
-  };
-  std::multiset<Selection, decltype(better_selection)> selected(
-      better_selection);
-  uint64_t selected_tasks = 0;
-  auto add_selection = [&](Selection selection) {
-    selected_tasks += selection.task_count;
-    selected.emplace(std::move(selection));
-    if (selected.size() > node_count) {
-      auto worst = std::prev(selected.end());
-      selected_tasks -= worst->task_count;
-      selected.erase(worst);
-    }
-  };
-  for (uint32_t tasks : available_node_task_counts)
-    add_selection({tasks, SelectionKind::kAvailable, {}});
-  auto requirements_met = [&] {
-    return selected.size() == node_count && selected_tasks >= task_count;
-  };
-  if (requirements_met()) return result;
-
-  for (const auto& candidate : in_progress_candidates) {
-    add_selection(
-        {candidate.task_count, SelectionKind::kInProgress, candidate.node_id});
-    if (requirements_met()) break;
-  }
-  if (!requirements_met()) {
-    for (const auto& candidate : wake_candidates) {
-      add_selection(
-          {candidate.task_count, SelectionKind::kWake, candidate.node_id});
-      if (requirements_met()) break;
-    }
-  }
-  if (!requirements_met()) {
-    for (const auto& candidate : power_on_candidates) {
-      add_selection(
-          {candidate.task_count, SelectionKind::kPowerOn, candidate.node_id});
-      if (requirements_met()) break;
-    }
-  }
-  if (!requirements_met()) return result;
-
-  for (const auto& selection : selected) {
-    switch (selection.kind) {
-    case SelectionKind::kAvailable:
-      break;
-    case SelectionKind::kInProgress:
-      result.reserved_nodes.emplace_back(selection.node_id);
-      break;
-    case SelectionKind::kWake:
-      result.nodes_to_wake.emplace_back(
-          selection.node_id, records_.at(selection.node_id).generation());
-      result.reserved_nodes.emplace_back(selection.node_id);
-      break;
-    case SelectionKind::kPowerOn:
-      result.nodes_to_power_on.emplace_back(
-          selection.node_id, records_.at(selection.node_id).generation());
-      result.reserved_nodes.emplace_back(selection.node_id);
-      break;
-    }
-  }
-  result.in_progress = !result.reserved_nodes.empty();
-  if (result.nodes_to_wake.empty() && result.nodes_to_power_on.empty())
-    return result;
-
+  // Nodes claimed for an earlier (higher-priority) request of this batch;
+  // their pending power-state updates are persisted in one batch below.
+  std::unordered_set<CranedId> claimed_nodes;
   std::vector<DynamicNodeRecord> updated_records;
-  updated_records.reserve(result.nodes_to_wake.size() +
-                          result.nodes_to_power_on.size());
-  for (const auto& target : result.nodes_to_wake) {
-    DynamicNodeRecord record = records_.at(target.node_id);
-    SetRecordPowerState(&record,
-                        crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP);
-    record.set_revision(++catalog_revision_);
-    updated_records.emplace_back(std::move(record));
+
+  for (size_t i = 0; i < requests.size(); ++i) {
+    const ScaleUpRequest& request = requests[i];
+    ScaleUpResult& result = results[i];
+    if (request.node_count == 0 || request.task_count == 0) continue;
+
+    std::vector<Candidate> power_on_candidates;
+    std::vector<Candidate> wake_candidates;
+    std::vector<Candidate> in_progress_candidates;
+
+    auto task_capacity = [&](const DynamicNodeSpec& spec) {
+      ResourceInNodeV3 available = ResourceInNodeFromDynamicSpec(spec);
+
+      ResourceInNodeV3 feasible;
+      const ResourceView minimum =
+          request.node_resource +
+          request.task_resource * request.min_tasks_per_node;
+      if (!minimum.GetFeasibleResourceInNode(available, &feasible)) return 0U;
+      available -= feasible;
+
+      uint32_t tasks = request.min_tasks_per_node;
+      while (tasks < request.max_tasks_per_node &&
+             request.task_resource.GetFeasibleResourceInNode(available,
+                                                             &feasible)) {
+        ++tasks;
+        available -= feasible;
+      }
+      return tasks;
+    };
+
+    for (const auto& [node_id, record] : records_) {
+      if (quarantined_nodes_.contains(node_id) ||
+          (record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_FUTURE &&
+           record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_REGISTERING &&
+           record.lifecycle() != DYNAMIC_NODE_LIFECYCLE_DOWN) ||
+          record.provider() != kPowerControlProvider ||
+          std::ranges::find(record.partition_names(), request.partition) ==
+              record.partition_names().end() ||
+          (!request.included_nodes.empty() &&
+           !request.included_nodes.contains(node_id)) ||
+          request.excluded_nodes.contains(node_id) ||
+          claimed_nodes.contains(node_id))
+        continue;
+
+      const uint32_t tasks = task_capacity(EffectiveSpec(record));
+      if (tasks == 0) continue;
+
+      if (record.lifecycle() == DYNAMIC_NODE_LIFECYCLE_REGISTERING ||
+          ((record.power_state() ==
+                crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON ||
+            record.power_state() ==
+                crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) &&
+           !PowerActionExpired(record))) {
+        in_progress_candidates.emplace_back(node_id, tasks);
+      } else if (record.power_state() == DYNAMIC_NODE_POWER_STATE_OFF ||
+                 record.power_state() ==
+                     crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON) {
+        power_on_candidates.emplace_back(node_id, tasks);
+      } else if (record.power_state() ==
+                     crane::grpc::DYNAMIC_NODE_POWER_STATE_SLEEPING ||
+                 record.power_state() ==
+                     crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP) {
+        wake_candidates.emplace_back(node_id, tasks);
+      }
+    }
+
+    auto by_capacity = [](const Candidate& lhs, const Candidate& rhs) {
+      if (lhs.task_count != rhs.task_count)
+        return lhs.task_count > rhs.task_count;
+      return lhs.node_id < rhs.node_id;
+    };
+    std::ranges::sort(in_progress_candidates, by_capacity);
+    std::ranges::sort(wake_candidates, by_capacity);
+    std::ranges::sort(power_on_candidates, by_capacity);
+
+    enum class SelectionKind : uint8_t {
+      kAvailable,
+      kInProgress,
+      kWake,
+      kPowerOn,
+    };
+    struct Selection {
+      uint32_t task_count;
+      SelectionKind kind;
+      CranedId node_id;
+    };
+    auto better_selection = [](const Selection& lhs, const Selection& rhs) {
+      if (lhs.task_count != rhs.task_count)
+        return lhs.task_count > rhs.task_count;
+      if (lhs.kind != rhs.kind) return lhs.kind < rhs.kind;
+      return lhs.node_id < rhs.node_id;
+    };
+    std::multiset<Selection, decltype(better_selection)> selected(
+        better_selection);
+    uint64_t selected_tasks = 0;
+    auto add_selection = [&](Selection selection) {
+      selected_tasks += selection.task_count;
+      selected.emplace(std::move(selection));
+      if (selected.size() > request.node_count) {
+        auto worst = std::prev(selected.end());
+        selected_tasks -= worst->task_count;
+        selected.erase(worst);
+      }
+    };
+    for (uint32_t tasks : request.available_node_task_counts)
+      add_selection({tasks, SelectionKind::kAvailable, {}});
+    auto requirements_met = [&] {
+      return selected.size() == request.node_count &&
+             selected_tasks >= request.task_count;
+    };
+    if (requirements_met()) continue;
+
+    for (const auto& candidate : in_progress_candidates) {
+      add_selection({candidate.task_count, SelectionKind::kInProgress,
+                     candidate.node_id});
+      if (requirements_met()) break;
+    }
+    if (!requirements_met()) {
+      for (const auto& candidate : wake_candidates) {
+        add_selection(
+            {candidate.task_count, SelectionKind::kWake, candidate.node_id});
+        if (requirements_met()) break;
+      }
+    }
+    if (!requirements_met()) {
+      for (const auto& candidate : power_on_candidates) {
+        add_selection(
+            {candidate.task_count, SelectionKind::kPowerOn, candidate.node_id});
+        if (requirements_met()) break;
+      }
+    }
+    if (!requirements_met()) continue;
+
+    for (const auto& selection : selected) {
+      switch (selection.kind) {
+      case SelectionKind::kAvailable:
+        break;
+      case SelectionKind::kInProgress:
+        claimed_nodes.emplace(selection.node_id);
+        result.in_progress = true;
+        break;
+      case SelectionKind::kWake:
+        result.nodes_to_wake.emplace_back(
+            selection.node_id, records_.at(selection.node_id).generation());
+        claimed_nodes.emplace(selection.node_id);
+        result.in_progress = true;
+        break;
+      case SelectionKind::kPowerOn:
+        result.nodes_to_power_on.emplace_back(
+            selection.node_id, records_.at(selection.node_id).generation());
+        claimed_nodes.emplace(selection.node_id);
+        result.in_progress = true;
+        break;
+      }
+    }
+
+    for (const auto& target : result.nodes_to_wake) {
+      DynamicNodeRecord record = records_.at(target.node_id);
+      SetRecordPowerState(&record,
+                          crane::grpc::DYNAMIC_NODE_POWER_STATE_WAKING_UP);
+      record.set_revision(++catalog_revision_);
+      updated_records.emplace_back(std::move(record));
+    }
+    for (const auto& target : result.nodes_to_power_on) {
+      DynamicNodeRecord record = records_.at(target.node_id);
+      SetRecordPowerState(&record,
+                          crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON);
+      record.set_revision(++catalog_revision_);
+      updated_records.emplace_back(std::move(record));
+    }
   }
-  for (const auto& target : result.nodes_to_power_on) {
-    DynamicNodeRecord record = records_.at(target.node_id);
-    SetRecordPowerState(&record,
-                        crane::grpc::DYNAMIC_NODE_POWER_STATE_POWERING_ON);
-    record.set_revision(++catalog_revision_);
-    updated_records.emplace_back(std::move(record));
-  }
+
+  if (updated_records.empty()) return results;
   if (!g_embedded_db_client->StoreDynamicNodeRecords(updated_records))
     return std::unexpected(
         FormatRichErr(crane::grpc::ERR_SYSTEM_ERR,
@@ -1984,7 +2065,7 @@ CraneExpectedRich<NodeManager::ScaleUpResult> NodeManager::RequestScaleUp(
     records_[record.node_name()] = record;
     g_meta_container->UpdateDynamicNodeMetadata(record);
   }
-  return result;
+  return results;
 }
 
 CraneExpectedRich<void> NodeManager::ValidateRegistrationNoLock_(

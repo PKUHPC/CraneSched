@@ -158,7 +158,7 @@ void ParseCtldConfig(const YAML::Node& config) {
             std::exit(1);
           }
           try {
-            static_cast<void>(std::regex(pool.NodeNamePattern));
+            pool.NodeNameRegex = std::regex(pool.NodeNamePattern);
           } catch (const std::regex_error&) {
             CRANE_ERROR("AutoCreate pool {} has an invalid NodeNamePattern.",
                         pool.Name);
