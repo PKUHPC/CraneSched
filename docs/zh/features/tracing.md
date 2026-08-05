@@ -111,6 +111,13 @@ common/`crun` step。启用 requeue 的提交、后续 requeue attempt 及额外
 状态/结果、逻辑服务标识、进程唯一服务标识和进程内事件序号；不会写入命令、
 完整环境、凭据或任意错误文本。该功能只观察状态机，不会推进或修复作业状态。
 
+trace 插件将普通分布式 trace span 写入 `spans` measurement，将执行流点位写入
+schema 定义的 `execution_flow_points` measurement。两者仍使用配置中的 core
+分片 bucket；复制到 error bucket 的执行流错误点也保持原 measurement。分离
+measurement 可以避免 `job_id` 等有意采用不同 wire type 的属性触发 InfluxDB
+field type conflict。查询方必须按数据模型选择 measurement，不能把一个 bucket
+视为只有一种 schema。
+
 `Level` 控制 span 创建等级：`basic` 只创建核心生命周期 span，`detailed` 额外创建调度、状态变更、cgroup/task 等细节 span，`debug` 创建编译进二进制的全部 span。实际生效等级为运行期 `Level` 和编译期 `CRANE_TRACE_COMPILED_MAX_LEVEL` 的较小值。
 
 错误 span 的 error bucket 路由只对已经创建并导出的 span 生效；如果某个 debug-only span 在 `basic` 等级下没有被创建，后续即使逻辑上设置 error status，也不会再补创建该 span。
@@ -385,7 +392,9 @@ CraneSpanExporter  →  PluginClient (gRPC, Unix socket)
   ▼
 cplugind  →  trace.so (TraceHook handler)
   ▼
-InfluxDB 2.x  (measurement: "spans")
+InfluxDB 2.x
+  │ 普通 trace: measurement "spans"
+  │ 执行流点位: measurement "execution_flow_points"
   ▼
 query_trace.py / Grafana / 自定义查询
 ```

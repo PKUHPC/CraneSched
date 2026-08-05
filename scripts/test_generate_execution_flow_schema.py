@@ -68,6 +68,14 @@ class ExecutionFlowSchemaValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "canonical point"):
             GENERATOR._validate(schema)
 
+    def test_storage_measurement_must_be_canonical(self) -> None:
+        for value in ("", "spans/flow", "UPPER", "a" * 129):
+            with self.subTest(value=value):
+                schema = copy.deepcopy(self.schema)
+                schema["metadata"]["storageMeasurement"] = value
+                with self.assertRaisesRegex(ValueError, "storageMeasurement"):
+                    GENERATOR._validate(schema)
+
     def test_pipeline_fault_must_require_reason_code(self) -> None:
         schema = copy.deepcopy(self.schema)
         fault = next(
@@ -304,6 +312,12 @@ class ExecutionFlowSchemaCliTest(unittest.TestCase):
             "autotest": r'\bVersion\s*=\s*"v1"',
             "autotest_python": r"\bVERSION\s*=\s*['\"]v1['\"]",
         }
+        measurement_constants = {
+            "cpp": r'kExecutionFlowStorageMeasurement\s*=\s*"execution_flow_points"',
+            "frontend": r'executionFlowStorageMeasurement\s*=\s*"execution_flow_points"',
+            "autotest": r'\bStorageMeasurement\s*=\s*"execution_flow_points"',
+            "autotest_python": r"\bSTORAGE_MEASUREMENT\s*=\s*['\"]execution_flow_points['\"]",
+        }
         for name, output in self.outputs.items():
             with self.subTest(output=name):
                 content = output.read_text(encoding="utf-8")
@@ -311,6 +325,7 @@ class ExecutionFlowSchemaCliTest(unittest.TestCase):
                 self.assertIn(f"{comment_prefix} SHA256: {digest}", content)
                 self.assertRegex(content, digest_constants[name])
                 self.assertRegex(content, version_constants[name])
+                self.assertRegex(content, measurement_constants[name])
 
         frontend = self.outputs["frontend"].read_text(encoding="utf-8")
         self.assertIn(

@@ -3,6 +3,7 @@ kind: ExecutionFlowPointSchema
 metadata:
   name: flow/v1
   wirePrefix: flow/v1/
+  storageMeasurement: execution_flow_points
   heartbeatPoint: flow/v1/pipeline/heartbeat
   pipelineFaultPoint: flow/v1/pipeline/fault
 envelopeAttributes:

@@ -135,6 +135,15 @@ record commands, full environment contents, credentials or arbitrary error
 text. This facility observes the state machine only and never advances or
 repairs job state.
 
+The trace plugin stores ordinary distributed-tracing spans in the `spans`
+measurement and execution-flow points in the schema-defined
+`execution_flow_points` measurement. Both measurements use the configured
+core shard buckets; execution-flow failures copied to the error bucket keep
+the same measurement. Keeping the measurements separate prevents attributes
+that intentionally have different wire types, such as `job_id`, from causing
+InfluxDB field-type conflicts. Consumers must select the measurement for the
+data model they query rather than treating the bucket as a single schema.
+
 The plugin list is configured in the independent `plugin.yaml` file.
 
 #### plugin.yaml
@@ -429,7 +438,9 @@ CraneSpanExporter  ->  PluginClient (gRPC, Unix socket)
   v
 cplugind  ->  trace.so (TraceHook handler)
   v
-InfluxDB 2.x  (measurement: "spans")
+InfluxDB 2.x
+  | ordinary traces: measurement "spans"
+  | execution flow:  measurement "execution_flow_points"
   v
 query_trace.py / Grafana / custom queries
 ```

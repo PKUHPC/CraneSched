@@ -41,7 +41,13 @@ TOP_LEVEL_KEYS = {
     "enums",
     "points",
 }
-METADATA_KEYS = {"name", "wirePrefix", "heartbeatPoint", "pipelineFaultPoint"}
+METADATA_KEYS = {
+    "name",
+    "wirePrefix",
+    "storageMeasurement",
+    "heartbeatPoint",
+    "pipelineFaultPoint",
+}
 POINT_KEYS = {"symbol", "id", "producer", "requiredAttributes"}
 ENVELOPE_ATTRIBUTE_KEYS = {"type", "required", "missingReason"}
 ENVELOPE_REQUIREMENTS = {"always", "business", "optional"}
@@ -56,6 +62,7 @@ STORAGE_ATTRIBUTE_KEYS = {
 STORAGE_KINDS = {"field", "tag"}
 STORAGE_SOURCES = {"frontend"}
 ATTRIBUTE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+MEASUREMENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 ENUM_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 POINT_ID_PATTERN = re.compile(
     r"^(?:ctld|craned|pipeline|supervisor)/[a-z0-9_]+(?:/[a-z0-9_]+)*$"
@@ -174,6 +181,14 @@ def _validate(data: dict[str, object]) -> list[dict[str, object]]:
         raise ValueError("metadata.name must be 'flow/v1'")
     if metadata.get("wirePrefix") != "flow/v1/":
         raise ValueError("metadata.wirePrefix must be 'flow/v1/'")
+    storage_measurement = metadata.get("storageMeasurement")
+    if (
+        not isinstance(storage_measurement, str)
+        or MEASUREMENT_NAME_PATTERN.fullmatch(storage_measurement) is None
+    ):
+        raise ValueError(
+            "metadata.storageMeasurement must be a canonical Influx measurement name"
+        )
     for field in ("heartbeatPoint", "pipelineFaultPoint"):
         point = metadata.get(field)
         if (
@@ -542,6 +557,7 @@ inline constexpr std::string_view kExecutionFlowSchemaSha256 = "{digest}";
 inline constexpr std::string_view kExecutionFlowSchemaName = "{schema_name}";
 inline constexpr std::string_view kExecutionFlowSchemaVersion = "{schema_version}";
 inline constexpr std::string_view kExecutionFlowWirePrefix = "{metadata["wirePrefix"]}";
+inline constexpr std::string_view kExecutionFlowStorageMeasurement = "{metadata["storageMeasurement"]}";
 inline constexpr std::string_view kExecutionFlowHeartbeatPoint = "{metadata["heartbeatPoint"]}";
 inline constexpr std::string_view kExecutionFlowPipelineFaultPoint = "{metadata["pipelineFaultPoint"]}";
 
@@ -801,6 +817,7 @@ const (
 \texecutionFlowSchemaName = {_go_string(schema_name)}
 \texecutionFlowSchemaVersion = {_go_string(schema_version)}
 \texecutionFlowWirePrefix = {_go_string(metadata["wirePrefix"])}
+\texecutionFlowStorageMeasurement = {_go_string(metadata["storageMeasurement"])}
 \texecutionFlowHeartbeatPoint = {_go_string(metadata["heartbeatPoint"])}
 \texecutionFlowPipelineFaultPoint = {_go_string(metadata["pipelineFaultPoint"])}
 {envelope_constant_lines}
@@ -852,6 +869,10 @@ func (generatedExecutionFlowCatalogData) SchemaVersion() string {{
 
 func (generatedExecutionFlowCatalogData) WirePrefix() string {{
 \treturn executionFlowWirePrefix
+}}
+
+func (generatedExecutionFlowCatalogData) StorageMeasurement() string {{
+\treturn executionFlowStorageMeasurement
 }}
 
 func (generatedExecutionFlowCatalogData) HeartbeatPoint() string {{
@@ -1029,6 +1050,7 @@ const (
 \tName = {_go_string(schema_name)}
 \tVersion = {_go_string(schema_version)}
 \tWirePrefix = {_go_string(wire_prefix)}
+\tStorageMeasurement = {_go_string(metadata["storageMeasurement"])}
 \tHeartbeatPoint = {_go_string(metadata["heartbeatPoint"])}
 \tPipelineFaultPoint = {_go_string(metadata["pipelineFaultPoint"])}
 \tSHA256 = {_go_string(digest)}
@@ -1177,6 +1199,7 @@ def _render_autotest_python(
         "NAME": schema_name,
         "VERSION": schema_version,
         "WIRE_PREFIX": metadata["wirePrefix"],
+        "STORAGE_MEASUREMENT": metadata["storageMeasurement"],
         "HEARTBEAT_POINT": metadata["heartbeatPoint"],
         "PIPELINE_FAULT_POINT": metadata["pipelineFaultPoint"],
         "SHA256": digest,

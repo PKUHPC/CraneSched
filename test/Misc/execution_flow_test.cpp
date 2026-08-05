@@ -835,6 +835,7 @@ TEST(ExecutionFlowTest, GeneratedCatalogUsesCanonicalWireNames) {
   EXPECT_EQ(crane::kExecutionFlowSchemaName, "flow/v1");
   EXPECT_EQ(crane::kExecutionFlowSchemaVersion, "v1");
   EXPECT_EQ(crane::kExecutionFlowWirePrefix, "flow/v1/");
+  EXPECT_EQ(crane::kExecutionFlowStorageMeasurement, "execution_flow_points");
   EXPECT_EQ(crane::kExecutionFlowHeartbeatPoint, "flow/v1/pipeline/heartbeat");
   EXPECT_EQ(crane::kExecutionFlowPipelineFaultPoint, "flow/v1/pipeline/fault");
   EXPECT_EQ(crane::kExecutionFlowSchemaSha256.size(), 64);
