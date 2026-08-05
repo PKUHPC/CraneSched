@@ -1,7 +1,8 @@
 # OpenTelemetry tracing library for CraneSched
 
 if(CRANE_ENABLE_TRACING)
-  add_library(crane_tracer STATIC TracerManager.cpp CraneSpanExporter.cpp)
+  add_library(crane_tracer STATIC TracerManager.cpp CraneSpanExporter.cpp
+                                  TraceSpanExport.cpp)
   if(CRANE_ENABLE_EXECUTION_FLOW)
     target_sources(crane_tracer PRIVATE ExecutionFlow.cpp)
     add_dependencies(crane_tracer crane_execution_flow_schema_check)

@@ -160,10 +160,6 @@
 #include <string_view>
 #include <utility>
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-#  include "crane/ExecutionFlowSchema.h"
-#endif
-
 #ifdef CRANE_ENABLE_TRACING
 #  include "crane/TracerManager.h"
 #  include "opentelemetry/trace/propagation/http_trace_context.h"
@@ -282,10 +278,6 @@ inline RuntimeTraceConfig ApplyRuntimeTraceConfig(bool enabled,
 }
 
 inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-  if (name.starts_with(kExecutionFlowWirePrefix)) return TraceSpanClass::Core;
-#endif
-
   switch (name.size()) {
   case 7:
     if (name == "job/end") return TraceSpanClass::Core;
@@ -358,15 +350,27 @@ inline TraceSpanClass ClassifyTraceSpanName(std::string_view name) {
   return TraceSpanClass::Other;
 }
 
-inline bool TraceLevelAllowsSpan(TraceLevel level, std::string_view name,
+inline bool TraceLevelAllowsSpan(TraceLevel level, TraceSpanClass span_class,
                                  bool is_error) {
   if (is_error) return true;
   if (level == TraceLevel::Debug) return true;
-  TraceSpanClass span_class = ClassifyTraceSpanName(name);
   if (span_class == TraceSpanClass::Core) return true;
   if (level == TraceLevel::Detailed && span_class == TraceSpanClass::Detailed)
     return true;
   return false;
+}
+
+inline bool TraceLevelAllowsSpan(TraceLevel level, std::string_view name,
+                                 bool is_error) {
+  return TraceLevelAllowsSpan(level, ClassifyTraceSpanName(name), is_error);
+}
+
+inline bool ShouldCreateTraceSpan(TraceSpanClass span_class,
+                                  bool is_error = false) {
+  if (!TraceCompiledWithTracing()) return false;
+  if (!g_tracing_enabled.load(std::memory_order_relaxed)) return false;
+  return TraceLevelAllowsSpan(g_trace_level.load(std::memory_order_relaxed),
+                              span_class, is_error);
 }
 
 inline bool ShouldCreateTraceSpan(std::string_view name,
@@ -379,6 +383,10 @@ inline bool ShouldCreateTraceSpan(std::string_view name,
 
 inline bool ShouldExportTraceSpan(std::string_view name, bool is_error) {
   return ShouldCreateTraceSpan(name, is_error);
+}
+
+inline bool ShouldExportTraceSpan(TraceSpanClass span_class, bool is_error) {
+  return ShouldCreateTraceSpan(span_class, is_error);
 }
 
 #ifdef CRANE_ENABLE_TRACING

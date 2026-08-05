@@ -21,6 +21,7 @@
 #include <thread>
 #include <utility>
 
+#include "TraceSpanExport.h"
 #include "crane/ExecutionFlowSchema.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
@@ -117,7 +118,7 @@ void EmitPipelineHeartbeat() {
 
   constexpr std::string_view kPoint = kExecutionFlowHeartbeatPoint;
   auto tracer = TracerManager::GetInstance().GetTracerSafe();
-  if (!ShouldCreateTraceSpan(kPoint) || !tracer) return;
+  if (!ShouldCreateTraceSpan(TraceSpanClass::Core) || !tracer) return;
 
   const auto system_time = std::chrono::system_clock::now();
   const auto steady_time = std::chrono::steady_clock::now();
@@ -126,6 +127,7 @@ void EmitPipelineHeartbeat() {
   start_options.start_steady_time = steady_time;
   auto span = tracer->StartSpan(std::string{kPoint}, start_options);
   if (!span) return;
+  otel::detail::MarkSpanClass(*span, TraceSpanClass::Core);
   SetCommonAttributes(span.get(),
                       kPoint.substr(kExecutionFlowWirePrefix.size()),
                       SnapshotFlowProducerIdentity());
@@ -235,7 +237,7 @@ class ExecutionFlowPoint {
     std::string span_name{kExecutionFlowWirePrefix};
     span_name.append(FlowPointName(point));
     auto tracer = TracerManager::GetInstance().GetTracerSafe();
-    if (!ShouldCreateTraceSpan(span_name) || !tracer) return;
+    if (!ShouldCreateTraceSpan(TraceSpanClass::Core) || !tracer) return;
 
     const auto system_time = std::chrono::system_clock::now();
     const auto steady_time = std::chrono::steady_clock::now();
@@ -246,6 +248,7 @@ class ExecutionFlowPoint {
     if (parent.IsValid()) start_options.parent = parent;
     span_ = tracer->StartSpan(span_name, start_options);
     if (!span_) return;
+    otel::detail::MarkSpanClass(*span_, TraceSpanClass::Core);
 
     point_time_ = steady_time;
     SetCommonAttributes(span_.get(), FlowPointName(point),

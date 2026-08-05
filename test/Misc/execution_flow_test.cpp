@@ -10,6 +10,7 @@
 #include <variant>
 #include <vector>
 
+#include "TraceSpanExport.h"
 #include "crane/ExecutionFlow.h"
 #include "crane/ExecutionFlowSchema.h"
 #include "crane/TracerManager.h"
@@ -28,6 +29,44 @@ concept HasPublicFlowStatusMutation =
 
 static_assert(!HasPublicFlowNodeMutation<crane::FlowContext>);
 static_assert(!HasPublicFlowStatusMutation<crane::FlowContext>);
+
+namespace {
+
+struct FilteringExporterState {
+  std::vector<std::optional<crane::grpc::plugin::SpanInfo>> results;
+};
+
+class FilteringExporter : public opentelemetry::sdk::trace::SpanExporter {
+ public:
+  explicit FilteringExporter(std::shared_ptr<FilteringExporterState> state)
+      : state_(std::move(state)) {}
+
+  std::unique_ptr<opentelemetry::sdk::trace::Recordable>
+  MakeRecordable() noexcept override {
+    return std::make_unique<opentelemetry::sdk::trace::SpanData>();
+  }
+
+  opentelemetry::sdk::common::ExportResult Export(
+      const opentelemetry::nostd::span<
+          std::unique_ptr<opentelemetry::sdk::trace::Recordable>>&
+          spans) noexcept override {
+    for (const auto& recordable : spans) {
+      const auto& span =
+          static_cast<const opentelemetry::sdk::trace::SpanData&>(*recordable);
+      state_->results.emplace_back(
+          crane::otel::detail::PrepareSpanForExport(span));
+    }
+    return opentelemetry::sdk::common::ExportResult::kSuccess;
+  }
+
+  bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
+  bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
+
+ private:
+  std::shared_ptr<FilteringExporterState> state_;
+};
+
+}  // namespace
 
 #ifdef CRANE_ENABLE_EXECUTION_FLOW
 namespace {
@@ -195,21 +234,12 @@ class BlockingExporter : public opentelemetry::sdk::trace::SpanExporter {
 }  // namespace
 #endif
 
-#ifdef CRANE_ENABLE_EXECUTION_FLOW
-TEST(ExecutionFlowTest, FlowNamesAreCoreAtBasicTraceLevel) {
-  EXPECT_EQ(crane::ClassifyTraceSpanName("flow/v1/ctld/job/accepted"),
-            crane::TraceSpanClass::Core);
-  EXPECT_TRUE(crane::TraceLevelAllowsSpan(
-      crane::TraceLevel::Basic, "flow/v1/supervisor/task/spawned", false));
-}
-#else
-TEST(ExecutionFlowTest, CompiledOutFlowNamesAreNotClassified) {
+TEST(ExecutionFlowTest, FlowEmitterUsesExplicitCoreTraceClass) {
   EXPECT_EQ(crane::ClassifyTraceSpanName("flow/v1/ctld/job/accepted"),
             crane::TraceSpanClass::Other);
-  EXPECT_FALSE(crane::TraceLevelAllowsSpan(
-      crane::TraceLevel::Basic, "flow/v1/supervisor/task/spawned", false));
+  EXPECT_TRUE(crane::TraceLevelAllowsSpan(crane::TraceLevel::Basic,
+                                          crane::TraceSpanClass::Core, false));
 }
-#endif
 
 #ifdef CRANE_ENABLE_EXECUTION_FLOW
 TEST(ExecutionFlowTest, RuntimeDisabledEmitterDoesNotEvaluateArguments) {
@@ -253,6 +283,43 @@ class ExecutionFlowRuntimeTest : public testing::Test {
     crane::ApplyRuntimeTraceConfig(false, crane::TraceLevel::Basic);
   }
 };
+
+TEST_F(ExecutionFlowRuntimeTest,
+       SemanticEmitterMarksCoreSpansAndExporterStripsMarker) {
+  auto state = std::make_shared<FilteringExporterState>();
+  auto& tracer_manager = crane::TracerManager::GetInstance();
+  tracer_manager.Shutdown();
+  ASSERT_TRUE(tracer_manager.Initialize(
+      "ExecutionFlowExporterTest", std::make_unique<FilteringExporter>(state)));
+  crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
+  crane::InitializeExecutionFlow(true, 3600, "cranectld", "ctld", false);
+
+  auto context = crane::FlowContext::Create("0123456789abcdef0123456789abcdef",
+                                            std::string_view{});
+  ASSERT_TRUE(context.has_value());
+  context->Job(42);
+  CRANE_FLOW_EMIT(JobAccepted, context);
+
+  auto tracer = tracer_manager.GetTracerSafe();
+  ASSERT_TRUE(tracer);
+  auto unmarked = tracer->StartSpan("flow/v1/ctld/job/accepted");
+  unmarked->SetAttribute("flow_id",
+                         std::string{"fedcba9876543210fedcba9876543210"});
+  unmarked->End();
+  tracer.reset();
+  crane::ShutdownExecutionFlow();
+  tracer_manager.Shutdown();
+
+  ASSERT_EQ(state->results.size(), 2);
+  ASSERT_TRUE(state->results[0].has_value());
+  EXPECT_EQ(state->results[0]->name(), "flow/v1/ctld/job/accepted");
+  const auto& attributes = state->results[0]->attributes();
+  EXPECT_NE(attributes.find("flow_id"), attributes.end());
+  EXPECT_EQ(
+      attributes.find(std::string{crane::otel::detail::kSpanClassAttribute}),
+      attributes.end());
+  EXPECT_FALSE(state->results[1].has_value());
+}
 
 TEST_F(ExecutionFlowRuntimeTest,
        ConfiguredFlowFollowsTracingTransitionsIdempotently) {
