@@ -235,6 +235,10 @@ inline std::optional<FlowContext> FlowContext::FromId(
 
 class FlowEmitter {
  public:
+  // Product call sites must invoke semantic point methods through
+  // CRANE_FLOW_EMIT. The macro owns both the compile-time and runtime gates,
+  // so disabled instrumentation does not evaluate its arguments. The helper
+  // methods below are not point emissions and may be called directly.
 #ifdef CRANE_ENABLE_EXECUTION_FLOW
   [[nodiscard]] static bool CorrelationRequired(bool already_captured);
   [[nodiscard]] static std::string CorrelationValue(

@@ -7,6 +7,7 @@ import copy
 import hashlib
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,14 @@ assert SPEC is not None and SPEC.loader is not None
 GENERATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GENERATOR)
 
+REPOSITORY_ROOT = SCRIPT.parent.parent
+DIRECT_EMITTER_CALL = re.compile(r"\bFlowEmitter::([A-Z][A-Za-z0-9_]*)\s*\(")
+DIRECT_HELPERS = {
+    "ChildRuntimeConfig",
+    "CorrelationRequired",
+    "CorrelationValue",
+}
+
 
 class ExecutionFlowSchemaValidationTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -29,6 +38,29 @@ class ExecutionFlowSchemaValidationTest(unittest.TestCase):
     def test_canonical_schema_is_valid(self) -> None:
         points = GENERATOR._validate(copy.deepcopy(self.schema))
         self.assertIn("pipeline/fault", {point["id"] for point in points})
+
+    def test_product_point_emissions_use_the_gated_macro(self) -> None:
+        offenders: list[str] = []
+        implementation = (
+            REPOSITORY_ROOT / "src/Utilities/OpenTelemetry/ExecutionFlow.cpp"
+        )
+        for path in sorted((REPOSITORY_ROOT / "src").rglob("*")):
+            if path.suffix not in {".cc", ".cpp", ".h", ".hpp"} or path == implementation:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for line_number, line in enumerate(source.splitlines(), start=1):
+                for match in DIRECT_EMITTER_CALL.finditer(line):
+                    if match.group(1) not in DIRECT_HELPERS:
+                        offenders.append(
+                            f"{path.relative_to(REPOSITORY_ROOT)}:{line_number}:"
+                            f" FlowEmitter::{match.group(1)}"
+                        )
+        self.assertEqual(
+            offenders,
+            [],
+            "semantic point emissions must use CRANE_FLOW_EMIT so disabled "
+            "instrumentation cannot evaluate arguments:\n" + "\n".join(offenders),
+        )
 
     def test_pipeline_fault_must_reference_a_point(self) -> None:
         schema = copy.deepcopy(self.schema)
