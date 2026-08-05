@@ -21,20 +21,69 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 
+#include <algorithm>
+
+#include "CleanupLifecycle.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "crane/CriClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Tracing.h"
 
 namespace Craned {
 using namespace std::literals::chrono_literals;
+
+namespace {
+bool RemoveStepCgroupDirectory(job_id_t job_id, step_id_t step_id,
+                               const std::string& step_cg_str) {
+  if (step_cg_str.empty()) return true;
+
+  // step_cg_str is e.g. "overflow/job_1/step_0/system". This helper is called
+  // only from the system-cgroup destroy completion, after an asynchronous v2
+  // janitor has physically removed the child directory.
+  auto step_cg_path =
+      (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
+       Common::CgConstant::kRootCgNamePrefix / step_cg_str)
+          .parent_path();
+
+  std::error_code ec;
+  if (std::filesystem::exists(step_cg_path, ec)) {
+    const bool removed = std::filesystem::remove(step_cg_path, ec);
+    if (!removed || ec) {
+      CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
+                  job_id, step_id, step_cg_path,
+                  ec ? ec.message() : "directory is not empty");
+      return false;
+    }
+    CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id, step_id,
+                step_cg_path);
+    return true;
+  }
+  if (ec) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
+        job_id, step_id, step_cg_path, ec.message());
+    return false;
+  }
+  CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
+              job_id, step_id, step_cg_path);
+  return true;
+}
+
+}  // namespace
+
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
       supv_pid(0),
       step_to_d(step_to_d),
-      status(StepStatus::Configuring) {}
+      status(StepStatus::Configuring) {
+  if (step_to_d.type() == crane::grpc::JobType::Batch && !IsContainer() &&
+      !step_to_d.has_array_task() && step_to_d.requeue_count() == 0)
+    execution_flow_id_ =
+        crane::ExecutionFlowIdFromString(step_to_d.execution_flow_id());
+}
 
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
                            pid_t supv_pid, StepStatus status,
@@ -44,9 +93,19 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supv_pid(supv_pid),
       step_to_d(step_to_d),
       status(status),
-      supervisor_stub(supervisor_stub) {}
+      supervisor_stub(supervisor_stub) {
+  if (step_to_d.type() == crane::grpc::JobType::Batch && !IsContainer() &&
+      !step_to_d.has_array_task() && step_to_d.requeue_count() == 0)
+    execution_flow_id_ =
+        crane::ExecutionFlowIdFromString(step_to_d.execution_flow_id());
+}
 
-void StepInstance::CleanUp(bool async) {
+std::optional<crane::FlowContext> StepInstance::ExecutionFlowContext() const {
+  return crane::MakeExecutionFlowContext(execution_flow_id_, traceparent,
+                                         job_id, step_id);
+}
+
+void StepInstance::CleanUp(bool async, CleanupCompletion completion) {
   if (this->status != StepStatus::Completing &&
       !IsFinishedStepStatus(this->status)) {
     CRANE_WARN(
@@ -56,41 +115,30 @@ void StepInstance::CleanUp(bool async) {
   }
 
   auto* cgroup = crane_cgroup.release();
-  if (cgroup == nullptr) return;
+  if (cgroup == nullptr) {
+    CleanupResult result;
+    result.cgroup_present = false;
+    if (completion) completion(result);
+    return;
+  }
 
   auto clean_step_cgroup = [job_id = job_id, step_id = step_id, cgroup,
-                            step_cg_str = this->cg_str] {
-    CgroupManager::KillAndDestroyCgroup(
-        std::unique_ptr<CgroupInterface>{cgroup});
-
-    // step_cg_str is e.g. "overflow/job_1/step_0/system"
-    // We want to remove the step_N directory (parent of system/user).
-    auto step_cg_path =
-        (std::filesystem::path{Common::CgConstant::kSystemCgPathPrefix} /
-         Common::CgConstant::kRootCgNamePrefix / step_cg_str)
-            .parent_path();
-
-    std::error_code ec;
-    if (std::filesystem::exists(step_cg_path, ec)) {
-      std::filesystem::remove(step_cg_path, ec);
-      if (ec) {
-        CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                    job_id, step_id, step_cg_path, ec.message());
-      } else {
-        CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id,
-                    step_id, step_cg_path);
-      }
-    } else {
-      if (ec) {
-        CRANE_ERROR(
-            "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
-            job_id, step_id, step_cg_path, ec.message());
-      } else {
-        CRANE_DEBUG(
-            "[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-            job_id, step_id, step_cg_path);
-      }
-    }
+                            step_cg_str = this->cg_str,
+                            completion = std::move(completion)]() mutable {
+    detail::CoordinateCgroupCleanup(
+        [cgroup](CgroupManager::CgroupCleanupCompletion cleanup_completion) {
+          CgroupManager::KillAndDestroyCgroup(
+              std::unique_ptr<CgroupInterface>{cgroup},
+              std::move(cleanup_completion));
+        },
+        [job_id, step_id, step_cg_str = std::move(step_cg_str)](
+            const CgroupManager::CgroupCleanupResult& cgroup_result) {
+          return detail::FinalizeStepCgroupCleanup<CleanupResult>(
+              cgroup_result, [job_id, step_id, &step_cg_str] {
+                return RemoveStepCgroupDirectory(job_id, step_id, step_cg_str);
+              });
+        },
+        std::move(completion));
   };
 
   if (async) {
@@ -195,6 +243,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   if (child_pid > 0) {  // Parent proc
     CRANE_DEBUG("[Step #{}.{}] Subprocess was created, pid: {}", job_id,
                 step_id, child_pid);
+    CRANE_FLOW_EMIT(CranedSupervisorForked, ExecutionFlowContext(),
+                    g_config.Hostname);
 
     bool ok;
     CanStartMessage msg;
@@ -377,6 +427,14 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_tracing_enabled(g_config.Tracing.Enabled);
     init_req.set_trace_level(
         std::string{crane::TraceLevelToString(g_config.Tracing.Level)});
+    const auto child_flow_config = crane::FlowEmitter::ChildRuntimeConfig(
+        execution_flow_id_,
+        g_config.Tracing.ExecutionFlow.HeartbeatIntervalSeconds);
+    init_req.set_execution_flow_enabled(child_flow_config.Enabled);
+    if (child_flow_config.Enabled) {
+      init_req.set_execution_flow_heartbeat_interval_seconds(
+          child_flow_config.HeartbeatIntervalSeconds);
+    }
     // Pass spawn span's context so step/execute becomes child of
     // step/supervisor_spawn, not just child of job/lifecycle.
     auto spawn_tp = crane::SerializeTraceParent(spawn_span.GetContext());
@@ -434,6 +492,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
+
+    CRANE_FLOW_EMIT(CranedSupervisorReady, ExecutionFlowContext(),
+                    g_config.Hostname);
 
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);

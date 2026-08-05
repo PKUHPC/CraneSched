@@ -6,6 +6,7 @@ add_executable(csupervisor
         SupervisorServer.h
         SupervisorServer.cpp
         Supervisor.cpp
+        TaskLifecycle.h
         TaskManager.cpp
         TaskManager.h
 )

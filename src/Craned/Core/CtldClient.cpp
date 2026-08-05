@@ -24,6 +24,7 @@
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorStub.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
 
@@ -1198,6 +1199,10 @@ bool CtldClient::SendStatusChanges_(
                               static_cast<int64_t>(status.error_code()));
     forward_span.SetAttribute("grpc_status_ok", status.ok());
     forward_span.SetAttribute("reply_ok", status.ok() && reply.ok());
+    CRANE_FLOW_EMIT(StatusSendResult, status_change.execution_flow_context,
+                    m_craned_id_,
+                    static_cast<int64_t>(status_change.new_status),
+                    status.ok() && reply.ok());
     if (!status.ok()) {
       CRANE_ERROR(
           "Failed to send StepStatusChange: "

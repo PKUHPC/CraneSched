@@ -14,8 +14,6 @@
 
 #  include "crane/PluginClient.h"
 #  include "opentelemetry/sdk/trace/exporter.h"
-#  include "opentelemetry/sdk/trace/span_data.h"
-#  include "protos/Plugin.pb.h"
 
 namespace crane {
 
@@ -36,15 +34,6 @@ class CraneSpanExporter : public opentelemetry::sdk::trace::SpanExporter {
 
  private:
   plugin::PluginClient& client_;
-
-  static std::string HexFromTraceId(const opentelemetry::trace::TraceId& id);
-  static std::string HexFromSpanId(const opentelemetry::trace::SpanId& id);
-  static std::string AttributeToString(
-      const opentelemetry::sdk::common::OwnedAttributeValue& value);
-  static void SetTimestamp(google::protobuf::Timestamp* ts,
-                           opentelemetry::common::SystemTimestamp time);
-  static crane::grpc::plugin::SpanInfo ConvertSpan(
-      const opentelemetry::sdk::trace::SpanData& span);
 };
 
 }  // namespace crane

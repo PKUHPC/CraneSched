@@ -1,0 +1,168 @@
+apiVersion: cranesched.io/execution-flow-schema/v1
+kind: ExecutionFlowPointSchema
+metadata:
+  name: flow/v1
+  wirePrefix: flow/v1/
+  storageMeasurement: execution_flow_points
+  heartbeatPoint: flow/v1/pipeline/heartbeat
+  pipelineFaultPoint: flow/v1/pipeline/fault
+envelopeAttributes:
+  flow_schema: {type: string, required: always, missingReason: invalid_flow_schema}
+  flow_id: {type: string, required: business, missingReason: invalid_flow_id}
+  point: {type: string, required: always, missingReason: point_name_mismatch}
+  producer: {type: string, required: always, missingReason: missing_producer}
+  service_logical_instance: {type: string, required: always, missingReason: missing_service_logical_instance}
+  service_instance: {type: string, required: always, missingReason: missing_service_instance}
+  event_sequence: {type: int64, required: always, missingReason: invalid_event_sequence}
+storageAttributes:
+  flow_environment_id: {type: string, kind: tag, source: frontend, wire: false, minimum: null, maximum: null}
+  flow_slot: {type: int64, kind: tag, source: frontend, wire: false, minimum: 0, maximum: 63}
+  flow_instance_slot: {type: int64, kind: tag, source: frontend, wire: false, minimum: 0, maximum: 63}
+  event_time_unix_nano: {type: int64, kind: field, source: frontend, wire: false, minimum: 1, maximum: null}
+attributes:
+  job_id: {type: int64}
+  step_id: {type: int64}
+  task_id: {type: int64}
+  attempt: {type: int64}
+  node_id: {type: string}
+  operation: {type: enum}
+  outcome: {type: enum}
+  status: {type: int64}
+  reason_code: {type: enum}
+enums:
+  operation:
+    - alloc-jobs
+    - alloc-steps
+    - allocate
+    - cancel-pending-job
+    - daemon-cleanup
+    - daemon-configure
+    - daemon-terminal
+    - embedded-db-commit
+    - embedded-db-finalize
+    - enqueue-status
+    - execute-step
+    - execute-steps
+    - exit-supervisor
+    - finalize-step
+    - finalize-task
+    - fork-supervisor
+    - free-jobs
+    - free-step
+    - free-steps
+    - initialize
+    - initialize-supervisor
+    - install-job
+    - install-step
+    - job-cleanup
+    - job-terminal
+    - mongodb-finalize
+    - observe-supervisor-exit
+    - observe-task-exit
+    - prepare-task
+    - release-resources
+    - remove-job
+    - requeue
+    - send-status-change
+    - shutdown-supervisor
+    - spawn-task
+    - state-machine
+    - status-change
+    - step-cleanup
+    - step-configure
+    - step-terminal
+    - submit
+    - submit-common-step
+    - supervisor-epilog
+  outcome:
+    - accepted
+    - applied
+    - cleanup-failure
+    - completed
+    - craned-down
+    - early-cancel
+    - exit
+    - exited
+    - failure
+    - persisted
+    - pre-start-failure
+    - queued
+    - rejected
+    - requested
+    - rpc-failure
+    - signal
+    - skipped
+    - started
+    - success
+    - unsupported
+  reason_code:
+    - array-job
+    - cancelled-before-allocation
+    - container-job
+    - extra-common-step
+    - flow_environment_id_mismatch
+    - invalid_attribute_type
+    - invalid_enum_value
+    - invalid_event_sequence
+    - invalid_event_time
+    - invalid_flow_id
+    - invalid_flow_schema
+    - invalid_integer_attribute
+    - invalid_span_id
+    - missing_flow_environment_id
+    - missing_producer
+    - missing_required_attribute
+    - missing_service_instance
+    - missing_service_logical_instance
+    - non-batch-job
+    - point_name_mismatch
+    - producer_mismatch
+    - requeue-attempt
+    - requeue-enabled
+    - storage_capacity_exceeded
+    - unexpected_attribute
+    - unknown_point
+points:
+  - {symbol: CtldJobAccepted, id: ctld/job/accepted, producer: cranectld, requiredAttributes: [job_id, operation, outcome]}
+  - {symbol: CtldJobAllocated, id: ctld/job/allocated, producer: cranectld, requiredAttributes: [job_id, node_id, operation, outcome]}
+  - {symbol: CtldJobAllocationPersisted, id: ctld/job/allocation_persisted, producer: cranectld, requiredAttributes: [job_id, operation, outcome]}
+  - {symbol: CtldJobAllocRpcResult, id: ctld/job/alloc_rpc_result, producer: cranectld, requiredAttributes: [job_id, node_id, operation, outcome]}
+  - {symbol: CtldJobEmbeddedPersisted, id: ctld/job/embedded_persisted, producer: cranectld, requiredAttributes: [job_id, operation, outcome]}
+  - {symbol: CtldJobFreeResult, id: ctld/job/free_result, producer: cranectld, requiredAttributes: [job_id, node_id, operation, outcome]}
+  - {symbol: CtldJobMongoPersisted, id: ctld/job/mongo_persisted, producer: cranectld, requiredAttributes: [job_id, operation, outcome]}
+  - {symbol: CtldJobResourcesReleased, id: ctld/job/resources_released, producer: cranectld, requiredAttributes: [job_id, operation, outcome]}
+  - {symbol: CtldJobTerminal, id: ctld/job/terminal, producer: cranectld, requiredAttributes: [job_id, status, operation, outcome]}
+  - {symbol: CtldJobUnsupported, id: ctld/job/unsupported, producer: cranectld, requiredAttributes: [job_id, operation, outcome, reason_code]}
+  - {symbol: CtldStatusApplied, id: ctld/status/applied, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, status, operation, outcome]}
+  - {symbol: CtldStatusReceived, id: ctld/status/received, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, status, operation]}
+  - {symbol: CtldStepAllCompleting, id: ctld/step/all_completing, producer: cranectld, requiredAttributes: [job_id, step_id, operation, outcome]}
+  - {symbol: CtldStepAllConfigured, id: ctld/step/all_configured, producer: cranectld, requiredAttributes: [job_id, step_id, operation, outcome]}
+  - {symbol: CtldStepAllTerminal, id: ctld/step/all_terminal, producer: cranectld, requiredAttributes: [job_id, step_id, status, operation]}
+  - {symbol: CtldStepAllocRpcResult, id: ctld/step/alloc_rpc_result, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CtldStepExecuteRequested, id: ctld/step/execute_requested, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CtldStepExecuteRpcResult, id: ctld/step/execute_rpc_result, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CtldStepFreeRpcResult, id: ctld/step/free_rpc_result, producer: cranectld, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedJobInstalled, id: craned/job/installed, producer: craned, requiredAttributes: [job_id, node_id, operation, outcome]}
+  - {symbol: CranedJobRemoved, id: craned/job/removed, producer: craned, requiredAttributes: [job_id, node_id, operation, outcome]}
+  - {symbol: CranedStatusSendResult, id: craned/status/send_result, producer: craned, requiredAttributes: [job_id, step_id, node_id, status, operation, outcome]}
+  - {symbol: CranedStepCleanupFinished, id: craned/step/cleanup_finished, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedStepCleanupStarted, id: craned/step/cleanup_started, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation]}
+  - {symbol: CranedStepExecuteAccepted, id: craned/step/execute_accepted, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedStepFreeAccepted, id: craned/step/free_accepted, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedStepInstallAccepted, id: craned/step/install_accepted, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedStepInstalled, id: craned/step/installed, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedSupervisorExitObserved, id: craned/supervisor/exit_observed, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedSupervisorForked, id: craned/supervisor/forked, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: CranedSupervisorReady, id: craned/supervisor/ready, producer: craned, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: PipelineFault, id: pipeline/fault, producer: frontend, requiredAttributes: [reason_code]}
+  - {symbol: SupervisorStepAllTasksFinalized, id: supervisor/step/all_tasks_finalized, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, status, operation]}
+  - {symbol: SupervisorStepCompletingEnqueued, id: supervisor/step/completing_enqueued, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, status, operation, outcome]}
+  - {symbol: SupervisorStepEpilogFinished, id: supervisor/step/epilog_finished, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: SupervisorStepExecuteStarted, id: supervisor/step/execute_started, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, operation, outcome]}
+  - {symbol: SupervisorStepExiting, id: supervisor/step/exiting, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, status, operation]}
+  - {symbol: SupervisorStepInitialized, id: supervisor/step/initialized, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, status, operation, outcome]}
+  - {symbol: SupervisorStepShutdownReceived, id: supervisor/step/shutdown_received, producer: supervisor, requiredAttributes: [job_id, step_id, node_id, status, operation]}
+  - {symbol: SupervisorTaskExitObserved, id: supervisor/task/exit_observed, producer: supervisor, requiredAttributes: [job_id, step_id, task_id, node_id, operation, outcome]}
+  - {symbol: SupervisorTaskFinalized, id: supervisor/task/finalized, producer: supervisor, requiredAttributes: [job_id, step_id, task_id, node_id, status, operation, outcome]}
+  - {symbol: SupervisorTaskPrepared, id: supervisor/task/prepared, producer: supervisor, requiredAttributes: [job_id, step_id, task_id, node_id, operation, outcome]}
+  - {symbol: SupervisorTaskSpawned, id: supervisor/task/spawned, producer: supervisor, requiredAttributes: [job_id, step_id, task_id, node_id, operation, outcome]}

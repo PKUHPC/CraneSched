@@ -258,6 +258,12 @@ Tracing:
   Enabled: false
   # Runtime tracing level: basic | detailed | debug
   Level: debug
+  ExecutionFlow:
+    # Emit durable flow/v1 lifecycle points for jobs carrying a validated
+    # CRANE_EXECUTION_FLOW_ID. Requires CRANE_ENABLE_EXECUTION_FLOW at build time.
+    Enabled: false
+    # Pipeline-health heartbeat interval for Cranectld and Craned.
+    HeartbeatIntervalSeconds: 5
 
 Container:
   # Toggle the container support in CraneSched

@@ -56,6 +56,61 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 # Options start here ----------------------------------------------------------------------------
 
 option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+option(CRANE_ENABLE_EXECUTION_FLOW
+        "Enable execution-flow lifecycle point instrumentation" OFF)
+if (CRANE_ENABLE_EXECUTION_FLOW AND NOT CRANE_ENABLE_TRACING)
+    message(FATAL_ERROR
+            "CRANE_ENABLE_EXECUTION_FLOW requires CRANE_ENABLE_TRACING=ON")
+endif ()
+if (CRANE_ENABLE_EXECUTION_FLOW)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH "$ENV{PYTHONPATH}" CACHE STRING
+            "Python module path used by the execution-flow schema generator")
+    mark_as_advanced(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+    if (CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+        set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND
+                "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH}"
+                "${Python3_EXECUTABLE}")
+    endif ()
+    execute_process(
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
+                    -c "import yaml"
+            RESULT_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT
+            ERROR_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR)
+    if (NOT CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT EQUAL 0)
+        message(FATAL_ERROR
+                "Execution-flow schema generation requires PyYAML for "
+                "${Python3_EXECUTABLE}: ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR}")
+    endif ()
+    set(CRANE_EXECUTION_FLOW_SCHEMA
+            "${CMAKE_CURRENT_SOURCE_DIR}/schemas/execution-flow/v1.yaml")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_execution_flow_schema.py")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_CATALOG
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Utilities/OpenTelemetry/include/crane/ExecutionFlowSchema.h")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP
+            "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/crane_execution_flow_schema_check.stamp")
+    add_custom_command(
+            OUTPUT "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}"
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR}"
+                    --schema "${CRANE_EXECUTION_FLOW_SCHEMA}"
+                    --output "${CRANE_EXECUTION_FLOW_SCHEMA_CATALOG}"
+                    --check
+            COMMAND "${CMAKE_COMMAND}" -E touch
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}"
+            DEPENDS
+                    "${CRANE_EXECUTION_FLOW_SCHEMA}"
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR}"
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_CATALOG}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Checking generated execution-flow schema catalog"
+            VERBATIM)
+    add_custom_target(crane_execution_flow_schema_check
+            DEPENDS "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}")
+endif ()
 set(CRANE_TRACE_COMPILED_MAX_LEVEL "debug" CACHE STRING
         "Maximum tracing level compiled into binaries: basic, detailed, or debug")
 set_property(CACHE CRANE_TRACE_COMPILED_MAX_LEVEL PROPERTY STRINGS basic detailed debug)

@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <string>
 
 #ifdef CRANE_ENABLE_TRACING
@@ -42,6 +43,7 @@ class TracerManager {
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
   GetTracerSafe() {
+    std::lock_guard lock{tracer_mutex_};
     return tracer_;
   }
 #endif
@@ -58,6 +60,7 @@ class TracerManager {
   ~TracerManager() = default;
 
 #ifdef CRANE_ENABLE_TRACING
+  mutable std::mutex tracer_mutex_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
       tracer_provider_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;

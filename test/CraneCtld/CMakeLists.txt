@@ -59,6 +59,8 @@ add_executable(ctld_public_defs_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.cpp
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.cpp
 
         CtldPublicDefsTest.cpp
         CtldTestStubs.cpp
@@ -69,6 +71,7 @@ target_link_libraries(ctld_public_defs_test
         spdlog::spdlog
         concurrentqueue
         crane_proto_lib
+        crane_tracer
 
         Utility_PublicHeader
         Utility_PasswordEntry

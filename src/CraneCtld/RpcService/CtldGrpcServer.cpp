@@ -31,6 +31,7 @@
 #include "Node/CranedMetaContainer.h"
 #include "Security/VaultClient.h"
 #include "absl/strings/ascii.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/PluginClient.h"
 #include "crane/TraceConfigProto.h"
 #include "crane/Tracing.h"
@@ -1550,6 +1551,7 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   g_config.Tracing.Level = runtime_level;
   auto applied_config = crane::ApplyRuntimeTraceConfig(g_config.Tracing.Enabled,
                                                        g_config.Tracing.Level);
+  CRANE_EXECUTION_FLOW_RECONCILE();
   if (applied_config.clamped) {
     CRANE_WARN(
         "Tracing runtime level {} exceeds compiled max level {}; effective "

@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 #include "crane/TracerManager.h"
@@ -65,6 +66,7 @@ struct StepStatusChangeQueueElem {
   std::chrono::steady_clock::time_point enqueue_steady_time{};
   int64_t enqueue_ts_ms{};
   int64_t queue_len_at_enqueue{};
+  std::optional<crane::FlowContext> execution_flow_context;
 };
 
 struct JobInfoOfUid {
@@ -164,6 +166,7 @@ struct Config {
   struct TracingConfig {
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
+    crane::ExecutionFlowRuntimeConfig ExecutionFlow;
   };
   TracingConfig Tracing;
 

@@ -23,6 +23,10 @@ MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_CHECKPOINT_BYTES = 16 * 1024 * 1024
 MAX_LOG_FILES = 2048
 MAX_LOG_SCAN = 8192
+MAX_FLOW_FILES = 512
+MAX_FLOW_FILE_BYTES = 2 * 1024 * 1024
+MAX_TOTAL_FLOW_BYTES = 16 * 1024 * 1024
+MAX_FLOW_DETAIL_ITEMS = 16
 MAX_FAILURE_ROWS = 50
 MAX_INFRASTRUCTURE_ROWS = 20
 MAX_SLOW_CASE_ROWS = 10
@@ -33,6 +37,11 @@ DENIED_NAME = re.compile(
 )
 LOG_RELATIVE = re.compile(
     r"^[A-Za-z0-9_.-]+/[0-9]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.log$"
+)
+FLOW_RELATIVE = re.compile(
+    r"^(?:(?:[A-Za-z0-9_.-]+)/[0-9]+/)?flow/(?:shard-[0-9]+\.progress\.json|"
+    r"shard-[0-9]+\.(?:commands|events)\.ndjson|"
+    r"cases/TC[A-Za-z0-9.-]+/[0-9a-f]{32}/iteration-[0-9]+\.ndjson)$"
 )
 CASE_LEVEL_DIAGNOSTIC = re.compile(
     r"^(?:case was not run|missing case result):\s*\S+\s*$", re.IGNORECASE
@@ -53,6 +62,10 @@ REDACTIONS = (
     re.compile(r"\b(?:hvs\.[A-Za-z0-9_-]+|s\.[A-Za-z0-9]{16,})\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     re.compile(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+"),
+    re.compile(
+        r'(?i)((?:"(?:password|passwd|token|secret|cookie|private[_-]?key|'
+        r'client[_-]?secret)"\s*:\s*"))(?:[^"\\]|\\.)*(?=")'
+    ),
     re.compile(
         r"(?i)((?:password|passwd|token|secret|cookie|private[_-]?key|client[_-]?secret)"
         r"\s*[:=]\s*)[^\s,;]+"
@@ -159,6 +172,21 @@ def _escape_markdown(value: object) -> str:
         .replace("\r", " ")
         .replace("\n", " ")
     )
+
+
+def _flow_detail_strings(value: object) -> tuple[str, ...]:
+    """Return a small, type-safe subset of an untrusted flow-result list."""
+
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in islice(value, MAX_FLOW_DETAIL_ITEMS * 4):
+        if not isinstance(item, str) or not item:
+            continue
+        result.append(item[:512])
+        if len(result) == MAX_FLOW_DETAIL_ITEMS:
+            break
+    return tuple(result)
 
 
 def _reject_json_constant(constant: str) -> object:
@@ -370,7 +398,9 @@ def _shard_context(
                     "wall": None,
                     "case_time": None,
                     "estimate": estimate,
-                    "result": "MISSING" if not records else f"DUPLICATE ({len(records)})",
+                    "result": "MISSING"
+                    if not records
+                    else f"DUPLICATE ({len(records)})",
                     "terminal": False,
                 }
             )
@@ -410,7 +440,9 @@ def _shard_context(
                 "slot": slot,
                 "cases": len(cases) if isinstance(cases, list) else planned_count,
                 "counts": counts,
-                "wall": _duration_between(record.get("started_at"), record.get("finished_at")),
+                "wall": _duration_between(
+                    record.get("started_at"), record.get("finished_at")
+                ),
                 "case_time": case_time,
                 "estimate": estimate,
                 "result": outcome,
@@ -557,9 +589,7 @@ def _shard_evidence_diagnostics(
         if shard_index not in planned:
             diagnostics.append(f"shard {shard_index} is not present in the plan")
         if not row["terminal"]:
-            diagnostics.append(
-                f"shard {shard_index} is {str(row['result']).lower()}"
-            )
+            diagnostics.append(f"shard {shard_index} is {str(row['result']).lower()}")
             continue
         shard_result = row["result"]
         if shard_result in {"INFRASTRUCTURE ERROR", "INCOMPLETE"}:
@@ -605,14 +635,12 @@ def _write_summary(
     sources = result.get("sources") or plan.get("sources") or {}
     if not isinstance(sources, dict):
         sources = {}
-    shard_rows, case_locations, shard_fatals = _shard_context(run_root, plan, allocation)
-    exit_code, exit_diagnostics = _resolve_exit_code(
-        result, state, execute_exit_code
+    shard_rows, case_locations, shard_fatals = _shard_context(
+        run_root, plan, allocation
     )
+    exit_code, exit_diagnostics = _resolve_exit_code(result, state, execute_exit_code)
     if exit_code in {0, 1}:
-        shard_diagnostics = _shard_evidence_diagnostics(
-            plan, shard_rows, exit_code
-        )
+        shard_diagnostics = _shard_evidence_diagnostics(plan, shard_rows, exit_code)
         if shard_diagnostics:
             exit_code = 2
             exit_diagnostics.extend(shard_diagnostics)
@@ -646,7 +674,9 @@ def _write_summary(
         identifiers = result.get(key)
         if isinstance(identifiers, list) and identifiers:
             visible = [str(identifier) for identifier in identifiers[:10]]
-            suffix = f" (+{len(identifiers) - 10} more)" if len(identifiers) > 10 else ""
+            suffix = (
+                f" (+{len(identifiers) - 10} more)" if len(identifiers) > 10 else ""
+            )
             infrastructure_messages.append(
                 f"{label}: {len(identifiers)} ({', '.join(visible)}{suffix})"
             )
@@ -670,9 +700,7 @@ def _write_summary(
     elif has_aggregate_cases:
         not_run_count = aggregate_counts["not_run"]
     elif shard_rows:
-        checkpoint_not_run = sum(
-            int(row["counts"]["not_run"]) for row in shard_rows
-        )
+        checkpoint_not_run = sum(int(row["counts"]["not_run"]) for row in shard_rows)
         not_run_count = f"{checkpoint_not_run} (partial)"
     else:
         not_run_count = "unavailable"
@@ -703,6 +731,117 @@ def _write_summary(
         ],
     )
     lines.append("")
+
+    flow_summary = result.get("execution_flow")
+    flow_subject_count = None
+    if isinstance(flow_summary, dict):
+        flow_subject_count = _integer(flow_summary.get("subject_count"))
+    if flow_subject_count is not None and flow_subject_count > 0:
+        status_counts = flow_summary.get("status_counts")
+        mode_counts = flow_summary.get("mode_counts")
+        contract_counts = flow_summary.get("contract_counts")
+        if not isinstance(status_counts, dict):
+            status_counts = {}
+        if not isinstance(mode_counts, dict):
+            mode_counts = {}
+        if not isinstance(contract_counts, dict):
+            contract_counts = {}
+        contracts = ", ".join(
+            f"{name} ({count})"
+            for name, count in sorted(contract_counts.items())
+            if isinstance(name, str) and _integer(count) is not None
+        )
+        modes = ", ".join(
+            f"{name} ({count})"
+            for name, count in (
+                ("shadow", mode_counts.get("shadow")),
+                ("enforce", mode_counts.get("enforce")),
+            )
+            if _integer(count) is not None and _integer(count) > 0
+        )
+        lines.extend(["### Execution flow contracts", ""])
+        _append_table(
+            lines,
+            (
+                "Cases",
+                "Subjects",
+                "Satisfied",
+                "Violations",
+                "Inconclusive",
+                "Unsupported",
+                "Modes",
+                "Contracts",
+            ),
+            [
+                (
+                    _integer(flow_summary.get("case_count")) or 0,
+                    flow_subject_count,
+                    _integer(status_counts.get("satisfied")) or 0,
+                    _integer(status_counts.get("flow_violation")) or 0,
+                    _integer(status_counts.get("trace_pipeline_inconclusive")) or 0,
+                    _integer(status_counts.get("unsupported")) or 0,
+                    modes or "unavailable",
+                    contracts or "unavailable",
+                )
+            ],
+        )
+        flow_findings: list[tuple[object, ...]] = []
+        for case in cases:
+            if not isinstance(case, dict):
+                continue
+            iterations = case.get("execution_flow")
+            if not isinstance(iterations, list):
+                continue
+            for iteration in iterations:
+                if not isinstance(iteration, dict):
+                    continue
+                subjects = iteration.get("subjects")
+                if not isinstance(subjects, list):
+                    continue
+                for subject in subjects:
+                    if (
+                        not isinstance(subject, dict)
+                        or subject.get("status") == "satisfied"
+                    ):
+                        continue
+                    expected = subject.get("expected_next")
+                    codes = subject.get("violation_codes")
+                    expected_items = _flow_detail_strings(expected)
+                    code_items = _flow_detail_strings(codes)
+                    flow_findings.append(
+                        (
+                            case.get("id", "unavailable"),
+                            iteration.get("mode", "unavailable"),
+                            subject.get("process_index", "unavailable"),
+                            subject.get("status", "unavailable"),
+                            subject.get("last_point") or "-",
+                            ", ".join(expected_items) if expected_items else "-",
+                            ", ".join(code_items) if code_items else "-",
+                        )
+                    )
+        if flow_findings:
+            lines.append("")
+            _append_table(
+                lines,
+                (
+                    "Case",
+                    "Mode",
+                    "Process",
+                    "Verdict",
+                    "Last point",
+                    "Expected",
+                    "Codes",
+                ),
+                flow_findings[:MAX_FAILURE_ROWS],
+            )
+            if len(flow_findings) > MAX_FAILURE_ROWS:
+                lines.extend(
+                    [
+                        "",
+                        f"Showing {MAX_FAILURE_ROWS} of {len(flow_findings)} flow findings.",
+                    ]
+                )
+        lines.append("")
 
     if infrastructure_messages:
         lines.extend(["### Infrastructure errors", ""])
@@ -742,7 +881,9 @@ def _write_summary(
             {
                 "id": case_id,
                 "name": (
-                    case.get("name") if isinstance(case.get("name"), str) else "unavailable"
+                    case.get("name")
+                    if isinstance(case.get("name"), str)
+                    else "unavailable"
                 ),
                 "status": case.get("status", "unavailable"),
                 "shard": shard,
@@ -764,7 +905,16 @@ def _write_summary(
         lines.extend(["### Failed, errored, or not-run cases", ""])
         _append_table(
             lines,
-            ("Case", "Name", "Status", "Shard", "Worker", "Duration", "Message", "Logs"),
+            (
+                "Case",
+                "Name",
+                "Status",
+                "Shard",
+                "Worker",
+                "Duration",
+                "Message",
+                "Logs",
+            ),
             [
                 (
                     case["id"],
@@ -879,7 +1029,9 @@ def _write_summary(
                     placement,
                 )
             )
-        _append_table(lines, ("Case", "Name", "Status", "Duration", "Placement"), slow_rows)
+        _append_table(
+            lines, ("Case", "Name", "Status", "Duration", "Placement"), slow_rows
+        )
         lines.append("")
 
     provenance_rows = [
@@ -891,7 +1043,10 @@ def _write_summary(
         ("AutoTest SHA", sources.get("autotest", "unavailable")),
         ("Build ID", result.get("build_id", plan.get("build_id", "unavailable"))),
         ("Suite digest", _suite_digest(result, plan)),
-        ("Plan digest", result.get("plan_digest", plan.get("plan_digest", "unavailable"))),
+        (
+            "Plan digest",
+            result.get("plan_digest", plan.get("plan_digest", "unavailable")),
+        ),
         ("Image", result.get("image_digest", plan.get("image_digest", "unavailable"))),
         ("Started", result.get("started_at", "unavailable")),
         ("Finished", result.get("finished_at", "unavailable")),
@@ -910,7 +1065,9 @@ def _write_summary(
     text = "\n".join(lines) + "\n"
     encoded = text.encode("utf-8")
     if len(encoded) > MAX_SUMMARY_BYTES:
-        suffix = "\n\n_Report truncated; download the JSON artifact for complete details._\n"
+        suffix = (
+            "\n\n_Report truncated; download the JSON artifact for complete details._\n"
+        )
         limit = MAX_SUMMARY_BYTES - len(suffix.encode("utf-8"))
         text = encoded[:limit].decode("utf-8", errors="ignore") + suffix
     destination.write_text(text, encoding="utf-8")
@@ -996,8 +1153,9 @@ def main() -> int:
             if logs_root.is_dir() and not logs_root.is_symlink():
                 for source in sorted(islice(logs_root.rglob("*.log"), MAX_LOG_SCAN)):
                     relative_under_logs = source.relative_to(logs_root)
+                    remaining = MAX_TOTAL_LOG_BYTES - total
                     if (
-                        total >= MAX_TOTAL_LOG_BYTES
+                        remaining <= 0
                         or log_files >= MAX_LOG_FILES
                         or not SAFE_LOG_NAME.fullmatch(source.name)
                         or DENIED_NAME.search(str(relative_under_logs))
@@ -1010,12 +1168,44 @@ def main() -> int:
                     entry = _copy_text(
                         safe,
                         destination / "logs" / relative_under_logs,
-                        tail_bytes=MAX_LOG_BYTES,
+                        tail_bytes=min(MAX_LOG_BYTES, remaining),
                     )
                     entry["path"] = str(Path("logs") / relative_under_logs)
                     entries.append(entry)
-                    total += min(safe.stat().st_size, MAX_LOG_BYTES)
+                    total += min(safe.stat().st_size, MAX_LOG_BYTES, remaining)
                     log_files += 1
+
+            flow_total = 0
+            flow_files = 0
+            logs_root = run_root / "logs"
+            if logs_root.is_dir() and not logs_root.is_symlink():
+                for source in sorted(islice(logs_root.rglob("*"), MAX_LOG_SCAN)):
+                    relative_under_logs = source.relative_to(logs_root)
+                    remaining = MAX_TOTAL_FLOW_BYTES - flow_total
+                    if (
+                        remaining <= 0
+                        or flow_files >= MAX_FLOW_FILES
+                        or DENIED_NAME.search(str(relative_under_logs))
+                        or not FLOW_RELATIVE.fullmatch(str(relative_under_logs))
+                    ):
+                        continue
+                    relative = Path("logs") / relative_under_logs
+                    safe = _safe_source(run_root, relative)
+                    if safe is None:
+                        continue
+                    entry = _copy_text(
+                        safe,
+                        destination / relative,
+                        tail_bytes=min(MAX_FLOW_FILE_BYTES, remaining),
+                    )
+                    entry["path"] = str(relative)
+                    entries.append(entry)
+                    flow_total += min(
+                        safe.stat().st_size,
+                        MAX_FLOW_FILE_BYTES,
+                        remaining,
+                    )
+                    flow_files += 1
 
     manifest = {
         "apiVersion": "cranesched.io/v1alpha1",
@@ -1023,9 +1213,7 @@ def main() -> int:
         "run_id": args.run_id,
         "run_present": run_root.is_dir() and not run_root.is_symlink(),
         "failure_logs_included": include_failure_logs,
-        "check_exit_code": (
-            summary_exit_code if summary_exit_code in {0, 1, 2} else 2
-        ),
+        "check_exit_code": (summary_exit_code if summary_exit_code in {0, 1, 2} else 2),
         "revision_routing": {
             "routing_sha": args.routing_sha,
             "pr_base_sha": args.pr_base_sha,

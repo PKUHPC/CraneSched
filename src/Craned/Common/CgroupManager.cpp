@@ -54,6 +54,7 @@ constexpr char kCgroupOpConcurrencyEnv[] = "CRANE_CGROUP_OP_CONCURRENCY";
 constexpr char kCgroupOpSemaphoreEnv[] = "CRANE_CGROUP_OP_SEM_NAME";
 constexpr char kCgroupV2FastPathEnv[] = "CRANE_CGROUP_V2_FAST_PATH";
 constexpr char kCgroupV2CleanupModeEnv[] = "CRANE_CGROUP_V2_CLEANUP_MODE";
+constexpr std::chrono::seconds kCgroupV2JanitorShutdownTimeout{5};
 
 int64_t MsSince(std::chrono::steady_clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -407,8 +408,13 @@ void CgroupManager::ConfigureCgroupV2CleanupMode(std::string_view mode) {
 
 void CgroupManager::ShutdownCgroupV2FastPath() {
   if (!m_v2_fs_backend_) return;
-  if (!m_v2_fs_backend_->DrainJanitor(std::chrono::seconds{5})) {
-    CRANE_WARN("Cgroup v2 janitor did not drain during cgroup shutdown");
+  // CgroupV2 instances retain their own shared backend reference. Stop new
+  // janitor submissions and drain the work accepted by the manager before
+  // dropping its owner; relying on the backend destructor would skip this
+  // boundary while any cgroup lives.
+  if (!m_v2_fs_backend_->StopAcceptingAndDrainJanitor(
+          kCgroupV2JanitorShutdownTimeout)) {
+    CRANE_WARN("Cgroup v2 janitor did not drain before fast-path shutdown");
   }
   m_v2_fs_backend_.reset();
 }
@@ -1129,21 +1135,29 @@ Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
 }
 
 void CgroupManager::KillAndDestroyCgroup(
-    std::unique_ptr<CgroupInterface> cgroup) {
-  if (cgroup == nullptr) return;
+    std::unique_ptr<CgroupInterface> cgroup,
+    CgroupCleanupCompletion completion) {
+  CgroupCleanupResult result;
+  if (cgroup == nullptr) {
+    if (completion) completion(result);
+    return;
+  }
 
-  const auto cgroup_name = cgroup->CgroupName();
   const auto cgroup_path = cgroup->CgroupPath().string();
   CRANE_TRACE("Destroying cgroup {}.", cgroup_path);
 
   int cnt = 0;
+  result.processes_drained = false;
   while (true) {
-    if (cgroup->Empty()) break;
+    if (cgroup->Empty()) {
+      result.processes_drained = true;
+      break;
+    }
     if (cnt >= 5) {
       CRANE_ERROR(
           "Couldn't kill the processes in cgroup {} after {} times. "
           "Skipping it.",
-          cgroup_name, cnt);
+          cgroup->CgroupName(), cnt);
       break;
     }
 
@@ -1152,8 +1166,13 @@ void CgroupManager::KillAndDestroyCgroup(
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
   }
 
-  cgroup->Destroy();
-  CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
+  (void)cgroup->Destroy(
+      [result, cgroup_path,
+       completion = std::move(completion)](bool destroyed) mutable {
+        result.cgroup_destroyed = destroyed;
+        if (destroyed) CRANE_DEBUG("Cgroup {} destroyed.", cgroup_path);
+        if (completion) completion(result);
+      });
 }
 
 CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
@@ -1554,7 +1573,8 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
   return true;
 }
 
-void Cgroup::Destroy() {
+bool Cgroup::Destroy() {
+  bool removed = true;
   if (m_cgroup_ != nullptr) {
     auto begin_time = std::chrono::steady_clock::now();
     CgroupOpGate gate;
@@ -1565,6 +1585,7 @@ void Cgroup::Destroy() {
     int err = cgroup_delete_cgroup_ext(
         m_cgroup_, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION);
     if (err != 0) {
+      removed = false;
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
       remove_span.SetAttribute("libcgroup_errno", err);
@@ -1575,9 +1596,14 @@ void Cgroup::Destroy() {
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
   }
+  return removed;
 }
 
-void CgroupInterface::Destroy() { m_cgroup_info_.Destroy(); }
+bool CgroupInterface::Destroy(CgroupDestroyCompletion completion) {
+  const bool removed = m_cgroup_info_.Destroy();
+  if (completion) completion(removed);
+  return removed;
+}
 
 bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgConstant::Controller;
@@ -1795,7 +1821,9 @@ bool CgroupV1::Empty() {
   return false;
 }
 
-void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
+bool CgroupV1::Destroy(CgroupDestroyCompletion completion) {
+  return CgroupInterface::Destroy(std::move(completion));
+}
 
 #ifdef CRANE_ENABLE_BPF
 
@@ -2345,7 +2373,7 @@ bool CgroupV2::Empty() {
   return false;
 }
 
-void CgroupV2::Destroy() {
+bool CgroupV2::Destroy(CgroupDestroyCompletion completion) {
   if (m_v2_fs_backend_) {
 #ifdef CRANE_ENABLE_BPF
     if (!m_cgroup_bpf_devices.empty()) {
@@ -2353,17 +2381,17 @@ void CgroupV2::Destroy() {
     }
     CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
-    m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
-    return;
+    return m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName(),
+                                     std::move(completion));
   }
 
-  CgroupInterface::Destroy();
+  const bool removed = CgroupInterface::Destroy();
 #ifdef CRANE_ENABLE_BPF
-  if (!m_cgroup_bpf_devices.empty()) {
-    EraseBpfDeviceMap();
-  }
+  if (!m_cgroup_bpf_devices.empty()) EraseBpfDeviceMap();
   CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
+  if (completion) completion(removed);
+  return removed;
 }
 
 bool CgroupV2::MigrateProcIn(pid_t pid) {
@@ -2573,7 +2601,7 @@ bool CgroupManager::InitCpuPool(const std::set<uint32_t>& node_cpus) {
 
 void CgroupManager::ShutdownCpuPool() {
   if (m_overflow_cg_) {
-    m_overflow_cg_->Destroy();
+    (void)m_overflow_cg_->Destroy();
     m_overflow_cg_.reset();
   }
   m_overflow_bits_.clear();

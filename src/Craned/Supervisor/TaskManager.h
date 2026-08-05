@@ -21,6 +21,7 @@
 
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
+#include "TaskLifecycle.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
@@ -28,6 +29,7 @@
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/Tracing.h"
@@ -119,6 +121,11 @@ class StepInstance {
     x11 = interactive_type.has_value() && step.interactive_meta().x11();
     x11_fwd = interactive_type.has_value() &&
               step.interactive_meta().x11_meta().enable_forwarding();
+    if (step.type() == crane::grpc::JobType::Batch &&
+        !step.has_container_meta() && !step.has_array_task() &&
+        step.requeue_count() == 0)
+      execution_flow_id_ =
+          crane::ExecutionFlowIdFromString(step.execution_flow_id());
   };
 
   StepInstance(const StepInstance&) = delete;
@@ -161,6 +168,8 @@ class StepInstance {
   [[nodiscard]] bool IsPod() const noexcept;
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsPmix() const noexcept;
+
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContext() const;
 
   [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
 
@@ -227,6 +236,7 @@ class StepInstance {
  private:
   std::atomic<StepStatus> m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
+  std::optional<crane::FlowId> execution_flow_id_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
@@ -268,7 +278,27 @@ class ITaskInstance {
     return m_parent_step_inst_->GetStep();
   }
 
-  [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
+  [[nodiscard]] bool RecordFinalizationIntent(
+      TaskFinalizeCause cause,
+      std::optional<std::string> reason = std::nullopt) {
+    return m_finalization_state_.RecordIntent(
+        {.cause = cause, .reason = std::move(reason)});
+  }
+
+  [[nodiscard]] bool HasFinalizationIntent() const {
+    return m_finalization_state_.HasIntent();
+  }
+
+  [[nodiscard]] std::optional<TaskFinalInfo> TryBeginFinalization() {
+    auto decision = m_finalization_state_.TryFinalize();
+    if (!decision.has_value()) return std::nullopt;
+
+    return TaskFinalInfo{
+        .cause = decision->cause.value_or(TaskFinalizeCause::NORMAL),
+        .raw_exit = m_raw_exit_,
+        .reason = std::move(decision->reason),
+    };
+  }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -287,8 +317,16 @@ class ITaskInstance {
   // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   StepInstance* m_parent_step_inst_;
   EnvMap m_env_;
-  TaskFinalInfo m_final_info_{};
   // NOLINTEND(misc-non-private-member-variables-in-classes)
+
+  const TaskExitInfo& RecordRawExit(TaskExitInfo raw_exit) {
+    m_raw_exit_ = std::move(raw_exit);
+    return *m_raw_exit_;
+  }
+
+ private:
+  std::optional<TaskExitInfo> m_raw_exit_;
+  detail::TaskFinalizationState<TaskFinalizeCause> m_finalization_state_;
 };
 
 // NOTE: Pod instance is only used in daemon step.
@@ -637,8 +675,6 @@ class TaskManager {
   }
 
   void FinalizeTaskAsync(task_id_t task_id);
-  void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
-                         std::optional<std::string> reason = std::nullopt);
 
   std::future<CraneErrCode> ExecuteStepAsync();
 
@@ -676,6 +712,9 @@ class TaskManager {
 
   struct DaemonPodTerminateQueueElem {};
 
+  using TaskFinalizeQueueElem = detail::TaskFinalizationRequest<task_id_t>;
+  using TaskFinalizeQueue = ConcurrentQueue<TaskFinalizeQueueElem>;
+
   struct ChangeStepTimeConstraintQueueElem {
     std::promise<CraneErrCode> ok_prom;
     std::optional<int64_t> time_limit{std::nullopt};
@@ -709,7 +748,12 @@ class TaskManager {
   void EvGrpcCheckStatusCb_();
   void EvGrpcMigrateSshProcToCgroupCb_();
 
-  void CompleteStepBeforeTaskStart_(uint32_t exit_code, std::string reason);
+  // Explicit finalization is event-loop-only because it records intent on the
+  // task before publishing a mailbox notification.
+  void FinalizeTaskAsync(task_id_t task_id, TaskFinalizeCause cause,
+                         std::optional<std::string> reason = std::nullopt);
+  void FailStepAndShutdown_(uint32_t exit_code, std::string reason);
+  void EnqueueTaskFinalization_(TaskFinalizeQueueElem elem);
 
   // Task sink for finalized tasks. Task will be removed here.
   // Should called in uvw thread, otherwise data race may happen.
@@ -743,7 +787,8 @@ class TaskManager {
 
   // Task is already terminated
   std::shared_ptr<uvw::async_handle> m_task_finalizing_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_finalizing_queue_;
+  detail::TaskFinalizationMailbox<TaskFinalizeQueueElem, TaskFinalizeQueue>
+      m_task_finalizing_mailbox_;
 
   // Step is requested to be terminated
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
@@ -773,6 +818,7 @@ class TaskManager {
       m_grpc_migrate_ssh_proc_to_cgroup_queue_;
 
   std::atomic_bool m_supervisor_exit_;
+  StepStatus m_exit_status_{StepStatus::Completed};
   std::thread m_uvw_thread_;
 
   // This is the gate for daemon step. Daemon step will not exit when all tasks

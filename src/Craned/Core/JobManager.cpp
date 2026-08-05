@@ -27,8 +27,10 @@
 #include <set>
 #include <utility>
 
+#include "CleanupLifecycle.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "crane/Tracing.h"
@@ -306,6 +308,11 @@ EnvMap JobInD::GetJobEnvMap() {
   return env_map;
 }
 
+std::optional<crane::FlowContext> JobInD::ExecutionFlowContext() const {
+  return crane::MakeExecutionFlowContext(execution_flow_id_,
+                                         job_to_d.traceparent(), job_id);
+}
+
 JobManager::JobManager() {
   m_uvw_loop_ = uvw::loop::create();
 
@@ -515,6 +522,9 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     }
 
     job_map_ptr->emplace(job_id, std::move(job));
+    CRANE_FLOW_EMIT(CranedJobInstalled,
+                    job_map_ptr->at(job_id).RawPtr()->ExecutionFlowContext(),
+                    g_config.Hostname);
     if (uid_map_ptr->contains(uid)) {
       uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
     } else {
@@ -621,6 +631,9 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
       span.SetAttribute("job_id", job_id);
     }
 
+    CRANE_FLOW_EMIT(CranedJobRemoved, job->ExecutionFlowContext(),
+                    g_config.Hostname);
+
     m_free_jobs_queue_.enqueue(FreeJobElem{
         .job = std::move(job.value()),
         .enqueue_time = std::chrono::steady_clock::now(),
@@ -669,6 +682,8 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
       step_inst->traceparent = job_ptr->job_to_d.traceparent();
+      CRANE_FLOW_EMIT(CranedStepInstallAccepted,
+                      step_inst->ExecutionFlowContext(), g_config.Hostname);
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
                                    .need_run_prolog = false};
       // GetJobEnvMap must step_map has the daemon step.
@@ -1058,6 +1073,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
           continue;
         }
       }
+      CRANE_FLOW_EMIT(CranedSupervisorExitObserved,
+                      step->ExecutionFlowContext(), g_config.Hostname);
       exit_steps.push_back(step_key);
     }
     for (const auto& step_key : exit_steps) {
@@ -1071,12 +1088,15 @@ bool JobManager::EvCheckSupervisorRunning_() {
         if (step->pending_terminal_status.has_value() &&
             !step->silent_cleanup) {
           auto& pt = step->pending_terminal_status.value();
-          terminal = StepStatusChangeQueueElem{.job_id = step->job_id,
-                                               .step_id = step->step_id,
-                                               .new_status = pt.final_status,
-                                               .exit_code = pt.exit_code,
-                                               .reason = pt.reason,
-                                               .timestamp = pt.timestamp};
+          terminal = StepStatusChangeQueueElem{
+              .job_id = step->job_id,
+              .step_id = step->step_id,
+              .new_status = pt.final_status,
+              .exit_code = pt.exit_code,
+              .reason = pt.reason,
+              .timestamp = pt.timestamp,
+              .execution_flow_context = step->ExecutionFlowContext(),
+          };
         }
         daemon_cleanup_requests.emplace_back(
             DaemonCleanupRequest{.job_id = step->job_id,
@@ -1094,6 +1114,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
       StepInstance* step = nullptr;
       std::optional<StepInstance::DaemonJobCleanupCtx> cleanup_ctx;
       CraneErrCode cleanup_result = CraneErrCode::SUCCESS;
+      bool cleanup_succeeded = true;
+      std::optional<crane::FlowContext> flow_context;
       {
         auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
         if (!job_ptr) {
@@ -1107,41 +1129,75 @@ bool JobManager::EvCheckSupervisorRunning_() {
                        request.job_id, request.step_id);
           } else {
             step = step_it->second.get();
+            flow_context = step->ExecutionFlowContext();
             if (step->daemon_job_cleanup.has_value()) {
               cleanup_ctx.emplace(std::move(*step->daemon_job_cleanup));
             } else {
               CRANE_WARN("[Step #{}.{}] Daemon cleanup context not found.",
                          request.job_id, request.step_id);
               cleanup_result = CraneErrCode::ERR_SYSTEM_ERR;
+              cleanup_succeeded = false;
             }
           }
         }
       }
 
-      if (step != nullptr) step->CleanUp(false);
-      if (cleanup_ctx.has_value()) {
-        CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx));
+      std::shared_ptr<detail::CleanupCompletionBarrier> flow_cleanup_latch;
+      if (step != nullptr && flow_context) {
+        const std::size_t pending_cleanup_count =
+            1 + static_cast<std::size_t>(cleanup_ctx.has_value());
+        flow_cleanup_latch = std::make_shared<detail::CleanupCompletionBarrier>(
+            pending_cleanup_count, cleanup_succeeded,
+            [flow_context](bool succeeded) {
+              CRANE_FLOW_EMIT(CranedJobCleanupFinished, flow_context,
+                              g_config.Hostname, succeeded);
+            });
       }
 
-      {
-        auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
-        if (job_ptr) {
-          absl::MutexLock lk(job_ptr->step_map_mtx.get());
-          job_ptr->step_map.erase(request.step_id);
-        }
-      }
-
-      if (request.terminal.has_value()) {
-        CRANE_INFO(
-            "[Step #{}.{}] Daemon cleanup completed, sending terminal "
-            "status {}.",
-            request.job_id, request.step_id, request.terminal->new_status);
-        g_ctld_client->StepStatusChangeAsync(
-            std::move(request.terminal.value()));
-      }
-
-      ResolveStepCleanupWaiters_(StepKey{request.job_id, request.step_id},
-                                 cleanup_result);
+      detail::RunDaemonCleanupSequence(
+          [&] {
+            if (step == nullptr) return;
+            CRANE_FLOW_EMIT(CranedJobCleanupStarted, flow_context,
+                            g_config.Hostname);
+            StepInstance::CleanupCompletion step_completion;
+            if (flow_cleanup_latch) {
+              step_completion =
+                  [flow_cleanup_latch](StepInstance::CleanupResult result) {
+                    flow_cleanup_latch->Complete(result.Succeeded());
+                  };
+            }
+            step->CleanUp(false, std::move(step_completion));
+          },
+          [&] {
+            if (!cleanup_ctx.has_value()) return;
+            JobCleanupCompletion job_completion;
+            if (flow_cleanup_latch) {
+              job_completion = [flow_cleanup_latch](bool succeeded) {
+                flow_cleanup_latch->Complete(succeeded);
+              };
+            }
+            CleanUpJobEnvironment_(request.job_id, std::move(*cleanup_ctx),
+                                   true, std::move(job_completion));
+          },
+          [&] {
+            auto job_ptr = m_job_map_.GetValueExclusivePtr(request.job_id);
+            if (!job_ptr) return;
+            absl::MutexLock lk(job_ptr->step_map_mtx.get());
+            job_ptr->step_map.erase(request.step_id);
+          },
+          [&] {
+            if (!request.terminal.has_value()) return;
+            CRANE_INFO(
+                "[Step #{}.{}] Daemon cleanup completed, sending terminal "
+                "status {}.",
+                request.job_id, request.step_id, request.terminal->new_status);
+            g_ctld_client->StepStatusChangeAsync(
+                std::move(request.terminal.value()));
+          },
+          [&] {
+            ResolveStepCleanupWaiters_(StepKey{request.job_id, request.step_id},
+                                       cleanup_result);
+          });
     });
   }
 
@@ -1438,6 +1494,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       continue;
     }
     step_it->second->wait_execute_span.End();
+    CRANE_FLOW_EMIT(CranedStepExecuteAccepted,
+                    step_it->second->ExecutionFlowContext(), g_config.Hostname);
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1473,8 +1531,10 @@ std::optional<JobInD> JobManager::FreeJobInfoNoLock_(
 
 void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
                                         StepInstance::DaemonJobCleanupCtx&& ctx,
-                                        bool run_epilog) {
+                                        bool run_epilog,
+                                        JobCleanupCompletion completion) {
   CRANE_DEBUG("[Job #{}] Cleaning up job environment.", job_id);
+  bool cleanup_succeeded = true;
 
   if (run_epilog && !g_config.JobLifecycleHook.Epilogs.empty() &&
       !(g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob)) {
@@ -1507,6 +1567,7 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
 
     auto result = util::os::RunPrologOrEpiLog(run_epilog_args);
     if (!result) {
+      cleanup_succeeded = false;
       auto status = result.error();
       CRANE_DEBUG("[Job #{}]: Epilog failed status={}:{}", job_id,
                   status.exit_code, status.signal_num);
@@ -1519,14 +1580,27 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
 
   CgroupManager::ReleaseJobCpuPool(job_id, ctx.resource);
 
-  if (ctx.job_cgroup == nullptr) return;
+  if (ctx.job_cgroup == nullptr) {
+    if (completion) completion(cleanup_succeeded);
+    return;
+  }
 
   if (g_config.Plugin.Enabled && g_plugin_client) {
     g_plugin_client->DestroyCgroupHookAsync(job_id,
                                             ctx.job_cgroup->CgroupName());
   }
 
-  CgroupManager::KillAndDestroyCgroup(std::move(ctx.job_cgroup));
+  detail::CoordinateCgroupCleanup(
+      [job_cgroup = std::move(ctx.job_cgroup)](
+          CgroupManager::CgroupCleanupCompletion cleanup_completion) mutable {
+        CgroupManager::KillAndDestroyCgroup(std::move(job_cgroup),
+                                            std::move(cleanup_completion));
+      },
+      [cleanup_succeeded](
+          const CgroupManager::CgroupCleanupResult& cgroup_result) {
+        return cleanup_succeeded && cgroup_result.Succeeded();
+      },
+      std::move(completion));
 }
 
 void JobManager::ResolveStepCleanupWaiters_(const StepKey& key,
@@ -1550,26 +1624,39 @@ void JobManager::FreeStepAllocation_(
   for (auto& step : steps) {
     job_id_t job_id = step->job_id;
     step_id_t step_id = step->step_id;
-    step->CleanUp();
+    std::optional<crane::FlowContext> flow_context =
+        step->ExecutionFlowContext();
+    CRANE_FLOW_EMIT(CranedStepCleanupStarted, flow_context, g_config.Hostname);
     std::optional<StepInstance::PendingTerminalStatus> terminal_status =
         std::nullopt;
     if (step->pending_terminal_status.has_value() && !step->silent_cleanup) {
       terminal_status = step->pending_terminal_status.value();
     }
+    StepInstance::CleanupCompletion completion;
+    if (flow_context) {
+      completion = [flow_context](StepInstance::CleanupResult result) {
+        CRANE_FLOW_EMIT(CranedStepCleanupFinished, flow_context,
+                        g_config.Hostname, result.Succeeded());
+      };
+    }
+    step->CleanUp(true, std::move(completion));
     step.reset();
-    // Send terminal status after step cleanup is done (skip for silent
-    // cleanup).
+
+    // Preserve the existing state-machine ordering. CleanUp() queues physical
+    // cleanup asynchronously; terminal status and waiters advance immediately.
     if (terminal_status.has_value()) {
       auto& pt = terminal_status.value();
       CRANE_TRACE("[Step #{}.{}] Sending terminal status {} after cleanup.",
                   job_id, step_id, pt.final_status);
-      g_ctld_client->StepStatusChangeAsync(
-          StepStatusChangeQueueElem{.job_id = job_id,
-                                    .step_id = step_id,
-                                    .new_status = pt.final_status,
-                                    .exit_code = pt.exit_code,
-                                    .reason = pt.reason,
-                                    .timestamp = pt.timestamp});
+      g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+          .job_id = job_id,
+          .step_id = step_id,
+          .new_status = pt.final_status,
+          .exit_code = pt.exit_code,
+          .reason = std::move(pt.reason),
+          .timestamp = std::move(pt.timestamp),
+          .execution_flow_context = std::move(flow_context),
+      });
     }
     ResolveStepCleanupWaiters_(StepKey{job_id, step_id}, CraneErrCode::SUCCESS);
   }
@@ -1689,6 +1776,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     absl::MutexLock lk(job->step_map_mtx.get());
     job->step_map.emplace(step->step_id, std::move(step));
   }
+  CRANE_FLOW_EMIT(CranedStepInstalled, step_ptr->ExecutionFlowContext(),
+                  g_config.Hostname);
 
   // SpawnSupervisor reports failure before registering a supervisor when
   // setup, fork, or process-group isolation fails. In these cases, report the
@@ -1755,6 +1844,7 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
     auto update_step = [&](StepInstance* step) {
       step->GotNewStatus(status_change.new_status);
       should_forward = !step->silent_cleanup;
+      status_change.execution_flow_context = step->ExecutionFlowContext();
       if (pending_terminal) {
         step->pending_terminal_status = *pending_terminal;
       } else if (step->err_before_supv_start && !step->IsDaemonStep() &&
@@ -2297,6 +2387,8 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       }
 
       auto& step = job->step_map.at(elem.step_id);
+      CRANE_FLOW_EMIT(CranedStepFreeAccepted, step->ExecutionFlowContext(),
+                      g_config.Hostname);
       if (step->IsDaemonStep()) {
         if (step->daemon_job_cleanup.has_value()) {
           CRANE_DEBUG("[Step #{}.{}] Daemon step is already cleaning.",

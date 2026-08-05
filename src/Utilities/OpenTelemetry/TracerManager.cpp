@@ -52,10 +52,8 @@ bool TracerManager::Initialize(
   namespace trace_sdk = opentelemetry::sdk::trace;
   namespace resource = opentelemetry::sdk::resource;
 
-  service_name_ = service_name;
-
   auto resource_attributes = resource::ResourceAttributes{
-      {resource::SemanticConventions::kServiceName, service_name_}};
+      {resource::SemanticConventions::kServiceName, service_name}};
   auto resource_ptr = resource::Resource::Create(resource_attributes);
 
   std::shared_ptr<trace_sdk::TracerProvider> provider;
@@ -71,10 +69,14 @@ bool TracerManager::Initialize(
         std::move(processors), resource_ptr);
   }
 
-  tracer_provider_ = provider;
-  tracer_ = tracer_provider_->GetTracer(service_name_);
-
-  initialized_ = true;
+  auto tracer = provider->GetTracer(service_name);
+  {
+    std::lock_guard lock{tracer_mutex_};
+    service_name_ = service_name;
+    tracer_provider_ = std::move(provider);
+    tracer_ = std::move(tracer);
+    initialized_ = true;
+  }
   return true;
 }
 #endif
@@ -87,20 +89,28 @@ void TracerManager::Shutdown() {
   // Step 2: Short pause to let in-flight ScopedSpan constructors finish
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  // Step 3: Flush and shutdown the provider
-  if (tracer_provider_) {
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
+      tracer_provider;
+  {
+    std::lock_guard lock{tracer_mutex_};
+    tracer_provider = std::move(tracer_provider_);
+    tracer_.reset();
+    initialized_ = false;
+  }
+
+  // Step 3: Flush and shutdown the provider through a private snapshot. New
+  // readers already observe an empty tracer, while existing snapshots keep
+  // their provider alive until they finish.
+  if (tracer_provider) {
     auto* sdk_provider =
         static_cast<opentelemetry::sdk::trace::TracerProvider*>(
-            tracer_provider_.get());
+            tracer_provider.get());
     sdk_provider->ForceFlush(std::chrono::milliseconds(5000));
     sdk_provider->Shutdown();
   }
-
-  // Step 4: Clear references
-  tracer_.reset();
-  tracer_provider_.reset();
-#endif
+#else
   initialized_ = false;
+#endif
 }
 
 }  // namespace crane

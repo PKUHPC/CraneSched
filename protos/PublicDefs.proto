@@ -407,6 +407,7 @@ message JobToD {
 
   optional string traceparent = 10;  // W3C traceparent for distributed tracing
   optional ArrayTaskIdentity array_task = 16;
+  optional string execution_flow_id = 17;  // validated 32-hex correlation id
 }
 
 enum StepType {
@@ -473,6 +474,8 @@ message StepToD {
   string sh_script = 36;
 
   optional ArrayTaskIdentity array_task = 39;
+  int32 requeue_count = 40;
+  optional string execution_flow_id = 41;  // validated 32-hex correlation id
 }
 
 message JobStepsToD {

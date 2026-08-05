@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 
@@ -99,6 +100,7 @@ struct Config {
     bool Enabled{false};
     crane::TraceLevel Level{crane::TraceLevel::Debug};
     std::string Traceparent;
+    crane::ExecutionFlowRuntimeConfig ExecutionFlow;
   };
   TracingConfig Tracing;
 
