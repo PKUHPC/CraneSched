@@ -206,7 +206,7 @@ int InitFromStdin(int argc, char** argv) {
   g_config.SupervisorMaxLogFileSize = msg.max_log_file_size();
   g_config.SupervisorMaxLogFileNum = msg.max_log_file_num();
   g_config.SupervisorUnixSockPath =
-      std::filesystem::path(kDefaultSupervisorUnixSockDir) /
+      g_config.CraneBaseDir / kDefaultSupervisorUnixSockDir /
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
   if (msg.has_job_lifecycle_hook_config()) {
@@ -312,7 +312,7 @@ bool CreateRequiredDirectories() {
     if (!ok) return ok;
   }
 
-  ok = util::os::CreateFolders(kDefaultSupervisorUnixSockDir);
+  ok = util::os::CreateFolders(g_config.SupervisorUnixSockPath.parent_path());
   return ok;
 }
 
@@ -368,6 +368,7 @@ void GlobalVariableInit(int grpc_output_fd) {
     uint32_t pool_size = g_config.ThreadPoolSize > 0
                              ? g_config.ThreadPoolSize
                              : std::thread::hardware_concurrency();
+    CRANE_INFO("Supervisor thread pool size: {}", pool_size);
     g_thread_pool = std::make_unique<BS::thread_pool>(
         pool_size, [] { util::SetCurrentThreadName("BsThreadPool"); });
   }

@@ -148,17 +148,11 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     // Terminate steps on other alive nodes (normal cancel flow)
     g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
                                                 request->craned_id());
-    // For the crashed node: send synthetic Completing + Terminal
-    // (two independent events, not "terminal implies completing")
+    // For the crashed node: enqueue ordinary outer-status events in order.
+    // CTLD status handling only reads JobStatusChangeArg::new_status.
     for (const auto& [job_id, steps] : orphaned_steps) {
       for (const auto step_id : steps | std::views::reverse) {
-        // Synthetic Completing → drives AllNodesCompleting → FreeSteps
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-        // Synthetic Terminal → drives AllNodesFinished → release/FreeJobs
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
+        g_job_scheduler->StepCompletingAndStatusChangeAsync(
             job_id, step_id, request->craned_id(),
             crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);

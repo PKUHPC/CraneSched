@@ -72,6 +72,22 @@ void ParseCtldConfig(const YAML::Node& config) {
       ctld_config.MaxLogFileNum = ctld_cfg["MaxLogFileNum"].as<uint64_t>();
     }
 
+    ctld_config.AsyncLogQueueSize = YamlValueOr<uint32_t>(
+        ctld_cfg["AsyncLogQueueSize"], kDefaultAsyncLogQueueSize);
+    ctld_config.AsyncLogThreadCount = YamlValueOr<uint32_t>(
+        ctld_cfg["AsyncLogThreadCount"], kDefaultAsyncLogThreadCount);
+    ctld_config.AsyncLogBlockWhenFull = YamlValueOr<bool>(
+        ctld_cfg["AsyncLogBlockWhenFull"], kDefaultAsyncLogBlockWhenFull);
+    ctld_config.LogToConsole =
+        YamlValueOr<bool>(ctld_cfg["LogToConsole"], kDefaultLogToConsole);
+    if (ctld_config.AsyncLogQueueSize == 0 ||
+        ctld_config.AsyncLogThreadCount == 0) {
+      fmt::print(stderr,
+                 "AsyncLogQueueSize and AsyncLogThreadCount must be "
+                 "greater than zero.\n");
+      std::exit(1);
+    }
+
     ctld_config.ThreadPoolSize =
         YamlValueOr<uint32_t>(ctld_cfg["ThreadPoolSize"], 0);
     ctld_config.SchedulerRpcThreadPoolSize =
@@ -90,6 +106,9 @@ void ParseCtldConfig(const YAML::Node& config) {
     ctld_config.StatusChangeDbCommitChunkSize =
         YamlValueOr<uint32_t>(ctld_cfg["StatusChangeDbCommitChunkSize"],
                               Ctld::kJobStatusChangeDbCommitChunkSize);
+    ctld_config.CompletingStepRetryIntervalSec =
+        YamlValueOr<uint32_t>(ctld_cfg["CompletingStepRetryIntervalSec"],
+                              Ctld::kCompletingStepRetryIntervalSec);
 
     ctld_config.JobRequeue =
         YamlValueOr<bool>(ctld_cfg["JobRequeue"], Ctld::kDefaultJobRequeue);
@@ -175,9 +194,20 @@ void ParseConfig(int argc, char** argv) {
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
-        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true,
+        InitLogger(log_level.value(), g_config.CraneCtldLogFile,
+                   g_config.CtldConf.LogToConsole,
                    g_config.CtldConf.MaxLogFileSize,
-                   g_config.CtldConf.MaxLogFileNum);
+                   g_config.CtldConf.MaxLogFileNum,
+                   g_config.CtldConf.AsyncLogQueueSize,
+                   g_config.CtldConf.AsyncLogThreadCount,
+                   g_config.CtldConf.AsyncLogBlockWhenFull);
+        CRANE_INFO(
+            "Async logger configured: queue_size={}, thread_count={}, "
+            "block_when_full={}, console={}",
+            g_config.CtldConf.AsyncLogQueueSize,
+            g_config.CtldConf.AsyncLogThreadCount,
+            g_config.CtldConf.AsyncLogBlockWhenFull,
+            g_config.CtldConf.LogToConsole);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);

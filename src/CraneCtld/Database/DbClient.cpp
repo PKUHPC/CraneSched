@@ -773,6 +773,41 @@ static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
          (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
 }
 
+// Select the latest job_db_id per job through a covering index, then fetch
+// only that submission's latest requeue attempt.
+static void AppendLatestJobDocumentStages_(mongocxx::pipeline& pipeline,
+                                           const std::string& collection_name) {
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  pipeline.sort(make_document(kvp("job_id", 1), kvp("job_db_id", 1)));
+  pipeline.group(make_document(
+      kvp("_id", "$job_id"),
+      kvp("job_db_id", make_document(kvp("$last", "$job_db_id")))));
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
+
+  auto lookup_expr = make_document(kvp(
+      "$and",
+      make_array(
+          make_document(kvp("$eq", make_array("$job_id", "$$latest_job_id"))),
+          make_document(
+              kvp("$eq", make_array("$job_db_id", "$$latest_job_db_id"))))));
+  auto lookup_match = make_document(
+      kvp("$match", make_document(kvp("$expr", lookup_expr.view()))));
+  pipeline.lookup(make_document(
+      kvp("from", collection_name),
+      kvp("let", make_document(kvp("latest_job_id", "$_id"),
+                               kvp("latest_job_db_id", "$job_db_id"))),
+      kvp("pipeline",
+          make_array(lookup_match.view(),
+                     make_document(
+                         kvp("$sort", make_document(kvp("requeue_count", -1)))),
+                     make_document(kvp("$limit", 1)))),
+      kvp("as", "latest_job")));
+  pipeline.unwind("$latest_job");
+  pipeline.replace_root(make_document(kvp("newRoot", "$latest_job")));
+}
+
 bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
@@ -876,8 +911,6 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  AppendJobIdSelectorClause_(request, filter);
-
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
@@ -912,21 +945,23 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  // Use aggregation to deduplicate: for each job_id, only return the
-  // record with the highest requeue_count (the latest run), then apply
-  // request filters to those latest-run documents.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
-  pipeline.group(
-      make_document(kvp("_id", "$job_id"),
-                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
-  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  if (request->filter_job_ids().empty()) {
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  } else {
+    document job_id_filter;
+    AppendJobIdSelectorClause_(request, job_id_filter);
+    pipeline.match(job_id_filter.view());
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  }
   pipeline.match(filter.view());
-  pipeline.sort(make_document(kvp("job_db_id", -1)));
   pipeline.limit(static_cast<int32_t>(limit));
 
+  mongocxx::options::aggregate aggregate_options;
+  aggregate_options.allow_disk_use(true);
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(
+          pipeline, aggregate_options);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1220,13 +1255,15 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  filter.append(kvp("job_id", [&job_info_map](sub_document job_id_doc) {
-    array job_id_array;
-    for (const auto job_id : *job_info_map | std::views::keys) {
-      job_id_array.append(static_cast<std::int32_t>(job_id));
-    }
-    job_id_doc.append(kvp("$in", job_id_array));
-  }));
+  document latest_job_filter;
+  latest_job_filter.append(
+      kvp("job_id", [&job_info_map](sub_document job_id_doc) {
+        array job_id_array;
+        for (const auto job_id : *job_info_map | std::views::keys) {
+          job_id_array.append(static_cast<std::int32_t>(job_id));
+        }
+        job_id_doc.append(kvp("$in", job_id_array));
+      }));
 
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
@@ -1250,22 +1287,16 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  // Use aggregation to deduplicate: for each job_id, only return the
-  // record with the highest requeue_count (the latest run).
-  // Apply the caller filter after deduplication so state/type/time-related
-  // constraints are evaluated against the latest run rather than an older
-  // matching run.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
-  pipeline.group(
-      make_document(kvp("_id", "$job_id"),
-                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
-  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(latest_job_filter.view());
+  AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
   pipeline.match(filter.view());
-  pipeline.sort(make_document(kvp("job_db_id", -1)));
 
+  mongocxx::options::aggregate aggregate_options;
+  aggregate_options.allow_disk_use(true);
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(
+          pipeline, aggregate_options);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -5803,6 +5834,12 @@ bool MongodbClient::InitTableIndexes() {
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
     CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
+    // Covers latest submission/requeue selection and the subsequent lookup.
+    CreateCollectionIndex(raw_table, {"job_id", "job_db_id", "requeue_count"},
+                          false);
+    CreateCollectionIndex(
+        raw_table, {"array_job_id", "array_task_id", "job_id", "job_db_id"},
+        false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
@@ -5900,8 +5937,9 @@ MongodbClient::MongodbClient() {
         fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
-  g_runtime_status.db_logger = AddLogger(
-      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+  g_runtime_status.db_logger =
+      AddLogger("mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(),
+                g_config.CtldConf.LogToConsole);
 
   m_logger_ = g_runtime_status.db_logger;
 

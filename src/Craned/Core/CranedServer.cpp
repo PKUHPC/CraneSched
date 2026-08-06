@@ -276,10 +276,11 @@ grpc::Status CranedServiceImpl::AllocJobs(
   const auto vector_end = std::chrono::steady_clock::now();
 
   const auto job_mgr_begin = std::chrono::steady_clock::now();
-  bool ok = g_job_mgr->AllocJobs(std::move(jobs));
+  g_job_mgr->AllocJobs(std::move(jobs), response);
   const auto job_mgr_end = std::chrono::steady_clock::now();
-  if (!ok) {
-    CRANE_ERROR("Failed to alloc some jobs.");
+  if (!response->failed_job_ids().empty()) {
+    CRANE_ERROR("Failed to alloc jobs [{}].",
+                absl::StrJoin(response->failed_job_ids(), ","));
   }
 
   const auto handler_end = std::chrono::steady_clock::now();
@@ -297,16 +298,16 @@ grpc::Status CranedServiceImpl::AllocJobs(
     CRANE_WARN(
         "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
         "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
-        "job_mgr_ms={} total_ms={} ok={}",
+        "job_mgr_ms={} total_ms={}",
         job_count, first_job_id, last_job_id, deadline_remaining_ms,
-        vector_build_ms, job_mgr_ms, total_ms, ok);
+        vector_build_ms, job_mgr_ms, total_ms);
   } else {
     CRANE_DEBUG(
         "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
         "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
-        "job_mgr_ms={} total_ms={} ok={}",
+        "job_mgr_ms={} total_ms={}",
         job_count, first_job_id, last_job_id, deadline_remaining_ms,
-        vector_build_ms, job_mgr_ms, total_ms, ok);
+        vector_build_ms, job_mgr_ms, total_ms);
   }
 
   return Status::OK;
@@ -320,7 +321,16 @@ grpc::Status CranedServiceImpl::AllocSteps(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>());
+  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>(),
+                        response);
+  if (!response->failed_job_step_ids_map().empty()) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>> failed_steps;
+    for (const auto &[job_id, steps] : response->failed_job_step_ids_map()) {
+      failed_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
+    }
+    CRANE_ERROR("Failed to alloc steps [{}].",
+                util::JobStepsToString(failed_steps));
+  }
   return Status::OK;
 }
 
@@ -740,8 +750,6 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
 
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
-  ServerBuilderAddUnixInsecureListeningPort(&builder,
-                                            listen_conf.UnixSocketListenAddr);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
@@ -754,12 +762,28 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
     ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
                                              listen_conf.CranedListenPort);
   }
+  // Add the Unix socket after TCP so a duplicate craned fails before gRPC
+  // unlinks the existing socket path.
+  ServerBuilderAddUnixInsecureListeningPort(&builder,
+                                            listen_conf.UnixSocketListenAddr);
 
   builder.RegisterService(m_service_impl_.get());
 
-  chmod(g_config.CranedUnixSockPath.c_str(), 0600);
-
   m_server_ = builder.BuildAndStart();
+  if (!m_server_) {
+    CRANE_CRITICAL("Cannot start Craned gRPC server on [{}, {}:{}].",
+                   listen_conf.UnixSocketListenAddr, craned_listen_addr,
+                   listen_conf.CranedListenPort);
+    std::exit(1);
+  }
+
+  if (chmod(g_config.CranedUnixSockPath.c_str(), 0600) != 0) {
+    CRANE_CRITICAL("Failed to chmod Craned Unix socket {}: {}.",
+                   g_config.CranedUnixSockPath, strerror(errno));
+    m_server_->Shutdown();
+    std::exit(1);
+  }
+
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);

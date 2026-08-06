@@ -616,34 +616,43 @@ void CtldClient::Init() {
             CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
                         job_id, step_id, ctld_status, craned_status);
 
-            if (craned_status == ctld_status) {
-              // Status match, no action needed
-              continue;
-            }
-
-            // Special case: Handle timeout-during-offline scenario
-            // This occurs when Craned goes offline and comes back online after
-            // job timeout. Only DaemonStep can be Running here because:
-            // - DaemonStep waits for Epilog to complete before terminating
-            // - CommonSteps should already be killed by Timer and in terminal
-            //   state
-            // Ctld detected timeout and marked as Completing. Let Ctld handle
-            // the termination.
-            if (craned_status == StepStatus::Running &&
-                ctld_status == StepStatus::Completing) {
-              CRANE_INFO(
-                  "[Step #{}.{}] Ctld has Completing status (likely due to "
-                  "timeout during offline), Craned reports Running (should be "
-                  "DaemonStep). Keeping Craned's state, Ctld will handle "
-                  "termination.",
-                  job_id, step_id);
-              continue;
-            }
-
-            // Handle Completing status from Ctld
             if (ctld_status == StepStatus::Completing) {
-              CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+              if (craned_status == StepStatus::Running) {
+                if (step_id == kDaemonStepId) {
+                  CRANE_INFO(
+                      "[Step #{}.{}] Ctld is Completing while daemon is still "
+                      "Running. Replay daemon cleanup.",
+                      job_id, step_id);
+                  completing_steps[job_id].insert(step_id);
+                  continue;
+                }
+
+                // Non-daemon steps may still have live user processes. Let
+                // Ctld continue through the terminate path before cleanup.
+                CRANE_INFO(
+                    "[Step #{}.{}] Ctld is Completing while Craned is still "
+                    "Running. Skip FreeSteps replay and let Ctld drive the "
+                    "terminate path.",
+                    job_id, step_id);
+                continue;
+              }
+
+              CRANE_TRACE(
+                  "[Step #{}.{}] Ctld is completing, replay local cleanup.",
+                  job_id, step_id);
               completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            if (ctld_status == StepStatus::Running &&
+                craned_status == StepStatus::Starting) {
+              CRANE_WARN(
+                  "[Step #{}.{}] Ctld is Running but Craned is still "
+                  "Starting. Starting recovery is unsupported; report lost "
+                  "step and clean up local residue.",
+                  job_id, step_id);
+              invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
               continue;
             }
 
@@ -666,6 +675,10 @@ void CtldClient::Init() {
               continue;
             }
 
+            if (craned_status == ctld_status) {
+              continue;
+            }
+
             int ctld_priority = GetStatusPriority(ctld_status);
             int craned_priority = GetStatusPriority(craned_status);
 
@@ -677,27 +690,14 @@ void CtldClient::Init() {
                   job_id, step_id, craned_status, ctld_status);
               steps_to_sync[job_id][step_id] = craned_status;
             } else if (craned_status == StepStatus::Starting) {
-              // For starting but not running step, terminate it
-              CRANE_TRACE(
-                  "[Step #{}.{}] is starting but not running, mark as "
-                  "invalid",
-                  job_id, step_id);
+              CRANE_WARN(
+                  "[Step #{}.{}] is Starting while Ctld has {}. Starting "
+                  "recovery is unsupported; report lost step and clean up "
+                  "locally.",
+                  job_id, step_id, ctld_status);
               invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
             } else {
-              // Ctld has higher/equal priority - terminate to maintain
-              // consistency
-              // This branch handles cases where craned_priority <=
-              // ctld_priority and not covered by special cases above,
-              // including:
-              // - Craned: Running, Ctld: Completing (non-DaemonStep case,
-              //   though this should rarely happen as CommonSteps should be
-              //   killed by timer)
-              // - Other cases where Ctld has equal or higher priority
-              // Craned: Configuring with Ctld: Running/Starting should
-              // not occur in the normal state machine flow, as Configuring
-              // means Ctld hasn't received the Starting status yet. The only
-              // valid case for Ctld to be ahead is when Ctld marks it as
-              // Completing (handled above).
               CRANE_WARN(
                   "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
                   "Terminating step to maintain consistency.",

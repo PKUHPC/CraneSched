@@ -114,6 +114,11 @@ inline constexpr uint64_t kDefaultCranedMaxLogFileNum = 3;
 inline constexpr uint64_t kDefaultSupervisorMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
 inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
+inline constexpr uint32_t kDefaultSupervisorThreadPoolSize = 4;
+inline constexpr uint32_t kDefaultAsyncLogQueueSize = 8192;
+inline constexpr uint32_t kDefaultAsyncLogThreadCount = 1;
+inline constexpr bool kDefaultAsyncLogBlockWhenFull = true;
+inline constexpr bool kDefaultLogToConsole = true;
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
@@ -139,7 +144,7 @@ inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 inline const char* const kDefaultContainerClusterDomain = "cluster.local";
 
 inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
-inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
+inline const char* const kDefaultSupervisorUnixSockDir = "craned/supervisor";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 

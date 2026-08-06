@@ -376,9 +376,9 @@ message RuntimeAttrOfStep {
   google.protobuf.Timestamp start_time = 26;
   google.protobuf.Timestamp end_time = 27;
 
-  JobStatus error_status = 30;
+  JobStatus pending_final_status = 30;
   JobStatus status = 31;
-  uint32 error_exit_code = 32;
+  uint32 pending_final_exit_code = 32;
   uint32 exit_code = 33;
 
   bool held = 35;

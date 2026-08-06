@@ -62,6 +62,7 @@ constexpr uint32_t kJobStatusChangeTimeoutMS = 100;
 constexpr uint32_t kJobStatusChangeBatchNum = 1000;
 constexpr uint32_t kJobStatusChangeMaxDrainPerTick = 200;
 constexpr uint32_t kJobStatusChangeDbCommitChunkSize = 200;
+constexpr uint32_t kCompletingStepRetryIntervalSec = 60;
 constexpr uint32_t kJobAggregationWorkerBatchSize = 500;
 constexpr uint32_t kJobAggregationPollIntervalMs = 200;
 constexpr uint32_t kJobAggregationRetryBackoffMs = 500;
@@ -102,6 +103,10 @@ struct Config {
     uint32_t CranedTimeout;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t AsyncLogQueueSize{kDefaultAsyncLogQueueSize};
+    uint32_t AsyncLogThreadCount{kDefaultAsyncLogThreadCount};
+    bool AsyncLogBlockWhenFull{kDefaultAsyncLogBlockWhenFull};
+    bool LogToConsole{kDefaultLogToConsole};
     uint32_t ThreadPoolSize{0};
     uint32_t SchedulerRpcThreadPoolSize{0};
     uint32_t SchedulerAllocJobsRpcTimeoutSeconds{kCtldRpcTimeoutSeconds};
@@ -109,6 +114,7 @@ struct Config {
     uint32_t StatusChangeBatchNum{kJobStatusChangeBatchNum};
     uint32_t StatusChangeMaxDrainPerTick{kJobStatusChangeMaxDrainPerTick};
     uint32_t StatusChangeDbCommitChunkSize{kJobStatusChangeDbCommitChunkSize};
+    uint32_t CompletingStepRetryIntervalSec{kCompletingStepRetryIntervalSec};
     bool JobRequeue{kDefaultJobRequeue};
     int32_t MaxRequeueCount{kDefaultMaxRequeueCount};
   };
@@ -625,8 +631,10 @@ struct StepInCtld {
   absl::Time m_start_time_;
   absl::Time m_end_time_;
 
-  crane::grpc::JobStatus m_error_status{crane::grpc::JobStatus::Invalid};
-  uint32_t m_error_exit_code_{0u};
+  // Final result received before every node has finished cleanup.
+  crane::grpc::JobStatus m_pending_final_status_{
+      crane::grpc::JobStatus::Invalid};
+  uint32_t m_pending_final_exit_code_{0u};
   crane::grpc::JobStatus m_status_{crane::grpc::JobStatus::Invalid};
   uint32_t m_exit_code_{};
 
@@ -690,6 +698,8 @@ struct StepInCtld {
 
   void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
   void NodeConfigured(const CranedId& node);
+  void NodeConfiguredWithCleanupIntent(const CranedId& node);
+  void NodeConfiguredWithTerminal(const CranedId& node);
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
 
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
@@ -711,15 +721,15 @@ struct StepInCtld {
   void SetEndTime(absl::Time end_time);
   absl::Time EndTime() const { return m_end_time_; }
 
-  void SetErrorStatus(crane::grpc::JobStatus failed_status);
-  std::optional<crane::grpc::JobStatus> PrevErrorStatus() {
-    if (m_error_status == crane::grpc::JobStatus::Invalid) {
+  void SetPendingFinalStatus(crane::grpc::JobStatus pending_final_status);
+  std::optional<crane::grpc::JobStatus> PendingFinalStatus() const {
+    if (m_pending_final_status_ == crane::grpc::JobStatus::Invalid) {
       return std::nullopt;
     }
-    return m_error_status;
+    return m_pending_final_status_;
   }
-  void SetErrorExitCode(uint32_t exit_code);
-  uint32_t PrevErrorExitCode() { return m_error_exit_code_; }
+  void SetPendingFinalExitCode(uint32_t exit_code);
+  uint32_t PendingFinalExitCode() const { return m_pending_final_exit_code_; }
   void SetStatus(crane::grpc::JobStatus new_status);
   crane::grpc::JobStatus Status() const { return m_status_; }
 
@@ -772,6 +782,7 @@ struct DaemonStepInCtld : StepInCtld {
                    const std::string& reason, const CranedId& craned_id,
                    const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
+  void RequestCleanupFromPrimaryFinish(StepStatusChangeContext* context);
 
   void RecoverFromDb(const JobInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;

@@ -25,7 +25,7 @@ All parameters below are configured in `/etc/crane/config.yaml`.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `Supervisor.ThreadPoolSize` | 0 (auto = hardware_concurrency) | Thread pool inside each supervisor process. Has minimal impact on short-lived jobs. Keep at default unless running complex multi-step jobs within a single supervisor. |
+| `Supervisor.ThreadPoolSize` | 4 | Thread pool created inside every supervisor process. Keep this small because thread usage scales with the number of concurrent steps. Set it to `0` only to explicitly use `hardware_concurrency`. |
 
 ## Recommended Profiles
 
@@ -44,7 +44,7 @@ Craned:
   ThreadPoolSize: 32  # or CPU cores × 4
 
 Supervisor:
-  ThreadPoolSize: 0
+  ThreadPoolSize: 4
 ```
 
 ### General HPC
@@ -62,5 +62,5 @@ Craned:
   ThreadPoolSize: 0
 
 Supervisor:
-  ThreadPoolSize: 0
+  ThreadPoolSize: 4
 ```
