@@ -6638,7 +6638,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
 void JobScheduler::QueryJobsInRam(
     const crane::grpc::QueryJobsInfoRequest* request,
-    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
+    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
+    size_t num_limit) {
   auto now = absl::Now();
 
   auto job_rng_filter_time = [&](auto* job_ptr) {
@@ -6762,9 +6763,6 @@ void JobScheduler::QueryJobsInRam(
     }
     return false;
   };
-
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
-                                               : request->num_limit();
 
   auto get_job_ptr_by_id = [&](job_id_t job_id) -> JobInCtld* {
     auto pending_it = m_pending_job_map_.find(job_id);

@@ -695,6 +695,7 @@ message QueryJobsInfoRequest {
 message QueryJobsInfoReply {
   bool ok = 1;
   repeated JobInfo job_info_list = 2;
+  bool has_more = 3;  // More matching jobs exist beyond job_info_list.
 }
 
 message QueueStateCount {

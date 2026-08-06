@@ -50,7 +50,8 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
 
         crane::grpc::QueryJobsInfoRequest req;
         std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
-        g_job_scheduler->QueryJobsInRam(&req, &job_info_map);
+        g_job_scheduler->QueryJobsInRam(&req, &job_info_map,
+                                        kDefaultQueryJobNumLimit);
 
         sol::table all_jobs = lua.create_table();
         for (auto& [job_id, job_info] : job_info_map) {
