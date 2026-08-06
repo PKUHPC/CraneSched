@@ -1069,17 +1069,6 @@ class JobScheduler {
     return m_pending_map_cached_size_.load(std::memory_order_relaxed);
   }
 
-  void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
-                                       const CranedId& craned_index,
-                                       crane::grpc::JobStatus new_status,
-                                       uint32_t exit_code,
-                                       std::optional<std::string>&& reason,
-                                       google::protobuf::Timestamp timestamp) {
-    // TODO: Add reason implementation here!
-    StepStatusChangeAsync(job_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""), std::move(timestamp));
-  }
-
   void StartCraneCtldPrologThread(JobInCtld* job);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
@@ -1324,6 +1313,9 @@ class JobScheduler {
   void DispatchTerminateSteps_(
       CranedId craned_id,
       std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+  void HandleExecuteStepsFailure_(
+      const CranedId& failed_craned_id,
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
   void RetryCompletingSteps_();
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);

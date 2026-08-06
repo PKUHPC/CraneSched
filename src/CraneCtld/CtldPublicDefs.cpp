@@ -285,6 +285,15 @@ void StepInCtld::SetPendingFinalExitCode(uint32_t exit_code) {
   this->m_runtime_attr_.set_pending_final_exit_code(exit_code);
 }
 
+bool StepInCtld::SetPendingFinalResultIfUnset(crane::grpc::JobStatus status,
+                                              uint32_t exit_code) {
+  if (PendingFinalStatus().has_value()) return false;
+
+  SetPendingFinalStatus(status);
+  SetPendingFinalExitCode(exit_code);
+  return true;
+}
+
 void StepInCtld::SetStatus(crane::grpc::JobStatus new_status) {
   this->m_status_ = new_status;
   this->m_runtime_attr_.set_status(new_status);
@@ -687,8 +696,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
     case crane::grpc::JobStatus::Failed:
     case crane::grpc::JobStatus::Cancelled:
-      this->SetPendingFinalStatus(new_status);
-      this->SetPendingFinalExitCode(exit_code);
+      this->SetPendingFinalResultIfUnset(new_status, exit_code);
       [[fallthrough]];
     case crane::grpc::JobStatus::Completed:
       if (craned_id != kCtldPrologInternalNodeIndex) [[likely]] {
@@ -791,8 +799,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     }
     // Terminal report: cleanup done on this node.
     if (new_status != crane::grpc::JobStatus::Completed) {
-      this->SetPendingFinalStatus(new_status);
-      this->SetPendingFinalExitCode(exit_code);
+      this->SetPendingFinalResultIfUnset(new_status, exit_code);
     }
 
     if (this->Status() == crane::grpc::JobStatus::Running) {
@@ -1366,8 +1373,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       context->rn_step_raw_ptrs.insert(this);
     } else if (IsFinishedStepStatus(new_status)) {
       if (new_status != crane::grpc::JobStatus::Completed) {
-        this->SetPendingFinalStatus(new_status);
-        this->SetPendingFinalExitCode(exit_code);
+        this->SetPendingFinalResultIfUnset(new_status, exit_code);
       }
       this->NodeConfiguredWithTerminal(craned_id);
       context->rn_step_raw_ptrs.insert(this);
@@ -1460,8 +1466,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         return std::nullopt;
       }
       if (new_status != crane::grpc::JobStatus::Completed) {
-        this->SetPendingFinalStatus(new_status);
-        this->SetPendingFinalExitCode(exit_code);
+        this->SetPendingFinalResultIfUnset(new_status, exit_code);
       }
       if (this->Status() == crane::grpc::JobStatus::Running) {
         // Terminal before CTLD observes Completing means the final result is

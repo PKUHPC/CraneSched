@@ -1487,6 +1487,13 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    if (step_it->second->status != StepStatus::Starting) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] Ignoring duplicate or late ExecuteStep in status {}.",
+          job_id, step_id, step_it->second->status);
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      continue;
+    }
     step_it->second->wait_execute_span.End();
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);

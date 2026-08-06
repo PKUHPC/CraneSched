@@ -730,6 +730,8 @@ struct StepInCtld {
   }
   void SetPendingFinalExitCode(uint32_t exit_code);
   uint32_t PendingFinalExitCode() const { return m_pending_final_exit_code_; }
+  bool SetPendingFinalResultIfUnset(crane::grpc::JobStatus status,
+                                    uint32_t exit_code);
   void SetStatus(crane::grpc::JobStatus new_status);
   crane::grpc::JobStatus Status() const { return m_status_; }
 

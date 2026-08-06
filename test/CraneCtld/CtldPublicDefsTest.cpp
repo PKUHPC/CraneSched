@@ -602,9 +602,47 @@ TEST(CtldStepStateMachineTest,
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(job.PrimaryStep(), nullptr);
   EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::JobStatus::Failed);
-  EXPECT_EQ(job.PrimaryStepExitCode(), 2U);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 1U);
   ExpectStepFreeRequested(context, "node-a", kJobId, kDaemonStepId);
   ExpectStepFreeRequested(context, "node-b", kJobId, kDaemonStepId);
+}
+
+TEST(CtldStepStateMachineTest,
+     PendingExecuteRpcFailureSurvivesTerminationStatus) {
+  constexpr job_id_t kJobId = 60;
+  const std::vector<CranedId> craned_ids{"node-a"};
+
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::Running);
+  job.SetPrimaryStepStatus(crane::grpc::JobStatus::Invalid);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  job.DaemonStep()->SetConfiguringNodes({});
+  job.DaemonStep()->SetStatus(crane::grpc::Running);
+  job.SetPrimaryStep(MakePrimaryStep(&job, craned_ids));
+
+  auto* primary_step = job.PrimaryStep();
+  primary_step->SetConfiguringNodes({});
+  primary_step->SetStatus(crane::grpc::Running);
+  ASSERT_TRUE(primary_step->SetPendingFinalResultIfUnset(crane::grpc::Failed,
+                                                         ExitCode::EC_RPC_ERR));
+
+  Ctld::StepStatusChangeContext context;
+  auto result = primary_step->StepStatusChange(
+      crane::grpc::Completing, ExitCode::EC_RPC_ERR, "execute rpc failed",
+      "node-a", TimestampAt(450), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(primary_step->Status(), crane::grpc::Completing);
+  ExpectStepFreeRequested(context, "node-a", kJobId, Ctld::kPrimaryStepId);
+
+  result = primary_step->StepStatusChange(crane::grpc::Cancelled,
+                                          ExitCode::EC_TERMINATED, "terminated",
+                                          "node-a", TimestampAt(451), &context);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::Failed);
+  EXPECT_EQ(job.PrimaryStepExitCode(), ExitCode::EC_RPC_ERR);
 }
 
 TEST(CtldStepStateMachineTest,

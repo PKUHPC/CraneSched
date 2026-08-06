@@ -5772,6 +5772,59 @@ void JobScheduler::DispatchTerminateSteps_(
   });
 }
 
+void JobScheduler::HandleExecuteStepsFailure_(
+    const CranedId& failed_craned_id,
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      steps_to_terminate;
+  std::unordered_map<job_id_t, std::set<step_id_t>> steps_to_complete;
+
+  {
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    for (const auto& [job_id, step_ids] : steps) {
+      auto job_it = m_running_job_map_.find(job_id);
+      if (job_it == m_running_job_map_.end()) continue;
+
+      JobInCtld* job = job_it->second.get();
+      for (step_id_t step_id : step_ids) {
+        StepInCtld* step = nullptr;
+        if (step_id == kDaemonStepId)
+          step = job->DaemonStep();
+        else
+          step = job->GetStep(step_id);
+        if (step == nullptr ||
+            !step->ExecutionNodes().contains(failed_craned_id) ||
+            (step->Status() != crane::grpc::JobStatus::Running &&
+             step->Status() != crane::grpc::JobStatus::Completing)) {
+          continue;
+        }
+
+        steps_to_complete[job_id].insert(step_id);
+        step->SetPendingFinalResultIfUnset(crane::grpc::JobStatus::Failed,
+                                           ExitCode::EC_RPC_ERR);
+
+        for (const auto& craned_id : step->ExecutionNodes()) {
+          steps_to_terminate[craned_id][job_id].insert(step_id);
+        }
+      }
+    }
+  }
+
+  for (auto& [craned_id, node_steps] : steps_to_terminate) {
+    DispatchTerminateSteps_(std::move(craned_id), std::move(node_steps));
+  }
+
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  for (const auto& [job_id, step_ids] : steps_to_complete) {
+    for (step_id_t step_id : step_ids) {
+      StepStatusChangeAsync(job_id, step_id, failed_craned_id,
+                            crane::grpc::JobStatus::Completing,
+                            ExitCode::EC_RPC_ERR, "ExecRpcError", now);
+    }
+  }
+}
+
 void JobScheduler::RetryCompletingSteps_() {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
@@ -6244,15 +6297,16 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         rpc_span.SetAttribute("craned_id", std::string(craned_id));
 
         CraneExpected failed_steps = stub->ExecuteSteps(steps, traceparents);
-        if (failed_steps.has_value() && !failed_steps.value().empty()) {
+        if (!failed_steps.has_value()) {
+          CRANE_ERROR(
+              "ExecuteSteps RPC failed for [{}] steps on Node {}; "
+              "terminating affected steps.",
+              util::JobStepsToString(steps), craned_id);
+          HandleExecuteStepsFailure_(craned_id, steps);
+        } else if (!failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
-          for (const auto& [job_id, step_ids] : failed_steps.value()) {
-            for (const auto& step_id : step_ids)
-              StepCompletingAndStatusChangeAsync(
-                  job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
-                  ExitCode::EC_RPC_ERR, "ExecRpcError", now);
-          }
+          HandleExecuteStepsFailure_(craned_id, failed_steps.value());
         }
       } else {
         CRANE_ERROR(
@@ -6312,14 +6366,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
             "rpc_worker_task_wait_ms={} rpc_elapsed_ms={} success={}",
             craned_id, craned_count, job_count, task_wait_ms, rpc_elapsed_ms,
             success);
-      }
-      if (!success) {
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-        for (const auto& job_id : jobs) {
-          StepStatusChangeWithReasonAsync(
-              job_id, kDaemonStepId, craned_id, crane::grpc::JobStatus::Failed,
-              ExitCode::EC_RPC_ERR, "Rpc failure when free job", now);
-        }
       }
     });
   }
