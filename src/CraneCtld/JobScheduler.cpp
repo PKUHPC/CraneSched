@@ -5640,13 +5640,17 @@ void JobScheduler::StepStatusChangeAsync(
     job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
     crane::grpc::JobStatus new_status, uint32_t exit_code, std::string reason,
     google::protobuf::Timestamp timestamp) {
-  m_job_status_change_queue_.enqueue({.job_id = job_id,
-                                      .step_id = step_id,
-                                      .exit_code = exit_code,
-                                      .new_status = new_status,
-                                      .craned_index = craned_index,
-                                      .reason = std::move(reason),
-                                      .timestamp = std::move(timestamp)});
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = new_status,
+         .craned_index = craned_index,
+         .reason = std::move(reason),
+         .timestamp = std::move(timestamp)});
+  }
   m_job_status_change_async_handle_->send();
 }
 
@@ -5655,21 +5659,25 @@ void JobScheduler::StepCompletingAndStatusChangeAsync(
     crane::grpc::JobStatus terminal_status, uint32_t exit_code,
     std::string reason, google::protobuf::Timestamp timestamp) {
   std::string terminal_reason = reason;
-  m_job_status_change_queue_.enqueue(
-      {.job_id = job_id,
-       .step_id = step_id,
-       .exit_code = exit_code,
-       .new_status = crane::grpc::JobStatus::Completing,
-       .craned_index = craned_index,
-       .reason = std::move(reason),
-       .timestamp = timestamp});
-  m_job_status_change_queue_.enqueue({.job_id = job_id,
-                                      .step_id = step_id,
-                                      .exit_code = exit_code,
-                                      .new_status = terminal_status,
-                                      .craned_index = craned_index,
-                                      .reason = std::move(terminal_reason),
-                                      .timestamp = std::move(timestamp)});
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = crane::grpc::JobStatus::Completing,
+         .craned_index = craned_index,
+         .reason = std::move(reason),
+         .timestamp = timestamp});
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = terminal_status,
+         .craned_index = craned_index,
+         .reason = std::move(terminal_reason),
+         .timestamp = std::move(timestamp)});
+  }
   m_job_status_change_async_handle_->send();
 }
 
@@ -5880,32 +5888,46 @@ void JobScheduler::JobStatusChangeTimerCb_() {
 }
 
 void JobScheduler::JobStatusChangeAsyncCb_() {
-  if (m_job_status_change_queue_.size_approx() >=
-      g_config.CtldConf.StatusChangeBatchNum)
+  size_t queue_size;
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    queue_size = m_job_status_change_pending_.size() +
+                 m_job_status_change_incoming_.size();
+  }
+  if (queue_size >= g_config.CtldConf.StatusChangeBatchNum)
     m_clean_job_status_change_handle_->send();
 }
 
 void JobScheduler::CleanJobStatusChangeQueueCb_() {
-  size_t approximate_size = m_job_status_change_queue_.size_approx();
+  size_t incoming_size;
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    if (m_job_status_change_pending_.empty())
+      m_job_status_change_pending_.swap(m_job_status_change_incoming_);
+    incoming_size = m_job_status_change_incoming_.size();
+  }
+
+  const size_t queue_size = m_job_status_change_pending_.size() + incoming_size;
   const size_t max_drain_per_tick =
       std::max<uint32_t>(1, g_config.CtldConf.StatusChangeMaxDrainPerTick);
-  const size_t drain_size = std::min(approximate_size, max_drain_per_tick);
+  const size_t drain_size =
+      std::min(m_job_status_change_pending_.size(), max_drain_per_tick);
 
   std::vector<JobStatusChangeArg> args;
-  args.resize(drain_size);
-
-  size_t actual_size =
-      m_job_status_change_queue_.try_dequeue_bulk(args.begin(), drain_size);
+  args.reserve(drain_size);
+  for (size_t i = 0; i < drain_size; ++i) {
+    args.emplace_back(std::move(m_job_status_change_pending_.front()));
+    m_job_status_change_pending_.pop_front();
+  }
+  const size_t actual_size = args.size();
   if (actual_size == 0) return;
-  args.resize(actual_size);
   auto begin_time = std::chrono::steady_clock::now();
   auto state_machine_begin = begin_time;
 
   CRANE_TRACE_SCOPE_NAMED(sc_span, "status_change/process");
   sc_span.SetAttribute("crane.dimension", "lifecycle");
   sc_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
-  sc_span.SetAttribute("queue_size_approx",
-                       static_cast<int64_t>(approximate_size));
+  sc_span.SetAttribute("queue_size_approx", static_cast<int64_t>(queue_size));
   sc_span.SetAttribute("max_drain_per_tick",
                        static_cast<int64_t>(max_drain_per_tick));
   size_t running_transition_count = 0;
@@ -6678,8 +6700,12 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE("Cleaning {} StepStatusChanges cost {} ms.", actual_size,
               total_elapsed_ms);
 
-  if (m_job_status_change_queue_.size_approx() > 0)
-    m_clean_job_status_change_handle_->send();
+  bool has_more = !m_job_status_change_pending_.empty();
+  if (!has_more) {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    has_more = !m_job_status_change_incoming_.empty();
+  }
+  if (has_more) m_clean_job_status_change_handle_->send();
 }
 
 void JobScheduler::QueryJobsInRam(

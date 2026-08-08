@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <deque>
+
 #include "Account/AccountDefs.h"
 #include "Array.h"
 #include "Node/CranedMetaContainer.h"
@@ -1509,7 +1511,12 @@ class JobScheduler {
     google::protobuf::Timestamp timestamp;
   };
 
-  ConcurrentQueue<JobStatusChangeArg> m_job_status_change_queue_;
+  absl::Mutex m_job_status_change_queue_mtx_;
+  std::deque<JobStatusChangeArg> m_job_status_change_incoming_
+      ABSL_GUARDED_BY(m_job_status_change_queue_mtx_);
+  // Accessed only by the job-status-change event loop. Older pending events
+  // are drained before the next incoming batch to preserve strict FIFO order.
+  std::deque<JobStatusChangeArg> m_job_status_change_pending_;
   void JobStatusChangeAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_job_status_change_handle_;
