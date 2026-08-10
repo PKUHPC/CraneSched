@@ -261,6 +261,15 @@ void SetJobSummaryQueryCommonFilter(
   }
 
   if constexpr (is_size_request) {
+    if (request && request->filter_job_ids_size() > 0) {
+      bsoncxx::builder::basic::array arr;
+      for (const auto& job_id : request->filter_job_ids())
+        arr.append(static_cast<int32_t>(job_id));
+      match_doc.append(
+          kvp("job_id",
+              bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+    }
+
     // partition
     if (request && request->filter_partitions_size() > 0) {
       bsoncxx::builder::basic::array arr;
