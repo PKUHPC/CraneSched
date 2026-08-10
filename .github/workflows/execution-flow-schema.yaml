@@ -47,9 +47,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Deliberately no draft guard, unlike format.yaml. That workflow skips drafts
+  # because installing clang-format is expensive; this one is three shallow
+  # checkouts and one script. Cross-repository drift is cheapest to fix the
+  # moment it appears, and a gate that only wakes up when a pull request leaves
+  # draft would stay silent for most of that pull request's life.
   catalogs:
     name: Check generated execution-flow catalogs
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout schema source
