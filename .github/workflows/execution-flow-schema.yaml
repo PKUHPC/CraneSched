@@ -1,0 +1,170 @@
+name: Execution Flow Schema Check
+
+# The execution-flow wire schema has one source of truth
+# (schemas/execution-flow/v1.yaml) and four generated consumers, three of which
+# live in other repositories. The C++ catalog is already checked at build time
+# by CMake, so only this job can notice that FrontEnd or AutoTest fell behind.
+#
+# Consumer refs follow the same pairing convention as .github/ci/authorize.py:
+# a branch with the same name as this PR's head branch, otherwise master. A
+# coordinated schema change therefore keeps all three PRs on one branch name.
+# The push trigger closes the remaining hole: if a paired consumer PR is
+# abandoned after this one merges, master itself starts failing.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - master
+    paths:
+      - '.github/workflows/execution-flow-schema.yaml'
+      - 'schemas/execution-flow/**'
+      - 'scripts/generate_execution_flow_schema.py'
+      - 'src/Utilities/OpenTelemetry/include/crane/ExecutionFlowSchema.h'
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/execution-flow-schema.yaml'
+      - 'schemas/execution-flow/**'
+      - 'scripts/generate_execution_flow_schema.py'
+      - 'src/Utilities/OpenTelemetry/include/crane/ExecutionFlowSchema.h'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request'
+      && format('pr-{0}', github.event.pull_request.number)
+      || github.ref
+    }}
+  cancel-in-progress: true
+
+jobs:
+  catalogs:
+    name: Check generated execution-flow catalogs
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout schema source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: sources/CraneSched
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve paired consumer refs
+        id: consumers
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+        run: |
+          set -euo pipefail
+
+          candidate=''
+          # Reject anything that is not a plain branch name before it reaches
+          # git or GITHUB_OUTPUT. Fork PR head refs are untrusted input.
+          if [[ "$HEAD_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$ ]]; then
+            candidate="$HEAD_REF"
+          elif [[ -n "$HEAD_REF" ]]; then
+            echo "::notice::Ignoring non-canonical head ref; pairing with master."
+          fi
+
+          resolve() {
+            local repository="$1"
+            if [[ -n "$candidate" ]] && git ls-remote --exit-code --heads \
+              "https://github.com/${repository}.git" \
+              "refs/heads/${candidate}" >/dev/null 2>&1; then
+              printf '%s\n' "$candidate"
+            else
+              printf 'master\n'
+            fi
+          }
+
+          frontend_ref="$(resolve PKUHPC/CraneSched-FrontEnd)"
+          autotest_ref="$(resolve PKUHPC/CraneSched-AutoTest)"
+          echo "frontend_ref=${frontend_ref}" >> "$GITHUB_OUTPUT"
+          echo "autotest_ref=${autotest_ref}" >> "$GITHUB_OUTPUT"
+          echo "Pairing with FrontEnd@${frontend_ref} and AutoTest@${autotest_ref}."
+
+      - name: Checkout paired FrontEnd revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: PKUHPC/CraneSched-FrontEnd
+          ref: ${{ steps.consumers.outputs.frontend_ref }}
+          path: sources/CraneSched-FrontEnd
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout paired AutoTest revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: PKUHPC/CraneSched-AutoTest
+          ref: ${{ steps.consumers.outputs.autotest_ref }}
+          path: sources/CraneSched-AutoTest
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Ensure PyYAML is available
+        run: python3 -c 'import yaml' || sudo apt-get install -y python3-yaml
+
+      - name: Check every generated catalog against the canonical schema
+        id: check
+        env:
+          FRONTEND_REF: ${{ steps.consumers.outputs.frontend_ref }}
+          AUTOTEST_REF: ${{ steps.consumers.outputs.autotest_ref }}
+        run: |
+          set -euo pipefail
+          frontend_root="$GITHUB_WORKSPACE/sources/CraneSched-FrontEnd"
+          autotest_root="$GITHUB_WORKSPACE/sources/CraneSched-AutoTest"
+
+          status=0
+          python3 sources/CraneSched/scripts/generate_execution_flow_schema.py \
+            --check \
+            --schema sources/CraneSched/schemas/execution-flow/v1.yaml \
+            --output sources/CraneSched/src/Utilities/OpenTelemetry/include/crane/ExecutionFlowSchema.h \
+            --frontend-output "$frontend_root/plugin/trace/flow_catalog_generated.go" \
+            --autotest-output "$autotest_root/flow-validator/internal/schema/catalog_generated.go" \
+            --autotest-python-output "$autotest_root/src/crane_testkit/execution_flow_schema_generated.py" \
+            2>stale.txt || status=$?
+          cat stale.txt
+
+          if ((status == 0)); then
+            echo 'All four generated execution-flow catalogs match the canonical schema.'
+            exit 0
+          fi
+
+          {
+            echo '### Execution-flow catalogs are out of sync'
+            echo
+            echo "Paired consumer refs: FrontEnd@\`$FRONTEND_REF\`, AutoTest@\`$AUTOTEST_REF\`."
+            echo
+            echo 'Stale or unreadable outputs:'
+            echo
+            echo '```'
+            cat stale.txt
+            echo '```'
+            echo
+            echo 'Regenerate every consumer from this schema and land all affected'
+            echo 'pull requests together:'
+            echo
+            echo '```bash'
+            echo 'python3 scripts/generate_execution_flow_schema.py \'
+            echo '  --frontend-output   <FrontEnd>/plugin/trace/flow_catalog_generated.go \'
+            echo '  --autotest-output   <AutoTest>/flow-validator/internal/schema/catalog_generated.go \'
+            echo '  --autotest-python-output <AutoTest>/src/crane_testkit/execution_flow_schema_generated.py'
+            echo '```'
+            echo
+            echo 'Put the consumer changes on a branch named exactly like this'
+            echo "pull request's head branch so this job pairs with them."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo '::error::Generated execution-flow catalogs are out of sync; see the job summary.'
+          exit 1

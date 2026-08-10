@@ -1302,14 +1302,14 @@ def main() -> int:
         print(f"execution-flow schema error: {exc}", file=sys.stderr)
         return 2
 
-    return (
-        0
-        if all(
-            _write_or_check(path, generated, check=args.check)
-            for path, generated in outputs
-        )
-        else 1
-    )
+    # Evaluate every output instead of short-circuiting: a stale-catalog report
+    # must name all affected consumers, and a write run must not leave some
+    # outputs regenerated and others untouched because an earlier one failed.
+    results = [
+        _write_or_check(path, generated, check=args.check)
+        for path, generated in outputs
+    ]
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":

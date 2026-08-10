@@ -411,6 +411,24 @@ class ExecutionFlowSchemaCliTest(unittest.TestCase):
                 self.assertIn(str(output), checked.stderr)
                 output.write_text(original, encoding="utf-8")
 
+    def test_check_reports_every_stale_output_in_one_run(self) -> None:
+        # The cross-repository CI gate turns this report into the instruction
+        # for which consumers to regenerate. Short-circuiting after the first
+        # stale catalog would hide the remaining ones and cost a round trip per
+        # repository.
+        generated = self._run()
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        for output in self.outputs.values():
+            output.write_text(
+                output.read_text(encoding="utf-8") + "// stale\n", encoding="utf-8"
+            )
+
+        checked = self._run(check=True)
+        self.assertEqual(checked.returncode, 1)
+        for name, output in self.outputs.items():
+            with self.subTest(output=name):
+                self.assertIn(str(output), checked.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
