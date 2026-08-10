@@ -705,6 +705,15 @@ TEST_F(ExecutionFlowRuntimeTest, EverySemanticEmitterMatchesCanonicalCatalog) {
       step_context, crane::FlowPoint::kCranedStepFreeAccepted,
       crane::FlowOperation::kFreeStep, crane::FlowOutcome::kAccepted,
       crane::FlowEmitter::CranedStepFreeAccepted(std::move(context), "node0"));
+  // Job cleanup and step cleanup deliberately share one point and are told
+  // apart only by operation. The two Craned paths are mutually exclusive by
+  // step type: EvCleanFreeStepsQueueCb_ diverts a daemon step into
+  // daemon_job_cleanup rather than FreeStepAllocation_, and guards repeated
+  // FreeSteps on daemon_job_cleanup already being set. Because that invariant
+  // lives in a dispatch function far from here, the contract's max cardinality
+  // on craned/step/cleanup_started is what fails the flow loudly if both paths
+  // ever fire for one step; see the comment on that node in batch-v1.yaml and
+  // TestBatchContractRejectsDuplicateStepCleanup in the validator engine.
   EXPECT_SEMANTIC(
       step_context, crane::FlowPoint::kCranedStepCleanupStarted,
       crane::FlowOperation::kJobCleanup, std::nullopt,
