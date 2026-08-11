@@ -62,6 +62,7 @@ nav:
     - Container Support: reference/container/index.md
   - Deployment:
     - Overview: deployment/index.md
+    - Upgrade Guide: deployment/upgrade.md
     - Frontend:
       - Deployment: deployment/frontend/frontend.md
       - Plugins: deployment/frontend/plugins.md
@@ -149,6 +150,7 @@ plugins:
             CraneSched + SCOW Integration: 鹤思 + SCOW 算力一体化方案
             Convergence Solution: 存·算·用融合超智算方案
             Deployment: 部署指南
+            Upgrade Guide: 升级指南
             Overview: 概览
             Frontend: 前端
             Backend: 后端

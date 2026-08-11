@@ -6196,7 +6196,7 @@ bool MongodbClient::MigrateV0ToV1_() {
       "renaming fields [task_id->job_id, task_name->job_name, "
       "task_db_id->job_db_id], "
       "normalizing legacy job and step resources, "
-      "backfilling fields [has_job_info(=true), exclusive(=false), "
+      "backfilling fields [has_job_info(=job_db_id exists), exclusive(=false), "
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
       "wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
@@ -6351,10 +6351,16 @@ bool MongodbClient::MigrateV0ToV1_() {
     // Step D: Backfill missing fields using pipeline-style update_many.
     // $ifNull preserves existing values, only setting defaults for missing
     // fields, making this operation idempotent.
+    auto inferred_has_job_info = make_document(
+        kvp("$ne",
+            make_array(make_document(kvp("$type", "$job_db_id")), "missing")));
+
     mongocxx::pipeline update_pipeline;
     update_pipeline.add_fields(make_document(
         kvp("has_job_info",
-            make_document(kvp("$ifNull", make_array("$has_job_info", true)))),
+            make_document(kvp(
+                "$ifNull",
+                make_array("$has_job_info", inferred_has_job_info.view())))),
         kvp("exclusive",
             make_document(kvp("$ifNull", make_array("$exclusive", false)))),
         kvp("cpus_alloc",
