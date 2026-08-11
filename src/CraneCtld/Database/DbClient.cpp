@@ -4871,54 +4871,6 @@ DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
   return res;
 }
 
-// v1.1.3 step records use ResourceV2: CPU counts are doubles and GRES values
-// are slot arrays. Convert only the quantities needed by historical queries.
-ResourceView MongodbClient::BsonToLegacyResourceView_(
-    const bsoncxx::document::view& doc) {
-  ResourceView result;
-  try {
-    for (auto&& node_elem : doc) {
-      if (node_elem.type() != bsoncxx::type::k_document) continue;
-      auto node_doc = node_elem.get_document().view();
-      ResourceView node_res;
-
-      if (auto cpu_elem = node_doc["cpu"];
-          cpu_elem && cpu_elem.type() == bsoncxx::type::k_double) {
-        node_res.SetCpuCount(static_cast<cpu_t>(cpu_elem.get_double().value));
-      }
-      if (auto memory_elem = node_doc["memory"];
-          memory_elem && memory_elem.type() == bsoncxx::type::k_int64) {
-        node_res.SetMemoryBytes(memory_elem.get_int64().value);
-        node_res.SetMemorySwBytes(memory_elem.get_int64().value);
-      }
-
-      if (auto gres_elem = node_doc["gres"];
-          gres_elem && gres_elem.type() == bsoncxx::type::k_document) {
-        for (auto&& device_elem : gres_elem.get_document().view()) {
-          if (device_elem.type() != bsoncxx::type::k_document) continue;
-          GresCount count;
-          for (auto&& type_elem : device_elem.get_document().view()) {
-            if (type_elem.type() != bsoncxx::type::k_array) continue;
-            uint64_t type_count = 0;
-            for (auto&& slot_elem : type_elem.get_array().value) {
-              (void)slot_elem;
-              ++type_count;
-            }
-            count.total += type_count;
-            count.specified[std::string(type_elem.key())] = type_count;
-          }
-          node_res.GetGresMap()[std::string(device_elem.key())] =
-              std::move(count);
-        }
-      }
-      result += node_res;
-    }
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
-  return result;
-}
-
 // Deserializes counts-only ResourceInNodeV3 from DB.
 // core_ids/slot_ids are not stored; only cpu_count, memory, and gres counts.
 ResourceInNodeV3 MongodbClient::BsonToResourceInNodeV3(
@@ -5784,12 +5736,8 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
-  auto cpus_req_elem = view["cpus_req"];
-  cpu_t cpus_req = cpus_req_elem.type() == bsoncxx::type::k_double
-                       ? static_cast<cpu_t>(cpus_req_elem.get_double().value)
-                       : cpu_t::from_raw_value(
-                             ViewGetArithmeticValue_<int64_t>(cpus_req_elem));
-  mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(cpus_req));
+  mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(
+      cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
   mutable_req_total_res_view->set_memory_bytes(
       view["mem_req"].get_int64().value);
   mutable_req_total_res_view->set_memory_sw_bytes(
@@ -5833,23 +5781,8 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
       static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
 
   step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
-  auto res_alloc_elem = view["res_alloc"];
-  ResourceView allocated_res_view;
-  if (res_alloc_elem && res_alloc_elem.type() == bsoncxx::type::k_document) {
-    auto res_alloc_doc = res_alloc_elem.get_document().view();
-    bool is_legacy_resource = false;
-    // ResourceV3 stores a fixed-point int64 CPU value; v1.1.3 stored double.
-    for (auto&& node_elem : res_alloc_doc) {
-      if (node_elem.type() != bsoncxx::type::k_document) continue;
-      auto cpu_elem = node_elem.get_document().view()["cpu"];
-      is_legacy_resource =
-          cpu_elem && cpu_elem.type() == bsoncxx::type::k_double;
-      break;
-    }
-    allocated_res_view = is_legacy_resource
-                             ? BsonToLegacyResourceView_(res_alloc_doc)
-                             : BsonToResourceV3(res_alloc_doc).View();
-  }
+  auto allocated_res_view =
+      BsonToResourceV3(view["res_alloc"].get_document().value).View();
   *step_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
   step_info->mutable_allocated_res_view()->set_cpu_count(
@@ -6262,13 +6195,14 @@ bool MongodbClient::MigrateV0ToV1_() {
       "Migrating schema v0 -> v1: "
       "renaming fields [task_id->job_id, task_name->job_name, "
       "task_db_id->job_db_id], "
+      "normalizing legacy job and step resources, "
       "backfilling fields [has_job_info(=true), exclusive(=false), "
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
       "wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
       "exclude_nodes(=[]), submit_hostname(=\"\"), "
-      "execution_nodes(=[]), requeue_count(=0), aggregated(=false), "
-      "steps(=[])]...");
+      "execution_nodes(=[]), deadline(=max timestamp), requeue_count(=0), "
+      "aggregated(=false), steps(=[])]...");
 
   try {
     auto client = GetClient_();
@@ -6284,8 +6218,7 @@ bool MongodbClient::MigrateV0ToV1_() {
     // Step B: Normalize CPU fields written as doubles by v1.1.3. The current
     // schema stores fixed-point cpu_t values as int64 raw values (scale 256).
     // Keep already-normalized integer values unchanged.
-    auto normalize_cpu = [](const char* field) {
-      std::string field_ref = fmt::format("${}", field);
+    auto normalize_cpu = [](std::string field_ref) {
       return make_document(kvp(
           "$cond",
           make_array(
@@ -6307,19 +6240,115 @@ bool MongodbClient::MigrateV0ToV1_() {
     req_cpu_pipeline.add_fields(make_document(kvp(
         "cpus_req",
         make_document(kvp(
-            "$ifNull", make_array(normalize_cpu("cpus_req"), int64_t{0}))))));
+            "$ifNull", make_array(normalize_cpu("$cpus_req"), int64_t{0}))))));
     collection.update_many({}, req_cpu_pipeline);
 
     // cpus_alloc was not present in v1.1.3. Normalize an existing value, or
     // copy the already-normalized cpus_req value when it is absent.
     mongocxx::pipeline alloc_cpu_pipeline;
-    alloc_cpu_pipeline.add_fields(make_document(
-        kvp("cpus_alloc",
-            make_document(kvp("$ifNull", make_array(normalize_cpu("cpus_alloc"),
-                                                    "$cpus_req"))))));
+    alloc_cpu_pipeline.add_fields(make_document(kvp(
+        "cpus_alloc",
+        make_document(kvp("$ifNull", make_array(normalize_cpu("$cpus_alloc"),
+                                                "$cpus_req"))))));
     collection.update_many({}, alloc_cpu_pipeline);
 
-    // Step C: Backfill missing fields using pipeline-style update_many.
+    // Step C: Convert embedded steps from ResourceV2 to ResourceV3. Legacy
+    // per-node GRES values are slot arrays; ResourceV3 stores only counts.
+    auto legacy_slot_count = [](std::string field_ref) {
+      return make_document(kvp(
+          "$cond",
+          make_array(make_document(kvp("$isArray", field_ref)),
+                     make_document(kvp("$toLong",
+                                       make_document(kvp("$size", field_ref)))),
+                     int64_t{0})));
+    };
+
+    auto legacy_gres_to_counts = [&](std::string field_ref) {
+      auto type_array = make_document(kvp("$objectToArray", "$$device.v"));
+
+      auto total_type_map = make_document(
+          kvp("$map",
+              make_document(kvp("input", type_array.view()), kvp("as", "type"),
+                            kvp("in", legacy_slot_count("$$type.v")))));
+      auto total = make_document(kvp("$sum", total_type_map.view()));
+
+      auto type_count_entry = make_document(
+          kvp("k", "$$type.k"), kvp("v", legacy_slot_count("$$type.v")));
+      auto type_count_entries = make_document(
+          kvp("$map",
+              make_document(kvp("input", type_array.view()), kvp("as", "type"),
+                            kvp("in", type_count_entry.view()))));
+      auto type_count_map =
+          make_document(kvp("$arrayToObject", type_count_entries.view()));
+
+      auto device_value =
+          make_document(kvp("total", total.view()),
+                        kvp("type_count_map", type_count_map.view()));
+      auto device_entry =
+          make_document(kvp("k", "$$device.k"), kvp("v", device_value.view()));
+
+      auto gres_or_empty =
+          make_document(kvp("$ifNull", make_array(field_ref, make_document())));
+      auto device_array =
+          make_document(kvp("$objectToArray", gres_or_empty.view()));
+      auto device_entries = make_document(kvp(
+          "$map",
+          make_document(kvp("input", device_array.view()), kvp("as", "device"),
+                        kvp("in", device_entry.view()))));
+      return make_document(kvp("$arrayToObject", device_entries.view()));
+    };
+
+    auto normalize_res_alloc = [&](std::string field_ref) {
+      auto legacy_cpu = make_document(kvp(
+          "$eq",
+          make_array(make_document(kvp("$type", "$$node.v.cpu")), "double")));
+      auto normalized_cpu = normalize_cpu("$$node.v.cpu");
+      auto normalized_gres = legacy_gres_to_counts("$$node.v.gres");
+      auto normalized_fields =
+          make_document(kvp("cpu", normalized_cpu.view()),
+                        kvp("gres", normalized_gres.view()));
+      auto normalized_node = make_document(kvp(
+          "$mergeObjects", make_array("$$node.v", normalized_fields.view())));
+      auto node_value = make_document(kvp(
+          "$cond",
+          make_array(legacy_cpu.view(), normalized_node.view(), "$$node.v")));
+      auto node_entry =
+          make_document(kvp("k", "$$node.k"), kvp("v", node_value.view()));
+
+      auto node_array = make_document(kvp("$objectToArray", field_ref));
+      auto node_entries = make_document(
+          kvp("$map",
+              make_document(kvp("input", node_array.view()), kvp("as", "node"),
+                            kvp("in", node_entry.view()))));
+      auto normalized_res =
+          make_document(kvp("$arrayToObject", node_entries.view()));
+      auto is_object = make_document(kvp(
+          "$eq", make_array(make_document(kvp("$type", field_ref)), "object")));
+      return make_document(
+          kvp("$cond",
+              make_array(is_object.view(), normalized_res.view(), field_ref)));
+    };
+
+    auto normalized_step_cpu = normalize_cpu("$$step.cpus_req");
+    auto normalized_step_res = normalize_res_alloc("$$step.res_alloc");
+    auto normalized_step_fields =
+        make_document(kvp("cpus_req", normalized_step_cpu.view()),
+                      kvp("res_alloc", normalized_step_res.view()));
+    auto normalized_step = make_document(kvp(
+        "$mergeObjects", make_array("$$step", normalized_step_fields.view())));
+    auto normalized_steps = make_document(
+        kvp("$map", make_document(kvp("input", "$steps"), kvp("as", "step"),
+                                  kvp("in", normalized_step.view()))));
+    auto steps_is_array = make_document(kvp("$isArray", "$steps"));
+    auto steps_value = make_document(kvp(
+        "$cond",
+        make_array(steps_is_array.view(), normalized_steps.view(), "$steps")));
+
+    mongocxx::pipeline step_pipeline;
+    step_pipeline.add_fields(make_document(kvp("steps", steps_value.view())));
+    collection.update_many({}, step_pipeline);
+
+    // Step D: Backfill missing fields using pipeline-style update_many.
     // $ifNull preserves existing values, only setting defaults for missing
     // fields, making this operation idempotent.
     mongocxx::pipeline update_pipeline;
@@ -6357,6 +6386,10 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("execution_nodes",
             make_document(
                 kvp("$ifNull", make_array("$execution_nodes", make_array())))),
+        kvp("deadline",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$deadline", int64_t{kJobMaxTimeStampSec})))),
         kvp("requeue_count",
             make_document(
                 kvp("$ifNull", make_array("$requeue_count", int32_t{0})))),
