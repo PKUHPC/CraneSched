@@ -5650,6 +5650,7 @@ void JobScheduler::StepStatusChangeAsync(
          .craned_index = craned_index,
          .reason = std::move(reason),
          .timestamp = std::move(timestamp)});
+    m_job_status_change_queue_size_.fetch_add(1, std::memory_order_relaxed);
   }
   m_job_status_change_async_handle_->send();
 }
@@ -5677,6 +5678,7 @@ void JobScheduler::StepCompletingAndStatusChangeAsync(
          .craned_index = craned_index,
          .reason = std::move(terminal_reason),
          .timestamp = std::move(timestamp)});
+    m_job_status_change_queue_size_.fetch_add(2, std::memory_order_relaxed);
   }
   m_job_status_change_async_handle_->send();
 }
@@ -5888,26 +5890,21 @@ void JobScheduler::JobStatusChangeTimerCb_() {
 }
 
 void JobScheduler::JobStatusChangeAsyncCb_() {
-  size_t queue_size;
-  {
-    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
-    queue_size = m_job_status_change_pending_.size() +
-                 m_job_status_change_incoming_.size();
-  }
+  const size_t queue_size =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed);
   if (queue_size >= g_config.CtldConf.StatusChangeBatchNum)
     m_clean_job_status_change_handle_->send();
 }
 
 void JobScheduler::CleanJobStatusChangeQueueCb_() {
-  size_t incoming_size;
   {
     absl::MutexLock lock(&m_job_status_change_queue_mtx_);
     if (m_job_status_change_pending_.empty())
       m_job_status_change_pending_.swap(m_job_status_change_incoming_);
-    incoming_size = m_job_status_change_incoming_.size();
   }
 
-  const size_t queue_size = m_job_status_change_pending_.size() + incoming_size;
+  const size_t queue_size =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed);
   const size_t max_drain_per_tick =
       std::max<uint32_t>(1, g_config.CtldConf.StatusChangeMaxDrainPerTick);
   const size_t drain_size =
@@ -5920,7 +5917,14 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     m_job_status_change_pending_.pop_front();
   }
   const size_t actual_size = args.size();
-  if (actual_size == 0) return;
+  const size_t previous_queue_size = m_job_status_change_queue_size_.fetch_sub(
+      actual_size, std::memory_order_relaxed);
+  CRANE_ASSERT(previous_queue_size >= actual_size);
+  if (actual_size == 0) {
+    if (m_job_status_change_queue_size_.load(std::memory_order_relaxed) > 0)
+      m_clean_job_status_change_handle_->send();
+    return;
+  }
   auto begin_time = std::chrono::steady_clock::now();
   auto state_machine_begin = begin_time;
 
@@ -6309,7 +6313,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     }
 
     m_rpc_worker_pool_->detach_task([this, craned_id, steps = std::move(steps),
-                                     traceparents = std::move(tp_map)] {
+                                     traceparents = std::move(tp_map)] mutable {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       if (stub && !stub->Invalid()) {
@@ -6324,11 +6328,17 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
               "ExecuteSteps RPC failed for [{}] steps on Node {}; "
               "terminating affected steps.",
               util::JobStepsToString(steps), craned_id);
-          HandleExecuteStepsFailure_(craned_id, steps);
+          g_thread_pool->detach_task(
+              [this, craned_id, steps = std::move(steps)] {
+                HandleExecuteStepsFailure_(craned_id, steps);
+              });
         } else if (!failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
-          HandleExecuteStepsFailure_(craned_id, failed_steps.value());
+          g_thread_pool->detach_task(
+              [this, craned_id, steps = std::move(failed_steps.value())] {
+                HandleExecuteStepsFailure_(craned_id, steps);
+              });
         }
       } else {
         CRANE_ERROR(
@@ -6700,11 +6710,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE("Cleaning {} StepStatusChanges cost {} ms.", actual_size,
               total_elapsed_ms);
 
-  bool has_more = !m_job_status_change_pending_.empty();
-  if (!has_more) {
-    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
-    has_more = !m_job_status_change_incoming_.empty();
-  }
+  const bool has_more =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed) > 0;
   if (has_more) m_clean_job_status_change_handle_->send();
 }
 

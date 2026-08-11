@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <atomic>
 #include <deque>
 
 #include "Account/AccountDefs.h"
@@ -1514,6 +1515,7 @@ class JobScheduler {
   absl::Mutex m_job_status_change_queue_mtx_;
   std::deque<JobStatusChangeArg> m_job_status_change_incoming_
       ABSL_GUARDED_BY(m_job_status_change_queue_mtx_);
+  std::atomic_size_t m_job_status_change_queue_size_{0};
   // Accessed only by the job-status-change event loop. Older pending events
   // are drained before the next incoming batch to preserve strict FIFO order.
   std::deque<JobStatusChangeArg> m_job_status_change_pending_;
