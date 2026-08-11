@@ -1,0 +1,4 @@
+interface:
+  display_name: "CraneSched 使用与一线排障"
+  short_description: "面向 HPC 用户与超算一线支持的 CraneSched 使用指南"
+  default_prompt: "使用 $cranesched-skill 帮我提交作业、理解队列状态或排查 CraneSched 问题。"
