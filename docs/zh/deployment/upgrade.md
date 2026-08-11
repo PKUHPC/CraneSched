@@ -6,10 +6,8 @@
 
 !!! warning
     当前版本不能保证 pending 或 running 作业的前向兼容。停止 CraneCtld
-    前必须排空或取消所有活动作业。较新版本的作业被中断时，MongoDB 可能只剩
-    某个 step 或 array child，而对应的 job 或 array parent 已不存在。这是后续
-    版本升级的风险；v1.1.3 源数据库本身没有 job step 记录。当前流程只能发现
-    这种不一致，不能重建运行时状态。后续前向兼容性请关注
+    前必须排空或取消所有活动作业。当前流程不会从旧 EmbeddedDB 恢复活动作业的
+    运行时状态。后续前向兼容性请关注
     [issue #950](https://github.com/PKUHPC/CraneSched/issues/950)。
 
 ## 需要备份的数据
@@ -33,10 +31,9 @@ BerkeleyDB legacy 后端时，对应的三个文件是：
 <解析后的 CraneCtldDbPath>resv
 ```
 
-v1.1.3 源数据库没有 job step 记录，也没有 `step_var` 或 `step_fix` 文件。上面
-三个文件就是它完整的 legacy EmbeddedDB 文件集合。较新版本可能创建额外的 step
-store，但它们不属于 v1.1.3 源数据库备份。以运行中实际存在的路径为准；不确定时
-备份整个父目录。MongoDB 备份示例（替换占位符，密码可交互式输入）：
+上面三个文件就是 v1.1.3 完整的 legacy EmbeddedDB 文件集合。以运行中实际存在
+的路径为准；不确定时备份整个父目录。MongoDB 备份示例（替换占位符，密码可
+交互式输入）：
 
 ```bash
 mongodump --host <DbHost> --port <DbPort> \
@@ -71,8 +68,7 @@ ccancel -t Running
 cqueue -t all --json
 ```
 
-仍有 pending 或 running 作业时不得继续。v1.1.3 的 `cqueue` 没有作业步查询模式，
-本次升级也没有需要排空的 step 记录。
+仍有 pending 或 running 作业时不得继续。
 
 ### 2. 停止鹤思服务
 
@@ -119,25 +115,25 @@ sudo systemctl start cfored
 然后交换为 `job_table`，原 collection 保留为 `task_table_backup_v0`。升级验收
 和备份保留期结束前不要删除该备份 collection。
 
-由于 EmbeddedDB 已被清理，开放新提交前先查询 MongoDB 中的最大 ID：
-
-```javascript
-use <DbName>
-db.job_table.aggregate([
-  {$group: {
-    _id: null,
-    max_job_id: {$max: "$job_id"},
-    max_job_db_id: {$max: "$job_db_id"}
-  }}
-]).forEach(printjson)
-```
-
-把两个计数器分别设为最大值加一（collection 为空时使用 `1`）：
+由于 EmbeddedDB 已被清理，开放新提交前要查询 MongoDB 中已持久化的最大 ID。
+`cranectld` 软件包安装的只读工具要求 `PATH` 中存在 `python3` 和 `mongosh`；
+指定 `--username` 时，`mongosh` 会提示输入密码：
 
 ```bash
-ccontrol reset next-job-id <max_job_id+1>
-ccontrol reset next-job-db-id <max_job_db_id+1>
+crane-query-next-job-ids \
+  --host <DbHost> --port <DbPort> \
+  --username <DbUser> --database <DbName>
 ```
+
+如果数据库中两个最大 ID 都是 `31`，输出末尾会给出：
+
+```bash
+ccontrol reset next-job-id 32
+ccontrol reset next-job-db-id 32
+```
+
+核对后执行工具输出的两条命令。collection 为空时工具使用 `1`；MongoDB 未启用
+认证时省略 `--username`。
 
 清空 EmbeddedDB 也会清除计数器；不执行这一步，新作业可能复用 MongoDB 中已有
 的 ID。
@@ -174,34 +170,8 @@ cacct -t all -F
 cacct -t all --json
 ```
 
-至少检查一个普通完成作业；如果生产数据库有 array 作业，再检查一个 array 作业。
-本次迁移使用的 v1.1.3 fixture 只有一个普通作业，不包含 array 或 job step 记录。
-对于纯 v1.1.3 数据，迁移后的每个 job 都应有 `has_job_info: true`；可用下面的
-查询统计异常：
-
-```javascript
-db.job_table.countDocuments({has_job_info: {$ne: true}})
-```
-
-纯 v1.1.3 数据出现异常并不是预期行为。记录受影响的 job ID，在解除提交阻止
-前完成调查。
-
-检查每个 array child 是否存在 parent。数据库一致时下面查询应返回空结果：
-
-```javascript
-db.job_table.aggregate([
-  {$match: {array_job_id: {$gte: 0}, array_task_id: {$gte: 0}}},
-  {$lookup: {
-    from: "job_table", localField: "array_job_id",
-    foreignField: "job_id", as: "parent"
-  }},
-  {$match: {$expr: {$eq: [{$size: "$parent"}, 0]}}},
-  {$project: {_id: 0, job_id: 1, array_job_id: 1, array_task_id: 1}}
-])
-```
-
-有结果表示 MongoDB 中存在 orphan array child。保留查询输出并按站点恢复流程
-处理；不要声称活动作业已经恢复。
+至少检查一个已完成的历史作业，确认 job ID、状态、CPU、内存、提交时间和结束
+时间正确。
 
 ### 新作业冒烟测试
 

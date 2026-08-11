@@ -7,11 +7,8 @@ v1.1.3 database to a release containing the v0-to-v1 schema migration.
 !!! warning
     The current release does not guarantee forward compatibility for pending
     or running jobs. Drain or cancel every active job before stopping CraneCtld.
-    An interrupted job from a newer release can leave a step or array child in
-    MongoDB without its job or array parent. This is a risk for later upgrades;
-    the v1.1.3 source database itself has no job-step records. The current
-    procedure detects this but does not reconstruct the missing runtime state.
-    See
+    The current procedure does not restore active runtime state from the old
+    EmbeddedDB. See
     [issue #950](https://github.com/PKUHPC/CraneSched/issues/950) for the
     planned forward-compatibility work.
 
@@ -37,11 +34,9 @@ Unqlite/BerkeleyDB layout with three files:
 <resolved-CraneCtldDbPath>resv
 ```
 
-The v1.1.3 source has no job-step records and no `step_var` or `step_fix` files.
-The three files above are its complete legacy EmbeddedDB set. Newer releases may
-create additional step stores, but they are not part of the v1.1.3 source
-backup. The paths in the running installation take precedence; back up the whole
-parent directory when in doubt. Example MongoDB backup (replace placeholders;
+The three files above are the complete v1.1.3 legacy EmbeddedDB set. The paths
+in the running installation take precedence; back up the whole parent directory
+when in doubt. Example MongoDB backup (replace placeholders;
 let the tooling prompt for a password when appropriate):
 
 ```bash
@@ -78,8 +73,7 @@ ccancel -t Running
 cqueue -t all --json
 ```
 
-Do not continue while any pending or running job remains. The v1.1.3 `cqueue`
-has no step-query mode, and no step records need to be drained for this upgrade.
+Do not continue while any pending or running job remains.
 
 ### 2. Stop services
 
@@ -129,27 +123,26 @@ converts the source, then swaps it into `job_table`; the original is retained
 as `task_table_backup_v0`. Keep that collection until acceptance and backup
 retention are complete.
 
-Since EmbeddedDB was cleared, calculate the maximum IDs in MongoDB before
-allowing new submissions:
-
-```javascript
-use <DbName>
-db.job_table.aggregate([
-  {$group: {
-    _id: null,
-    max_job_id: {$max: "$job_id"},
-    max_job_db_id: {$max: "$job_db_id"}
-  }}
-]).forEach(printjson)
-```
-
-Set each counter to one greater than its maximum (use `1` for an empty
-collection):
+Since EmbeddedDB was cleared, query the maximum persisted IDs before allowing
+new submissions. The read-only helper installed with the `cranectld` package
+requires `python3` and `mongosh` in `PATH`. When `--username` is supplied,
+`mongosh` prompts for the password:
 
 ```bash
-ccontrol reset next-job-id <max_job_id+1>
-ccontrol reset next-job-db-id <max_job_db_id+1>
+crane-query-next-job-ids \
+  --host <DbHost> --port <DbPort> \
+  --username <DbUser> --database <DbName>
 ```
+
+For a database whose maximum IDs are both `31`, the output ends with:
+
+```bash
+ccontrol reset next-job-id 32
+ccontrol reset next-job-db-id 32
+```
+
+Review and run the two printed commands. For an empty collection, the helper
+uses `1`. Omit `--username` when MongoDB authentication is disabled.
 
 This step is required because clearing EmbeddedDB also removes its counters;
 without it, a new job can reuse an ID already in MongoDB.
@@ -186,36 +179,8 @@ cacct -t all -F
 cacct -t all --json
 ```
 
-Read at least one normal completed job and an array job if the production
-database has one. The v1.1.3 fixture used for this migration has one normal job
-and no array or job-step records. For a pure v1.1.3 database, every migrated job
-should have `has_job_info: true`; count exceptions for manual review:
-
-```javascript
-db.job_table.countDocuments({has_job_info: {$ne: true}})
-```
-
-An exception is not expected from v1.1.3 data. Preserve the affected job IDs
-and investigate before reopening submissions.
-
-Check that every array child has a parent. This query should return no documents
-in a consistent database:
-
-```javascript
-db.job_table.aggregate([
-  {$match: {array_job_id: {$gte: 0}, array_task_id: {$gte: 0}}},
-  {$lookup: {
-    from: "job_table", localField: "array_job_id",
-    foreignField: "job_id", as: "parent"
-  }},
-  {$match: {$expr: {$eq: [{$size: "$parent"}, 0]}}},
-  {$project: {_id: 0, job_id: 1, array_job_id: 1, array_task_id: 1}}
-])
-```
-
-Any result is an orphan array child. Preserve the output with the upgrade
-record and escalate it through the site recovery process; do not claim that
-the interrupted job was restored.
+Read at least one completed historical job and confirm its job ID, state, CPU,
+memory, submit time, and end time are correct.
 
 ### New-job smoke test
 
