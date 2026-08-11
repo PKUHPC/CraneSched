@@ -736,6 +736,7 @@ class MongodbClient {
                        crane::grpc::StepInfo* step_info);
 
   GresMap BsonToGresMap(const bsoncxx::document::view& doc);
+  ResourceView BsonToLegacyResourceView_(const bsoncxx::document::view& doc);
   DedicatedResourceInNode BsonToDedicatedResourceInNode(
       const bsoncxx::document::view& doc);
   ResourceInNodeV3 BsonToResourceInNodeV3(const bsoncxx::document::view& doc);

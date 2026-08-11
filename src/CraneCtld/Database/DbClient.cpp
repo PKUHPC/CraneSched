@@ -4870,10 +4870,57 @@ DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
   }
   return res;
 }
+
+// v1.1.3 step records use ResourceV2: CPU counts are doubles and GRES values
+// are slot arrays. Convert only the quantities needed by historical queries.
+ResourceView MongodbClient::BsonToLegacyResourceView_(
+    const bsoncxx::document::view& doc) {
+  ResourceView result;
+  try {
+    for (auto&& node_elem : doc) {
+      if (node_elem.type() != bsoncxx::type::k_document) continue;
+      auto node_doc = node_elem.get_document().view();
+      ResourceView node_res;
+
+      if (auto cpu_elem = node_doc["cpu"];
+          cpu_elem && cpu_elem.type() == bsoncxx::type::k_double) {
+        node_res.SetCpuCount(static_cast<cpu_t>(cpu_elem.get_double().value));
+      }
+      if (auto memory_elem = node_doc["memory"];
+          memory_elem && memory_elem.type() == bsoncxx::type::k_int64) {
+        node_res.SetMemoryBytes(memory_elem.get_int64().value);
+        node_res.SetMemorySwBytes(memory_elem.get_int64().value);
+      }
+
+      if (auto gres_elem = node_doc["gres"];
+          gres_elem && gres_elem.type() == bsoncxx::type::k_document) {
+        for (auto&& device_elem : gres_elem.get_document().view()) {
+          if (device_elem.type() != bsoncxx::type::k_document) continue;
+          GresCount count;
+          for (auto&& type_elem : device_elem.get_document().view()) {
+            if (type_elem.type() != bsoncxx::type::k_array) continue;
+            uint64_t type_count = 0;
+            for (auto&& slot_elem : type_elem.get_array().value) {
+              (void)slot_elem;
+              ++type_count;
+            }
+            count.total += type_count;
+            count.specified[std::string(type_elem.key())] = type_count;
+          }
+          node_res.GetGresMap()[std::string(device_elem.key())] =
+              std::move(count);
+        }
+      }
+      result += node_res;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return result;
+}
+
 // Deserializes counts-only ResourceInNodeV3 from DB.
 // core_ids/slot_ids are not stored; only cpu_count, memory, and gres counts.
-// TODO: DB migration script needed to convert old gres format
-// (DedicatedResourceInNode with slot IDs) to new GresMap format (counts).
 ResourceInNodeV3 MongodbClient::BsonToResourceInNodeV3(
     const bsoncxx::document::view& doc) {
   ResourceInNodeV3 res;
@@ -5737,8 +5784,12 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_id_t step_id = view["step_id"].get_int32().value;
   step_info->set_step_id(step_id);
   auto* mutable_req_total_res_view = step_info->mutable_req_total_res_view();
-  mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(
-      cpu_t::from_raw_value(view["cpus_req"].get_int64().value)));
+  auto cpus_req_elem = view["cpus_req"];
+  cpu_t cpus_req = cpus_req_elem.type() == bsoncxx::type::k_double
+                       ? static_cast<cpu_t>(cpus_req_elem.get_double().value)
+                       : cpu_t::from_raw_value(
+                             ViewGetArithmeticValue_<int64_t>(cpus_req_elem));
+  mutable_req_total_res_view->set_cpu_count(ConvertCpuCountForClient(cpus_req));
   mutable_req_total_res_view->set_memory_bytes(
       view["mem_req"].get_int64().value);
   mutable_req_total_res_view->set_memory_sw_bytes(
@@ -5782,8 +5833,23 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
       static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
 
   step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
-  auto allocated_res_view =
-      BsonToResourceV3(view["res_alloc"].get_document().value).View();
+  auto res_alloc_elem = view["res_alloc"];
+  ResourceView allocated_res_view;
+  if (res_alloc_elem && res_alloc_elem.type() == bsoncxx::type::k_document) {
+    auto res_alloc_doc = res_alloc_elem.get_document().view();
+    bool is_legacy_resource = false;
+    // ResourceV3 stores a fixed-point int64 CPU value; v1.1.3 stored double.
+    for (auto&& node_elem : res_alloc_doc) {
+      if (node_elem.type() != bsoncxx::type::k_document) continue;
+      auto cpu_elem = node_elem.get_document().view()["cpu"];
+      is_legacy_resource =
+          cpu_elem && cpu_elem.type() == bsoncxx::type::k_double;
+      break;
+    }
+    allocated_res_view = is_legacy_resource
+                             ? BsonToLegacyResourceView_(res_alloc_doc)
+                             : BsonToResourceV3(res_alloc_doc).View();
+  }
   *step_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
   step_info->mutable_allocated_res_view()->set_cpu_count(
@@ -6198,10 +6264,11 @@ bool MongodbClient::MigrateV0ToV1_() {
       "task_db_id->job_db_id], "
       "backfilling fields [has_job_info(=true), exclusive(=false), "
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
-      "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
+      "wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
       "exclude_nodes(=[]), submit_hostname(=\"\"), "
-      "execution_nodes(=[])]...");
+      "execution_nodes(=[]), requeue_count(=0), aggregated(=false), "
+      "steps(=[])]...");
 
   try {
     auto client = GetClient_();
@@ -6214,7 +6281,45 @@ bool MongodbClient::MigrateV0ToV1_() {
                                              kvp("task_name", "job_name"),
                                              kvp("task_db_id", "job_db_id")))));
 
-    // Step B: Backfill missing fields using pipeline-style update_many.
+    // Step B: Normalize CPU fields written as doubles by v1.1.3. The current
+    // schema stores fixed-point cpu_t values as int64 raw values (scale 256).
+    // Keep already-normalized integer values unchanged.
+    auto normalize_cpu = [](const char* field) {
+      std::string field_ref = fmt::format("${}", field);
+      return make_document(kvp(
+          "$cond",
+          make_array(
+              make_document(
+                  kvp("$eq", make_array(make_document(kvp("$type", field_ref)),
+                                        "double"))),
+              make_document(
+                  kvp("$toLong",
+                      make_document(kvp(
+                          "$round",
+                          make_array(make_document(kvp(
+                                         "$multiply",
+                                         make_array(field_ref, int64_t{256}))),
+                                     0))))),
+              field_ref)));
+    };
+
+    mongocxx::pipeline req_cpu_pipeline;
+    req_cpu_pipeline.add_fields(make_document(kvp(
+        "cpus_req",
+        make_document(kvp(
+            "$ifNull", make_array(normalize_cpu("cpus_req"), int64_t{0}))))));
+    collection.update_many({}, req_cpu_pipeline);
+
+    // cpus_alloc was not present in v1.1.3. Normalize an existing value, or
+    // copy the already-normalized cpus_req value when it is absent.
+    mongocxx::pipeline alloc_cpu_pipeline;
+    alloc_cpu_pipeline.add_fields(make_document(
+        kvp("cpus_alloc",
+            make_document(kvp("$ifNull", make_array(normalize_cpu("cpus_alloc"),
+                                                    "$cpus_req"))))));
+    collection.update_many({}, alloc_cpu_pipeline);
+
+    // Step C: Backfill missing fields using pipeline-style update_many.
     // $ifNull preserves existing values, only setting defaults for missing
     // fields, making this operation idempotent.
     mongocxx::pipeline update_pipeline;
@@ -6231,9 +6336,6 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("device_map",
             make_document(
                 kvp("$ifNull", make_array("$device_map", make_document())))),
-        kvp("nodename_list",
-            make_document(
-                kvp("$ifNull", make_array("$nodename_list", make_array())))),
         kvp("wckey", make_document(kvp("$ifNull", make_array("$wckey", "")))),
         kvp("using_default_wckey",
             make_document(
@@ -6253,8 +6355,15 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("submit_hostname",
             make_document(kvp("$ifNull", make_array("$submit_hostname", "")))),
         kvp("execution_nodes",
-            make_document(kvp("$ifNull",
-                              make_array("$execution_nodes", make_array()))))));
+            make_document(
+                kvp("$ifNull", make_array("$execution_nodes", make_array())))),
+        kvp("requeue_count",
+            make_document(
+                kvp("$ifNull", make_array("$requeue_count", int32_t{0})))),
+        kvp("aggregated",
+            make_document(kvp("$ifNull", make_array("$aggregated", false)))),
+        kvp("steps", make_document(
+                         kvp("$ifNull", make_array("$steps", make_array()))))));
     collection.update_many({}, update_pipeline);
 
     CRANE_LOGGER_INFO(m_logger_, "Schema migration v0 -> v1 completed.");
@@ -6303,9 +6412,9 @@ bool MongodbClient::RecoverInterruptedMigration_() {
     bool job_table_exists = job_cursor.begin() != job_cursor.end();
 
     // Find any backup collection from either old or new naming scheme
-    auto backup_cursor = db.list_collections(make_document(kvp(
-        "name", make_document(kvp(
-                    "$regex", "^(task_table|job_table)_backup_v\\\\d+$")))));
+    auto backup_cursor = db.list_collections(make_document(
+        kvp("name", make_document(kvp(
+                        "$regex", "^(task_table|job_table)_backup_v\\d+$")))));
     std::string backup_name;
     auto it = backup_cursor.begin();
     if (it != backup_cursor.end()) {
