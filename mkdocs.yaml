@@ -14,6 +14,11 @@ copyright: Copyright &copy; 2022 - 2026 PKUHPC
 
 docs_dir: docs
 
+# Skills are source documentation for the Codex package, not pages served by
+# the CraneSched documentation site.
+exclude_docs: |
+  skills/**
+
 theme:
   name: material
   language: zh
