@@ -1,225 +1,279 @@
-# Upgrade Guide
+# Upgrade from v1.1.3
 
-This guide describes the current CraneSched database upgrade procedure for
-control-plane administrators. It covers a maintenance-window upgrade from a
-v1.1.3 database to a release containing the v0-to-v1 schema migration.
+This runbook is for control-plane administrators upgrading CraneSched v1.1.3
+to the current release.
 
 !!! warning
     The current release does not guarantee forward compatibility for pending
-    or running jobs. Drain or cancel every active job before stopping CraneCtld.
-    The current procedure does not restore active runtime state from the old
-    EmbeddedDB. See
+    or running jobs. Drain or cancel every active job before stopping
+    CraneCtld. This procedure does not restore active runtime state from the
+    v1.1.3 EmbeddedDB. See
     [issue #950](https://github.com/PKUHPC/CraneSched/issues/950) for the
-    planned forward-compatibility work.
+    planned compatibility work.
 
-## Backups
+## Preparation
 
-Create a timestamped backup directory and keep it until the upgraded cluster
-passes verification.
-
-| Data | Back up | Purpose |
-| --- | --- | --- |
-| Configuration | `/etc/crane/` (including `config.yaml`, `database.yaml`, `plugin.yaml`, certificates, and local overrides) | Restore service and database settings |
-| MongoDB | The complete database named by `DbName` in `database.yaml` | Preserve job history, accounts, users, QoS, and the migration source |
-| EmbeddedDB | Every file belonging to `CraneCtldDbPath` | Preserve runtime state and next-ID counters for rollback |
-
-Resolve a relative `CraneCtldDbPath` against `CraneBaseDir` (or
-`CraneSharedBaseDir` for Keepalived) before copying it. With RocksDB, the actual
-directory is `<resolved-CraneCtldDbPath>.rocksdb/`. v1.1.3 used a legacy
-Unqlite/BerkeleyDB layout with three files:
-
-```text
-<resolved-CraneCtldDbPath>var
-<resolved-CraneCtldDbPath>fix
-<resolved-CraneCtldDbPath>resv
-```
-
-The three files above are the complete v1.1.3 legacy EmbeddedDB set. The paths
-in the running installation take precedence; back up the whole parent directory
-when in doubt. Example MongoDB backup (replace placeholders;
-let the tooling prompt for a password when appropriate):
+Before the maintenance window, copy `scripts/upgrade_data.py` from the
+target release source tree to the v1.1.3 control node, for example as
+`/root/crane-upgrade/upgrade_data.py`. The script is not installed by the
+CraneSched RPM/DEB. Install `python3-pyyaml` on RHEL-compatible systems or
+`python3-yaml` on Debian-based systems. The control node must also provide
+`mongosh`, `mongodump`, `mongorestore`, and `ccontrol`. The command blocks below
+use Bash syntax and assume one root shell:
 
 ```bash
-mongodump --host <DbHost> --port <DbPort> \
-  --username <DbUser> --authenticationDatabase admin \
-  --db <DbName> --out <backup-dir>/mongodb
+crane_upgrade_tool=/root/crane-upgrade/upgrade_data.py
+test -r "$crane_upgrade_tool"
 ```
 
-Record the CraneSched version, package/Git version, `DbName`, resolved
-EmbeddedDB path, and backup timestamp. Never overwrite an earlier backup.
+The tool reads `/etc/crane/config.yaml` and follows its `DbConfigPath` setting.
+`DbName` is the MongoDB database name in that file; its v1.1.3 default is
+`crane_db`. Administrators do not enter `DbHost`, `DbPort`, `DbUser`, `DbName`,
+or `CraneCtldDbPath` on the command line.
 
-## Upgrade
+A completed backup contains:
 
-Perform all steps in one maintenance window.
+| Path | Contents |
+| --- | --- |
+| `etc-crane/` | Complete copy of `/etc/crane/` |
+| `database.yaml.active` | Database configuration selected by `DbConfigPath` |
+| `mongodb/` | `mongodump` of the configured database |
+| `cranectld-runtime/` | Entire CraneCtld runtime directory containing `CraneCtldDbPath` |
+| `manifest.json` | Resolved paths, MongoDB connection settings, maximum IDs, and next IDs |
+
+Store the backup outside the CraneCtld runtime directory and retain it through
+upgrade acceptance and the required backup-retention period.
+
+## Upgrade SOP
 
 ### 1. Block submissions and drain jobs
 
-Block new calls to `cbatch`, `crun`, `calloc`, `ccon`, and other submission
-frontends at the login gateway or access-control layer. Keep the block until
-verification is complete.
+Block `cbatch`, `crun`, `calloc`, `ccon`, and other submission entry points at
+the login gateway or access-control layer. Keep the block in place until every
+verification step in this runbook passes.
 
-Cancel jobs that have not started, then let running jobs finish when possible:
+Cancel pending jobs and allow running jobs to finish:
 
 ```bash
 ccancel -t Pending
 cqueue -t all --json
 ```
 
-The queue command must report an empty `job_info_list`. If running jobs cannot
-finish in the maintenance window, cancel them explicitly and check again:
+If running jobs cannot finish during the maintenance window, cancel and check
+them again:
 
 ```bash
 ccancel -t Running
 cqueue -t all --json
 ```
 
-Do not continue while any pending or running job remains.
+The `cqueue` response must contain an empty `job_info_list` before continuing.
 
 ### 2. Stop services
 
-Run these commands on the relevant hosts. Stop submission/interactive
-frontends first, then compute daemons, the scheduler, and its plugin service:
+Stop services on their respective hosts. Stop `craned` on every compute node:
 
 ```bash
 sudo systemctl stop cfored
-sudo systemctl stop craned       # every compute node
+sudo systemctl stop craned
 sudo systemctl stop cranectld
 sudo systemctl stop cplugind
+systemctl is-active cfored cranectld cplugind || true
+systemctl is-active craned || true
 ```
 
-Verify that no old Crane process still holds the EmbeddedDB. Do not stop
-`mongod`; it can remain available for the database dump.
+Each check must print `inactive`. The backup script also checks for a remaining
+`cranectld` process. Keep `mongod` running because the backup tool must connect
+to it.
 
-### 3. Back up and clear EmbeddedDB
+### 3. Back up databases and record IDs
 
-Copy `/etc/crane/`, dump the configured MongoDB database, and copy all
-EmbeddedDB files after the processes have stopped. Move the live EmbeddedDB to
-a dated backup location instead of deleting it:
+Run this in one shell on the v1.1.3 control node:
 
 ```bash
-sudo mv <resolved-CraneCtldDbPath>.rocksdb \
-  <backup-dir>/embedded.db.rocksdb.v1.1.3
+crane_backup_dir="/var/backups/crane/upgrade-$(date -u +%Y%m%dT%H%M%SZ)"
+python3 "$crane_upgrade_tool" --output "$crane_backup_dir"
 ```
 
-Move all three legacy files (`var`, `fix`, and `resv`) when that backend is in
-use. This upgrade deliberately starts with an empty EmbeddedDB; do not restore
-the old runtime database before starting the new version.
+The output directory must not already exist. The tool creates it with mode
+`0700` and refuses to run while `cranectld` is active. When MongoDB
+authentication is enabled, `mongosh` and `mongodump` each prompt for the
+database password.
 
-### 4. Start the new version and restore ID counters
+The tool performs these operations:
 
-Install the new package or binaries and keep the existing configuration unless
-the release notes require a change:
+1. Resolve MongoDB and EmbeddedDB locations from the default Crane configuration.
+2. Query the maximum job ID and job database ID in historical data.
+3. Back up configuration, the complete MongoDB database, and the entire
+   CraneCtld runtime directory.
+4. Record both independent maximum IDs and next safe IDs in `manifest.json`.
+
+The script prints an `[INFO] Starting`/`[INFO] Completed` pair, or the resolved
+result, for configuration loading, ID queries, configuration copies, the
+MongoDB dump, runtime copy, and manifest write. A completed backup must print
+`SUCCESS: Backup completed: <backup-directory>` and both maximum and next IDs.
+A failure prints `error: <reason>` and leaves `BACKUP_INCOMPLETE`.
+
+After backup completion, have the same script read and validate the backup:
+
+```bash
+python3 "$crane_upgrade_tool" \
+  --validate-backup "$crane_backup_dir"
+```
+
+Successful validation must print `SUCCESS: Backup validated:` followed by the
+backup directory, MongoDB database, CraneCtld runtime directory, and both next
+IDs. `manifest.json` never contains the MongoDB
+password. The script queries and records the IDs; administrators do not need
+to understand the internal MongoDB layout, query IDs, or construct reset
+commands manually.
+
+### 4. Clear the old CraneCtld runtime directory
+
+Do not parse the manifest or construct individual EmbeddedDB filenames. Have
+the script validate the backup, confirm that `cranectld` is stopped, and clear
+the runtime directory recorded in the manifest:
+
+```bash
+python3 "$crane_upgrade_tool" \
+  --clear-runtime-from "$crane_backup_dir"
+```
+
+The script removes only the directory contents and preserves the directory,
+owner, and permissions. It rejects unsafe broad paths, overlapping
+configuration and runtime directories, incomplete backups, and a running
+`cranectld`. Continue only after it prints `[INFO] Confirmed empty CraneCtld
+runtime directory:` and `SUCCESS: CraneCtld runtime directory cleared:`, both
+followed by the same path. Do not restore the old EmbeddedDB before starting
+the upgraded release.
+
+### 5. Install and start the release
+
+Install the target packages or binaries while retaining the backed-up site
+configuration. Start only the plugin service and CraneCtld first:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl start cplugind
 sudo systemctl start cranectld
-sudo systemctl start craned       # every compute node
+systemctl is-active cranectld
+```
+
+On its first start, CraneCtld automatically upgrades the historical job
+database when required. Inspect the service state and the complete log from the
+current boot:
+
+```bash
+systemctl is-active cranectld
+journalctl -u cranectld -b --no-pager
+```
+
+`cranectld` must remain `active`, and the log must contain no database
+initialization or upgrade error. Successful historical reads through `cacct` in
+step 7 are the final acceptance criterion. Keep the backup from step 3 through
+acceptance and the required retention period.
+
+### 6. Restore next-job IDs
+
+Clearing EmbeddedDB removes both counters. Restore them before reopening
+submissions. The counters are calculated independently and need not match.
+Have the backup script read and validate the manifest and invoke both
+`ccontrol reset` operations:
+
+```bash
+python3 "$crane_upgrade_tool" \
+  --restore-job-ids-from "$crane_backup_dir"
+```
+
+The script rejects incomplete backups and manifests whose maximum and next IDs
+are inconsistent. Continue only after it prints both `[INFO] Completed: restore
+... ID` messages, `SUCCESS: Job ID counters restored`, and both next IDs.
+
+Then start `craned` on every compute node and start the interactive frontend:
+
+```bash
+sudo systemctl start craned
 sudo systemctl start cfored
+systemctl is-active craned
+systemctl is-active cfored
 ```
 
-CraneCtld automatically migrates MongoDB schema v0 to v1. It copies and
-converts the source, then swaps it into `job_table`; the original is retained
-as `task_table_backup_v0`. Keep that collection until acceptance and backup
-retention are complete.
+Both checks must print `active`.
 
-Since EmbeddedDB was cleared, query the maximum persisted IDs before allowing
-new submissions. The read-only helper installed with the `cranectld` package
-requires `python3` and `mongosh` in `PATH`. When `--username` is supplied,
-`mongosh` prompts for the password:
+### 7. Verify the upgrade
+
+Complete these checks before removing the submission block.
+
+Check services on their respective hosts and read historical jobs:
 
 ```bash
-crane-query-next-job-ids \
-  --host <DbHost> --port <DbPort> \
-  --username <DbUser> --database <DbName>
-```
-
-For a database whose maximum IDs are both `31`, the output ends with:
-
-```bash
-ccontrol reset next-job-id 32
-ccontrol reset next-job-db-id 32
-```
-
-Review and run the two printed commands. For an empty collection, the helper
-uses `1`. Omit `--username` when MongoDB authentication is disabled.
-
-This step is required because clearing EmbeddedDB also removes its counters;
-without it, a new job can reuse an ID already in MongoDB.
-
-## Verification
-
-Keep submissions blocked while completing every check below.
-
-### Services and schema
-
-```bash
-systemctl is-active cranectld craned cfored cplugind
-journalctl -u cranectld -b --no-pager | \
-  rg "schema version|Migrating schema v0 -> v1|Schema migration v0 -> v1 completed|Migrated db schema"
-```
-
-The log must show successful migration and no migration error. Verify the
-persisted version and collection swap:
-
-```javascript
-use <DbName>
-db.metadata_table.findOne({_id: "db_schema_version"})
-db.getCollectionNames().filter(n => /^(task_table|job_table)(_backup_v0)?$/.test(n))
-```
-
-The metadata document must contain `version: 1`; `job_table` must exist and
-`task_table_backup_v0` should remain available for rollback.
-
-### Queue, accounting, and consistency
-
-```bash
+systemctl is-active cranectld cplugind
+systemctl is-active craned
+systemctl is-active cfored
 cqueue -t all --json
 cacct -t all -F
 cacct -t all --json
 ```
 
-Read at least one completed historical job and confirm its job ID, state, CPU,
-memory, submit time, and end time are correct.
+The queue must be empty. Verify the job ID, state, CPU, memory, submit time, and
+end time for at least one completed v1.1.3 job.
 
-### New-job smoke test
-
-Submit one held canary, confirm its ID is greater than all historical IDs, then
-cancel it and read it with `cacct`:
+Keep external submissions blocked. Have the script submit a held canary, verify
+its ID, cancel it, and read the cancelled record through `cacct`:
 
 ```bash
-cbatch --hold --json -J upgrade-canary --wrap 'true'
+python3 "$crane_upgrade_tool" \
+  --run-canary-from "$crane_backup_dir"
 cqueue -t all --json
-ccancel <canary-job-id>
-cacct -j <canary-job-id> --json
 ```
 
-Only remove the submission block after the canary is visible, cancellation
-succeeds, and `cacct` returns its record.
+The script must print `[INFO]` messages confirming the ID match, cancellation,
+and the `cacct` read, followed by `SUCCESS: Upgrade canary passed: <job-id>` and
+the `cacct` JSON. `cqueue` must then be empty. Remove the submission block only
+after every check passes.
 
-## Rollback
+## Rollback SOP
 
-Rollback if CraneCtld cannot start, migration logs an error, the schema version
-is not `1`, or historical jobs cannot be read:
+Perform a complete rollback if CraneCtld cannot start, the database upgrade reports an
+error, `cacct` cannot read historical jobs, or canary verification fails:
 
-1. Reapply the submission block and stop the new `cfored`, `craned`,
+1. Reapply the submission block and stop the upgraded `cfored`, `craned`,
    `cranectld`, and `cplugind` services.
-2. Restore `/etc/crane/` from the backup.
-3. Drop only the configured `<DbName>` and restore that database from the
-   MongoDB dump, so collections absent from the dump do not remain. Confirm
-   the database name before running the destructive command:
+2. Reinstall the retained v1.1.3 package or binaries, but do not start services.
+3. Have the script restore configuration, MongoDB, and the CraneCtld runtime
+   directory from the same backup:
 
    ```bash
-   mongosh --host <DbHost> --port <DbPort> <DbName> \
-     --eval 'db.dropDatabase()'
-   mongorestore --host <DbHost> --port <DbPort> \
-     --db <DbName> <backup-dir>/mongodb/<DbName>
+   python3 "$crane_upgrade_tool" \
+     --rollback-from "$crane_backup_dir"
    ```
 
-4. Restore the EmbeddedDB files to their original absolute paths.
-5. Start the old-version services and verify `cqueue` and `cacct` before
-   reopening submissions.
+   The script first restores the complete MongoDB database named in the
+   manifest, then restores configuration and runtime data. Replaced
+   new-release configuration and runtime directories are moved to timestamped
+   `failed-upgrade` paths. When MongoDB authentication is enabled, the command
+   prompts for the password. Each operation prints `[INFO] Starting` and
+   `[INFO] Completed`. The command must print `SUCCESS: Rollback data restored`
+   and the restored MongoDB, configuration, runtime, and `failed-upgrade` paths.
+   Do not start services if any operation reports an error.
 
-Rollback is a complete return to the backed-up configuration, MongoDB database,
-and EmbeddedDB snapshot. Do not run a new version with an old EmbeddedDB in a
-mixed state.
+4. Start the v1.1.3 services and inspect their output:
+
+   ```bash
+   sudo systemctl start cplugind cranectld
+   sudo systemctl start craned
+   sudo systemctl start cfored
+   systemctl is-active cplugind cranectld
+   systemctl is-active craned
+   systemctl is-active cfored
+   cqueue -t all --json
+   cacct -t all --json
+   ```
+
+   Every service must print `active`, `cqueue` must match the expected
+   pre-upgrade state, and `cacct` must read pre-upgrade history before
+   submissions are reopened.
+
+A rollback must restore the v1.1.3 binaries, configuration, MongoDB database,
+and CraneCtld runtime directory together. Never mix data from different
+releases.
