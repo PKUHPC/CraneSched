@@ -85,6 +85,9 @@ nav:
       - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
       - PMIx Support: deployment/configuration/pmix.md
       - Resource Limit Guide: deployment/configuration/partition_resource_limit_guide.md
+  - AI Assistants:
+    - CraneSched Skill: ai-assistants/skill.md
+    - Shared Cluster Codex: ai-assistants/shared-codex.md
   - Commands:
       - Job Submission:
           - cbatch: command/cbatch.md
@@ -192,6 +195,9 @@ plugins:
             PowerControl Deployment: 节能模块部署
             Plugins: 插件部署
             PMIx Support: PMIx 使用指南
+            AI Assistants: AI 助手
+            CraneSched Skill: 鹤思 Skill
+            Shared Cluster Codex: 集群共享 Codex
         - locale: en
           name: English
           build: true
