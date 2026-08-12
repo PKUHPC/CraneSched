@@ -7191,9 +7191,7 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     const absl::flat_hash_set<job_id_t>& preempting_set) {
   std::vector<NodeState*> nodes_to_sched;
   if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) {
-    if (MaterializeResource_(job)) return true;
-    CRANE_ERROR("Failed to materialize resources for job #{}", job->job_id);
-    return false;
+    return MaterializeResource_(job);
   }
   if (nodes_to_sched.size() < job->node_num) {
     CRANE_TRACE(
@@ -7458,6 +7456,10 @@ bool SchedulerAlgo::LocalScheduler::MaterializeResource_(
 
     ResourceInNodeV3 feasible_res;
     if (!planned_res.GetFeasibleResourceInNode(available_res, &feasible_res)) {
+      CRANE_ERROR(
+          "Failed to materialize planned resources for job #{} on craned {}; "
+          "resource view and concrete resource state are inconsistent",
+          job->job_id, craned_id);
       return false;
     }
     allocated_res.AddResourceInNode(craned_id, feasible_res);
@@ -7487,6 +7489,8 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     }
   }
   if (preemptable_set.empty()) return false;
+
+  job->preempted_jobs.clear();
 
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>> ordered(
       preemptable_set.begin(), preemptable_set.end());
@@ -7528,27 +7532,80 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
   seg_trees.reserve(nodes_to_sched.size());
   absl::flat_hash_map<CranedId, size_t> node_index;
   node_index.reserve(nodes_to_sched.size());
-  const auto& alloc_per_node = job->planned_res;
   for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
     auto* node = nodes_to_sched[i];
     node_index[node->craned_id] = i;
-    auto alloc_it = alloc_per_node.find(node->craned_id);
-    CRANE_ASSERT_MSG(
-        alloc_it != alloc_per_node.end(),
-        fmt("TryPreempt_: planned_res missing craned {}", node->craned_id));
-    seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
+    seg_trees.emplace_back(seg_start, seg_end);
 
     auto& tree = seg_trees.back();
     const auto& tmap = node->time_avail_res_map;
     for (auto it = tmap.begin(); it != tmap.end();) {
-      absl::Time st = it->first;
+      absl::Time st = std::max(it->first, seg_start);
       auto nxt = std::next(it);
-      absl::Time ed = (nxt == tmap.end() ? seg_end : nxt->first);
-      tree.Add(st, ed, it->second);
-      if (ed >= seg_end) break;
+      absl::Time ed =
+          std::min(nxt == tmap.end() ? seg_end : nxt->first, seg_end);
+      if (st < ed) tree.Add(st, ed, it->second);
+      if (nxt == tmap.end() || nxt->first >= seg_end) break;
       it = nxt;
     }
   }
+
+  const ResourceView min_res_required =
+      job->req_node_res_view +
+      job->req_task_res_view * job->ntasks_per_node_min;
+  auto get_capacity = [&](const ResourceView& available) -> uint32_t {
+    if (!(min_res_required <= available)) return 0;
+    if (job->req_task_res_view.IsZero()) {
+      return job->ntasks_per_node_max;
+    }
+
+    uint64_t capacity =
+        (available - job->req_node_res_view) / job->req_task_res_view;
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(capacity, job->ntasks_per_node_max));
+  };
+
+  std::vector<uint32_t> node_capacity(nodes_to_sched.size());
+  uint64_t total_capacity = 0;
+  size_t satisfied_node_count = 0;
+  auto get_node_capacity = [&](size_t index) -> uint32_t {
+    const ResourceView& available = seg_trees[index].MinResource();
+    if (job->exclusive && !(nodes_to_sched[index]->res_total <= available))
+      return 0;
+    return get_capacity(job->exclusive ? nodes_to_sched[index]->res_total
+                                       : available);
+  };
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    node_capacity[i] = get_node_capacity(i);
+    total_capacity += node_capacity[i];
+    if (node_capacity[i] >= job->ntasks_per_node_min) {
+      ++satisfied_node_count;
+    }
+  }
+
+  auto feasible = [&]() {
+    return satisfied_node_count == nodes_to_sched.size() &&
+           total_capacity >= job->ntasks;
+  };
+
+  auto apply_to_tree = [&](size_t index, const absl::Time& st,
+                           const absl::Time& ed, const ResourceView& res,
+                           bool add) {
+    uint32_t old_capacity = node_capacity[index];
+    total_capacity -= old_capacity;
+    if (old_capacity >= job->ntasks_per_node_min) --satisfied_node_count;
+
+    if (add) {
+      seg_trees[index].Add(st, ed, res);
+    } else {
+      seg_trees[index].Sub(st, ed, res);
+    }
+
+    uint32_t new_capacity = get_node_capacity(index);
+    node_capacity[index] = new_capacity;
+    total_capacity += new_capacity;
+    if (new_capacity >= job->ntasks_per_node_min) ++satisfied_node_count;
+  };
 
   auto apply_to_trees = [&](const auto& preempted, bool add) {
     std::visit(
@@ -7558,54 +7615,67 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
             for (const auto& [cid, res] : pj->planned_res) {
               auto ni = node_index.find(cid);
               if (ni == node_index.end()) continue;
-              if (add)
-                seg_trees[ni->second].Add(pj->start_time, pj->end_time, res);
-              else
-                seg_trees[ni->second].Sub(pj->start_time, pj->end_time, res);
+              absl::Time st = std::max(pj->start_time, seg_start);
+              absl::Time ed = std::min(pj->end_time, seg_end);
+              if (st >= ed) continue;
+              apply_to_tree(ni->second, st, ed, res, add);
             }
           } else {
             for (const auto& [cid, res] : pj->allocated_res.EachNodeResMap()) {
               auto ni = node_index.find(cid);
               if (ni == node_index.end()) continue;
-              if (add)
-                seg_trees[ni->second].Add(pj->start_time, pj->end_time,
-                                          res.ToResourceView());
-              else
-                seg_trees[ni->second].Sub(pj->start_time, pj->end_time,
-                                          res.ToResourceView());
+              absl::Time st = std::max(pj->start_time, seg_start);
+              absl::Time ed = std::min(pj->end_time, seg_end);
+              if (st >= ed) continue;
+              apply_to_tree(ni->second, st, ed, res.ToResourceView(), add);
             }
           }
         },
         preempted);
   };
-  auto all_satisfied = [&]() {
-    for (const auto& t : seg_trees)
-      if (!t.IsSatisfied()) return false;
-    return true;
-  };
 
   int preempt_idx = -1;
-  for (size_t i = 0; !all_satisfied() && i < ordered.size(); ++i) {
+  for (size_t i = 0; !feasible() && i < ordered.size(); ++i) {
     apply_to_trees(ordered[i], /*add=*/true);
     preempt_idx = static_cast<int>(i);
   }
-  if (!all_satisfied()) {
+  if (!feasible()) {
     return false;
   }
 
-  job->preempted_jobs.push_back(ordered[preempt_idx]);
-  for (int i = preempt_idx - 1; i >= 0; --i) {
-    apply_to_trees(ordered[i], /*add=*/false);
-    if (!all_satisfied()) {
-      apply_to_trees(ordered[i], /*add=*/true);
-      job->preempted_jobs.push_back(ordered[i]);
+  if (preempt_idx >= 0) {
+    job->preempted_jobs.push_back(ordered[preempt_idx]);
+    for (int i = preempt_idx - 1; i >= 0; --i) {
+      apply_to_trees(ordered[i], /*add=*/false);
+      if (!feasible()) {
+        apply_to_trees(ordered[i], /*add=*/true);
+        job->preempted_jobs.push_back(ordered[i]);
+      }
     }
   }
 
+  job->planned_res.clear();
+  job->craned_id_to_task_num.clear();
   job->craned_ids.clear();
   job->craned_ids.reserve(nodes_to_sched.size());
-  for (const auto* node : nodes_to_sched)
+  uint32_t remaining_tasks =
+      job->ntasks - job->node_num * job->ntasks_per_node_min;
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    const auto* node = nodes_to_sched[i];
+    uint32_t task_num =
+        job->ntasks_per_node_min +
+        std::min<uint32_t>(remaining_tasks,
+                           node_capacity[i] - job->ntasks_per_node_min);
+    ResourceView planned_res =
+        job->exclusive
+            ? node->res_total
+            : job->req_node_res_view + job->req_task_res_view * task_num;
+    job->planned_res.emplace(node->craned_id, std::move(planned_res));
+    job->craned_id_to_task_num[node->craned_id] = task_num;
     job->craned_ids.emplace_back(node->craned_id);
+    remaining_tasks -= task_num - job->ntasks_per_node_min;
+  }
+  CRANE_ASSERT(remaining_tasks == 0);
   job->start_time = now;
   if (!MaterializeResource_(job, &job->preempted_jobs)) {
     job->preempted_jobs.clear();
