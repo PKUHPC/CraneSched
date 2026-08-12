@@ -929,35 +929,32 @@ class SchedulerAlgo {
 
   class PreemptSegTree {
    private:
+    // Resource aggregation for one fixed [start, end) preemption window.
+    // Task-specific capacity is calculated from MinResource() by the caller.
     struct Node {
       absl::Time st, ed;
       Node* ls;
       Node* rs;
-      bool satisfied;
-      ResourceView res;
+      ResourceView min_res;
       ResourceView add_tag;
       ResourceView sub_tag;
     };
 
     void add_res_(Node* node, const ResourceView& res) {
-      node->res += res;
-      node->satisfied = (m_target_res_ <= node->res);
+      node->min_res += res;
       if (node->ls) node->add_tag += res;
     }
 
     void sub_res_(Node* node, const ResourceView& res) {
-      node->res -= res;
-      node->satisfied = (m_target_res_ <= node->res);
+      node->min_res -= res;
       if (node->ls) node->sub_tag += res;
     }
 
     void push_down_(Node* node) {
       if (node->ls == nullptr) {
         absl::Time mid = node->st + (node->ed - node->st) / 2;
-        node->ls = new Node{node->st,        mid,      nullptr, nullptr,
-                            node->satisfied, node->res};
-        node->rs = new Node{mid,     node->ed,        nullptr,
-                            nullptr, node->satisfied, node->res};
+        node->ls = new Node{node->st, mid, nullptr, nullptr, node->min_res};
+        node->rs = new Node{mid, node->ed, nullptr, nullptr, node->min_res};
         return;
       }
       if (!node->add_tag.IsZero()) {
@@ -973,7 +970,7 @@ class SchedulerAlgo {
     }
 
     void push_up_(Node* node) {
-      node->satisfied = node->ls->satisfied && node->rs->satisfied;
+      node->min_res = ResourceView::Min(node->ls->min_res, node->rs->min_res);
     }
 
     void add_(Node* node, const absl::Time& st, const absl::Time& ed,
@@ -1009,21 +1006,16 @@ class SchedulerAlgo {
       delete node;
     }
 
-    const ResourceView m_target_res_;
     Node* m_root_;
 
    public:
-    PreemptSegTree(const absl::Time& st, const absl::Time& ed,
-                   const ResourceView& target_res)
-        : m_target_res_(target_res) {
-      m_root_ = new Node{st, ed, nullptr, nullptr, false};
-    }
+    PreemptSegTree(const absl::Time& st, const absl::Time& ed)
+        : m_root_(new Node{st, ed, nullptr, nullptr, ResourceView{}}) {}
     ~PreemptSegTree() { destroy_(m_root_); }
 
     PreemptSegTree(const PreemptSegTree&) = delete;
     PreemptSegTree& operator=(const PreemptSegTree&) = delete;
-    PreemptSegTree(PreemptSegTree&& other) noexcept
-        : m_root_(other.m_root_), m_target_res_(other.m_target_res_) {
+    PreemptSegTree(PreemptSegTree&& other) noexcept : m_root_(other.m_root_) {
       other.m_root_ = nullptr;
     }
 
@@ -1037,9 +1029,7 @@ class SchedulerAlgo {
       sub_(m_root_, st, ed, res);
     }
 
-    bool IsSatisfied() const { return m_root_->satisfied; }
-
-    const ResourceView& TargetRes() const { return m_target_res_; }
+    const ResourceView& MinResource() const { return m_root_->min_res; }
   };
 
   IPrioritySorter* m_priority_sorter_;
