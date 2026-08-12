@@ -474,12 +474,6 @@ install(TARGETS cranectld
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/query_next_job_ids.py
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-        RENAME crane-query-next-job-ids
-        COMPONENT cranectldc
-)
-
 install(TARGETS craned
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT cranedc
