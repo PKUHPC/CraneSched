@@ -6198,7 +6198,7 @@ bool MongodbClient::MigrateV0ToV1_() {
       "normalizing legacy job and step resources, "
       "backfilling fields [has_job_info(=job_db_id exists), exclusive(=false), "
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
-      "wckey(=\"\"), using_default_wckey(=false), "
+      "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
       "exclude_nodes(=[]), submit_hostname(=\"\"), "
       "execution_nodes(=[]), deadline(=max timestamp), requeue_count(=0), "
@@ -6371,6 +6371,9 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("device_map",
             make_document(
                 kvp("$ifNull", make_array("$device_map", make_document())))),
+        kvp("nodename_list",
+            make_document(
+                kvp("$ifNull", make_array("$nodename_list", make_array())))),
         kvp("wckey", make_document(kvp("$ifNull", make_array("$wckey", "")))),
         kvp("using_default_wckey",
             make_document(
