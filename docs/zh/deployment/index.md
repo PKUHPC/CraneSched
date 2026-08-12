@@ -194,6 +194,11 @@ MongoDB 存储作业历史记录、用户账户和资源使用数据。
 
 - **[容器功能部署](./container.md)** - 配置 CRI 运行时，启用容器作业支持
 
+### AI 助手
+
+- **[鹤思 Skill](../ai-assistants/skill.md)** - 用户可安装到自己的 AI 助手中，无需集群部署 Codex
+- **[集群共享 Codex](../ai-assistants/shared-codex.md)** - 管理员为共享节点提供开箱即用的 Codex
+
 ---
 
 ## 获取帮助
