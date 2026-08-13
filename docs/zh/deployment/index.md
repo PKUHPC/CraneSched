@@ -198,6 +198,7 @@ MongoDB 存储作业历史记录、用户账户和资源使用数据。
 
 - **[鹤思 Skill](../ai-assistants/skill.md)** - 用户可安装到自己的 AI 助手中，无需集群部署 Codex
 - **[集群共享 Codex](../ai-assistants/shared-codex.md)** - 管理员为共享节点提供开箱即用的 Codex
+- **[使用集群共享 Codex](../ai-assistants/shared-codex-user-guide.md)** - 用户启动方法和典型使用案例
 
 ---
 
