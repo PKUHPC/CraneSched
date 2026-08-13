@@ -198,6 +198,7 @@ Run containerized jobs in the cluster with user isolation and portable environme
 
 - **[CraneSched Skill](../ai-assistants/skill.md)** - Users can install it in their own AI assistant without a cluster Codex deployment
 - **[Shared Cluster Codex](../ai-assistants/shared-codex.md)** - Administrators can provide a ready-to-use Codex on shared nodes
+- **[Using Shared Codex](../ai-assistants/shared-codex-user-guide.md)** - User startup instructions and representative use cases
 
 ---
 

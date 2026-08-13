@@ -55,7 +55,8 @@ codex --strict-config doctor --json
 ```
 
 `ss` should show only `127.0.0.1:617`. After a minimal real-request check, users can run `codex`
-directly or override the system default with a personal BYOK provider.
+directly or override the system default with a personal BYOK provider. See
+[Using Shared Codex](shared-codex-user-guide.md) for the user workflow.
 
 Follow the
 [full installation and configuration guide](https://github.com/PKUHPC/CraneSched-Codex/blob/main/docs/installation-and-configuration.md)

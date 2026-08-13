@@ -88,6 +88,7 @@ nav:
   - AI Assistants:
     - CraneSched Skill: ai-assistants/skill.md
     - Shared Cluster Codex: ai-assistants/shared-codex.md
+    - Using Shared Codex: ai-assistants/shared-codex-user-guide.md
   - Commands:
       - Job Submission:
           - cbatch: command/cbatch.md
@@ -198,6 +199,7 @@ plugins:
             AI Assistants: AI 助手
             CraneSched Skill: 鹤思 Skill
             Shared Cluster Codex: 集群共享 Codex
+            Using Shared Codex: 使用集群共享 Codex
         - locale: en
           name: English
           build: true

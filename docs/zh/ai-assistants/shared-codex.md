@@ -53,7 +53,8 @@ codex --strict-config doctor --json
 ```
 
 `ss` 应只显示 `127.0.0.1:617`。完成最小真实请求验证后，普通用户可直接运行
-`codex`，也可以用自己的 BYOK provider 覆盖系统默认值。
+`codex`，也可以用自己的 BYOK provider 覆盖系统默认值。用户操作方式参见
+[使用集群共享 Codex](shared-codex-user-guide.md)。
 
 配置文件格式、升级、轮换、回滚、故障排查和卸载步骤以
 [完整安装与配置指南](https://github.com/PKUHPC/CraneSched-Codex/blob/main/docs/installation-and-configuration.md)
