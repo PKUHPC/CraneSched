@@ -57,8 +57,8 @@ with your input, site policy, and installed version.
 
 **You:**
 
-> Job 4812 has remained `Pending`, and `cqueue -j 4812 -F` shows `Reason=Resources`. Did submission
-> fail?
+> Job 4812 has remained `Pending`, and the `NODELIST/REASON` column from `cqueue -j 4812 -F`
+> shows `Resource`. Did submission fail?
 
 **Codex (example response):**
 

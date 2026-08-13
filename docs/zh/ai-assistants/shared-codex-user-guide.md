@@ -52,8 +52,8 @@ codex
 
 **你：**
 
-> 我的作业 4812 一直是 `Pending`，`cqueue -j 4812 -F` 显示
-> `Reason=Resources`。这是提交失败了吗？
+> 我的作业 4812 一直是 `Pending`，`cqueue -j 4812 -F` 的 `NODELIST/REASON`
+> 列显示 `Resource`。这是提交失败了吗？
 
 **Codex（示例响应）：**
 
