@@ -312,8 +312,7 @@ bool CreateRequiredDirectories() {
     if (!ok) return ok;
   }
 
-  ok = util::os::CreateFolders(g_config.SupervisorUnixSockPath.parent_path());
-  return ok;
+  return true;
 }
 
 void GlobalVariableInit(int grpc_output_fd) {

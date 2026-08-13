@@ -1353,6 +1353,10 @@ void CreateRequiredDirectories() {
   ok = util::os::CreateFolders(g_config.CranedScriptDir);
   if (!ok) std::exit(1);
 
+  ok = util::os::CreateFolders(g_config.CraneBaseDir /
+                               kDefaultSupervisorUnixSockDir);
+  if (!ok) std::exit(1);
+
   ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);
   if (!ok) std::exit(1);
 }
