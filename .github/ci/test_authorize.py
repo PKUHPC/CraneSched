@@ -227,49 +227,26 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["pr_head_sha"], BACKEND_SHA)
         self.assertEqual(result["pr_merge_sha"], MERGE_SHA)
 
-    def test_waits_for_api_base_to_converge_to_trusted_workflow(self) -> None:
-        snapshots = iter(
-            [
-                _snapshot(base_sha="e" * 40),
-                _snapshot(),
-                _snapshot(),
-            ]
-        )
-        delays: list[float] = []
-
-        result = authorize.authorize_dispatch(
+    def test_stale_api_base_is_allowed_when_merge_parents_are_trusted(self) -> None:
+        result = _authorize(
             _context(pr_base_sha="e" * 40, pr_merge_sha="f" * 40),
-            lambda _repo, _actor: {"permission": "admin"},
-            _resolver,
-            lambda _repo, _number: next(snapshots),
-            _merge_ref,
-            _commit_parents,
-            sleeper=delays.append,
-            retry_delays=(0.25,),
+            pull_request_lookup=lambda _repo, _number: _snapshot(base_sha="e" * 40),
         )
 
         self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
         self.assertEqual(result["routing_sha"], MERGE_SHA)
-        self.assertEqual(delays, [0.25])
 
-    def test_api_base_convergence_is_bounded(self) -> None:
-        calls = 0
-
-        def stale_base(_repository: str, _number: int):
-            nonlocal calls
-            calls += 1
-            return _snapshot(base_sha="e" * 40)
-
-        with self.assertRaisesRegex(
-            authorize.AuthorizationError, "base has not converged"
-        ):
+    def test_stale_api_base_does_not_allow_an_untrusted_merge_parent(self) -> None:
+        with self.assertRaisesRegex(authorize.AuthorizationError, "parents"):
             _authorize(
-                _context(pr_base_sha="e" * 40, pr_merge_sha="f" * 40),
-                pull_request_lookup=stale_base,
-                retry_delays=(0.0, 0.0),
+                pull_request_lookup=lambda _repo, _number: _snapshot(
+                    base_sha="e" * 40
+                ),
+                commit_parents_resolver=lambda _repo, _sha: (
+                    "e" * 40,
+                    BACKEND_SHA,
+                ),
             )
-
-        self.assertEqual(calls, 3)
 
     def test_waits_for_github_to_compute_mergeability(self) -> None:
         snapshots = iter(
@@ -360,11 +337,15 @@ class AuthorizationPolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(authorize.AuthorizationError, "changed"):
             _authorize(pull_request_lookup=lambda _repo, _number: next(snapshots))
 
-    def test_second_snapshot_detects_base_drift(self) -> None:
+    def test_second_snapshot_allows_api_base_hint_to_change(self) -> None:
         snapshots = iter([_snapshot(), _snapshot(base_sha="e" * 40)])
 
-        with self.assertRaisesRegex(authorize.AuthorizationError, "base changed"):
-            _authorize(pull_request_lookup=lambda _repo, _number: next(snapshots))
+        result = _authorize(
+            pull_request_lookup=lambda _repo, _number: next(snapshots)
+        )
+
+        self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
+        self.assertEqual(result["routing_sha"], MERGE_SHA)
 
     def test_mergeable_blocked_pr_is_authorized(self) -> None:
         result = _authorize(

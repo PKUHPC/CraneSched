@@ -329,14 +329,11 @@ def _resolve_pr_merge(
     for attempt in range(attempts):
         snapshot = pull_request_lookup(context.repository, number)
         _validate_pr_snapshot(context, number, snapshot)
-        if snapshot.base_sha != context.event_sha:
-            pending_reason = (
-                "the current pull request base has not converged to the trusted "
-                "workflow revision"
-            )
-        elif snapshot.mergeable is False:
+        # GitHub can retain the base SHA from the PR's last branch update. The
+        # current merge ref and its ordered parents prove the routing base.
+        if snapshot.mergeable is False:
             raise AuthorizationError("pull request has no mergeable proposed result")
-        elif snapshot.mergeable is not True or not SHA_RE.fullmatch(
+        if snapshot.mergeable is not True or not SHA_RE.fullmatch(
             snapshot.merge_commit_sha
         ):
             pending_reason = "GitHub has not computed the proposed merge"
@@ -357,12 +354,7 @@ def _resolve_pr_merge(
                 else:
                     final_snapshot = pull_request_lookup(context.repository, number)
                     _validate_pr_snapshot(context, number, final_snapshot)
-                    if final_snapshot.base_sha != context.event_sha:
-                        raise AuthorizationError(
-                            "pull request base changed during authorization; wait for "
-                            "the new run"
-                        )
-                    elif final_snapshot.mergeable is False:
+                    if final_snapshot.mergeable is False:
                         raise AuthorizationError(
                             "pull request has no mergeable proposed result"
                         )
