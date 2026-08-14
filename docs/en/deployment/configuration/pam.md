@@ -25,8 +25,8 @@ cp build/src/Misc/Pam/pam_crane.so /usr/lib64/security/
 
 Edit `/etc/pam.d/sshd` and add the following lines:
 
-- Add `account required pam_crane.so` **before** `account include password-auth`
-- Add `session required pam_crane.so` **after** `session include password-auth`
+- Add `account [success=ok module_unknown=ignore default=bad] pam_crane.so` **before** `account include password-auth`
+- Add `session [success=ok module_unknown=ignore default=bad] pam_crane.so` **after** `session include password-auth`
 
 **Example configuration:**
 
@@ -37,7 +37,7 @@ auth       substack     password-auth
 auth       include      postlogin
 # Used with polkit to reauthorize users in remote sessions
 -auth      optional     pam_reauthorize.so prepare
-account    required     pam_crane.so
+account    [success=ok module_unknown=ignore default=bad] pam_crane.so
 account    required     pam_nologin.so
 account    include      password-auth
 password   include      password-auth
@@ -49,14 +49,14 @@ session    required     pam_selinux.so open env_params
 session    required     pam_namespace.so
 session    optional     pam_keyinit.so force revoke
 session    include      password-auth
-session    required     pam_crane.so
+session    [success=ok module_unknown=ignore default=bad] pam_crane.so
 session    include      postlogin
 # Used with polkit to reauthorize users in remote sessions
 -session   optional     pam_reauthorize.so prepare
 ```
 
 !!! warning
-    The line `session required pam_crane.so` must be placed **after** `session include password-auth`.
+    The line `session [success=ok module_unknown=ignore default=bad] pam_crane.so` must be placed **after** `session include password-auth`.
 
 ## Testing
 

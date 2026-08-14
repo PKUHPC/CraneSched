@@ -25,8 +25,8 @@ cp build/src/Misc/Pam/pam_crane.so /usr/lib64/security/
 
 编辑 `/etc/pam.d/sshd` 并添加以下行：
 
-- 在 `account include password-auth` **之前**添加 `account required pam_crane.so`
-- 在 `session include password-auth` **之后**添加 `session required pam_crane.so`
+- 在 `account include password-auth` **之前**添加 `account [success=ok module_unknown=ignore default=bad] pam_crane.so`
+- 在 `session include password-auth` **之后**添加 `session [success=ok module_unknown=ignore default=bad] pam_crane.so`
 
 **配置示例：**
 
@@ -37,7 +37,7 @@ auth       substack     password-auth
 auth       include      postlogin
 # Used with polkit to reauthorize users in remote sessions
 -auth      optional     pam_reauthorize.so prepare
-account    required     pam_crane.so
+account    [success=ok module_unknown=ignore default=bad] pam_crane.so
 account    required     pam_nologin.so
 account    include      password-auth
 password   include      password-auth
@@ -49,14 +49,14 @@ session    required     pam_selinux.so open env_params
 session    required     pam_namespace.so
 session    optional     pam_keyinit.so force revoke
 session    include      password-auth
-session    required     pam_crane.so
+session    [success=ok module_unknown=ignore default=bad] pam_crane.so
 session    include      postlogin
 # Used with polkit to reauthorize users in remote sessions
 -session   optional     pam_reauthorize.so prepare
 ```
 
 !!! warning
-    行 `session required pam_crane.so` 必须放在 `session include password-auth` **之后**。
+    行 `session [success=ok module_unknown=ignore default=bad] pam_crane.so` 必须放在 `session include password-auth` **之后**。
 
 ## 测试
 
