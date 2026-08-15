@@ -286,6 +286,8 @@ class SchedulerAlgo {
   static constexpr uint32_t kAlgoMaxJobNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
+  class INodeSelector;
+
   struct NodeState {
     // Running jobs and active reservations
     struct AllocatedRes {
@@ -305,6 +307,7 @@ class SchedulerAlgo {
     ResourceInNodeV3 res_avail_v3;
     std::vector<AllocatedRes> allocated_res;
     std::vector<ReservedRes> reserved_res;
+    std::vector<INodeSelector*> selectors;
 
     TimeAvailResMap time_avail_res_map;
 
@@ -580,6 +583,7 @@ class SchedulerAlgo {
       node_info.cost_node_info_set_it =
           m_cost_node_info_set_.emplace(node_info.cost, node_info.node_state)
               .first;
+      node_state->selectors.emplace_back(this);
     }
 
     NodeState* GetNodeState(const CranedId& craned_id) const override {
@@ -602,9 +606,11 @@ class SchedulerAlgo {
                           const NodeResourceViewMap& res,
                           const ResourceV3* concrete_res) override {
       for (const auto& [craned_id, res_in_node] : res) {
-        m_node_info_map_.at(craned_id).node_state->UpdateResourceInNode(
-            start_time, end_time, res_in_node);
-        UpdateCost(craned_id, start_time, end_time, res_in_node);
+        NodeState* node_state = m_node_info_map_.at(craned_id).node_state;
+        node_state->UpdateResourceInNode(start_time, end_time, res_in_node);
+        for (INodeSelector* selector : node_state->selectors) {
+          selector->UpdateCost(craned_id, start_time, end_time, res_in_node);
+        }
       }
       if (concrete_res != nullptr) {
         for (const auto& [craned_id, res_in_node] :
@@ -621,10 +627,13 @@ class SchedulerAlgo {
                                   const ResourceV3* concrete_res) override {
       for (const auto& [craned_id, res_in_node] : res) {
         if (!m_node_info_map_.contains(craned_id)) continue;
-        m_node_info_map_.at(craned_id).node_state->UpdateResourceInNode(
-            start_time, end_time, res_in_node, /*is_release=*/true);
-        UpdateCost(craned_id, start_time, end_time, res_in_node,
-                   /*is_release=*/true);
+        NodeState* node_state = m_node_info_map_.at(craned_id).node_state;
+        node_state->UpdateResourceInNode(start_time, end_time, res_in_node,
+                                         /*is_release=*/true);
+        for (INodeSelector* selector : node_state->selectors) {
+          selector->UpdateCost(craned_id, start_time, end_time, res_in_node,
+                               /*is_release=*/true);
+        }
       }
       if (concrete_res != nullptr) {
         for (const auto& [craned_id, res_in_node] :
