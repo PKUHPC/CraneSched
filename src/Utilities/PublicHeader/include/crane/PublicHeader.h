@@ -391,8 +391,7 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   CraneRichError rich_err;
 
   rich_err.set_code(code);
-  rich_err.set_description(
-      std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
+  rich_err.set_description(std::vformat(fmt, std::make_format_args(args...)));
 
   return rich_err;
 }

@@ -312,7 +312,7 @@ bool JobScheduler::Init() {
               "#{}. "
               "Error Code: {}. "
               "Mark it as FAILED and move it to the ended queue.",
-              job_id, CraneErrStr(result.error()));
+              job_id, CraneErrStr(result.error().code()));
         else {
           CRANE_INFO("Mark running interactive job {} as FAILED.", job_id);
 
