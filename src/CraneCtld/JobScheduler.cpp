@@ -8325,7 +8325,8 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
           "--cpus-per-task={} under partition '{}' memory limits; reduce "
           "--mem or increase the task or CPU count",
           util::ReadableMemory(job->JobToCtld().mem_per_node()),
-          job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+          job->JobToCtld().ntasks_per_node(),
+          job->req_task_res_view.CpuCountDouble(),
           job->partition_id));
     }
     if (job->JobToCtld().has_mem_per_cpu()) {
@@ -8335,14 +8336,16 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
           "--cpus-per-task={} under partition '{}' memory limits; reduce "
           "--mem-per-cpu or adjust the task or CPU count",
           util::ReadableMemory(job->JobToCtld().mem_per_cpu()),
-          job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+          job->JobToCtld().ntasks_per_node(),
+          job->req_task_res_view.CpuCountDouble(),
           job->partition_id));
     }
     return std::unexpected(FormatRichErr(
         CraneErrCode::ERR_INVALID_PARAM,
         "--ntasks-per-node={} and --cpus-per-task={} cannot satisfy the "
         "default memory limits of partition '{}'; adjust the task or CPU count",
-        job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+        job->JobToCtld().ntasks_per_node(),
+        job->req_task_res_view.CpuCountDouble(),
         job->partition_id));
   }
 
