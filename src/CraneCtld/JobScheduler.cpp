@@ -3719,7 +3719,7 @@ void JobScheduler::CollectJobIdsForModify(
   }
 }
 
-CraneExpected<std::future<CraneExpected<job_id_t>>>
+CraneExpectedRich<std::future<CraneExpected<job_id_t>>>
 JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   CRANE_TRACE_SCOPE_FROM_REMOTE(validate_span, "submit/validate",
                                 job->SubmitTraceparent());
@@ -3727,7 +3727,8 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
     validate_span.SetStatus(crane::StatusCode::kError, "invalid_uid");
-    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_UID,
+                                         "Invalid user ID: {}", job->uid));
   }
   job->SetUsername(job->password_entry->Username());
   validate_span.AddEvent("uid_validated");
@@ -3739,7 +3740,9 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
       CRANE_DEBUG("User '{}' not found in the account database",
                   job->Username());
       validate_span.SetStatus(crane::StatusCode::kError, "invalid_user");
-      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_USER,
+          "User '{}' does not exist in the account database", job->Username()));
     }
 
     if (job->account.empty()) {
@@ -3752,7 +3755,11 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
             "job",
             job->account);
         validate_span.SetStatus(crane::StatusCode::kError, "account_mismatch");
-        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
+            "Invalid --account value '{}': the user does not belong to this "
+            "account",
+            job->account));
       }
     }
   }
@@ -3765,14 +3772,19 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
         "account '{}'",
         job->Username(), job->partition_id, job->account);
     validate_span.SetStatus(crane::StatusCode::kError, "partition_denied");
-    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_PARTITION_MISSING,
+        "Invalid --partition value '{}': account '{}' is not allowed to use "
+        "this partition",
+        job->partition_id, job->account));
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       job->Username(), job->account);
   if (!enable_res) {
     validate_span.SetStatus(crane::StatusCode::kError, "account_disabled");
-    return std::unexpected(enable_res.error());
+    return std::unexpected(FormatRichErr(enable_res.error(), "{}",
+                                         CraneErrStr(enable_res.error())));
   }
 
   auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
@@ -3780,33 +3792,47 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (!result) {
     validate_span.SetStatus(crane::StatusCode::kError,
                             "account_not_in_partition");
-    return std::unexpected(result.error());
+    return std::unexpected(
+        FormatRichErr(result.error(), "{}", CraneErrStr(result.error())));
   }
   validate_span.AddEvent("partition_validated");
 
   job->SetSubmitTime(absl::Now());
 
   result = JobScheduler::HandleUnsetOptionalInJobToCtld(job.get());
-  if (result) result = JobScheduler::AcquireJobAttributes(job.get());
+  if (!result) {
+    return std::unexpected(
+        FormatRichErr(result.error(), "{}", CraneErrStr(result.error())));
+  }
+
+  auto validation_result = JobScheduler::AcquireJobAttributes(job.get());
   validate_span.AddEvent("attributes_acquired");
-  if (result) result = JobScheduler::CheckJobValidity(job.get());
+  if (validation_result)
+    validation_result = JobScheduler::CheckJobValidity(job.get());
   validate_span.AddEvent("validity_checked");
-  if (result) {
+  if (validation_result) {
     {
       const auto& user_ptr =
           g_account_manager->GetExistedUserInfo(job->Username());
-      if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      if (!user_ptr) {
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_USER,
+                          "User '{}' does not exist in the account database",
+                          job->Username()));
+      }
 
       uint32_t reserve_count = QosSubmitReserveCount(*job);
       if (reserve_count == 0) {
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "Invalid --array value: the requested array contains no tasks"));
       }
 
       auto res = g_account_meta_container->TryMallocMetaSubmitResource(
           *job, *user_ptr, reserve_count);
       if (res != CraneErrCode::SUCCESS) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
-        return std::unexpected(res);
+        return std::unexpected(FormatRichErr(res, "{}", CraneErrStr(res)));
       }
       g_account_meta_container->UserAddJob(user_ptr->name, reserve_count);
     }
@@ -3815,7 +3841,7 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     return {std::move(future)};
   }
 
-  return std::unexpected(result.error());
+  return std::unexpected(validation_result.error());
 }
 
 CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
@@ -8154,12 +8180,15 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
   return {};
 }
 
-CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   auto part_it = g_config.Partitions.find(job->partition_id);
   if (part_it == g_config.Partitions.end()) {
     CRANE_ERROR("Failed to call AcquireJobAttributes: no such partition {}",
                 job->partition_id);
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARTITION,
+        "Invalid --partition value '{}': partition does not exist",
+        job->partition_id));
   }
 
   job->partition_priority = part_it->second.priority;
@@ -8181,7 +8210,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         "Job {} has both mem_per_cpu and mem_per_node set by user, which is "
         "not allowed.",
         job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_RESOURCE,
+                      "--mem and --mem-per-cpu cannot be specified together"));
   }
 
   CRANE_ASSERT(job->req_node_res_view.GetCpuCount() == cpu_t{0});
@@ -8209,7 +8240,11 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
           "Neither mem_per_cpu nor mem_per_node is set for job #{} and "
           "partition {}, and no default is provided by partition meta.",
           job->JobId(), job->partition_id);
-      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_RESOURCE,
+          "Neither --mem nor --mem-per-cpu was specified, and partition '{}' "
+          "has no default memory configured",
+          job->partition_id));
     }
   }
 
@@ -8283,7 +8318,32 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         "Job #{}: ntasks_per_node_min ({}) > ntasks_per_node_max ({}), "
         "infeasible constraints.",
         job->JobId(), job->ntasks_per_node_min, job->ntasks_per_node_max);
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    if (job->JobToCtld().has_mem_per_node()) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "--mem={} cannot be satisfied with --ntasks-per-node={} and "
+          "--cpus-per-task={} under partition '{}' memory limits; reduce "
+          "--mem or increase the task or CPU count",
+          util::ReadableMemory(job->JobToCtld().mem_per_node()),
+          job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+          job->partition_id));
+    }
+    if (job->JobToCtld().has_mem_per_cpu()) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "--mem-per-cpu={} cannot be satisfied with --ntasks-per-node={} and "
+          "--cpus-per-task={} under partition '{}' memory limits; reduce "
+          "--mem-per-cpu or adjust the task or CPU count",
+          util::ReadableMemory(job->JobToCtld().mem_per_cpu()),
+          job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+          job->partition_id));
+    }
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARAM,
+        "--ntasks-per-node={} and --cpus-per-task={} cannot satisfy the "
+        "default memory limits of partition '{}'; adjust the task or CPU count",
+        job->ntasks_per_node, job->req_task_res_view.CpuCountDouble(),
+        job->partition_id));
   }
 
   CRANE_TRACE(
@@ -8303,13 +8363,17 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   if (!check_qos_result) {
     CRANE_ERROR("Failed to call CheckQosLimitOnJob: {}",
                 CraneErrStr(check_qos_result.error()));
-    return check_qos_result;
+    return std::unexpected(FormatRichErr(
+        check_qos_result.error(), "{}", CraneErrStr(check_qos_result.error())));
   }
 
   if (!job->JobToCtld().nodelist().empty() && job->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+    if (!ok)
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                                           "Invalid --nodelist value '{}'",
+                                           job->JobToCtld().nodelist()));
 
     for (auto&& node : nodes) job->included_nodes.emplace(std::move(node));
   }
@@ -8317,7 +8381,10 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   if (!job->JobToCtld().excludes().empty() && job->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+    if (!ok)
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+          "Invalid --exclude value '{}'", job->JobToCtld().excludes()));
 
     for (auto&& node : nodes) job->excluded_nodes.emplace(std::move(node));
   }
@@ -8328,7 +8395,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());
-      return std::unexpected(CraneErrCode::ERR_LICENSE_LEGAL_FAILED);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_LICENSE_LEGAL_FAILED,
+          "Invalid --licenses value: {}", check_licenses_result.error()));
     }
   }
 
@@ -8341,7 +8410,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
       if (!wckey_scoped_ptr) {
         CRANE_DEBUG("Job wckey '{}' not found in the wckey database, rejected.",
                     wckey);
-        return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_WCKEY,
+                                             "Invalid --wckey value '{}'",
+                                             wckey));
       }
 
       job->wckey = wckey;
@@ -8361,27 +8432,37 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   return {};
 }
 
-CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   if (!CheckIfTimeLimitIsValid(job->time_limit))
-    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_TIME_TIMIT_BEYOND,
+        "Invalid --time value: the requested time limit exceeds the allowed "
+        "range"));
 
   const auto& job_to_ctld = job->JobToCtld();
   if (job_to_ctld.has_array_spec()) {
     if (job_to_ctld.type() != crane::grpc::JobType::Batch) {
       CRANE_DEBUG("Job #{} uses array_spec on non-batch job type {}.",
                   job->JobId(), static_cast<int>(job_to_ctld.type()));
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                        "--array is only valid for batch jobs"));
     }
 
     const auto& array_spec = job_to_ctld.array_spec();
     if (array_spec.end() < array_spec.start()) {
       CRANE_DEBUG("Job #{} has invalid array range [{}-{}].", job->JobId(),
                   array_spec.start(), array_spec.end());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: range end {} is smaller than start {}",
+          array_spec.end(), array_spec.start()));
     }
     if (array_spec.has_stride() && array_spec.stride() == 0) {
       CRANE_DEBUG("Job #{} has invalid array stride 0.", job->JobId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: stride must be greater than 0"));
     }
     uint64_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
     uint64_t start = array_spec.start();
@@ -8390,26 +8471,41 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
     if (task_count == 0 || task_count > kMaxArrayTaskCount) {
       CRANE_DEBUG("Job #{} has invalid array task count {}.", job->JobId(),
                   task_count);
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: task count {} exceeds the limit of {}",
+          task_count, kMaxArrayTaskCount));
     }
     if (array_spec.has_max_concurrent() && array_spec.max_concurrent() == 0) {
       CRANE_DEBUG("Job #{} has invalid array max_concurrent 0.", job->JobId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: maximum concurrent task count must be "
+          "greater than 0"));
     }
   }
 
   // Check res req valid
   if (job->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARAM,
+        "Invalid --mem/--mem-per-cpu value: requested memory must be greater "
+        "than 0"));
   }
   if (job->req_task_res_view.CpuCountDouble() == 0) {
     CRANE_DEBUG("Job #{} has zero cpu request.", job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                      "Invalid --cpus-per-task value: requested CPUs must be "
+                      "greater than 0"));
   }
 
   if (job->deadline_time <= job->SubmitTime())
-    return std::unexpected(CraneErrCode::ERR_INVALID_DEADLINE);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_DEADLINE,
+        "Invalid --deadline value: deadline must be later than submission "
+        "time"));
 
   // Check whether the selected partition is able to run this job.
   std::unordered_set<std::string> avail_nodes;
@@ -8433,7 +8529,9 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
                                    .res_total_inc_dead.GetMemorySwBytes()),
           util::ReadableGresMap(
               metas_ptr->partition_global_meta.res_total.GetGresMap()));
-      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}",
+                        CraneErrStr(CraneErrCode::ERR_NO_RESOURCE)));
     }
 
     if (job->node_num > metas_ptr->craned_ids.size()) {
@@ -8441,7 +8539,10 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           "Nodes not enough for job #{}. "
           "Partition total Nodes: {}",
           job->JobId(), metas_ptr->craned_ids.size());
-      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_NUM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_NODE_NUM,
+          "Invalid --nodes value {}: partition '{}' contains only {} nodes",
+          job->node_num, job->partition_id, metas_ptr->craned_ids.size()));
     }
 
     if (job->reservation != "") {
@@ -8449,7 +8550,10 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
               job->reservation)) {
         CRANE_TRACE("Reservation {} not found for job #{}", job->reservation,
                     job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "Invalid --reservation value '{}': reservation does not exist",
+            job->reservation));
       }
 
       auto resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
@@ -8457,7 +8561,11 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
       if (resv_meta->part_id != "" && resv_meta->part_id != job->partition_id) {
         CRANE_TRACE("Partition {} not allowed for reservation {} for job #{}",
                     job->partition_id, job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--partition value '{}' does not match reservation '{}'; use "
+            "partition '{}' or choose another reservation",
+            job->partition_id, job->reservation, resv_meta->part_id));
       }
 
       // if passed, either not in the black list (true, true)
@@ -8466,13 +8574,22 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           !resv_meta->accounts.contains(job->account)) {
         CRANE_TRACE("Account {} not allowed for reservation {} for job #{}",
                     job->account, job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--account value '{}' is not allowed by reservation '{}'; use an "
+            "allowed account or choose another reservation",
+            job->account, job->reservation));
       }
       if (resv_meta->users_black_list ^
           !resv_meta->users.contains(job->Username())) {
         CRANE_TRACE("User {} not allowed for reservation {} for job #{}",
                     job->Username(), job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                          "Current user is not allowed by --reservation '{}'; "
+                          "choose another reservation or contact the "
+                          "administrator",
+                          job->reservation));
       }
 
       if (!job->included_nodes.empty()) {
@@ -8484,7 +8601,12 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           if (!reserved_craned_id_set.contains(craned_id)) {
             CRANE_TRACE("Craned {} is not in the reservation {} for job #{}",
                         craned_id, job->reservation, job->JobId());
-            return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+            return std::unexpected(FormatRichErr(
+                CraneErrCode::ERR_INVALID_PARAM,
+                "--nodelist value includes node '{}', which is not part of "
+                "reservation '{}'; remove the node from --nodelist or choose "
+                "another reservation",
+                craned_id, job->reservation));
           }
         }
       }
@@ -8510,7 +8632,9 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
         "Resource not enough. Job #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         job->JobId(), job->node_num, avail_nodes.size());
-    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_NO_ENOUGH_NODE, "{}",
+                      CraneErrStr(CraneErrCode::ERR_NO_ENOUGH_NODE)));
   }
 
   return {};
