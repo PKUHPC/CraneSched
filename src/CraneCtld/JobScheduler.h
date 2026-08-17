@@ -1065,7 +1065,7 @@ class JobScheduler {
                               crane::grpc::ModifyJobReply* response,
                               std::vector<job_id_t>* job_ids);
 
-  CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
+  CraneExpectedRich<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
   size_t PendingQueueSize() const {
@@ -1225,8 +1225,8 @@ class JobScheduler {
   }
 
   static CraneExpected<void> HandleUnsetOptionalInJobToCtld(JobInCtld* job);
-  static CraneExpected<void> AcquireJobAttributes(JobInCtld* job);
-  static CraneExpected<void> CheckJobValidity(JobInCtld* job);
+  static CraneExpectedRich<void> AcquireJobAttributes(JobInCtld* job);
+  static CraneExpectedRich<void> CheckJobValidity(JobInCtld* job);
 
   static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);

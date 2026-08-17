@@ -421,7 +421,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 result = std::unexpected(CraneErrStr(job_result.error()));
               }
             } else {
-              result = std::unexpected(CraneErrStr(submit_result.error()));
+              result = std::unexpected(submit_result.error().description());
             }
           }
 
@@ -765,7 +765,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
       enqueue_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       response->set_ok(false);
-      response->set_code(result.error());
+      response->set_code(result.error().code());
+      response->set_reason(result.error().description());
     }
   }
 
@@ -859,7 +860,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
   submit_span.SetAttribute("crane.submit_id", submit_id);
 
-  std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
+  std::vector<CraneExpectedRich<std::future<CraneExpected<job_id_t>>>> results;
 
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
@@ -893,7 +894,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       }
     } else {
       response->mutable_job_id_list()->Add(0);
-      response->mutable_code_list()->Add(result.error());
+      response->mutable_code_list()->Add(result.error().code());
     }
   } else {
     // Non-array jobs: submit individually (repeat count).
@@ -919,7 +920,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
         }
       } else {
         response->mutable_job_id_list()->Add(0);
-        response->mutable_code_list()->Add(res.error());
+        response->mutable_code_list()->Add(res.error().code());
       }
     }
   }
