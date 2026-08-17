@@ -58,6 +58,7 @@ class DispatchContext:
 
 PermissionLookup = Callable[[str, str], dict[str, object]]
 CommitResolver = Callable[[str, str], Optional[str]]
+BranchResolver = Callable[[str, str], Optional[str]]
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,15 @@ def _required_commit(
     revision = resolver(repository, ref)
     if revision is None or not SHA_RE.fullmatch(revision):
         raise AuthorizationError(f"{label} ref did not resolve to a full commit SHA")
+    return revision
+
+
+def _required_branch(
+    resolver: BranchResolver, repository: str, branch: str, label: str
+) -> str:
+    revision = resolver(repository, branch)
+    if revision is None or not SHA_RE.fullmatch(revision):
+        raise AuthorizationError(f"{label} branch did not resolve to a full commit SHA")
     return revision
 
 
@@ -391,6 +401,7 @@ def authorize_dispatch(
     issue_comments_lookup: IssueCommentsLookup | None = None,
     issue_comment_lookup: IssueCommentLookup | None = None,
     *,
+    branch_resolver: BranchResolver | None = None,
     sleeper: Sleeper = time.sleep,
     retry_delays: tuple[float, ...] = _MERGE_RETRY_DELAYS,
 ) -> dict[str, str]:
@@ -439,16 +450,25 @@ def authorize_dispatch(
         pr_base_sha = context.event_sha
         pr_head_sha = context.pr_head_sha
         pr_merge_sha = routing_sha
+        if branch_resolver is None:
+            raise AuthorizationError("FrontEnd branch lookup is unavailable")
         frontend_ref = context.pr_head_ref
-        frontend_sha = commit_resolver(context.frontend_repository, frontend_ref)
+        frontend_sha = branch_resolver(context.frontend_repository, frontend_ref)
         if frontend_sha is None:
             frontend_ref = "master"
-            frontend_sha = _required_commit(
-                commit_resolver,
+            frontend_sha = _required_branch(
+                branch_resolver,
                 context.frontend_repository,
                 frontend_ref,
                 "FrontEnd",
             )
+            frontend_source = "master_fallback"
+        else:
+            if not SHA_RE.fullmatch(frontend_sha):
+                raise AuthorizationError(
+                    "FrontEnd matching branch did not resolve to a full commit SHA"
+                )
+            frontend_source = "matching_branch"
     elif context.event_name == "workflow_dispatch":
         _require_maintainer(context, permission_lookup)
         backend_sha = _required_commit(
@@ -464,17 +484,21 @@ def authorize_dispatch(
             frontend_ref,
             "FrontEnd",
         )
+        frontend_source = "manual_ref"
         routing_sha = backend_sha
     elif context.event_name in {"push", "schedule"}:
         backend_sha = context.event_sha
         routing_sha = backend_sha
+        if branch_resolver is None:
+            raise AuthorizationError("FrontEnd branch lookup is unavailable")
         frontend_ref = "master"
-        frontend_sha = _required_commit(
-            commit_resolver,
+        frontend_sha = _required_branch(
+            branch_resolver,
             context.frontend_repository,
             frontend_ref,
             "FrontEnd",
         )
+        frontend_source = "master_default"
     else:
         raise AuthorizationError(f"unsupported dispatch event: {context.event_name}")
 
@@ -492,6 +516,11 @@ def authorize_dispatch(
         raise AuthorizationError("Routing commit verification failed")
     if not SHA_RE.fullmatch(frontend_sha):
         raise AuthorizationError("FrontEnd ref did not resolve to a full commit SHA")
+    verified_frontend = _required_commit(
+        commit_resolver, context.frontend_repository, frontend_sha, "FrontEnd"
+    )
+    if verified_frontend != frontend_sha:
+        raise AuthorizationError("FrontEnd commit verification failed")
     if any(character in frontend_ref for character in "\r\n"):
         raise AuthorizationError("FrontEnd ref contains an invalid output character")
 
@@ -504,6 +533,7 @@ def authorize_dispatch(
         "pr_merge_sha": pr_merge_sha,
         "frontend_ref": frontend_ref,
         "frontend_sha": frontend_sha,
+        "frontend_source": frontend_source,
         "workflow_sha": context.event_sha,
     }
 
@@ -575,6 +605,25 @@ class GitHubApi:
             return None
         revision = value.get("sha")
         return revision if isinstance(revision, str) else None
+
+    def branch_head(self, repository: str, branch: str) -> str | None:
+        encoded_branch = urllib.parse.quote(branch, safe="")
+        value = self._get(
+            f"repos/{repository}/git/ref/heads/{encoded_branch}",
+            missing_statuses=frozenset({404}),
+        )
+        if value is None:
+            return None
+        target = value.get("object")
+        if (
+            value.get("ref") != f"refs/heads/{branch}"
+            or not isinstance(target, dict)
+            or target.get("type") != "commit"
+            or not isinstance(target.get("sha"), str)
+            or SHA_RE.fullmatch(target["sha"]) is None
+        ):
+            raise AuthorizationError("GitHub branch response is malformed")
+        return target["sha"]
 
     def pull_request(self, repository: str, number: int) -> PullRequestSnapshot:
         value = self._get(f"repos/{repository}/pulls/{number}")
@@ -770,6 +819,7 @@ def main() -> int:
         api.commit_parents,
         api.issue_comments,
         api.issue_comment,
+        branch_resolver=api.branch_head,
     )
     with output_path.open("a", encoding="utf-8") as output:
         for name in (
@@ -781,6 +831,7 @@ def main() -> int:
             "pr_merge_sha",
             "frontend_ref",
             "frontend_sha",
+            "frontend_source",
             "workflow_sha",
         ):
             output.write(f"{name}={result[name]}\n")

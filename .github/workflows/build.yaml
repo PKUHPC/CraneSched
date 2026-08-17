@@ -69,6 +69,7 @@ jobs:
       pr_merge_sha: ${{ steps.authorize.outputs.pr_merge_sha }}
       frontend_ref: ${{ steps.authorize.outputs.frontend_ref }}
       frontend_sha: ${{ steps.authorize.outputs.frontend_sha }}
+      frontend_source: ${{ steps.authorize.outputs.frontend_source }}
       workflow_sha: ${{ steps.authorize.outputs.workflow_sha }}
     steps:
       - name: Checkout trusted authorization policy
@@ -173,6 +174,7 @@ jobs:
       PR_MERGE_SHA: ${{ needs.authorize.outputs.pr_merge_sha }}
       FRONTEND_SHA: ${{ needs.authorize.outputs.frontend_sha }}
       FRONTEND_REF: ${{ needs.authorize.outputs.frontend_ref }}
+      FRONTEND_SOURCE: ${{ needs.authorize.outputs.frontend_source }}
     defaults:
       run:
         shell: bash
@@ -200,17 +202,52 @@ jobs:
 
       - name: Record revision routing provenance
         run: |
-          {
-            echo "### CI revision routing"
-            echo "- Backend test SHA: \`$BACKEND_SHA\`"
-            if [[ -n "$PR_HEAD_SHA" ]]; then
-              echo "- PR base SHA: \`$PR_BASE_SHA\`"
-              echo "- PR head SHA: \`$PR_HEAD_SHA\`"
-              echo "- Proposed merge routing SHA: \`$ROUTING_SHA\`"
-            else
-              echo "- Workflow routing SHA: \`$ROUTING_SHA\`"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          /usr/bin/python3 - "$GITHUB_STEP_SUMMARY" <<'PY'
+          import html
+          import json
+          import os
+          import sys
+
+          def code(value: str) -> str:
+              encoded = json.dumps(value, ensure_ascii=True)
+              return html.escape(encoded, quote=True).replace("`", "&#96;")
+
+          lines = [
+              "### CI revision routing",
+              f"- Backend test SHA: <code>{code(os.environ['BACKEND_SHA'])}</code>",
+          ]
+          if os.environ["PR_HEAD_SHA"]:
+              lines.extend(
+                  [
+                      f"- PR base SHA: <code>{code(os.environ['PR_BASE_SHA'])}</code>",
+                      f"- PR head SHA: <code>{code(os.environ['PR_HEAD_SHA'])}</code>",
+                      "- Proposed merge routing SHA: "
+                      f"<code>{code(os.environ['ROUTING_SHA'])}</code>",
+                  ]
+              )
+          else:
+              lines.append(
+                  "- Workflow routing SHA: "
+                  f"<code>{code(os.environ['ROUTING_SHA'])}</code>"
+              )
+          frontend = json.dumps(
+              {
+                  "repository": "PKUHPC/CraneSched-FrontEnd",
+                  "ref": os.environ["FRONTEND_REF"],
+                  "sha": os.environ["FRONTEND_SHA"],
+                  "source": os.environ["FRONTEND_SOURCE"],
+              },
+              ensure_ascii=True,
+              sort_keys=True,
+          )
+          lines.append(
+              "- FrontEnd: <code>"
+              + html.escape(frontend, quote=True).replace("`", "&#96;")
+              + "</code>"
+          )
+          with open(sys.argv[1], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
 
       - name: Validate deployment variables
         env:
@@ -444,6 +481,11 @@ jobs:
             arguments+=(--build-duration-seconds "$BUILD_DURATION_SECONDS")
           fi
           arguments+=(--routing-sha "$ROUTING_SHA")
+          arguments+=(
+            --frontend-ref "$FRONTEND_REF"
+            --frontend-sha "$FRONTEND_SHA"
+            --frontend-source "$FRONTEND_SOURCE"
+          )
           if [[ -n "$PR_HEAD_SHA" ]]; then
             arguments+=(--pr-base-sha "$PR_BASE_SHA" --pr-head-sha "$PR_HEAD_SHA")
           fi
