@@ -63,11 +63,28 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 UNSAFE_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 BIDI_CONTROLS = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+FRONTEND_REPOSITORY = "PKUHPC/CraneSched-FrontEnd"
+FRONTEND_SOURCES = (
+    "matching_branch",
+    "master_fallback",
+    "master_default",
+    "manual_ref",
+)
 
 
 def _full_sha(value: str) -> str:
     if FULL_SHA.fullmatch(value) is None:
         raise argparse.ArgumentTypeError("revision must be a full lowercase commit SHA")
+    return value
+
+
+def _frontend_ref(value: str) -> str:
+    if (
+        not value
+        or len(value) > 1024
+        or any(character in value for character in "\r\n")
+    ):
+        raise argparse.ArgumentTypeError("FrontEnd ref is invalid")
     return value
 
 
@@ -106,9 +123,9 @@ def _redact(value: str) -> tuple[str, int]:
     count = 0
     for pattern in REDACTIONS:
         value, replacements = pattern.subn(
-            lambda match: match.group(1) + "[REDACTED]"
-            if match.lastindex
-            else "[REDACTED]",
+            lambda match: (
+                match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]"
+            ),
             value,
         )
         count += replacements
@@ -370,7 +387,9 @@ def _shard_context(
                     "wall": None,
                     "case_time": None,
                     "estimate": estimate,
-                    "result": "MISSING" if not records else f"DUPLICATE ({len(records)})",
+                    "result": "MISSING"
+                    if not records
+                    else f"DUPLICATE ({len(records)})",
                     "terminal": False,
                 }
             )
@@ -410,7 +429,9 @@ def _shard_context(
                 "slot": slot,
                 "cases": len(cases) if isinstance(cases, list) else planned_count,
                 "counts": counts,
-                "wall": _duration_between(record.get("started_at"), record.get("finished_at")),
+                "wall": _duration_between(
+                    record.get("started_at"), record.get("finished_at")
+                ),
                 "case_time": case_time,
                 "estimate": estimate,
                 "result": outcome,
@@ -489,6 +510,33 @@ def _resolve_exit_code(
     return None, []
 
 
+def _frontend_revision_diagnostics(
+    run_root: Path,
+    result: dict[str, object],
+    plan: dict[str, object],
+    authorized_sha: str,
+) -> list[str]:
+    if not run_root.is_dir() or run_root.is_symlink():
+        return []
+    diagnostics: list[str] = []
+    for label, relative, document in (
+        ("Aggregate result", Path("result.json"), result),
+        ("Plan", Path("plan/manifest.json"), plan),
+    ):
+        if _safe_source(run_root, relative) is None:
+            continue
+        sources = document.get("sources")
+        actual = sources.get("frontend") if isinstance(sources, dict) else None
+        if actual is None:
+            diagnostics.append(f"{label} FrontEnd SHA is missing")
+        elif actual != authorized_sha:
+            diagnostics.append(
+                f"{label} FrontEnd SHA {actual} does not match authorized SHA "
+                f"{authorized_sha}"
+            )
+    return diagnostics
+
+
 def _suite_digest(result: dict[str, object], plan: dict[str, object]) -> str:
     candidates = [result.get("suite_digest")]
     suite = plan.get("suite")
@@ -557,9 +605,7 @@ def _shard_evidence_diagnostics(
         if shard_index not in planned:
             diagnostics.append(f"shard {shard_index} is not present in the plan")
         if not row["terminal"]:
-            diagnostics.append(
-                f"shard {shard_index} is {str(row['result']).lower()}"
-            )
+            diagnostics.append(f"shard {shard_index} is {str(row['result']).lower()}")
             continue
         shard_result = row["result"]
         if shard_result in {"INFRASTRUCTURE ERROR", "INCOMPLETE"}:
@@ -597,6 +643,9 @@ def _write_summary(
     routing_sha: str | None = None,
     pr_base_sha: str | None = None,
     pr_head_sha: str | None = None,
+    frontend_ref: str,
+    frontend_sha: str,
+    frontend_source: str,
 ) -> int | None:
     result = _read_run_json(run_root, Path("result.json"))
     state = _read_run_json(run_root, Path("state.json"))
@@ -605,14 +654,18 @@ def _write_summary(
     sources = result.get("sources") or plan.get("sources") or {}
     if not isinstance(sources, dict):
         sources = {}
-    shard_rows, case_locations, shard_fatals = _shard_context(run_root, plan, allocation)
-    exit_code, exit_diagnostics = _resolve_exit_code(
-        result, state, execute_exit_code
+    shard_rows, case_locations, shard_fatals = _shard_context(
+        run_root, plan, allocation
     )
+    exit_code, exit_diagnostics = _resolve_exit_code(result, state, execute_exit_code)
+    frontend_diagnostics = _frontend_revision_diagnostics(
+        run_root, result, plan, frontend_sha
+    )
+    if frontend_diagnostics:
+        exit_code = 2
+        exit_diagnostics.extend(frontend_diagnostics)
     if exit_code in {0, 1}:
-        shard_diagnostics = _shard_evidence_diagnostics(
-            plan, shard_rows, exit_code
-        )
+        shard_diagnostics = _shard_evidence_diagnostics(plan, shard_rows, exit_code)
         if shard_diagnostics:
             exit_code = 2
             exit_diagnostics.extend(shard_diagnostics)
@@ -646,7 +699,9 @@ def _write_summary(
         identifiers = result.get(key)
         if isinstance(identifiers, list) and identifiers:
             visible = [str(identifier) for identifier in identifiers[:10]]
-            suffix = f" (+{len(identifiers) - 10} more)" if len(identifiers) > 10 else ""
+            suffix = (
+                f" (+{len(identifiers) - 10} more)" if len(identifiers) > 10 else ""
+            )
             infrastructure_messages.append(
                 f"{label}: {len(identifiers)} ({', '.join(visible)}{suffix})"
             )
@@ -670,9 +725,7 @@ def _write_summary(
     elif has_aggregate_cases:
         not_run_count = aggregate_counts["not_run"]
     elif shard_rows:
-        checkpoint_not_run = sum(
-            int(row["counts"]["not_run"]) for row in shard_rows
-        )
+        checkpoint_not_run = sum(int(row["counts"]["not_run"]) for row in shard_rows)
         not_run_count = f"{checkpoint_not_run} (partial)"
     else:
         not_run_count = "unavailable"
@@ -742,7 +795,9 @@ def _write_summary(
             {
                 "id": case_id,
                 "name": (
-                    case.get("name") if isinstance(case.get("name"), str) else "unavailable"
+                    case.get("name")
+                    if isinstance(case.get("name"), str)
+                    else "unavailable"
                 ),
                 "status": case.get("status", "unavailable"),
                 "shard": shard,
@@ -764,7 +819,16 @@ def _write_summary(
         lines.extend(["### Failed, errored, or not-run cases", ""])
         _append_table(
             lines,
-            ("Case", "Name", "Status", "Shard", "Worker", "Duration", "Message", "Logs"),
+            (
+                "Case",
+                "Name",
+                "Status",
+                "Shard",
+                "Worker",
+                "Duration",
+                "Message",
+                "Logs",
+            ),
             [
                 (
                     case["id"],
@@ -879,19 +943,28 @@ def _write_summary(
                     placement,
                 )
             )
-        _append_table(lines, ("Case", "Name", "Status", "Duration", "Placement"), slow_rows)
+        _append_table(
+            lines, ("Case", "Name", "Status", "Duration", "Placement"), slow_rows
+        )
         lines.append("")
 
     provenance_rows = [
         ("Run ID", run_id),
         ("Phase", state.get("phase", "not-created")),
         ("Exit code", exit_code if exit_code is not None else "unavailable"),
+        ("Authorized FrontEnd repository", FRONTEND_REPOSITORY),
+        ("Authorized FrontEnd ref", frontend_ref),
+        ("Authorized FrontEnd source", frontend_source),
+        ("Authorized FrontEnd SHA", frontend_sha),
         ("Backend SHA", sources.get("backend", "unavailable")),
         ("Frontend SHA", sources.get("frontend", "unavailable")),
         ("AutoTest SHA", sources.get("autotest", "unavailable")),
         ("Build ID", result.get("build_id", plan.get("build_id", "unavailable"))),
         ("Suite digest", _suite_digest(result, plan)),
-        ("Plan digest", result.get("plan_digest", plan.get("plan_digest", "unavailable"))),
+        (
+            "Plan digest",
+            result.get("plan_digest", plan.get("plan_digest", "unavailable")),
+        ),
         ("Image", result.get("image_digest", plan.get("image_digest", "unavailable"))),
         ("Started", result.get("started_at", "unavailable")),
         ("Finished", result.get("finished_at", "unavailable")),
@@ -910,7 +983,9 @@ def _write_summary(
     text = "\n".join(lines) + "\n"
     encoded = text.encode("utf-8")
     if len(encoded) > MAX_SUMMARY_BYTES:
-        suffix = "\n\n_Report truncated; download the JSON artifact for complete details._\n"
+        suffix = (
+            "\n\n_Report truncated; download the JSON artifact for complete details._\n"
+        )
         limit = MAX_SUMMARY_BYTES - len(suffix.encode("utf-8"))
         text = encoded[:limit].decode("utf-8", errors="ignore") + suffix
     destination.write_text(text, encoding="utf-8")
@@ -929,6 +1004,9 @@ def main() -> int:
     parser.add_argument("--routing-sha", type=_full_sha)
     parser.add_argument("--pr-base-sha", type=_full_sha)
     parser.add_argument("--pr-head-sha", type=_full_sha)
+    parser.add_argument("--frontend-ref", type=_frontend_ref, required=True)
+    parser.add_argument("--frontend-sha", type=_full_sha, required=True)
+    parser.add_argument("--frontend-source", choices=FRONTEND_SOURCES, required=True)
     args = parser.parse_args()
     if (args.pr_base_sha is None) != (args.pr_head_sha is None):
         parser.error("PR base and head SHAs must be provided together")
@@ -954,6 +1032,9 @@ def main() -> int:
         routing_sha=args.routing_sha,
         pr_base_sha=args.pr_base_sha,
         pr_head_sha=args.pr_head_sha,
+        frontend_ref=args.frontend_ref,
+        frontend_sha=args.frontend_sha,
+        frontend_source=args.frontend_source,
     )
     include_failure_logs = args.include_logs or summary_exit_code != 0
     if run_root.exists() and not run_root.is_symlink() and run_root.is_dir():
@@ -1023,13 +1104,17 @@ def main() -> int:
         "run_id": args.run_id,
         "run_present": run_root.is_dir() and not run_root.is_symlink(),
         "failure_logs_included": include_failure_logs,
-        "check_exit_code": (
-            summary_exit_code if summary_exit_code in {0, 1, 2} else 2
-        ),
+        "check_exit_code": (summary_exit_code if summary_exit_code in {0, 1, 2} else 2),
         "revision_routing": {
             "routing_sha": args.routing_sha,
             "pr_base_sha": args.pr_base_sha,
             "pr_head_sha": args.pr_head_sha,
+            "frontend": {
+                "repository": FRONTEND_REPOSITORY,
+                "ref": args.frontend_ref,
+                "sha": args.frontend_sha,
+                "source": args.frontend_source,
+            },
         },
         "files": entries,
     }

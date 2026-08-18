@@ -206,6 +206,43 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             workflow,
         )
 
+    def test_frontend_routing_is_sha_pinned_and_fully_reported(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "frontend_source: ${{ steps.authorize.outputs.frontend_source }}",
+            workflow,
+        )
+        self.assertIn(
+            "FRONTEND_SOURCE: ${{ needs.authorize.outputs.frontend_source }}",
+            workflow,
+        )
+
+        checkout = workflow.index("- name: Checkout exact FrontEnd revision")
+        checkout_end = workflow.find("\n      - name:", checkout + 1)
+        checkout_block = workflow[checkout:checkout_end]
+        self.assertIn(
+            "ref: ${{ needs.authorize.outputs.frontend_sha }}", checkout_block
+        )
+        self.assertNotIn("frontend_ref", checkout_block)
+
+        collect = workflow.index("- name: Collect sanitized CI artifacts")
+        collect_end = workflow.find("\n      - name:", collect + 1)
+        collect_block = workflow[collect:collect_end]
+        self.assertIn('--frontend-ref "$FRONTEND_REF"', collect_block)
+        self.assertIn('--frontend-sha "$FRONTEND_SHA"', collect_block)
+        self.assertIn('--frontend-source "$FRONTEND_SOURCE"', collect_block)
+
+    def test_revision_summary_escapes_frontend_routing_as_json_and_html(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        start = workflow.index("- name: Record revision routing provenance")
+        end = workflow.find("\n      - name:", start + 1)
+        block = workflow[start:end]
+        self.assertIn("json.dumps(", block)
+        self.assertIn("html.escape(", block)
+        self.assertIn('os.environ["FRONTEND_REF"]', block)
+        self.assertIn('os.environ["FRONTEND_SOURCE"]', block)
+        self.assertNotIn('echo "- FrontEnd', block)
+
     def test_authorization_receives_actions_run_identity(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("GITHUB_RUN_ID: ${{ github.run_id }}", workflow)

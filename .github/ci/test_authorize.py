@@ -63,7 +63,20 @@ def _resolver(repository: str, ref: str) -> str | None:
         "master",
     }:
         return BACKEND_SHA if ref == "master" else ref
-    if repository == "PKUHPC/CraneSched-FrontEnd" and ref in {"feature/test", "master"}:
+    if repository == "PKUHPC/CraneSched-FrontEnd" and ref in {
+        FRONTEND_SHA,
+        "feature/test",
+        "master",
+    }:
+        return FRONTEND_SHA
+    return None
+
+
+def _branch_resolver(repository: str, branch: str) -> str | None:
+    if repository == "PKUHPC/CraneSched-FrontEnd" and branch in {
+        "feature/test",
+        "master",
+    }:
         return FRONTEND_SHA
     return None
 
@@ -171,6 +184,7 @@ def _authorize(
     commit_parents_resolver=_commit_parents,
     issue_comments_lookup=None,
     issue_comment_lookup=None,
+    branch_resolver=_branch_resolver,
     retry_delays: tuple[float, ...] = (),
 ) -> dict[str, str]:
     resolved_context = context or _context()
@@ -185,6 +199,7 @@ def _authorize(
         commit_parents_resolver,
         issue_comments_lookup,
         issue_comment_lookup,
+        branch_resolver=branch_resolver,
         sleeper=lambda _delay: None,
         retry_delays=retry_delays,
     )
@@ -210,6 +225,8 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["pr_head_sha"], BACKEND_SHA)
         self.assertEqual(result["pr_merge_sha"], MERGE_SHA)
         self.assertEqual(result["frontend_sha"], FRONTEND_SHA)
+        self.assertEqual(result["frontend_ref"], "feature/test")
+        self.assertEqual(result["frontend_source"], "matching_branch")
         self.assertEqual(result["workflow_sha"], WORKFLOW_SHA)
 
     def test_missing_event_merge_sha_uses_verified_current_merge(self) -> None:
@@ -239,9 +256,7 @@ class AuthorizationPolicyTest(unittest.TestCase):
     def test_stale_api_base_does_not_allow_an_untrusted_merge_parent(self) -> None:
         with self.assertRaisesRegex(authorize.AuthorizationError, "parents"):
             _authorize(
-                pull_request_lookup=lambda _repo, _number: _snapshot(
-                    base_sha="e" * 40
-                ),
+                pull_request_lookup=lambda _repo, _number: _snapshot(base_sha="e" * 40),
                 commit_parents_resolver=lambda _repo, _sha: (
                     "e" * 40,
                     BACKEND_SHA,
@@ -265,6 +280,7 @@ class AuthorizationPolicyTest(unittest.TestCase):
             lambda _repo, _number: next(snapshots),
             _merge_ref,
             _commit_parents,
+            branch_resolver=_branch_resolver,
             sleeper=delays.append,
             retry_delays=(0.25,),
         )
@@ -340,9 +356,7 @@ class AuthorizationPolicyTest(unittest.TestCase):
     def test_second_snapshot_allows_api_base_hint_to_change(self) -> None:
         snapshots = iter([_snapshot(), _snapshot(base_sha="e" * 40)])
 
-        result = _authorize(
-            pull_request_lookup=lambda _repo, _number: next(snapshots)
-        )
+        result = _authorize(pull_request_lookup=lambda _repo, _number: next(snapshots))
 
         self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
         self.assertEqual(result["routing_sha"], MERGE_SHA)
@@ -357,8 +371,14 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["routing_sha"], MERGE_SHA)
 
     def test_initial_fork_run_requests_comment_before_permission_lookup(self) -> None:
+        branch_lookups: list[tuple[str, str]] = []
+
         def unexpected_permission(_repo, _actor):
             self.fail("permission lookup must not run for an initial fork attempt")
+
+        def unexpected_branch(repository: str, branch: str) -> str | None:
+            branch_lookups.append((repository, branch))
+            return FRONTEND_SHA
 
         with self.assertRaisesRegex(authorize.AuthorizationError, "/request-ci"):
             authorize.authorize_dispatch(
@@ -368,7 +388,10 @@ class AuthorizationPolicyTest(unittest.TestCase):
                 _pull_request,
                 _merge_ref,
                 _commit_parents,
+                branch_resolver=unexpected_branch,
             )
+
+        self.assertEqual(branch_lookups, [])
 
     def test_fork_rerun_without_attestation_is_rejected(self) -> None:
         with self.assertRaisesRegex(authorize.AuthorizationError, "no valid"):
@@ -407,14 +430,13 @@ class AuthorizationPolicyTest(unittest.TestCase):
             pull_request_lookup=_fork_pull_request,
             commit_parents_resolver=_fork_commit_parents,
             issue_comments_lookup=lambda _repo, _number: (_attestation_comment(),),
-            issue_comment_lookup=lambda _repo, _number, _comment_id: (
-                _request_comment()
-            ),
+            issue_comment_lookup=lambda _repo, _number, _comment_id: _request_comment(),
         )
 
         self.assertEqual(result["backend_sha"], FORK_HEAD_SHA)
         self.assertEqual(result["routing_sha"], MERGE_SHA)
         self.assertEqual(result["pr_head_sha"], FORK_HEAD_SHA)
+        self.assertEqual(result["frontend_source"], "matching_branch")
 
     def test_maintainer_request_allows_a_different_maintainer_to_rerun(self) -> None:
         result = _authorize(
@@ -424,8 +446,8 @@ class AuthorizationPolicyTest(unittest.TestCase):
             pull_request_lookup=_fork_pull_request,
             commit_parents_resolver=_fork_commit_parents,
             issue_comments_lookup=lambda _repo, _number: (_attestation_comment(),),
-            issue_comment_lookup=lambda _repo, _number, _comment_id: (
-                _request_comment(author_login="request-maintainer")
+            issue_comment_lookup=lambda _repo, _number, _comment_id: _request_comment(
+                author_login="request-maintainer"
             ),
         )
 
@@ -551,7 +573,7 @@ class AuthorizationPolicyTest(unittest.TestCase):
         def resolver(repository: str, ref: str) -> str | None:
             if repository == "PKUHPC/CraneSched" and ref == WORKFLOW_SHA:
                 return WORKFLOW_SHA
-            if repository == "PKUHPC/CraneSched-FrontEnd" and ref == "master":
+            if repository == "PKUHPC/CraneSched-FrontEnd" and ref == FRONTEND_SHA:
                 return FRONTEND_SHA
             return None
 
@@ -561,10 +583,13 @@ class AuthorizationPolicyTest(unittest.TestCase):
                     _context(event_name=event_name, event_sha=WORKFLOW_SHA),
                     unexpected_permission,
                     resolver,
+                    branch_resolver=_branch_resolver,
                 )
                 self.assertEqual(result["backend_sha"], WORKFLOW_SHA)
                 self.assertEqual(result["routing_sha"], WORKFLOW_SHA)
                 self.assertEqual(result["pr_base_sha"], "")
+                self.assertEqual(result["frontend_ref"], "master")
+                self.assertEqual(result["frontend_source"], "master_default")
                 self.assertEqual(result["workflow_sha"], WORKFLOW_SHA)
 
     def test_non_default_workflow_ref_is_rejected(self) -> None:
@@ -590,6 +615,19 @@ class AuthorizationPolicyTest(unittest.TestCase):
                 _resolver,
             )
 
+    def test_manual_dispatch_keeps_explicit_commitish_resolution(self) -> None:
+        result = _authorize(
+            _context(
+                event_name="workflow_dispatch",
+                manual_backend_ref="master",
+                manual_frontend_ref="feature/test",
+            )
+        )
+
+        self.assertEqual(result["frontend_ref"], "feature/test")
+        self.assertEqual(result["frontend_sha"], FRONTEND_SHA)
+        self.assertEqual(result["frontend_source"], "manual_ref")
+
     def test_missing_matching_frontend_branch_falls_back_to_master(self) -> None:
         def resolver(repository: str, ref: str) -> str | None:
             if repository == "PKUHPC/CraneSched" and ref in {
@@ -597,7 +635,12 @@ class AuthorizationPolicyTest(unittest.TestCase):
                 MERGE_SHA,
             }:
                 return ref
-            if repository == "PKUHPC/CraneSched-FrontEnd" and ref == "master":
+            if repository == "PKUHPC/CraneSched-FrontEnd" and ref == FRONTEND_SHA:
+                return FRONTEND_SHA
+            return None
+
+        def branch_resolver(repository: str, branch: str) -> str | None:
+            if repository == "PKUHPC/CraneSched-FrontEnd" and branch == "master":
                 return FRONTEND_SHA
             return None
 
@@ -605,12 +648,101 @@ class AuthorizationPolicyTest(unittest.TestCase):
             _context(pr_head_ref="backend-only-branch"),
             permission="admin",
             resolver=resolver,
+            branch_resolver=branch_resolver,
             pull_request_lookup=lambda _repo, _number: _snapshot(
                 head_ref="backend-only-branch"
             ),
         )
         self.assertEqual(result["frontend_ref"], "master")
         self.assertEqual(result["frontend_sha"], FRONTEND_SHA)
+        self.assertEqual(result["frontend_source"], "master_fallback")
+
+    def test_same_name_tag_does_not_count_as_a_matching_branch(self) -> None:
+        commit_queries: list[tuple[str, str]] = []
+
+        def resolver(repository: str, ref: str) -> str | None:
+            commit_queries.append((repository, ref))
+            if repository == "PKUHPC/CraneSched" and ref in {
+                BACKEND_SHA,
+                MERGE_SHA,
+            }:
+                return ref
+            if repository == "PKUHPC/CraneSched-FrontEnd" and ref in {
+                "tag-only",
+                FRONTEND_SHA,
+            }:
+                return FRONTEND_SHA
+            return None
+
+        result = _authorize(
+            _context(pr_head_ref="tag-only"),
+            resolver=resolver,
+            branch_resolver=lambda _repository, branch: (
+                FRONTEND_SHA if branch == "master" else None
+            ),
+            pull_request_lookup=lambda _repo, _number: _snapshot(head_ref="tag-only"),
+        )
+
+        self.assertEqual(result["frontend_ref"], "master")
+        self.assertEqual(result["frontend_source"], "master_fallback")
+        self.assertNotIn(("PKUHPC/CraneSched-FrontEnd", "tag-only"), commit_queries)
+
+    def test_slash_branch_is_matched_exactly(self) -> None:
+        result = _authorize(
+            _context(pr_head_ref="feature/nested/test"),
+            branch_resolver=lambda repository, branch: (
+                FRONTEND_SHA
+                if repository == "PKUHPC/CraneSched-FrontEnd"
+                and branch in {"feature/nested/test", "master"}
+                else None
+            ),
+            pull_request_lookup=lambda _repo, _number: _snapshot(
+                head_ref="feature/nested/test"
+            ),
+        )
+
+        self.assertEqual(result["frontend_ref"], "feature/nested/test")
+        self.assertEqual(result["frontend_source"], "matching_branch")
+
+    def test_missing_frontend_master_fails_closed(self) -> None:
+        with self.assertRaisesRegex(authorize.AuthorizationError, "FrontEnd branch"):
+            _authorize(
+                _context(pr_head_ref="missing"),
+                branch_resolver=lambda _repository, _branch: None,
+                pull_request_lookup=lambda _repo, _number: _snapshot(
+                    head_ref="missing"
+                ),
+            )
+
+    def test_frontend_sha_must_still_resolve_as_a_commit(self) -> None:
+        def resolver(repository: str, ref: str) -> str | None:
+            if repository == "PKUHPC/CraneSched" and ref in {
+                BACKEND_SHA,
+                MERGE_SHA,
+            }:
+                return ref
+            return None
+
+        with self.assertRaisesRegex(authorize.AuthorizationError, "FrontEnd ref"):
+            _authorize(resolver=resolver)
+
+    def test_frontend_commit_verification_must_match_selected_sha(self) -> None:
+        different_sha = "f" * 40
+
+        def resolver(repository: str, ref: str) -> str | None:
+            if repository == "PKUHPC/CraneSched" and ref in {
+                BACKEND_SHA,
+                MERGE_SHA,
+            }:
+                return ref
+            if repository == "PKUHPC/CraneSched-FrontEnd" and ref == FRONTEND_SHA:
+                return different_sha
+            return None
+
+        with self.assertRaisesRegex(
+            authorize.AuthorizationError, "verification failed"
+        ):
+            _authorize(resolver=resolver)
 
 
 class GitHubApiTest(unittest.TestCase):
@@ -636,6 +768,88 @@ class GitHubApiTest(unittest.TestCase):
                 ),
             ):
                 self.assertIsNone(api.commit("PKUHPC/CraneSched", "missing/ref"))
+
+    def test_branch_head_uses_exact_encoded_heads_ref(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        response = {
+            "ref": "refs/heads/feature/nested/test",
+            "object": {"type": "commit", "sha": FRONTEND_SHA},
+        }
+
+        with mock.patch.object(api, "_get", return_value=response) as get:
+            revision = api.branch_head(
+                "PKUHPC/CraneSched-FrontEnd", "feature/nested/test"
+            )
+
+        self.assertEqual(revision, FRONTEND_SHA)
+        self.assertEqual(
+            get.call_args.args[0],
+            "repos/PKUHPC/CraneSched-FrontEnd/git/ref/heads/feature%2Fnested%2Ftest",
+        )
+        self.assertEqual(get.call_args.kwargs["missing_statuses"], frozenset({404}))
+
+    def test_only_branch_404_is_treated_as_missing(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        with mock.patch.object(
+            authorize.urllib.request,
+            "urlopen",
+            side_effect=self._http_error(404),
+        ):
+            self.assertIsNone(api.branch_head("PKUHPC/CraneSched-FrontEnd", "missing"))
+
+        for status in (403, 422, 429, 500):
+            with (
+                self.subTest(status=status),
+                mock.patch.object(
+                    authorize.urllib.request,
+                    "urlopen",
+                    side_effect=self._http_error(status),
+                ),
+                self.assertRaisesRegex(authorize.AuthorizationError, f"HTTP {status}"),
+            ):
+                api.branch_head("PKUHPC/CraneSched-FrontEnd", "missing")
+
+    def test_branch_timeout_fails_closed(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        with (
+            mock.patch.object(
+                authorize.urllib.request,
+                "urlopen",
+                side_effect=TimeoutError,
+            ),
+            self.assertRaisesRegex(authorize.AuthorizationError, "request failed"),
+        ):
+            api.branch_head("PKUHPC/CraneSched-FrontEnd", "feature/test")
+
+    def test_branch_response_must_be_an_exact_commit_ref(self) -> None:
+        api = authorize.GitHubApi("test-token")
+        malformed = (
+            {
+                "ref": "refs/heads/Feature/Test",
+                "object": {"type": "commit", "sha": FRONTEND_SHA},
+            },
+            {
+                "ref": "refs/tags/feature/test",
+                "object": {"type": "commit", "sha": FRONTEND_SHA},
+            },
+            {
+                "ref": "refs/heads/feature/test",
+                "object": {"type": "tag", "sha": FRONTEND_SHA},
+            },
+            {
+                "ref": "refs/heads/feature/test",
+                "object": {"type": "commit", "sha": "short"},
+            },
+            {"ref": "refs/heads/feature/test", "object": "invalid"},
+        )
+
+        for response in malformed:
+            with (
+                self.subTest(response=response),
+                mock.patch.object(api, "_get", return_value=response),
+                self.assertRaisesRegex(authorize.AuthorizationError, "malformed"),
+            ):
+                api.branch_head("PKUHPC/CraneSched-FrontEnd", "feature/test")
 
     def test_permission_lookup_keeps_422_fail_closed(self) -> None:
         api = authorize.GitHubApi("test-token")
