@@ -279,6 +279,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           continue;
         }
         meta.out_handle.pipe = ph;
+        meta.stdout_read = -1;
 
         ph->on<uvw::data_event>(
             [this, task_id](uvw::data_event& e, uvw::pipe_handle&) {
@@ -335,6 +336,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           continue;
         }
         meta.err_handle = err_ph;
+        meta.stderr_read = -1;
 
         err_ph->on<uvw::data_event>(
             [this](uvw::data_event& e, uvw::pipe_handle&) {
@@ -386,6 +388,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
         continue;
       }
       meta.out_handle.tty = th;
+      meta.stdout_read = -1;
 
       th->on<uvw::data_event>(
           [this, task_id](uvw::data_event& e, uvw::tty_handle&) {
