@@ -293,9 +293,16 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           // EOF Received
           h.close();
           CRANE_INFO("[Task #{}] Output pipe received EOF.", tid);
-          auto& meta = this->m_fwd_meta_map.at(tid);
-          meta.output_stopped = true;
-          if (meta.err_stopped) on_finish();
+          bool should_finish = false;
+          {
+            absl::MutexLock lock(&m_mtx_);
+            auto it = m_fwd_meta_map.find(tid);
+            if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
+              it->second.output_stopped = true;
+              should_finish = it->second.err_stopped;
+            }
+          }
+          if (should_finish) on_finish();
         });
 
         ph->on<uvw::error_event>([this, tid = meta.task_id, on_finish](
@@ -303,9 +310,16 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           CRANE_WARN("[Task #{}] output pipe error: {}. Closing.", tid,
                      e.what());
           h.close();
-          auto& meta = this->m_fwd_meta_map.at(tid);
-          meta.output_stopped = true;
-          if (meta.err_stopped) on_finish();
+          bool should_finish = false;
+          {
+            absl::MutexLock lock(&m_mtx_);
+            auto it = m_fwd_meta_map.find(tid);
+            if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
+              it->second.output_stopped = true;
+              should_finish = it->second.err_stopped;
+            }
+          }
+          if (should_finish) on_finish();
         });
 
         ph->on<uvw::close_event>(
@@ -350,9 +364,16 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           CRANE_INFO("[Task #{}] Stderr pipe received EOF.", tid);
           // EOF Received
           h.close();
-          auto& meta = this->m_fwd_meta_map.at(tid);
-          meta.err_stopped = true;
-          if (meta.output_stopped) on_finish();
+          bool should_finish = false;
+          {
+            absl::MutexLock lock(&m_mtx_);
+            auto it = m_fwd_meta_map.find(tid);
+            if (it != m_fwd_meta_map.end() && !it->second.err_stopped) {
+              it->second.err_stopped = true;
+              should_finish = it->second.output_stopped;
+            }
+          }
+          if (should_finish) on_finish();
         });
 
         err_ph->on<uvw::error_event>(
@@ -361,9 +382,16 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
               CRANE_WARN("[Task #{}] Stderr pipe error: {}. Closing.", tid,
                          e.what());
               h.close();
-              auto& meta = this->m_fwd_meta_map.at(tid);
-              meta.err_stopped = true;
-              if (meta.output_stopped) on_finish();
+              bool should_finish = false;
+              {
+                absl::MutexLock lock(&m_mtx_);
+                auto it = m_fwd_meta_map.find(tid);
+                if (it != m_fwd_meta_map.end() && !it->second.err_stopped) {
+                  it->second.err_stopped = true;
+                  should_finish = it->second.output_stopped;
+                }
+              }
+              if (should_finish) on_finish();
             });
 
         err_ph->on<uvw::close_event>(
@@ -397,17 +425,38 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
             }
           });
 
-      th->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::tty_handle& h) {
-        // The remote end is closed, go to EOF process.
-        h.close();
-        on_finish();
-      });
+      th->on<uvw::end_event>(
+          [this, task_id, on_finish](uvw::end_event&, uvw::tty_handle& h) {
+            // The remote end is closed, go to EOF process.
+            h.close();
+            bool should_finish = false;
+            {
+              absl::MutexLock lock(&m_mtx_);
+              auto it = m_fwd_meta_map.find(task_id);
+              if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
+                it->second.output_stopped = true;
+                it->second.input_stopped = true;
+                should_finish = true;
+              }
+            }
+            if (should_finish) on_finish();
+          });
 
-      th->on<uvw::error_event>([tid = meta.task_id, on_finish](
+      th->on<uvw::error_event>([this, tid = meta.task_id, on_finish](
                                    uvw::error_event& e, uvw::tty_handle& h) {
         CRANE_WARN("[Task #{}] pty read error: {}. Closing.", tid, e.what());
         h.close();
-        on_finish();
+        bool should_finish = false;
+        {
+          absl::MutexLock lock(&m_mtx_);
+          auto it = m_fwd_meta_map.find(tid);
+          if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
+            it->second.output_stopped = true;
+            it->second.input_stopped = true;
+            should_finish = true;
+          }
+        }
+        if (should_finish) on_finish();
       });
 
       th->on<uvw::close_event>(
