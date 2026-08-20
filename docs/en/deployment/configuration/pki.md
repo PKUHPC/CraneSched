@@ -208,8 +208,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   ExternalCaFilePath: /etc/crane/tls/ca.pem
+  DomainSuffix: crane.local # Domain suffix used for certificate issuance
   # AllowedNodes: "cn[15-18]" # Allowed frontend nodes for signing
-  DomainSuffix: crane.local # Domain suffix
 ```
 
 ### Database Configuration File

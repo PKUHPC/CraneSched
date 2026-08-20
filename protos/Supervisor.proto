@@ -98,9 +98,9 @@ message InitSupervisorRequest {
       string ca_content = 3;
     };
 
+    reserved 3;
     bool use_tls = 1;
     TlsCertificates tls_certs = 2;
-    string domain_suffix = 3;
   }
 
   CforedListenConf cfored_listen_conf = 25;

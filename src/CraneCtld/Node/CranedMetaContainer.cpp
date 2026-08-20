@@ -350,6 +350,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.node_topo_info.sockets =
         config.Nodes.at(craned_name)->node_topo_info.sockets;
     static_meta.hostname = craned_name;
+    static_meta.node_hostname = config.Nodes.at(craned_name)->node_hostname;
+    static_meta.node_addr = config.Nodes.at(craned_name)->node_addr;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
 

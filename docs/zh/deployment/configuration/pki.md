@@ -208,8 +208,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   ExternalCaFilePath: /etc/crane/tls/ca.pem
+  DomainSuffix: crane.local # 证书签发使用的域名后缀
   # AllowedNodes: "cn[15-18]" # 允许签发的前端节点
-  DomainSuffix: crane.local # 域名后缀
 ```
 
 ### 数据库配置文件

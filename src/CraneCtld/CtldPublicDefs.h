@@ -121,6 +121,8 @@ struct Config {
   CraneCtldConf CtldConf;
 
   struct Node {
+    std::string node_hostname;
+    std::string node_addr;
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;

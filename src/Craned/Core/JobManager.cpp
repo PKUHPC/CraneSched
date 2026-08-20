@@ -228,7 +228,7 @@ EnvMap JobInD::GetJobEnvMap() {
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   auto nodelist = daemon_step_to_d.nodelist();
   auto node_id_to_str = [nodelist]() -> std::string {
-    auto it = std::ranges::find(nodelist, g_config.Hostname);
+    auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
     if (it == nodelist.end()) {
       return "-1";
     }
@@ -292,7 +292,7 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.emplace("SLURM_JOBID", std::to_string(job_id));
     env_map.emplace("SLURM_JOB_ID", std::to_string(job_id));
     env_map.emplace("SLURM_NODEID", node_id_to_str());
-    env_map.emplace("SLURMD_NODENAME", g_config.Hostname);
+    env_map.emplace("SLURMD_NODENAME", g_config.CranedIdOfThisNode);
     env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
     env_map.emplace("SLURM_NODELIST",
                     util::HostNameListToStr(daemon_step_to_d.nodelist()));

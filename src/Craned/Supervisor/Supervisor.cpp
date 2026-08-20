@@ -117,8 +117,6 @@ int InitFromStdin(int argc, char** argv) {
       msg.cfored_listen_conf().tls_certs().ca_content();
   g_config.CforedListenConf.TlsConfig.TlsCerts.KeyContent =
       msg.cfored_listen_conf().tls_certs().key_content();
-  g_config.CforedListenConf.TlsConfig.DomainSuffix =
-      msg.cfored_listen_conf().domain_suffix();
 
   // Environment from JobManager
   g_config.JobEnv.clear();

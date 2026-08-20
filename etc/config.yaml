@@ -18,8 +18,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
+  DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
-  DomainSuffix: crane.com
 
 # Ctld settings
 # the listening address of control machine
@@ -152,10 +152,16 @@ EnableSlurmCompatibleEnv: false
 Nodes:
   # the hostname of computing node
   - name: "cn[15-16]"
+    # Optional. The OS hostname reported by each node. Defaults to name.
+    # NodeHostname: "cn[15-16].crane.com"
+    # Optional. Address used by cranectld to connect to craned. Defaults to NodeHostname.
+    # NodeAddr: "cn[15-16].crane.com"
     cpu: 2
     memory: 2G
 
   - name: "cn[17-18]"
+    # NodeHostname: "cn[17-18].crane.com"
+    # NodeAddr: "10.0.0.[17-18]"
     cpu: 2
     memory: 2G
     gres:

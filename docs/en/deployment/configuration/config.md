@@ -78,6 +78,8 @@ Specify compute node resources:
 Nodes:
   # Node range notation
   - name: "crane[01-04]"
+    NodeHostname: "crane[01-04].example.com"
+    NodeAddr: "10.0.0.[1-4]"
     cpu: 4
     memory: 8G
 
@@ -98,7 +100,9 @@ Nodes:
 
 **Node Parameters:**
 
-- **name**: Hostname or range (e.g., `node[01-10]`)
+- **name**: CraneSched node name or range (e.g., `node[01-10]`). This is the node identifier shown to users and used in partitions.
+- **NodeHostname**: Optional OS hostname or range for matching the local `craned` host. Defaults to `name`.
+- **NodeAddr**: Optional address or range used by `cranectld` to connect to `craned`. Defaults to `NodeHostname`.
 - **cpu**: Number of CPU cores
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
@@ -107,6 +111,7 @@ Nodes:
 
 - `crane[01-04]` expands to: crane01, crane02, crane03, crane04
 - `cn[1-3,5]` expands to: cn1, cn2, cn3, cn5
+- `crane[01-04].example.com` expands to: crane01.example.com, crane02.example.com, crane03.example.com, crane04.example.com
 
 ### Partition Configuration
 
@@ -203,8 +208,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
-  AllowedNodes: "crane[01-10]"
   DomainSuffix: crane.local
+  AllowedNodes: "crane[01-10]"
 ```
 
 ### Gres Configuration

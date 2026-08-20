@@ -868,8 +868,7 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.ListenConf.TlsConfig.Enabled)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
         server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts,
-        g_config.ListenConf.TlsConfig.DomainSuffix, channel_args);
+        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
   else
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
         server_address, g_config.CraneCtldForInternalListenPort, channel_args);
@@ -1376,12 +1375,12 @@ void CtldClient::NodeHealthCheck_() {
     return;
   }
 
-  if (!g_config.CranedRes.contains(g_config.Hostname)) {
+  if (!g_config.CranedRes.contains(g_config.CranedIdOfThisNode)) {
     CRANE_ERROR("Failed to get node config info.");
     return;
   }
 
-  auto node_config = g_config.CranedRes.at(g_config.Hostname);
+  auto node_config = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
 
   CRANE_DEBUG("Start node health checking....");
 

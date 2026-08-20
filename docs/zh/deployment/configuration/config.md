@@ -78,6 +78,8 @@ CraneBaseDir: /var/crane/
 Nodes:
   # 节点范围表示法
   - name: "crane[01-04]"
+    NodeHostname: "crane[01-04].example.com"
+    NodeAddr: "10.0.0.[1-4]"
     cpu: 4
     memory: 8G
 
@@ -98,7 +100,9 @@ Nodes:
 
 **节点参数：**
 
-- **name**：主机名或范围（例如，`node[01-10]`）
+- **name**：CraneSched 节点名或范围（例如，`node[01-10]`），也是用户看到和分区中使用的节点标识
+- **NodeHostname**：可选，节点操作系统 hostname 或范围，用于本机 `craned` 匹配身份；默认等于 `name`
+- **NodeAddr**：可选，`cranectld` 连接 `craned` 时使用的地址或范围；默认等于 `NodeHostname`
 - **cpu**：CPU 核心数
 - **memory**：总内存（支持 K、M、G、T 后缀）
 - **gres**：通用资源，如 GPU（可选）
@@ -107,6 +111,7 @@ Nodes:
 
 - `crane[01-04]` 展开为：crane01、crane02、crane03、crane04
 - `cn[1-3,5]` 展开为：cn1、cn2、cn3、cn5
+- `crane[01-04].example.com` 展开为：crane01.example.com、crane02.example.com、crane03.example.com、crane04.example.com
 
 ### 分区配置
 
@@ -203,8 +208,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
-  AllowedNodes: "crane[01-10]"
   DomainSuffix: crane.local
+  AllowedNodes: "crane[01-10]"
 ```
 
 ### Gres配置

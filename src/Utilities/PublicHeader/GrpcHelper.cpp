@@ -184,9 +184,8 @@ void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
 }
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
-                            const std::string& hostname,
-                            const std::string& domain_suffix) {
-  args->SetSslTargetNameOverride(fmt::format("{}.{}", hostname, domain_suffix));
+                            const std::string& hostname) {
+  args->SetSslTargetNameOverride(hostname);
 }
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
@@ -232,22 +231,21 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const std::string& domain_suffix) {
+    const TlsCertificates& certs) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
-  std::string target = fmt::format("{}.{}:{}", hostname, domain_suffix, port);
+  std::string target = fmt::format("{}:{}", hostname, port);
   return grpc::CreateChannel(target, grpc::SslCredentials(ssl_opts));
 }
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const std::string& domain_suffix,
-    const grpc::ChannelArguments& args) {
+    const TlsCertificates& certs, const grpc::ChannelArguments& args) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
-  std::string target = fmt::format("{}.{}:{}", hostname, domain_suffix, port);
+  std::string target = fmt::format("{}:{}", hostname, port);
   return grpc::CreateCustomChannel(target, grpc::SslCredentials(ssl_opts),
                                    args);
 }

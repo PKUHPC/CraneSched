@@ -1927,7 +1927,10 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
 
   std::string common_name =
-      std::format("{}.{}", uid, g_config.ListenConf.TlsConfig.DomainSuffix);
+      g_config.ListenConf.TlsConfig.DomainSuffix.empty()
+          ? std::to_string(uid)
+          : std::format("{}.{}", uid,
+                        g_config.ListenConf.TlsConfig.DomainSuffix);
   auto sign_response =
       g_vault_client->Sign(csr_content, common_name, alt_names);
   if (!sign_response)

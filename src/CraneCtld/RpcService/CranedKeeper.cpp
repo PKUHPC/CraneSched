@@ -972,17 +972,19 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     } else {
       ipv4_t ipv4_addr;
       ipv6_t ipv6_addr;
-      if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
+      const std::string &node_addr = g_config.Nodes.at(craned_id)->node_addr;
+      if (crane::ResolveIpv4FromHostname(node_addr, &ipv4_addr)) {
         ip_addr = crane::Ipv4ToStr(ipv4_addr);
         s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
-      } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
+      } else if (crane::ResolveIpv6FromHostname(node_addr, &ipv6_addr)) {
         ip_addr = crane::Ipv6ToStr(ipv6_addr);
         s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
       } else {
         // Just hostname. It should never happen,
         // but we add error handling here for robustness.
-        CRANE_ERROR("Unresolved hostname: {}", craned_id);
-        ip_addr = craned_id;
+        CRANE_ERROR("Unresolved node address: {} for Craned {}", node_addr,
+                    craned_id);
+        ip_addr = node_addr;
       }
     }
   }
@@ -1008,8 +1010,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
               ProtoTimestampToString(token), m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
-    SetTlsHostnameOverride(&channel_args, craned_id,
-                           g_config.ListenConf.TlsConfig.DomainSuffix);
+    SetTlsHostnameOverride(&channel_args,
+                           g_config.Nodes.at(craned_id)->node_hostname);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
         g_config.ListenConf.TlsConfig.InternalCerts, channel_args);

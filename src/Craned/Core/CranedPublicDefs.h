@@ -199,6 +199,9 @@ struct Config {
   CranedId CranedIdOfThisNode;
 
   std::set<CranedId> NodeList;
+  std::unordered_map<std::string, CranedId> NodeHostnameToCranedId;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeAddr;
 
   struct CranedMeta {
     SystemRelInfo SysInfo;
