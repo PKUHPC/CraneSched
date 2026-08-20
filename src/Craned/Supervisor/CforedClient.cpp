@@ -21,7 +21,9 @@
 #include <cerrno>
 
 #include "TaskManager.h"
+#include "crane/GrpcHelper.h"
 #include "crane/String.h"
+
 namespace Craned::Supervisor {
 
 using crane::grpc::StreamStepIOReply;
@@ -491,10 +493,14 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   SetGrpcClientKeepAliveChannelArgs(&channel_args);
   // Todo: Use cfored listen config
   if (g_config.CforedListenConf.TlsConfig.Enabled) {
+    std::string cfored_fqdn = cfored_name;
+    const std::string& domain_suffix =
+        g_config.CforedListenConf.TlsConfig.DomainSuffix;
+    if (!domain_suffix.empty() && !cfored_fqdn.ends_with("." + domain_suffix))
+      cfored_fqdn += "." + domain_suffix;
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort,
-        g_config.CforedListenConf.TlsConfig.TlsCerts,
-        g_config.CforedListenConf.TlsConfig.DomainSuffix);
+        cfored_fqdn, kCforedDefaultPort,
+        g_config.CforedListenConf.TlsConfig.TlsCerts);
   } else {
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
@@ -746,7 +752,8 @@ void CforedClient::AsyncSendRecvThread_() {
               int(tag), ok);
           continue;
         }
-        CRANE_DEBUG("Cfored connection failed, wait reconnect...");
+        CRANE_DEBUG("Cfored connection failed, channel state: {}.",
+                    GrpcConnStateStr(m_cfored_channel_->GetState(false)));
         m_wait_reconn_ = true;
 
         // Close all active X11 proxy connections on disconnect
