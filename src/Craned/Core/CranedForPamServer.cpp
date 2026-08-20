@@ -101,9 +101,13 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
       CRANE_TRACE("Remote address {} was resolved as {}",
                   request->ssh_remote_address(), remote_hostname);
 
+      std::string remote_fqdn = remote_hostname;
+      const std::string &domain_suffix =
+          g_config.ListenConf.TlsConfig.DomainSuffix;
+      if (!domain_suffix.empty() && !remote_fqdn.ends_with("." + domain_suffix))
+        remote_fqdn += "." + domain_suffix;
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_port, g_config.ListenConf.TlsConfig.TlsCerts,
-          g_config.ListenConf.TlsConfig.DomainSuffix);
+          remote_fqdn, crane_port, g_config.ListenConf.TlsConfig.TlsCerts);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());

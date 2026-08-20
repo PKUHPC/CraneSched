@@ -865,14 +865,19 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.TlsConfig.Enabled)
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    std::string ctld_fqdn = server_address;
+    const std::string& domain_suffix =
+        g_config.ListenConf.TlsConfig.DomainSuffix;
+    if (!domain_suffix.empty() && !ctld_fqdn.ends_with("." + domain_suffix))
+      ctld_fqdn += "." + domain_suffix;
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
-        server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts,
-        g_config.ListenConf.TlsConfig.DomainSuffix, channel_args);
-  else
+        ctld_fqdn, g_config.CraneCtldForInternalListenPort,
+        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+  } else {
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
         server_address, g_config.CraneCtldForInternalListenPort, channel_args);
+  }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);

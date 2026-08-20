@@ -1008,8 +1008,12 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
               ProtoTimestampToString(token), m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
-    SetTlsHostnameOverride(&channel_args, craned_id,
-                           g_config.ListenConf.TlsConfig.DomainSuffix);
+    std::string craned_fqdn = craned_id;
+    const std::string &domain_suffix =
+        g_config.ListenConf.TlsConfig.DomainSuffix;
+    if (!domain_suffix.empty() && !craned_fqdn.ends_with("." + domain_suffix))
+      craned_fqdn += "." + domain_suffix;
+    SetTlsHostnameOverride(&channel_args, craned_fqdn);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
         g_config.ListenConf.TlsConfig.InternalCerts, channel_args);
