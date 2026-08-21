@@ -533,21 +533,24 @@ void CforedClient::CleanStopTaskIOQueueCb_() {
       if (!meta.pty && output_handle.pipe) output_handle.pipe->close();
       if (meta.pty && output_handle.tty) output_handle.tty->close();
       if (meta.err_handle) meta.err_handle->close();
+      // After uvw opens these fds, libuv owns their lifecycle. Closing the raw
+      // fd here can race with fd reuse while libuv still has pending epoll
+      // operations for the handle.
       output_handle.pipe.reset();
       output_handle.tty.reset();
       meta.err_handle.reset();
-
-      if (meta.stdout_read != -1) close(meta.stdout_read);
-      if (meta.stderr_read != -1) close(meta.stderr_read);
+      meta.stdout_read = -1;
+      meta.stderr_read = -1;
 
       CRANE_DEBUG("[Task #{}] Finished its output and err output.", task_id);
 
       auto& m = m_fwd_meta_map[task_id];
       ok_to_free = m.proc_stopped;
       if (ok_to_free) {
-        // Output fully drained and process already exited.
-        // Now it is safe to send TASK_EXIT_STATUS — all TASK_OUTPUT
-        // messages have already been enqueued before this point.
+        // Output and stderr fully drained and process already exited.
+        // Now it is safe to send TASK_EXIT_STATUS — all TASK_OUTPUT and
+        // TASK_ERR_OUTPUT messages have already been enqueued before this
+        // point.
         m_task_fwd_req_queue_.enqueue(FwdRequest{
             .type = StreamStepIORequest::TASK_EXIT_STATUS,
             .data = TaskFinishStatus{.task_id = task_id,
@@ -1088,15 +1091,15 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                    bool signaled) {
   CRANE_DEBUG("[Task #{}] Process stopped with exit_code: {}, signaled: {}.",
               task_id, exit_code, signaled);
-  // Store exit info in meta. TASK_EXIT_STATUS is only enqueued after
-  // output is fully drained, so that all TASK_OUTPUT messages precede it.
+  // Store exit info in meta. TASK_EXIT_STATUS is only enqueued after stdout and
+  // stderr are fully drained, so all output messages precede it.
   absl::MutexLock lock(&m_mtx_);
   auto& meta = m_fwd_meta_map[task_id];
   meta.proc_stopped = true;
   meta.exit_code = exit_code;
   meta.signaled = signaled;
-  if (meta.output_stopped) {
-    // Output already drained — safe to send EXIT_STATUS now.
+  if (meta.output_stopped && meta.err_stopped) {
+    // Output and stderr already drained — safe to send EXIT_STATUS now.
     m_task_fwd_req_queue_.enqueue(FwdRequest{
         .type = StreamStepIORequest::TASK_EXIT_STATUS,
         .data = TaskFinishStatus{.task_id = task_id,
@@ -1104,7 +1107,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                  .signaled = signaled},
     });
   }
-  return meta.output_stopped;
+  return meta.output_stopped && meta.err_stopped;
 }
 
 void CforedClient::TaskEnd(task_id_t task_id) {
