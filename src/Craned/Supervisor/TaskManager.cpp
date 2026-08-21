@@ -3204,12 +3204,8 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       uint32_t exit_code = exit_info->value;
       if (exit_info->is_terminated_by_signal)
         exit_code += ExitCode::KCrunExitCodeStatusNum;
-      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(
+      m_step_.GetCforedClient()->TaskProcessStop(
           task_id, exit_code, exit_info.value().is_terminated_by_signal);
-      if (ok_to_free) {
-        CRANE_TRACE("It's ok to unregister task #{}", task_id);
-        m_step_.GetCforedClient()->TaskEnd(task_id);
-      }
     } else /* Batch / Calloc */ {
       FinalizeTaskAsync(task_id);
     }
