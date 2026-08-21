@@ -55,9 +55,12 @@ class CforedClient {
     bool err_stopped{false};
 
     bool proc_stopped{false};
+    bool stop_task_io_queued{false};
+    bool io_cleaned{false};
+    bool exit_status_sent{false};
 
-    // Deferred exit status: filled by TaskProcessStop(), sent after output
-    // drain to guarantee all TASK_OUTPUT precedes TASK_EXIT_STATUS.
+    // Deferred exit status: filled after SIGCHLD, sent after output drain to
+    // guarantee all TASK_OUTPUT precedes TASK_EXIT_STATUS.
     uint32_t exit_code{0};
     bool signaled{false};
   };
@@ -80,7 +83,7 @@ class CforedClient {
 
   uint16_t InitUvX11FwdHandler();
 
-  bool TaskProcessStop(task_id_t task_id, uint32_t exit_code, bool signaled);
+  void TaskProcessStop(task_id_t task_id, uint32_t exit_code, bool signaled);
   void TaskEnd(task_id_t task_id);
 
   const std::string& CforedName() const { return m_cfored_name_; }
@@ -114,6 +117,18 @@ class CforedClient {
   ConcurrentQueue<task_id_t> m_stop_task_io_queue_;
   std::shared_ptr<uvw::async_handle> m_clean_stop_task_io_queue_async_handle_;
   void CleanStopTaskIOQueueCb_();
+
+  struct ProcessStopQueueElem {
+    task_id_t task_id;
+    uint32_t exit_code;
+    bool signaled;
+  };
+  ConcurrentQueue<ProcessStopQueueElem> m_process_stop_queue_;
+  std::shared_ptr<uvw::async_handle> m_process_stop_async_handle_;
+  void ProcessStopQueueCb_();
+
+  bool QueueStopTaskIoIfReadyNoLock_(task_id_t task_id, TaskFwdMeta* meta)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_mtx_);
 
   void AsyncSendRecvThread_();
 
