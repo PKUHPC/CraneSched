@@ -17,6 +17,7 @@
  */
 
 #include "JobScheduler.h"
+#include "crane/PrologEpilogExecutor.h"
 
 namespace Ctld {
 

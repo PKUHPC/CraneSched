@@ -376,6 +376,9 @@ Supervisor:
   
   # Log directory (relative to CraneBaseDir)
   LogDir: supervisor
+
+  # Worker threads created in each supervisor process
+  ThreadPoolSize: 4
 ```
 
 **Supervisor Parameters:**
@@ -383,6 +386,7 @@ Supervisor:
 - **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
 - **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
 - **LogDir**: Directory for supervisor log files, relative to the `CraneBaseDir` setting. Log files are helpful for diagnosing job execution issues.
+- **ThreadPoolSize**: Worker threads created in each Supervisor process. The default is `4`; set it to `0` to use the host's hardware concurrency.
 
 !!! tip
     When troubleshooting job execution problems, you can temporarily set `DebugLevel` to `debug` or `trace` for more detailed log information.

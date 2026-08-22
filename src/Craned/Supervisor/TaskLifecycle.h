@@ -18,11 +18,6 @@
 
 namespace Craned::Supervisor::detail {
 
-[[nodiscard]] constexpr bool ChildHandshakeSucceeded(bool message_received,
-                                                     bool child_ready) {
-  return message_received && child_ready;
-}
-
 template <typename Cause>
 struct TaskFinalizationUpdate {
   std::optional<Cause> cause;

@@ -42,6 +42,14 @@ CraneCtld:
   MaxLogFileSize: 50M
   # max files of cranectld log file
   MaxLogFileNum: 3
+  # Number of messages buffered by the asynchronous logger
+  AsyncLogQueueSize: 8192
+  # Number of asynchronous logger worker threads (1 preserves log ordering)
+  AsyncLogThreadCount: 1
+  # Block producers when the queue is full; false overwrites oldest messages
+  AsyncLogBlockWhenFull: true
+  # Also write logs to stderr (usually captured by systemd-journald)
+  LogToConsole: true
   # Number of threads in the general-purpose thread pool (0 = auto, uses hardware_concurrency)
   ThreadPoolSize: 0
   # Number of threads for scheduler RPC dispatch (0 = auto)
@@ -54,6 +62,8 @@ CraneCtld:
   StatusChangeMaxDrainPerTick: 200
   # Max runtime DB updates per transaction chunk (default: 200)
   StatusChangeDbCommitChunkSize: 200
+  # Retry FreeSteps for steps still Completing (seconds, 0 disables retries)
+  CompletingStepRetryIntervalSec: 60
   # Whether batch jobs may be requeued by default. Users can override with --requeue/--no-requeue.
   JobRequeue: true
   # Max number of times a job can be requeued before it is held.
@@ -250,8 +260,8 @@ Supervisor:
   MaxLogFileSize: 50M
   # max files of supervisor log file
   MaxLogFileNum: 3
-  # Number of threads in the supervisor thread pool (0 = auto, uses hardware_concurrency)
-  ThreadPoolSize: 0
+  # Number of threads in each supervisor process (0 = auto, uses hardware_concurrency)
+  ThreadPoolSize: 4
 
 Tracing:
   # Toggle OpenTelemetry tracing support (requires CRANE_ENABLE_TRACING at compile time)

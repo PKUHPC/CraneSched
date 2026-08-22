@@ -103,6 +103,8 @@ Hide table header in output.
 
 :   **Applies to:** `Job`, `Step`  
 Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 1000 lines.
+If more records match the query, the command returns the limited results and prints an incomplete-result notice to standard error; narrow the filters or adjust `-m` to query again.
+If the response exceeds the gRPC message-size limit, no results are returned; narrow the query scope or lower `-m`.
 
 **--json**
 
@@ -258,7 +260,7 @@ Flags:
   -h, --help                 help for cacct
   -j, --job string           Select job ids to view (comma separated list), default is all
       --json                 Output in JSON format
-  -m, --max-lines uint32     Limit the number of lines in the output, 0 means no limit (default 1000)
+  -m, --max-lines uint32     Limit the number of jobs returned (default 20)
   -n, --name string          Select job names to view (comma separated list), default is all
   -w, --nodelist string      Specify node names to view (comma separated list or patterns like node[1-10]), default is all
   -N, --noheader             Do not print header line in the output

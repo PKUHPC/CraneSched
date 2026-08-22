@@ -261,6 +261,14 @@ void SetJobSummaryQueryCommonFilter(
   }
 
   if constexpr (is_size_request) {
+    if (request && request->filter_job_ids_size() > 0) {
+      bsoncxx::builder::basic::array arr;
+      for (const auto& job_id : request->filter_job_ids())
+        arr.append(static_cast<int32_t>(job_id));
+      match_doc.append(kvp(
+          "job_id", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+    }
+
     // partition
     if (request && request->filter_partitions_size() > 0) {
       bsoncxx::builder::basic::array arr;
@@ -773,6 +781,41 @@ static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
          (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
 }
 
+// Select the latest job_db_id per job through a covering index, then fetch
+// only that submission's latest requeue attempt.
+static void AppendLatestJobDocumentStages_(mongocxx::pipeline& pipeline,
+                                           const std::string& collection_name) {
+  using bsoncxx::builder::basic::make_array;
+  using bsoncxx::builder::basic::make_document;
+
+  pipeline.sort(make_document(kvp("job_id", 1), kvp("job_db_id", 1)));
+  pipeline.group(make_document(
+      kvp("_id", "$job_id"),
+      kvp("job_db_id", make_document(kvp("$last", "$job_db_id")))));
+  pipeline.sort(make_document(kvp("job_db_id", -1)));
+
+  auto lookup_expr = make_document(kvp(
+      "$and",
+      make_array(
+          make_document(kvp("$eq", make_array("$job_id", "$$latest_job_id"))),
+          make_document(
+              kvp("$eq", make_array("$job_db_id", "$$latest_job_db_id"))))));
+  auto lookup_match = make_document(
+      kvp("$match", make_document(kvp("$expr", lookup_expr.view()))));
+  pipeline.lookup(make_document(
+      kvp("from", collection_name),
+      kvp("let", make_document(kvp("latest_job_id", "$_id"),
+                               kvp("latest_job_db_id", "$job_db_id"))),
+      kvp("pipeline",
+          make_array(lookup_match.view(),
+                     make_document(
+                         kvp("$sort", make_document(kvp("requeue_count", -1)))),
+                     make_document(kvp("$limit", 1)))),
+      kvp("as", "latest_job")));
+  pipeline.unwind("$latest_job");
+  pipeline.replace_root(make_document(kvp("newRoot", "$latest_job")));
+}
+
 bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
@@ -876,8 +919,6 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  AppendJobIdSelectorClause_(request, filter);
-
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
@@ -912,21 +953,23 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  // Use aggregation to deduplicate: for each job_id, only return the
-  // record with the highest requeue_count (the latest run), then apply
-  // request filters to those latest-run documents.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
-  pipeline.group(
-      make_document(kvp("_id", "$job_id"),
-                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
-  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  if (request->filter_job_ids().empty()) {
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  } else {
+    document job_id_filter;
+    AppendJobIdSelectorClause_(request, job_id_filter);
+    pipeline.match(job_id_filter.view());
+    AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
+  }
   pipeline.match(filter.view());
-  pipeline.sort(make_document(kvp("job_db_id", -1)));
   pipeline.limit(static_cast<int32_t>(limit));
 
+  mongocxx::options::aggregate aggregate_options;
+  aggregate_options.allow_disk_use(true);
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(
+          pipeline, aggregate_options);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -1220,13 +1263,15 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  filter.append(kvp("job_id", [&job_info_map](sub_document job_id_doc) {
-    array job_id_array;
-    for (const auto job_id : *job_info_map | std::views::keys) {
-      job_id_array.append(static_cast<std::int32_t>(job_id));
-    }
-    job_id_doc.append(kvp("$in", job_id_array));
-  }));
+  document latest_job_filter;
+  latest_job_filter.append(
+      kvp("job_id", [&job_info_map](sub_document job_id_doc) {
+        array job_id_array;
+        for (const auto job_id : *job_info_map | std::views::keys) {
+          job_id_array.append(static_cast<std::int32_t>(job_id));
+        }
+        job_id_doc.append(kvp("$in", job_id_array));
+      }));
 
   bool has_job_status_constraint = !request->filter_states().empty();
   if (has_job_status_constraint) {
@@ -1250,22 +1295,16 @@ bool MongodbClient::FetchJobStepRecords(
     }));
   }
 
-  // Use aggregation to deduplicate: for each job_id, only return the
-  // record with the highest requeue_count (the latest run).
-  // Apply the caller filter after deduplication so state/type/time-related
-  // constraints are evaluated against the latest run rather than an older
-  // matching run.
   mongocxx::pipeline pipeline;
-  pipeline.sort(make_document(kvp("requeue_count", -1), kvp("job_db_id", -1)));
-  pipeline.group(
-      make_document(kvp("_id", "$job_id"),
-                    kvp("doc", make_document(kvp("$first", "$$ROOT")))));
-  pipeline.replace_root(make_document(kvp("newRoot", "$doc")));
+  pipeline.match(latest_job_filter.view());
+  AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
   pipeline.match(filter.view());
-  pipeline.sort(make_document(kvp("job_db_id", -1)));
 
+  mongocxx::options::aggregate aggregate_options;
+  aggregate_options.allow_disk_use(true);
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(pipeline);
+      (*GetClient_())[m_db_name_][m_job_collection_name_].aggregate(
+          pipeline, aggregate_options);
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -4831,10 +4870,9 @@ DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
   }
   return res;
 }
+
 // Deserializes counts-only ResourceInNodeV3 from DB.
 // core_ids/slot_ids are not stored; only cpu_count, memory, and gres counts.
-// TODO: DB migration script needed to convert old gres format
-// (DedicatedResourceInNode with slot IDs) to new GresMap format (counts).
 ResourceInNodeV3 MongodbClient::BsonToResourceInNodeV3(
     const bsoncxx::document::view& doc) {
   ResourceInNodeV3 res;
@@ -5803,6 +5841,12 @@ bool MongodbClient::InitTableIndexes() {
     auto raw_table = client[m_db_name_][m_job_collection_name_];
     CreateCollectionIndex(raw_table, {"job_id"}, false);
     CreateCollectionIndex(raw_table, {"job_id", "requeue_count"}, false);
+    // Covers latest submission/requeue selection and the subsequent lookup.
+    CreateCollectionIndex(raw_table, {"job_id", "job_db_id", "requeue_count"},
+                          false);
+    CreateCollectionIndex(
+        raw_table, {"array_job_id", "array_task_id", "job_id", "job_db_id"},
+        false);
     CreateCollectionIndex(raw_table, {"time_start", "time_end"}, false);
     // Indexes for jobsize queries (direct job_table scan)
     CreateCollectionIndex(
@@ -5900,8 +5944,9 @@ MongodbClient::MongodbClient() {
         fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
-  g_runtime_status.db_logger = AddLogger(
-      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+  g_runtime_status.db_logger =
+      AddLogger("mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(),
+                g_config.CtldConf.LogToConsole);
 
   m_logger_ = g_runtime_status.db_logger;
 
@@ -6150,12 +6195,14 @@ bool MongodbClient::MigrateV0ToV1_() {
       "Migrating schema v0 -> v1: "
       "renaming fields [task_id->job_id, task_name->job_name, "
       "task_db_id->job_db_id], "
-      "backfilling fields [has_job_info(=true), exclusive(=false), "
+      "normalizing legacy job and step resources, "
+      "backfilling fields [has_job_info(=job_db_id exists), exclusive(=false), "
       "cpus_alloc(=cpus_req), mem_alloc(=mem_req), device_map(={{}}), "
       "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
       "exclude_nodes(=[]), submit_hostname(=\"\"), "
-      "execution_nodes(=[])]...");
+      "execution_nodes(=[]), deadline(=max timestamp), requeue_count(=0), "
+      "aggregated(=false), steps(=[])]...");
 
   try {
     auto client = GetClient_();
@@ -6168,13 +6215,152 @@ bool MongodbClient::MigrateV0ToV1_() {
                                              kvp("task_name", "job_name"),
                                              kvp("task_db_id", "job_db_id")))));
 
-    // Step B: Backfill missing fields using pipeline-style update_many.
+    // Step B: Normalize CPU fields written as doubles by v1.1.3. The current
+    // schema stores fixed-point cpu_t values as int64 raw values (scale 256).
+    // Keep already-normalized integer values unchanged.
+    auto normalize_cpu = [](std::string field_ref) {
+      return make_document(kvp(
+          "$cond",
+          make_array(
+              make_document(
+                  kvp("$eq", make_array(make_document(kvp("$type", field_ref)),
+                                        "double"))),
+              make_document(
+                  kvp("$toLong",
+                      make_document(kvp(
+                          "$round",
+                          make_array(make_document(kvp(
+                                         "$multiply",
+                                         make_array(field_ref, int64_t{256}))),
+                                     0))))),
+              field_ref)));
+    };
+
+    mongocxx::pipeline req_cpu_pipeline;
+    req_cpu_pipeline.add_fields(make_document(kvp(
+        "cpus_req",
+        make_document(kvp(
+            "$ifNull", make_array(normalize_cpu("$cpus_req"), int64_t{0}))))));
+    collection.update_many({}, req_cpu_pipeline);
+
+    // cpus_alloc was not present in v1.1.3. Normalize an existing value, or
+    // copy the already-normalized cpus_req value when it is absent.
+    mongocxx::pipeline alloc_cpu_pipeline;
+    alloc_cpu_pipeline.add_fields(make_document(kvp(
+        "cpus_alloc",
+        make_document(kvp("$ifNull", make_array(normalize_cpu("$cpus_alloc"),
+                                                "$cpus_req"))))));
+    collection.update_many({}, alloc_cpu_pipeline);
+
+    // Step C: Convert embedded steps from ResourceV2 to ResourceV3. Legacy
+    // per-node GRES values are slot arrays; ResourceV3 stores only counts.
+    auto legacy_slot_count = [](std::string field_ref) {
+      return make_document(kvp(
+          "$cond",
+          make_array(make_document(kvp("$isArray", field_ref)),
+                     make_document(kvp("$toLong",
+                                       make_document(kvp("$size", field_ref)))),
+                     int64_t{0})));
+    };
+
+    auto legacy_gres_to_counts = [&](std::string field_ref) {
+      auto type_array = make_document(kvp("$objectToArray", "$$device.v"));
+
+      auto total_type_map = make_document(
+          kvp("$map",
+              make_document(kvp("input", type_array.view()), kvp("as", "type"),
+                            kvp("in", legacy_slot_count("$$type.v")))));
+      auto total = make_document(kvp("$sum", total_type_map.view()));
+
+      auto type_count_entry = make_document(
+          kvp("k", "$$type.k"), kvp("v", legacy_slot_count("$$type.v")));
+      auto type_count_entries = make_document(
+          kvp("$map",
+              make_document(kvp("input", type_array.view()), kvp("as", "type"),
+                            kvp("in", type_count_entry.view()))));
+      auto type_count_map =
+          make_document(kvp("$arrayToObject", type_count_entries.view()));
+
+      auto device_value =
+          make_document(kvp("total", total.view()),
+                        kvp("type_count_map", type_count_map.view()));
+      auto device_entry =
+          make_document(kvp("k", "$$device.k"), kvp("v", device_value.view()));
+
+      auto gres_or_empty =
+          make_document(kvp("$ifNull", make_array(field_ref, make_document())));
+      auto device_array =
+          make_document(kvp("$objectToArray", gres_or_empty.view()));
+      auto device_entries = make_document(kvp(
+          "$map",
+          make_document(kvp("input", device_array.view()), kvp("as", "device"),
+                        kvp("in", device_entry.view()))));
+      return make_document(kvp("$arrayToObject", device_entries.view()));
+    };
+
+    auto normalize_res_alloc = [&](std::string field_ref) {
+      auto legacy_cpu = make_document(kvp(
+          "$eq",
+          make_array(make_document(kvp("$type", "$$node.v.cpu")), "double")));
+      auto normalized_cpu = normalize_cpu("$$node.v.cpu");
+      auto normalized_gres = legacy_gres_to_counts("$$node.v.gres");
+      auto normalized_fields =
+          make_document(kvp("cpu", normalized_cpu.view()),
+                        kvp("gres", normalized_gres.view()));
+      auto normalized_node = make_document(kvp(
+          "$mergeObjects", make_array("$$node.v", normalized_fields.view())));
+      auto node_value = make_document(kvp(
+          "$cond",
+          make_array(legacy_cpu.view(), normalized_node.view(), "$$node.v")));
+      auto node_entry =
+          make_document(kvp("k", "$$node.k"), kvp("v", node_value.view()));
+
+      auto node_array = make_document(kvp("$objectToArray", field_ref));
+      auto node_entries = make_document(
+          kvp("$map",
+              make_document(kvp("input", node_array.view()), kvp("as", "node"),
+                            kvp("in", node_entry.view()))));
+      auto normalized_res =
+          make_document(kvp("$arrayToObject", node_entries.view()));
+      auto is_object = make_document(kvp(
+          "$eq", make_array(make_document(kvp("$type", field_ref)), "object")));
+      return make_document(
+          kvp("$cond",
+              make_array(is_object.view(), normalized_res.view(), field_ref)));
+    };
+
+    auto normalized_step_cpu = normalize_cpu("$$step.cpus_req");
+    auto normalized_step_res = normalize_res_alloc("$$step.res_alloc");
+    auto normalized_step_fields =
+        make_document(kvp("cpus_req", normalized_step_cpu.view()),
+                      kvp("res_alloc", normalized_step_res.view()));
+    auto normalized_step = make_document(kvp(
+        "$mergeObjects", make_array("$$step", normalized_step_fields.view())));
+    auto normalized_steps = make_document(
+        kvp("$map", make_document(kvp("input", "$steps"), kvp("as", "step"),
+                                  kvp("in", normalized_step.view()))));
+    auto steps_is_array = make_document(kvp("$isArray", "$steps"));
+    auto steps_value = make_document(kvp(
+        "$cond",
+        make_array(steps_is_array.view(), normalized_steps.view(), "$steps")));
+
+    mongocxx::pipeline step_pipeline;
+    step_pipeline.add_fields(make_document(kvp("steps", steps_value.view())));
+    collection.update_many({}, step_pipeline);
+
+    // Step D: Backfill missing fields using pipeline-style update_many.
     // $ifNull preserves existing values, only setting defaults for missing
     // fields, making this operation idempotent.
+    auto inferred_has_job_info = make_document(
+        kvp("$ne",
+            make_array(make_document(kvp("$type", "$job_db_id")), "missing")));
+
     mongocxx::pipeline update_pipeline;
     update_pipeline.add_fields(make_document(
         kvp("has_job_info",
-            make_document(kvp("$ifNull", make_array("$has_job_info", true)))),
+            make_document(kvp(
+                "$ifNull",
+                make_array("$has_job_info", inferred_has_job_info.view())))),
         kvp("exclusive",
             make_document(kvp("$ifNull", make_array("$exclusive", false)))),
         kvp("cpus_alloc",
@@ -6207,8 +6393,19 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("submit_hostname",
             make_document(kvp("$ifNull", make_array("$submit_hostname", "")))),
         kvp("execution_nodes",
-            make_document(kvp("$ifNull",
-                              make_array("$execution_nodes", make_array()))))));
+            make_document(
+                kvp("$ifNull", make_array("$execution_nodes", make_array())))),
+        kvp("deadline",
+            make_document(
+                kvp("$ifNull",
+                    make_array("$deadline", int64_t{kJobMaxTimeStampSec})))),
+        kvp("requeue_count",
+            make_document(
+                kvp("$ifNull", make_array("$requeue_count", int32_t{0})))),
+        kvp("aggregated",
+            make_document(kvp("$ifNull", make_array("$aggregated", false)))),
+        kvp("steps", make_document(
+                         kvp("$ifNull", make_array("$steps", make_array()))))));
     collection.update_many({}, update_pipeline);
 
     CRANE_LOGGER_INFO(m_logger_, "Schema migration v0 -> v1 completed.");
@@ -6257,9 +6454,9 @@ bool MongodbClient::RecoverInterruptedMigration_() {
     bool job_table_exists = job_cursor.begin() != job_cursor.end();
 
     // Find any backup collection from either old or new naming scheme
-    auto backup_cursor = db.list_collections(make_document(kvp(
-        "name", make_document(kvp(
-                    "$regex", "^(task_table|job_table)_backup_v\\\\d+$")))));
+    auto backup_cursor = db.list_collections(make_document(
+        kvp("name", make_document(kvp(
+                        "$regex", "^(task_table|job_table)_backup_v\\d+$")))));
     std::string backup_name;
     auto it = backup_cursor.begin();
     if (it != backup_cursor.end()) {

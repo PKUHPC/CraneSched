@@ -35,6 +35,7 @@
 #include "RpcService/CranedKeeper.h"
 #include "crane/ExecutionFlow.h"
 #include "crane/PluginClient.h"
+#include "crane/PrologEpilogExecutor.h"
 #include "crane/Tracing.h"
 #include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
@@ -191,10 +192,12 @@ JobScheduler::JobScheduler() {
   }
 
   m_array_manager_ = std::make_unique<ArrayManager>();
+  m_ctld_hook_executor_ = std::make_unique<util::os::PrologEpilogExecutor>();
 }
 
 JobScheduler::~JobScheduler() {
   m_thread_stop_ = true;
+  if (m_ctld_hook_executor_) m_ctld_hook_executor_->Shutdown();
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_step_schedule_thread_.joinable()) m_step_schedule_thread_.join();
   if (m_job_release_thread_.joinable()) m_job_release_thread_.join();
@@ -208,6 +211,7 @@ JobScheduler::~JobScheduler() {
     m_job_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
   m_rpc_worker_pool_.reset();
+  m_ctld_hook_executor_.reset();
 }
 
 bool JobScheduler::Init() {
@@ -328,7 +332,7 @@ bool JobScheduler::Init() {
               "#{}. "
               "Error Code: {}. "
               "Mark it as FAILED and move it to the ended queue.",
-              job_id, CraneErrStr(result.error()));
+              job_id, CraneErrStr(result.error().code()));
         else {
           CRANE_INFO("Mark running interactive job {} as FAILED.", job_id);
 
@@ -1013,6 +1017,19 @@ bool JobScheduler::Init() {
                                 3),
       std::chrono::milliseconds(g_config.CtldConf.StatusChangeFlushTimeoutMs));
 
+  if (g_config.CtldConf.CompletingStepRetryIntervalSec > 0) {
+    m_completing_step_retry_timer_handle_ =
+        uvw_job_status_change_loop->resource<uvw::timer_handle>();
+    m_completing_step_retry_timer_handle_->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle&) {
+          RetryCompletingSteps_();
+        });
+    const auto retry_interval =
+        std::chrono::seconds(g_config.CtldConf.CompletingStepRetryIntervalSec);
+    m_completing_step_retry_timer_handle_->start(retry_interval,
+                                                 retry_interval);
+  }
+
   m_job_status_change_async_handle_ =
       uvw_job_status_change_loop->resource<uvw::async_handle>();
   m_job_status_change_async_handle_->on<uvw::async_event>(
@@ -1180,6 +1197,18 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
 
   for (const CranedId& craned_id : job->CranedIds())
     m_node_to_jobs_map_[craned_id].emplace(job->JobId());
+
+  const job_id_t job_id = job->JobId();
+  auto index_completing_step = [this, job_id](const StepInCtld* step) {
+    if (step != nullptr &&
+        step->Status() == crane::grpc::JobStatus::Completing) {
+      m_completing_step_ids_[job_id].insert(step->StepId());
+    }
+  };
+  index_completing_step(job->DaemonStep());
+  index_completing_step(job->PrimaryStep());
+  for (const auto& step : job->Steps() | std::views::values)
+    index_completing_step(step.get());
 
   m_running_job_map_.emplace(job->JobId(), std::move(job));
 }
@@ -1362,6 +1391,7 @@ void JobScheduler::ScheduleThread_() {
     // array parents; processed after all scheduler locks are released (below).
     std::vector<ArrayManager::FinalizedArrayParent>
         sched_loop_final_array_parents;
+    HashMap<CranedId, std::vector<job_id_t>> sched_loop_jobs_to_free;
 
     if (!m_pending_job_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
@@ -1743,7 +1773,8 @@ void JobScheduler::ScheduleThread_() {
       m_job_indexes_mtx_.Unlock();
 
       Mutex thread_pool_mtx;
-      HashSet<job_id_t> failed_job_id_set;
+      HashSet<job_id_t> alloc_job_failed_job_id_set;
+      HashSet<job_id_t> alloc_step_failed_job_id_set;
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
@@ -1801,6 +1832,7 @@ void JobScheduler::ScheduleThread_() {
         jobs_failed.insert(jobs_failed.end(),
                            std::make_move_iterator(jobs_to_run.begin()),
                            std::make_move_iterator(jobs_to_run.end()));
+        jobs_to_run.clear();
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
@@ -1871,7 +1903,7 @@ void JobScheduler::ScheduleThread_() {
                 craned_id);
             absl::MutexLock lk(&thread_pool_mtx);
             for (const auto& job_to_d : jobs) {
-              failed_job_id_set.emplace(job_to_d.job_id());
+              alloc_job_failed_job_id_set.emplace(job_to_d.job_id());
               CRANE_FLOW_EMIT(JobAllocCranedDown,
                               ExecutionFlowContextForJob(alloc_flow_contexts,
                                                          job_to_d.job_id()),
@@ -1881,7 +1913,7 @@ void JobScheduler::ScheduleThread_() {
             return;
           }
           auto err = stub->AllocJobs(jobs);
-          if (err == CraneErrCode::SUCCESS) {
+          if (err.has_value() && err->failed_job_ids().empty()) {
             for (const auto& job_to_d : jobs) {
               CRANE_FLOW_EMIT(JobAllocRpcSucceeded,
                               ExecutionFlowContextForJob(alloc_flow_contexts,
@@ -1907,30 +1939,40 @@ void JobScheduler::ScheduleThread_() {
             alloc_job_latch.count_down();
             return;
           }
-          CRANE_ERROR(
-              "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
-              "last_job_id={} task_wait_ms={} rpc_status=rpc_failure "
-              "failed_job_count={}",
-              diag_craned_id, job_count, first_job_id, last_job_id,
-              task_wait_ms, job_count);
-          CRANE_TRACE("AllocJobs for jobs [{}] to {} failed: Rpc failure.",
-                      absl::StrJoin(
-                          jobs | std::views::transform(
-                                     [](const crane::grpc::JobToD& job_to_d) {
-                                       return std::to_string(job_to_d.job_id());
-                                     }),
-                          ","),
-                      craned_id);
+          if (!err.has_value()) {
+            CRANE_TRACE(
+                "AllocJobs for jobs [{}] to {} failed: Rpc failure.",
+                absl::StrJoin(
+                    jobs | std::views::transform(
+                               [](const crane::grpc::JobToD& job_to_d) {
+                                 return std::to_string(job_to_d.job_id());
+                               }),
+                    ","),
+                craned_id);
 
-          thread_pool_mtx.Lock();
-          for (const auto& job_to_d : jobs) {
-            failed_job_id_set.emplace(job_to_d.job_id());
-            CRANE_FLOW_EMIT(JobAllocRpcFailed,
-                            ExecutionFlowContextForJob(alloc_flow_contexts,
-                                                       job_to_d.job_id()),
-                            diag_craned_id);
+            thread_pool_mtx.Lock();
+            for (const auto& job_to_d : jobs) {
+              alloc_job_failed_job_id_set.emplace(job_to_d.job_id());
+              CRANE_FLOW_EMIT(JobAllocRpcFailed,
+                              ExecutionFlowContextForJob(alloc_flow_contexts,
+                                                         job_to_d.job_id()),
+                              diag_craned_id);
+            }
+            thread_pool_mtx.Unlock();
+          } else {
+            CRANE_ERROR("AllocJobs for jobs [{}] to {} failed by Craned.",
+                        absl::StrJoin(err->failed_job_ids(), ","), craned_id);
+
+            thread_pool_mtx.Lock();
+            for (const auto job_id : err->failed_job_ids()) {
+              alloc_job_failed_job_id_set.emplace(job_id);
+              CRANE_FLOW_EMIT(
+                  JobAllocRpcFailed,
+                  ExecutionFlowContextForJob(alloc_flow_contexts, job_id),
+                  diag_craned_id);
+            }
+            thread_pool_mtx.Unlock();
           }
-          thread_pool_mtx.Unlock();
 
           // If jobs in task_uid_pairs failed to start, they will be moved to
           // the completed jobs and do the following steps:
@@ -1969,6 +2011,44 @@ void JobScheduler::ScheduleThread_() {
       rpc_as_span.SetAttribute("craned_count",
                                static_cast<int64_t>(craned_alloc_steps.size()));
 
+      for (auto it = craned_alloc_steps.begin();
+           it != craned_alloc_steps.end();) {
+        auto& steps = it->second;
+        std::vector<crane::grpc::StepToD> filtered_steps;
+        std::erase_if(steps, [&](const crane::grpc::StepToD& step) {
+          if (!alloc_job_failed_job_id_set.contains(step.job_id()))
+            return false;
+          filtered_steps.emplace_back(step);
+          return true;
+        });
+        if (!filtered_steps.empty()) {
+          CRANE_ERROR(
+              "Filtered AllocSteps [{}] to {} because AllocJobs failed.",
+              util::StepToDRangeIdString(filtered_steps), it->first);
+        }
+        if (steps.empty())
+          it = craned_alloc_steps.erase(it);
+        else
+          ++it;
+      }
+
+      std::vector<JobInCtld*> jobs_created;
+      jobs_created.reserve(jobs_to_run.size());
+      for (auto& job : jobs_to_run) {
+        if (!job) continue;
+        if (alloc_job_failed_job_id_set.contains(job->JobId())) {
+          for (const auto& craned_id : job->CranedIds()) {
+            sched_loop_jobs_to_free[craned_id].emplace_back(job->JobId());
+          }
+          jobs_failed.emplace_back(std::move(job));
+          continue;
+        }
+
+        jobs_created.emplace_back(job.get());
+        m_running_job_map_.emplace(job->JobId(), std::move(job));
+      }
+      jobs_to_run.clear();
+
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1993,38 +2073,76 @@ void JobScheduler::ScheduleThread_() {
           if (stub == nullptr || stub->Invalid()) {
             thread_pool_mtx.Lock();
             for (const auto& step_to_d : steps)
-              failed_job_id_set.emplace(step_to_d.job_id());
+              alloc_step_failed_job_id_set.emplace(step_to_d.job_id());
             thread_pool_mtx.Unlock();
             emit_alloc_step_results(false, true);
 
             CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: Craned down.",
                         util::StepToDRangeIdString(steps), craned_id);
+            auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+            for (const auto& step_to_d : steps) {
+              StepCompletingAndStatusChangeAsync(
+                  step_to_d.job_id(), step_to_d.step_id(), craned_id,
+                  crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
+                  "CranedDown", now);
+            }
             alloc_step_latch.count_down();
             return;
           }
 
           auto err = stub->AllocSteps(steps);
-          if (err == CraneErrCode::SUCCESS) {
+          if (err.has_value() && err->failed_job_step_ids_map().empty()) {
             emit_alloc_step_results(true, false);
             alloc_step_latch.count_down();
             return;
           }
-          CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
-                      util::StepToDRangeIdString(steps), craned_id,
-                      CraneErrStr(err));
+          if (!err.has_value()) {
+            CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
+                        util::StepToDRangeIdString(steps), craned_id,
+                        CraneErrStr(err.error()));
 
-          thread_pool_mtx.Lock();
-          for (const auto& step_to_d : steps)
-            failed_job_id_set.emplace(step_to_d.job_id());
-          thread_pool_mtx.Unlock();
-          emit_alloc_step_results(false, false);
+            thread_pool_mtx.Lock();
+            for (const auto& step_to_d : steps)
+              alloc_step_failed_job_id_set.emplace(step_to_d.job_id());
+            thread_pool_mtx.Unlock();
+            emit_alloc_step_results(false, false);
+            auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+            for (const auto& step_to_d : steps) {
+              StepCompletingAndStatusChangeAsync(
+                  step_to_d.job_id(), step_to_d.step_id(), craned_id,
+                  crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
+                  "AllocStepsRpcError", now);
+            }
+          } else {
+            std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+                failed_steps;
+            auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+            thread_pool_mtx.Lock();
+            for (const auto& [job_id, step_ids] :
+                 err->failed_job_step_ids_map()) {
+              alloc_step_failed_job_id_set.emplace(job_id);
+              failed_steps[job_id].insert(step_ids.steps().begin(),
+                                          step_ids.steps().end());
+            }
+            thread_pool_mtx.Unlock();
+            for (const auto& [job_id, step_ids] :
+                 err->failed_job_step_ids_map()) {
+              for (const auto step_id : step_ids.steps()) {
+                CRANE_FLOW_EMIT(StepAllocRpcFailed,
+                                ExecutionFlowContextForStep(alloc_flow_contexts,
+                                                            job_id, step_id),
+                                craned_id);
+                StepCompletingAndStatusChangeAsync(
+                    job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
+                    ExitCode::EC_RPC_ERR, "AllocStepsRejected", now);
+              }
+            }
+            CRANE_ERROR("AllocSteps for steps [{}] to {} failed by Craned.",
+                        util::JobStepsToString(failed_steps), craned_id);
+          }
 
-          // If jobs in job_uid_pairs failed to start,
-          // they will be moved to the completed jobs and do the following
-          // steps:
-          // 1. call g_meta_container->FreeResources() for the failed jobs.
-          // 2. Release all cgroups related to these failed jobs.
-          // 3. Move these jobs to the completed queue.
+          // Daemon AllocSteps failures are fed back into StepStatusChange.
+          // The state machine owns step cleanup, job finalization and FreeJobs.
           CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
 
           alloc_step_latch.count_down();
@@ -2038,41 +2156,34 @@ void JobScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      std::vector<std::unique_ptr<JobInCtld>> jobs_created;
-      for (auto& job : jobs_to_run) {
-        if (failed_job_id_set.contains(job->JobId())) {
-          jobs_failed.emplace_back(std::move(job));
-        } else {
-          jobs_created.emplace_back(std::move(job));
-        }
-      }
-
       begin = std::chrono::steady_clock::now();
 
-      // Now we have the ownerships of succeeded jobs in `jobs_created` and
-      // the ownerships of failed jobs in `jobs_failed`.
-      // For successfully created jobs, add them to m_node_to_jobs_map_.
-      // For failed jobs, free all the resource and move them to the completed
-      // queue.
-
-      // Set succeed jobs status and do callbacks.
-      for (auto& job : jobs_created) {
+      // Jobs that passed AllocJobs were moved to running map before AllocSteps
+      // so synthetic AllocSteps failures can be handled by StepStatusChange.
+      // Keep the original success side effects here and only run them for jobs
+      // whose daemon AllocSteps completed on all requested nodes.
+      for (auto* job : jobs_created) {
+        if (alloc_step_failed_job_id_set.contains(job->JobId())) {
+          CRANE_ERROR(
+              "[Job #{}] daemon AllocSteps failed; skip job-start callbacks "
+              "and let StepStatusChange finish cleanup.",
+              job->JobId());
+          continue;
+        }
         if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
           // Transitions the parent to Running and fires AFTER deps once.
           // The parent's deadline timer is intentionally NOT removed here:
           // later children still need it to enforce the array's deadline.
           // It is cleared when the parent itself finalizes (timer fire,
           // cancellation, or completion).
-          m_array_manager_->OnChildStarted(job.get());
+          m_array_manager_->OnChildStarted(job);
         } else {
           job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                        job->StartTime());
         }
-        // Start CraneCtld prolog before transferring ownership.
+        // Start CraneCtld prolog after daemon allocation succeeded.
         // Sets m_ctld_prolog_pending_ on DaemonStep if prolog is configured.
-        StartCraneCtldPrologThread(job.get());
-        // The ownership of JobInCtld is transferred to the running queue.
-        m_running_job_map_.emplace(job->JobId(), std::move(job));
+        StartCraneCtldPrologThread(job);
       }
 
       sched_cycle.SetAttribute("running_job_count_end",
@@ -2084,7 +2195,7 @@ void JobScheduler::ScheduleThread_() {
 
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
-          "Move jobs into running queue costed {} ms",
+          "Run job-start callbacks costed {} ms",
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
@@ -2183,6 +2294,25 @@ void JobScheduler::ScheduleThread_() {
     if (!sched_loop_final_array_parents.empty()) {
       ArrayManager::ProcessFinalParents(sched_loop_final_array_parents);
     }
+    for (auto& [craned_id, jobs] : sched_loop_jobs_to_free) {
+      m_rpc_worker_pool_->detach_task([craned_id, jobs = std::move(jobs)] {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (stub && !stub->Invalid()) {
+          auto err = stub->FreeJobs(jobs);
+          if (err != CraneErrCode::SUCCESS) {
+            CRANE_ERROR(
+                "Failed to compensate AllocJobs failure with FreeJobs for [{}] "
+                "on Node {}",
+                absl::StrJoin(jobs, ","), craned_id);
+          }
+        } else {
+          CRANE_ERROR(
+              "Failed to compensate AllocJobs failure with FreeJobs for [{}] "
+              "on Node {}, stub invalid",
+              absl::StrJoin(jobs, ","), craned_id);
+        }
+      });
+    }
 
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kJobScheduleIntervalMs));
@@ -2221,19 +2351,27 @@ void JobScheduler::StepScheduleThread_() {
 
         auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
 
+        std::unordered_set<CommonStepInCtld*> db_update_failed_steps;
+        std::vector<std::tuple<job_id_t, step_id_t, CranedId>>
+            db_update_failed_step_nodes;
         for (const auto& step : scheduled_steps) {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
-            CRANE_ERROR("Failed to update steps to embedded database.");
-            StepStatusChangeAsync(step->job_id, step->StepId(), "",
-                                  crane::grpc::JobStatus::Failed, 0,
-                                  "DbUpdateError", now);
+            CRANE_ERROR(
+                "[Step #{}.{}] Failed to update step in embedded database.",
+                step->job_id, step->StepId());
+            db_update_failed_steps.emplace(step);
+            for (const auto& craned_id : step->ExecutionNodes()) {
+              db_update_failed_step_nodes.emplace_back(
+                  step->job_id, step->StepId(), craned_id);
+            }
           }
         }
 
         absl::flat_hash_map<CranedId, std::vector<crane::grpc::StepToD>>
             craned_alloc_steps;
         for (auto* step : scheduled_steps) {
+          if (db_update_failed_steps.contains(step)) continue;
           for (const auto& craned_id : step->CranedIds()) {
             craned_alloc_steps[craned_id].emplace_back(
                 step->GetStepToD(craned_id));
@@ -2261,6 +2399,13 @@ void JobScheduler::StepScheduleThread_() {
           }
         }
 
+        for (const auto& [job_id, step_id, craned_id] :
+             db_update_failed_step_nodes) {
+          StepCompletingAndStatusChangeAsync(job_id, step_id, craned_id,
+                                             crane::grpc::JobStatus::Failed, 0,
+                                             "DbUpdateError", now);
+        }
+
         Mutex thread_pool_mtx;
         std::latch alloc_step_latch(craned_alloc_steps.size());
         for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
@@ -2271,9 +2416,9 @@ void JobScheduler::StepScheduleThread_() {
             if (stub == nullptr || stub->Invalid()) {
               thread_pool_mtx.Lock();
               for (const auto& step : steps)
-                StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
-                                      crane::grpc::JobStatus::Failed, 0,
-                                      "CranedDown", now);
+                StepCompletingAndStatusChangeAsync(
+                    step.job_id(), step.step_id(), craned_id,
+                    crane::grpc::JobStatus::Failed, 0, "CranedDown", now);
 
               thread_pool_mtx.Unlock();
 
@@ -2285,19 +2430,36 @@ void JobScheduler::StepScheduleThread_() {
             }
 
             auto err = stub->AllocSteps(steps);
-            if (err == CraneErrCode::SUCCESS) {
+            if (err.has_value() && err->failed_job_step_ids_map().empty()) {
               alloc_step_latch.count_down();
               return;
             }
-            CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
-                        util::StepToDRangeIdString(steps), craned_id,
-                        CraneErrStr(err));
-
             thread_pool_mtx.Lock();
-            for (const auto& step : steps)
-              StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
-                                    crane::grpc::JobStatus::Failed, 0,
-                                    "AllocRpcError", now);
+            if (!err.has_value()) {
+              CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
+                          util::StepToDRangeIdString(steps), craned_id,
+                          CraneErrStr(err.error()));
+
+              for (const auto& step : steps)
+                StepCompletingAndStatusChangeAsync(
+                    step.job_id(), step.step_id(), craned_id,
+                    crane::grpc::JobStatus::Failed, 0, "AllocRpcError", now);
+            } else {
+              std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+                  failed_steps;
+              for (const auto& [job_id, step_ids] :
+                   err->failed_job_step_ids_map()) {
+                failed_steps[job_id].insert(step_ids.steps().begin(),
+                                            step_ids.steps().end());
+                for (const auto step_id : step_ids.steps()) {
+                  StepCompletingAndStatusChangeAsync(
+                      job_id, step_id, craned_id,
+                      crane::grpc::JobStatus::Failed, 0, "AllocRejected", now);
+                }
+              }
+              CRANE_ERROR("AllocSteps for steps [{}] to {} failed by Craned.",
+                          util::JobStepsToString(failed_steps), craned_id);
+            }
             thread_pool_mtx.Unlock();
             CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
 
@@ -3627,7 +3789,7 @@ void JobScheduler::CollectJobIdsForModify(
   }
 }
 
-CraneExpected<std::future<CraneExpected<job_id_t>>>
+CraneExpectedRich<std::future<CraneExpected<job_id_t>>>
 JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   CRANE_TRACE_SCOPE_FROM_REMOTE(validate_span, "submit/validate",
                                 job->SubmitTraceparent());
@@ -3635,7 +3797,8 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
     validate_span.SetStatus(crane::StatusCode::kError, "invalid_uid");
-    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_UID,
+                                         "Invalid user ID: {}", job->uid));
   }
   job->SetUsername(job->password_entry->Username());
   validate_span.AddEvent("uid_validated");
@@ -3647,7 +3810,9 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
       CRANE_DEBUG("User '{}' not found in the account database",
                   job->Username());
       validate_span.SetStatus(crane::StatusCode::kError, "invalid_user");
-      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_USER,
+          "User '{}' does not exist in the account database", job->Username()));
     }
 
     if (job->account.empty()) {
@@ -3660,7 +3825,11 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
             "job",
             job->account);
         validate_span.SetStatus(crane::StatusCode::kError, "account_mismatch");
-        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
+            "Invalid --account value '{}': the user does not belong to this "
+            "account",
+            job->account));
       }
     }
   }
@@ -3673,14 +3842,19 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
         "account '{}'",
         job->Username(), job->partition_id, job->account);
     validate_span.SetStatus(crane::StatusCode::kError, "partition_denied");
-    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_PARTITION_MISSING,
+        "Invalid --partition value '{}': account '{}' is not allowed to use "
+        "this partition",
+        job->partition_id, job->account));
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       job->Username(), job->account);
   if (!enable_res) {
     validate_span.SetStatus(crane::StatusCode::kError, "account_disabled");
-    return std::unexpected(enable_res.error());
+    return std::unexpected(FormatRichErr(enable_res.error(), "{}",
+                                         CraneErrStr(enable_res.error())));
   }
 
   auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
@@ -3688,33 +3862,47 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (!result) {
     validate_span.SetStatus(crane::StatusCode::kError,
                             "account_not_in_partition");
-    return std::unexpected(result.error());
+    return std::unexpected(
+        FormatRichErr(result.error(), "{}", CraneErrStr(result.error())));
   }
   validate_span.AddEvent("partition_validated");
 
   job->SetSubmitTime(absl::Now());
 
   result = JobScheduler::HandleUnsetOptionalInJobToCtld(job.get());
-  if (result) result = JobScheduler::AcquireJobAttributes(job.get());
+  if (!result) {
+    return std::unexpected(
+        FormatRichErr(result.error(), "{}", CraneErrStr(result.error())));
+  }
+
+  auto validation_result = JobScheduler::AcquireJobAttributes(job.get());
   validate_span.AddEvent("attributes_acquired");
-  if (result) result = JobScheduler::CheckJobValidity(job.get());
+  if (validation_result)
+    validation_result = JobScheduler::CheckJobValidity(job.get());
   validate_span.AddEvent("validity_checked");
-  if (result) {
+  if (validation_result) {
     {
       const auto& user_ptr =
           g_account_manager->GetExistedUserInfo(job->Username());
-      if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      if (!user_ptr) {
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_USER,
+                          "User '{}' does not exist in the account database",
+                          job->Username()));
+      }
 
       uint32_t reserve_count = QosSubmitReserveCount(*job);
       if (reserve_count == 0) {
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "Invalid --array value: the requested array contains no tasks"));
       }
 
       auto res = g_account_meta_container->TryMallocMetaSubmitResource(
           *job, *user_ptr, reserve_count);
       if (res != CraneErrCode::SUCCESS) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
-        return std::unexpected(res);
+        return std::unexpected(FormatRichErr(res, "{}", CraneErrStr(res)));
       }
       g_account_meta_container->UserAddJob(user_ptr->name, reserve_count);
     }
@@ -3723,7 +3911,7 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     return {std::move(future)};
   }
 
-  return std::unexpected(result.error());
+  return std::unexpected(validation_result.error());
 }
 
 CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
@@ -5112,9 +5300,9 @@ void JobScheduler::CleanCancelJobQueueCb_() {
             }
           }
           for (auto step_id : step_ids)
-            StepStatusChangeAsync(job_id, step_id, craned_id,
-                                  crane::grpc::JobStatus::Cancelled,
-                                  ExitCode::EC_TERMINATED, "", end_timestamp);
+            StepCompletingAndStatusChangeAsync(
+                job_id, step_id, craned_id, crane::grpc::JobStatus::Cancelled,
+                ExitCode::EC_TERMINATED, "", end_timestamp);
         }
       }
       continue;
@@ -5541,41 +5729,38 @@ void JobScheduler::StartCraneCtldPrologThread(JobInCtld* job) {
   if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
     // TODO: cbatch job must be requeue
     job->DaemonStep()->SetCtldPrologPending(true);
-    g_thread_pool->detach_task([this, job_id = job->JobId(), env = job->env]() {
-      // run prolog ctld script
-      RunPrologEpilogArgs run_prolog_args{
-          .scripts = g_config.JobLifecycleHook.CranectldPrologs,
-          .envs = env,
-          .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
-          .run_uid = 0,
-          .run_gid = 0,
-          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
-      if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
-        run_prolog_args.timeout_sec =
-            g_config.JobLifecycleHook.PrologEpilogTimeout;
-      }
-      CRANE_TRACE(
-          "[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
-          job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
-      auto run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
-
-      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-      if (!run_prolog_result) {
-        auto status = run_prolog_result.error();
-        CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}", job_id,
-                    status.exit_code, status.signal_num);
-        this->StepStatusChangeAsync(
-            job_id, kDaemonStepId, kCtldPrologInternalNodeIndex,
-            crane::grpc::JobStatus::Cancelled, ExitCode::EC_PROLOG_ERR,
-            "CraneCtldPrologError", now);
-      } else {
-        CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
-        this->StepStatusChangeAsync(
-            job_id, kDaemonStepId, kCtldPrologInternalNodeIndex,
-            crane::grpc::JobStatus::Running, 0, "", now);
-      }
-    });
+    const job_id_t job_id = job->JobId();
+    RunPrologEpilogArgs run_prolog_args{
+        .scripts = g_config.JobLifecycleHook.CranectldPrologs,
+        .envs = job->env,
+        .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
+        .run_uid = 0,
+        .run_gid = 0,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
+      run_prolog_args.timeout_sec =
+          g_config.JobLifecycleHook.PrologEpilogTimeout;
+    }
+    CRANE_TRACE("[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
+                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
+    m_ctld_hook_executor_->Submit(
+        std::move(run_prolog_args),
+        [this, job_id](util::os::PrologEpilogResult result) {
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          if (!result.ok) {
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog failed status={}:{}",
+                        job_id, result.exit_code, result.signal_num);
+            this->StepCompletingAndStatusChangeAsync(
+                job_id, kDaemonStepId, kCtldPrologInternalNodeIndex,
+                crane::grpc::JobStatus::Cancelled, ExitCode::EC_PROLOG_ERR,
+                "CraneCtldPrologError", now);
+          } else {
+            CRANE_DEBUG("[Job #{}]: CraneCtldProlog success", job_id);
+            this->StepStatusChangeAsync(
+                job_id, kDaemonStepId, kCtldPrologInternalNodeIndex,
+                crane::grpc::JobStatus::Running, 0, "", now);
+          }
+        });
   }
 }
 
@@ -5583,14 +5768,282 @@ void JobScheduler::StepStatusChangeAsync(
     job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
     crane::grpc::JobStatus new_status, uint32_t exit_code, std::string reason,
     google::protobuf::Timestamp timestamp) {
-  m_job_status_change_queue_.enqueue({.job_id = job_id,
-                                      .step_id = step_id,
-                                      .exit_code = exit_code,
-                                      .new_status = new_status,
-                                      .craned_index = craned_index,
-                                      .reason = std::move(reason),
-                                      .timestamp = std::move(timestamp)});
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = new_status,
+         .craned_index = craned_index,
+         .reason = std::move(reason),
+         .timestamp = std::move(timestamp)});
+    m_job_status_change_queue_size_.fetch_add(1, std::memory_order_relaxed);
+  }
   m_job_status_change_async_handle_->send();
+}
+
+void JobScheduler::StepCompletingAndStatusChangeAsync(
+    job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+    crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+    std::string reason, google::protobuf::Timestamp timestamp) {
+  std::string terminal_reason = reason;
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = crane::grpc::JobStatus::Completing,
+         .craned_index = craned_index,
+         .reason = std::move(reason),
+         .timestamp = timestamp});
+    m_job_status_change_incoming_.push_back(
+        {.job_id = job_id,
+         .step_id = step_id,
+         .exit_code = exit_code,
+         .new_status = terminal_status,
+         .craned_index = craned_index,
+         .reason = std::move(terminal_reason),
+         .timestamp = std::move(timestamp)});
+    m_job_status_change_queue_size_.fetch_add(2, std::memory_order_relaxed);
+  }
+  m_job_status_change_async_handle_->send();
+}
+
+bool JobScheduler::SynthesizeStepStatusIfCranedDown_(
+    const CranedId& craned_id,
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
+    crane::grpc::JobStatus new_status, uint32_t exit_code, const char* reason) {
+  if (g_meta_container->CheckCranedOnline(craned_id)) return false;
+
+  CRANE_ASSERT(new_status == crane::grpc::JobStatus::Completing ||
+               new_status == crane::grpc::JobStatus::Completed);
+
+  CRANE_INFO(
+      "Craned {} is down; synthesizing {} for [{}] instead of waiting for "
+      "the node.",
+      craned_id, util::StepStatusToString(new_status),
+      util::JobStepsToString(steps));
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  for (const auto& [job_id, step_ids] : steps) {
+    for (step_id_t step_id : step_ids) {
+      StepStatusChangeAsync(job_id, step_id, craned_id, new_status, exit_code,
+                            reason, now);
+    }
+  }
+
+  return true;
+}
+
+void JobScheduler::DispatchFreeSteps_(
+    CranedId craned_id,
+    std::unordered_map<job_id_t, std::set<step_id_t>> steps,
+    std::unordered_map<job_id_t, crane::FlowContext> flow_contexts) {
+  if (steps.empty()) return;
+
+  m_rpc_worker_pool_->detach_task(
+      [this, craned_id = std::move(craned_id), steps = std::move(steps),
+       flow_contexts = std::move(flow_contexts)] {
+        // The free contract is anchored on the daemon and primary steps, so
+        // only those report an outcome. Every exit path below reports exactly
+        // once, including the two craned-down synthesis shortcuts.
+        auto emit_free_result = [&](bool succeeded, bool craned_down) {
+          for (const auto& [job_id, step_ids] : steps) {
+            for (const auto step_id : step_ids) {
+              if (step_id != kDaemonStepId && step_id != kPrimaryStepId)
+                continue;
+              auto flow_context =
+                  ExecutionFlowContextForStep(flow_contexts, job_id, step_id);
+              if (succeeded) {
+                CRANE_FLOW_EMIT(StepFreeRpcSucceeded, flow_context, craned_id);
+              } else if (craned_down) {
+                CRANE_FLOW_EMIT(StepFreeCranedDown, flow_context, craned_id);
+              } else {
+                CRANE_FLOW_EMIT(StepFreeRpcFailed, flow_context, craned_id);
+              }
+            }
+          }
+        };
+        auto synthesize_cleanup_if_down = [this, &craned_id, &steps] {
+          return SynthesizeStepStatusIfCranedDown_(
+              craned_id, steps, crane::grpc::JobStatus::Completed, 0,
+              "CranedDownDuringFreeSteps");
+        };
+        if (synthesize_cleanup_if_down()) {
+          emit_free_result(false, true);
+          return;
+        }
+
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        const bool stub_valid = stub && !stub->Invalid();
+        if (stub_valid) {
+          auto err = stub->FreeSteps(steps);
+          if (err == CraneErrCode::SUCCESS) {
+            emit_free_result(true, false);
+            return;
+          }
+        }
+
+        if (synthesize_cleanup_if_down()) {
+          emit_free_result(false, true);
+          return;
+        }
+
+        emit_free_result(false, !stub_valid);
+
+        if (stub_valid) {
+          CRANE_ERROR(
+              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure; "
+              "keep steps in Completing for periodic retry.",
+              util::JobStepsToString(steps), craned_id);
+        } else {
+          CRANE_ERROR(
+              "Failed to FreeSteps for [{}] steps on Node {}, stub invalid; "
+              "keep steps in Completing for periodic retry.",
+              util::JobStepsToString(steps), craned_id);
+        }
+      });
+}
+
+void JobScheduler::DispatchTerminateSteps_(
+    CranedId craned_id,
+    std::unordered_map<job_id_t, std::set<step_id_t>> steps) {
+  if (steps.empty()) return;
+
+  m_rpc_worker_pool_->detach_task([this, craned_id = std::move(craned_id),
+                                   steps = std::move(steps)] {
+    auto synthesize_completing_if_down = [this, &craned_id, &steps] {
+      return SynthesizeStepStatusIfCranedDown_(
+          craned_id, steps, crane::grpc::JobStatus::Completing, 0,
+          "CranedDownDuringTerminateSteps");
+    };
+    if (synthesize_completing_if_down()) return;
+
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    const bool stub_valid = stub && !stub->Invalid();
+    if (stub_valid) {
+      auto err = stub->TerminateSteps(steps);
+      if (err == CraneErrCode::SUCCESS) return;
+    }
+
+    if (synthesize_completing_if_down()) return;
+
+    if (stub_valid) {
+      CRANE_ERROR(
+          "Failed to TerminateSteps for [{}] steps on Node {}; waiting "
+          "for reconnect/lost-step recovery.",
+          util::JobStepsToString(steps), craned_id);
+    } else {
+      CRANE_ERROR(
+          "Failed to TerminateSteps for [{}] steps on Node {}; stub invalid "
+          "while Craned is still online.",
+          util::JobStepsToString(steps), craned_id);
+    }
+  });
+}
+
+void JobScheduler::HandleExecuteStepsFailure_(
+    const CranedId& failed_craned_id,
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      steps_to_terminate;
+  std::unordered_map<job_id_t, std::set<step_id_t>> steps_to_complete;
+
+  {
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    for (const auto& [job_id, step_ids] : steps) {
+      auto job_it = m_running_job_map_.find(job_id);
+      if (job_it == m_running_job_map_.end()) continue;
+
+      JobInCtld* job = job_it->second.get();
+      for (step_id_t step_id : step_ids) {
+        StepInCtld* step = nullptr;
+        if (step_id == kDaemonStepId)
+          step = job->DaemonStep();
+        else
+          step = job->GetStep(step_id);
+        if (step == nullptr ||
+            !step->ExecutionNodes().contains(failed_craned_id) ||
+            (step->Status() != crane::grpc::JobStatus::Running &&
+             step->Status() != crane::grpc::JobStatus::Completing)) {
+          continue;
+        }
+
+        steps_to_complete[job_id].insert(step_id);
+        step->SetPendingFinalResultIfUnset(crane::grpc::JobStatus::Failed,
+                                           ExitCode::EC_RPC_ERR);
+
+        for (const auto& craned_id : step->ExecutionNodes()) {
+          steps_to_terminate[craned_id][job_id].insert(step_id);
+        }
+      }
+    }
+  }
+
+  for (auto& [craned_id, node_steps] : steps_to_terminate) {
+    DispatchTerminateSteps_(std::move(craned_id), std::move(node_steps));
+  }
+
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  for (const auto& [job_id, step_ids] : steps_to_complete) {
+    for (step_id_t step_id : step_ids) {
+      StepStatusChangeAsync(job_id, step_id, failed_craned_id,
+                            crane::grpc::JobStatus::Completing,
+                            ExitCode::EC_RPC_ERR, "ExecRpcError", now);
+    }
+  }
+}
+
+void JobScheduler::RetryCompletingSteps_() {
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      steps_by_craned;
+
+  {
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    for (auto job_it = m_completing_step_ids_.begin();
+         job_it != m_completing_step_ids_.end();) {
+      auto running_job_it = m_running_job_map_.find(job_it->first);
+      if (running_job_it == m_running_job_map_.end()) {
+        job_it = m_completing_step_ids_.erase(job_it);
+        continue;
+      }
+
+      JobInCtld* job = running_job_it->second.get();
+      auto& step_ids = job_it->second;
+      for (auto step_it = step_ids.begin(); step_it != step_ids.end();) {
+        StepInCtld* step = nullptr;
+        if (*step_it == kDaemonStepId)
+          step = job->DaemonStep();
+        else
+          step = job->GetStep(*step_it);
+
+        if (step == nullptr ||
+            step->Status() != crane::grpc::JobStatus::Completing) {
+          step_it = step_ids.erase(step_it);
+          continue;
+        }
+
+        for (const CranedId& craned_id : step->RunningNodes())
+          steps_by_craned[craned_id][job_it->first].insert(*step_it);
+        ++step_it;
+      }
+
+      if (step_ids.empty())
+        job_it = m_completing_step_ids_.erase(job_it);
+      else
+        ++job_it;
+    }
+  }
+
+  if (steps_by_craned.empty()) return;
+
+  CRANE_DEBUG("Retrying FreeSteps for Completing steps on {} Craned nodes.",
+              steps_by_craned.size());
+  for (auto& [craned_id, steps] : steps_by_craned)
+    DispatchFreeSteps_(std::move(craned_id), std::move(steps));
 }
 
 void JobScheduler::JobStatusChangeTimerCb_() {
@@ -5598,32 +6051,48 @@ void JobScheduler::JobStatusChangeTimerCb_() {
 }
 
 void JobScheduler::JobStatusChangeAsyncCb_() {
-  if (m_job_status_change_queue_.size_approx() >=
-      g_config.CtldConf.StatusChangeBatchNum)
+  const size_t queue_size =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed);
+  if (queue_size >= g_config.CtldConf.StatusChangeBatchNum)
     m_clean_job_status_change_handle_->send();
 }
 
 void JobScheduler::CleanJobStatusChangeQueueCb_() {
-  size_t approximate_size = m_job_status_change_queue_.size_approx();
+  {
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
+    if (m_job_status_change_pending_.empty())
+      m_job_status_change_pending_.swap(m_job_status_change_incoming_);
+  }
+
+  const size_t queue_size =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed);
   const size_t max_drain_per_tick =
       std::max<uint32_t>(1, g_config.CtldConf.StatusChangeMaxDrainPerTick);
-  const size_t drain_size = std::min(approximate_size, max_drain_per_tick);
+  const size_t drain_size =
+      std::min(m_job_status_change_pending_.size(), max_drain_per_tick);
 
   std::vector<JobStatusChangeArg> args;
-  args.resize(drain_size);
-
-  size_t actual_size =
-      m_job_status_change_queue_.try_dequeue_bulk(args.begin(), drain_size);
-  if (actual_size == 0) return;
-  args.resize(actual_size);
+  args.reserve(drain_size);
+  for (size_t i = 0; i < drain_size; ++i) {
+    args.emplace_back(std::move(m_job_status_change_pending_.front()));
+    m_job_status_change_pending_.pop_front();
+  }
+  const size_t actual_size = args.size();
+  const size_t previous_queue_size = m_job_status_change_queue_size_.fetch_sub(
+      actual_size, std::memory_order_relaxed);
+  CRANE_ASSERT(previous_queue_size >= actual_size);
+  if (actual_size == 0) {
+    if (m_job_status_change_queue_size_.load(std::memory_order_relaxed) > 0)
+      m_clean_job_status_change_handle_->send();
+    return;
+  }
   auto begin_time = std::chrono::steady_clock::now();
   auto state_machine_begin = begin_time;
 
   CRANE_TRACE_SCOPE_NAMED(sc_span, "status_change/process");
   sc_span.SetAttribute("crane.dimension", "lifecycle");
   sc_span.SetAttribute("batch_size", static_cast<int64_t>(actual_size));
-  sc_span.SetAttribute("queue_size_approx",
-                       static_cast<int64_t>(approximate_size));
+  sc_span.SetAttribute("queue_size_approx", static_cast<int64_t>(queue_size));
   sc_span.SetAttribute("max_drain_per_tick",
                        static_cast<int64_t>(max_drain_per_tick));
   size_t running_transition_count = 0;
@@ -5647,15 +6116,20 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     LockGuard running_guard(&m_running_job_map_mtx_);
     LockGuard indexes_guard(&m_job_indexes_mtx_);
 
-    for (const auto& [job_id, step_id, exit_code, new_status, craned_index,
-                      reason, timestamp] : args) {
+    for (const auto& arg : args) {
+      const job_id_t job_id = arg.job_id;
+      const step_id_t step_id = arg.step_id;
+      const uint32_t exit_code = arg.exit_code;
+      const auto new_status = arg.new_status;
+      const CranedId& craned_index = arg.craned_index;
+      const std::string& reason = arg.reason;
+      const google::protobuf::Timestamp& timestamp = arg.timestamp;
       if (new_status == crane::grpc::JobStatus::Running) {
         ++running_transition_count;
       }
       if (IsFinishedStepStatus(new_status)) {
         ++terminal_step_count;
       }
-
       auto iter = m_running_job_map_.find(job_id);
       if (iter == m_running_job_map_.end()) {
         CRANE_WARN(
@@ -5689,12 +6163,14 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       } else {
         CommonStepInCtld* step = job->GetStep(step_id);
         if (step == nullptr) {
-          CRANE_WARN("[Step #{}.{}] Ignoring unknown step in StepStatusChange.",
-                     job_id, step_id);
+          CRANE_WARN(
+              "[Step #{}.{}] Ignoring unknown step in StepStatusChange "
+              "(status: {}, from: {}, exit_code: {}, reason: {}).",
+              job_id, step_id, util::StepStatusToString(new_status),
+              craned_index, exit_code, reason);
           continue;
         }
-        CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
-                    job_id, step_id, new_status);
+
         job_finished_status = step->StepStatusChange(
             new_status, exit_code, reason, craned_index, timestamp, &context);
       }
@@ -5804,31 +6280,32 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           CRANE_FLOW_EMIT(JobResourcesReleased, job->ExecutionFlowContext());
 
           if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
-            g_thread_pool->detach_task([job_id = job->JobId(),
-                                        env_copy = job->env]() {
-              RunPrologEpilogArgs run_epilog_ctld_args{
-                  .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
-                  .envs = env_copy,
-                  .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
-                  .run_uid = 0,
-                  .run_gid = 0,
-                  .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-              if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
-                run_epilog_ctld_args.timeout_sec =
-                    g_config.JobLifecycleHook.PrologEpilogTimeout;
-              }
-              CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
-                          run_epilog_ctld_args.run_uid,
-                          run_epilog_ctld_args.timeout_sec);
-              auto result = util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
-              if (!result) {
-                auto status = result.error();
-                CRANE_DEBUG("Job #[{}]: CraneCtldEpilog failed status={}:{}",
-                            job_id, status.exit_code, status.signal_num);
-              } else {
-                CRANE_DEBUG("Job #[{}]: CraneCtldEpilog success", job_id);
-              }
-            });
+            const job_id_t job_id = job->JobId();
+            RunPrologEpilogArgs run_epilog_ctld_args{
+                .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
+                .envs = job->env,
+                .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
+                .run_uid = 0,
+                .run_gid = 0,
+                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+            if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
+              run_epilog_ctld_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologEpilogTimeout;
+            }
+            CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
+                        run_epilog_ctld_args.run_uid,
+                        run_epilog_ctld_args.timeout_sec);
+            m_ctld_hook_executor_->Submit(
+                std::move(run_epilog_ctld_args),
+                [job_id](util::os::PrologEpilogResult result) {
+                  if (!result.ok) {
+                    CRANE_DEBUG(
+                        "Job #[{}]: CraneCtldEpilog failed status={}:{}",
+                        job_id, result.exit_code, result.signal_num);
+                  } else {
+                    CRANE_DEBUG("Job #[{}]: CraneCtldEpilog success", job_id);
+                  }
+                });
           }
 
           context.job_raw_ptrs.insert(job.get());
@@ -5844,6 +6321,25 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           m_running_job_map_.erase(iter);
         }  // end of normal completion path (else)
       }
+    }
+
+    // Keep a compact retry index instead of periodically scanning every running
+    // job. Both sets keep their pointed-to steps alive until this callback
+    // ends.
+    for (const StepInCtld* step : context.rn_step_raw_ptrs) {
+      if (step->Status() == crane::grpc::JobStatus::Completing) {
+        m_completing_step_ids_[step->job_id].insert(step->StepId());
+      } else if (auto it = m_completing_step_ids_.find(step->job_id);
+                 it != m_completing_step_ids_.end()) {
+        it->second.erase(step->StepId());
+        if (it->second.empty()) m_completing_step_ids_.erase(it);
+      }
+    }
+    for (const StepInCtld* step : context.step_raw_ptrs) {
+      auto it = m_completing_step_ids_.find(step->job_id);
+      if (it == m_completing_step_ids_.end()) continue;
+      it->second.erase(step->StepId());
+      if (it->second.empty()) m_completing_step_ids_.erase(it);
     }
 
     SpliceFinalArrayParentsFromPendingMapNoLock_(final_array_parents);
@@ -5907,7 +6403,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       for (auto* job : context.pending_append_steps_jobs) {
         auto* daemon_step = job->DaemonStep();
         for (const auto& node_id : job->CranedIds()) {
-          StepStatusChangeWithReasonAsync(
+          StepCompletingAndStatusChangeAsync(
               job->JobId(), daemon_step->StepId(), node_id,
               crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
               "Batch AppendSteps failed", now_ts);
@@ -5927,7 +6423,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   }
 
   // Fire-and-forget RPCs to craned nodes. Errors are handled via
-  // StepStatusChangeWithReasonAsync which feeds back into the status
+  // StepCompletingAndStatusChangeAsync which feeds back into the status
   // change queue. No need to block the status change processing thread.
   for (auto& [craned_id, steps] : context.craned_step_alloc_map) {
     std::unordered_map<job_id_t, crane::FlowContext> flow_contexts;
@@ -5939,39 +6435,64 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     m_rpc_worker_pool_->detach_task([this, craned_id, steps = std::move(steps),
                                      flow_contexts = std::move(flow_contexts)] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      bool success = false;
-      bool craned_down = !stub || stub->Invalid();
       if (stub && !stub->Invalid()) {
         auto err = stub->AllocSteps(steps);
-        success = err == CraneErrCode::SUCCESS;
-        if (!success) {
+        if (!err.has_value()) {
           CRANE_ERROR(
               "Failed to AllocSteps for [{}] steps on Node {}: Rpc failure",
               util::StepToDRangeIdString(steps), craned_id);
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          for (const auto& step : steps) {
+            CRANE_FLOW_EMIT(StepAllocRpcFailed,
+                            ExecutionFlowContextForStep(
+                                flow_contexts, step.job_id(), step.step_id()),
+                            craned_id);
+            StepCompletingAndStatusChangeAsync(
+                step.job_id(), step.step_id(), craned_id,
+                crane::grpc::JobStatus::Failed, ExitCode::EC_RPC_ERR,
+                "AllocStepsRpcError", now);
+          }
+        } else if (!err->failed_job_step_ids_map().empty()) {
+          std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+              failed_steps;
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+          for (const auto& [job_id, step_ids] :
+               err->failed_job_step_ids_map()) {
+            failed_steps[job_id].insert(step_ids.steps().begin(),
+                                        step_ids.steps().end());
+            for (const auto step_id : step_ids.steps()) {
+              CRANE_FLOW_EMIT(
+                  StepAllocRpcFailed,
+                  ExecutionFlowContextForStep(flow_contexts, job_id, step_id),
+                  craned_id);
+              StepCompletingAndStatusChangeAsync(
+                  job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
+                  ExitCode::EC_RPC_ERR, "AllocRejected", now);
+            }
+          }
+          CRANE_ERROR(
+              "Failed to AllocSteps for [{}] steps on Node {}: rejected "
+              "by Craned",
+              util::JobStepsToString(failed_steps), craned_id);
+        } else {
+          for (const auto& step : steps) {
+            CRANE_FLOW_EMIT(StepAllocRpcSucceeded,
+                            ExecutionFlowContextForStep(
+                                flow_contexts, step.job_id(), step.step_id()),
+                            craned_id);
+          }
         }
       } else {
         CRANE_ERROR(
             "Failed to AllocSteps for [{}] steps on Node {}: Craned down",
             util::StepToDRangeIdString(steps), craned_id);
-      }
-      for (const auto& step : steps) {
-        auto flow_context = ExecutionFlowContextForStep(
-            flow_contexts, step.job_id(), step.step_id());
-        if (success) {
-          CRANE_FLOW_EMIT(StepAllocRpcSucceeded, flow_context, craned_id);
-        } else if (craned_down) {
-          CRANE_FLOW_EMIT(StepAllocCranedDown, flow_context, craned_id);
-        } else {
-          CRANE_FLOW_EMIT(StepAllocRpcFailed, flow_context, craned_id);
-        }
-      }
-      // Preserve the pre-instrumentation state machine: a missing Craned
-      // forces the step to Failed, while an AllocSteps RPC error remains
-      // log-only here.
-      if (craned_down) {
         auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& step : steps) {
-          StepStatusChangeWithReasonAsync(
+          CRANE_FLOW_EMIT(StepAllocCranedDown,
+                          ExecutionFlowContextForStep(
+                              flow_contexts, step.job_id(), step.step_id()),
+                          craned_id);
+          StepCompletingAndStatusChangeAsync(
               step.job_id(), step.step_id(), craned_id,
               crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
               "CranedDown", now);
@@ -5988,40 +6509,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           it != context.job_execution_flow_contexts.end())
         flow_contexts.emplace(job_id, it->second);
     }
-    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps),
-                                     flow_contexts = std::move(flow_contexts)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      bool free_succeeded = false;
-      const bool craned_down = !stub || stub->Invalid();
-      if (stub && !stub->Invalid()) {
-        auto err = stub->FreeSteps(steps);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Failed to FreeSteps for [{}] steps on Node {}. Rpc failure",
-              util::JobStepsToString(steps), craned_id);
-        } else {
-          free_succeeded = true;
-        }
-      } else {
-        CRANE_ERROR(
-            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid",
-            util::JobStepsToString(steps), craned_id);
-      }
-      for (const auto& [job_id, step_ids] : steps) {
-        for (const auto step_id : step_ids) {
-          if (step_id != kDaemonStepId && step_id != kPrimaryStepId) continue;
-          auto flow_context =
-              ExecutionFlowContextForStep(flow_contexts, job_id, step_id);
-          if (free_succeeded) {
-            CRANE_FLOW_EMIT(StepFreeRpcSucceeded, flow_context, craned_id);
-          } else if (craned_down) {
-            CRANE_FLOW_EMIT(StepFreeCranedDown, flow_context, craned_id);
-          } else {
-            CRANE_FLOW_EMIT(StepFreeRpcFailed, flow_context, craned_id);
-          }
-        }
-      }
-    });
+    DispatchFreeSteps_(std::move(craned_id), std::move(steps),
+                       std::move(flow_contexts));
   }
 
   for (auto& [craned_id, steps] : context.craned_step_exec_map) {
@@ -6038,96 +6527,92 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           it != context.job_execution_flow_contexts.end())
         flow_contexts.emplace(job_id, it->second);
     }
-    m_rpc_worker_pool_->detach_task([this, craned_id, steps = std::move(steps),
-                                     traceparents = std::move(tp_map),
-                                     flow_contexts = std::move(flow_contexts)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-      for (const auto& [job_id, step_ids] : steps) {
-        for (const auto step_id : step_ids) {
-          CRANE_FLOW_EMIT(
-              StepExecuteRequested,
-              ExecutionFlowContextForStep(flow_contexts, job_id, step_id),
-              craned_id);
-        }
-      }
-      if (stub && !stub->Invalid()) {
-        auto first_job_id = steps.begin()->first;
-        CRANE_TRACE_SCOPE_NAMED(rpc_span, "job/rpc_execute");
-        rpc_span.SetAttribute("job_id", first_job_id);
-        rpc_span.SetAttribute("craned_id", std::string{craned_id});
-
-        CraneExpected failed_steps = stub->ExecuteSteps(steps, traceparents);
-        if (!failed_steps.has_value()) {
+    m_rpc_worker_pool_->detach_task(
+        [this, craned_id, steps = std::move(steps),
+         traceparents = std::move(tp_map),
+         flow_contexts = std::move(flow_contexts)] mutable {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
           for (const auto& [job_id, step_ids] : steps) {
             for (const auto step_id : step_ids) {
               CRANE_FLOW_EMIT(
-                  StepExecuteRpcFailed,
+                  StepExecuteRequested,
                   ExecutionFlowContextForStep(flow_contexts, job_id, step_id),
                   craned_id);
             }
           }
-        } else {
-          const auto& rejected_steps = failed_steps.value();
-          for (const auto& [job_id, step_ids] : steps) {
-            auto rejected_it = rejected_steps.find(job_id);
-            for (const auto step_id : step_ids) {
-              const bool rejected = rejected_it != rejected_steps.end() &&
-                                    rejected_it->second.contains(step_id);
-              auto flow_context =
-                  ExecutionFlowContextForStep(flow_contexts, job_id, step_id);
-              if (rejected) {
-                CRANE_FLOW_EMIT(StepExecuteRpcRejected, flow_context,
-                                craned_id);
-              } else {
-                CRANE_FLOW_EMIT(StepExecuteRpcSucceeded, flow_context,
-                                craned_id);
+          if (stub && !stub->Invalid()) {
+            auto first_job_id = steps.begin()->first;
+            CRANE_TRACE_SCOPE_NAMED(rpc_span, "job/rpc_execute");
+            rpc_span.SetAttribute("job_id", first_job_id);
+            rpc_span.SetAttribute("craned_id", std::string(craned_id));
+
+            CraneExpected failed_steps = stub->ExecuteSteps(steps, traceparents);
+            if (!failed_steps.has_value()) {
+              for (const auto& [job_id, step_ids] : steps) {
+                for (const auto step_id : step_ids) {
+                  CRANE_FLOW_EMIT(StepExecuteRpcFailed,
+                                  ExecutionFlowContextForStep(flow_contexts,
+                                                              job_id, step_id),
+                                  craned_id);
+                }
+              }
+              CRANE_ERROR(
+                  "ExecuteSteps RPC failed for [{}] steps on Node {}; "
+                  "terminating affected steps.",
+                  util::JobStepsToString(steps), craned_id);
+              g_thread_pool->detach_task(
+                  [this, craned_id, steps = std::move(steps)] {
+                    HandleExecuteStepsFailure_(craned_id, steps);
+                  });
+            } else {
+              const auto& rejected_steps = failed_steps.value();
+              for (const auto& [job_id, step_ids] : steps) {
+                auto rejected_it = rejected_steps.find(job_id);
+                for (const auto step_id : step_ids) {
+                  const bool rejected = rejected_it != rejected_steps.end() &&
+                                        rejected_it->second.contains(step_id);
+                  auto flow_context = ExecutionFlowContextForStep(
+                      flow_contexts, job_id, step_id);
+                  if (rejected) {
+                    CRANE_FLOW_EMIT(StepExecuteRpcRejected, flow_context,
+                                    craned_id);
+                  } else {
+                    CRANE_FLOW_EMIT(StepExecuteRpcSucceeded, flow_context,
+                                    craned_id);
+                  }
+                }
+              }
+              if (!rejected_steps.empty()) {
+                CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
+                            util::JobStepsToString(rejected_steps), craned_id);
+                g_thread_pool->detach_task(
+                    [this, craned_id, steps = failed_steps.value()] {
+                      HandleExecuteStepsFailure_(craned_id, steps);
+                    });
+              }
+            }
+          } else {
+            CRANE_ERROR(
+                "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
+                util::JobStepsToString(steps), craned_id);
+            for (const auto& [job_id, step_ids] : steps) {
+              for (const auto& step_id : step_ids) {
+                CRANE_FLOW_EMIT(
+                    StepExecuteCranedDown,
+                    ExecutionFlowContextForStep(flow_contexts, job_id, step_id),
+                    craned_id);
+                StepCompletingAndStatusChangeAsync(
+                    job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
+                    ExitCode::EC_CRANED_DOWN, "CranedDown", now);
               }
             }
           }
-        }
-        if (failed_steps.has_value() && !failed_steps.value().empty()) {
-          const auto& rejected_steps = failed_steps.value();
-          CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
-                      util::JobStepsToString(rejected_steps), craned_id);
-          for (const auto& [job_id, step_ids] : rejected_steps) {
-            for (const auto step_id : step_ids) {
-              StepStatusChangeWithReasonAsync(
-                  job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
-                  ExitCode::EC_RPC_ERR, "ExecRpcError", now);
-            }
-          }
-        }
-      } else {
-        CRANE_ERROR(
-            "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
-            util::JobStepsToString(steps), craned_id);
-        for (const auto& [job_id, step_ids] : steps) {
-          for (const auto step_id : step_ids) {
-            CRANE_FLOW_EMIT(
-                StepExecuteCranedDown,
-                ExecutionFlowContextForStep(flow_contexts, job_id, step_id),
-                craned_id);
-            StepStatusChangeWithReasonAsync(
-                job_id, step_id, craned_id, crane::grpc::JobStatus::Failed,
-                ExitCode::EC_CRANED_DOWN, "CranedDown", now);
-          }
-        }
-      }
-    });
+        });
   }
 
   for (auto& [craned_id, steps] : context.craned_cancel_steps) {
-    m_rpc_worker_pool_->detach_task([craned_id, steps = std::move(steps)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        auto err = stub->TerminateSteps(steps);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to TerminateSteps for [{}] jobs on Node {}",
-                      util::JobStepsToString(steps), craned_id);
-        }
-      }
-    });
+    DispatchTerminateSteps_(std::move(craned_id), std::move(steps));
   }
 
   for (auto& [craned_id, jobs] : context.craned_jobs_to_free) {
@@ -6182,14 +6667,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         auto flow_it = flow_contexts.find(job_id);
         if (flow_it == flow_contexts.end()) continue;
         CRANE_FLOW_EMIT(JobFreeResult, flow_it->second, craned_id, success);
-      }
-      if (!success) {
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-        for (const auto& job_id : jobs) {
-          StepStatusChangeWithReasonAsync(
-              job_id, kDaemonStepId, craned_id, crane::grpc::JobStatus::Failed,
-              ExitCode::EC_RPC_ERR, "Rpc failure when free job", now);
-        }
       }
     });
   }
@@ -6508,13 +6985,15 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE("Cleaning {} StepStatusChanges cost {} ms.", actual_size,
               total_elapsed_ms);
 
-  if (m_job_status_change_queue_.size_approx() > 0)
-    m_clean_job_status_change_handle_->send();
+  const bool has_more =
+      m_job_status_change_queue_size_.load(std::memory_order_relaxed) > 0;
+  if (has_more) m_clean_job_status_change_handle_->send();
 }
 
 void JobScheduler::QueryJobsInRam(
     const crane::grpc::QueryJobsInfoRequest* request,
-    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map) {
+    std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
+    size_t num_limit) {
   auto now = absl::Now();
 
   auto job_rng_filter_time = [&](auto* job_ptr) {
@@ -6638,9 +7117,6 @@ void JobScheduler::QueryJobsInRam(
     }
     return false;
   };
-
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
-                                               : request->num_limit();
 
   auto get_job_ptr_by_id = [&](job_id_t job_id) -> JobInCtld* {
     auto pending_it = m_pending_job_map_.find(job_id);
@@ -7959,12 +8435,15 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
   return {};
 }
 
-CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   auto part_it = g_config.Partitions.find(job->partition_id);
   if (part_it == g_config.Partitions.end()) {
     CRANE_ERROR("Failed to call AcquireJobAttributes: no such partition {}",
                 job->partition_id);
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARTITION,
+        "Invalid --partition value '{}': partition does not exist",
+        job->partition_id));
   }
 
   job->partition_priority = part_it->second.priority;
@@ -7986,7 +8465,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         "Job {} has both mem_per_cpu and mem_per_node set by user, which is "
         "not allowed.",
         job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_RESOURCE,
+                      "--mem and --mem-per-cpu cannot be specified together"));
   }
 
   CRANE_ASSERT(job->req_node_res_view.GetCpuCount() == cpu_t{0});
@@ -8014,7 +8495,11 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
           "Neither mem_per_cpu nor mem_per_node is set for job #{} and "
           "partition {}, and no default is provided by partition meta.",
           job->JobId(), job->partition_id);
-      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_RESOURCE,
+          "Neither --mem nor --mem-per-cpu was specified, and partition '{}' "
+          "has no default memory configured",
+          job->partition_id));
     }
   }
 
@@ -8088,7 +8573,32 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         "Job #{}: ntasks_per_node_min ({}) > ntasks_per_node_max ({}), "
         "infeasible constraints.",
         job->JobId(), job->ntasks_per_node_min, job->ntasks_per_node_max);
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    if (job->JobToCtld().has_mem_per_node()) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "--mem={} cannot be satisfied with --ntasks-per-node={} and "
+          "--cpus-per-task={} under partition '{}' memory limits; reduce "
+          "--mem or increase the task or CPU count",
+          util::ReadableMemory(job->JobToCtld().mem_per_node()),
+          job->JobToCtld().ntasks_per_node(),
+          job->req_task_res_view.CpuCountDouble(), job->partition_id));
+    }
+    if (job->JobToCtld().has_mem_per_cpu()) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "--mem-per-cpu={} cannot be satisfied with --ntasks-per-node={} and "
+          "--cpus-per-task={} under partition '{}' memory limits; reduce "
+          "--mem-per-cpu or adjust the task or CPU count",
+          util::ReadableMemory(job->JobToCtld().mem_per_cpu()),
+          job->JobToCtld().ntasks_per_node(),
+          job->req_task_res_view.CpuCountDouble(), job->partition_id));
+    }
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARAM,
+        "--ntasks-per-node={} and --cpus-per-task={} cannot satisfy the "
+        "default memory limits of partition '{}'; adjust the task or CPU count",
+        job->JobToCtld().ntasks_per_node(),
+        job->req_task_res_view.CpuCountDouble(), job->partition_id));
   }
 
   CRANE_TRACE(
@@ -8108,13 +8618,17 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   if (!check_qos_result) {
     CRANE_ERROR("Failed to call CheckQosLimitOnJob: {}",
                 CraneErrStr(check_qos_result.error()));
-    return check_qos_result;
+    return std::unexpected(FormatRichErr(
+        check_qos_result.error(), "{}", CraneErrStr(check_qos_result.error())));
   }
 
   if (!job->JobToCtld().nodelist().empty() && job->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+    if (!ok)
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                                           "Invalid --nodelist value '{}'",
+                                           job->JobToCtld().nodelist()));
 
     for (auto&& node : nodes) job->included_nodes.emplace(std::move(node));
   }
@@ -8122,7 +8636,10 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   if (!job->JobToCtld().excludes().empty() && job->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+    if (!ok)
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+          "Invalid --exclude value '{}'", job->JobToCtld().excludes()));
 
     for (auto&& node : nodes) job->excluded_nodes.emplace(std::move(node));
   }
@@ -8133,7 +8650,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());
-      return std::unexpected(CraneErrCode::ERR_LICENSE_LEGAL_FAILED);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_LICENSE_LEGAL_FAILED,
+          "Invalid --licenses value: {}", check_licenses_result.error()));
     }
   }
 
@@ -8146,7 +8665,9 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
       if (!wckey_scoped_ptr) {
         CRANE_DEBUG("Job wckey '{}' not found in the wckey database, rejected.",
                     wckey);
-        return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_WCKEY,
+                                             "Invalid --wckey value '{}'",
+                                             wckey));
       }
 
       job->wckey = wckey;
@@ -8166,27 +8687,37 @@ CraneExpected<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   return {};
 }
 
-CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   if (!CheckIfTimeLimitIsValid(job->time_limit))
-    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_TIME_TIMIT_BEYOND,
+        "Invalid --time value: the requested time limit exceeds the allowed "
+        "range"));
 
   const auto& job_to_ctld = job->JobToCtld();
   if (job_to_ctld.has_array_spec()) {
     if (job_to_ctld.type() != crane::grpc::JobType::Batch) {
       CRANE_DEBUG("Job #{} uses array_spec on non-batch job type {}.",
                   job->JobId(), static_cast<int>(job_to_ctld.type()));
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                        "--array is only valid for batch jobs"));
     }
 
     const auto& array_spec = job_to_ctld.array_spec();
     if (array_spec.end() < array_spec.start()) {
       CRANE_DEBUG("Job #{} has invalid array range [{}-{}].", job->JobId(),
                   array_spec.start(), array_spec.end());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: range end {} is smaller than start {}",
+          array_spec.end(), array_spec.start()));
     }
     if (array_spec.has_stride() && array_spec.stride() == 0) {
       CRANE_DEBUG("Job #{} has invalid array stride 0.", job->JobId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: stride must be greater than 0"));
     }
     uint64_t stride = array_spec.has_stride() ? array_spec.stride() : 1;
     uint64_t start = array_spec.start();
@@ -8195,26 +8726,41 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
     if (task_count == 0 || task_count > kMaxArrayTaskCount) {
       CRANE_DEBUG("Job #{} has invalid array task count {}.", job->JobId(),
                   task_count);
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: task count {} exceeds the limit of {}",
+          task_count, kMaxArrayTaskCount));
     }
     if (array_spec.has_max_concurrent() && array_spec.max_concurrent() == 0) {
       CRANE_DEBUG("Job #{} has invalid array max_concurrent 0.", job->JobId());
-      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --array value: maximum concurrent task count must be "
+          "greater than 0"));
     }
   }
 
   // Check res req valid
   if (job->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARAM,
+        "Invalid --mem/--mem-per-cpu value: requested memory must be greater "
+        "than 0"));
   }
   if (job->req_task_res_view.CpuCountDouble() == 0) {
     CRANE_DEBUG("Job #{} has zero cpu request.", job->JobId());
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                      "Invalid --cpus-per-task value: requested CPUs must be "
+                      "greater than 0"));
   }
 
   if (job->deadline_time <= job->SubmitTime())
-    return std::unexpected(CraneErrCode::ERR_INVALID_DEADLINE);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_DEADLINE,
+        "Invalid --deadline value: deadline must be later than submission "
+        "time"));
 
   // Check whether the selected partition is able to run this job.
   std::unordered_set<std::string> avail_nodes;
@@ -8238,7 +8784,9 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
                                    .res_total_inc_dead.GetMemorySwBytes()),
           util::ReadableGresMap(
               metas_ptr->partition_global_meta.res_total.GetGresMap()));
-      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}",
+                        CraneErrStr(CraneErrCode::ERR_NO_RESOURCE)));
     }
 
     if (job->node_num > metas_ptr->craned_ids.size()) {
@@ -8246,7 +8794,10 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           "Nodes not enough for job #{}. "
           "Partition total Nodes: {}",
           job->JobId(), metas_ptr->craned_ids.size());
-      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_NUM);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_NODE_NUM,
+          "Invalid --nodes value {}: partition '{}' contains only {} nodes",
+          job->node_num, job->partition_id, metas_ptr->craned_ids.size()));
     }
 
     if (job->reservation != "") {
@@ -8254,7 +8805,10 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
               job->reservation)) {
         CRANE_TRACE("Reservation {} not found for job #{}", job->reservation,
                     job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "Invalid --reservation value '{}': reservation does not exist",
+            job->reservation));
       }
 
       auto resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
@@ -8262,7 +8816,11 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
       if (resv_meta->part_id != "" && resv_meta->part_id != job->partition_id) {
         CRANE_TRACE("Partition {} not allowed for reservation {} for job #{}",
                     job->partition_id, job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--partition value '{}' does not match reservation '{}'; use "
+            "partition '{}' or choose another reservation",
+            job->partition_id, job->reservation, resv_meta->part_id));
       }
 
       // if passed, either not in the black list (true, true)
@@ -8271,13 +8829,22 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           !resv_meta->accounts.contains(job->account)) {
         CRANE_TRACE("Account {} not allowed for reservation {} for job #{}",
                     job->account, job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--account value '{}' is not allowed by reservation '{}'; use an "
+            "allowed account or choose another reservation",
+            job->account, job->reservation));
       }
       if (resv_meta->users_black_list ^
           !resv_meta->users.contains(job->Username())) {
         CRANE_TRACE("User {} not allowed for reservation {} for job #{}",
                     job->Username(), job->reservation, job->JobId());
-        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                          "Current user is not allowed by --reservation '{}'; "
+                          "choose another reservation or contact the "
+                          "administrator",
+                          job->reservation));
       }
 
       if (!job->included_nodes.empty()) {
@@ -8289,7 +8856,12 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
           if (!reserved_craned_id_set.contains(craned_id)) {
             CRANE_TRACE("Craned {} is not in the reservation {} for job #{}",
                         craned_id, job->reservation, job->JobId());
-            return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+            return std::unexpected(FormatRichErr(
+                CraneErrCode::ERR_INVALID_PARAM,
+                "--nodelist value includes node '{}', which is not part of "
+                "reservation '{}'; remove the node from --nodelist or choose "
+                "another reservation",
+                craned_id, job->reservation));
           }
         }
       }
@@ -8315,7 +8887,9 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
         "Resource not enough. Job #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         job->JobId(), job->node_num, avail_nodes.size());
-    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_NO_ENOUGH_NODE, "{}",
+                      CraneErrStr(CraneErrCode::ERR_NO_ENOUGH_NODE)));
   }
 
   return {};
@@ -8538,10 +9112,10 @@ void JobScheduler::TerminateJobsOnCraned(const CranedId& craned_id,
     std::vector<job_id_t> job_ids(it->second.begin(), it->second.end());
 
     for (job_id_t job_id : job_ids)
-      StepStatusChangeAsync(job_id, kDaemonStepId, craned_id,
-                            crane::grpc::JobStatus::Failed, exit_code,
-                            "Terminated",
-                            google::protobuf::util::TimeUtil::GetCurrentTime());
+      StepCompletingAndStatusChangeAsync(
+          job_id, kDaemonStepId, craned_id, crane::grpc::JobStatus::Failed,
+          exit_code, "Terminated",
+          google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     CRANE_TRACE("No job is executed by craned {}. Ignore cleaning step...",
                 craned_id);

@@ -9,6 +9,8 @@ add_executable(embedded_db_client_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.cpp
 
         EmbeddedDbClientTest.cpp
         )
@@ -75,6 +77,7 @@ target_link_libraries(ctld_public_defs_test
 
         Utility_PublicHeader
         Utility_PasswordEntry
+        Utility_PrologEpilogExecutor
         uvw
         cxxopts
         Threads::Threads

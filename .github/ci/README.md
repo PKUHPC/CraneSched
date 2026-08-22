@@ -15,6 +15,24 @@ privileged job is dispatched only when all of the following are true:
   reran that same workflow run;
 - Backend and FrontEnd refs resolve to full commit SHAs.
 
+For every authorized Backend pull-request event or approved rerun, the hosted
+job looks for an exact, case-sensitive branch with the same name in
+`PKUHPC/CraneSched-FrontEnd`. It uses GitHub's branch-reference API, so a tag or
+other commit-ish value with the same name does not match. Only an explicit 404
+for that branch permits fallback to FrontEnd `master`; permission, rate-limit,
+timeout and malformed-response failures stop authorization. The selected branch
+head is immediately verified and locked to its full commit SHA. The privileged
+runner checks out only that SHA and never falls back during checkout if the
+branch subsequently moves or is deleted.
+
+Approved fork pull requests use the same central FrontEnd branch lookup; no
+FrontEnd fork is queried. Backend `push` and `schedule` events always select the
+exact FrontEnd `master` branch, while `workflow_dispatch` retains its explicit
+`frontend_ref` commit-ish input. FrontEnd pushes do not trigger Backend CI.
+Selection is recalculated only for a new Backend event or a manual workflow
+rerun, then recorded as `matching_branch`, `master_fallback`, `master_default`
+or `manual_ref` in the job summary and sanitized artifact manifest.
+
 The privileged job uses the dedicated repository-scoped runner selected by the
 exact `cranesystemtest` label. Repository registration prevents other
 repositories from dispatching to it, but GitHub does not restrict which
@@ -70,8 +88,11 @@ temporary merge commit. Protect
 `.github/workflows/**` and `.github/ci/**` through branch protection and
 required maintainer review because this static guard is an accidental-change
 check, not a GitHub-enforced workflow authorization boundary.
-The sanitized artifact manifest and summary retain the base, head, and routing
-SHAs so reviewers can distinguish tested source from the inspected merge tree.
+The sanitized artifact manifest and summary retain the base, head, routing and
+authorized FrontEnd revisions so reviewers can distinguish tested source from
+the inspected merge tree. If a generated plan or aggregate result omits the
+FrontEnd SHA or disagrees with the authorized SHA, artifact collection reports
+an infrastructure error with exit code `2`.
 
 ## Repository variables
 

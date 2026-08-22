@@ -6,7 +6,7 @@ add_subdirectory(FileLock)
 add_subdirectory(Lua)
 add_subdirectory(PasswordEntry)
 add_subdirectory(PluginClient)
+add_subdirectory(PrologEpilogExecutor)
 add_subdirectory(Pmix)
 add_subdirectory(PublicHeader)
-
 add_subdirectory(OpenTelemetry)

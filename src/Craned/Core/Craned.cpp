@@ -313,8 +313,8 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
 
   g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
       supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
-  g_config.Supervisor.ThreadPoolSize =
-      YamlValueOr<uint32_t>(supervisor_config["ThreadPoolSize"], 0);
+  g_config.Supervisor.ThreadPoolSize = YamlValueOr<uint32_t>(
+      supervisor_config["ThreadPoolSize"], kDefaultSupervisorThreadPoolSize);
 }
 
 void ParseContainerConfig(const YAML::Node& container_config) {
@@ -1364,6 +1364,10 @@ void ParseConfig(int argc, char** argv) {
 void CreateRequiredDirectories() {
   bool ok;
   ok = util::os::CreateFolders(g_config.CranedScriptDir);
+  if (!ok) std::exit(1);
+
+  ok = util::os::CreateFolders(g_config.CraneBaseDir /
+                               kDefaultSupervisorUnixSockDir);
   if (!ok) std::exit(1);
 
   ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);

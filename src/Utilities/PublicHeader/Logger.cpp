@@ -19,6 +19,8 @@
 #include "crane/Logger.h"
 
 static LoggerSinks default_sinks{};
+static spdlog::async_overflow_policy default_overflow_policy =
+    spdlog::async_overflow_policy::block;
 
 std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string& level) {
@@ -41,7 +43,9 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
 
 void InitLogger(spdlog::level::level_enum level,
                 const std::string& log_file_path, bool enable_console,
-                uint64_t max_file_size, uint64_t max_file_num) {
+                uint64_t max_file_size, uint64_t max_file_num,
+                size_t async_queue_size, size_t async_thread_count,
+                bool async_block_when_full) {
   std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, max_file_size, max_file_num);
@@ -57,12 +61,17 @@ void InitLogger(spdlog::level::level_enum level,
     sinks.push_back(console_sink);
 
     default_sinks.console_sink = console_sink;
+  } else {
+    default_sinks.console_sink.reset();
   }
 
-  spdlog::init_thread_pool(256, 1);
+  spdlog::init_thread_pool(async_queue_size, async_thread_count);
+  default_overflow_policy = async_block_when_full
+                                ? spdlog::async_overflow_policy::block
+                                : spdlog::async_overflow_policy::overrun_oldest;
   auto logger = std::make_shared<spdlog::async_logger>(
       "default", sinks.begin(), sinks.end(), spdlog::thread_pool(),
-      spdlog::async_overflow_policy::block);
+      default_overflow_policy);
   spdlog::set_default_logger(logger);
 
   spdlog::flush_on(spdlog::level::err);
@@ -94,7 +103,7 @@ std::shared_ptr<spdlog::async_logger> AddLogger(
   }
   auto logger = std::make_shared<spdlog::async_logger>(
       name, sinks.begin(), sinks.end(), spdlog::thread_pool(),
-      spdlog::async_overflow_policy::block);
+      default_overflow_policy);
   logger->set_level(level);
   spdlog::register_logger(logger);
   return logger;
@@ -119,7 +128,7 @@ std::shared_ptr<spdlog::async_logger> AddLogger(const std::string& name,
 
   auto logger = std::make_shared<spdlog::async_logger>(
       name, sinks.begin(), sinks.end(), spdlog::thread_pool(),
-      spdlog::async_overflow_policy::block);
+      default_overflow_policy);
   logger->set_level(level);
   spdlog::register_logger(logger);
   return logger;

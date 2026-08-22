@@ -26,13 +26,6 @@ enum class TestFinalizeCause : uint8_t {
   kCancelled,
 };
 
-TEST(ChildHandshakeTest, RequiresReceivedAffirmativeChildResponse) {
-  EXPECT_TRUE(ChildHandshakeSucceeded(true, true));
-  EXPECT_FALSE(ChildHandshakeSucceeded(false, true));
-  EXPECT_FALSE(ChildHandshakeSucceeded(true, false));
-  EXPECT_FALSE(ChildHandshakeSucceeded(false, false));
-}
-
 TEST(TaskFinalizationStateTest, NaturalExitPreservesRecordedFailure) {
   TaskFinalizationState<TestFinalizeCause> state;
   EXPECT_TRUE(state.RecordIntent({.cause = TestFinalizeCause::kSpawnFailed,

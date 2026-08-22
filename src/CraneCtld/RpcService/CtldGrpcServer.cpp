@@ -149,17 +149,11 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     // Terminate steps on other alive nodes (normal cancel flow)
     g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
                                                 request->craned_id());
-    // For the crashed node: send synthetic Completing + Terminal
-    // (two independent events, not "terminal implies completing")
+    // For the crashed node: enqueue ordinary outer-status events in order.
+    // CTLD status handling only reads JobStatusChangeArg::new_status.
     for (const auto& [job_id, steps] : orphaned_steps) {
       for (const auto step_id : steps | std::views::reverse) {
-        // Synthetic Completing → drives AllNodesCompleting → FreeSteps
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Completing, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-        // Synthetic Terminal → drives AllNodesFinished → release/FreeJobs
-        g_job_scheduler->StepStatusChangeWithReasonAsync(
+        g_job_scheduler->StepCompletingAndStatusChangeAsync(
             job_id, step_id, request->craned_id(),
             crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);
@@ -428,7 +422,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 result = std::unexpected(CraneErrStr(job_result.error()));
               }
             } else {
-              result = std::unexpected(CraneErrStr(submit_result.error()));
+              result = std::unexpected(submit_result.error().description());
             }
           }
 
@@ -772,7 +766,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
       enqueue_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
       response->set_ok(false);
-      response->set_code(result.error());
+      response->set_code(result.error().code());
+      response->set_reason(result.error().description());
     }
   }
 
@@ -866,7 +861,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
   submit_span.SetAttribute("crane.submit_id", submit_id);
 
-  std::vector<CraneExpected<std::future<CraneExpected<job_id_t>>>> results;
+  std::vector<CraneExpectedRich<std::future<CraneExpected<job_id_t>>>> results;
 
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
@@ -900,7 +895,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       }
     } else {
       response->mutable_job_id_list()->Add(0);
-      response->mutable_code_list()->Add(result.error());
+      response->mutable_code_list()->Add(result.error().code());
     }
   } else {
     // Non-array jobs: submit individually (repeat count).
@@ -926,7 +921,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
         }
       } else {
         response->mutable_job_id_list()->Add(0);
-        response->mutable_code_list()->Add(res.error());
+        response->mutable_code_list()->Add(res.error().code());
       }
     }
   }
@@ -1593,12 +1588,14 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+
+  const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
+                                                     : request->num_limit();
+  const size_t probe_limit = num_limit + 1;
+
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
   // Query jobs in RAM
-  g_job_scheduler->QueryJobsInRam(request, &job_info_map);
-
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
-                                               : request->num_limit();
+  g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
   auto sort_truncate_and_move_to_proto = [&job_info_map,
                                           response](size_t limit) -> void {
@@ -1617,11 +1614,13 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
                            : (a.status() < b.status());
               });
 
-    if (job_info_list->size() > limit)
+    const bool has_more = job_info_list->size() > limit;
+    response->set_has_more(has_more);
+    if (has_more)
       job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);
   };
 
-  if (job_info_map.size() >= num_limit ||
+  if (job_info_map.size() >= probe_limit ||
       !request->option_include_completed_jobs()) {
     if (request->option_include_completed_jobs()) {
       // Fetch job finished steps in Mongodb
@@ -1637,8 +1636,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
 
   // Query completed jobs in Mongodb
   // (only for cacct, which sets `option_include_completed_jobs` to true)
-  if (!g_db_client->FetchJobRecords(request, &job_info_map,
-                                    num_limit - job_info_map.size())) {
+  // Fetch a full probe window because records already present in RAM can also
+  // occur in MongoDB and must not consume the extra-record probe.
+  if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }

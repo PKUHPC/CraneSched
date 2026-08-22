@@ -9,15 +9,15 @@
  */
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <unistd.h>
-
 #include "Database/EmbeddedDbClient.h"
+#include "Database/LegacyEmbeddedDbClient.h"
 #include "crane/Logger.h"
 
 namespace fs = std::filesystem;
@@ -137,7 +137,8 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
   const std::string db_path = DbBasePath(backend);
   CleanupDbPath(db_path);
 
-  auto client = std::make_unique<Ctld::EmbeddedDbClient>();
+  auto client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(client, nullptr);
   ASSERT_TRUE(client->Init(db_path));
 
   auto pending = MakeJob("pending-job", crane::grpc::Pending);
@@ -186,7 +187,8 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
 
   client.reset();
 
-  auto recovered_client = std::make_unique<Ctld::EmbeddedDbClient>();
+  auto recovered_client = Ctld::MakeEmbeddedDbClient(backend);
+  ASSERT_NE(recovered_client, nullptr);
   ASSERT_TRUE(recovered_client->Init(db_path));
 
   Ctld::EmbeddedDbClient::DbSnapshot snapshot;
@@ -205,7 +207,13 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
   EXPECT_EQ(step_snapshot.steps.at(running->JobId())[0].step_to_ctld().name(),
             "running-step");
 
-  ASSERT_TRUE(recovered_client->PurgeEndedSteps({step->StepDbId()}));
+  auto recovered_step = MakeStep(running.get(), "recovered-running-step");
+  ASSERT_TRUE(recovered_client->AppendSteps({recovered_step.get()}));
+  EXPECT_EQ(recovered_step->StepId(), 1);
+  EXPECT_EQ(recovered_step->StepDbId(), 2);
+
+  ASSERT_TRUE(recovered_client->PurgeEndedSteps(
+      {step->StepDbId(), recovered_step->StepDbId()}));
   step_in_db.Clear();
   EXPECT_FALSE(
       recovered_client->FetchStepDataInDb(0, step->StepDbId(), &step_in_db));
@@ -218,6 +226,107 @@ void RunEmbeddedDbSmoke(const std::string& backend) {
 
 TEST(EmbeddedDbClientTest, UnqliteCurrentApiSmoke) {
   RunEmbeddedDbSmoke("Unqlite");
+}
+
+TEST(EmbeddedDbClientTest, UnqliteStepCountersArePerJob) {
+  g_config.CraneEmbeddedDbBackend = "Unqlite";
+
+  const std::string db_path = DbBasePath("UnqliteStepCounters");
+  CleanupDbPath(db_path);
+
+  auto client = Ctld::MakeEmbeddedDbClient("Unqlite");
+  ASSERT_NE(client, nullptr);
+  ASSERT_TRUE(client->Init(db_path));
+
+  auto purged_job = MakeJob("purged-job", crane::grpc::Running);
+  auto reset_job = MakeJob("reset-job", crane::grpc::Running);
+  ASSERT_TRUE(client->AppendJobsToPendingAndAdvanceJobIds(
+      {purged_job.get(), reset_job.get()}));
+
+  auto purged_job_step = MakeStep(purged_job.get(), "purged-job-step");
+  auto reset_job_step = MakeStep(reset_job.get(), "reset-job-step");
+  ASSERT_TRUE(
+      client->AppendSteps({purged_job_step.get(), reset_job_step.get()}));
+  EXPECT_EQ(purged_job_step->StepId(), 0);
+  EXPECT_EQ(reset_job_step->StepId(), 0);
+  EXPECT_EQ(purged_job_step->StepDbId(), 1);
+  EXPECT_EQ(reset_job_step->StepDbId(), 2);
+
+  ASSERT_TRUE(
+      client->PurgeEndedJobs({{purged_job->JobId(), purged_job->JobDbId()}}));
+  ASSERT_TRUE(client->ResetJobStepIdCounter(reset_job->JobId()));
+
+  auto purged_job_step_after_purge =
+      MakeStep(purged_job.get(), "purged-job-step-after-purge");
+  auto reset_job_step_after_reset =
+      MakeStep(reset_job.get(), "reset-job-step-after-reset");
+  ASSERT_TRUE(client->AppendSteps(
+      {purged_job_step_after_purge.get(), reset_job_step_after_reset.get()}));
+  EXPECT_EQ(purged_job_step_after_purge->StepId(), 0);
+  EXPECT_EQ(reset_job_step_after_reset->StepId(), 0);
+  EXPECT_EQ(purged_job_step_after_purge->StepDbId(), 3);
+  EXPECT_EQ(reset_job_step_after_reset->StepDbId(), 4);
+
+  client.reset();
+
+  Ctld::UnqliteDb step_var_db;
+  ASSERT_TRUE(step_var_db.Init(db_path + "step_var"));
+  bool has_legacy_map = false;
+  bool has_purged_job_counter = false;
+  bool has_reset_job_counter = false;
+  ASSERT_TRUE(step_var_db.IterateAllKv([&](std::string&& key,
+                                           std::vector<uint8_t>&&) {
+    has_legacy_map |= key == "NSI";
+    has_purged_job_counter |= key == fmt::format("NSI:{}", purged_job->JobId());
+    has_reset_job_counter |= key == fmt::format("NSI:{}", reset_job->JobId());
+    return true;
+  }));
+  EXPECT_FALSE(has_legacy_map);
+  EXPECT_TRUE(has_purged_job_counter);
+  EXPECT_TRUE(has_reset_job_counter);
+  ASSERT_TRUE(step_var_db.Close());
+
+  client = Ctld::MakeEmbeddedDbClient("Unqlite");
+  ASSERT_NE(client, nullptr);
+  ASSERT_TRUE(client->Init(db_path));
+
+  auto purged_job_step_after_restart =
+      MakeStep(purged_job.get(), "purged-job-step-after-restart");
+  auto reset_job_step_after_restart =
+      MakeStep(reset_job.get(), "reset-job-step-after-restart");
+  ASSERT_TRUE(client->AppendSteps({purged_job_step_after_restart.get(),
+                                   reset_job_step_after_restart.get()}));
+  EXPECT_EQ(purged_job_step_after_restart->StepId(), 1);
+  EXPECT_EQ(reset_job_step_after_restart->StepId(), 1);
+  EXPECT_EQ(purged_job_step_after_restart->StepDbId(), 5);
+  EXPECT_EQ(reset_job_step_after_restart->StepDbId(), 6);
+
+  client.reset();
+  CleanupDbPath(db_path);
+}
+
+TEST(EmbeddedDbClientTest, UnqliteRejectsLegacyStepCounterMap) {
+  g_config.CraneEmbeddedDbBackend = "Unqlite";
+
+  const std::string db_path = DbBasePath("UnqliteLegacyStepCounter");
+  CleanupDbPath(db_path);
+
+  Ctld::UnqliteDb step_var_db;
+  ASSERT_TRUE(step_var_db.Init(db_path + "step_var"));
+  auto txn_id = step_var_db.Begin();
+  ASSERT_TRUE(txn_id.has_value());
+  uint32_t legacy_map_data = 0;
+  ASSERT_TRUE(step_var_db.Store(txn_id.value(), "NSI", &legacy_map_data,
+                                sizeof(legacy_map_data)));
+  ASSERT_TRUE(step_var_db.Commit(txn_id.value()));
+  ASSERT_TRUE(step_var_db.Close());
+
+  auto client = Ctld::MakeEmbeddedDbClient("Unqlite");
+  ASSERT_NE(client, nullptr);
+  EXPECT_FALSE(client->Init(db_path));
+
+  client.reset();
+  CleanupDbPath(db_path);
 }
 
 #ifdef CRANE_HAVE_ROCKSDB

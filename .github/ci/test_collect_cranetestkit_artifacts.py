@@ -34,6 +34,9 @@ class ArtifactCollectionTest(unittest.TestCase):
         routing_sha: str | None = None,
         pr_base_sha: str | None = None,
         pr_head_sha: str | None = None,
+        frontend_ref: str = "master",
+        frontend_sha: str = "b" * 40,
+        frontend_source: str = "master_default",
     ) -> None:
         command = [
             sys.executable,
@@ -44,6 +47,12 @@ class ArtifactCollectionTest(unittest.TestCase):
             str(destination),
             "--run-id",
             "gh-123-1",
+            "--frontend-ref",
+            frontend_ref,
+            "--frontend-sha",
+            frontend_sha,
+            "--frontend-source",
+            frontend_source,
         ]
         if logs:
             command.append("--include-logs")
@@ -570,12 +579,18 @@ class ArtifactCollectionTest(unittest.TestCase):
                 routing_sha=routing_sha,
                 pr_base_sha=base_sha,
                 pr_head_sha=head_sha,
+                frontend_ref="feature/test|<unsafe>`branch",
+                frontend_source="matching_branch",
             )
 
             summary = (destination / "summary.md").read_text(encoding="utf-8")
             self.assertIn(f"`{routing_sha}`", summary)
             self.assertIn(f"`{base_sha}`", summary)
             self.assertIn(f"`{head_sha}`", summary)
+            self.assertIn("PKUHPC/CraneSched-FrontEnd", summary)
+            self.assertIn("matching_branch", summary)
+            self.assertIn("feature/test\\|&lt;unsafe&gt;&#96;branch", summary)
+            self.assertNotIn("<unsafe>", summary)
             manifest = json.loads(
                 (destination / "artifact-manifest.json").read_text(encoding="utf-8")
             )
@@ -585,8 +600,74 @@ class ArtifactCollectionTest(unittest.TestCase):
                     "routing_sha": routing_sha,
                     "pr_base_sha": base_sha,
                     "pr_head_sha": head_sha,
+                    "frontend": {
+                        "repository": "PKUHPC/CraneSched-FrontEnd",
+                        "ref": "feature/test|<unsafe>`branch",
+                        "sha": "b" * 40,
+                        "source": "matching_branch",
+                    },
                 },
             )
+
+    def test_frontend_revision_mismatch_is_infrastructure_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cases = [self._case("1.0.0.1", "passed", 1.0)]
+            run_root = self._run(
+                root,
+                cases,
+                exit_code=0,
+                shards=[cases],
+                workers={"wrl02": [0]},
+            )
+            self._checkpoint(run_root, "wrl02", 0, 0, cases, exit_code=0)
+            result = json.loads((run_root / "result.json").read_text(encoding="utf-8"))
+            result["sources"]["frontend"] = "c" * 40
+            self._write_json(run_root / "result.json", result)
+
+            destination = root / "artifact"
+            self._collect(run_root, destination, execute_exit_code=0)
+
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+            manifest = json.loads(
+                (destination / "artifact-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("system test: INFRASTRUCTURE ERROR", summary)
+            self.assertIn("does not match authorized SHA", summary)
+            self.assertEqual(manifest["check_exit_code"], 2)
+
+    def test_missing_frontend_revision_in_generated_plan_is_infrastructure_error(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_root = root / "runs/gh-123-1"
+            self._write_json(run_root / "plan/manifest.json", {"sharding": {}})
+
+            destination = root / "artifact"
+            self._collect(run_root, destination)
+
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+            manifest = json.loads(
+                (destination / "artifact-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("Plan FrontEnd SHA is missing", summary)
+            self.assertEqual(manifest["check_exit_code"], 2)
+
+    def test_preflight_failure_without_plan_or_result_has_no_source_mismatch(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_root = root / "runs/gh-123-1"
+            run_root.mkdir(parents=True)
+
+            destination = root / "artifact"
+            self._collect(run_root, destination)
+
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+            self.assertNotIn("FrontEnd SHA is missing", summary)
+            self.assertNotIn("does not match authorized SHA", summary)
 
     def test_exit_one_summary_reports_failed_and_error_cases(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -765,12 +846,13 @@ class ArtifactCollectionTest(unittest.TestCase):
             self._write_json(
                 run_root / "plan/manifest.json",
                 {
+                    "sources": {"frontend": "b" * 40},
                     "sharding": {
                         "shards": [
                             {"index": 0, "cases": []},
                             {"index": 1, "cases": []},
                         ]
-                    }
+                    },
                 },
             )
             self._write_json(
@@ -944,6 +1026,7 @@ class ArtifactCollectionTest(unittest.TestCase):
             self._write_json(
                 run_root / "plan/manifest.json",
                 {
+                    "sources": {"frontend": "b" * 40},
                     "suite": {"digest": "suite-primary"},
                     "sharding": {
                         "suite_digest": "suite-secondary",
@@ -961,7 +1044,13 @@ class ArtifactCollectionTest(unittest.TestCase):
 
             self._write_json(
                 run_root / "plan/manifest.json",
-                {"sharding": {"suite_digest": "suite-secondary", "shards": []}},
+                {
+                    "sources": {"frontend": "b" * 40},
+                    "sharding": {
+                        "suite_digest": "suite-secondary",
+                        "shards": [],
+                    },
+                },
             )
             fallback_destination = root / "fallback-artifact"
             self._collect(run_root, fallback_destination)
@@ -1025,6 +1114,7 @@ class ArtifactCollectionTest(unittest.TestCase):
             self._write_json(
                 run_root / "plan/manifest.json",
                 {
+                    "sources": {"frontend": "b" * 40},
                     "sharding": {
                         "shards": [
                             {
@@ -1033,7 +1123,7 @@ class ArtifactCollectionTest(unittest.TestCase):
                                 "cases": [],
                             }
                         ]
-                    }
+                    },
                 },
             )
 
@@ -1078,6 +1168,12 @@ class ArtifactCollectionTest(unittest.TestCase):
                     str(destination),
                     "--run-id",
                     "gh-123-1",
+                    "--frontend-ref",
+                    "master",
+                    "--frontend-sha",
+                    "b" * 40,
+                    "--frontend-source",
+                    "master_default",
                 ],
                 check=False,
                 capture_output=True,

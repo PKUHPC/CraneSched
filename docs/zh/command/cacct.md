@@ -103,6 +103,8 @@ cacct
 
 :   **适用于：** `作业`, `作业步`  
 指定输出结果的最大条数。例如，`-m=500` 将输出限制为500行。默认：1000条。
+如果匹配结果超过限制，命令仍会返回前面的结果，并在标准错误中提示结果不完整；请缩小过滤范围或调整 `-m`。
+如果响应超过 gRPC 消息大小限制，则不会返回结果，并提示缩小查询范围或降低 `-m`。
 
 **--json**
 
@@ -260,7 +262,7 @@ Flags:
   -h, --help                 help for cacct
   -j, --job string           Select job ids to view (comma separated list), default is all
       --json                 Output in JSON format
-  -m, --max-lines uint32     Limit the number of lines in the output, 0 means no limit (default 1000)
+  -m, --max-lines uint32     Limit the number of jobs returned (default 20)
   -n, --name string          Select job names to view (comma separated list), default is all
   -w, --nodelist string      Specify node names to view (comma separated list or patterns like node[1-10]), default is all
   -N, --noheader             Do not print header line in the output

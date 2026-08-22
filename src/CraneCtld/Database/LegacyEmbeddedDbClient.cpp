@@ -18,6 +18,8 @@
 
 #include "LegacyEmbeddedDbClient.h"
 
+#include <cstring>
+
 namespace Ctld {
 
 #ifdef CRANE_HAVE_UNQLITE
@@ -579,11 +581,87 @@ bool LegacyEmbeddedDbClient::Init(const std::string& db_path) {
       0, m_step_var_db_.get(), s_next_step_db_id_str_, &s_next_step_db_id_, 1L);
   if (!ok) return false;
 
-  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      0, m_step_var_db_.get(), s_next_step_id_str_, &s_next_step_id_map_,
-      crane::grpc::StepNextIdInEmbeddedDb{});
-  if (!ok) return false;
+  if (!LoadNextStepIdMap_()) return false;
 
+  return true;
+}
+
+bool LegacyEmbeddedDbClient::LoadNextStepIdMap_() {
+  std::unordered_map<job_id_t, uint32_t> next_step_id_map;
+  bool entries_valid = true;
+
+  auto result = m_step_var_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        if (key == "NSI") {
+          CRANE_ERROR(
+              "Unsupported legacy next_step_id map found. Clean the legacy "
+              "embedded database before starting CraneCtld.");
+          entries_valid = false;
+          return true;
+        }
+        if (!IsNextStepIdEntry_(key)) return true;
+
+        job_id_t job_id;
+        if (!ExtractJobIdFromNextStepIdEntry_(key, &job_id) ||
+            value.size() != sizeof(uint32_t)) {
+          CRANE_ERROR("Invalid next_step_id entry '{}'.", key);
+          entries_valid = false;
+          return true;
+        }
+
+        uint32_t next_step_id;
+        std::memcpy(&next_step_id, value.data(), sizeof(next_step_id));
+        next_step_id_map[job_id] = next_step_id;
+        return true;
+      });
+  if (!result || !entries_valid) {
+    CRANE_ERROR("Failed to load next_step_id entries from embedded db.");
+    return false;
+  }
+
+  absl::MutexLock lock_steps(&s_step_id_mtx_);
+  s_next_step_id_map_ = std::move(next_step_id_map);
+  return true;
+}
+
+bool LegacyEmbeddedDbClient::ResetStepIdCounters_() {
+  absl::MutexLock lock_steps(&s_step_id_mtx_);
+
+  std::vector<std::string> next_step_id_keys;
+  auto result = m_step_var_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&&) {
+        if (IsNextStepIdEntry_(key))
+          next_step_id_keys.emplace_back(std::move(key));
+        return true;
+      });
+  if (!result) {
+    CRANE_ERROR("Failed to collect next_step_id entries for reset.");
+    return false;
+  }
+
+  txn_id_t txn_id;
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+
+  db_id_t next_step_db_id = 1;
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            s_next_step_db_id_str_, &next_step_db_id);
+  if (!result) {
+    CRANE_ERROR("Failed to reset next_step_db_id.");
+    return false;
+  }
+
+  for (const auto& key : next_step_id_keys) {
+    result = m_step_var_db_->Delete(txn_id, key);
+    if (!result) {
+      CRANE_ERROR("Failed to delete next_step_id entry '{}'.", key);
+      return false;
+    }
+  }
+
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  s_next_step_db_id_ = next_step_db_id;
+  s_next_step_id_map_.clear();
   return true;
 }
 
@@ -618,32 +696,7 @@ bool LegacyEmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   // Also reset step counters when job IDs are reset
-  if (next_job_id > 0) {
-    absl::MutexLock lock_steps(&s_step_id_mtx_);
-
-    if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
-
-    db_id_t new_step_db_id = 1;
-    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
-                              s_next_step_db_id_str_, &new_step_db_id);
-    if (!result) {
-      CRANE_ERROR("Failed to reset next_step_db_id.");
-      return false;
-    }
-
-    crane::grpc::StepNextIdInEmbeddedDb new_step_id_map;
-    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
-                              &new_step_id_map);
-    if (!result) {
-      CRANE_ERROR("Failed to reset next_step_id_map.");
-      return false;
-    }
-
-    if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
-
-    s_next_step_db_id_ = new_step_db_id;
-    s_next_step_id_map_ = new_step_id_map;
-  }
+  if (next_job_id > 0 && !ResetStepIdCounters_()) return false;
 
   // Update in-memory values
   if (next_job_id > 0) s_next_job_id_ = next_job_id;
@@ -655,51 +708,20 @@ bool LegacyEmbeddedDbClient::ResetNextJobId(job_id_t next_job_id,
 }
 
 bool LegacyEmbeddedDbClient::ResetNextStepDbId() {
-  txn_id_t txn_id;
-  std::expected<void, DbErrorCode> result;
-
-  absl::MutexLock lock_steps(&s_step_id_mtx_);
-
-  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
-
-  db_id_t new_step_db_id = 1;
-  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
-                            s_next_step_db_id_str_, &new_step_db_id);
-  if (!result) {
-    CRANE_ERROR("Failed to reset next_step_db_id.");
-    return false;
-  }
-
-  crane::grpc::StepNextIdInEmbeddedDb new_step_id_map;
-  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
-                            &new_step_id_map);
-  if (!result) {
-    CRANE_ERROR("Failed to reset next_step_id_map.");
-    return false;
-  }
-
-  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
-
-  s_next_step_db_id_ = new_step_db_id;
-  s_next_step_id_map_ = new_step_id_map;
-
-  CRANE_INFO("Step ID counters reset: next_step_db_id={}.", s_next_step_db_id_);
+  if (!ResetStepIdCounters_()) return false;
+  CRANE_INFO("Step ID counters reset: next_step_db_id=1.");
   return true;
 }
 
 bool LegacyEmbeddedDbClient::ResetJobStepIdCounter(job_id_t job_id) {
   absl::MutexLock lock_steps(&s_step_id_mtx_);
 
-  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
-  next_step_id_map.erase(job_id);
+  if (!s_next_step_id_map_.contains(job_id)) return true;
 
   txn_id_t txn_id;
   if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
 
-  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
-  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
-  auto res = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
-                              &db_next_step_id_map);
+  auto res = m_step_var_db_->Delete(txn_id, GetNextStepIdEntryName_(job_id));
   if (!res) {
     CRANE_ERROR("Failed to reset step_id counter for job {}.", job_id);
     return false;
@@ -707,7 +729,7 @@ bool LegacyEmbeddedDbClient::ResetJobStepIdCounter(job_id_t job_id) {
 
   if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
 
-  s_next_step_id_map_ = db_next_step_id_map;
+  s_next_step_id_map_.erase(job_id);
   CRANE_DEBUG("Reset step_id counter for job {}.", job_id);
   return true;
 }
@@ -766,12 +788,12 @@ bool LegacyEmbeddedDbClient::PurgeAllJobHistory() {
   }
 
   // Collect and delete all step data from step_var_db and step_fixed_db
+  absl::MutexLock lock_steps(&s_step_id_mtx_);
   std::vector<std::string> step_var_keys, step_fixed_keys;
 
   res = m_step_var_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&&) {
-        if (key != s_next_step_id_str_ && key != s_next_step_db_id_str_)
-          step_var_keys.push_back(key);
+        if (key != s_next_step_db_id_str_) step_var_keys.push_back(key);
         return true;
       });
   if (!res) {
@@ -790,6 +812,7 @@ bool LegacyEmbeddedDbClient::PurgeAllJobHistory() {
     }
     if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
   }
+  s_next_step_id_map_.clear();
 
   res = m_step_fixed_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&&) {
@@ -1101,26 +1124,33 @@ bool LegacyEmbeddedDbClient::PurgeEndedJobs(
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
   absl::MutexLock lock_ids(&s_step_id_mtx_);
-  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+  std::vector<job_id_t> next_step_ids_to_delete;
   for (const auto& job_id : job_ids | std::views::keys) {
-    next_step_id_map.erase(job_id);
+    if (s_next_step_id_map_.contains(job_id))
+      next_step_ids_to_delete.emplace_back(job_id);
   }
+  if (next_step_ids_to_delete.empty()) return true;
+
   if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
-  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
-  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
-  res = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
-                         &db_next_step_id_map);
-  if (!res) {
-    CRANE_ERROR("Failed to store next_step_id_map.");
-    return false;
+  for (const auto& job_id : next_step_ids_to_delete) {
+    res = m_step_var_db_->Delete(txn_id, GetNextStepIdEntryName_(job_id));
+    if (!res) {
+      CRANE_ERROR("Failed to delete next_step_id counter for job {}.", job_id);
+      return false;
+    }
   }
   if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  for (const auto& job_id : next_step_ids_to_delete)
+    s_next_step_id_map_.erase(job_id);
 
   return true;
 }
 
 bool LegacyEmbeddedDbClient::AppendSteps(
     const std::vector<StepInCtld*>& steps) {
+  if (steps.empty()) return true;
+
   txn_id_t txn_id;
   std::expected<void, DbErrorCode> result;
 
@@ -1131,15 +1161,18 @@ bool LegacyEmbeddedDbClient::AppendSteps(
   absl::MutexLock lock_ids(&s_step_id_mtx_);
 
   db_id_t step_db_id{s_next_step_db_id_};
-  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+  std::unordered_map<job_id_t, uint32_t> touched_next_step_ids;
 
   if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
 
   for (const auto& step : steps) {
-    if (!next_step_id_map.contains(step->job_id)) {
-      next_step_id_map[step->job_id] = 0;
-    }
-    step->SetStepId(next_step_id_map[step->job_id]++);
+    auto it = touched_next_step_ids
+                  .try_emplace(step->job_id,
+                               s_next_step_id_map_.contains(step->job_id)
+                                   ? s_next_step_id_map_.at(step->job_id)
+                                   : 0)
+                  .first;
+    step->SetStepId(it->second++);
     step->SetStepDbId(step_db_id++);
 
     result = StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
@@ -1171,13 +1204,14 @@ bool LegacyEmbeddedDbClient::AppendSteps(
       return false;
     }
   }
-  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
-  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
-  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
-                            &db_next_step_id_map);
-  if (!result) {
-    CRANE_ERROR("Failed to store next_step_id.");
-    return false;
+
+  for (const auto& [job_id, next_step_id] : touched_next_step_ids) {
+    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                              GetNextStepIdEntryName_(job_id), &next_step_id);
+    if (!result) {
+      CRANE_ERROR("Failed to store next_step_id for job {}.", job_id);
+      return false;
+    }
   }
 
   result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
@@ -1188,7 +1222,8 @@ bool LegacyEmbeddedDbClient::AppendSteps(
   }
   if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
 
-  s_next_step_id_map_ = db_next_step_id_map;
+  for (const auto& [job_id, next_step_id] : touched_next_step_ids)
+    s_next_step_id_map_[job_id] = next_step_id;
   s_next_step_db_id_ = step_db_id;
 
   return true;

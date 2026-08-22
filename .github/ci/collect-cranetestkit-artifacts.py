@@ -76,11 +76,28 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 UNSAFE_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 BIDI_CONTROLS = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+FRONTEND_REPOSITORY = "PKUHPC/CraneSched-FrontEnd"
+FRONTEND_SOURCES = (
+    "matching_branch",
+    "master_fallback",
+    "master_default",
+    "manual_ref",
+)
 
 
 def _full_sha(value: str) -> str:
     if FULL_SHA.fullmatch(value) is None:
         raise argparse.ArgumentTypeError("revision must be a full lowercase commit SHA")
+    return value
+
+
+def _frontend_ref(value: str) -> str:
+    if (
+        not value
+        or len(value) > 1024
+        or any(character in value for character in "\r\n")
+    ):
+        raise argparse.ArgumentTypeError("FrontEnd ref is invalid")
     return value
 
 
@@ -119,9 +136,9 @@ def _redact(value: str) -> tuple[str, int]:
     count = 0
     for pattern in REDACTIONS:
         value, replacements = pattern.subn(
-            lambda match: match.group(1) + "[REDACTED]"
-            if match.lastindex
-            else "[REDACTED]",
+            lambda match: (
+                match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]"
+            ),
             value,
         )
         count += replacements
@@ -521,6 +538,33 @@ def _resolve_exit_code(
     return None, []
 
 
+def _frontend_revision_diagnostics(
+    run_root: Path,
+    result: dict[str, object],
+    plan: dict[str, object],
+    authorized_sha: str,
+) -> list[str]:
+    if not run_root.is_dir() or run_root.is_symlink():
+        return []
+    diagnostics: list[str] = []
+    for label, relative, document in (
+        ("Aggregate result", Path("result.json"), result),
+        ("Plan", Path("plan/manifest.json"), plan),
+    ):
+        if _safe_source(run_root, relative) is None:
+            continue
+        sources = document.get("sources")
+        actual = sources.get("frontend") if isinstance(sources, dict) else None
+        if actual is None:
+            diagnostics.append(f"{label} FrontEnd SHA is missing")
+        elif actual != authorized_sha:
+            diagnostics.append(
+                f"{label} FrontEnd SHA {actual} does not match authorized SHA "
+                f"{authorized_sha}"
+            )
+    return diagnostics
+
+
 def _suite_digest(result: dict[str, object], plan: dict[str, object]) -> str:
     candidates = [result.get("suite_digest")]
     suite = plan.get("suite")
@@ -627,6 +671,9 @@ def _write_summary(
     routing_sha: str | None = None,
     pr_base_sha: str | None = None,
     pr_head_sha: str | None = None,
+    frontend_ref: str,
+    frontend_sha: str,
+    frontend_source: str,
 ) -> int | None:
     result = _read_run_json(run_root, Path("result.json"))
     state = _read_run_json(run_root, Path("state.json"))
@@ -639,6 +686,12 @@ def _write_summary(
         run_root, plan, allocation
     )
     exit_code, exit_diagnostics = _resolve_exit_code(result, state, execute_exit_code)
+    frontend_diagnostics = _frontend_revision_diagnostics(
+        run_root, result, plan, frontend_sha
+    )
+    if frontend_diagnostics:
+        exit_code = 2
+        exit_diagnostics.extend(frontend_diagnostics)
     if exit_code in {0, 1}:
         shard_diagnostics = _shard_evidence_diagnostics(plan, shard_rows, exit_code)
         if shard_diagnostics:
@@ -1038,6 +1091,10 @@ def _write_summary(
         ("Run ID", run_id),
         ("Phase", state.get("phase", "not-created")),
         ("Exit code", exit_code if exit_code is not None else "unavailable"),
+        ("Authorized FrontEnd repository", FRONTEND_REPOSITORY),
+        ("Authorized FrontEnd ref", frontend_ref),
+        ("Authorized FrontEnd source", frontend_source),
+        ("Authorized FrontEnd SHA", frontend_sha),
         ("Backend SHA", sources.get("backend", "unavailable")),
         ("Frontend SHA", sources.get("frontend", "unavailable")),
         ("AutoTest SHA", sources.get("autotest", "unavailable")),
@@ -1086,6 +1143,9 @@ def main() -> int:
     parser.add_argument("--routing-sha", type=_full_sha)
     parser.add_argument("--pr-base-sha", type=_full_sha)
     parser.add_argument("--pr-head-sha", type=_full_sha)
+    parser.add_argument("--frontend-ref", type=_frontend_ref, required=True)
+    parser.add_argument("--frontend-sha", type=_full_sha, required=True)
+    parser.add_argument("--frontend-source", choices=FRONTEND_SOURCES, required=True)
     args = parser.parse_args()
     if (args.pr_base_sha is None) != (args.pr_head_sha is None):
         parser.error("PR base and head SHAs must be provided together")
@@ -1111,6 +1171,9 @@ def main() -> int:
         routing_sha=args.routing_sha,
         pr_base_sha=args.pr_base_sha,
         pr_head_sha=args.pr_head_sha,
+        frontend_ref=args.frontend_ref,
+        frontend_sha=args.frontend_sha,
+        frontend_source=args.frontend_source,
     )
     include_failure_logs = args.include_logs or summary_exit_code != 0
     if run_root.exists() and not run_root.is_symlink() and run_root.is_dir():
@@ -1218,6 +1281,12 @@ def main() -> int:
             "routing_sha": args.routing_sha,
             "pr_base_sha": args.pr_base_sha,
             "pr_head_sha": args.pr_head_sha,
+            "frontend": {
+                "repository": FRONTEND_REPOSITORY,
+                "ref": args.frontend_ref,
+                "sha": args.frontend_sha,
+                "source": args.frontend_source,
+            },
         },
         "files": entries,
     }

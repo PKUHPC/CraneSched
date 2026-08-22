@@ -21,10 +21,19 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <atomic>
+#include <deque>
+
 #include "Account/AccountDefs.h"
 #include "Array.h"
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
+
+namespace util::os {
+
+class PrologEpilogExecutor;
+
+}  // namespace util::os
 
 namespace Ctld {
 
@@ -1056,22 +1065,11 @@ class JobScheduler {
                               crane::grpc::ModifyJobReply* response,
                               std::vector<job_id_t>* job_ids);
 
-  CraneExpected<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
+  CraneExpectedRich<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
 
   size_t PendingQueueSize() const {
     return m_pending_map_cached_size_.load(std::memory_order_relaxed);
-  }
-
-  void StepStatusChangeWithReasonAsync(uint32_t job_id, step_id_t step_id,
-                                       const CranedId& craned_index,
-                                       crane::grpc::JobStatus new_status,
-                                       uint32_t exit_code,
-                                       std::optional<std::string>&& reason,
-                                       google::protobuf::Timestamp timestamp) {
-    // TODO: Add reason implementation here!
-    StepStatusChangeAsync(job_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""), std::move(timestamp));
   }
 
   void StartCraneCtldPrologThread(JobInCtld* job);
@@ -1082,11 +1080,17 @@ class JobScheduler {
                              uint32_t exit_code, std::string reason,
                              google::protobuf::Timestamp timestamp);
 
+  void StepCompletingAndStatusChangeAsync(
+      job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+      crane::grpc::JobStatus terminal_status, uint32_t exit_code,
+      std::string reason, google::protobuf::Timestamp timestamp);
+
   void TerminateJobsOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
   void QueryJobsInRam(
       const crane::grpc::QueryJobsInfoRequest* request,
-      std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
+      std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
+      size_t num_limit);
 
   void QueryQueueStateSummary(
       const crane::grpc::QueryQueueStateSummaryRequest* request,
@@ -1221,8 +1225,8 @@ class JobScheduler {
   }
 
   static CraneExpected<void> HandleUnsetOptionalInJobToCtld(JobInCtld* job);
-  static CraneExpected<void> AcquireJobAttributes(JobInCtld* job);
-  static CraneExpected<void> CheckJobValidity(JobInCtld* job);
+  static CraneExpectedRich<void> AcquireJobAttributes(JobInCtld* job);
+  static CraneExpectedRich<void> CheckJobValidity(JobInCtld* job);
 
   static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
@@ -1301,6 +1305,23 @@ class JobScheduler {
                                crane::grpc::TerminateSource terminate_source =
                                    crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
 
+  bool SynthesizeStepStatusIfCranedDown_(
+      const CranedId& craned_id,
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
+      crane::grpc::JobStatus new_status, uint32_t exit_code,
+      const char* reason);
+  void DispatchFreeSteps_(
+      CranedId craned_id,
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps,
+      std::unordered_map<job_id_t, crane::FlowContext> flow_contexts = {});
+  void DispatchTerminateSteps_(
+      CranedId craned_id,
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+  void HandleExecuteStepsFailure_(
+      const CranedId& failed_craned_id,
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
+  void RetryCompletingSteps_();
+
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
   std::expected<void, std::string> CreateResv_(
@@ -1321,6 +1342,8 @@ class JobScheduler {
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
   Mutex m_running_job_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_job_map_mtx_);
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+      m_completing_step_ids_ ABSL_GUARDED_BY(m_running_job_map_mtx_);
 
   // Owns all array metas and drives child materialization/lifecycle.
   // Uses references to the above pending/running maps and must be
@@ -1358,6 +1381,7 @@ class JobScheduler {
   // may be occupied, then job `B` can never be scheduled, and therefore
   // the latch will cause a deadlock.
   std::unique_ptr<BS::thread_pool> m_rpc_worker_pool_;
+  std::unique_ptr<util::os::PrologEpilogExecutor> m_ctld_hook_executor_;
 
   std::thread m_schedule_thread_;
   void ScheduleThread_();
@@ -1475,6 +1499,8 @@ class JobScheduler {
   std::shared_ptr<uvw::timer_handle> m_job_status_change_timer_handle_;
   void JobStatusChangeTimerCb_();
 
+  std::shared_ptr<uvw::timer_handle> m_completing_step_retry_timer_handle_;
+
   std::shared_ptr<uvw::async_handle> m_job_status_change_async_handle_;
 
   struct JobStatusChangeArg {
@@ -1487,7 +1513,13 @@ class JobScheduler {
     google::protobuf::Timestamp timestamp;
   };
 
-  ConcurrentQueue<JobStatusChangeArg> m_job_status_change_queue_;
+  absl::Mutex m_job_status_change_queue_mtx_;
+  std::deque<JobStatusChangeArg> m_job_status_change_incoming_
+      ABSL_GUARDED_BY(m_job_status_change_queue_mtx_);
+  std::atomic_size_t m_job_status_change_queue_size_{0};
+  // Accessed only by the job-status-change event loop. Older pending events
+  // are drained before the next incoming batch to preserve strict FIFO order.
+  std::deque<JobStatusChangeArg> m_job_status_change_pending_;
   void JobStatusChangeAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_job_status_change_handle_;
