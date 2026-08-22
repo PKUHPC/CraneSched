@@ -27,6 +27,7 @@ ccontrol <操作> <实体> [选项]
 - **step** - 作业步骤（作业内的子执行单元）
 - **reservation** - 资源预留
 - **lic** - 许可证
+- **hostnames** - 将节点列表表达式展开为主机名
 
 ## 全局选项
 
@@ -233,6 +234,48 @@ LicenseName=ansys
 LicenseName=fluent
         Total=30 Used=0  Free=30
 ```
+
+#### 展开主机名
+
+展开节点列表表达式，每行输出一个主机名。也可以使用单数形式 `hostname`
+作为实体名称。展开操作在本地完成，不会查询控制器。
+
+```bash
+ccontrol show hostnames [<节点列表>]
+```
+
+**示例：**
+
+```console
+$ ccontrol show hostnames 'node[01-03]'
+node01
+node02
+node03
+
+$ ccontrol show hostname 'rack[0-1]_blade[01-02]'
+rack0_blade01
+rack0_blade02
+rack1_blade01
+rack1_blade02
+```
+
+省略 `<节点列表>` 时，`ccontrol` 按顺序使用第一个非空的环境变量：
+`CRANE_JOB_NODELIST`、`SLURM_JOB_NODELIST`、`SLURM_NODELIST`。因此可以在已分配
+资源的作业中直接生成 hostfile：
+
+```bash
+ccontrol show hostnames > hostfile
+```
+
+也可以通过 `cwrapper` 使用兼容 Slurm 的写法：
+
+```bash
+scontrol show hostnames 'node[01-03]'
+scontrol show hostnames > hostfile
+```
+
+未显式指定节点列表时，`scontrol` 依次检查 `SLURM_JOB_NODELIST`、
+`SLURM_NODELIST` 和 `CRANE_JOB_NODELIST`。
 
 ### Update 命令
 

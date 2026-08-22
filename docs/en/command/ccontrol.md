@@ -27,6 +27,7 @@ ccontrol <ACTION> <ENTITY> [OPTIONS]
 - **step** - Job steps (sub-execution units within jobs)
 - **reservation** - Resource reservations
 - **lic** - License
+- **hostnames** - Expanded hostnames from a hostlist expression
 
 ## Global Options
 
@@ -233,6 +234,49 @@ LicenseName=ansys
 LicenseName=fluent
         Total=30 Used=0  Free=30
 ```
+
+#### Expand Hostnames
+
+Expand a hostlist expression and print one hostname per line. The singular
+entity name `hostname` is accepted as an alias. Expansion is performed locally
+and does not query the controller.
+
+```bash
+ccontrol show hostnames [<hostlist>]
+```
+
+**Examples:**
+
+```console
+$ ccontrol show hostnames 'node[01-03]'
+node01
+node02
+node03
+
+$ ccontrol show hostname 'rack[0-1]_blade[01-02]'
+rack0_blade01
+rack0_blade02
+rack1_blade01
+rack1_blade02
+```
+
+When `<hostlist>` is omitted, `ccontrol` uses the first non-empty variable in
+this order: `CRANE_JOB_NODELIST`, `SLURM_JOB_NODELIST`, then `SLURM_NODELIST`.
+This makes the command convenient inside an allocated job:
+
+```bash
+ccontrol show hostnames > hostfile
+```
+
+The Slurm-compatible form is also available through `cwrapper`:
+
+```bash
+scontrol show hostnames 'node[01-03]'
+scontrol show hostnames > hostfile
+```
+
+Without an explicit hostlist, `scontrol` checks `SLURM_JOB_NODELIST`,
+`SLURM_NODELIST`, and `CRANE_JOB_NODELIST`, in that order.
 
 ### Update Commands
 
