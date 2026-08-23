@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package grpc_example;
+
+// Minimal message for the unqlite round-trip test. The original lived in a
+// shared proto tree and was removed in #393, which left misc_unqlite_test
+// referencing a `test_proto` target that no longer existed. Nothing noticed
+// because the test tree was EXCLUDE_FROM_ALL and never built.
+//
+// This is deliberately test-local: the test exercises unqlite's blob storage
+// with a serialized protobuf payload, not any CraneSched schema.
+message MaxRequest {
+  int32 a = 1;
+  int32 b = 2;
+}

@@ -42,7 +42,8 @@
                 "CRANE_NATIVE_ARCH_OPT": "OFF",
                 "CRANE_ENABLE_TRACING": "ON",
                 "CRANE_ENABLE_EXECUTION_FLOW": "ON",
-                "CRANE_ENABLE_BPF": "ON"
+                "CRANE_ENABLE_BPF": "ON",
+                "CRANE_ENABLE_TESTS": "ON"
             }
         },
         {

@@ -496,6 +496,50 @@ if (CRANE_ENABLE_TESTS)
     # Test source files may include lots of warnings and errors.
     # Exclude it from 'all' target
     add_subdirectory(test EXCLUDE_FROM_ALL)
+
+    # Because the test tree is EXCLUDE_FROM_ALL, `cmake --build` never produces
+    # the test executables. ctest then resolves every gtest_discover_tests entry
+    # to a <name>_NOT_BUILT placeholder and the suite reports nothing while
+    # looking like it ran. Give CI a single target that builds them all.
+    add_custom_target(crane_tests)
+
+    # Targets that do not compile against the current tree. Neither is touched
+    # by the execution-flow work; both were simply invisible while the test tree
+    # was never built. Naming them here (rather than dropping the aggregate
+    # target) means a newly added test is gated by default, and un-breaking one
+    # is a one-line deletion.
+    #
+    #   utility_test      - the req_map..req_map5 cases compare a raw
+    #                       DeviceMap-shaped map against DedicatedResourceInNode.
+    #                       operator<=(DeviceMap, DedicatedResourceInNode) was
+    #                       removed by ResourceV3 (#867) without updating the
+    #                       test. The other 15 cases in the file are fine, so
+    #                       this needs those 5 ported to the V3 model (or
+    #                       dropped), not a build fix.
+    #   misc_mongodb_test - written against the pre-#884 account schema: it
+    #                       still expects Ctld::User::allowed_partition_qos_map,
+    #                       which no longer exists. Needs a rewrite against
+    #                       Account/AccountDefs.h, and a live MongoDB to run.
+    set(CRANE_TESTS_KNOWN_BROKEN
+            utility_test
+            misc_mongodb_test)
+
+    function(crane_add_test_executables directory)
+        get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+        foreach (child IN LISTS children)
+            crane_add_test_executables("${child}")
+        endforeach ()
+        get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach (target IN LISTS targets)
+            get_target_property(target_type ${target} TYPE)
+            if (target_type STREQUAL "EXECUTABLE"
+                    AND NOT ${target} IN_LIST CRANE_TESTS_KNOWN_BROKEN)
+                add_dependencies(crane_tests ${target})
+            endif ()
+        endforeach ()
+    endfunction()
+
+    crane_add_test_executables("${CMAKE_CURRENT_SOURCE_DIR}/test")
 endif ()
 
 # Adopt GNU standard installation directories

@@ -14,8 +14,48 @@ target_link_libraries(misc_mongodb_test
         absl::btree
         Utility_PublicHeader
 )
+# mongodb_test.cpp includes CtldPublicDefs.h, which pulls in
+# CtldPreCompiledHeader.h. Mirror the usage requirements that
+# ctld_public_defs_test already declares for the same header.
+target_link_libraries(misc_mongodb_test
+        concurrentqueue
+        crane_proto_lib
+        crane_tracer
+        Utility_PasswordEntry
+        Utility_PrologEpilogExecutor
+        uvw
+        cxxopts
+        Threads::Threads
+        absl::synchronization
+        absl::flat_hash_map
+        phmap
+        nlohmann_json
+        unqlite
+        range-v3::range-v3
+        bs_thread_pool
+        yaml-cpp
+        Backward::Interface
+)
 target_include_directories(misc_mongodb_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
+if (ENABLE_UNQLITE)
+    target_compile_definitions(misc_mongodb_test PRIVATE CRANE_HAVE_UNQLITE)
+endif ()
 gtest_discover_tests(misc_mongodb_test)
+
+# misc_unqlite_test round-trips a serialized protobuf blob through unqlite. Its
+# message came from a shared proto tree removed in #393, which left the
+# `test_proto` link below pointing at a target that no longer existed -- the
+# test has not compiled since, unnoticed because the test tree is
+# EXCLUDE_FROM_ALL. The message is deliberately test-local: this exercises
+# unqlite's blob storage, not any CraneSched schema.
+set(TEST_PROTO_OUTDIR ${CMAKE_CURRENT_BINARY_DIR}/generated/protos)
+file(MAKE_DIRECTORY ${TEST_PROTO_OUTDIR})
+get_property(protobuf_SOURCE_DIR GLOBAL PROPERTY protobuf_SOURCE_DIR)
+PROTOBUF_GENERATE_GRPC_CPP(TestProtoSources TestProtoHeaders ${TEST_PROTO_OUTDIR}
+        ${protobuf_SOURCE_DIR}/src math.proto)
+add_library(test_proto STATIC ${TestProtoSources} ${TestProtoHeaders})
+target_link_libraries(test_proto ${_GRPC_GRPCPP} ${_PROTOBUF_LIBPROTOBUF})
+target_include_directories(test_proto PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 add_executable(misc_unqlite_test unqlite_test.cpp)
 target_link_libraries(misc_unqlite_test
