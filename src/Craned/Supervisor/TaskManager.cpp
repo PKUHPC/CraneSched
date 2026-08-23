@@ -21,9 +21,11 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <atomic>
 #include <iterator>
 #include <limits>
 #include <variant>
@@ -44,6 +46,16 @@
 #include "crane/Tracing.h"
 
 namespace Craned::Supervisor {
+namespace {
+constexpr uint32_t kInitialTerminalSizeDiagnosticLimit = 8;
+
+bool ShouldLogInitialTerminalSizeDiagnostic() {
+  static std::atomic_uint32_t count{0};
+  return count.fetch_add(1, std::memory_order_relaxed) <
+         kInitialTerminalSizeDiagnosticLimit;
+}
+}  // namespace
+
 using namespace std::chrono_literals;
 using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
@@ -799,7 +811,28 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitIOfd_() {
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
   if (m_parent_step_inst_->pty) {
-    pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
+    struct winsize terminal_size{};
+    struct winsize* terminal_size_ptr = nullptr;
+    if (GetParentStep().has_interactive_meta() &&
+        GetParentStep().interactive_meta().has_terminal_size()) {
+      const auto& requested_size =
+          GetParentStep().interactive_meta().terminal_size();
+      if (requested_size.rows() > 0 &&
+          requested_size.rows() <= std::numeric_limits<uint16_t>::max() &&
+          requested_size.columns() > 0 &&
+          requested_size.columns() <= std::numeric_limits<uint16_t>::max()) {
+        terminal_size.ws_row = static_cast<uint16_t>(requested_size.rows());
+        terminal_size.ws_col = static_cast<uint16_t>(requested_size.columns());
+        terminal_size_ptr = &terminal_size;
+      } else {
+        if (ShouldLogInitialTerminalSizeDiagnostic()) {
+          CRANE_WARN("[Task #{}] Ignoring invalid initial terminal size {}x{}.",
+                     task_id, requested_size.rows(), requested_size.columns());
+        }
+      }
+    }
+
+    pid = forkpty(&crun_pty_fd, nullptr, nullptr, terminal_size_ptr);
 
     if (pid > 0) {
       meta->stdin_read = -1;

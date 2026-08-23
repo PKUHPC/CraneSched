@@ -515,6 +515,11 @@ message X11Meta {
   bool enable_forwarding = 4;
 }
 
+message TerminalSize {
+  uint32 rows = 1;
+  uint32 columns = 2;
+}
+
 message InteractiveJobAdditionalMeta {
   string cfored_name = 1;
   string term_env = 3;
@@ -529,6 +534,8 @@ message InteractiveJobAdditionalMeta {
   optional uint32 input_task_id = 8;
 
   string mpi = 9;
+
+  TerminalSize terminal_size = 10;
 }
 
 message PodJobAdditionalMeta {
