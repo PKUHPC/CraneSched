@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -189,7 +191,15 @@ void InitializeExecutionFlow(bool enabled, uint32_t heartbeat_interval_seconds,
                              std::string service, std::string instance,
                              bool emit_heartbeat);
 void ReconcileExecutionFlowWithTracing();
-void ShutdownExecutionFlow();
+
+// Waits for in-flight points to finish before tearing the pipeline down, but
+// only for `drain_timeout`. Emission ends with a span export, which on the
+// production SimpleSpanProcessor is a synchronous plugin RPC; an unbounded wait
+// here lets a wedged plugin hang daemon shutdown forever. Mirrors the bound the
+// cgroup janitor already uses. Returns false if the drain timed out, leaving
+// the caller to log an incomplete flow export rather than never returning.
+bool ShutdownExecutionFlow(
+    std::chrono::milliseconds drain_timeout = std::chrono::seconds{5});
 
 #else
 inline bool ExecutionFlowEnabled() noexcept { return false; }
@@ -197,7 +207,10 @@ inline bool ExecutionFlowHeartbeatRunning() noexcept { return false; }
 inline void InitializeExecutionFlow(bool, uint32_t, std::string, std::string,
                                     bool) noexcept {}
 inline void ReconcileExecutionFlowWithTracing() noexcept {}
-inline void ShutdownExecutionFlow() noexcept {}
+inline bool ShutdownExecutionFlow(
+    std::chrono::milliseconds = std::chrono::seconds{5}) noexcept {
+  return true;
+}
 
 inline std::string MakeExecutionFlowServiceInstance(
     std::string_view logical_instance, uint64_t, uint64_t) {
@@ -444,7 +457,16 @@ class FlowEmitter {
                                      emit_heartbeat)
 #  define CRANE_EXECUTION_FLOW_RECONCILE()       \
     ::crane::ReconcileExecutionFlowWithTracing()
-#  define CRANE_EXECUTION_FLOW_SHUTDOWN() ::crane::ShutdownExecutionFlow()
+// Expanded in the daemons, which have the logger this layer deliberately does
+// not depend on. A timed-out drain means the process is exiting with flow
+// points unexported -- say so rather than exiting quietly.
+#  define CRANE_EXECUTION_FLOW_SHUTDOWN()                                  \
+    do {                                                                   \
+      if (!::crane::ShutdownExecutionFlow())                               \
+        CRANE_ERROR(                                                       \
+            "Execution-flow drain timed out during shutdown; exported "    \
+            "flow data for this process is incomplete.");                  \
+    } while (0)
 #  define CRANE_EXECUTION_FLOW_IF_COMPILED(...) \
     do {                                        \
       __VA_ARGS__                               \

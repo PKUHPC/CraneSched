@@ -158,7 +158,10 @@ void StopHeartbeatLocked() {
     g_execution_flow_heartbeat_thread.join();
 }
 
-void DisableExecutionFlowAndDrain() {
+constexpr std::chrono::seconds kExecutionFlowDrainTimeout{5};
+
+bool DisableExecutionFlowAndDrain(
+    std::chrono::milliseconds drain_timeout = kExecutionFlowDrainTimeout) {
   {
     std::lock_guard lock{g_execution_flow_emitters_mutex};
     g_execution_flow_configured.store(false, std::memory_order_release);
@@ -166,8 +169,8 @@ void DisableExecutionFlowAndDrain() {
   StopHeartbeatLocked();
 
   std::unique_lock lock{g_execution_flow_emitters_mutex};
-  g_execution_flow_emitters_cv.wait(
-      lock, [] { return g_execution_flow_emitters == 0; });
+  return g_execution_flow_emitters_cv.wait_for(
+      lock, drain_timeout, [] { return g_execution_flow_emitters == 0; });
 }
 
 void StartHeartbeatLocked() {
@@ -387,7 +390,10 @@ void InitializeExecutionFlow(bool enabled, uint32_t heartbeat_interval_seconds,
                              std::string service, std::string instance,
                              bool emit_heartbeat) {
   std::lock_guard lifecycle_lock{g_execution_flow_lifecycle_mutex};
-  DisableExecutionFlowAndDrain();
+  // Bounded: a wedged exporter must not stall reinitialization either. A
+  // timeout here means the previous generation's points may be lost, which is
+  // preferable to never returning.
+  (void)DisableExecutionFlowAndDrain();
 
   const auto process_start_unix_nanos = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -416,9 +422,11 @@ void ReconcileExecutionFlowWithTracing() {
   ReconcileHeartbeatLocked();
 }
 
-void ShutdownExecutionFlow() {
+bool ShutdownExecutionFlow(std::chrono::milliseconds drain_timeout) {
   std::lock_guard lifecycle_lock{g_execution_flow_lifecycle_mutex};
-  DisableExecutionFlowAndDrain();
+  // This layer has no logger on purpose -- crane_tracer must not depend on the
+  // logging facility. Report the outcome instead and let the daemon log it.
+  return DisableExecutionFlowAndDrain(drain_timeout);
 }
 
 void EmitPoint(FlowPoint point, std::optional<FlowContext> context,

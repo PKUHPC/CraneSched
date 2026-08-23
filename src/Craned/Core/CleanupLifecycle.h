@@ -12,10 +12,33 @@
 
 #include <atomic>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
+#include <system_error>
 #include <utility>
 
 namespace Craned::detail {
+
+// Outcome of removing a step's cgroup directory. "Already gone" is deliberately
+// distinct from "removed" for logging, but both are success: the janitor runs
+// asynchronously and a concurrent remover reaching the directory first is
+// normal, not a cleanup failure.
+enum class StepDirectoryRemoval { kRemoved, kAlreadyGone, kFailed };
+
+// std::filesystem::remove already separates the three cases: it sets ec on a
+// real failure (a non-empty directory included), returns true when it removed
+// the directory, and returns false with no error when nothing was there. An
+// exists() pre-check on top of that only adds a race -- a concurrent remover
+// winning the gap turned into a spurious "directory is not empty" error and a
+// step forced to kError.
+inline StepDirectoryRemoval RemoveStepDirectory(
+    const std::filesystem::path& path, std::error_code& ec) {
+  ec.clear();
+  const bool removed = std::filesystem::remove(path, ec);
+  if (ec) return StepDirectoryRemoval::kFailed;
+  return removed ? StepDirectoryRemoval::kRemoved
+                 : StepDirectoryRemoval::kAlreadyGone;
+}
 
 template <typename Result, typename CgroupResult, typename RemoveDirectory>
 Result FinalizeStepCgroupCleanup(const CgroupResult& cgroup_result,

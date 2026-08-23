@@ -7,10 +7,13 @@
 // clang-format on
 
 #include <csignal>
+#include <unistd.h>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -352,6 +355,53 @@ TEST(CgroupCleanupContractTest, AggregatesDaemonCleanupCompletionsExactlyOnce) {
   EXPECT_TRUE(results.empty());
   barrier.Complete(false);
   EXPECT_EQ(results, (std::vector<bool>{false}));
+}
+
+// The production step-cleanup path, run in both flow variants. This is what
+// gives the ON/OFF matrix content: the same filesystem outcomes must be
+// reported identically whether or not the flow points are compiled in.
+TEST(CgroupCleanupContractTest, StepDirectoryRemovalReportsRemoved) {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("crane_cleanup_removed_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(root);
+  ASSERT_TRUE(std::filesystem::create_directories(root));
+
+  std::error_code ec;
+  EXPECT_EQ(Craned::detail::RemoveStepDirectory(root, ec),
+            Craned::detail::StepDirectoryRemoval::kRemoved);
+  EXPECT_FALSE(ec);
+  EXPECT_FALSE(std::filesystem::exists(root));
+}
+
+// A concurrent remover reaching the directory first is normal: the v2 janitor
+// is asynchronous. Reporting that as a failure produced a cleanup_finished
+// point with outcome=failure and forced the step to kError.
+TEST(CgroupCleanupContractTest,
+     StepDirectoryRemovalTreatsAlreadyGoneAsSuccess) {
+  const auto missing = std::filesystem::temp_directory_path() /
+                       ("crane_cleanup_absent_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(missing);
+  ASSERT_FALSE(std::filesystem::exists(missing));
+
+  std::error_code ec;
+  EXPECT_EQ(Craned::detail::RemoveStepDirectory(missing, ec),
+            Craned::detail::StepDirectoryRemoval::kAlreadyGone);
+  EXPECT_FALSE(ec) << "an absent directory is not an error: " << ec.message();
+}
+
+// A directory that still has contents is a genuine failure and must stay one.
+TEST(CgroupCleanupContractTest,
+     StepDirectoryRemovalReportsNonEmptyAsFailure) {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("crane_cleanup_nonempty_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(root);
+  ASSERT_TRUE(std::filesystem::create_directories(root / "leftover"));
+
+  std::error_code ec;
+  EXPECT_EQ(Craned::detail::RemoveStepDirectory(root, ec),
+            Craned::detail::StepDirectoryRemoval::kFailed);
+  EXPECT_TRUE(ec) << "a non-empty directory must report why it could not go";
+  std::filesystem::remove_all(root);
 }
 
 TEST(CgroupCleanupContractTest, PreservesDaemonCleanupAndWaiterOrder) {

@@ -48,26 +48,20 @@ bool RemoveStepCgroupDirectory(job_id_t job_id, step_id_t step_id,
           .parent_path();
 
   std::error_code ec;
-  if (std::filesystem::exists(step_cg_path, ec)) {
-    const bool removed = std::filesystem::remove(step_cg_path, ec);
-    if (!removed || ec) {
+  switch (detail::RemoveStepDirectory(step_cg_path, ec)) {
+    case detail::StepDirectoryRemoval::kFailed:
       CRANE_ERROR("[Step #{}.{}] Failed to remove step cgroup dir {}: {}",
-                  job_id, step_id, step_cg_path,
-                  ec ? ec.message() : "directory is not empty");
+                  job_id, step_id, step_cg_path, ec.message());
       return false;
-    }
-    CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id, step_id,
-                step_cg_path);
-    return true;
+    case detail::StepDirectoryRemoval::kRemoved:
+      CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} removed.", job_id, step_id,
+                  step_cg_path);
+      return true;
+    case detail::StepDirectoryRemoval::kAlreadyGone:
+      CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} already gone, skip clean.",
+                  job_id, step_id, step_cg_path);
+      return true;
   }
-  if (ec) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Failed to check existence of step cgroup dir {}: {}",
-        job_id, step_id, step_cg_path, ec.message());
-    return false;
-  }
-  CRANE_DEBUG("[Step #{}.{}] Step cgroup dir {} does not exist, skip clean.",
-              job_id, step_id, step_cg_path);
   return true;
 }
 

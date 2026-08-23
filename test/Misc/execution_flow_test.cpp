@@ -393,6 +393,52 @@ TEST_F(ExecutionFlowRuntimeTest,
   EXPECT_FALSE(crane::ExecutionFlowHeartbeatRunning());
 }
 
+// Emission ends with a span export, which on the production SimpleSpanProcessor
+// is a synchronous plugin RPC. If the drain were unbounded, a wedged plugin
+// would hang daemon shutdown forever -- the process would never exit. Bound it
+// the way the cgroup janitor already does, and report the incomplete export.
+TEST_F(ExecutionFlowRuntimeTest, ShutdownStopsWaitingForAWedgedExport) {
+  auto exporter_state = std::make_shared<BlockingExporterState>();
+  auto& tracer_manager = crane::TracerManager::GetInstance();
+  ASSERT_TRUE(tracer_manager.Initialize(
+      "ExecutionFlowRuntimeTest",
+      std::make_unique<BlockingExporter>(exporter_state)));
+  crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
+  crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
+
+  auto context = crane::FlowContext::Create("0123456789abcdef0123456789abcdef",
+                                            std::string_view{});
+  ASSERT_TRUE(context.has_value());
+  context->Job(1);
+  std::thread emitter_thread(
+      [context] { crane::FlowEmitter::JobAccepted(context); });
+  {
+    std::unique_lock lock{exporter_state->mutex};
+    ASSERT_TRUE(exporter_state->cv.wait_for(
+        lock, std::chrono::seconds{5},
+        [&] { return exporter_state->export_started; }))
+        << "flow point was not exported within the deadline";
+  }
+
+  // The exporter is still wedged. Shutdown must give up and return.
+  const auto begin = std::chrono::steady_clock::now();
+  const bool drained =
+      crane::ShutdownExecutionFlow(std::chrono::milliseconds{200});
+  const auto elapsed = std::chrono::steady_clock::now() - begin;
+
+  EXPECT_FALSE(drained) << "a wedged export must be reported, not hidden";
+  EXPECT_GE(elapsed, std::chrono::milliseconds{200});
+  EXPECT_LT(elapsed, std::chrono::seconds{5}) << "shutdown did not honour its bound";
+
+  {
+    std::lock_guard lock{exporter_state->mutex};
+    exporter_state->release_export = true;
+  }
+  exporter_state->cv.notify_all();
+  emitter_thread.join();
+  tracer_manager.Shutdown();
+}
+
 TEST_F(ExecutionFlowRuntimeTest, ShutdownWaitsForInFlightPoint) {
   auto exporter_state = std::make_shared<BlockingExporterState>();
   auto& tracer_manager = crane::TracerManager::GetInstance();
@@ -425,7 +471,9 @@ TEST_F(ExecutionFlowRuntimeTest, ShutdownWaitsForInFlightPoint) {
 
   std::atomic<bool> shutdown_returned{false};
   std::thread shutdown_thread([&] {
-    crane::ShutdownExecutionFlow();
+    // Generous bound: this test asserts the drain waits for a point that does
+    // finish. ShutdownStopsWaitingForAWedgedExport covers the timeout side.
+    crane::ShutdownExecutionFlow(std::chrono::seconds{30});
     shutdown_returned.store(true, std::memory_order_release);
   });
   while (crane::ExecutionFlowEnabled()) std::this_thread::yield();
