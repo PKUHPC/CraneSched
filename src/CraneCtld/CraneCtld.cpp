@@ -522,7 +522,7 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          auto node_hostname_list = node_id_list;
+          std::list<std::string> node_hostname_list;
           if (node["NodeHostname"]) {
             if (!util::ParseHostList(node["NodeHostname"].Scalar(),
                                      &node_hostname_list)) {
@@ -540,7 +540,7 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
-          auto node_addr_list = node_hostname_list;
+          std::list<std::string> node_addr_list;
           if (node["NodeAddr"]) {
             if (!util::ParseHostList(node["NodeAddr"].Scalar(),
                                      &node_addr_list)) {
