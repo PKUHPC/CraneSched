@@ -75,11 +75,9 @@ CraneBaseDir: /var/crane/
 - **ClusterName**: Used for identification in multi-cluster environments
 - **CraneBaseDir**: All relative paths are based on this directory
 
-When TLS is enabled, `ControlMachine` must match a DNS name in the control node
-certificate SAN. If certificates are issued for FQDNs, configure
-`ControlMachine` as the FQDN and use `ControlMachineAddr` for the reachable IP
-address or alternate network name. `DomainSuffix` is not appended to
-`ControlMachine`.
+When TLS is enabled, configure `ControlMachine` as the control node FQDN and
+use `ControlMachineAddr` for the reachable IP address or alternate network
+name.
 
 ### Node Definitions
 
@@ -118,13 +116,8 @@ Nodes:
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
 
-`craned` matches itself by exact comparison with the local short hostname first
-and then the full hostname returned by `gethostname()`. Either value may match
-the node `name` or `NodeHostname`. When TLS is enabled, `NodeHostname` is also
-used as the gRPC TLS target name for this node, so it must match a DNS name in
-the node certificate SAN. If node certificates are issued for FQDNs, configure
-`NodeHostname` as the FQDN and use `NodeAddr` for the reachable IP address or
-alternate network name. `DomainSuffix` is not appended to `NodeHostname`.
+When TLS is enabled, configure `NodeHostname` as the node FQDN and use
+`NodeAddr` for the reachable IP address or alternate network name.
 
 **Node Range Notation:**
 

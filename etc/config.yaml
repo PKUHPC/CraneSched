@@ -1,7 +1,6 @@
 # Cluster settings (This must be identical across all nodes)
 # The hostname of node which is running cranectld.
-# When TLS is enabled, this is also the TLS target name and must match the
-# control node certificate SAN, typically an FQDN.
+# When TLS is enabled, configure this as the control node FQDN.
 ControlMachine: cn15
 # Optional address used to connect to cranectld. Defaults to ControlMachine.
 # This may be an IP address or alternate network name.
@@ -158,8 +157,7 @@ Nodes:
   # the hostname of computing node
   - name: "cn[15-16]"
     # Optional. The OS hostname reported by each node. Defaults to name.
-    # When TLS is enabled, this is also the TLS target name and must match the
-    # node certificate SAN, typically an FQDN.
+    # When TLS is enabled, configure this as the node FQDN.
     # NodeHostname: "cn[15-16].crane.com"
     # Optional. Address used by cranectld to connect to craned. Defaults to NodeHostname.
     # This may be an IP address or alternate network name.

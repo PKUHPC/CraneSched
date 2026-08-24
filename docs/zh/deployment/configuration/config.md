@@ -75,9 +75,8 @@ CraneBaseDir: /var/crane/
 - **ClusterName**：在多集群环境中用于标识
 - **CraneBaseDir**：所有相对路径基于此目录
 
-启用 TLS 时，`ControlMachine` 必须匹配控制节点证书 SAN 中的 DNS 名称。如果证书按
-FQDN 签发，请将 `ControlMachine` 配置为 FQDN，并用 `ControlMachineAddr` 配置实际可
-达的 IP 地址或其他网络名。系统不会把 `DomainSuffix` 自动拼接到 `ControlMachine`。
+启用 TLS 时，将 `ControlMachine` 配置为控制节点 FQDN，并用 `ControlMachineAddr` 配置
+实际可达的 IP 地址或其他网络名。
 
 ### 节点定义
 
@@ -116,11 +115,8 @@ Nodes:
 - **memory**：总内存（支持 K、M、G、T 后缀）
 - **gres**：通用资源，如 GPU（可选）
 
-`craned` 会先用本机 short hostname，再用 `gethostname()` 返回的完整 hostname 做精确
-匹配；任一值可以匹配节点 `name` 或 `NodeHostname`。启用 TLS 时，`NodeHostname` 还会
-作为该节点的 gRPC TLS 目标名，因此必须匹配节点证书 SAN 中的 DNS 名称。如果节点证书
-按 FQDN 签发，请将 `NodeHostname` 配置为 FQDN，并用 `NodeAddr` 配置实际可达的 IP 地址
-或其他网络名。系统不会把 `DomainSuffix` 自动拼接到 `NodeHostname`。
+启用 TLS 时，将 `NodeHostname` 配置为节点 FQDN，并用 `NodeAddr` 配置实际可达的 IP 地址
+或其他网络名。
 
 **节点范围表示法：**
 
