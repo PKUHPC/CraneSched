@@ -75,9 +75,6 @@ CraneBaseDir: /var/crane/
 - **ClusterName**：在多集群环境中用于标识
 - **CraneBaseDir**：所有相对路径基于此目录
 
-启用 TLS 时，将 `ControlMachine` 配置为控制节点 FQDN，并用 `ControlMachineAddr` 配置
-实际可达的 IP 地址或其他网络名。
-
 ### 节点定义
 
 指定计算节点资源：
@@ -115,8 +112,10 @@ Nodes:
 - **memory**：总内存（支持 K、M、G、T 后缀）
 - **gres**：通用资源，如 GPU（可选）
 
-启用 TLS 时，将 `NodeHostname` 配置为节点 FQDN，并用 `NodeAddr` 配置实际可达的 IP 地址
-或其他网络名。
+Hostname 规则：
+
+- `craned` 会用本机 short hostname 和完整 hostname 匹配 `name` 与 `NodeHostname`。
+- 启用 TLS 时，`ControlMachine` 和 `NodeHostname` 需要配置为以 `TLS.DomainSuffix` 结尾的 FQDN。
 
 **节点范围表示法：**
 

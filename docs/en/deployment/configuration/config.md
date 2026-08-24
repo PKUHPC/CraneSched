@@ -75,10 +75,6 @@ CraneBaseDir: /var/crane/
 - **ClusterName**: Used for identification in multi-cluster environments
 - **CraneBaseDir**: All relative paths are based on this directory
 
-When TLS is enabled, configure `ControlMachine` as the control node FQDN and
-use `ControlMachineAddr` for the reachable IP address or alternate network
-name.
-
 ### Node Definitions
 
 Specify compute node resources:
@@ -116,8 +112,12 @@ Nodes:
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
 
-When TLS is enabled, configure `NodeHostname` as the node FQDN and use
-`NodeAddr` for the reachable IP address or alternate network name.
+Hostname rules:
+
+- `craned` matches the local short hostname and full hostname against `name` and
+  `NodeHostname`.
+- When TLS is enabled, configure `ControlMachine` and `NodeHostname` as FQDNs
+  ending with `TLS.DomainSuffix`.
 
 **Node Range Notation:**
 
