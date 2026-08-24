@@ -12,6 +12,7 @@ A minimal configuration for a 4-node cluster:
 ```yaml
 # Cluster identification
 ControlMachine: crane01
+ControlMachineAddr: 10.0.0.1
 ClusterName: my_cluster
 
 # Database configuration
@@ -56,6 +57,9 @@ Define basic cluster information:
 # Hostname of the node running cranectld (control node)
 ControlMachine: crane01
 
+# Optional address used to connect to cranectld. Defaults to ControlMachine.
+ControlMachineAddr: 10.0.0.1
+
 # Name of this cluster
 ClusterName: my_cluster
 
@@ -66,7 +70,8 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 ```
 
-- **ControlMachine**: Must be the actual hostname of your control node
+- **ControlMachine**: Hostname of your control node, used as the control node identity and TLS target name
+- **ControlMachineAddr**: Optional address used for connecting to the control node. Defaults to `ControlMachine`
 - **ClusterName**: Used for identification in multi-cluster environments
 - **CraneBaseDir**: All relative paths are based on this directory
 
@@ -471,7 +476,7 @@ After modifying the configuration:
 
 ## Troubleshooting
 
-**Nodes not appearing**: Check ControlMachine hostname matches actual control node hostname.
+**Nodes not appearing**: Check `ControlMachine` identifies the control node and `ControlMachineAddr` points to a reachable control node address.
 
 **Configuration mismatch warnings**: Ensure `/etc/crane/config.yaml` is identical on all nodes.
 

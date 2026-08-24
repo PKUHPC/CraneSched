@@ -12,6 +12,7 @@
 ```yaml
 # 集群标识
 ControlMachine: crane01
+ControlMachineAddr: 10.0.0.1
 ClusterName: my_cluster
 
 # 数据库配置
@@ -56,6 +57,9 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 # 运行 cranectld 的节点的主机名（控制节点）
 ControlMachine: crane01
 
+# 用于连接 cranectld 的可选地址。默认使用 ControlMachine。
+ControlMachineAddr: 10.0.0.1
+
 # 此集群的名称
 ClusterName: my_cluster
 
@@ -66,7 +70,8 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 ```
 
-- **ControlMachine**：必须是控制节点的实际主机名
+- **ControlMachine**：控制节点主机名，用作控制节点身份和 TLS 目标名
+- **ControlMachineAddr**：用于连接控制节点的可选地址。默认使用 `ControlMachine`
 - **ClusterName**：在多集群环境中用于标识
 - **CraneBaseDir**：所有相对路径基于此目录
 
@@ -473,7 +478,7 @@ HealthCheck:
 
 ## 故障排除
 
-**节点未显示**：检查 ControlMachine 主机名是否与实际控制节点主机名匹配。
+**节点未显示**：检查 `ControlMachine` 是否标识控制节点，并确认 `ControlMachineAddr` 指向可访问的控制节点地址。
 
 **配置不匹配警告**：确保所有节点上的 `/etc/crane/config.yaml` 完全相同。
 
