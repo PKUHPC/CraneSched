@@ -538,6 +538,8 @@ void ParseConfig(int argc, char** argv) {
                   node["name"].Scalar());
               std::exit(1);
             }
+          } else {
+            node_hostname_list = node_id_list;
           }
 
           std::list<std::string> node_addr_list;
@@ -556,6 +558,8 @@ void ParseConfig(int argc, char** argv) {
                   node["name"].Scalar());
               std::exit(1);
             }
+          } else {
+            node_addr_list = node_hostname_list;
           }
 
           if (node["cpu"])

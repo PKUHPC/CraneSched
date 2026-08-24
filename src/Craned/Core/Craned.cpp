@@ -115,6 +115,12 @@ void RegisterNodeAddrOrExit_(const std::string& node_addr,
   }
 }
 
+std::string ShortHostname_(const std::string& hostname) {
+  const auto dot_pos = hostname.find('.');
+  if (dot_pos == std::string::npos) return hostname;
+  return hostname.substr(0, dot_pos);
+}
+
 }  // namespace
 
 CraneErrCode RecoverCgForJobSteps(
@@ -870,6 +876,8 @@ void ParseConfig(int argc, char** argv) {
                   node["name"].Scalar());
               std::exit(1);
             }
+          } else {
+            node_hostname_list = name_list;
           }
 
           std::list<std::string> node_addr_list;
@@ -888,6 +896,8 @@ void ParseConfig(int argc, char** argv) {
                   node["name"].Scalar());
               std::exit(1);
             }
+          } else {
+            node_addr_list = node_hostname_list;
           }
 
           if (node["cpu"]) {
@@ -1270,10 +1280,17 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  auto craned_id_it = g_config.NodeHostnameToCranedId.find(g_config.Hostname);
+  const std::string short_hostname = ShortHostname_(g_config.Hostname);
+  auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
+  if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
+      short_hostname != g_config.Hostname) {
+    craned_id_it = g_config.NodeHostnameToCranedId.find(g_config.Hostname);
+  }
   if (craned_id_it == g_config.NodeHostnameToCranedId.end()) {
-    CRANE_ERROR("This machine {} is not contained in Nodes!",
-                g_config.Hostname);
+    CRANE_ERROR(
+        "This machine {} (short hostname: {}) is not contained in "
+        "Nodes!",
+        g_config.Hostname, short_hostname);
     std::exit(1);
   }
   g_config.CranedIdOfThisNode = craned_id_it->second;
