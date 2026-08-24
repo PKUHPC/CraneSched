@@ -803,6 +803,8 @@ void ParseConfig(int argc, char** argv) {
         CRANE_ERROR("ControlMachine is not configured.");
         std::exit(1);
       }
+      g_config.ControlMachineAddr =
+          YamlValueOr(config["ControlMachineAddr"], g_config.ControlMachine);
 
       g_config.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
@@ -1236,6 +1238,7 @@ void ParseConfig(int argc, char** argv) {
     }
   } else {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
+    g_config.ControlMachineAddr = g_config.ControlMachine;
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
@@ -1616,7 +1619,8 @@ void GlobalVariableInit() {
   g_ctld_client->Init();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
-  g_ctld_client->InitGrpcChannel(g_config.ControlMachine);
+  g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
+                                 g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

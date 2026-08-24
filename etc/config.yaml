@@ -1,6 +1,8 @@
 # Cluster settings (This must be identical across all nodes)
 # the hostname of node which is running cranectld
 ControlMachine: cn15
+# Optional address used to connect to cranectld. Defaults to ControlMachine.
+ControlMachineAddr: cn15
 # the name of this cluster
 ClusterName: pkuhpc_test
 
