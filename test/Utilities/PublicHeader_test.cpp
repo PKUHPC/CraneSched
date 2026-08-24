@@ -38,6 +38,19 @@ TEST(String, ParseNodeList) {
   }
 }
 
+TEST(String, ParseHostListKeepsDeterministicOrder) {
+  using util::ParseHostList;
+
+  std::list<std::string> parsed_list;
+  ASSERT_TRUE(ParseHostList("node[02,01],node03", &parsed_list));
+  EXPECT_EQ(absl::StrJoin(parsed_list, " "), "node02 node01 node03");
+
+  parsed_list.clear();
+  ASSERT_TRUE(ParseHostList("rack[1-2]n[01-02]", &parsed_list));
+  EXPECT_EQ(absl::StrJoin(parsed_list, " "),
+            "rack1n01 rack1n02 rack2n01 rack2n02");
+}
+
 TEST(String, HostNameListToStr) {
   using util::HostNameListToStr;
 
