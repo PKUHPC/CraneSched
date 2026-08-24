@@ -225,6 +225,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
     auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
     cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
+    cfored_listen_conf->set_domain_suffix(
+        g_config.ListenConf.TlsConfig.DomainSuffix);
     auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
     tls_certs->set_cert_content(
         g_config.ListenConf.TlsConfig.TlsCerts.CertContent);
