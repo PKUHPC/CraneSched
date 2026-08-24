@@ -94,7 +94,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   if (g_config.ListenConf.TlsConfig.Enabled) {
     if (remote_is_craned) {
       grpc::ChannelArguments channel_args;
-      SetTlsHostnameOverride(
+      SetTlsTargetNameOverride(
           &channel_args, g_config.CranedIdToNodeHostname.at(remote_craned_id));
       channel_of_remote_service = CreateTcpTlsCustomChannelByIp(
           g_config.CranedIdToNodeAddr.at(remote_craned_id), crane_port,
@@ -112,7 +112,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
         CRANE_TRACE("Remote address {} was resolved as {}",
                     request->ssh_remote_address(), remote_hostname);
 
-        channel_of_remote_service = CreateTcpTlsChannelByHostname(
+        channel_of_remote_service = CreateTcpTlsChannelByDnsName(
             remote_hostname, crane_port,
             g_config.ListenConf.TlsConfig.TlsCerts);
       } else {

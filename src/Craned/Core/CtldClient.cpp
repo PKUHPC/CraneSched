@@ -866,7 +866,7 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (g_config.ListenConf.TlsConfig.Enabled)
-    m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
+    m_ctld_channel_ = CreateTcpTlsCustomChannelByDnsName(
         server_address, g_config.CraneCtldForInternalListenPort,
         g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
   else
