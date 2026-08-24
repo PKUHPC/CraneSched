@@ -7361,11 +7361,15 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
   if (topk_nodes_avail.size() == job->node_num &&
       topk_ntasks_sum_avail >= job->ntasks) {
-    int rest_ntasks = job->ntasks - job->node_num;
+    uint32_t rest_ntasks =
+        job->ntasks - job->node_num * job->ntasks_per_node_min;
     while (!topk_nodes_avail.empty()) {
       const auto& info = topk_nodes_avail.top();
       const auto& res = info.res;
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      uint32_t ntasks_on_node =
+          job->ntasks_per_node_min +
+          std::min(rest_ntasks, static_cast<uint32_t>(info.ntasks_on_node) -
+                                    job->ntasks_per_node_min);
       if (job->exclusive) {
         job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
       } else {
@@ -7380,9 +7384,10 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
                                              feasible_res);
       }
       job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
-      rest_ntasks -= ntasks_on_node - 1;
+      rest_ntasks -= ntasks_on_node - job->ntasks_per_node_min;
       topk_nodes_avail.pop();
     }
+    CRANE_ASSERT(rest_ntasks == 0);
     job->start_time = now;
     job->craned_ids.clear();
     job->craned_ids.reserve(job->craned_id_to_task_num.size());
@@ -7402,11 +7407,14 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
     return false;
   }
 
-  int rest_ntasks = job->ntasks - job->node_num;
+  uint32_t rest_ntasks = job->ntasks - job->node_num * job->ntasks_per_node_min;
   while (!topk_nodes_total.empty()) {
     const auto& info = topk_nodes_total.top();
     const auto& res = info.res;
-    int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+    uint32_t ntasks_on_node =
+        job->ntasks_per_node_min +
+        std::min(rest_ntasks, static_cast<uint32_t>(info.ntasks_on_node) -
+                                  job->ntasks_per_node_min);
     if (job->exclusive) {
       job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
     } else {
@@ -7422,9 +7430,10 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
     }
     job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
     nodes_to_sched->push_back(info.node_state);
-    rest_ntasks -= ntasks_on_node - 1;
+    rest_ntasks -= ntasks_on_node - job->ntasks_per_node_min;
     topk_nodes_total.pop();
   }
+  CRANE_ASSERT(rest_ntasks == 0);
   return false;
 }
 
