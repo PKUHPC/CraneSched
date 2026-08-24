@@ -47,6 +47,7 @@ struct Config {
       TlsCertificates TlsCerts;
       std::string CaFilePath;
       std::string CaContent;
+      std::string DomainSuffix;
     };
     TlsCertConfig TlsConfig;
   };
