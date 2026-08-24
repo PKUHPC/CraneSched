@@ -56,28 +56,6 @@ using Craned::StepInstance;
 
 namespace {
 
-std::list<std::string> ParseNodeEndpointListOrExit_(
-    const YAML::Node& node, std::string_view key,
-    const std::list<std::string>& default_list) {
-  if (!node[std::string(key)]) return default_list;
-
-  std::list<std::string> endpoint_list;
-  if (!util::ParseHostList(node[std::string(key)].Scalar(), &endpoint_list)) {
-    CRANE_ERROR("Illegal {} string format: {}", key,
-                node[std::string(key)].Scalar());
-    std::exit(1);
-  }
-
-  if (endpoint_list.size() != default_list.size()) {
-    CRANE_ERROR(
-        "{} count ({}) must match node name count ({}) in Nodes entry '{}'.",
-        key, endpoint_list.size(), default_list.size(), node["name"].Scalar());
-    std::exit(1);
-  }
-
-  return endpoint_list;
-}
-
 void RegisterNodeHostnameAliasOrExit_(const std::string& alias,
                                       const CranedId& craned_id) {
   auto [it, inserted] =
@@ -876,10 +854,41 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          auto node_hostname_list =
-              ParseNodeEndpointListOrExit_(node, "NodeHostname", name_list);
-          auto node_addr_list = ParseNodeEndpointListOrExit_(
-              node, "NodeAddr", node_hostname_list);
+          auto node_hostname_list = name_list;
+          if (node["NodeHostname"]) {
+            if (!util::ParseHostList(node["NodeHostname"].Scalar(),
+                                     &node_hostname_list)) {
+              CRANE_ERROR("Illegal NodeHostname string format: {}",
+                          node["NodeHostname"].Scalar());
+              std::exit(1);
+            }
+            if (node_hostname_list.size() != name_list.size()) {
+              CRANE_ERROR(
+                  "NodeHostname count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_hostname_list.size(), name_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          }
+
+          auto node_addr_list = node_hostname_list;
+          if (node["NodeAddr"]) {
+            if (!util::ParseHostList(node["NodeAddr"].Scalar(),
+                                     &node_addr_list)) {
+              CRANE_ERROR("Illegal NodeAddr string format: {}",
+                          node["NodeAddr"].Scalar());
+              std::exit(1);
+            }
+            if (node_addr_list.size() != name_list.size()) {
+              CRANE_ERROR(
+                  "NodeAddr count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_addr_list.size(), name_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          }
 
           if (node["cpu"]) {
             uint32_t cpu_count = std::stoul(node["cpu"].as<std::string>());
