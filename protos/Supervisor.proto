@@ -100,7 +100,6 @@ message InitSupervisorRequest {
 
     bool use_tls = 1;
     TlsCertificates tls_certs = 2;
-    string domain_suffix = 3;
   }
 
   CforedListenConf cfored_listen_conf = 25;
