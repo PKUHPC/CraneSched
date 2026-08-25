@@ -573,8 +573,14 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   SetGrpcClientKeepAliveChannelArgs(&channel_args);
   // Todo: Use cfored listen config
   if (g_config.CforedListenConf.TlsConfig.Enabled) {
+    std::string cfored_fqdn = cfored_name;
+    const std::string& domain_suffix =
+        g_config.CforedListenConf.TlsConfig.DomainSuffix;
+    if (!domain_suffix.empty() && !cfored_fqdn.ends_with("." + domain_suffix)) {
+      cfored_fqdn += "." + domain_suffix;
+    }
     m_cfored_channel_ = CreateTcpTlsChannelByDnsName(
-        cfored_name, kCforedDefaultPort,
+        cfored_fqdn, kCforedDefaultPort,
         g_config.CforedListenConf.TlsConfig.TlsCerts);
   } else {
     m_cfored_channel_ =
