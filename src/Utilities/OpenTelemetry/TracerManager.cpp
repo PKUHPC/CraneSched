@@ -24,6 +24,8 @@
 #  include "crane/Tracing.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
+#  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
+#  include "opentelemetry/sdk/trace/batch_span_processor_options.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
 #endif
@@ -48,7 +50,8 @@ bool TracerManager::Initialize(const std::string& service_name) {
 #ifdef CRANE_ENABLE_TRACING
 bool TracerManager::Initialize(
     const std::string& service_name,
-    std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter) {
+    std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter,
+    SpanExportMode export_mode) {
   namespace trace_sdk = opentelemetry::sdk::trace;
   namespace resource = opentelemetry::sdk::resource;
 
@@ -59,8 +62,24 @@ bool TracerManager::Initialize(
   std::shared_ptr<trace_sdk::TracerProvider> provider;
 
   if (extra_exporter) {
-    auto processor = trace_sdk::SimpleSpanProcessorFactory::Create(
-        std::move(extra_exporter));
+    std::unique_ptr<trace_sdk::SpanProcessor> processor;
+    if (export_mode == SpanExportMode::kSynchronous) {
+      processor = trace_sdk::SimpleSpanProcessorFactory::Create(
+          std::move(extra_exporter));
+    } else {
+      trace_sdk::BatchSpanProcessorOptions options;
+      // Room for a burst of concurrent job lifecycles. On overflow the SDK
+      // drops, which the contract already tolerates: flow points carry a
+      // monotonic event_sequence, so a gap is detected and reported as
+      // trace_pipeline_inconclusive rather than mistaken for a violation.
+      options.max_queue_size = 8192;
+      options.max_export_batch_size = 512;
+      // Well inside the validator's query overlap (5s floor), so a batched
+      // point is never older than the watermark by the time it is queried.
+      options.schedule_delay_millis = std::chrono::milliseconds{1000};
+      processor = trace_sdk::BatchSpanProcessorFactory::Create(
+          std::move(extra_exporter), options);
+    }
     provider = std::make_shared<trace_sdk::TracerProvider>(std::move(processor),
                                                            resource_ptr);
   } else {

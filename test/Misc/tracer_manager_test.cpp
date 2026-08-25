@@ -106,8 +106,9 @@ TEST(TracerManagerTest, SerializeDeserializeTraceParent) {
 TEST(TracerManagerTest, ServiceName) {
   auto& manager = crane::TracerManager::GetInstance();
   auto counter = std::make_shared<std::atomic<int>>(0);
-  ASSERT_TRUE(manager.Initialize("MyService",
-                                 std::make_unique<CountingExporter>(counter)));
+  ASSERT_TRUE(manager.Initialize(
+      "MyService", std::make_unique<CountingExporter>(counter),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   EXPECT_EQ(manager.ServiceName(), "MyService");
   manager.Shutdown();
 }
@@ -115,8 +116,9 @@ TEST(TracerManagerTest, ServiceName) {
 TEST(TracerManagerTest, ConcurrentTracerSnapshotsObserveShutdownSafely) {
   auto& manager = crane::TracerManager::GetInstance();
   auto counter = std::make_shared<std::atomic<int>>(0);
-  ASSERT_TRUE(manager.Initialize("ConcurrentSnapshotTest",
-                                 std::make_unique<CountingExporter>(counter)));
+  ASSERT_TRUE(manager.Initialize(
+      "ConcurrentSnapshotTest", std::make_unique<CountingExporter>(counter),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::g_tracing_enabled.store(true, std::memory_order_release);
 
   std::atomic_bool stop{false};

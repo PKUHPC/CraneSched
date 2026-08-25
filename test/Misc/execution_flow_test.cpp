@@ -290,7 +290,8 @@ TEST_F(ExecutionFlowRuntimeTest,
   auto& tracer_manager = crane::TracerManager::GetInstance();
   tracer_manager.Shutdown();
   ASSERT_TRUE(tracer_manager.Initialize(
-      "ExecutionFlowExporterTest", std::make_unique<FilteringExporter>(state)));
+      "ExecutionFlowExporterTest", std::make_unique<FilteringExporter>(state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 3600, "cranectld", "ctld", false);
 
@@ -397,12 +398,52 @@ TEST_F(ExecutionFlowRuntimeTest,
 // is a synchronous plugin RPC. If the drain were unbounded, a wedged plugin
 // would hang daemon shutdown forever -- the process would never exit. Bound it
 // the way the cgroup janitor already does, and report the incomplete export.
+// The production default must not put the exporter on the producer's thread.
+// Under SimpleSpanProcessor every span end was a synchronous plugin RPC taken
+// under a global mutex, so a slow plugin stalled whichever thread emitted --
+// the scheduler's single status-change thread and the single cgroup janitor
+// worker included. With tens of flow points per job that is a scheduler stall,
+// not just added latency.
+TEST_F(ExecutionFlowRuntimeTest, BatchedExportDoesNotBlockTheEmittingThread) {
+  auto exporter_state = std::make_shared<BlockingExporterState>();
+  auto& tracer_manager = crane::TracerManager::GetInstance();
+  // No export mode: take the production default.
+  ASSERT_TRUE(tracer_manager.Initialize(
+      "ExecutionFlowRuntimeTest",
+      std::make_unique<BlockingExporter>(exporter_state)));
+  crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
+  crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
+
+  auto context = crane::FlowContext::Create("0123456789abcdef0123456789abcdef",
+                                            std::string_view{});
+  ASSERT_TRUE(context.has_value());
+  context->Job(1);
+
+  // The exporter is wedged for the whole test; emission must not wait on it.
+  const auto begin = std::chrono::steady_clock::now();
+  for (int i = 0; i < 64; ++i) crane::FlowEmitter::JobAccepted(context);
+  const auto elapsed = std::chrono::steady_clock::now() - begin;
+
+  EXPECT_LT(elapsed, std::chrono::seconds{2})
+      << "64 flow points took " << std::chrono::duration_cast<
+             std::chrono::milliseconds>(elapsed).count()
+      << " ms; emission is waiting on the exporter";
+
+  {
+    std::lock_guard lock{exporter_state->mutex};
+    exporter_state->release_export = true;
+  }
+  exporter_state->cv.notify_all();
+  tracer_manager.Shutdown();
+}
+
 TEST_F(ExecutionFlowRuntimeTest, ShutdownStopsWaitingForAWedgedExport) {
   auto exporter_state = std::make_shared<BlockingExporterState>();
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<BlockingExporter>(exporter_state)));
+      std::make_unique<BlockingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
 
@@ -444,7 +485,8 @@ TEST_F(ExecutionFlowRuntimeTest, ShutdownWaitsForInFlightPoint) {
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<BlockingExporter>(exporter_state)));
+      std::make_unique<BlockingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
 
@@ -496,7 +538,8 @@ TEST_F(ExecutionFlowRuntimeTest,
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<RecordingExporter>(exporter_state)));
+      std::make_unique<RecordingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
 
@@ -526,7 +569,8 @@ TEST_F(ExecutionFlowRuntimeTest, ContextSnapshotsProducerIdentity) {
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<RecordingExporter>(exporter_state)));
+      std::make_unique<RecordingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 1, "cranectld", "ctld", false);
 
@@ -553,7 +597,8 @@ TEST_F(ExecutionFlowRuntimeTest, EverySemanticEmitterMatchesCanonicalCatalog) {
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<RecordingExporter>(exporter_state)));
+      std::make_unique<RecordingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
 
   auto job_context = [] {
@@ -870,7 +915,8 @@ TEST_F(ExecutionFlowRuntimeTest, DaemonAndCommonCleanupUseCanonicalStepPoints) {
   auto& tracer_manager = crane::TracerManager::GetInstance();
   ASSERT_TRUE(tracer_manager.Initialize(
       "ExecutionFlowRuntimeTest",
-      std::make_unique<RecordingExporter>(exporter_state)));
+      std::make_unique<RecordingExporter>(exporter_state),
+      crane::TracerManager::SpanExportMode::kSynchronous));
   crane::ApplyRuntimeTraceConfig(true, crane::TraceLevel::Basic);
   crane::InitializeExecutionFlow(true, 1, "craned", "node0", false);
 
