@@ -61,6 +61,8 @@ CriClient::~CriClient() {
 
 void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
                                    const std::filesystem::path& image_service) {
+  m_event_stream_supported_ = true;
+
   if (runtime_service == image_service) {
     m_rs_channel_ = CreateUnixInsecureChannel(runtime_service);
     m_is_channel_ = m_rs_channel_;
@@ -73,7 +75,7 @@ void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
   m_is_stub_ = api::ImageService::NewStub(m_is_channel_);
 }
 
-void CriClient::Version() const {
+CraneExpectedRich<api::VersionResponse> CriClient::GetVersion() const {
   using api::VersionRequest;
   using api::VersionResponse;
 
@@ -86,11 +88,66 @@ void CriClient::Version() const {
 
   auto status = m_rs_stub_->Version(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to get CRI version: {}", status.error_message());
+    std::string error_msg = std::format(
+        "Failed to get CRI version: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  return response;
+}
+
+void CriClient::Version() const {
+  auto version = GetVersion();
+  if (!version.has_value()) {
+    CRANE_ERROR("{}", version.error().description());
     return;
   }
 
-  CRANE_TRACE("CRI replied: version={}", response.version());
+  CRANE_TRACE(
+      "CRI replied: runtime_name={}, runtime_version={}, "
+      "runtime_api_version={}",
+      version->runtime_name(), version->runtime_version(),
+      version->runtime_api_version());
+}
+
+std::optional<std::pair<uint32_t, uint32_t>>
+CriClient::ParseRuntimeVersionMajorMinor(std::string_view version) {
+  if (version.starts_with('v')) version.remove_prefix(1);
+
+  auto dot = version.find('.');
+  if (dot == std::string_view::npos || dot == 0 || dot + 1 >= version.size())
+    return std::nullopt;
+
+  uint32_t major = 0;
+  auto major_result =
+      std::from_chars(version.data(), version.data() + dot, major);
+  if (major_result.ec != std::errc{} ||
+      major_result.ptr != version.data() + dot)
+    return std::nullopt;
+
+  auto minor_end = version.find('.', dot + 1);
+  if (minor_end == std::string_view::npos) minor_end = version.size();
+  if (minor_end == dot + 1) return std::nullopt;
+
+  uint32_t minor = 0;
+  auto minor_result = std::from_chars(version.data() + dot + 1,
+                                      version.data() + minor_end, minor);
+  if (minor_result.ec != std::errc{} ||
+      minor_result.ptr != version.data() + minor_end)
+    return std::nullopt;
+
+  return std::pair{major, minor};
+}
+
+bool CriClient::IsRuntimeVersionSupported(std::string_view version) {
+  auto parsed = ParseRuntimeVersionMajorMinor(version);
+  if (!parsed.has_value()) return false;
+
+  const auto [major, minor] = parsed.value();
+  return major > kCriMinRuntimeMajor ||
+         (major == kCriMinRuntimeMajor && minor >= kCriMinRuntimeMinor);
 }
 
 void CriClient::RuntimeConfig() const {
@@ -644,6 +701,13 @@ CraneExpectedRich<std::string> CriClient::Exec(
 // ===== Container Event Monitoring Implementation =====
 
 void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
+  if (!m_event_stream_supported_) {
+    CRANE_ERROR(
+        "CRI runtime does not support GetContainerEvents; "
+        "container event stream is disabled.");
+    return;
+  }
+
   // Stop existing stream if running
   StopContainerEventStream();
 
@@ -717,6 +781,10 @@ void CriClient::ContainerEventStreamLoop_() {
         CRANE_ERROR("Container event stream failed: {} (code: {})",
                     status.error_message(),
                     static_cast<int>(status.error_code()));
+        if (status.error_code() == grpc::StatusCode::UNIMPLEMENTED) {
+          m_event_stream_supported_ = false;
+          m_event_stream_stop_ = true;
+        }
       }
 
     } catch (const std::exception& e) {

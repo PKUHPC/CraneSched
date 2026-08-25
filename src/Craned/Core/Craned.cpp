@@ -1606,6 +1606,26 @@ void GlobalVariableInit() {
     g_cri_client = std::make_unique<cri::CriClient>();
     g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
                                      g_config.Container.ImageEndpoint);
+
+    auto runtime_version = g_cri_client->GetVersion();
+    if (!runtime_version.has_value()) {
+      CRANE_ERROR("Container runtime compatibility check failed: {}",
+                  runtime_version.error().description());
+      std::exit(1);
+    }
+
+    CRANE_INFO("CRI runtime detected: name={}, version={}, api_version={}",
+               runtime_version->runtime_name(),
+               runtime_version->runtime_version(),
+               runtime_version->runtime_api_version());
+    if (!cri::CriClient::IsRuntimeVersionSupported(
+            runtime_version->runtime_version())) {
+      CRANE_ERROR(
+          "Container runtime version '{}' is unsupported; container jobs "
+          "require containerd 1.7.0 or newer.",
+          runtime_version->runtime_version());
+      std::exit(1);
+    }
   }
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);

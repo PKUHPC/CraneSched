@@ -552,8 +552,10 @@ bool JobScheduler::Init() {
   };
   auto mark_job_invalid = [this, &recovered_running_jobs](JobInCtld* job) {
     job_id_t job_id = job->JobId();
-    CRANE_ERROR("[Job #{}] Running job without step, mark the job as FAILED!",
-                job_id);
+    CRANE_ERROR(
+        "[Job #{}] Running job without a valid daemon step, mark the job as "
+        "FAILED!",
+        job_id);
     job->SetStatus(crane::grpc::Failed);
     if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
       {
@@ -675,7 +677,13 @@ bool JobScheduler::Init() {
       }
     }
 
-    if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty()) {
+    // A common-only snapshot is incomplete and must not enter the running
+    // indexes, even if other steps were recovered successfully.
+    if (!HasRequiredDaemonStepForRunningJob(*job)) {
+      CRANE_ERROR(
+          "[Job #{}] Running job is missing its daemon step during recovery; "
+          "marking the job as FAILED.",
+          job->JobId());
       job_it = mark_job_invalid(job.get());
     } else {
       ++job_it;
@@ -7087,6 +7095,13 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
 
     JobInCtld* job = job_it->second.get();
     auto* daemon_step = job->DaemonStep();
+    if (daemon_step == nullptr) {
+      CRANE_ERROR(
+          "[Job #{}] Running job has no daemon step while configuring craned "
+          "{}; skipping malformed job configuration.",
+          job_id, craned_id);
+      continue;
+    }
 
     absl::Time expected_end_time = job->EndTime();
     if (job->Status() == crane::grpc::JobStatus::Running &&

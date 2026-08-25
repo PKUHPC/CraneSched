@@ -125,6 +125,15 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
+TEST(CtldRecoveryInvariantTest, RunningJobRequiresDaemonStep) {
+  Ctld::JobInCtld job;
+  job.SetJobId(100);
+  EXPECT_FALSE(Ctld::HasRequiredDaemonStepForRunningJob(job));
+
+  job.SetDaemonStep(MakeDaemonStep(&job, {"node-a"}));
+  EXPECT_TRUE(Ctld::HasRequiredDaemonStepForRunningJob(job));
+}
+
 TEST(CtldStepStateMachineTest,
      DaemonConfigureFailureCleansAndReturnsFailureAfterTerminalReports) {
   constexpr job_id_t kJobId = 42;
