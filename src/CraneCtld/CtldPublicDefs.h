@@ -847,6 +847,8 @@ struct JobInCtld {
   std::string name;
   std::string qos;
 
+  uint32_t node_num_min{0};
+  uint32_t node_num_max{0};
   uint32_t node_num{0};
   uint32_t ntasks{0};
   uint32_t ntasks_per_node_min{1};

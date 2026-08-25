@@ -223,7 +223,9 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "type", &JobInCtld::type, "uid", &JobInCtld::uid,
     "gid", &JobInCtld::gid, "account", &JobInCtld::account,
     "name", &JobInCtld::name, "qos", &JobInCtld::qos,
-    "node_num", &JobInCtld::node_num,
+    "node_num", sol::property([](const JobInCtld& t) { return t.node_num; }),
+    "node_num_min", &JobInCtld::node_num_min,
+    "node_num_max", &JobInCtld::node_num_max,
     // TODO: expose ntasks_per_node_min to Lua
     "ntasks_per_node_min", &JobInCtld::ntasks_per_node_min,
     "ntasks_per_node_max", &JobInCtld::ntasks_per_node_max,
