@@ -18,11 +18,26 @@
 
 #include "CforedClient.h"
 
+#include <poll.h>
+#include <sys/ioctl.h>
+
+#include <atomic>
 #include <cerrno>
+#include <limits>
 
 #include "TaskManager.h"
 #include "crane/String.h"
 namespace Craned::Supervisor {
+
+namespace {
+constexpr uint32_t kTerminalResizeDiagnosticLimit = 8;
+
+bool ShouldLogTerminalResizeDiagnostic() {
+  static std::atomic_uint32_t count{0};
+  return count.fetch_add(1, std::memory_order_relaxed) <
+         kTerminalResizeDiagnosticLimit;
+}
+}  // namespace
 
 using crane::grpc::StreamStepIOReply;
 using crane::grpc::StreamStepIORequest;
@@ -221,15 +236,30 @@ uint16_t CforedClient::SetupX11forwarding_() {
 
 bool CforedClient::WriteStringToFd_(const std::string& msg, int fd,
                                     bool close_fd) {
-  ssize_t sz_sent = 0, sz_written;
-  while (sz_sent != msg.size()) {
-    sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
-    if (sz_written < 0) {
-      CRANE_ERROR("Pipe to Crun task was broken.");
+  size_t sz_sent = 0;
+  while (sz_sent < msg.size()) {
+    const ssize_t sz_written =
+        write(fd, msg.data() + sz_sent, msg.size() - sz_sent);
+    if (sz_written > 0) {
+      sz_sent += static_cast<size_t>(sz_written);
+      continue;
+    }
+    if (sz_written < 0 && errno == EINTR) continue;
+    if (sz_written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      struct pollfd poll_fd{.fd = fd, .events = POLLOUT, .revents = 0};
+      int poll_result;
+      do {
+        poll_result = poll(&poll_fd, 1, 1000);
+      } while (poll_result < 0 && errno == EINTR);
+      if (poll_result > 0 && (poll_fd.revents & POLLOUT) != 0) continue;
+      CRANE_WARN("Timed out waiting for task input fd {} to become writable.",
+                 fd);
       return false;
     }
 
-    sz_sent += sz_written;
+    CRANE_ERROR("Failed to write task input to fd {}: {}", fd,
+                sz_written == 0 ? "zero-byte write" : strerror(errno));
+    return false;
   }
   if (close_fd) close(fd);
   return true;
@@ -833,6 +863,8 @@ void CforedClient::AsyncSendRecvThread_() {
             g_config.CranedIdOfThisNode);
         request.mutable_payload_register_req()->set_job_id(g_config.JobId);
         request.mutable_payload_register_req()->set_step_id(g_config.StepId);
+        request.mutable_payload_register_req()->set_supports_terminal_resize(
+            true);
 
         write_pending.store(true, std::memory_order::release);
         stream->Write(request, (void*)Tag::Write);
@@ -877,6 +909,57 @@ void CforedClient::AsyncSendRecvThread_() {
         }
 
         CRANE_ASSERT(tag == Tag::Read);
+
+        if (reply.type() == StreamStepIOReply::TERMINAL_RESIZE) {
+          const auto& resize = reply.payload_terminal_resize_req();
+          const auto& size = resize.terminal_size();
+          const bool valid_size =
+              size.rows() > 0 &&
+              size.rows() <= std::numeric_limits<uint16_t>::max() &&
+              size.columns() > 0 &&
+              size.columns() <= std::numeric_limits<uint16_t>::max();
+          if (!valid_size) {
+            if (ShouldLogTerminalResizeDiagnostic()) {
+              CRANE_WARN("Ignoring invalid terminal resize {}x{} for task #{}.",
+                         size.rows(), size.columns(), resize.task_id());
+            }
+          } else {
+            absl::MutexLock lock(&m_mtx_);
+            auto meta_it = m_fwd_meta_map.find(resize.task_id());
+            if (meta_it == m_fwd_meta_map.end()) {
+              if (ShouldLogTerminalResizeDiagnostic()) {
+                CRANE_WARN("Ignoring terminal resize for unknown task #{}.",
+                           resize.task_id());
+              }
+            } else if (!meta_it->second.pty ||
+                       meta_it->second.stdin_write == -1) {
+              if (ShouldLogTerminalResizeDiagnostic()) {
+                CRANE_WARN("Ignoring terminal resize for non-PTY task #{}.",
+                           resize.task_id());
+              }
+            } else {
+              struct winsize terminal_size{
+                  .ws_row = static_cast<uint16_t>(size.rows()),
+                  .ws_col = static_cast<uint16_t>(size.columns()),
+                  .ws_xpixel = 0,
+                  .ws_ypixel = 0,
+              };
+              if (ioctl(meta_it->second.stdin_write, TIOCSWINSZ,
+                        &terminal_size) == -1) {
+                if (ShouldLogTerminalResizeDiagnostic()) {
+                  CRANE_WARN("Failed to resize PTY for task #{} to {}x{}: {}",
+                             resize.task_id(), size.rows(), size.columns(),
+                             strerror(errno));
+                }
+              }
+            }
+          }
+
+          reply.Clear();
+          stream->Read(&reply, (void*)Tag::Read);
+          break;
+        }
+
         const std::string* msg;
 
         if (reply.type() == StreamStepIOReply::STEP_X11_INPUT) {
@@ -888,8 +971,10 @@ void CforedClient::AsyncSendRecvThread_() {
           CRANE_TRACE("TASK_INPUT len:{} EOF:{}.", msg->length(),
                       reply.payload_task_input_req().eof());
         } else [[unlikely]] {
-          CRANE_ERROR("Expect TASK_INPUT or STEP_X11_INPUT, but got {}",
-                      (int)reply.type());
+          CRANE_ERROR(
+              "Expect TASK_INPUT, STEP_X11_INPUT or TERMINAL_RESIZE, but got "
+              "{}",
+              (int)reply.type());
           break;
         }
 

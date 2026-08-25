@@ -1003,6 +1003,7 @@ message StreamCrunRequest {
     STEP_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
     STEP_X11_FORWARD = 3;
+    TERMINAL_RESIZE = 5;
   }
 
   message JobReq {
@@ -1032,6 +1033,11 @@ message StreamCrunRequest {
     string craned_id = 4;
   }
 
+  message TerminalResizeReq {
+    TerminalSize terminal_size = 1;
+    uint32 task_id = 2;
+  }
+
   CrunRequestType type = 1;
 
   oneof payload {
@@ -1040,6 +1046,7 @@ message StreamCrunRequest {
     StepCompleteReq payload_step_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
     StepX11ForwardReq payload_step_x11_forward_req = 5;
+    TerminalResizeReq payload_terminal_resize_req = 7;
   }
 }
 
@@ -1229,6 +1236,7 @@ message StreamStepIORequest {
     string craned_id = 1;
     uint32 job_id = 2;
     uint32 step_id = 3;
+    bool supports_terminal_resize = 4;
   }
 
   message TaskOutputReq {
@@ -1284,6 +1292,7 @@ message StreamStepIOReply {
     TASK_INPUT = 1;
     SUPERVISOR_UNREGISTER_REPLY = 2;
     STEP_X11_INPUT = 3;
+    TERMINAL_RESIZE = 4;
   }
 
   message SupervisorRegisterReply {
@@ -1306,6 +1315,11 @@ message StreamStepIOReply {
     uint32 local_id = 3;
   }
 
+  message TerminalResizeReq {
+    TerminalSize terminal_size = 1;
+    uint32 task_id = 2;
+  }
+
   SupervisorReplyType type = 1;
 
   oneof payload {
@@ -1313,6 +1327,7 @@ message StreamStepIOReply {
     TaskInputReq payload_task_input_req = 3;
     SupervisorUnregisterReply payload_supervisor_unregister_reply = 4;
     StepX11InputReq payload_step_x11_input_req = 5;
+    TerminalResizeReq payload_terminal_resize_req = 6;
   }
 }
 
