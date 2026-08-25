@@ -33,6 +33,9 @@ TEST(CriClientVersionTest, RejectsOlderOrMalformedVersions) {
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7."));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7"));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7.0-rc"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7.0-rc1"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7.0-alpha1"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7.0-beta2"));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7alpha"));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7..0"));
 }

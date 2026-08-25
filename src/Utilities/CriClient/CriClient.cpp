@@ -168,10 +168,22 @@ CriClient::ParseRuntimeVersionMajorMinor(std::string_view version) {
   if (suffix_separator == '-') {
     auto prerelease_label_end = qualifier.find('.');
     auto prerelease_label = qualifier.substr(0, prerelease_label_end);
-    if (prerelease_label == "alpha" || prerelease_label == "beta" ||
-        prerelease_label == "dev" || prerelease_label == "pre" ||
-        prerelease_label == "preview" || prerelease_label == "rc")
-      return std::nullopt;
+    for (auto known_label : {"alpha", "beta", "dev", "pre", "preview", "rc"}) {
+      std::string_view label{known_label};
+      if (prerelease_label.size() < label.size() ||
+          prerelease_label.substr(0, label.size()) != label)
+        continue;
+      auto numeric_suffix = prerelease_label.substr(label.size());
+      if (numeric_suffix.empty()) return std::nullopt;
+      bool all_numeric = true;
+      for (char ch : numeric_suffix) {
+        if (ch < '0' || ch > '9') {
+          all_numeric = false;
+          break;
+        }
+      }
+      if (all_numeric) return std::nullopt;
+    }
   }
   for (size_t i = 0; i < qualifier.size(); ++i) {
     char ch = qualifier[i];
