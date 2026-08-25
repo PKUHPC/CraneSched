@@ -543,6 +543,9 @@ bool JobScheduler::Init() {
   std::unordered_map<job_id_t, std::vector<crane::grpc::StepInEmbeddedDb>>
       invalid_steps;
   std::vector<crane::grpc::StepInEmbeddedDb> completed_steps;
+  std::unordered_map<job_id_t, std::vector<step_db_id_t>>
+      nonterminal_step_db_ids_by_job;
+  std::vector<step_db_id_t> orphaned_recovered_step_db_ids;
   const std::unordered_set completed_step_status{
       crane::grpc::JobStatus::Completed,
       crane::grpc::JobStatus::Failed,
@@ -557,6 +560,7 @@ bool JobScheduler::Init() {
         "FAILED!",
         job_id);
     job->SetStatus(crane::grpc::Failed);
+    job->SetEndTime(absl::Now());
     if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
       {
         LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -609,6 +613,11 @@ bool JobScheduler::Init() {
     for (auto&& step_info : it->second) {
       step_id_t step_id = step_info.runtime_attr().step_id();
       auto step_type = step_info.runtime_attr().step_type();
+      auto step_status = step_info.runtime_attr().status();
+      if (!completed_step_status.contains(step_status)) {
+        nonterminal_step_db_ids_by_job[job_id].push_back(
+            step_info.runtime_attr().step_db_id());
+      }
       if (step_type == crane::grpc::StepType::INVALID) {
         CRANE_ERROR("[Step #{}{}] Invalid step type, dropped!", job_id,
                     step_id);
@@ -616,7 +625,6 @@ bool JobScheduler::Init() {
         continue;
       }
 
-      auto step_status = step_info.runtime_attr().status();
       if (completed_step_status.contains(step_status)) {
         CRANE_INFO("[Step #{}{}] Step is completed, put to mongodb!", job_id,
                    step_id);
@@ -679,11 +687,12 @@ bool JobScheduler::Init() {
 
     // A common-only snapshot is incomplete and must not enter the running
     // indexes, even if other steps were recovered successfully.
-    if (!HasRequiredDaemonStepForRunningJob(*job)) {
-      CRANE_ERROR(
-          "[Job #{}] Running job is missing its daemon step during recovery; "
-          "marking the job as FAILED.",
-          job->JobId());
+    if (!HasDaemonStep(*job)) {
+      auto orphaned_it = nonterminal_step_db_ids_by_job.find(job_id);
+      if (orphaned_it != nonterminal_step_db_ids_by_job.end())
+        orphaned_recovered_step_db_ids.insert(
+            orphaned_recovered_step_db_ids.end(), orphaned_it->second.begin(),
+            orphaned_it->second.end());
       job_it = mark_job_invalid(job.get());
     } else {
       ++job_it;
@@ -882,6 +891,9 @@ bool JobScheduler::Init() {
       g_db_client->InsertRecoveredStep(step_info);
     }
   }
+  purged_step_db_ids.insert(purged_step_db_ids.end(),
+                            orphaned_recovered_step_db_ids.begin(),
+                            orphaned_recovered_step_db_ids.end());
   g_embedded_db_client->PurgeEndedSteps(purged_step_db_ids);
 
   std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();

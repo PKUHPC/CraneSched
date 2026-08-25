@@ -1254,7 +1254,7 @@ struct JobInCtld {
 
 // A running job always has a daemon step. The daemon owns the job cgroup and
 // is the anchor used to configure a craned after Ctld recovery.
-inline bool HasRequiredDaemonStepForRunningJob(const JobInCtld& job) noexcept {
+inline bool HasDaemonStep(const JobInCtld& job) noexcept {
   return job.DaemonStep() != nullptr;
 }
 

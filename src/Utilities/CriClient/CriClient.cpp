@@ -138,6 +138,51 @@ CriClient::ParseRuntimeVersionMajorMinor(std::string_view version) {
       minor_result.ptr != version.data() + minor_end)
     return std::nullopt;
 
+  // A runtime version must include a numeric patch component.  Accepting only
+  // major/minor would make incomplete responses such as `1.7` look valid.
+  if (minor_end == version.size()) return std::nullopt;
+
+  // Runtime versions may carry a semver patch and vendor suffix (for example
+  // containerd's `2.3.2-k3s2`), but no arbitrary trailing text.
+  auto is_identifier_char = [](char ch) {
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
+           (ch >= 'A' && ch <= 'Z') || ch == '-';
+  };
+  auto suffix = version.substr(minor_end);
+  if (suffix.front() != '.') return std::nullopt;
+
+  size_t patch_end = 1;
+  while (patch_end < suffix.size() && suffix[patch_end] >= '0' &&
+         suffix[patch_end] <= '9') {
+    ++patch_end;
+  }
+  if (patch_end == 1) return std::nullopt;
+  if (patch_end == suffix.size()) return std::pair{major, minor};
+
+  char suffix_separator = suffix[patch_end];
+  if (suffix_separator != '-' && suffix_separator != '+') return std::nullopt;
+  auto qualifier = suffix.substr(patch_end + 1);
+  if (qualifier.empty() || qualifier.front() == '.' || qualifier.back() == '.')
+    return std::nullopt;
+
+  if (suffix_separator == '-') {
+    auto prerelease_label_end = qualifier.find('.');
+    auto prerelease_label = qualifier.substr(0, prerelease_label_end);
+    if (prerelease_label == "alpha" || prerelease_label == "beta" ||
+        prerelease_label == "dev" || prerelease_label == "pre" ||
+        prerelease_label == "preview" || prerelease_label == "rc")
+      return std::nullopt;
+  }
+  for (size_t i = 0; i < qualifier.size(); ++i) {
+    char ch = qualifier[i];
+    if (ch == '.') {
+      if (i == 0 || i + 1 == qualifier.size() || qualifier[i - 1] == '.')
+        return std::nullopt;
+      continue;
+    }
+    if (!is_identifier_char(ch)) return std::nullopt;
+  }
+
   return std::pair{major, minor};
 }
 
@@ -711,6 +756,13 @@ void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
   // Stop existing stream if running
   StopContainerEventStream();
 
+  if (!m_event_stream_supported_) {
+    CRANE_ERROR(
+        "CRI runtime does not support GetContainerEvents; "
+        "container event stream is disabled.");
+    return;
+  }
+
   {
     util::lock_guard lock(m_event_callback_mutex_);
     m_event_callback_ = std::move(callback);
@@ -777,12 +829,16 @@ void CriClient::ContainerEventStreamLoop_() {
       }
 
       auto status = stream->Finish();
-      if (!status.ok() && !m_event_stream_stop_) {
-        CRANE_ERROR("Container event stream failed: {} (code: {})",
-                    status.error_message(),
-                    static_cast<int>(status.error_code()));
+      if (!status.ok()) {
         if (status.error_code() == grpc::StatusCode::UNIMPLEMENTED) {
           m_event_stream_supported_ = false;
+        }
+        if (!m_event_stream_stop_) {
+          CRANE_ERROR("Container event stream failed: {} (code: {})",
+                      status.error_message(),
+                      static_cast<int>(status.error_code()));
+        }
+        if (status.error_code() == grpc::StatusCode::UNIMPLEMENTED) {
           m_event_stream_stop_ = true;
         }
       }

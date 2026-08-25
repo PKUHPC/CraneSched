@@ -10,6 +10,10 @@
 
 #include <gtest/gtest.h>
 
+#ifdef SIGABRT
+#  undef SIGABRT
+#endif
+
 #include "crane/CriClient.h"
 
 namespace {
@@ -26,6 +30,16 @@ TEST(CriClientVersionTest, RejectsOlderOrMalformedVersions) {
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("0.25.0"));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1"));
   EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.x.0"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7."));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7.0-rc"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7alpha"));
+  EXPECT_FALSE(cri::CriClient::IsRuntimeVersionSupported("1.7..0"));
+}
+
+TEST(CriClientVersionTest, AcceptsRuntimeVendorSuffix) {
+  EXPECT_TRUE(cri::CriClient::IsRuntimeVersionSupported("2.3.2-k3s2"));
+  EXPECT_TRUE(cri::CriClient::IsRuntimeVersionSupported("1.7.0+build.1"));
 }
 
 TEST(CriClientVersionTest, ParsesMajorAndMinor) {
