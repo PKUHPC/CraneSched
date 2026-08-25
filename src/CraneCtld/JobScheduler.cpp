@@ -7190,7 +7190,9 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
         qos_preempt_map,
     const absl::flat_hash_set<job_id_t>& preempting_set) {
   std::vector<NodeState*> nodes_to_sched;
-  if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) return true;
+  if (GetNodesAndTrySchedule_(now, job, &nodes_to_sched)) {
+    return MaterializeResource_(job);
+  }
   if (nodes_to_sched.size() < job->node_num) {
     CRANE_TRACE(
         "Only {} nodes are available for job #{} but {} nodes are required.",
@@ -7216,7 +7218,7 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       job->req_task_res_view * job->ntasks_per_node_min;
   struct node_info {
     int ntasks_on_node;
-    ResourceInNodeV3 res;
+    ResourceView res;
     NodeState* node_state;
     bool operator<(const node_info& other) const {
       return ntasks_on_node > other.ntasks_on_node;
@@ -7228,21 +7230,17 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   std::priority_queue<node_info> topk_nodes_avail;
   int topk_ntasks_sum_avail = 0;
 
-  auto get_max_tasks = [&](const ResourceInNodeV3& res_on_node) {
-    ResourceInNodeV3 feasible_res;
-    if (!min_res_view.GetFeasibleResourceInNode(res_on_node, &feasible_res)) {
-      return 0;
+  auto get_max_tasks = [&](const ResourceView& res_on_node) {
+    if (!(min_res_view <= res_on_node)) return 0;
+    if (job->req_task_res_view.IsZero()) {
+      return static_cast<int>(job->ntasks_per_node_max);
     }
-    ResourceInNodeV3 res_avail = res_on_node;
-    res_avail -= feasible_res;
-    int ntasks_on_node = job->ntasks_per_node_min;
-    while (ntasks_on_node < static_cast<int>(job->ntasks_per_node_max) &&
-           job->req_task_res_view.GetFeasibleResourceInNode(res_avail,
-                                                            &feasible_res)) {
-      ++ntasks_on_node;
-      res_avail -= feasible_res;
-    }
-    return ntasks_on_node;
+
+    uint64_t extra_capacity =
+        (res_on_node - min_res_view) / job->req_task_res_view;
+    uint64_t max_extra = job->ntasks_per_node_max - job->ntasks_per_node_min;
+    return static_cast<int>(job->ntasks_per_node_min +
+                            std::min(extra_capacity, max_extra));
   };
 
   for (const auto& node_state :
@@ -7330,16 +7328,14 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
         break;
       }
     } else {
-      ResourceInNodeV3 feasible_res;
-      if (!min_res_view.GetFeasibleResourceInNode(node_state->res_avail,
-                                                  &feasible_res)) {
+      if (!(min_res_view <= node_state->res_avail)) {
         continue;
       }
-      ResourceInNodeV3 min_res_on_node = node_state->res_avail;
+      ResourceView min_res_on_node = node_state->res_avail;
 
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
-        min_res_on_node.Ckmin(res);
+        min_res_on_node = ResourceView::Min(min_res_on_node, res);
       }
 
       int ntasks_on_node_avail = get_max_tasks(min_res_on_node);
@@ -7361,28 +7357,28 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
   if (topk_nodes_avail.size() == job->node_num &&
       topk_ntasks_sum_avail >= job->ntasks) {
-    int rest_ntasks = job->ntasks - job->node_num;
+    uint32_t rest_ntasks =
+        job->ntasks - job->node_num * job->ntasks_per_node_min;
     while (!topk_nodes_avail.empty()) {
       const auto& info = topk_nodes_avail.top();
-      const auto& res = info.res;
-      int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+      uint32_t ntasks_on_node =
+          job->ntasks_per_node_min +
+          std::min(rest_ntasks, static_cast<uint32_t>(info.ntasks_on_node) -
+                                    job->ntasks_per_node_min);
+      ResourceView planned_res;
       if (job->exclusive) {
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+        planned_res = info.node_state->res_total;
       } else {
-        ResourceInNodeV3 feasible_res;
-        bool ok =
-            (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
-                .GetFeasibleResourceInNode(res, &feasible_res);
-        CRANE_ASSERT_MSG(
-            ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                    info.node_state->craned_id, job->job_id));
-        job->allocated_res.AddResourceInNode(info.node_state->craned_id,
-                                             feasible_res);
+        planned_res =
+            job->req_node_res_view + job->req_task_res_view * ntasks_on_node;
       }
+      job->planned_res.emplace(info.node_state->craned_id,
+                               std::move(planned_res));
       job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
-      rest_ntasks -= ntasks_on_node - 1;
+      rest_ntasks -= ntasks_on_node - job->ntasks_per_node_min;
       topk_nodes_avail.pop();
     }
+    CRANE_ASSERT(rest_ntasks == 0);
     job->start_time = now;
     job->craned_ids.clear();
     job->craned_ids.reserve(job->craned_id_to_task_num.size());
@@ -7402,29 +7398,28 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
     return false;
   }
 
-  int rest_ntasks = job->ntasks - job->node_num;
+  uint32_t rest_ntasks = job->ntasks - job->node_num * job->ntasks_per_node_min;
   while (!topk_nodes_total.empty()) {
     const auto& info = topk_nodes_total.top();
-    const auto& res = info.res;
-    int ntasks_on_node = std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+    uint32_t ntasks_on_node =
+        job->ntasks_per_node_min +
+        std::min(rest_ntasks, static_cast<uint32_t>(info.ntasks_on_node) -
+                                  job->ntasks_per_node_min);
+    ResourceView planned_res;
     if (job->exclusive) {
-      job->allocated_res.AddResourceInNode(info.node_state->craned_id, res);
+      planned_res = info.node_state->res_total;
     } else {
-      ResourceInNodeV3 feasible_res;
-      bool ok =
-          (job->req_node_res_view + job->req_task_res_view * ntasks_on_node)
-              .GetFeasibleResourceInNode(res, &feasible_res);
-      CRANE_ASSERT_MSG(
-          ok, fmt("Failed to get feasible resource on craned {} for job #{}",
-                  info.node_state->craned_id, job->job_id));
-      job->allocated_res.AddResourceInNode(info.node_state->craned_id,
-                                           feasible_res);
+      planned_res =
+          job->req_node_res_view + job->req_task_res_view * ntasks_on_node;
     }
+    job->planned_res.emplace(info.node_state->craned_id,
+                             std::move(planned_res));
     job->craned_id_to_task_num[info.node_state->craned_id] = ntasks_on_node;
     nodes_to_sched->push_back(info.node_state);
-    rest_ntasks -= ntasks_on_node - 1;
+    rest_ntasks -= ntasks_on_node - job->ntasks_per_node_min;
     topk_nodes_total.pop();
   }
+  CRANE_ASSERT(rest_ntasks == 0);
   return false;
 }
 
@@ -7432,7 +7427,46 @@ bool SchedulerAlgo::LocalScheduler::Backfill_(
     const absl::Time& now, PdJobInScheduler* job,
     const std::vector<NodeState*>& nodes_to_sched) {
   EarliestStartSubsetSelector scheduler(job, nodes_to_sched);
-  return scheduler.CalcEarliestStartTime(now, job);
+  if (!scheduler.CalcEarliestStartTime(now, job)) return false;
+  return job->start_time != now || MaterializeResource_(job);
+}
+
+bool SchedulerAlgo::LocalScheduler::MaterializeResource_(
+    PdJobInScheduler* job,
+    const std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>*
+        resources_to_release) const {
+  ResourceV3 allocated_res;
+  for (const auto& [craned_id, planned_res] : job->planned_res) {
+    ResourceInNodeV3 available_res =
+        m_node_selector_->GetNodeState(craned_id)->res_avail_v3;
+
+    if (resources_to_release != nullptr) {
+      for (const auto& released_job : *resources_to_release) {
+        std::visit(
+            [&](auto* released) {
+              auto it =
+                  released->allocated_res.EachNodeResMap().find(craned_id);
+              if (it != released->allocated_res.EachNodeResMap().end()) {
+                available_res += it->second;
+              }
+            },
+            released_job);
+      }
+    }
+
+    ResourceInNodeV3 feasible_res;
+    if (!planned_res.GetFeasibleResourceInNode(available_res, &feasible_res)) {
+      CRANE_ERROR(
+          "Failed to materialize planned resources for job #{} on craned {}; "
+          "resource view and concrete resource state are inconsistent",
+          job->job_id, craned_id);
+      return false;
+    }
+    allocated_res.AddResourceInNode(craned_id, feasible_res);
+  }
+
+  job->allocated_res = std::move(allocated_res);
+  return true;
 }
 
 bool SchedulerAlgo::LocalScheduler::TryPreempt_(
@@ -7455,6 +7489,8 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     }
   }
   if (preemptable_set.empty()) return false;
+
+  job->preempted_jobs.clear();
 
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>> ordered(
       preemptable_set.begin(), preemptable_set.end());
@@ -7496,71 +7532,155 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
   seg_trees.reserve(nodes_to_sched.size());
   absl::flat_hash_map<CranedId, size_t> node_index;
   node_index.reserve(nodes_to_sched.size());
-  const auto& alloc_per_node = job->allocated_res.EachNodeResMap();
   for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
     auto* node = nodes_to_sched[i];
     node_index[node->craned_id] = i;
-    auto alloc_it = alloc_per_node.find(node->craned_id);
-    CRANE_ASSERT_MSG(
-        alloc_it != alloc_per_node.end(),
-        fmt("TryPreempt_: allocated_res missing craned {}", node->craned_id));
-    seg_trees.emplace_back(seg_start, seg_end, alloc_it->second);
+    seg_trees.emplace_back(seg_start, seg_end);
 
     auto& tree = seg_trees.back();
     const auto& tmap = node->time_avail_res_map;
     for (auto it = tmap.begin(); it != tmap.end();) {
-      absl::Time st = it->first;
+      absl::Time st = std::max(it->first, seg_start);
       auto nxt = std::next(it);
-      absl::Time ed = (nxt == tmap.end() ? seg_end : nxt->first);
-      tree.Add(st, ed, it->second);
-      if (ed >= seg_end) break;
+      absl::Time ed =
+          std::min(nxt == tmap.end() ? seg_end : nxt->first, seg_end);
+      if (st < ed) tree.Add(st, ed, it->second);
+      if (nxt == tmap.end() || nxt->first >= seg_end) break;
       it = nxt;
     }
   }
 
+  const ResourceView min_res_required =
+      job->req_node_res_view +
+      job->req_task_res_view * job->ntasks_per_node_min;
+  auto get_capacity = [&](const ResourceView& available) -> uint32_t {
+    if (!(min_res_required <= available)) return 0;
+    if (job->req_task_res_view.IsZero()) {
+      return job->ntasks_per_node_max;
+    }
+
+    uint64_t capacity =
+        (available - job->req_node_res_view) / job->req_task_res_view;
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(capacity, job->ntasks_per_node_max));
+  };
+
+  std::vector<uint32_t> node_capacity(nodes_to_sched.size());
+  uint64_t total_capacity = 0;
+  size_t satisfied_node_count = 0;
+  auto get_node_capacity = [&](size_t index) -> uint32_t {
+    const ResourceView& available = seg_trees[index].MinResource();
+    if (job->exclusive && !(nodes_to_sched[index]->res_total <= available))
+      return 0;
+    return get_capacity(job->exclusive ? nodes_to_sched[index]->res_total
+                                       : available);
+  };
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    node_capacity[i] = get_node_capacity(i);
+    total_capacity += node_capacity[i];
+    if (node_capacity[i] >= job->ntasks_per_node_min) {
+      ++satisfied_node_count;
+    }
+  }
+
+  auto feasible = [&]() {
+    return satisfied_node_count == nodes_to_sched.size() &&
+           total_capacity >= job->ntasks;
+  };
+
+  auto apply_to_tree = [&](size_t index, const absl::Time& st,
+                           const absl::Time& ed, const ResourceView& res,
+                           bool add) {
+    uint32_t old_capacity = node_capacity[index];
+    total_capacity -= old_capacity;
+    if (old_capacity >= job->ntasks_per_node_min) --satisfied_node_count;
+
+    if (add) {
+      seg_trees[index].Add(st, ed, res);
+    } else {
+      seg_trees[index].Sub(st, ed, res);
+    }
+
+    uint32_t new_capacity = get_node_capacity(index);
+    node_capacity[index] = new_capacity;
+    total_capacity += new_capacity;
+    if (new_capacity >= job->ntasks_per_node_min) ++satisfied_node_count;
+  };
+
   auto apply_to_trees = [&](const auto& preempted, bool add) {
     std::visit(
         [&](auto* pj) {
-          for (const auto& [cid, res] : pj->allocated_res.EachNodeResMap()) {
-            auto ni = node_index.find(cid);
-            if (ni == node_index.end()) continue;
-            if (add)
-              seg_trees[ni->second].Add(pj->start_time, pj->end_time, res);
-            else
-              seg_trees[ni->second].Sub(pj->start_time, pj->end_time, res);
+          using JobType = std::remove_pointer_t<decltype(pj)>;
+          if constexpr (std::is_same_v<JobType, PdJobInScheduler>) {
+            for (const auto& [cid, res] : pj->planned_res) {
+              auto ni = node_index.find(cid);
+              if (ni == node_index.end()) continue;
+              absl::Time st = std::max(pj->start_time, seg_start);
+              absl::Time ed = std::min(pj->end_time, seg_end);
+              if (st >= ed) continue;
+              apply_to_tree(ni->second, st, ed, res, add);
+            }
+          } else {
+            for (const auto& [cid, res] : pj->allocated_res.EachNodeResMap()) {
+              auto ni = node_index.find(cid);
+              if (ni == node_index.end()) continue;
+              absl::Time st = std::max(pj->start_time, seg_start);
+              absl::Time ed = std::min(pj->end_time, seg_end);
+              if (st >= ed) continue;
+              apply_to_tree(ni->second, st, ed, res.ToResourceView(), add);
+            }
           }
         },
         preempted);
   };
-  auto all_satisfied = [&]() {
-    for (const auto& t : seg_trees)
-      if (!t.IsSatisfied()) return false;
-    return true;
-  };
 
   int preempt_idx = -1;
-  for (size_t i = 0; !all_satisfied() && i < ordered.size(); ++i) {
+  for (size_t i = 0; !feasible() && i < ordered.size(); ++i) {
     apply_to_trees(ordered[i], /*add=*/true);
     preempt_idx = static_cast<int>(i);
   }
-  if (!all_satisfied()) {
+  if (!feasible()) {
     return false;
   }
 
-  job->preempted_jobs.push_back(ordered[preempt_idx]);
-  for (int i = preempt_idx - 1; i >= 0; --i) {
-    apply_to_trees(ordered[i], /*add=*/false);
-    if (!all_satisfied()) {
-      apply_to_trees(ordered[i], /*add=*/true);
-      job->preempted_jobs.push_back(ordered[i]);
+  if (preempt_idx >= 0) {
+    job->preempted_jobs.push_back(ordered[preempt_idx]);
+    for (int i = preempt_idx - 1; i >= 0; --i) {
+      apply_to_trees(ordered[i], /*add=*/false);
+      if (!feasible()) {
+        apply_to_trees(ordered[i], /*add=*/true);
+        job->preempted_jobs.push_back(ordered[i]);
+      }
     }
   }
 
+  job->planned_res.clear();
+  job->craned_id_to_task_num.clear();
   job->craned_ids.clear();
   job->craned_ids.reserve(nodes_to_sched.size());
-  for (const auto* node : nodes_to_sched)
+  uint32_t remaining_tasks =
+      job->ntasks - job->node_num * job->ntasks_per_node_min;
+  for (size_t i = 0; i < nodes_to_sched.size(); ++i) {
+    const auto* node = nodes_to_sched[i];
+    uint32_t task_num =
+        job->ntasks_per_node_min +
+        std::min<uint32_t>(remaining_tasks,
+                           node_capacity[i] - job->ntasks_per_node_min);
+    ResourceView planned_res =
+        job->exclusive
+            ? node->res_total
+            : job->req_node_res_view + job->req_task_res_view * task_num;
+    job->planned_res.emplace(node->craned_id, std::move(planned_res));
+    job->craned_id_to_task_num[node->craned_id] = task_num;
     job->craned_ids.emplace_back(node->craned_id);
+    remaining_tasks -= task_num - job->ntasks_per_node_min;
+  }
+  CRANE_ASSERT(remaining_tasks == 0);
   job->start_time = now;
+  if (!MaterializeResource_(job, &job->preempted_jobs)) {
+    job->preempted_jobs.clear();
+    return false;
+  }
   return true;
 }
 
@@ -7705,8 +7825,7 @@ void SchedulerAlgo::NodeSelect(
              resv_meta->res_total.EachNodeResMap()) {
           auto node_state_it = node_state_map.find(craned_id);
           if (node_state_it != node_state_map.end()) {
-            node_state_it->second.allocated_res.emplace_back(
-                resv_meta->end_time, res);
+            node_state_it->second.AddAllocatedRes(resv_meta->end_time, res);
           }
         }
         auto it = resv_pd_job_ptr_map.find(reservation_id);
@@ -7730,8 +7849,8 @@ void SchedulerAlgo::NodeSelect(
              resv_meta->res_total.EachNodeResMap()) {
           auto node_state_it = node_state_map.find(craned_id);
           if (node_state_it != node_state_map.end()) {
-            node_state_it->second.reserved_res.emplace_back(
-                resv_meta->start_time, resv_meta->end_time, res);
+            node_state_it->second.AddReservedRes(resv_meta->start_time,
+                                                 resv_meta->end_time, res);
           }
         }
       }
@@ -7744,7 +7863,7 @@ void SchedulerAlgo::NodeSelect(
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto it = node_state_map.find(craned_id);
           if (it != node_state_map.end()) {
-            it->second.allocated_res.emplace_back(job->end_time, res);
+            it->second.AddAllocatedRes(job->end_time, res);
             it->second.qos_job_map[job->qos].emplace(job.get());
           }
         }
@@ -7761,7 +7880,7 @@ void SchedulerAlgo::NodeSelect(
         auto& craned_id_node_map = it->second.second;
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           auto& ns = craned_id_node_map.at(craned_id);
-          ns.allocated_res.emplace_back(job->end_time, res);
+          ns.AddAllocatedRes(job->end_time, res);
           ns.qos_job_map[job->qos].emplace(job.get());
         }
       }
@@ -7869,8 +7988,7 @@ void SchedulerAlgo::NodeSelect(
           }
           for (const CranedId& craned_id : job->craned_ids) {
             const auto& res_avail = node_state_map.at(craned_id).res_avail;
-            if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
-                  res_avail)) {
+            if (!(job->planned_res.at(craned_id) <= res_avail)) {
               job->reason = "Resource";
               break;
             }
@@ -7880,8 +7998,7 @@ void SchedulerAlgo::NodeSelect(
             const auto& res_avail = resv_node_state_map.at(job->reservation)
                                         .second.at(craned_id)
                                         .res_avail;
-            if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
-                  res_avail)) {
+            if (!(job->planned_res.at(craned_id) <= res_avail)) {
               job->reason = "Resource";
               break;
             }
