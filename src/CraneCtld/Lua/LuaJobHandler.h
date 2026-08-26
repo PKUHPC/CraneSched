@@ -45,6 +45,9 @@ class LuaJobHandler {
 #ifdef HAVE_LUA
   static const std::vector<std::string> kReqFxns;
 
+  static sol::table GresMapToLuaTable_(const crane::LuaEnvironment& lua_env,
+                                       const GresMap& gres_map);
+
   static void RegisterGlobalFunctions_(const crane::LuaEnvironment& lua_env);
   static void RegisterTypes_(const crane::LuaEnvironment& lua_env);
   static void RegisterGlobalVariables_(const crane::LuaEnvironment& lua_env);
