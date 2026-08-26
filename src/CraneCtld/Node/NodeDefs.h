@@ -30,6 +30,8 @@ namespace Ctld {
  */
 struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index
+  std::string node_hostname;
+  std::string node_addr;
   uint32_t port;
 
   std::list<std::string> partition_ids;  // Partitions to which

@@ -177,7 +177,8 @@ class CtldClient {
    * If CraneCtld cannot be connected within 3s, kConnectionTimeout is
    * returned.
    */
-  void InitGrpcChannel(const std::string& server_address);
+  void InitGrpcChannel(const std::string& server_address,
+                       const std::string& tls_target_name);
 
   void AddGrpcCtldConnectedCb(std::function<void()> cb);
 

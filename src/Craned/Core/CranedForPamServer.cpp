@@ -34,6 +34,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   // May be craned or cfored
   std::string crane_port;
   std::string crane_addr = request->ssh_remote_address();
+  CranedId remote_craned_id;
 
   int ip_ver = crane::GetIpAddrVer(request->ssh_remote_address());
 
@@ -41,6 +42,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   ipv6_t crane_addr6;
   if (ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) {
     if (g_config.Ipv4ToCranedHostname.contains(crane_addr4)) {
+      remote_craned_id = g_config.Ipv4ToCranedHostname.at(crane_addr4);
       CRANE_TRACE(
           "Receive QueryJobIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
@@ -55,6 +57,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
     }
   } else if (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)) {
     if (g_config.Ipv6ToCranedHostname.contains(crane_addr6)) {
+      remote_craned_id = g_config.Ipv6ToCranedHostname.at(crane_addr6);
       CRANE_TRACE(
           "Receive QueryJobIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
@@ -89,24 +92,33 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
 
   std::shared_ptr<Channel> channel_of_remote_service;
   if (g_config.ListenConf.TlsConfig.Enabled) {
-    std::string remote_hostname;
-    if (ip_ver == 4) {
-      ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
+    if (remote_is_craned) {
+      grpc::ChannelArguments channel_args;
+      SetTlsTargetNameOverride(
+          &channel_args, g_config.CranedIdToNodeHostname.at(remote_craned_id));
+      channel_of_remote_service = CreateTcpTlsCustomChannelByIp(
+          g_config.CranedIdToNodeAddr.at(remote_craned_id), crane_port,
+          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
     } else {
-      CRANE_ASSERT(ip_ver == 6);
-      ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
-    }
+      std::string remote_hostname;
+      if (ip_ver == 4) {
+        ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
+      } else {
+        CRANE_ASSERT(ip_ver == 6);
+        ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
+      }
 
-    if (ok) {
-      CRANE_TRACE("Remote address {} was resolved as {}",
-                  request->ssh_remote_address(), remote_hostname);
+      if (ok) {
+        CRANE_TRACE("Remote address {} was resolved as {}",
+                    request->ssh_remote_address(), remote_hostname);
 
-      channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_port, g_config.ListenConf.TlsConfig.TlsCerts,
-          g_config.ListenConf.TlsConfig.DomainSuffix);
-    } else {
-      CRANE_ERROR("Failed to resolve remote address {}.",
-                  request->ssh_remote_address());
+        channel_of_remote_service = CreateTcpTlsChannelByDnsName(
+            remote_hostname, crane_port,
+            g_config.ListenConf.TlsConfig.TlsCerts);
+      } else {
+        CRANE_ERROR("Failed to resolve remote address {}.",
+                    request->ssh_remote_address());
+      }
     }
   } else {
     channel_of_remote_service =

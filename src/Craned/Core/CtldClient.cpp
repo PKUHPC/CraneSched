@@ -25,6 +25,7 @@
 #include "JobManager.h"
 #include "SupervisorStub.h"
 #include "crane/GrpcHelper.h"
+#include "crane/Network.h"
 #include "crane/String.h"
 
 namespace Craned {
@@ -856,7 +857,8 @@ void CtldClient::Init() {
       });
 }
 
-void CtldClient::InitGrpcChannel(const std::string& server_address) {
+void CtldClient::InitGrpcChannel(const std::string& server_address,
+                                 const std::string& tls_target_name) {
   m_grpc_has_initialized_.store(true, std::memory_order::release);
 
   grpc::ChannelArguments channel_args;
@@ -865,14 +867,23 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.TlsConfig.Enabled)
-    m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
-        server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts,
-        g_config.ListenConf.TlsConfig.DomainSuffix, channel_args);
-  else
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    if (server_address != tls_target_name)
+      SetTlsTargetNameOverride(&channel_args, tls_target_name);
+
+    if (crane::GetIpAddrVer(server_address) != -1) {
+      m_ctld_channel_ = CreateTcpTlsCustomChannelByIp(
+          server_address, g_config.CraneCtldForInternalListenPort,
+          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+    } else {
+      m_ctld_channel_ = CreateTcpTlsCustomChannelByDnsName(
+          server_address, g_config.CraneCtldForInternalListenPort,
+          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+    }
+  } else {
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
         server_address, g_config.CraneCtldForInternalListenPort, channel_args);
+  }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
@@ -1376,12 +1387,12 @@ void CtldClient::NodeHealthCheck_() {
     return;
   }
 
-  if (!g_config.CranedRes.contains(g_config.Hostname)) {
+  if (!g_config.CranedRes.contains(g_config.CranedIdOfThisNode)) {
     CRANE_ERROR("Failed to get node config info.");
     return;
   }
 
-  auto node_config = g_config.CranedRes.at(g_config.Hostname);
+  auto node_config = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
 
   CRANE_DEBUG("Start node health checking....");
 

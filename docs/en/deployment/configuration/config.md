@@ -12,6 +12,7 @@ A minimal configuration for a 4-node cluster:
 ```yaml
 # Cluster identification
 ControlMachine: crane01
+ControlMachineAddr: 10.0.0.1
 ClusterName: my_cluster
 
 # Database configuration
@@ -56,6 +57,9 @@ Define basic cluster information:
 # Hostname of the node running cranectld (control node)
 ControlMachine: crane01
 
+# Optional address used to connect to cranectld. Defaults to ControlMachine.
+ControlMachineAddr: 10.0.0.1
+
 # Name of this cluster
 ClusterName: my_cluster
 
@@ -66,7 +70,8 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 ```
 
-- **ControlMachine**: Must be the actual hostname of your control node
+- **ControlMachine**: Hostname of your control node, used as the control node identity and TLS target name
+- **ControlMachineAddr**: Optional address used for connecting to the control node. Defaults to `ControlMachine`
 - **ClusterName**: Used for identification in multi-cluster environments
 - **CraneBaseDir**: All relative paths are based on this directory
 
@@ -78,6 +83,8 @@ Specify compute node resources:
 Nodes:
   # Node range notation
   - name: "crane[01-04]"
+    NodeHostname: "crane[01-04].example.com"
+    NodeAddr: "10.0.0.[1-4]"
     cpu: 4
     memory: 8G
 
@@ -98,15 +105,25 @@ Nodes:
 
 **Node Parameters:**
 
-- **name**: Hostname or range (e.g., `node[01-10]`)
+- **name**: CraneSched node name or range (e.g., `node[01-10]`). This is the node identifier shown to users and used in partitions.
+- **NodeHostname**: Optional OS hostname or range for matching the local `craned` host. Defaults to `name`.
+- **NodeAddr**: Optional address or range used by `cranectld` to connect to `craned`. Defaults to `NodeHostname`.
 - **cpu**: Number of CPU cores
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
+
+Hostname rules:
+
+- `craned` matches the local short hostname and full hostname against `name` and
+  `NodeHostname`.
+- When TLS is enabled, configure `ControlMachine` and `NodeHostname` as FQDNs
+  ending with `TLS.DomainSuffix`.
 
 **Node Range Notation:**
 
 - `crane[01-04]` expands to: crane01, crane02, crane03, crane04
 - `cn[1-3,5]` expands to: cn1, cn2, cn3, cn5
+- `crane[01-04].example.com` expands to: crane01.example.com, crane02.example.com, crane03.example.com, crane04.example.com
 
 ### Partition Configuration
 
@@ -203,8 +220,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
-  AllowedNodes: "crane[01-10]"
   DomainSuffix: crane.local
+  AllowedNodes: "crane[01-10]"
 ```
 
 ### Gres Configuration
@@ -466,7 +483,7 @@ After modifying the configuration:
 
 ## Troubleshooting
 
-**Nodes not appearing**: Check ControlMachine hostname matches actual control node hostname.
+**Nodes not appearing**: Check `ControlMachine` identifies the control node and `ControlMachineAddr` points to a reachable control node address.
 
 **Configuration mismatch warnings**: Ensure `/etc/crane/config.yaml` is identical on all nodes.
 

@@ -54,6 +54,75 @@ using Craned::g_config;
 using Craned::JobInD;
 using Craned::StepInstance;
 
+namespace {
+
+void RegisterNodeHostnameAliasOrExit_(const std::string& alias,
+                                      const CranedId& craned_id) {
+  auto [it, inserted] =
+      g_config.NodeHostnameToCranedId.emplace(alias, craned_id);
+  if (!inserted && it->second != craned_id) {
+    CRANE_ERROR("Node hostname alias '{}' is used by both '{}' and '{}'.",
+                alias, it->second, craned_id);
+    std::exit(1);
+  }
+}
+
+void RegisterNodeAddrOrExit_(const std::string& node_addr,
+                             const CranedId& craned_id) {
+  ipv4_t ipv4;
+  ipv6_t ipv6;
+  switch (crane::GetIpAddrVer(node_addr)) {
+  case -1: {
+    bool ip_resolved = false;
+    if (crane::ResolveIpv4FromHostname(node_addr, &ipv4)) {
+      g_config.Ipv4ToCranedHostname[ipv4] = craned_id;
+      CRANE_INFO("Resolve node address `{}` for `{}` to `{}`", node_addr,
+                 craned_id, crane::Ipv4ToStr(ipv4));
+      ip_resolved = true;
+    }
+
+    if (crane::ResolveIpv6FromHostname(node_addr, &ipv6)) {
+      g_config.Ipv6ToCranedHostname[ipv6] = craned_id;
+      CRANE_INFO("Resolve node address `{}` for `{}` to `{}`", node_addr,
+                 craned_id, crane::Ipv6ToStr(ipv6));
+      ip_resolved = true;
+    }
+
+    if (!ip_resolved) {
+      CRANE_ERROR("Init error: Cannot resolve node address `{}` for `{}`",
+                  node_addr, craned_id);
+      std::exit(1);
+    }
+    break;
+  }
+
+  case 4:
+    CRANE_INFO("Node address `{}` for `{}` is a valid ipv4 address.", node_addr,
+               craned_id);
+    if (!crane::StrToIpv4(node_addr, &ipv4)) std::exit(1);
+    g_config.Ipv4ToCranedHostname[ipv4] = craned_id;
+    break;
+
+  case 6:
+    CRANE_INFO("Node address `{}` for `{}` is a valid ipv6 address.", node_addr,
+               craned_id);
+    if (!crane::StrToIpv6(node_addr, &ipv6)) std::exit(1);
+    g_config.Ipv6ToCranedHostname[ipv6] = craned_id;
+    break;
+
+  default:
+    ABSL_UNREACHABLE();
+  }
+}
+
+std::string ShortHostname_(const std::string& hostname) {
+  const auto dot_pos = hostname.find('.');
+  if (dot_pos == std::string::npos) return hostname;
+  return hostname.substr(0, dot_pos);
+}
+
+}  // namespace
+
 CraneErrCode RecoverCgForJobSteps(
     std::unordered_map<job_id_t, JobInD>& rn_jobs_from_ctld,
     absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
@@ -718,6 +787,8 @@ void ParseConfig(int argc, char** argv) {
         CRANE_ERROR("ControlMachine is not configured.");
         std::exit(1);
       }
+      g_config.ControlMachineAddr =
+          YamlValueOr(config["ControlMachineAddr"], g_config.ControlMachine);
 
       g_config.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
@@ -788,6 +859,46 @@ void ParseConfig(int argc, char** argv) {
                         fmt::join(name_list, ", "));
           } else
             std::exit(1);
+
+          std::list<std::string> node_hostname_list;
+          if (node["NodeHostname"]) {
+            if (!util::ParseHostList(node["NodeHostname"].Scalar(),
+                                     &node_hostname_list)) {
+              CRANE_ERROR("Illegal NodeHostname string format: {}",
+                          node["NodeHostname"].Scalar());
+              std::exit(1);
+            }
+            if (node_hostname_list.size() != name_list.size()) {
+              CRANE_ERROR(
+                  "NodeHostname count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_hostname_list.size(), name_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          } else {
+            node_hostname_list = name_list;
+          }
+
+          std::list<std::string> node_addr_list;
+          if (node["NodeAddr"]) {
+            if (!util::ParseHostList(node["NodeAddr"].Scalar(),
+                                     &node_addr_list)) {
+              CRANE_ERROR("Illegal NodeAddr string format: {}",
+                          node["NodeAddr"].Scalar());
+              std::exit(1);
+            }
+            if (node_addr_list.size() != name_list.size()) {
+              CRANE_ERROR(
+                  "NodeAddr count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_addr_list.size(), name_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          } else {
+            node_addr_list = node_hostname_list;
+          }
 
           if (node["cpu"]) {
             uint32_t cpu_count = std::stoul(node["cpu"].as<std::string>());
@@ -973,65 +1084,21 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          auto hostname_it = node_hostname_list.begin();
+          auto addr_it = node_addr_list.begin();
           for (auto&& name : name_list) {
+            const std::string node_hostname = *hostname_it++;
+            const std::string node_addr = *addr_it++;
+
             for (auto& dev : devices) {
               each_node_device[name].push_back(dev);
             }
 
-            ipv4_t ipv4;
-            ipv6_t ipv6;
-            switch (crane::GetIpAddrVer(name)) {
-            case -1: {
-              bool ip_resolved = false;
-              if (crane::ResolveIpv4FromHostname(name, &ipv4)) {
-                g_config.Ipv4ToCranedHostname[ipv4] = name;
-                CRANE_INFO("Resolve hostname `{}` to `{}`", name,
-                           crane::Ipv4ToStr(ipv4));
-                ip_resolved = true;
-              }
-
-              if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
-                g_config.Ipv6ToCranedHostname[ipv6] = name;
-                CRANE_INFO("Resolve hostname `{}` to `{}`", name,
-                           crane::Ipv6ToStr(ipv6));
-                ip_resolved = true;
-              }
-
-              if (!ip_resolved) {
-                CRANE_ERROR("Init error: Cannot resolve hostname of `{}`",
-                            name);
-                std::exit(1);
-              }
-              break;
-            }
-
-            case 4: {
-              CRANE_INFO(
-                  "Node name `{}` is a valid ipv4 address and doesn't "
-                  "need resolving.",
-                  name);
-              if (!crane::StrToIpv4(name, &ipv4)) {
-                std::exit(1);
-              }
-              g_config.Ipv4ToCranedHostname[ipv4] = name;
-              break;
-            }
-
-            case 6: {
-              CRANE_INFO(
-                  "Node name `{}` is a valid ipv6 address and doesn't "
-                  "need resolving.",
-                  name);
-              if (!crane::StrToIpv6(name, &ipv6)) {
-                std::exit(1);
-              }
-              g_config.Ipv6ToCranedHostname[ipv6] = name;
-              break;
-            }
-
-            default:
-              ABSL_UNREACHABLE();
-            }
+            RegisterNodeHostnameAliasOrExit_(name, name);
+            RegisterNodeHostnameAliasOrExit_(node_hostname, name);
+            g_config.CranedIdToNodeHostname[name] = node_hostname;
+            g_config.CranedIdToNodeAddr[name] = node_addr;
+            RegisterNodeAddrOrExit_(node_addr, name);
             g_config.CranedRes[name] = node_res;
             node_topologies[name] = node_topo;
           }
@@ -1190,6 +1257,7 @@ void ParseConfig(int argc, char** argv) {
     }
   } else {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
+    g_config.ControlMachineAddr = g_config.ControlMachine;
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
@@ -1212,19 +1280,29 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  if (!g_config.CranedRes.contains(g_config.Hostname)) {
-    CRANE_ERROR("This machine {} is not contained in Nodes!",
-                g_config.Hostname);
+  const std::string short_hostname = ShortHostname_(g_config.Hostname);
+  auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
+  if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
+      short_hostname != g_config.Hostname) {
+    craned_id_it = g_config.NodeHostnameToCranedId.find(g_config.Hostname);
+  }
+  if (craned_id_it == g_config.NodeHostnameToCranedId.end()) {
+    CRANE_ERROR(
+        "This machine {} (short hostname: {}) is not contained in "
+        "Nodes!",
+        g_config.Hostname, short_hostname);
     std::exit(1);
   }
+  g_config.CranedIdOfThisNode = craned_id_it->second;
 
-  CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
-  g_config.node_topo_info = node_topologies.at(g_config.Hostname);
+  CRANE_INFO("Found this machine {} as CranedId {} in Nodes", g_config.Hostname,
+             g_config.CranedIdOfThisNode);
+  g_config.node_topo_info = node_topologies.at(g_config.CranedIdOfThisNode);
   // get this node device info
   // Todo: Auto detect device
   {
-    auto node_res = g_config.CranedRes.at(g_config.Hostname);
-    auto& devices = each_node_device[g_config.Hostname];
+    auto node_res = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
+    auto& devices = each_node_device[g_config.CranedIdOfThisNode];
     for (auto& dev_arg : devices) {
       auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
           dev_arg;
@@ -1302,23 +1380,21 @@ void ParseConfig(int argc, char** argv) {
     }
   }
 
-  uint32_t part_id, node_index;
   std::string part_name;
   for (const auto& par : g_config.Partitions) {
-    if (par.second.nodes.contains(g_config.Hostname)) {
+    if (par.second.nodes.contains(g_config.CranedIdOfThisNode)) {
       part_name = par.first;
-      CRANE_INFO("Found this machine {} in partition {}", g_config.Hostname,
-                 par.first);
+      CRANE_INFO("Found CranedId {} in partition {}",
+                 g_config.CranedIdOfThisNode, par.first);
       break;
     }
   }
   if (part_name.empty()) {
-    CRANE_ERROR("This machine {} doesn't belong to any partition",
-                g_config.Hostname);
+    CRANE_ERROR("CranedId {} doesn't belong to any partition",
+                g_config.CranedIdOfThisNode);
     std::exit(1);
   }
 
-  g_config.CranedIdOfThisNode = g_config.Hostname;
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 
   auto& meta = g_config.CranedMeta;
@@ -1518,7 +1594,7 @@ void GlobalVariableInit() {
 
   // Initialize CPU pool (overflow cgroup and pool state)
   {
-    auto node_res = g_config.CranedRes.at(g_config.Hostname);
+    auto node_res = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
     if (!CgroupManager::InitCpuPool(node_res->GetCpuSet().core_ids)) {
       CRANE_ERROR("Failed to initialize CPU pool.");
       std::exit(1);
@@ -1569,7 +1645,8 @@ void GlobalVariableInit() {
   g_ctld_client->Init();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
-  g_ctld_client->InitGrpcChannel(g_config.ControlMachine);
+  g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
+                                 g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

@@ -1,6 +1,10 @@
 # Cluster settings (This must be identical across all nodes)
-# the hostname of node which is running cranectld
+# The hostname of node which is running cranectld.
+# When TLS is enabled, configure this as a FQDN ending with TLS.DomainSuffix.
 ControlMachine: cn15
+# Optional address used to connect to cranectld. Defaults to ControlMachine.
+# This may be an IP address or alternate network name.
+ControlMachineAddr: cn15
 # the name of this cluster
 ClusterName: pkuhpc_test
 
@@ -18,8 +22,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
+  DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
-  DomainSuffix: crane.com
 
 # Ctld settings
 # the listening address of control machine
@@ -152,10 +156,19 @@ EnableSlurmCompatibleEnv: false
 Nodes:
   # the hostname of computing node
   - name: "cn[15-16]"
+    # Optional. The OS hostname reported by each node. Defaults to name.
+    # craned matches local short/full hostname against name and NodeHostname.
+    # When TLS is enabled, configure this as a FQDN ending with TLS.DomainSuffix.
+    # NodeHostname: "cn[15-16].crane.com"
+    # Optional. Address used by cranectld to connect to craned. Defaults to NodeHostname.
+    # This may be an IP address or alternate network name.
+    # NodeAddr: "cn[15-16].crane.com"
     cpu: 2
     memory: 2G
 
   - name: "cn[17-18]"
+    # NodeHostname: "cn[17-18].crane.com"
+    # NodeAddr: "10.0.0.[17-18]"
     cpu: 2
     memory: 2G
     gres:

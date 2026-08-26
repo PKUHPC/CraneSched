@@ -87,9 +87,8 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
-void SetTlsHostnameOverride(grpc::ChannelArguments* args,
-                            const std::string& hostname,
-                            const std::string& domain_suffix);
+void SetTlsTargetNameOverride(grpc::ChannelArguments* args,
+                              const std::string& target_name);
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
     const std::string& socket_addr);
@@ -105,11 +104,10 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
     const std::string& ip, const std::string& port,
     const TlsCertificates& certs, const grpc::ChannelArguments& args);
 
-std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
-    const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const std::string& domain_suffix);
+std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByDnsName(
+    const std::string& dns_name, const std::string& port,
+    const TlsCertificates& certs);
 
-std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
-    const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const std::string& domain_suffix,
-    const grpc::ChannelArguments& args);
+std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByDnsName(
+    const std::string& dns_name, const std::string& port,
+    const TlsCertificates& certs, const grpc::ChannelArguments& args);

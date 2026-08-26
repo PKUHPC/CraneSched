@@ -14,3 +14,13 @@ target_link_libraries(utility_test
 
         shared_test_impl_lib
         )
+
+add_executable(public_header_test
+        PublicHeader_test.cpp)
+target_link_libraries(public_header_test
+        GTest::gtest
+        GTest::gtest_main
+        absl::strings
+
+        Utility_PublicHeader
+        )

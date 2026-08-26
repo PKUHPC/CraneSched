@@ -12,6 +12,7 @@
 ```yaml
 # 集群标识
 ControlMachine: crane01
+ControlMachineAddr: 10.0.0.1
 ClusterName: my_cluster
 
 # 数据库配置
@@ -56,6 +57,9 @@ sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 
 # 运行 cranectld 的节点的主机名（控制节点）
 ControlMachine: crane01
 
+# 用于连接 cranectld 的可选地址。默认使用 ControlMachine。
+ControlMachineAddr: 10.0.0.1
+
 # 此集群的名称
 ClusterName: my_cluster
 
@@ -66,7 +70,8 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 ```
 
-- **ControlMachine**：必须是控制节点的实际主机名
+- **ControlMachine**：控制节点主机名，用作控制节点身份和 TLS 目标名
+- **ControlMachineAddr**：用于连接控制节点的可选地址。默认使用 `ControlMachine`
 - **ClusterName**：在多集群环境中用于标识
 - **CraneBaseDir**：所有相对路径基于此目录
 
@@ -78,6 +83,8 @@ CraneBaseDir: /var/crane/
 Nodes:
   # 节点范围表示法
   - name: "crane[01-04]"
+    NodeHostname: "crane[01-04].example.com"
+    NodeAddr: "10.0.0.[1-4]"
     cpu: 4
     memory: 8G
 
@@ -98,15 +105,23 @@ Nodes:
 
 **节点参数：**
 
-- **name**：主机名或范围（例如，`node[01-10]`）
+- **name**：CraneSched 节点名或范围（例如，`node[01-10]`），也是用户看到和分区中使用的节点标识
+- **NodeHostname**：可选，节点操作系统 hostname 或范围，用于本机 `craned` 匹配身份；默认等于 `name`
+- **NodeAddr**：可选，`cranectld` 连接 `craned` 时使用的地址或范围；默认等于 `NodeHostname`
 - **cpu**：CPU 核心数
 - **memory**：总内存（支持 K、M、G、T 后缀）
 - **gres**：通用资源，如 GPU（可选）
+
+Hostname 规则：
+
+- `craned` 会用本机 short hostname 和完整 hostname 匹配 `name` 与 `NodeHostname`。
+- 启用 TLS 时，`ControlMachine` 和 `NodeHostname` 需要配置为以 `TLS.DomainSuffix` 结尾的 FQDN。
 
 **节点范围表示法：**
 
 - `crane[01-04]` 展开为：crane01、crane02、crane03、crane04
 - `cn[1-3,5]` 展开为：cn1、cn2、cn3、cn5
+- `crane[01-04].example.com` 展开为：crane01.example.com、crane02.example.com、crane03.example.com、crane04.example.com
 
 ### 分区配置
 
@@ -203,8 +218,8 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   CaFilePath: /etc/crane/tls/ca.pem
-  AllowedNodes: "crane[01-10]"
   DomainSuffix: crane.local
+  AllowedNodes: "crane[01-10]"
 ```
 
 ### Gres配置
@@ -468,7 +483,7 @@ HealthCheck:
 
 ## 故障排除
 
-**节点未显示**：检查 ControlMachine 主机名是否与实际控制节点主机名匹配。
+**节点未显示**：检查 `ControlMachine` 是否标识控制节点，并确认 `ControlMachineAddr` 指向可访问的控制节点地址。
 
 **配置不匹配警告**：确保所有节点上的 `/etc/crane/config.yaml` 完全相同。
 

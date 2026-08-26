@@ -303,8 +303,6 @@ void ParseConfig(int argc, char** argv) {
             }
             for (const auto& name : name_list) {
               g_tls_config.AllowedNodes.insert(name);
-              g_tls_config.AllowedNodes.insert(
-                  fmt::format("{}.{}", name, g_tls_config.DomainSuffix));
             }
             // todo: localhost?
             g_tls_config.AllowedNodes.insert("localhost");
@@ -524,6 +522,46 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          std::list<std::string> node_hostname_list;
+          if (node["NodeHostname"]) {
+            if (!util::ParseHostList(node["NodeHostname"].Scalar(),
+                                     &node_hostname_list)) {
+              CRANE_ERROR("Illegal NodeHostname string format: {}",
+                          node["NodeHostname"].Scalar());
+              std::exit(1);
+            }
+            if (node_hostname_list.size() != node_id_list.size()) {
+              CRANE_ERROR(
+                  "NodeHostname count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_hostname_list.size(), node_id_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          } else {
+            node_hostname_list = node_id_list;
+          }
+
+          std::list<std::string> node_addr_list;
+          if (node["NodeAddr"]) {
+            if (!util::ParseHostList(node["NodeAddr"].Scalar(),
+                                     &node_addr_list)) {
+              CRANE_ERROR("Illegal NodeAddr string format: {}",
+                          node["NodeAddr"].Scalar());
+              std::exit(1);
+            }
+            if (node_addr_list.size() != node_id_list.size()) {
+              CRANE_ERROR(
+                  "NodeAddr count ({}) must match node name count ({}) in "
+                  "Nodes entry '{}'.",
+                  node_addr_list.size(), node_id_list.size(),
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+          } else {
+            node_addr_list = node_hostname_list;
+          }
+
           if (node["cpu"])
             node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
           else
@@ -613,9 +651,14 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          auto hostname_it = node_hostname_list.begin();
+          auto addr_it = node_addr_list.begin();
           for (auto&& node_id : node_id_list) {
-            g_config.Nodes[node_id] = node_ptr;
-            g_config.Nodes[node_id]->dedicated_resource = resourceInNode;
+            auto node_config = std::make_shared<Ctld::Config::Node>(*node_ptr);
+            node_config->node_hostname = *hostname_it++;
+            node_config->node_addr = *addr_it++;
+            node_config->dedicated_resource = resourceInNode;
+            g_config.Nodes[node_id] = node_config;
           }
         }
       }
