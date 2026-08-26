@@ -293,21 +293,21 @@ EnvMap StepInstance::GetTaskEpilogEnv(task_id_t task_id) const {
   // Keep task identifiers consistent with the environment used by task
   // processes. This environment is constructed in the supervisor parent,
   // because the task's private m_env_ is initialized only after fork().
-  env_map.emplace("CRANE_PROCID", std::to_string(task_id));
-  env_map.emplace("CRANE_PROC_ID", std::to_string(task_id));
+  env_map.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
+  env_map.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
   if (g_config.EnableSlurmCompatibleEnv) {
-    env_map.emplace("SLURM_PROCID", std::to_string(task_id));
+    env_map.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
 
     task_id_t local_task_id = 0;
     const auto& task_node_list = m_step_to_supv_.task_node_list();
-    for (uint32_t index = 0; index < task_node_list.size(); ++index) {
+    for (size_t index = 0; index < task_node_list.size() && index < task_id;
+         ++index) {
       if (m_step_to_supv_.nodelist(task_node_list[index]) ==
           g_config.CranedIdOfThisNode) {
-        local_task_id = task_id - index;
-        break;
+        ++local_task_id;
       }
     }
-    env_map.emplace("SLURM_LOCALID", std::to_string(local_task_id));
+    env_map.insert_or_assign("SLURM_LOCALID", std::to_string(local_task_id));
   }
 
   env_map.insert_or_assign("CRANE_SCRIPT_CONTEXT", "task_epilog");
@@ -487,20 +487,20 @@ void ITaskInstance::InitEnvMap() {
   }
   if (g_config.EnableSlurmCompatibleEnv) {
     // Global task id
-    m_env_.emplace("SLURM_PROCID", std::to_string(task_id));
+    m_env_.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
     // Local task id task_node_list()
     task_id_t local_task_id = 0;
     const auto& task_node_list =
         m_parent_step_inst_->GetStep().task_node_list();
-    for (uint32_t index = 0; index < task_node_list.size(); index++) {
+    for (size_t index = 0; index < task_node_list.size() && index < task_id;
+         ++index) {
       const std::string& hostname =
           m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
       if (hostname == g_config.CranedIdOfThisNode) {
-        local_task_id = task_id - index;
-        break;
+        ++local_task_id;
       }
     }
-    m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
+    m_env_.insert_or_assign("SLURM_LOCALID", std::to_string(local_task_id));
   }
 }
 
@@ -529,8 +529,8 @@ void ProcInstance::InitEnvMap() {
       m_env_["XAUTHORITY"] = m_parent_step_inst_->x11_meta->x11_auth_path;
     }
   }
-  m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
-  m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
+  m_env_.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
+  m_env_.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
 
   if (m_parent_step_inst_->IsCrun() &&
       m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
