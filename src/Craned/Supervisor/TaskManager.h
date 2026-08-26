@@ -220,6 +220,11 @@ class StepInstance {
 
   EnvMap GetStepProcessEnv() const;
 
+  // Build the environment visible to a task epilog in the supervisor parent.
+  // Task processes initialize their private environment after fork, so it
+  // cannot be read back when the task exits.
+  EnvMap GetTaskEpilogEnv(task_id_t task_id) const;
+
   void GotNewStatus(StepStatus new_status);
 
   // OOM monitoring methods

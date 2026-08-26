@@ -287,6 +287,40 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   return env_map;
 }
 
+EnvMap StepInstance::GetTaskEpilogEnv(task_id_t task_id) const {
+  auto env_map = GetStepProcessEnv();
+
+  // Keep task identifiers consistent with the environment used by task
+  // processes. This environment is constructed in the supervisor parent,
+  // because the task's private m_env_ is initialized only after fork().
+  env_map.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
+  env_map.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
+  if (g_config.EnableSlurmCompatibleEnv) {
+    env_map.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
+
+    task_id_t local_task_id = 0;
+    const auto& task_node_list = m_step_to_supv_.task_node_list();
+    for (size_t index = 0; index < task_node_list.size() && index < task_id;
+         ++index) {
+      if (m_step_to_supv_.nodelist(task_node_list[index]) ==
+          g_config.CranedIdOfThisNode) {
+        ++local_task_id;
+      }
+    }
+    env_map.insert_or_assign("SLURM_LOCALID", std::to_string(local_task_id));
+  }
+
+  env_map.insert_or_assign("CRANE_SCRIPT_CONTEXT", "task_epilog");
+  if (pwd.Valid()) {
+    // RunPrologOrEpiLog uses an explicit environment and does not inherit
+    // USER/LOGNAME from the supervisor's ambient environment.
+    env_map.insert_or_assign("USER", pwd.Username());
+    env_map.insert_or_assign("LOGNAME", pwd.Username());
+  }
+
+  return env_map;
+}
+
 void StepInstance::GotNewStatus(StepStatus new_status) {
   if (IsFinishedStepStatus(new_status)) {
     if (m_status_ == new_status) return;
@@ -453,20 +487,20 @@ void ITaskInstance::InitEnvMap() {
   }
   if (g_config.EnableSlurmCompatibleEnv) {
     // Global task id
-    m_env_.emplace("SLURM_PROCID", std::to_string(task_id));
+    m_env_.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
     // Local task id task_node_list()
     task_id_t local_task_id = 0;
     const auto& task_node_list =
         m_parent_step_inst_->GetStep().task_node_list();
-    for (uint32_t index = 0; index < task_node_list.size(); index++) {
+    for (size_t index = 0; index < task_node_list.size() && index < task_id;
+         ++index) {
       const std::string& hostname =
           m_parent_step_inst_->GetStep().nodelist(task_node_list[index]);
       if (hostname == g_config.CranedIdOfThisNode) {
-        local_task_id = task_id - index;
-        break;
+        ++local_task_id;
       }
     }
-    m_env_.emplace("SLURM_LOCALID", std::to_string(local_task_id));
+    m_env_.insert_or_assign("SLURM_LOCALID", std::to_string(local_task_id));
   }
 }
 
@@ -495,8 +529,8 @@ void ProcInstance::InitEnvMap() {
       m_env_["XAUTHORITY"] = m_parent_step_inst_->x11_meta->x11_auth_path;
     }
   }
-  m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
-  m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
+  m_env_.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
+  m_env_.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
 
   if (m_parent_step_inst_->IsCrun() &&
       m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
@@ -2750,9 +2784,11 @@ TaskManager::~TaskManager() {
     epilog_span.SetAttribute("job_id", m_step_.job_id);
     epilog_span.SetAttribute("step_id", m_step_.step_id);
 
+    auto epilog_env = g_config.JobEnv;
+    epilog_env.insert_or_assign("CRANE_SCRIPT_CONTEXT", "epilog");
     RunPrologEpilogArgs run_epilog_args{
         .scripts = g_config.JobLifecycleHook.Epilogs,
-        .envs = g_config.JobEnv,
+        .envs = std::move(epilog_env),
         .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
         .run_uid = 0,
         .run_gid = 0,
@@ -3330,8 +3366,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
 
       RunPrologEpilogArgs run_epilog_args{
           .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
-          .envs = std::unordered_map{task->GetParentStep().env().begin(),
-                                     task->GetParentStep().env().end()},
+          .envs = m_step_.GetTaskEpilogEnv(task_id),
           .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],
@@ -3361,8 +3396,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
 
       RunPrologEpilogArgs run_epilog_args{
           .scripts = g_config.JobLifecycleHook.TaskEpilogs,
-          .envs = std::unordered_map{task->GetParentStep().env().begin(),
-                                     task->GetParentStep().env().end()},
+          .envs = m_step_.GetTaskEpilogEnv(task_id),
           .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
           .run_gid = task->GetParentStep().gid()[0],

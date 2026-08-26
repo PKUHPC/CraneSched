@@ -1541,9 +1541,11 @@ void JobManager::CleanUpJobEnvironment_(job_id_t job_id,
       script_lock = true;
     }
     CRANE_TRACE("[Job #{}] Running epilogs...", job_id);
+    auto epilog_env = std::move(ctx.epilog_env);
+    epilog_env.insert_or_assign("CRANE_SCRIPT_CONTEXT", "epilog");
     RunPrologEpilogArgs run_epilog_args{
         .scripts = g_config.JobLifecycleHook.Epilogs,
-        .envs = ctx.epilog_env,
+        .envs = std::move(epilog_env),
         .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
         .run_uid = 0,
         .run_gid = 0,

@@ -580,6 +580,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
 
     std::vector<char*> envp;
     std::vector<std::string> env_storage;
+    env_storage.reserve(args.envs.size());
     envp.reserve(args.envs.size() + 1);
     for (const auto& [name, value] : args.envs) {
       env_storage.emplace_back(name + "=" + value);
