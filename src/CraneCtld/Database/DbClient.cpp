@@ -5171,7 +5171,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   }
 
   if (job_to_ctld.has_mem_per_node()) {
-    mem_req += job_to_ctld.mem_per_node() * job_to_ctld.node_num();
+    mem_req += job_to_ctld.mem_per_node() * job_to_ctld.node_num_min();
   }
   if (job_to_ctld.has_cpus_per_task() && job_to_ctld.has_mem_per_cpu()) {
     mem_req +=

@@ -133,7 +133,9 @@ Same as the return values of `crane_job_submit`.
 | account                   | string  | Account associated with the job               |
 | name                      | string  | Job name                                      |
 | qos                       | string  | QoS associated with the job                   |
-| node_num                  | number  | Number of nodes                               |
+| node_num                  | number  | Actual selected node count (read-only; 0 in the submission hook before selection) |
+| node_num_min              | number  | Requested minimum node count                   |
+| node_num_max              | number  | Requested maximum node count                   |
 | ntasks_per_node_min       | number  | Minimum number of tasks per node              |
 | ntasks_per_node_max       | number  | Maximum number of tasks per node              |
 | included_nodes            | table(string list) | Nodes explicitly included            |
@@ -244,6 +246,8 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_info("job_desc.gid: %d", job_desc.gid)
     crane.log_info("job_desc.account: %s", job_desc.account)
     crane.log_info("job_desc.node_num: %d", job_desc.node_num)
+    crane.log_info("job_desc.node_num_min: %d", job_desc.node_num_min)
+    crane.log_info("job_desc.node_num_max: %d", job_desc.node_num_max)
     crane.log_info("job_desc.qos: %s", job_desc.qos)
     crane.log_info("job_desc.type: %d", job_desc.type)
     crane.log_info("job_desc.time_limit: %d", job_desc.time_limit)

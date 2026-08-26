@@ -8190,6 +8190,12 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
 }
 
 CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
+  job->node_num_max = std::max(job->node_num_min, job->node_num_max);
+  job->node_num =
+      job->node_num_min == job->node_num_max ? job->node_num_min : 0;
+  job->MutableJobToCtld()->set_node_num_min(job->node_num_min);
+  job->MutableJobToCtld()->set_node_num_max(job->node_num_max);
+
   auto part_it = g_config.Partitions.find(job->partition_id);
   if (part_it == g_config.Partitions.end()) {
     CRANE_ERROR("Failed to call AcquireJobAttributes: no such partition {}",
@@ -8303,10 +8309,10 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     }
   }
 
-  // Finalize ntasks_per_node bounds from job distribution constraint.
-  // One pass suffices: the second iteration is provably idempotent
-  // because N >= K*m holds for any valid job (ntasks >= node_num).
-  {
+  if (job->node_num != 0) {
+    // Finalize ntasks_per_node bounds from job distribution constraint.
+    // One pass suffices: the second iteration is provably idempotent
+    // because N >= K*m holds for any valid job (ntasks >= node_num).
     uint32_t dist_max = job->ntasks - job->node_num + 1;
     if (job->ntasks_per_node_max == 0)
       job->ntasks_per_node_max = dist_max;
@@ -8320,52 +8326,53 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     job->ntasks_per_node_max =
         std::min(job->ntasks_per_node_max,
                  job->ntasks - (job->node_num - 1) * job->ntasks_per_node_min);
-  }
-
-  if (job->ntasks_per_node_min > job->ntasks_per_node_max) {
-    CRANE_ERROR(
-        "Job #{}: ntasks_per_node_min ({}) > ntasks_per_node_max ({}), "
-        "infeasible constraints.",
-        job->JobId(), job->ntasks_per_node_min, job->ntasks_per_node_max);
-    if (job->JobToCtld().has_mem_per_node()) {
+    if (job->ntasks_per_node_min > job->ntasks_per_node_max) {
+      CRANE_ERROR(
+          "Job #{}: ntasks_per_node_min ({}) > ntasks_per_node_max ({}), "
+          "infeasible constraints.",
+          job->JobId(), job->ntasks_per_node_min, job->ntasks_per_node_max);
+      if (job->JobToCtld().has_mem_per_node()) {
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--mem={} cannot be satisfied with --ntasks-per-node={} and "
+            "--cpus-per-task={} under partition '{}' memory limits; reduce "
+            "--mem or increase the task or CPU count",
+            util::ReadableMemory(job->JobToCtld().mem_per_node()),
+            job->JobToCtld().ntasks_per_node(),
+            job->req_task_res_view.CpuCountDouble(), job->partition_id));
+      }
+      if (job->JobToCtld().has_mem_per_cpu()) {
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "--mem-per-cpu={} cannot be satisfied with --ntasks-per-node={} "
+            "and "
+            "--cpus-per-task={} under partition '{}' memory limits; reduce "
+            "--mem-per-cpu or adjust the task or CPU count",
+            util::ReadableMemory(job->JobToCtld().mem_per_cpu()),
+            job->JobToCtld().ntasks_per_node(),
+            job->req_task_res_view.CpuCountDouble(), job->partition_id));
+      }
       return std::unexpected(FormatRichErr(
           CraneErrCode::ERR_INVALID_PARAM,
-          "--mem={} cannot be satisfied with --ntasks-per-node={} and "
-          "--cpus-per-task={} under partition '{}' memory limits; reduce "
-          "--mem or increase the task or CPU count",
-          util::ReadableMemory(job->JobToCtld().mem_per_node()),
+          "--ntasks-per-node={} and --cpus-per-task={} cannot satisfy the "
+          "default memory limits of partition '{}'; adjust the task or CPU "
+          "count",
           job->JobToCtld().ntasks_per_node(),
           job->req_task_res_view.CpuCountDouble(), job->partition_id));
     }
-    if (job->JobToCtld().has_mem_per_cpu()) {
-      return std::unexpected(FormatRichErr(
-          CraneErrCode::ERR_INVALID_PARAM,
-          "--mem-per-cpu={} cannot be satisfied with --ntasks-per-node={} and "
-          "--cpus-per-task={} under partition '{}' memory limits; reduce "
-          "--mem-per-cpu or adjust the task or CPU count",
-          util::ReadableMemory(job->JobToCtld().mem_per_cpu()),
-          job->JobToCtld().ntasks_per_node(),
-          job->req_task_res_view.CpuCountDouble(), job->partition_id));
-    }
-    return std::unexpected(FormatRichErr(
-        CraneErrCode::ERR_INVALID_PARAM,
-        "--ntasks-per-node={} and --cpus-per-task={} cannot satisfy the "
-        "default memory limits of partition '{}'; adjust the task or CPU count",
-        job->JobToCtld().ntasks_per_node(),
-        job->req_task_res_view.CpuCountDouble(), job->partition_id));
+
+    CRANE_TRACE(
+        "Job #{} after mem adjust: node res:{}, job res:{}, "
+        "ntasks_per_node_min:{}, ntasks_per_node_max:{}",
+        job->JobId(), util::ReadableResourceView(job->req_node_res_view),
+        util::ReadableResourceView(job->req_task_res_view),
+        job->ntasks_per_node_min, job->ntasks_per_node_max);
+
+    job->req_total_res_view = job->req_node_res_view * job->node_num +
+                              job->req_task_res_view * job->ntasks;
+    CRANE_TRACE("Job #{} total res:{}", job->JobId(),
+                util::ReadableResourceView(job->req_total_res_view));
   }
-
-  CRANE_TRACE(
-      "Job #{} after mem adjust: node res:{}, job res:{}, "
-      "ntasks_per_node_min:{}, ntasks_per_node_max:{}",
-      job->JobId(), util::ReadableResourceView(job->req_node_res_view),
-      util::ReadableResourceView(job->req_task_res_view),
-      job->ntasks_per_node_min, job->ntasks_per_node_max);
-
-  job->req_total_res_view = job->req_node_res_view * job->node_num +
-                            job->req_task_res_view * job->ntasks;
-  CRANE_TRACE("Job #{} total res:{}", job->JobId(),
-              util::ReadableResourceView(job->req_total_res_view));
 
   auto check_qos_result =
       g_account_manager->CheckQosLimitOnJob(job->Username(), job->account, job);
@@ -8495,7 +8502,9 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
   }
 
   // Check res req valid
-  if (job->req_total_res_view.GetMemoryBytes() == 0) {
+  if (job->node_num == 0 ? (job->req_node_res_view.GetMemoryBytes() == 0 &&
+                            job->req_task_res_view.GetMemoryBytes() == 0)
+                         : job->req_total_res_view.GetMemoryBytes() == 0) {
     CRANE_DEBUG("Job #{} has zero memory request.", job->JobId());
     return std::unexpected(FormatRichErr(
         CraneErrCode::ERR_INVALID_PARAM,
@@ -8517,16 +8526,21 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
         "time"));
 
   // Check whether the selected partition is able to run this job.
-  std::unordered_set<std::string> avail_nodes;
   {
     // Preserve lock ordering.
     auto metas_ptr = g_meta_container->GetPartitionMetasPtr(job->partition_id);
 
     // Since we do not access the elements in partition_metas_m
+    const uint32_t requested_node_num = job->node_num;
+    const auto no_feasible_node_err = job->node_num == 0
+                                          ? CraneErrCode::ERR_NO_RESOURCE
+                                          : CraneErrCode::ERR_NO_ENOUGH_NODE;
 
-    // Check whether the selected partition is able to run this job.
-    if (!(job->req_total_res_view <=
-          metas_ptr->partition_global_meta.res_total_inc_dead)) {
+    auto has_partition_resources = [&] {
+      if (job->req_total_res_view <=
+          metas_ptr->partition_global_meta.res_total_inc_dead)
+        return true;
+
       CRANE_TRACE(
           "Resource not enough for job #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
@@ -8538,112 +8552,231 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
                                    .res_total_inc_dead.GetMemorySwBytes()),
           util::ReadableGresMap(
               metas_ptr->partition_global_meta.res_total.GetGresMap()));
+      return false;
+    };
+
+    if (requested_node_num != 0) {
+      if (!has_partition_resources())
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}",
+                          CraneErrStr(CraneErrCode::ERR_NO_RESOURCE)));
+
+      if (requested_node_num > metas_ptr->craned_ids.size()) {
+        CRANE_TRACE(
+            "Nodes not enough for job #{}. "
+            "Partition total Nodes: {}",
+            job->JobId(), metas_ptr->craned_ids.size());
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_INVALID_NODE_NUM,
+            "Invalid --nodes value {}: partition '{}' contains only {} nodes",
+            requested_node_num, job->partition_id,
+            metas_ptr->craned_ids.size()));
+      }
+    }
+
+    {
+      CranedMetaContainer::ResvMetaPtr resv_meta;
+      if (job->reservation != "") {
+        if (!g_meta_container->GetResvMetaMapConstPtr()->contains(
+                job->reservation)) {
+          CRANE_TRACE("Reservation {} not found for job #{}", job->reservation,
+                      job->JobId());
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Invalid --reservation value '{}': reservation does not exist",
+              job->reservation));
+        }
+
+        resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
+
+        if (resv_meta->part_id != "" &&
+            resv_meta->part_id != job->partition_id) {
+          CRANE_TRACE("Partition {} not allowed for reservation {} for job #{}",
+                      job->partition_id, job->reservation, job->JobId());
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "--partition value '{}' does not match reservation '{}'; use "
+              "partition '{}' or choose another reservation",
+              job->partition_id, job->reservation, resv_meta->part_id));
+        }
+
+        // if passed, either not in the black list (true, true)
+        // or in the white list (false, false)
+        if (resv_meta->accounts_black_list ^
+            !resv_meta->accounts.contains(job->account)) {
+          CRANE_TRACE("Account {} not allowed for reservation {} for job #{}",
+                      job->account, job->reservation, job->JobId());
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "--account value '{}' is not allowed by reservation '{}'; use an "
+              "allowed account or choose another reservation",
+              job->account, job->reservation));
+        }
+        if (resv_meta->users_black_list ^
+            !resv_meta->users.contains(job->Username())) {
+          CRANE_TRACE("User {} not allowed for reservation {} for job #{}",
+                      job->Username(), job->reservation, job->JobId());
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Current user is not allowed by --reservation '{}'; "
+              "choose another reservation or contact the "
+              "administrator",
+              job->reservation));
+        }
+
+        if (!job->included_nodes.empty()) {
+          auto reserved_craned_id_list = resv_meta->craned_ids;
+          std::unordered_set<std::string> reserved_craned_id_set;
+          reserved_craned_id_set.insert(reserved_craned_id_list.begin(),
+                                        reserved_craned_id_list.end());
+          for (const auto& craned_id : job->included_nodes) {
+            if (!reserved_craned_id_set.contains(craned_id)) {
+              CRANE_TRACE("Craned {} is not in the reservation {} for job #{}",
+                          craned_id, job->reservation, job->JobId());
+              return std::unexpected(FormatRichErr(
+                  CraneErrCode::ERR_INVALID_PARAM,
+                  "--nodelist value includes node '{}', which is not part of "
+                  "reservation '{}'; remove the node from --nodelist or choose "
+                  "another reservation",
+                  craned_id, job->reservation));
+            }
+          }
+        }
+      }
+
+      if (job->node_num != 0) {
+        job->node_num_min = job->node_num;
+        job->node_num_max = job->node_num;
+      }
+      const uint32_t ntasks_per_node_min =
+          std::max(1u, job->ntasks_per_node_min);
+      const uint32_t ntasks_per_node_max =
+          job->ntasks_per_node_max == 0
+              ? job->ntasks
+              : std::min(job->ntasks_per_node_max, job->ntasks);
+      const uint32_t candidate_node_num_max = std::min(
+          {job->node_num_max, job->ntasks, job->ntasks / ntasks_per_node_min});
+
+      std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<>>
+          top_capacities;
+      uint64_t top_capacity_sum = 0;
+      uint32_t selected_node_num = 0;
+      uint32_t selected_ntasks_per_node_min = 0;
+
+      auto add_node_capacity = [&](const ResourceInNodeV3& resource) {
+        if (candidate_node_num_max < job->node_num_min ||
+            ntasks_per_node_min > ntasks_per_node_max) {
+          return false;
+        }
+
+        const ResourceView min_res_view =
+            job->req_node_res_view +
+            job->req_task_res_view * ntasks_per_node_min;
+        if (min_res_view.GetMemorySwBytes() > resource.GetMemorySwBytes())
+          return false;
+
+        ResourceInNodeV3 feasible_res;
+        if (!min_res_view.GetFeasibleResourceInNode(resource, &feasible_res))
+          return false;
+
+        ResourceInNodeV3 remaining_res = resource;
+        remaining_res -= feasible_res;
+        const uint64_t extra_capacity =
+            remaining_res.ToResourceView() / job->req_task_res_view;
+        const uint32_t capacity =
+            ntasks_per_node_min +
+            static_cast<uint32_t>(
+                std::min(static_cast<uint64_t>(ntasks_per_node_max -
+                                               ntasks_per_node_min),
+                         extra_capacity));
+
+        if (top_capacities.size() < candidate_node_num_max) {
+          top_capacities.push(capacity);
+          top_capacity_sum += capacity;
+        } else if (capacity > top_capacities.top()) {
+          top_capacity_sum -= top_capacities.top();
+          top_capacities.pop();
+          top_capacities.push(capacity);
+          top_capacity_sum += capacity;
+        } else {
+          return false;
+        }
+
+        const uint32_t candidate_node_num = top_capacities.size();
+        if (candidate_node_num < job->node_num_min) return false;
+
+        const uint32_t required_min = std::max(
+            ntasks_per_node_min,
+            (candidate_node_num - 1) * ntasks_per_node_max >= job->ntasks
+                ? 1u
+                : job->ntasks - (candidate_node_num - 1) * ntasks_per_node_max);
+        if (candidate_node_num * required_min > job->ntasks ||
+            top_capacities.top() < required_min ||
+            top_capacity_sum < job->ntasks)
+          return false;
+
+        selected_node_num = candidate_node_num;
+        selected_ntasks_per_node_min = required_min;
+        return true;
+      };
+
+      if (job->reservation != "") {
+        for (const auto& [craned_id, resource] :
+             resv_meta->res_total.EachNodeResMap()) {
+          if ((!job->included_nodes.empty() &&
+               !job->included_nodes.contains(craned_id)) ||
+              job->excluded_nodes.contains(craned_id)) {
+            continue;
+          }
+          if (add_node_capacity(resource)) break;
+        }
+      } else {
+        auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+        for (const auto& craned_id : metas_ptr->craned_ids) {
+          if ((!job->included_nodes.empty() &&
+               !job->included_nodes.contains(craned_id)) ||
+              job->excluded_nodes.contains(craned_id)) {
+            continue;
+          }
+          if (add_node_capacity(craned_meta_map->at(craned_id)
+                                    .GetExclusivePtr()
+                                    ->res_total)) {
+            break;
+          }
+        }
+      }
+
+      job->node_num = selected_node_num;
+      if (job->node_num == 0) {
+        job->req_total_res_view = job->req_node_res_view * job->node_num_min +
+                                  job->req_task_res_view * job->ntasks;
+      } else {
+        job->node_num_min = job->node_num;
+        job->node_num_max = job->node_num;
+        job->MutableJobToCtld()->set_node_num_min(job->node_num);
+        job->MutableJobToCtld()->set_node_num_max(job->node_num);
+
+        job->ntasks_per_node_min = selected_ntasks_per_node_min;
+        job->ntasks_per_node_max = std::min(
+            {ntasks_per_node_max, job->ntasks - job->node_num + 1,
+             job->ntasks - (job->node_num - 1) * job->ntasks_per_node_min});
+
+        job->req_total_res_view = job->req_node_res_view * job->node_num +
+                                  job->req_task_res_view * job->ntasks;
+        CRANE_TRACE("Job #{} total res:{}", job->JobId(),
+                    util::ReadableResourceView(job->req_total_res_view));
+      }
+    }
+
+    if (requested_node_num == 0 && !has_partition_resources()) {
       return std::unexpected(
           FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}",
                         CraneErrStr(CraneErrCode::ERR_NO_RESOURCE)));
     }
 
-    if (job->node_num > metas_ptr->craned_ids.size()) {
-      CRANE_TRACE(
-          "Nodes not enough for job #{}. "
-          "Partition total Nodes: {}",
-          job->JobId(), metas_ptr->craned_ids.size());
-      return std::unexpected(FormatRichErr(
-          CraneErrCode::ERR_INVALID_NODE_NUM,
-          "Invalid --nodes value {}: partition '{}' contains only {} nodes",
-          job->node_num, job->partition_id, metas_ptr->craned_ids.size()));
-    }
-
-    if (job->reservation != "") {
-      if (!g_meta_container->GetResvMetaMapConstPtr()->contains(
-              job->reservation)) {
-        CRANE_TRACE("Reservation {} not found for job #{}", job->reservation,
-                    job->JobId());
-        return std::unexpected(FormatRichErr(
-            CraneErrCode::ERR_INVALID_PARAM,
-            "Invalid --reservation value '{}': reservation does not exist",
-            job->reservation));
-      }
-
-      auto resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
-
-      if (resv_meta->part_id != "" && resv_meta->part_id != job->partition_id) {
-        CRANE_TRACE("Partition {} not allowed for reservation {} for job #{}",
-                    job->partition_id, job->reservation, job->JobId());
-        return std::unexpected(FormatRichErr(
-            CraneErrCode::ERR_INVALID_PARAM,
-            "--partition value '{}' does not match reservation '{}'; use "
-            "partition '{}' or choose another reservation",
-            job->partition_id, job->reservation, resv_meta->part_id));
-      }
-
-      // if passed, either not in the black list (true, true)
-      // or in the white list (false, false)
-      if (resv_meta->accounts_black_list ^
-          !resv_meta->accounts.contains(job->account)) {
-        CRANE_TRACE("Account {} not allowed for reservation {} for job #{}",
-                    job->account, job->reservation, job->JobId());
-        return std::unexpected(FormatRichErr(
-            CraneErrCode::ERR_INVALID_PARAM,
-            "--account value '{}' is not allowed by reservation '{}'; use an "
-            "allowed account or choose another reservation",
-            job->account, job->reservation));
-      }
-      if (resv_meta->users_black_list ^
-          !resv_meta->users.contains(job->Username())) {
-        CRANE_TRACE("User {} not allowed for reservation {} for job #{}",
-                    job->Username(), job->reservation, job->JobId());
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                          "Current user is not allowed by --reservation '{}'; "
-                          "choose another reservation or contact the "
-                          "administrator",
-                          job->reservation));
-      }
-
-      if (!job->included_nodes.empty()) {
-        auto reserved_craned_id_list = resv_meta->craned_ids;
-        std::unordered_set<std::string> reserved_craned_id_set;
-        reserved_craned_id_set.insert(reserved_craned_id_list.begin(),
-                                      reserved_craned_id_list.end());
-        for (const auto& craned_id : job->included_nodes) {
-          if (!reserved_craned_id_set.contains(craned_id)) {
-            CRANE_TRACE("Craned {} is not in the reservation {} for job #{}",
-                        craned_id, job->reservation, job->JobId());
-            return std::unexpected(FormatRichErr(
-                CraneErrCode::ERR_INVALID_PARAM,
-                "--nodelist value includes node '{}', which is not part of "
-                "reservation '{}'; remove the node from --nodelist or choose "
-                "another reservation",
-                craned_id, job->reservation));
-          }
-        }
-      }
-    }
-
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-    for (const auto& craned_id : metas_ptr->craned_ids) {
-      auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (job->req_node_res_view + job->req_task_res_view <=
-              craned_meta->res_total &&
-          (job->included_nodes.empty() ||
-           job->included_nodes.contains(craned_id)) &&
-          (job->excluded_nodes.empty() ||
-           !job->excluded_nodes.contains(craned_id)))
-        avail_nodes.emplace(craned_meta->static_meta.hostname);
-
-      if (avail_nodes.size() >= job->node_num) break;
-    }
-  }
-
-  if (job->node_num > avail_nodes.size()) {
-    CRANE_TRACE(
-        "Resource not enough. Job #{} needs {} nodes, while only {} "
-        "nodes satisfy its requirement.",
-        job->JobId(), job->node_num, avail_nodes.size());
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_NO_ENOUGH_NODE, "{}",
-                      CraneErrStr(CraneErrCode::ERR_NO_ENOUGH_NODE)));
+    if (job->node_num == 0)
+      return std::unexpected(FormatRichErr(no_feasible_node_err, "{}",
+                                           CraneErrStr(no_feasible_node_err)));
   }
 
   return {};

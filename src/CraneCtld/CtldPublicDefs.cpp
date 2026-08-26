@@ -1986,7 +1986,9 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
     }
   }
 
-  node_num = val.node_num();
+  node_num_min = val.node_num_min();
+  node_num_max = std::max(node_num_min, val.node_num_max());
+  node_num = node_num_min == node_num_max ? node_num_min : 0;
   ntasks = val.ntasks();
   ntasks_per_node_max = val.ntasks_per_node();
 

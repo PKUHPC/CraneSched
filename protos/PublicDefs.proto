@@ -200,7 +200,7 @@ message JobToCtld {
   string account = 6;
   string name = 7;
   string qos = 8;
-  uint32 node_num = 9;
+  uint32 node_num_min = 9;
   uint32 ntasks_per_node = 10;
   uint32 ntasks = 17;
 
@@ -258,6 +258,7 @@ message JobToCtld {
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
   bool no_requeue = 53;
+  uint32 node_num_max = 54;
 
   // Array submission spec for this job. Child identity is runtime-only.
   ArraySpec array_spec = 58;

@@ -116,7 +116,9 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | account                 | string  | 作业所属账户       |
 | name                    | string  | 作业名          |
 | qos                     | string  | 作业所属qos      |
-| node_num                | number  | 节点数目         |
+| node_num                | number  | 实际选择的节点数目（提交 hook 中尚未选择时为 0，只读） |
+| node_num_min            | number  | 请求的节点数下限 |
+| node_num_max            | number  | 请求的节点数上限 |
 | ntasks_per_node_min     | number  | 每个节点最少task数目 |
 | ntasks_per_node_max     | number  | 每个节点最多task数目 |
 | included_nodes          | table(string list) | 包含的节点 |
@@ -220,6 +222,8 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_info("job_desc.gid: %d", job_desc.gid)
     crane.log_info("job_desc.account: %s", job_desc.account)
     crane.log_info("job_desc.node_num: %d", job_desc.node_num)
+    crane.log_info("job_desc.node_num_min: %d", job_desc.node_num_min)
+    crane.log_info("job_desc.node_num_max: %d", job_desc.node_num_max)
     crane.log_info("job_desc.qos: %s", job_desc.qos)
     crane.log_info("job_desc.type: %d", job_desc.type)
     crane.log_info("job_desc.time_limit: %d", job_desc.time_limit)
