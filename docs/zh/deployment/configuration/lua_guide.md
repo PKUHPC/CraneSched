@@ -110,6 +110,8 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | req_node_res_view       | ResourceView | 单节点需求资源信息  | 
 | req_task_res_view       | ResourceView | 单task需求资源信息 |
 | req_total_res_view      | ResourceView | 总需求资源信息     |
+| gres                    | table(map)，只读 | `tres_per_node` 的别名，鹤思的每节点 GRES 映射 |
+| tres_per_node           | table(map)，只读 | 鹤思的每节点 GRES 映射 |
 | type                    | number  | 作业类型         |
 | uid                     | number  | 作业所属uid      |
 | gid                     | number  | 作业所属gid      |
@@ -133,6 +135,17 @@ function crane_job_modify(job_desc, job_ptr, part_list, uid)
 | begin_time              | number  | 作业开始时间       |
 | exclusive               | boolean | 是否独占节点       |
 | licenses_count          | table(map) | 许可证信息     |
+
+`gres` 和 `tres_per_node` 使用与 `ResourceView.device_map` 相同的结构：
+
+```lua
+local gpu = job_desc.gres.gpu
+if gpu ~= nil then
+    crane.log_info("requested GPUs: %d", gpu.total_count)
+end
+```
+
+这两个字段是 `job_desc.req_node_res_view.device_map` 中 GRES 数据的只读别名。
 
 #### part_list
 该用户有权限使用的分区列表。

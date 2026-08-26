@@ -28,6 +28,21 @@ namespace Ctld {
 
 const std::vector<std::string> LuaJobHandler::kReqFxns = {"crane_job_submit",
                                                           "crane_job_modify"};
+
+sol::table LuaJobHandler::GresMapToLuaTable_(
+    const crane::LuaEnvironment& lua_env, const GresMap& gres_map) {
+  sol::table result = lua_env.GetLuaState().create_table();
+  for (const auto& [name, count] : gres_map) {
+    sol::table entry = lua_env.GetLuaState().create_table();
+    entry["total_count"] = count.total;
+
+    sol::table typed = lua_env.GetLuaState().create_table();
+    for (const auto& [type, value] : count.specified) typed[type] = value;
+    entry["typed"] = typed;
+    result[name] = entry;
+  }
+  return result;
+}
 #endif
 
 CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
@@ -193,19 +208,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     }),
     "device_map", sol::property(
       [&](const ResourceView& rv) {
-        sol::table tbl = lua_env.GetLuaState().create_table();
-        for (const auto& [gres_name, gres_count] : rv.GetGresMap()) {
-          sol::table entry = lua_env.GetLuaState().create_table();
-          entry["total_count"] = gres_count.total;
-
-          sol::table typed = lua_env.GetLuaState().create_table();
-          for (const auto& [typed_name, typed_count] : gres_count.specified) {
-            typed[typed_name] = typed_count;
-          }
-          entry["typed"] = typed;
-          tbl[gres_name] = entry;
-        }
-        return tbl;
+        return LuaJobHandler::GresMapToLuaTable_(lua_env, rv.GetGresMap());
       })
   );
 
@@ -220,6 +223,16 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "req_node_res_view", &JobInCtld::req_node_res_view,
     "req_task_res_view", &JobInCtld::req_task_res_view,
     "req_total_res_view", &JobInCtld::req_total_res_view,
+    "gres", sol::property(
+        [&](const JobInCtld& t) {
+          return LuaJobHandler::GresMapToLuaTable_(
+              lua_env, t.req_node_res_view.GetGresMap());
+        }),
+    "tres_per_node", sol::property(
+        [&](const JobInCtld& t) {
+          return LuaJobHandler::GresMapToLuaTable_(
+              lua_env, t.req_node_res_view.GetGresMap());
+        }),
     "type", &JobInCtld::type, "uid", &JobInCtld::uid,
     "gid", &JobInCtld::gid, "account", &JobInCtld::account,
     "name", &JobInCtld::name, "qos", &JobInCtld::qos,

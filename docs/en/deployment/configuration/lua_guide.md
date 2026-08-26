@@ -127,6 +127,8 @@ Same as the return values of `crane_job_submit`.
 | req_node_res_view         | ResourceView | Requested resource per node              |
 | req_task_res_view         | ResourceView | Requested resource per task              |
 | req_total_res_view        | ResourceView | Total requested resource information     |
+| gres                      | table(map), read-only | Alias for `tres_per_node`; Crane's per-node GRES map |
+| tres_per_node              | table(map), read-only | Crane's per-node GRES map |
 | type                      | number  | Job type                                      |
 | uid                       | number  | UID of the job owner                          |
 | gid                       | number  | GID of the job owner                          |
@@ -150,6 +152,19 @@ Same as the return values of `crane_job_submit`.
 | begin_time                | number  | Job start time                                |
 | exclusive                 | boolean | Whether to run in exclusive node mode         |
 | licenses_count            | table(map) | License information                        |
+
+`gres` and `tres_per_node` use the same `device_map` shape as
+`ResourceView.device_map`:
+
+```lua
+local gpu = job_desc.gres.gpu
+if gpu ~= nil then
+    crane.log_info("requested GPUs: %d", gpu.total_count)
+end
+```
+
+The two fields are read-only aliases of the GRES data in
+`job_desc.req_node_res_view.device_map`.
 
 
 ---
