@@ -1040,7 +1040,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   allocated_craneds_regex = job.allocated_craneds_regex;
   task_prolog = job.JobToCtld().task_prolog();
   task_epilog = job.JobToCtld().task_epilog();
-  // FIXME: Following job fields should set by scheduler
+  // Per-node scheduler task counts are not persisted. Reconstruct the same
+  // minimum-first distribution from the job constraints and allocated slots.
   task_id_t cur_task_id = 0;
   if (job.IsBatch() || job.IsCalloc() || is_container_batch_primary) {
     // Batch-like primary steps only launch one orchestration task on one node.
@@ -1050,23 +1051,55 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     task_res_map[cur_task_id] =
         job.AllocatedRes().At(job.executing_craned_ids.front());
   } else {
-    ResourceV3 step_alloc_res;
-    task_id_t cur_task_id = 0;
+    CRANE_ASSERT(job.CranedIds().size() == job.node_num);
+    const uint64_t minimum_task_count =
+        static_cast<uint64_t>(job.CranedIds().size()) * job.ntasks_per_node_min;
+    CRANE_ASSERT(minimum_task_count <= job.ntasks);
+
+    uint32_t remaining_tasks =
+        job.ntasks - static_cast<uint32_t>(minimum_task_count);
+
     for (const auto& craned_id : job.CranedIds()) {
       ResourceInNodeV3& res_avail = job.StepResAvail().At(craned_id);
       ResourceInNodeV3 feasible_res;
-      req_node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
+      bool feasible =
+          req_node_res_view.GetFeasibleResourceInNode(res_avail, &feasible_res);
+      CRANE_ASSERT_MSG(
+          feasible,
+          fmt("Primary step of job #{} cannot allocate per-node resources on "
+              "craned {}",
+              job.JobId(), craned_id));
       res_avail -= feasible_res;
-      step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-      while (req_task_res_view.GetFeasibleResourceInNode(res_avail,
+
+      uint32_t tasks_on_node = 0;
+      for (; tasks_on_node < job.ntasks_per_node_min; ++tasks_on_node) {
+        feasible = req_task_res_view.GetFeasibleResourceInNode(res_avail,
+                                                               &feasible_res);
+        CRANE_ASSERT_MSG(feasible,
+                         fmt("Primary step of job #{} cannot allocate "
+                             "ntasks_per_node_min tasks on craned {}",
+                             job.JobId(), craned_id));
+        res_avail -= feasible_res;
+        craned_task_map[craned_id].insert(cur_task_id);
+        task_res_map[cur_task_id] = feasible_res;
+        ++cur_task_id;
+      }
+
+      while (remaining_tasks > 0 && tasks_on_node < job.ntasks_per_node_max &&
+             req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                          &feasible_res)) {
         res_avail -= feasible_res;
         craned_task_map[craned_id].insert(cur_task_id);
         task_res_map[cur_task_id] = feasible_res;
-        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
         ++cur_task_id;
+        ++tasks_on_node;
+        --remaining_tasks;
       }
     }
+    CRANE_ASSERT_MSG(remaining_tasks == 0,
+                     fmt("Primary step of job #{} lacks capacity for {} tasks",
+                         job.JobId(), remaining_tasks));
+    CRANE_ASSERT(cur_task_id == job.ntasks);
   }
 
   /* Field of StepToCtld proto */
@@ -2262,7 +2295,8 @@ uint32_t JobInCtld::SchedulePendingSteps(
     if (candidates.size() < step->node_num || sum_ntasks < step->ntasks) {
       break;
     }
-    uint32_t rest_ntasks = step->ntasks - step->node_num;
+    uint32_t rest_ntasks =
+        step->ntasks - step->node_num * step->ntasks_per_node_min;
     task_id_t cur_task_id = 0;
     while (!candidates.empty()) {
       const auto& info = candidates.top();
@@ -2273,7 +2307,9 @@ uint32_t JobInCtld::SchedulePendingSteps(
       res_avail -= feasible_res;
       step_alloc_res.AddResourceInNode(*info.craned_id, feasible_res);
       uint32_t ntasks_on_node =
-          std::min(rest_ntasks, info.ntasks_on_node - 1) + 1;
+          step->ntasks_per_node_min +
+          std::min(rest_ntasks,
+                   info.ntasks_on_node - step->ntasks_per_node_min);
       for (uint32_t i = 0; i < ntasks_on_node; ++i) {
         step->req_task_res_view.GetFeasibleResourceInNode(res_avail,
                                                           &feasible_res);
@@ -2283,9 +2319,11 @@ uint32_t JobInCtld::SchedulePendingSteps(
         step_alloc_res.AddResourceInNode(*info.craned_id, feasible_res);
         ++cur_task_id;
       }
-      rest_ntasks -= ntasks_on_node - 1;
+      rest_ntasks -= ntasks_on_node - step->ntasks_per_node_min;
       candidates.pop();
     }
+    CRANE_ASSERT(rest_ntasks == 0);
+    CRANE_ASSERT(cur_task_id == step->ntasks);
     std::vector<CranedId> step_craned_ids = step_alloc_res.EachNodeResMap() |
                                             std::views::keys |
                                             std::ranges::to<std::vector>();
