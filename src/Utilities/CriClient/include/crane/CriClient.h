@@ -31,11 +31,13 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "crane/Lock.h"
@@ -67,6 +69,9 @@ inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
 inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
     std::chrono::seconds(60);
 
+inline constexpr uint32_t kCriMinRuntimeMajor = 1;
+inline constexpr uint32_t kCriMinRuntimeMinor = 7;
+
 using ContainerEventCallback =
     std::function<void(const api::ContainerEventResponse&)>;
 
@@ -85,8 +90,13 @@ class CriClient {
                           const std::filesystem::path& image_service);
 
   // ==== Runtime Service ====
+  CraneExpectedRich<api::VersionResponse> GetVersion() const;
   void Version() const;
   void RuntimeConfig() const;
+
+  static std::optional<std::pair<uint32_t, uint32_t>>
+  ParseRuntimeVersionMajorMinor(std::string_view version);
+  static bool IsRuntimeVersionSupported(std::string_view version);
 
   // Pod
   CraneExpectedRich<std::string> RunPodSandbox(
@@ -231,6 +241,7 @@ class CriClient {
   // Container event streaming
   std::thread m_event_stream_thread_;
   std::atomic_bool m_event_stream_stop_{true};
+  std::atomic_bool m_event_stream_supported_{true};
 
   // Cancellable context for gRPC stream
   std::shared_ptr<grpc::ClientContext> m_event_stream_context_;

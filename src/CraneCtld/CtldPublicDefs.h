@@ -1252,6 +1252,12 @@ struct JobInCtld {
   void SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const;
 };
 
+// A running job always has a daemon step. The daemon owns the job cgroup and
+// is the anchor used to configure a craned after Ctld recovery.
+inline bool HasDaemonStep(const JobInCtld& job) noexcept {
+  return job.DaemonStep() != nullptr;
+}
+
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
   return sec >= kJobMinTimeLimitSec && sec <= kJobMaxTimeLimitSec;
 }
