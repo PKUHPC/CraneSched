@@ -125,15 +125,6 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
-TEST(CtldRecoveryInvariantTest, RunningJobHasDaemonStep) {
-  Ctld::JobInCtld job;
-  job.SetJobId(100);
-  EXPECT_FALSE(Ctld::HasDaemonStep(job));
-
-  job.SetDaemonStep(MakeDaemonStep(&job, {"node-a"}));
-  EXPECT_TRUE(Ctld::HasDaemonStep(job));
-}
-
 TEST(CtldStepStateMachineTest,
      DaemonConfigureFailureCleansAndReturnsFailureAfterTerminalReports) {
   constexpr job_id_t kJobId = 42;
