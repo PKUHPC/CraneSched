@@ -261,7 +261,8 @@ rack1_blade02
 ```
 
 When `<hostlist>` is omitted, `ccontrol` uses the first non-empty variable in
-this order: `CRANE_JOB_NODELIST`, `SLURM_JOB_NODELIST`, then `SLURM_NODELIST`.
+this order: `SLURM_JOB_NODELIST`, `SLURM_NODELIST`, `CRANE_JOB_NODELIST`, then
+`CRANE_NODELIST`.
 This makes the command convenient inside an allocated job:
 
 ```bash
@@ -276,7 +277,7 @@ scontrol show hostnames > hostfile
 ```
 
 Without an explicit hostlist, `scontrol` checks `SLURM_JOB_NODELIST`,
-`SLURM_NODELIST`, and `CRANE_JOB_NODELIST`, in that order.
+`SLURM_NODELIST`, `CRANE_JOB_NODELIST`, and `CRANE_NODELIST`, in that order.
 
 ### Update Commands
 

@@ -260,7 +260,7 @@ rack1_blade02
 ```
 
 省略 `<节点列表>` 时，`ccontrol` 按顺序使用第一个非空的环境变量：
-`CRANE_JOB_NODELIST`、`SLURM_JOB_NODELIST`、`SLURM_NODELIST`。因此可以在已分配
+`SLURM_JOB_NODELIST`、`SLURM_NODELIST`、`CRANE_JOB_NODELIST`、`CRANE_NODELIST`。因此可以在已分配
 资源的作业中直接生成 hostfile：
 
 ```bash
@@ -275,7 +275,7 @@ scontrol show hostnames > hostfile
 ```
 
 未显式指定节点列表时，`scontrol` 依次检查 `SLURM_JOB_NODELIST`、
-`SLURM_NODELIST` 和 `CRANE_JOB_NODELIST`。
+`SLURM_NODELIST`、`CRANE_JOB_NODELIST` 和 `CRANE_NODELIST`。
 
 ### Update 命令
 
