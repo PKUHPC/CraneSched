@@ -227,6 +227,8 @@ EnvMap JobInD::GetJobEnvMap() {
 
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   auto nodelist = daemon_step_to_d.nodelist();
+  const auto crane_nodelist = absl::StrJoin(nodelist, ";");
+  const auto slurm_nodelist = util::HostNameListToStr(nodelist);
   auto node_id_to_str = [nodelist]() -> std::string {
     auto it = std::ranges::find(nodelist, g_config.CranedIdOfThisNode);
     if (it == nodelist.end()) {
@@ -258,8 +260,8 @@ EnvMap JobInD::GetJobEnvMap() {
                          .count()));
   env_map.emplace("CRANE_JOB_ID", std::to_string(job_id));
   env_map.emplace("CRANE_JOB_NAME", daemon_step_to_d.name());
-  env_map.emplace("CRANE_JOB_NODELIST",
-                  absl::StrJoin(daemon_step_to_d.nodelist(), ";"));
+  env_map.emplace("CRANE_JOB_NODELIST", crane_nodelist);
+  env_map.emplace("CRANE_NODELIST", crane_nodelist);
   env_map.emplace("CRANE_JOB_NUM_NODES",
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
@@ -294,8 +296,8 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.emplace("SLURM_NODEID", node_id_to_str());
     env_map.emplace("SLURMD_NODENAME", g_config.CranedIdOfThisNode);
     env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
-    env_map.emplace("SLURM_NODELIST",
-                    util::HostNameListToStr(daemon_step_to_d.nodelist()));
+    env_map.emplace("SLURM_JOB_NODELIST", slurm_nodelist);
+    env_map.emplace("SLURM_NODELIST", slurm_nodelist);
     if (job_to_d.has_array_task()) {
       const auto& array_task = job_to_d.array_task();
       env_map.emplace("SLURM_ARRAY_JOB_ID",
