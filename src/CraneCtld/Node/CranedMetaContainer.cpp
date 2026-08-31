@@ -354,6 +354,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.node_addr = config.Nodes.at(craned_name)->node_addr;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
+    static_meta.is_future = config.Nodes.at(craned_name)->is_future;
+    static_meta.features = config.Nodes.at(craned_name)->features;
 
     craned_meta.res_total += static_meta.res;
     craned_meta.res_avail += static_meta.res;
@@ -374,6 +376,14 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       craned_id_part_ids_map_[craned_name].emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
+
+      if (craned_meta.static_meta.is_future) {
+        CRANE_DEBUG(
+            "FUTURE node {} is not added to partition [{}]'s global resource "
+            "until a craned is mapped to it.",
+            craned_name, part_name);
+        continue;
+      }
 
       part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
       part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
@@ -796,7 +806,9 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
         control_state = crane::grpc::CranedControlState::CRANE_NONE;
       }
       crane::grpc::CranedResourceState resource_state;
-      if (craned_meta->alive) {
+      if (craned_meta->static_meta.is_future && !craned_meta->future_mapped) {
+        resource_state = crane::grpc::CranedResourceState::CRANE_FUTURE;
+      } else if (craned_meta->alive) {
         if (res_in_use.IsZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
         } else if (res_avail.IsExhausted()) {
@@ -880,6 +892,13 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     }
 
     auto craned_meta = craned_meta_map_[craned_id];
+
+    if (craned_meta->static_meta.is_future && !craned_meta->future_mapped) {
+      reply.add_not_modified_nodes(craned_id);
+      reply.add_not_modified_reasons(
+          "Node is a FUTURE placeholder and not mapped yet.");
+      continue;
+    }
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
@@ -970,6 +989,136 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   }
 
   return true;
+}
+
+crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
+    const crane::grpc::CranedMapFutureNodeRequest& request,
+    const std::string& craned_addr) {
+  crane::grpc::CranedMapFutureNodeReply reply;
+
+  absl::MutexLock lock(&m_future_map_mtx_);
+
+  constexpr double kBytesPerGB = 1024 * 1024 * 1024;
+  double real_mem_gb =
+      static_cast<double>(request.memory_bytes()) / kBytesPerGB;
+
+  // A restarted craned on an already mapped machine reuses its previous
+  // mapping instead of claiming (and thus leaking) another node.
+  CranedId selected_id;
+  {
+    auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+    for (const auto& [craned_id, craned_meta_ptr] : *craned_map) {
+      auto craned_meta = craned_meta_ptr.GetExclusivePtr();
+      if (!craned_meta->static_meta.is_future || !craned_meta->future_mapped)
+        continue;
+      if (craned_meta->static_meta.node_hostname != request.hostname())
+        continue;
+
+      selected_id = craned_id;
+      break;
+    }
+  }
+  if (!selected_id.empty()) {
+    craned_meta_map_[selected_id]->static_meta.node_addr = craned_addr;
+    CRANE_INFO("Craned {} at {} reuses its mapping to FUTURE node {}.",
+               request.hostname(), craned_addr, selected_id);
+    reply.set_ok(true);
+    reply.set_craned_id(selected_id);
+    return reply;
+  }
+
+  // Pick the matching node with the smallest hostname for deterministic
+  // mapping.
+  {
+    auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+    for (const auto& [craned_id, craned_meta_ptr] : *craned_map) {
+      if (!selected_id.empty() && craned_id >= selected_id) continue;
+
+      auto craned_meta = craned_meta_ptr.GetExclusivePtr();
+      const auto& static_meta = craned_meta->static_meta;
+      if (!static_meta.is_future || craned_meta->future_mapped) continue;
+
+      if (!request.feature().empty() &&
+          std::ranges::find(static_meta.features, request.feature()) ==
+              static_meta.features.end())
+        continue;
+
+      if (request.cpu() <
+          static_cast<uint32_t>(static_meta.res.GetCpuSet().cpu_count))
+        continue;
+
+      double config_mem_gb =
+          static_cast<double>(static_meta.res.GetMemoryBytes()) / kBytesPerGB;
+      if (real_mem_gb + kMemoryToleranceGB < config_mem_gb) continue;
+
+      selected_id = craned_id;
+    }
+  }
+
+  if (selected_id.empty()) {
+    reply.set_ok(false);
+    reply.set_reason(
+        fmt::format("No matching unmapped FUTURE node (cpu: {}, mem: {:.3f}GB, "
+                    "feature: '{}').",
+                    request.cpu(), real_mem_gb, request.feature()));
+    return reply;
+  }
+
+  ClaimFutureNode_(selected_id, request.hostname(), craned_addr);
+
+  CRANE_INFO("Craned {} at {} is mapped to FUTURE node {}.", request.hostname(),
+             craned_addr, selected_id);
+
+  reply.set_ok(true);
+  reply.set_craned_id(selected_id);
+  return reply;
+}
+
+bool CranedMetaContainer::ReclaimFutureNode(const CranedId& craned_id,
+                                            const std::string& craned_addr) {
+  absl::MutexLock lock(&m_future_map_mtx_);
+
+  {
+    auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
+    if (!craned_meta->static_meta.is_future || craned_meta->future_mapped)
+      return false;
+  }
+
+  // The mapping was lost due to a CraneCtld restart. The node keeps its
+  // config-defined spec; only the craned address needs to be re-learned.
+  ClaimFutureNode_(craned_id, "", craned_addr);
+  return true;
+}
+
+void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
+                                           const std::string& node_hostname,
+                                           const std::string& node_addr) {
+  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map = partition_meta_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  auto node_meta = craned_meta_map_[craned_id];
+  node_meta->future_mapped = true;
+  if (!node_hostname.empty())
+    node_meta->static_meta.node_hostname = node_hostname;
+  node_meta->static_meta.node_addr = node_addr;
+
+  for (auto& partition_meta : part_meta_ptrs) {
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
+    part_global_meta.res_total += node_meta->static_meta.res;
+    part_global_meta.res_avail += node_meta->static_meta.res;
+    part_global_meta.res_total_inc_dead += node_meta->static_meta.res;
+  }
 }
 
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
@@ -1150,7 +1299,10 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   // Set power state
   craned_info->set_power_state(craned_meta.power_state);
 
-  if (craned_meta.alive) {
+  if (craned_meta.static_meta.is_future && !craned_meta.future_mapped) {
+    craned_info->set_resource_state(
+        crane::grpc::CranedResourceState::CRANE_FUTURE);
+  } else if (craned_meta.alive) {
     if (craned_meta.res_in_use.IsZero())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
@@ -1164,6 +1316,12 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     craned_info->set_resource_state(
         crane::grpc::CranedResourceState::CRANE_DOWN);
   }
+
+  craned_info->set_dynamic_mapped(craned_meta.static_meta.is_future &&
+                                  craned_meta.future_mapped);
+  craned_info->mutable_features()->Assign(
+      craned_meta.static_meta.features.begin(),
+      craned_meta.static_meta.features.end());
 
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),

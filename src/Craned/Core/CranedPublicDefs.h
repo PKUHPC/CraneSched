@@ -199,6 +199,11 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
+  // Set by -F/--future: this craned registers as a FUTURE node whose
+  // identity (CranedId) is assigned by CraneCtld at mapping time.
+  bool FutureMode{false};
+  std::string FutureFeature;
+
   std::set<CranedId> NodeList;
   std::unordered_map<std::string, CranedId> NodeHostnameToCranedId;
   std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;

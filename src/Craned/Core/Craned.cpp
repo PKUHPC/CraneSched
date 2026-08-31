@@ -608,6 +608,8 @@ void ParseConfig(int argc, char** argv) {
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
       ("C,nodeinfo", "Print current node cpu and memory info")
+      ("F,future", "Register as a FUTURE node, optionally filtered by a feature",
+       cxxopts::value<std::string>()->implicit_value(""))
       ;
   // clang-format on
 
@@ -1254,6 +1256,11 @@ void ParseConfig(int argc, char** argv) {
     g_config.ControlMachineAddr = g_config.ControlMachine;
   }
 
+  if (parsed_args.count("future") > 0) {
+    g_config.FutureMode = true;
+    g_config.FutureFeature = parsed_args["future"].as<std::string>();
+  }
+
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
     CRANE_ERROR("Listening address is invalid.");
     std::exit(1);
@@ -1274,23 +1281,37 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  const std::string short_hostname = util::ShortHostname(g_config.Hostname);
-  auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
-  if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
-      short_hostname != g_config.Hostname) {
-    craned_id_it = g_config.NodeHostnameToCranedId.find(g_config.Hostname);
+  if (g_config.FutureMode) {
+    // The node identity is assigned by CraneCtld: block until this craned is
+    // mapped to an unmapped FUTURE node matching the local hardware spec.
+    g_config.CranedIdOfThisNode = Craned::MapToFutureNodeBlocking();
+    if (!g_config.CranedRes.contains(g_config.CranedIdOfThisNode)) {
+      CRANE_ERROR(
+          "Mapped FUTURE node {} is not contained in Nodes of the local "
+          "config file!",
+          g_config.CranedIdOfThisNode);
+      std::exit(1);
+    }
+  } else {
+    const std::string short_hostname = ShortHostname_(g_config.Hostname);
+    auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
+    if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
+        short_hostname != g_config.Hostname) {
+      craned_id_it = g_config.NodeHostnameToCranedId.find(g_config.Hostname);
+    }
+    if (craned_id_it == g_config.NodeHostnameToCranedId.end()) {
+      CRANE_ERROR(
+          "This machine {} (short hostname: {}) is not contained in "
+          "Nodes!",
+          g_config.Hostname, short_hostname);
+      std::exit(1);
+    }
+    g_config.CranedIdOfThisNode = craned_id_it->second;
   }
-  if (craned_id_it == g_config.NodeHostnameToCranedId.end()) {
-    CRANE_ERROR(
-        "This machine {} (short hostname: {}) is not contained in "
-        "Nodes!",
-        g_config.Hostname, short_hostname);
-    std::exit(1);
-  }
-  g_config.CranedIdOfThisNode = craned_id_it->second;
 
-  CRANE_INFO("Found this machine {} as CranedId {} in Nodes", g_config.Hostname,
-             g_config.CranedIdOfThisNode);
+    CRANE_INFO("Found this machine {} as CranedId {} in Nodes",
+               g_config.Hostname, g_config.CranedIdOfThisNode);
+  }
   g_config.node_topo_info = node_topologies.at(g_config.CranedIdOfThisNode);
   // get this node device info
   // Todo: Auto detect device
