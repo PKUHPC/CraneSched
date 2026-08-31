@@ -38,6 +38,20 @@
 
 namespace Ctld {
 
+// Extract the IP part from a grpc peer string like "ipv4:1.2.3.4:port" or
+// "ipv6:[::1]:port". Returns an empty string on failure.
+static std::string PeerIpFromContext(grpc::ServerContext* context) {
+  std::string peer = context->peer();
+  size_t scheme_pos = peer.find(':');
+  size_t port_pos = peer.rfind(':');
+  if (scheme_pos == std::string::npos || port_pos <= scheme_pos + 1) return "";
+
+  std::string ip = peer.substr(scheme_pos + 1, port_pos - scheme_pos - 1);
+  if (ip.starts_with('[') && ip.ends_with(']'))
+    ip = ip.substr(1, ip.size() - 2);
+  return ip;
+}
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -66,6 +80,16 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     return grpc::Status::OK;
   }
 
+  // A craned previously mapped to this FUTURE node may reconnect after a
+  // CraneCtld restart wiped the mapping. Re-claim the node with the peer
+  // address so that the reverse connection reaches the real machine.
+  if (std::string peer_ip = PeerIpFromContext(context);
+      !peer_ip.empty() &&
+      g_meta_container->ReclaimFutureNode(craned_id, peer_ip)) {
+    CRANE_INFO("FUTURE node {} is re-claimed by craned at {}.", craned_id,
+               peer_ip);
+  }
+
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
   } else {
@@ -86,6 +110,31 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
       g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
     }
   }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::CranedMapFutureNode(
+    grpc::ServerContext* context,
+    const crane::grpc::CranedMapFutureNodeRequest* request,
+    crane::grpc::CranedMapFutureNodeReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  std::string peer_ip = PeerIpFromContext(context);
+  if (peer_ip.empty()) {
+    CRANE_WARN("Failed to extract peer address '{}' of craned {}.",
+               context->peer(), request->hostname());
+    response->set_ok(false);
+    response->set_reason("Failed to extract craned peer address.");
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->MapFutureNode(*request, peer_ip);
+  if (!response->ok())
+    CRANE_WARN("Failed to map craned {} at {} to a FUTURE node: {}",
+               request->hostname(), peer_ip, response->reason());
 
   return grpc::Status::OK;
 }

@@ -82,6 +82,7 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
+  CRANE_FUTURE = 4;
 }
 
 enum CranedPowerState {
@@ -851,6 +852,9 @@ message CranedInfo {
   ResourceInNodeV3 cleanup_resources = 31;
   // Unfinished work on this node, distinct from resources awaiting release.
   bool cleanup_pending = 32;
+  repeated string features = 33;
+  // True if this node is a FUTURE node mapped to a running craned.
+  bool dynamic_mapped = 34;
 }
 
 message ReservationInfo {
