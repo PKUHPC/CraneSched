@@ -39,6 +39,10 @@ struct CranedStaticMeta {
   ResourceInNodeV3 res;
 
   NodeTopoInfo node_topo_info;
+
+  // True if this is a FUTURE placeholder node in config.
+  bool is_future{false};
+  std::vector<std::string> features;
 };
 
 struct CranedRemoteMeta {
@@ -63,6 +67,9 @@ struct CranedMeta {
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
+  // For a FUTURE node, true once a craned has been mapped to it. An unmapped
+  // FUTURE node takes part in neither scheduling nor partition resources.
+  bool future_mapped{false};
   crane::grpc::CranedPowerState power_state{
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 

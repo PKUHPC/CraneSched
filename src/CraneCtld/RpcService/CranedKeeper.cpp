@@ -956,12 +956,27 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
 
+  // Read the address from the meta container instead of g_config: for a
+  // mapped FUTURE node it holds the real craned address learned at mapping
+  // time. The address of a FUTURE node may change across mappings, so it
+  // never goes through the ip cache below.
+  std::string node_addr;
+  std::string node_hostname;
+  bool is_future = false;
+  {
+    auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+    node_addr = craned_meta->static_meta.node_addr;
+    node_hostname = craned_meta->static_meta.node_hostname;
+    is_future = craned_meta->static_meta.is_future;
+  }
+
   std::string ip_addr;
 
   {
     util::lock_guard guard(s_craned_id_to_ip_cache_map_mtx);
 
-    auto it = s_craned_id_to_ip_cache_map.find(craned_id);
+    auto it = is_future ? s_craned_id_to_ip_cache_map.end()
+                        : s_craned_id_to_ip_cache_map.find(craned_id);
     if (it != s_craned_id_to_ip_cache_map.end()) {
       if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
         ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
@@ -972,13 +987,14 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     } else {
       ipv4_t ipv4_addr;
       ipv6_t ipv6_addr;
-      const std::string &node_addr = g_config.Nodes.at(craned_id)->node_addr;
       if (crane::ResolveIpv4FromHostname(node_addr, &ipv4_addr)) {
         ip_addr = crane::Ipv4ToStr(ipv4_addr);
-        s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
+        if (!is_future)
+          s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
       } else if (crane::ResolveIpv6FromHostname(node_addr, &ipv6_addr)) {
         ip_addr = crane::Ipv6ToStr(ipv6_addr);
-        s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
+        if (!is_future)
+          s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
       } else {
         // Just hostname. It should never happen,
         // but we add error handling here for robustness.
@@ -1010,8 +1026,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
               ProtoTimestampToString(token), m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
-    SetTlsTargetNameOverride(&channel_args,
-                             g_config.Nodes.at(craned_id)->node_hostname);
+    SetTlsTargetNameOverride(&channel_args, node_hostname);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
         g_config.ListenConf.TlsConfig.InternalCerts, channel_args);

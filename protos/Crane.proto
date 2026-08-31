@@ -95,6 +95,19 @@ message UpdateTraceConfigReply {
   RuntimeTraceConfig config = 3;
 }
 
+message CranedMapFutureNodeRequest {
+  string hostname = 1;
+  uint32 cpu = 2;
+  uint64 memory_bytes = 3;
+  string feature = 4;
+}
+
+message CranedMapFutureNodeReply {
+  bool ok = 1;
+  string craned_id = 2;
+  string reason = 3;
+}
+
 message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
@@ -1790,6 +1803,7 @@ service CraneCtldForInternal {
   /* RPCs called from Craned */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
+  rpc CranedMapFutureNode(CranedMapFutureNodeRequest) returns (CranedMapFutureNodeReply);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
   rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
