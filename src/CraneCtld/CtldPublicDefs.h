@@ -149,6 +149,11 @@ struct Config {
     std::vector<GresResource> gres_order;
 
     NodeTopoInfo node_topo_info;
+
+    // True if this is a FUTURE placeholder node waiting for a craned to be
+    // mapped to it.
+    bool is_future{false};
+    std::vector<std::string> features;
   };
 
   struct Partition {
