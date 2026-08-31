@@ -93,6 +93,13 @@ class CranedMetaContainer final {
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
 
+  crane::grpc::CranedMapFutureNodeReply MapFutureNode(
+      const crane::grpc::CranedMapFutureNodeRequest& request,
+      const std::string& craned_addr);
+
+  bool ReclaimFutureNode(const CranedId& craned_id,
+                         const std::string& craned_addr);
+
   CraneExpected<void> ModifyPartitionAcl(
       const std::string& partition_name, bool is_allowed_list,
       std::unordered_set<std::string>&& accounts);
@@ -214,6 +221,12 @@ class CranedMetaContainer final {
       craned_id_part_ids_map_;
 
  private:  // Helper functions
+  // Mark a FUTURE node as mapped, record the craned address and add the
+  // node's resource to its partitions. m_future_map_mtx_ must be held.
+  void ClaimFutureNode_(const CranedId& craned_id,
+                        const std::string& node_hostname,
+                        const std::string& node_addr);
+
   void LoadPartitionAclFromConfig_(const std::string& part_name,
                                    PartitionGlobalMeta& meta);
 
@@ -225,6 +238,9 @@ class CranedMetaContainer final {
   bool logging_enabled{false};
   absl::Mutex
       m_res_reduce_events_mtx_;  // lock before get resv_meta & craned_meta
+
+  // Serializes the scan-and-claim procedure of FUTURE node mapping.
+  absl::Mutex m_future_map_mtx_;
 };
 
 }  // namespace Ctld
