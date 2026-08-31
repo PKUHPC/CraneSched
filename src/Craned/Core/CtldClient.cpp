@@ -1438,4 +1438,78 @@ void CtldClient::NodeHealthCheck_() {
   return;
 }
 
+CranedId MapToFutureNodeBlocking() {
+  using crane::grpc::CranedMapFutureNodeReply;
+  using crane::grpc::CranedMapFutureNodeRequest;
+
+  NodeSpecInfo node_info;
+  if (!util::os::GetNodeInfo(&node_info)) {
+    CRANE_ERROR("Failed to get node real info.");
+    std::exit(1);
+  }
+
+  CranedMapFutureNodeRequest request;
+  request.set_hostname(g_config.Hostname);
+  request.set_cpu(static_cast<uint32_t>(node_info.cpu));
+  request.set_memory_bytes(
+      static_cast<uint64_t>(node_info.memory_gb * 1024 * 1024 * 1024));
+  request.set_feature(g_config.FutureFeature);
+
+  // A short-lived channel: the regular CtldClient channel is created later
+  // in GlobalVariableInit(), after the node identity is known.
+  grpc::ChannelArguments channel_args;
+  SetGrpcClientKeepAliveChannelArgs(&channel_args);
+
+  if (g_config.CompressedRpc)
+    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
+  const std::string& server_address = g_config.ControlMachineAddr;
+  std::shared_ptr<Channel> channel;
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    if (server_address != g_config.ControlMachine)
+      SetTlsTargetNameOverride(&channel_args, g_config.ControlMachine);
+
+    if (crane::GetIpAddrVer(server_address) != -1) {
+      channel = CreateTcpTlsCustomChannelByIp(
+          server_address, g_config.CraneCtldForInternalListenPort,
+          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+    } else {
+      channel = CreateTcpTlsCustomChannelByDnsName(
+          server_address, g_config.CraneCtldForInternalListenPort,
+          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+    }
+  } else {
+    channel = CreateTcpInsecureCustomChannel(
+        server_address, g_config.CraneCtldForInternalListenPort, channel_args);
+  }
+
+  std::unique_ptr<CraneCtldForInternal::Stub> stub =
+      CraneCtldForInternal::NewStub(channel);
+
+  while (true) {
+    CranedMapFutureNodeReply reply;
+    ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(kCranedRpcTimeoutSeconds));
+
+    Status status = stub->CranedMapFutureNode(&context, request, &reply);
+    if (status.ok() && reply.ok()) {
+      CRANE_INFO("This machine {} is mapped to FUTURE node {}.",
+                 g_config.Hostname, reply.craned_id());
+      return reply.craned_id();
+    }
+
+    if (!status.ok())
+      CRANE_WARN(
+          "Failed to request FUTURE node mapping from CraneCtld: {}. "
+          "Retry in {}s.",
+          status.error_message(), kCtldClientTimeoutSec);
+    else
+      CRANE_WARN("CraneCtld refused FUTURE node mapping: {} Retry in {}s.",
+                 reply.reason(), kCtldClientTimeoutSec);
+
+    std::this_thread::sleep_for(std::chrono::seconds(kCtldClientTimeoutSec));
+  }
+}
+
 }  // namespace Craned
