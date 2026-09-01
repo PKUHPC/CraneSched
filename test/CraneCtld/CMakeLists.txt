@@ -103,3 +103,15 @@ if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
     target_link_libraries(ctld_public_defs_test ${BERKELEY_DB_CXX_LIBRARIES})
 endif ()
 gtest_discover_tests(ctld_public_defs_test)
+
+add_executable(node_list_validation_test
+        NodeListValidationTest.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Node/NodeListValidation.h
+        )
+target_link_libraries(node_list_validation_test
+        GTest::gtest
+        GTest::gtest_main
+        )
+target_include_directories(node_list_validation_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld)
+gtest_discover_tests(node_list_validation_test)
