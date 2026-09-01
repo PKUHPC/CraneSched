@@ -244,7 +244,9 @@ bool ParseHostList(const std::string &host_str,
     return false;
   }
 
-  static const LazyRE2 regex(R"(.*\[(.*)\](\..*)*$)");
+  // A hostlist's suffix is shared by every expanded element. Slurm permits
+  // arbitrary suffixes (for example, "node[01-02]-gpu"), not only dot suffixes.
+  static const LazyRE2 regex(R"(.*\[(.*)\].*)");
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
     if (str_s == "") continue;
