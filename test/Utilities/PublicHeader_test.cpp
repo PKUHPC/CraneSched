@@ -19,6 +19,10 @@
 #include <absl/strings/str_join.h>
 #include <gtest/gtest.h>
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "crane/String.h"
 
 TEST(String, ParseNodeList) {
@@ -63,6 +67,42 @@ TEST(String, ParseHostListSupportsSharedNonDotSuffix) {
   parsed_list.clear();
   ASSERT_TRUE(ParseHostList("node[01-02]-gpu", &parsed_list));
   EXPECT_EQ(absl::StrJoin(parsed_list, " "), "node01-gpu node02-gpu");
+}
+
+TEST(String, ParseHostListSupportsSlurmHostlistForms) {
+  using util::ParseHostList;
+
+  const std::vector<std::pair<std::string, std::string>> test_cases = {
+      {"node[01,03-04]", "node01 node03 node04"},
+      {"node[01-02].example.com", "node01.example.com node02.example.com"},
+      {"node[08,10-11],login", "node08 node10 node11 login"},
+      {"gpu[01-02]a[1-2]-x", "gpu01a1-x gpu01a2-x gpu02a1-x gpu02a2-x"},
+      {"node[01, 03], node05", "node01 node03 node05"},
+      {"node[01]foo[02]", "node01foo02"},
+  };
+
+  for (const auto& [host_string, expected] : test_cases) {
+    SCOPED_TRACE(host_string);
+    std::list<std::string> parsed_list;
+    ASSERT_TRUE(ParseHostList(host_string, &parsed_list));
+    EXPECT_EQ(absl::StrJoin(parsed_list, " "), expected);
+  }
+}
+
+TEST(String, ParseHostListRejectsMalformedExpressions) {
+  using util::ParseHostList;
+
+  const std::vector<std::string> malformed_host_lists = {
+      "node[01",   "node01]",   "node[[01]]",   "node[]",
+      "node[01,]", "node[,01]", "node[01,,02]", "node[foo]",
+      "node[01-]", "node[-02]", "node[01-02",   "node[01]tail]",
+  };
+
+  for (const auto& host_string : malformed_host_lists) {
+    SCOPED_TRACE(host_string);
+    std::list<std::string> parsed_list;
+    EXPECT_FALSE(ParseHostList(host_string, &parsed_list));
+  }
 }
 
 TEST(String, HostNameListToStr) {
