@@ -51,6 +51,20 @@ TEST(String, ParseHostListKeepsDeterministicOrder) {
             "rack1n01 rack1n02 rack2n01 rack2n02");
 }
 
+TEST(String, ParseHostListSupportsSharedNonDotSuffix) {
+  using util::ParseHostList;
+
+  std::list<std::string> parsed_list;
+  ASSERT_TRUE(ParseHostList(
+      "b1u01n1,b2u[05,02]n3,b3u03n4", &parsed_list));
+  EXPECT_EQ(absl::StrJoin(parsed_list, " "),
+            "b1u01n1 b2u05n3 b2u02n3 b3u03n4");
+
+  parsed_list.clear();
+  ASSERT_TRUE(ParseHostList("node[01-02]-gpu", &parsed_list));
+  EXPECT_EQ(absl::StrJoin(parsed_list, " "), "node01-gpu node02-gpu");
+}
+
 TEST(String, HostNameListToStr) {
   using util::HostNameListToStr;
 
