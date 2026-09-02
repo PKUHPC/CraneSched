@@ -50,6 +50,12 @@ Before building backend packages, ensure you have:
    apt-get install -y dpkg-dev
    ```
 
+Lua is fetched at a pinned release and linked into the backend binaries by
+default when `CRANE_FULL_DYNAMIC=OFF`. This avoids a runtime dependency on the
+build host's Lua SONAME, which can differ between distributions. Fully dynamic
+builds, or builds configured with `-DCRANE_STATIC_LUA=OFF`, continue to use the
+system Lua development package.
+
 #### Build Process
 
 Navigate to your build directory and ensure the project is properly configured:

@@ -47,5 +47,9 @@ add_subdirectory(parallel-hashmap)
 add_subdirectory(libvault)
 add_subdirectory(lua_sol)
 
+if (CRANE_ENABLE_LUA AND CRANE_STATIC_LUA AND NOT CRANE_FULL_DYNAMIC)
+    add_subdirectory(lua)
+endif ()
+
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
 suppress_header_warning()

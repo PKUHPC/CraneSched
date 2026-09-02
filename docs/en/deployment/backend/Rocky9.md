@@ -129,9 +129,12 @@ dnf install -y \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
-    shadow-utils-subid-devel \
-    lua-devel
+    shadow-utils-subid-devel
 ```
+
+The default package build fetches and statically links the pinned Lua runtime.
+Install `lua-devel` only for `CRANE_FULL_DYNAMIC=ON` or
+`-DCRANE_STATIC_LUA=OFF` builds.
 
 ## 4. Build CraneSched Backend
 

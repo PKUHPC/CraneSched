@@ -12,6 +12,6 @@ target_link_libraries(Utility_Lua PUBLIC
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
 )
 
-if (${LUA_FOUND})
+if (LUA_FOUND AND LUA_INCLUDE_DIR)
     target_include_directories(Utility_Lua PRIVATE ${LUA_INCLUDE_DIR})
 endif ()

@@ -6,8 +6,13 @@ This document describes Crane’s Lua script configuration and its APIs.
 
 ## Overview
 
-CraneSched builds with Lua support enabled by default. This means a default CMake
-configuration requires Lua development headers and libraries on the build host.
+CraneSched builds with Lua support enabled by default. With the default static
+dependency configuration (`CRANE_FULL_DYNAMIC=OFF`), CMake fetches the pinned
+Lua 5.4.8 source release and links it into the backend binaries, so the build
+host does not need a Lua development package. Fully dynamic builds, or builds
+configured with `-DCRANE_STATIC_LUA=OFF`, use the system Lua development
+package instead. The bundled runtime is Lua 5.4.8; scripts that rely on a
+different Lua ABI should use one of those system-Lua build modes.
 
 Lua support at build time does **not** mean CraneSched executes a policy script by
 default. `cranectld` runs Lua callbacks only after `JobSubmitLuaScript` is set in
@@ -403,8 +408,9 @@ end
 
 ## Troubleshooting
 
-- `Lua not found` during CMake configuration: install the platform-specific Lua
-  development package listed above, or build with `-DCRANE_ENABLE_LUA=OFF`.
+- `Lua not found` during CMake configuration: this is expected only for fully
+  dynamic builds or builds with `-DCRANE_STATIC_LUA=OFF`; install the matching
+  platform Lua development package, or build with `-DCRANE_ENABLE_LUA=OFF`.
 - The script is not running: confirm `JobSubmitLuaScript` is configured in the
   `cranectld` configuration file and restart `cranectld`.
 - Job submission or modification returns `ERR_LUA_FAILED`: check the script path,

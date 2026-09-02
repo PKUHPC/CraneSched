@@ -80,6 +80,10 @@ option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 
 option(CRANE_ENABLE_LUA "Enable lua support" ON)
 
+option(CRANE_STATIC_LUA
+        "Build and statically link the bundled Lua runtime when using static dependencies"
+        ON)
+
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
@@ -313,7 +317,17 @@ function(crane_enable_ipo target)
 endfunction()
 
 if (CRANE_ENABLE_LUA)
-    find_package(Lua QUIET)
+    if (CRANE_STATIC_LUA AND NOT CRANE_FULL_DYNAMIC)
+        # The system Lua package may expose a versioned shared library only.
+        # Use the bundled static runtime so packages do not depend on the
+        # build host's Lua SONAME (for example, liblua-5.3.so).
+        set(LUA_FOUND TRUE)
+        set(LUA_LIBRARIES crane_lua_static)
+        set(LUA_INCLUDE_DIR "")
+        message(STATUS "Using bundled static Lua runtime")
+    else ()
+        find_package(Lua QUIET)
+    endif ()
     if(LUA_FOUND)
         add_definitions(-DHAVE_LUA)
         set(LUA_INCLUDE_DIR ${LUA_INCLUDE_DIR} CACHE PATH "Lua include dir")

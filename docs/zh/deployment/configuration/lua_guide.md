@@ -4,7 +4,11 @@
 
 ## 概览
 
-CraneSched 默认在构建时启用 Lua 支持，CMake 配置要求构建机已安装 Lua 开发头文件和库。
+CraneSched 默认在构建时启用 Lua 支持。在默认的静态依赖配置
+（`CRANE_FULL_DYNAMIC=OFF`）下，CMake 会获取固定版本的 Lua 5.4.8 源码并将其
+静态链接到后端二进制文件中，因此构建机不需要安装 Lua 开发包。全动态构建或
+使用 `-DCRANE_STATIC_LUA=OFF` 的构建仍使用系统 Lua 开发包。内置运行时为
+Lua 5.4.8；依赖其他 Lua ABI 的脚本应使用系统 Lua 构建模式。
 
 构建时启用 Lua 支持并不表示系统会默认执行 Lua 策略脚本。只有在 `/etc/crane/config.yaml`
 中配置 `JobSubmitLuaScript` 后，`cranectld` 才会执行 Lua 回调。如果该选项被省略或注释，
@@ -377,7 +381,8 @@ end
 
 ## 排障
 
-- CMake 配置阶段出现 `Lua not found`：安装上表中对应平台的 Lua 开发包，或使用
+- CMake 配置阶段出现 `Lua not found`：这只会在全动态构建或使用
+  `-DCRANE_STATIC_LUA=OFF` 的构建中发生；请安装匹配平台的 Lua 开发包，或使用
   `-DCRANE_ENABLE_LUA=OFF` 构建不含 Lua 支持的版本。
 - 脚本没有执行：确认 `JobSubmitLuaScript` 已配置在 `cranectld` 使用的配置文件中，并重启
   `cranectld`。

@@ -116,6 +116,6 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(cranectld PRIVATE stdc++fs)
 endif ()
 
-if (${LUA_FOUND})
+if (LUA_FOUND AND LUA_INCLUDE_DIR)
     target_include_directories(cranectld PRIVATE ${LUA_INCLUDE_DIR})
 endif ()
