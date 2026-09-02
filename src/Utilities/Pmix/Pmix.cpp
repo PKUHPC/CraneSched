@@ -318,8 +318,14 @@ PmixServer::SetupFork(uint32_t rank) {
     }
   }
 
+  const auto slurm_nodelist =
+      util::HostNameListToStr(m_pmix_step_info_.node_list);
+  const auto crane_nodelist = absl::StrJoin(m_pmix_step_info_.node_list, ";");
   env_map.emplace("SLURM_JOBID", std::to_string(m_pmix_step_info_.job_id));
-  env_map.emplace("SLURM_NODELIST", m_pmix_step_info_.node_list_str);
+  env_map.emplace("SLURM_JOB_NODELIST", slurm_nodelist);
+  env_map.emplace("SLURM_NODELIST", slurm_nodelist);
+  env_map.emplace("CRANE_JOB_NODELIST", crane_nodelist);
+  env_map.emplace("CRANE_NODELIST", crane_nodelist);
   env_map.emplace("SLURM_STEP_ID", std::to_string(m_pmix_step_info_.step_id));
 
   if (!env_map.contains("OMPI_MCA_orte_precondition_transports")) {
