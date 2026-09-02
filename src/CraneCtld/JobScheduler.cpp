@@ -18,9 +18,11 @@
 
 #include "JobScheduler.h"
 
+#include <absl/strings/str_join.h>
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
+#include <algorithm>
 #include <iterator>
 #include <map>
 
@@ -31,6 +33,7 @@
 #include "Database/EmbeddedDbClient.h"
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
+#include "Node/NodeListValidation.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/PrologEpilogExecutor.h"
@@ -8432,6 +8435,23 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     for (auto&& node : nodes) job->excluded_nodes.emplace(std::move(node));
   }
 
+  auto invalid_nodes =
+      FindNodesNotInPartition(job->included_nodes, part_meta.nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_NODE_LIST,
+        "Invalid --nodelist value: nodes '{}' are not in partition '{}'",
+        absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+  }
+
+  invalid_nodes = FindNodesNotInPartition(job->excluded_nodes, part_meta.nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+        "Invalid --exclude value: nodes '{}' are not in partition '{}'",
+        absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+  }
+
   if (!job->JobToCtld().licenses_count().empty()) {
     auto check_licenses_result = g_license_manager->CheckLicensesLegal(
         job->JobToCtld().licenses_count(), job->JobToCtld().is_licenses_or());
@@ -8839,6 +8859,28 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   auto part_it = g_config.Partitions.find(step->job->partition_id);
   if (part_it != g_config.Partitions.end()) {
     Config::Partition const& part_meta = part_it->second;
+
+    auto invalid_nodes =
+        FindNodesNotInPartition(step->included_nodes, part_meta.nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Invalid --nodelist value for step #{}.{}: nodes '{}' are not in "
+          "partition '{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
+          step->job->partition_id);
+      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+    }
+
+    invalid_nodes =
+        FindNodesNotInPartition(step->excluded_nodes, part_meta.nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Invalid --exclude value for step #{}.{}: nodes '{}' are not in "
+          "partition '{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
+          step->job->partition_id);
+      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+    }
 
     bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
     bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();

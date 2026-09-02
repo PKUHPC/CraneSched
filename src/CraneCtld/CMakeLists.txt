@@ -4,6 +4,7 @@ add_executable(cranectld
         Account/AccountDefs.h
         Node/NodeDefs.h
         Node/NodeDefs.cpp
+        Node/NodeListValidation.h
         Node/CranedMetaContainer.h
         Node/CranedMetaContainer.cpp
         Database/DbClient.h
