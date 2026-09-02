@@ -200,9 +200,9 @@ apt install -y \
     在 Ubuntu 22.04 及以下版本中， `libsubid-dev` 不可用。请参考：[https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/) 构建并安装 shadow 4.0 或更高版本。
 
 !!! info
-    默认打包构建会获取并静态链接固定版本的 Lua。仅在
-    `CRANE_FULL_DYNAMIC=ON` 或 `-DCRANE_STATIC_LUA=OFF` 时安装
-    `liblua5.4-dev`（Ubuntu 20.04 使用 `liblua5.3-dev`）。
+    默认打包构建会获取并静态链接固定版本的 Lua。仅在使用
+    `-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `liblua5.4-dev`（Ubuntu 20.04 使用
+    `liblua5.3-dev`）。
 
 ## 4. 构建鹤思后端
 

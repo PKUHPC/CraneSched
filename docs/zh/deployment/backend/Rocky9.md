@@ -133,8 +133,8 @@ dnf install -y \
     shadow-utils-subid-devel
 ```
 
-默认打包构建会获取并静态链接固定版本的 Lua。仅在
-`CRANE_FULL_DYNAMIC=ON` 或 `-DCRANE_STATIC_LUA=OFF` 时安装 `lua-devel`。
+默认打包构建会获取并静态链接固定版本的 Lua。仅在使用
+`-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `lua-devel`。
 
 ## 4. 构建鹤思后端
 

@@ -200,7 +200,7 @@ apt install -y \
     `libsubid-dev` is unavailable on Ubuntu 22.04 and older releases. Build and install shadow 4.0+ from [https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/).
 
 !!! info
-    The default package build fetches and statically links the pinned Lua runtime. Install `liblua5.4-dev` (or `liblua5.3-dev` on Ubuntu 20.04) only for `CRANE_FULL_DYNAMIC=ON` or `-DCRANE_STATIC_LUA=OFF` builds.
+    The default package build fetches and statically links the pinned Lua runtime. Install `liblua5.4-dev` (or `liblua5.3-dev` on Ubuntu 20.04) only when configuring with `-DCRANE_USE_SYSTEM_LUA=ON`.
 
 ## 4. Build CraneSched Backend
 

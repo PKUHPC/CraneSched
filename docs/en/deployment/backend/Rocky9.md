@@ -133,8 +133,7 @@ dnf install -y \
 ```
 
 The default package build fetches and statically links the pinned Lua runtime.
-Install `lua-devel` only for `CRANE_FULL_DYNAMIC=ON` or
-`-DCRANE_STATIC_LUA=OFF` builds.
+Install `lua-devel` only when configuring with `-DCRANE_USE_SYSTEM_LUA=ON`.
 
 ## 4. Build CraneSched Backend
 

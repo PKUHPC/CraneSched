@@ -1,3 +1,16 @@
+if (CRANE_USE_SYSTEM_LUA)
+    message(STATUS "Using Lua from system.")
+
+    find_package(Lua REQUIRED)
+
+    add_library(crane_lua INTERFACE)
+    target_include_directories(crane_lua SYSTEM INTERFACE ${LUA_INCLUDE_DIR})
+    target_link_libraries(crane_lua INTERFACE ${LUA_LIBRARIES})
+    return()
+endif ()
+
+message(STATUS "Building Lua from source.")
+
 include(FetchContent)
 
 # Lua has no upstream CMake build. Fetch the audited release archive and build
@@ -56,10 +69,10 @@ set(CRANE_LUA_SOURCES
         ${CRANE_LUA_SOURCE_DIR}/lvm.c
         ${CRANE_LUA_SOURCE_DIR}/lzio.c)
 
-add_library(crane_lua_static STATIC ${CRANE_LUA_SOURCES})
-target_compile_definitions(crane_lua_static PRIVATE LUA_USE_LINUX)
-target_include_directories(crane_lua_static SYSTEM PUBLIC ${CRANE_LUA_SOURCE_DIR})
+add_library(crane_lua ${CRANE_LUA_SOURCES})
+target_compile_definitions(crane_lua PRIVATE LUA_USE_LINUX)
+target_include_directories(crane_lua SYSTEM PUBLIC ${CRANE_LUA_SOURCE_DIR})
 
 if (UNIX)
-    target_link_libraries(crane_lua_static PUBLIC m ${CMAKE_DL_LIBS})
+    target_link_libraries(crane_lua PUBLIC m ${CMAKE_DL_LIBS})
 endif ()

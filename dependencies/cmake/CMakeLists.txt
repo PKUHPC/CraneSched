@@ -47,7 +47,7 @@ add_subdirectory(parallel-hashmap)
 add_subdirectory(libvault)
 add_subdirectory(lua_sol)
 
-if (CRANE_ENABLE_LUA AND CRANE_STATIC_LUA AND NOT CRANE_FULL_DYNAMIC)
+if (CRANE_ENABLE_LUA)
     add_subdirectory(lua)
 endif ()
 

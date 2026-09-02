@@ -89,9 +89,9 @@ yum install -y \
 ```
 
 Lua support is enabled by default and the packaged build uses the pinned
-bundled Lua runtime. Install `lua-devel` only for `CRANE_FULL_DYNAMIC=ON` or
-`-DCRANE_STATIC_LUA=OFF`; use `-DCRANE_ENABLE_LUA=OFF` only when Lua hooks are
-not needed.
+bundled Lua runtime. Install `lua-devel` only when configuring with
+`-DCRANE_USE_SYSTEM_LUA=ON`; use `-DCRANE_ENABLE_LUA=OFF` only when Lua hooks
+are not needed.
 
 Install `devtoolset-11-libasan-devel` or `devtoolset-11-libtsan-devel` only when enabling AddressSanitizer or ThreadSanitizer. Production builds do not need them by default.
 

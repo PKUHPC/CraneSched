@@ -52,8 +52,8 @@
 
 在 `CRANE_FULL_DYNAMIC=OFF`（默认）时，Lua 会从固定版本的源码获取并
 静态链接到后端二进制文件中。这可以避免软件包依赖构建主机上的 Lua
-SONAME（例如 `liblua-5.3.so`）而无法在 Rocky 9 上安装。全动态构建，或
-使用 `-DCRANE_STATIC_LUA=OFF` 的构建，仍使用系统 Lua 开发软件包。
+SONAME（例如 `liblua-5.3.so`）而无法在 Rocky 9 上安装。使用
+`-DCRANE_USE_SYSTEM_LUA=ON` 的构建改用系统 Lua 开发软件包。
 
 #### 构建过程
 
