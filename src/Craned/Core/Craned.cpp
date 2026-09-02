@@ -39,6 +39,8 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
+#include "NodeGarbageCollectionService.h"
+#include "SupervisorLogGcTask.h"
 #include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
@@ -52,6 +54,7 @@
 using namespace Craned::Common;
 using Craned::g_config;
 using Craned::JobInD;
+using Craned::NodeGarbageCollectionService;
 using Craned::StepInstance;
 
 namespace {
@@ -303,6 +306,7 @@ CraneErrCode RecoverCgForJobSteps(
 
 void ParseCranedConfig(const YAML::Node& config) {
   Craned::Config::CranedConfig conf{};
+  Craned::Config::CranedConfig::NodeGarbageCollectionConfig gc_conf{};
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
   conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
@@ -339,7 +343,27 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<bool>(craned_config["CgroupV2FastPath"], true);
     conf.CgroupV2CleanupMode = YamlValueOr<std::string>(
         craned_config["CgroupV2CleanupMode"], "sync_rmdir");
+
+    if (craned_config["NodeGarbageCollection"]) {
+      const auto& node_gc_config = craned_config["NodeGarbageCollection"];
+      gc_conf.Enabled = YamlValueOr<bool>(node_gc_config["Enabled"], false);
+      gc_conf.IntervalSec =
+          YamlValueOr<uint32_t>(node_gc_config["IntervalSec"], 3600);
+      gc_conf.InitialDelaySec =
+          YamlValueOr<uint32_t>(node_gc_config["InitialDelaySec"], 300);
+
+      if (node_gc_config["LogCleanup"]) {
+        const auto& log_cleanup_config = node_gc_config["LogCleanup"];
+        gc_conf.LogCleanup.Enabled =
+            YamlValueOr<bool>(log_cleanup_config["Enabled"], true);
+        gc_conf.LogCleanup.RetentionSec = YamlValueOr<uint32_t>(
+            log_cleanup_config["RetentionSec"], 7 * 24 * 3600);
+        gc_conf.LogCleanup.MaxDeletePerCycle =
+            YamlValueOr<uint32_t>(log_cleanup_config["MaxDeletePerCycle"], 500);
+      }
+    }
   }
+  conf.NodeGarbageCollection = std::move(gc_conf);
   g_config.CranedConf = std::move(conf);
 }
 
@@ -1636,6 +1660,13 @@ void GlobalVariableInit() {
     g_craned_for_pam_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
+  auto node_gc_service = std::make_shared<NodeGarbageCollectionService>();
+  if (g_config.CranedConf.NodeGarbageCollection.Enabled &&
+      g_config.CranedConf.NodeGarbageCollection.LogCleanup.Enabled) {
+    node_gc_service->RegisterTask(
+        std::make_unique<Craned::SupervisorLogGcTask>());
+  }
+  g_job_mgr->SetNodeGcService(std::move(node_gc_service));
 
   g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
@@ -1737,6 +1768,7 @@ void WaitForStopAndDoGvarFini() {
    * Called from JobMgr and CtldClient, wait all thread pool task finish before
    * destruct.
    */
+  g_job_mgr->StopNodeGcService();
   g_thread_pool->wait();
   g_job_mgr.reset();
 
