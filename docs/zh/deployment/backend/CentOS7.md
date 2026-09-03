@@ -85,10 +85,12 @@ firewall-cmd --reload
 yum install -y \
     libstdc++-devel libstdc++-static \
     openssl-devel libcurl-devel pam-devel \
-    zlib-devel zlib-static libaio-devel systemd-devel lua-devel
+    zlib-devel zlib-static libaio-devel systemd-devel
 ```
 
-Lua 支持默认开启。如果无法从 Vault 或内部镜像安装 `lua-devel`，可在配置时添加 `-DCRANE_ENABLE_LUA=OFF`。
+Lua 支持默认开启，打包构建使用固定版本的内置 Lua。仅在使用
+`-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `lua-devel`；只有不需要 Lua hook 时才使用
+`-DCRANE_ENABLE_LUA=OFF`。
 
 仅在启用 AddressSanitizer 或 ThreadSanitizer 时，才需要安装对应的 `devtoolset-11-libasan-devel` 或 `devtoolset-11-libtsan-devel`，生产构建不需要默认安装它们。
 

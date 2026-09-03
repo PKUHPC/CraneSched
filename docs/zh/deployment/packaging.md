@@ -50,6 +50,11 @@
    apt-get install -y dpkg-dev
    ```
 
+在 `CRANE_FULL_DYNAMIC=OFF`（默认）时，Lua 会从固定版本的源码获取并
+静态链接到后端二进制文件中。这可以避免软件包依赖构建主机上的 Lua
+SONAME（例如 `liblua-5.3.so`）而无法在 Rocky 9 上安装。使用
+`-DCRANE_USE_SYSTEM_LUA=ON` 的构建改用系统 Lua 开发软件包。
+
 #### 构建过程
 
 导航到您的构建目录并确保项目已正确配置：

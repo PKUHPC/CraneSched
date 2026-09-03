@@ -54,7 +54,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PasswordEntry
         Utility_PluginClient
         Utility_PrologEpilogExecutor
-        $<$<BOOL:${LUA_FOUND}>:Utility_Lua>
+        $<$<BOOL:${CRANE_ENABLE_LUA}>:Utility_Lua>
         crane_tracer
         uvw
 
@@ -114,8 +114,4 @@ endif ()
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(cranectld PRIVATE stdc++fs)
-endif ()
-
-if (${LUA_FOUND})
-    target_include_directories(cranectld PRIVATE ${LUA_INCLUDE_DIR})
 endif ()

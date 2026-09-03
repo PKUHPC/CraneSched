@@ -85,10 +85,13 @@ firewall-cmd --reload
 yum install -y \
     libstdc++-devel libstdc++-static \
     openssl-devel libcurl-devel pam-devel \
-    zlib-devel zlib-static libaio-devel systemd-devel lua-devel
+    zlib-devel zlib-static libaio-devel systemd-devel
 ```
 
-Lua support is enabled by default. If `lua-devel` is unavailable from the Vault or internal mirror, configure with `-DCRANE_ENABLE_LUA=OFF`.
+Lua support is enabled by default and the packaged build uses the pinned
+bundled Lua runtime. Install `lua-devel` only when configuring with
+`-DCRANE_USE_SYSTEM_LUA=ON`; use `-DCRANE_ENABLE_LUA=OFF` only when Lua hooks
+are not needed.
 
 Install `devtoolset-11-libasan-devel` or `devtoolset-11-libtsan-devel` only when enabling AddressSanitizer or ThreadSanitizer. Production builds do not need them by default.
 

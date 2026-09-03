@@ -90,6 +90,7 @@ option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download sourc
 
 option(CRANE_USE_SYSTEM_LIBCGROUP "Use libcgroup from system instead of building from source" OFF)
 option(CRANE_USE_SYSTEM_LIBBPF "Use libbpf from system instead of building from source" OFF)
+option(CRANE_USE_SYSTEM_LUA "Use Lua from system instead of building from source" OFF)
 
 option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" ON)
 option(CRANE_ENABLE_BPF "Enable eBPF support for Cgroup V2 device management" OFF)
@@ -130,6 +131,10 @@ endif ()
 
 if (CRANE_USE_SYSTEM_LIBBPF AND NOT CRANE_ENABLE_BPF)
     message(FATAL_ERROR "CRANE_USE_SYSTEM_LIBBPF requires CRANE_ENABLE_BPF to be enabled.")
+endif ()
+
+if (CRANE_USE_SYSTEM_LUA AND NOT CRANE_ENABLE_LUA)
+    message(FATAL_ERROR "CRANE_USE_SYSTEM_LUA requires CRANE_ENABLE_LUA to be enabled.")
 endif ()
 
 # Check and set compiler
@@ -313,16 +318,7 @@ function(crane_enable_ipo target)
 endfunction()
 
 if (CRANE_ENABLE_LUA)
-    find_package(Lua QUIET)
-    if(LUA_FOUND)
-        add_definitions(-DHAVE_LUA)
-        set(LUA_INCLUDE_DIR ${LUA_INCLUDE_DIR} CACHE PATH "Lua include dir")
-        set(LUA_LIBRARIES ${LUA_LIBRARIES} CACHE STRING "Lua libraries")
-        message(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
-        message(STATUS "LUA_LIBRARIES = ${LUA_LIBRARIES}")
-    else()
-        message(FATAL_ERROR "Lua not found")
-    endif()
+    add_definitions(-DHAVE_LUA)
 endif ()
 
 if (${CRANE_FULL_DYNAMIC})
@@ -473,6 +469,12 @@ install(TARGETS cranectld
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
+
+if (CRANE_FULL_DYNAMIC AND TARGET crane_lua_bundled)
+    install(TARGETS crane_lua_bundled
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT cranectldc)
+endif ()
 
 install(TARGETS craned
         DESTINATION ${CMAKE_INSTALL_BINDIR}

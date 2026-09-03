@@ -193,15 +193,16 @@ apt install -y \
     libaio-dev \
     libsystemd-dev \
     libelf-dev \
-    libsubid-dev \
-    liblua5.4-dev
+    libsubid-dev
 ```
 
 !!! info
     在 Ubuntu 22.04 及以下版本中， `libsubid-dev` 不可用。请参考：[https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/) 构建并安装 shadow 4.0 或更高版本。
 
 !!! info
-    Lua 支持默认开启。在 Ubuntu 20.04 上，请将 `liblua5.4-dev` 替换为 `liblua5.3-dev`。
+    默认打包构建会获取并静态链接固定版本的 Lua。仅在使用
+    `-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `liblua5.4-dev`（Ubuntu 20.04 使用
+    `liblua5.3-dev`）。
 
 ## 4. 构建鹤思后端
 

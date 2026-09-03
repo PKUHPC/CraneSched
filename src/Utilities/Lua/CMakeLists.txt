@@ -9,9 +9,5 @@ target_link_libraries(Utility_Lua PUBLIC
         sol2
         Utility_PublicHeader
         bs_thread_pool
-        $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
+        $<$<BOOL:${CRANE_ENABLE_LUA}>:crane_lua>
 )
-
-if (${LUA_FOUND})
-    target_include_directories(Utility_Lua PRIVATE ${LUA_INCLUDE_DIR})
-endif ()

@@ -130,9 +130,11 @@ dnf install -y \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
-    shadow-utils-subid-devel \
-    lua-devel
+    shadow-utils-subid-devel
 ```
+
+默认打包构建会获取并静态链接固定版本的 Lua。仅在使用
+`-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `lua-devel`。
 
 ## 4. 构建鹤思后端
 
