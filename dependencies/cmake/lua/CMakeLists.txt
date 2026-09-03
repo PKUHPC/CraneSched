@@ -69,10 +69,25 @@ set(CRANE_LUA_SOURCES
         ${CRANE_LUA_SOURCE_DIR}/lvm.c
         ${CRANE_LUA_SOURCE_DIR}/lzio.c)
 
-add_library(crane_lua ${CRANE_LUA_SOURCES})
-target_compile_definitions(crane_lua PRIVATE LUA_USE_LINUX)
-target_include_directories(crane_lua SYSTEM PUBLIC ${CRANE_LUA_SOURCE_DIR})
+add_library(crane_lua_bundled ${CRANE_LUA_SOURCES})
+set_target_properties(crane_lua_bundled PROPERTIES OUTPUT_NAME crane_lua)
+target_compile_definitions(crane_lua_bundled PRIVATE LUA_USE_LINUX)
+target_include_directories(crane_lua_bundled SYSTEM PUBLIC ${CRANE_LUA_SOURCE_DIR})
 
 if (UNIX)
-    target_link_libraries(crane_lua PUBLIC m ${CMAKE_DL_LIBS})
+    target_link_libraries(crane_lua_bundled PUBLIC m ${CMAKE_DL_LIBS})
+endif ()
+
+add_library(crane_lua INTERFACE)
+if (BUILD_SHARED_LIBS)
+    target_link_libraries(crane_lua INTERFACE crane_lua_bundled)
+else ()
+    # Lua C modules are shared objects whose Lua API references resolve from
+    # the host process. Keep every API object and publish the symbols so modules
+    # loaded by require() work with the bundled static runtime.
+    target_link_libraries(crane_lua INTERFACE
+            "$<LINK_LIBRARY:WHOLE_ARCHIVE,crane_lua_bundled>")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(crane_lua INTERFACE "LINKER:--export-dynamic")
+    endif ()
 endif ()
