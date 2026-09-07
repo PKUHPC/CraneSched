@@ -60,14 +60,18 @@ Output command execution results in JSON format instead of table format.
 
 :   **Applies to:** `step`  
 Query step information instead of job information. Accepts optional comma-separated list of step IDs: regular jobs use
-`jobid.stepid`, array jobs use `jobid_arraytaskid.stepid` (e.g., `123.1,123.2,456.3,229_0.1`). If no argument is
-provided, shows all steps. This option switches the query mode from jobs to steps.
+`jobid.stepid`, and materialized array tasks use `jobid_arraytaskid.stepid` (e.g., `123.1,123.2,456.3,229_0.1`).
+If no argument is provided, shows all steps. This option switches the query mode from jobs to steps and does not add
+pending array-task projections.
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `job`, `step`  
-Specify job IDs to query (comma-separated list). Supports `jobid` and `jobid_arraytaskid` (for example, `-j=229,229_0`).
-When used with `--step`, filters steps belonging to the specified jobs (or array tasks).
+Specify job IDs to query (comma-separated list). Supports a parent `jobid` or a materialized `jobid_arraytaskid` (for
+example, `-j=229,229_0`). A plain array parent selector expands to the parent's pending range projection and its
+materialized children; an exact task selector returns the child or a singleton pending projection. The displayed
+`jobid_[range]` form is an output representation and is not accepted as an input selector. When used with `--step`,
+filters steps belonging to the specified jobs (or array tasks).
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -124,7 +128,8 @@ between job and step queries (see Format Specifiers sections below).
 
 When querying jobs (default mode), the following fields are displayed:
 
-- **JobId**: Job identification number
+- **JobId**: Logical queue identifier. A materialized array task is shown as `jobid_arraytaskid`; unmaterialized tasks are
+  projected as `jobid_[range]` and have `Pending` status (or `PD` in Slurm output mode).
 - **Partition**: Partition where the job is running
 - **Name**: Job name
 - **User**: Username of job owner
@@ -136,13 +141,16 @@ When querying jobs (default mode), the following fields are displayed:
 - **NodeList**: Names of nodes where the job is running
 - **Deadline**： Deadline of the job
 
-For array jobs, `JobId` is shown as `jobid_arraytaskid`; in the default table output an additional array summary row
-(`anchorJobId_[start-end]`) is displayed.
+For an array with parent ID `P`, cqueue shows materialized children as `P_i` and keeps the parent projection for the
+unmaterialized range as `P_[start-end]` (including stride and concurrency when applicable). The projection carries the
+parent's `array_spec` plus a `pending_array_spec` identifying the displayed range. Once all tasks are materialized, the
+parent aggregate is hidden from queue output and only the child rows remain. JSON keeps the canonical raw `job_id` and
+`array_task` fields; the text table is where the logical ID is formatted.
 
 When querying steps (using `--step`), the following fields are displayed:
 
-- **StepId**: Step identification; array jobs use `jobid_arraytaskid.stepid`, regular jobs use `jobid.stepid`
-- **JobId**: Parent job identification number (array jobs use `jobid_arraytaskid`)
+- **StepId**: Step identification; materialized array tasks use `jobid_arraytaskid.stepid`, regular jobs use `jobid.stepid`
+- **JobId**: Logical job identifier for the step; materialized array tasks use `jobid_arraytaskid`
 - **Name**: Step name
 - **Partition**: Partition (inherited from parent job)
 - **User**: Username (inherited from parent job)
@@ -162,7 +170,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 | %deadline  | Deadline        | Deadline time of the job                                    |
 | %e         | ElapsedTime     | Elapsed time since job started                              |
 | %h         | Held            | Hold state of the job                                       |
-| %j         | JobID           | Job ID (array jobs use `jobid_arraytaskid`)                |
+| %j         | JobID           | Logical queue ID (`jobid_arraytaskid` for materialized tasks, `jobid_[range]` for pending tasks) |
 | %k         | Comment         | Comment of the job                                          |
 | %l         | TimeLimit       | Time limit for the job                                      |
 | %L         | NodeList        | List of nodes the job is running on (or reason for pending) |
@@ -192,8 +200,8 @@ When querying steps (using `--step`), the following format identifiers are suppo
 
 | Identifier | Full Name   | Description                                    |
 |------------|-------------|------------------------------------------------|
-| %i         | StepId      | Step ID; array jobs use `jobid_arraytaskid.stepid`         |
-| %j         | JobId       | Parent job ID (array jobs use `jobid_arraytaskid`)         |
+| %i         | StepId      | Step ID; materialized array tasks use `jobid_arraytaskid.stepid` |
+| %j         | JobId       | Logical job ID for the step (`jobid_arraytaskid` for array tasks) |
 | %n         | Name        | Step name                                      |
 | %P         | Partition   | Partition (inherited from parent job)          |
 | %u         | User        | Username (inherited from parent job)           |
@@ -257,8 +265,10 @@ Flags:
                                 %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
                                 %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
-                                %i/%StepId             - Display the ID of the step (format: jobId_arrayTaskId.stepId for array jobs, jobId.stepId otherwise). (For steps only)
-                                %j/%JobID              - Display the ID of the job (array jobs use jobId_arrayTaskId).
+                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
+                                                               Materialized array steps use jobId_arrayTaskId.stepId.
+                                %j/%JobID              - Display the logical queue ID (or parent job ID for steps).
+                                                               Materialized array tasks use jobId_arrayTaskId; pending tasks use jobId_[range].
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
                                 %L/%NodeList           - Display the list of nodes the job/step is running on.
@@ -294,7 +304,7 @@ Flags:
   -F, --full                  Display full information (If not set, only display 30 characters per cell)
   -h, --help                  help for cqueue
   -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
-  -j, --job string            Specify job ids to view (comma separated list, supports jobid or jobid_arraytaskid), default is all
+  -j, --job string            Specify job ids to view (comma separated list, default is all. Supports jobid or jobid_arraytaskid; pending tasks are displayed as jobid_[range])
       --json                  Output in JSON format
   -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
   -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 10000)

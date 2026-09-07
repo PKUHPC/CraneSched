@@ -57,12 +57,14 @@ cqueue
 **-s, --step[=&lt;stepid1,stepid2,...&gt;]**
 
 :   **适用于：** `作业步`    
-查询作业步信息而非作业信息。接受可选的逗号分隔的作业步ID列表：普通作业格式为 `jobid.stepid`，数组作业格式为 `jobid_arraytaskid.stepid`（如 `123.1,123.2,456.3,229_0.1`）。如果不提供参数，则显示所有作业步。此选项将查询模式从作业切换到作业步。
+查询作业步信息而非作业信息。接受可选的逗号分隔的作业步ID列表：普通作业格式为 `jobid.stepid`，已物化数组子任务格式为
+`jobid_arraytaskid.stepid`（如 `123.1,123.2,456.3,229_0.1`）。如果不提供参数，则显示所有作业步。此选项将查询模式从作业切换到作业步，且不会生成未物化数组任务的 pending 投影。
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **适用于：** `作业`, `作业步`  
-指定查询的作业ID（逗号分隔列表）。支持 `jobid` 或 `jobid_arraytaskid`（例如 `-j=229,229_0`）。与`--step`一起使用时，过滤属于指定作业（或数组子任务）的作业步。
+指定查询的作业ID（逗号分隔列表）。支持父任务 `jobid` 或已物化子任务 `jobid_arraytaskid`（例如
+`-j=229,229_0`）。只指定数组父任务时，会展开为父任务的 pending 范围投影和已物化子任务；精确任务选择器返回真实子任务或单元素 pending 投影。输出中的 `jobid_[range]` 仅是展示格式，不能作为输入选择器。与`--step`一起使用时，过滤属于指定作业（或数组子任务）的作业步。
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -115,7 +117,7 @@ cqueue
 
 查询作业时（默认模式），显示以下字段：
 
-- **JobId**：作业标识号
+- **JobId**：队列中的逻辑标识。已物化数组子任务显示为 `jobid_arraytaskid`；未物化任务显示为 `jobid_[range]`，状态为 `Pending`（Slurm 输出模式下为 `PD`）。
 - **Partition**：作业运行的分区
 - **Name**：作业名
 - **User**：作业所有者的用户名
@@ -126,12 +128,12 @@ cqueue
 - **Nodes**：分配的节点数
 - **NodeList**：作业运行的节点名称
 
-对于数组作业，`JobId` 会显示为 `jobid_arraytaskid`；默认表格还会额外显示一行数组聚合行（形如 `anchorJobId_[start-end]`）。
+对于父任务 ID 为 `P` 的数组，cqueue 将已物化子任务显示为 `P_i`，并把尚未物化的连续范围显示为 `P_[start-end]`（必要时包含步长和并发限制）。该投影同时保留父任务的 `array_spec`，并通过 `pending_array_spec` 标识当前显示范围。全部任务物化后，队列输出隐藏父任务聚合行，只显示子任务。JSON 保留规范的 raw `job_id` 和 `array_task` 字段；逻辑 ID 只在文本表格中格式化。
 
 查询作业步时（使用`--step`），显示以下字段：
 
-- **StepId**：作业步标识，数组作业格式为 `jobid_arraytaskid.stepid`，普通作业为 `jobid.stepid`
-- **JobId**：父作业标识号（数组作业显示为 `jobid_arraytaskid`）
+- **StepId**：作业步标识，已物化数组子任务格式为 `jobid_arraytaskid.stepid`，普通作业为 `jobid.stepid`
+- **JobId**：作业步对应的逻辑作业标识（数组子任务显示为 `jobid_arraytaskid`）
 - **Name**：作业步名称
 - **Partition**：分区（从父作业继承）
 - **User**：用户名（从父作业继承）
@@ -150,7 +152,7 @@ cqueue
 | %C  | ReqCpus         | 作业请求的总CPU数            |
 | %e  | ElapsedTime     | 作业启动以来的经过时间           |
 | %h  | Held            | 作业的保持状态               |
-| %j  | JobID           | 作业ID（数组作业显示为 `jobid_arraytaskid`） |
+| %j  | JobID           | 队列逻辑ID（已物化子任务为 `jobid_arraytaskid`，pending 任务为 `jobid_[range]`） |
 | %k  | Comment         | 作业的备注                 |
 | %l  | TimeLimit       | 作业的时间限制               |
 | %L  | NodeList        | 作业运行的节点列表（或pending原因） |
@@ -180,8 +182,8 @@ cqueue
 
 | 标识符 | 全名          | 描述                    |
 |-----|-------------|-----------------------|
-| %i  | StepId      | 作业步ID，数组作业格式为 `jobid_arraytaskid.stepid` |
-| %j  | JobId       | 父作业ID（数组作业显示为 `jobid_arraytaskid`） |
+| %i  | StepId      | 作业步ID，已物化数组子任务格式为 `jobid_arraytaskid.stepid` |
+| %j  | JobId       | 作业步对应的逻辑作业ID（数组子任务为 `jobid_arraytaskid`） |
 | %n  | Name        | 作业步名称                 |
 | %P  | Partition   | 分区（从父作业继承）            |
 | %u  | User        | 用户名（从父作业继承）           |
@@ -245,8 +247,10 @@ Flags:
                                 %c/%AllocCpus          - Display the cpus allocated to the job. (For jobs only)
                                 %e/%ElapsedTime        - Display the elapsed time from the start of the job/step.
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
-                                %i/%StepId             - Display the ID of the step (format: jobId_arrayTaskId.stepId for array jobs, jobId.stepId otherwise). (For steps only)
-                                %j/%JobID              - Display the ID of the job (array jobs use jobId_arrayTaskId).
+                                %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
+                                                               Materialized array steps use jobId_arrayTaskId.stepId.
+                                %j/%JobID              - Display the logical queue ID (or parent job ID for steps).
+                                                               Materialized array tasks use jobId_arrayTaskId; pending tasks use jobId_[range].
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
                                 %L/%NodeList           - Display the list of nodes the job/step is running on.
@@ -282,7 +286,7 @@ Flags:
   -F, --full                  Display full information (If not set, only display 30 characters per cell)
   -h, --help                  help for cqueue
   -i, --iterate uint          Display at specified intervals (seconds), default is 0 (no iteration)
-  -j, --job string            Specify job ids to view (comma separated list, supports jobid or jobid_arraytaskid), default is all
+  -j, --job string            Specify job ids to view (comma separated list, default is all. Supports jobid or jobid_arraytaskid; pending tasks are displayed as jobid_[range])
       --json                  Output in JSON format
   -L, --licenses string       Specify licenses to view (comma separated list), default is all licenses
   -m, --max-lines uint32      Limit the number of lines in the output, 0 means no limit (default 10000)

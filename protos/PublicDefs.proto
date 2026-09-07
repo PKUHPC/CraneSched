@@ -687,6 +687,8 @@ message JobInfo {
 
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;
+  // Set only for queue/accounting projections of unmaterialized array tasks.
+  ArraySpec pending_array_spec = 52;
 }
 
 message StepInfo {
