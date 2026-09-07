@@ -28,8 +28,8 @@ cacct
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **适用于：** `作业`, `作业步`  
-指定查询的作业ID（逗号分隔列表）。支持 `jobid`、`jobid_arraytaskid`、`jobid.stepid`、`jobid_arraytaskid.stepid`。例如，`-j=2,2_0,2.1,2_0.1`。
-查询时会按作业或作业步ID过滤，输出包含匹配记录及其关联信息。
+指定查询的作业ID（逗号分隔列表）。支持父任务 `jobid`、已物化子任务 `jobid_arraytaskid` 以及对应的 `.stepid` 形式（例如
+`-j=2,2_0,2.1,2_0.1`）。只指定数组父任务时，输出包含父聚合记录、已物化子任务和未物化范围投影；精确任务选择器返回真实子任务或单元素 pending 投影。输出中的 `jobid_[range]` 仅是展示格式，不能作为输入选择器。
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -121,7 +121,10 @@ cacct
 
 显示默认格式时，会显示以下字段：
 
-- **JobId**：作业或作业步标识（普通作业为 `jobid`/`jobid.stepid`，数组作业为 `jobid_arraytaskid`/`jobid_arraytaskid.stepid`）
+- **JobId**：规范的 raw 作业或作业步标识。普通作业为 `jobid`/`jobid.stepid`；已物化数组子任务使用其分配到的真实 `jobid`（作业步为 `jobid.stepid`）。未物化任务投影显示为 `array_job_id_[range]`。
+- **ArrayJobId**：数组父任务ID；非数组作业为空。
+- **ArrayTaskId**：数组任务索引；父聚合记录和非数组作业为空。
+- **ArraySpec**：完整数组范围规格（存在时包含步长和并发限制）。
 - **JobName**：作业或作业步名称
 - **Partition**：作业/作业步运行的分区
 - **Account**：作业/作业步计费的账户
@@ -129,7 +132,7 @@ cacct
 - **State**：作业/作业步状态（如COMPLETED、FAILED、CANCELLED）
 - **ExitCode**：退出码（格式：exitcode:signal，见[退出码参考](../reference/exit_code.md)）
 
-对于数组作业，默认表格会额外显示一行数组聚合行（形如 `anchorJobId_[start-end]`）。
+对于父任务 ID 为 `P` 的数组，cacct 保留父聚合记录，并且不筛掉已物化子任务。子任务保留规范的真实 raw JobId，使用 `ArrayJobId=P` 和 `ArrayTaskId=i` 标识归属。尚未物化的任务显示为 pending 行，例如 `P_[start-end]`；其 JSON 中会提供 `pending_array_spec`。这与 cqueue 不同：cqueue 在全部任务物化后隐藏已完成的父聚合，并在文本中将子任务格式化为 `P_i`。
 
 ## 格式说明符
 
@@ -144,7 +147,10 @@ cacct
 | %E / %EndTime         | 作业/作业步的结束时间                  |
 | %e / %ExitCode        | 退出码（格式：exitcode:signal）      |
 | %h / %Held            | 作业的保持状态                      |
-| %j / %JobID           | 作业ID（支持 `jobid`、`jobid_arraytaskid`、`jobid.stepid`、`jobid_arraytaskid.stepid`） |
+| %j / %JobID           | 规范的真实 raw 作业ID；作业步为 `jobid.stepid`，pending 投影为 `array_job_id_[range]` |
+| %ArrayJobId           | 数组父任务ID（非数组作业为空）                 |
+| %ArrayTaskId          | 数组任务索引（父任务/非数组作业为空）           |
+| %ArraySpec            | 完整数组范围规格                               |
 | %K / %Wckey           | 工作负载特征键                      |
 | %k / %Comment         | 作业的备注                        |
 | %L / %NodeList        | 作业/作业步运行的节点列表                |
@@ -219,6 +225,9 @@ Flags:
                              
                              Supported format identifiers or string, string case insensitive:
                                 %a/%Account           - Display the account associated with the job.
+                                %ArrayJobId           - Display the array job id, empty for non-array jobs.
+                                %ArraySpec            - Display the array range specification, empty for non-array jobs.
+                                %ArrayTaskId          - Display the array task id, empty for non-array jobs and array parents.
                                 %C/%ReqCpus           - Display the number of requested CPUs, formatted to two decimal places
                                 %c/%AllocCpus         - Display the number of allocated CPUs, formatted to two decimal places.
                                 %D/%ElapsedTime       - Display the elapsed time from the start of the job.
@@ -227,7 +236,7 @@ Flags:
                                                           If the exit code is based on a specific base (e.g., kCraneExitCodeBase),
                                                           it formats as "0:<code>" or "<code>:0" based on the condition.
                                 %h/%Held              - Display the hold status of the job.
-                                %j/%JobID             - Display the ID of the job.
+                                %j/%JobID             - Display the real job ID; pending array tasks use jobid_[range]; steps use jobid.stepid.
                                 %K/%Wckey             - Display the wckey of the job.
                                 %k/%Comment           - Display the comment of the job.
                                 %L/%NodeList          - Display the list of nodes the job is running on.

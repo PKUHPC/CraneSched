@@ -81,6 +81,36 @@ std::optional<job_id_t> ArrayMeta::ChildJobIdOfTask(
   return it->second;
 }
 
+std::optional<crane::grpc::ArraySpec> ArrayMeta::RemainingTaskSpec() const {
+  if (parent_job_ == nullptr || !parent_job_->HasArraySpec() ||
+      parent_job_->ArrayMaterializationComplete()) {
+    return std::nullopt;
+  }
+
+  auto next_task_id = NextMaterializableTaskId();
+  if (!next_task_id.has_value()) return std::nullopt;
+
+  const auto& full_spec = parent_job_->JobToCtld().array_spec();
+  crane::grpc::ArraySpec remaining;
+  remaining.set_start(*next_task_id);
+  remaining.set_end(full_spec.end());
+  uint32_t stride = ArrayUtil::Stride(full_spec);
+  if (stride > 1) remaining.set_stride(stride);
+  return remaining;
+}
+
+std::vector<std::pair<array_task_id_t, job_id_t>>
+ArrayMeta::MaterializedChildren() const {
+  std::vector<std::pair<array_task_id_t, job_id_t>> children;
+  children.reserve(child_job_id_by_task_id_.size());
+  for (const auto& [task_id, child_job_id] : child_job_id_by_task_id_) {
+    children.emplace_back(task_id, child_job_id);
+  }
+  std::sort(children.begin(), children.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  return children;
+}
+
 std::optional<array_task_id_t> ArrayMeta::NextMaterializableTaskId() const {
   if (parent_job_ == nullptr || !parent_job_->HasArraySpec()) {
     return std::nullopt;
@@ -374,6 +404,27 @@ ArrayMeta* ArrayManager::FindMeta_(job_id_t array_job_id) {
 const ArrayMeta* ArrayManager::FindMeta_(job_id_t array_job_id) const {
   auto it = m_metas_.find(array_job_id);
   return it == m_metas_.end() ? nullptr : it->second.get();
+}
+
+std::optional<crane::grpc::ArraySpec> ArrayManager::RemainingTaskSpec(
+    job_id_t array_job_id) const {
+  const auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr) return std::nullopt;
+  return meta->RemainingTaskSpec();
+}
+
+std::optional<job_id_t> ArrayManager::MaterializedChildJobId(
+    job_id_t array_job_id, array_task_id_t task_id) const {
+  const auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr) return std::nullopt;
+  return meta->ChildJobIdOfTask(task_id);
+}
+
+std::vector<std::pair<array_task_id_t, job_id_t>>
+ArrayManager::MaterializedChildren(job_id_t array_job_id) const {
+  const auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr) return {};
+  return meta->MaterializedChildren();
 }
 
 // ----------------------------------------------------------------------------

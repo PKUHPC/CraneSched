@@ -672,6 +672,12 @@ message QueryClusterInfoReply {
   repeated TrimmedPartitionInfo partitions = 2;
 }
 
+enum QueryJobsInfoMode {
+  QUERY_JOBS_INFO_DEFAULT = 0;
+  QUERY_JOBS_INFO_QUEUE = 1;
+  QUERY_JOBS_INFO_ACCOUNTING = 2;
+}
+
 message QueryJobsInfoRequest {
   repeated JobIdSelector filter_job_ids = 1;
   repeated string filter_partitions = 2;
@@ -690,6 +696,8 @@ message QueryJobsInfoRequest {
   repeated string filter_nodename_list = 14;
 
   bool option_include_completed_jobs = 15;
+  QueryJobsInfoMode mode = 16;
+  bool option_query_steps_only = 17;
 }
 
 message QueryJobsInfoReply {

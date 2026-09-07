@@ -701,7 +701,12 @@ void MongodbClient::AppendJobIdSelectorClause_(
     const crane::grpc::QueryJobsInfoRequest* request, document& filter) {
   if (request->filter_job_ids().empty()) return;
 
-  filter.append(kvp("$or", [request](sub_array or_array) {
+  const bool expand_array_parent_selector =
+      request->mode() == crane::grpc::QUERY_JOBS_INFO_QUEUE ||
+      request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
+
+  filter.append(kvp("$or", [request, expand_array_parent_selector](
+                                  sub_array or_array) {
     for (const auto& selector : request->filter_job_ids()) {
       if (selector.has_array_task_id()) {
         or_array.append([&](sub_document match_doc) {
@@ -713,10 +718,26 @@ void MongodbClient::AppendJobIdSelectorClause_(
         continue;
       }
 
-      or_array.append([&](sub_document match_doc) {
-        match_doc.append(
-            kvp("job_id", static_cast<std::int32_t>(selector.job_id())));
-      });
+      if (!expand_array_parent_selector) {
+        or_array.append([&](sub_document match_doc) {
+          match_doc.append(kvp(
+              "job_id", static_cast<std::int32_t>(selector.job_id())));
+        });
+      } else {
+        or_array.append([&](sub_document match_doc) {
+          match_doc.append(kvp(
+              "$or", [job_id = selector.job_id()](sub_array id_or_array) {
+                id_or_array.append([job_id](sub_document job_id_doc) {
+                  job_id_doc.append(
+                      kvp("job_id", static_cast<std::int32_t>(job_id)));
+                });
+                id_or_array.append([job_id](sub_document array_job_id_doc) {
+                  array_job_id_doc.append(kvp(
+                      "array_job_id", static_cast<std::int32_t>(job_id)));
+                });
+              }));
+        });
+      }
     }
   }));
 }
@@ -779,6 +800,14 @@ static bool ShouldAppendStep_(const std::unordered_set<step_id_t>& req_steps,
                               int64_t step_id) {
   return req_steps.empty() ||
          (step_id >= 0 && req_steps.contains(static_cast<step_id_t>(step_id)));
+}
+
+static bool HasStepInfo_(const crane::grpc::JobInfo& job_info,
+                         int64_t step_id) {
+  for (const auto& step_info : job_info.step_info_list()) {
+    if (step_info.step_id() == step_id) return true;
+  }
+  return false;
 }
 
 // Select the latest job_db_id per job through a covering index, then fetch
@@ -963,7 +992,9 @@ bool MongodbClient::FetchJobRecords(
     AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
   }
   pipeline.match(filter.view());
-  pipeline.limit(static_cast<int32_t>(limit));
+  const size_t mongo_limit = std::min(
+      limit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+  pipeline.limit(static_cast<int32_t>(mongo_limit));
 
   mongocxx::options::aggregate aggregate_options;
   aggregate_options.allow_disk_use(true);
@@ -1149,6 +1180,7 @@ bool MongodbClient::FetchJobRecords(
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
         if (!ShouldAppendStep_(req_steps, step_id)) continue;
+        if (HasStepInfo_(*job_info_ptr, step_id)) continue;
         auto* step_info = job_info_ptr->add_step_info_list();
         ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
@@ -1345,6 +1377,7 @@ bool MongodbClient::FetchJobStepRecords(
         auto step_doc = elem.get_document().value;
         int64_t step_id = ViewValueOr_(step_doc["step_id"], int64_t{-1});
         if (!ShouldAppendStep_(req_steps, step_id)) continue;
+        if (HasStepInfo_(*job_info_ptr, step_id)) continue;
         auto* step_info = job_info_ptr->add_step_info_list();
         ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
