@@ -217,7 +217,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "time_limit", sol::property([](const JobInCtld& t) {
       return  absl::ToInt64Seconds(t.time_limit);
     }, [](JobInCtld& t, int64_t time_limit) {
-      t.time_limit = absl::Seconds(time_limit);
+      t.SetTimeLimit(absl::Seconds(time_limit));
     }),
     "partition_id", &JobInCtld::partition_id,
     "req_node_res_view", &JobInCtld::req_node_res_view,
@@ -235,7 +235,11 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
         }),
     "type", &JobInCtld::type, "uid", &JobInCtld::uid,
     "gid", &JobInCtld::gid, "account", &JobInCtld::account,
-    "name", &JobInCtld::name, "qos", &JobInCtld::qos,
+    "name", &JobInCtld::name,
+    "qos", sol::property([](const JobInCtld& t) { return t.qos; },
+                         [](JobInCtld& t, std::string qos) {
+                           t.SetQos(std::move(qos));
+                         }),
     "node_num", sol::property([](const JobInCtld& t) { return t.node_num; }),
     "node_num_min", &JobInCtld::node_num_min,
     "node_num_max", &JobInCtld::node_num_max,

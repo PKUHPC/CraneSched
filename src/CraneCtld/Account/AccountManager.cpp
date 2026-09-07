@@ -1856,7 +1856,7 @@ CraneExpected<void> AccountManager::CheckQosLimitOnJob(
     }
     if (job->qos.empty()) {
       // Default qos
-      job->qos = partition_it->second.first;
+      job->SetQos(partition_it->second.first);
       if (job->qos.empty()) {
         CRANE_ERROR(
             "The user '{}' has no QOS available for this partition '{}' to "
@@ -1877,7 +1877,7 @@ CraneExpected<void> AccountManager::CheckQosLimitOnJob(
     }
   } else {
     if (job->qos.empty()) {
-      job->qos = kUnlimitedQosName;
+      job->SetQos(kUnlimitedQosName);
     }
   }
   return {};

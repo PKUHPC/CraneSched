@@ -1076,6 +1076,16 @@ struct JobInCtld {
   void SetUsername(std::string const& val);
   std::string const& Username() const { return username; }
 
+  void SetTimeLimit(absl::Duration val) {
+    time_limit = val;
+    job_to_ctld.mutable_time_limit()->set_seconds(ToInt64Seconds(val));
+  }
+
+  void SetQos(std::string val) {
+    qos = std::move(val);
+    job_to_ctld.set_qos(qos);
+  }
+
   void SetCranedIds(std::vector<CranedId>&& val);
   std::vector<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear();

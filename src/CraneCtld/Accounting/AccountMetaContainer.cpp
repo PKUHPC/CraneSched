@@ -116,7 +116,7 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job,
   job.qos_priority = qos->priority;
 
   if (job.time_limit >= absl::Seconds(kJobMaxTimeLimitSec)) {
-    job.time_limit = qos->max_time_limit_per_job;
+    job.SetTimeLimit(qos->max_time_limit_per_job);
   } else if (job.time_limit > qos->max_time_limit_per_job) {
     CRANE_TRACE("time-limit beyond the user's limit");
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;

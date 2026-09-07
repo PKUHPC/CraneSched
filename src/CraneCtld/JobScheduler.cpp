@@ -2735,9 +2735,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
 
     for (JobInCtld* target : jobs_to_update) {
       if (time_limit_seconds) {
-        target->time_limit = absl::Seconds(time_limit_seconds.value());
-        target->MutableJobToCtld()->mutable_time_limit()->set_seconds(
-            time_limit_seconds.value());
+        target->SetTimeLimit(absl::Seconds(time_limit_seconds.value()));
       }
       if (absl_deadline_time) {
         target->deadline_time = absl_deadline_time.value();
@@ -5432,6 +5430,9 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
 
       // Add the job to the pending job queue.
       job->SetStatus(crane::grpc::Pending);
+      CRANE_ASSERT(job->JobToCtld().time_limit().seconds() ==
+                   ToInt64Seconds(job->time_limit));
+      CRANE_ASSERT(job->JobToCtld().qos() == job->qos);
       accepted_job_ptrs.emplace_back(job);
     }
 

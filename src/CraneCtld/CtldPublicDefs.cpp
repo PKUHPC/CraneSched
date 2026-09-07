@@ -1972,7 +1972,7 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                 : val.partition_name();
 
-  time_limit = absl::Seconds(val.time_limit().seconds());
+  SetTimeLimit(absl::Seconds(val.time_limit().seconds()));
 
   type = val.type();
 
@@ -2029,7 +2029,7 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
 
   account = val.account();
   name = val.name();
-  qos = val.qos();
+  SetQos(val.qos());
 
   cmd_line = val.cmd_line();
   cwd = val.cwd();

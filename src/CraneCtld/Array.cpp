@@ -130,11 +130,8 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->SetStatus(crane::grpc::Pending);
   child->SetArrayTaskIdentity(parent_job_->JobId(), task_id);
   child->SetUsername(parent_job_->Username());
-  child->qos = parent_job_->qos;
-  child->time_limit = parent_job_->time_limit;
-  child->MutableJobToCtld()->set_qos(child->qos);
-  child->MutableJobToCtld()->mutable_time_limit()->set_seconds(
-      ToInt64Seconds(child->time_limit));
+  child->SetQos(parent_job_->qos);
+  child->SetTimeLimit(parent_job_->time_limit);
   child->account_chain = parent_job_->account_chain;
   child->req_node_res_view = parent_job_->req_node_res_view;
   child->req_task_res_view = parent_job_->req_task_res_view;
@@ -384,7 +381,7 @@ void ArrayManager::RegisterParent(JobInCtld* parent) {
   CRANE_ASSERT(parent != nullptr && parent->IsArrayParent());
 
   if (parent->qos.empty()) {
-    parent->qos = parent->JobToCtld().qos();
+    parent->SetQos(parent->JobToCtld().qos());
   }
 
   job_id_t parent_id = parent->JobId();
