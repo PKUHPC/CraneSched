@@ -6967,10 +6967,7 @@ void JobScheduler::QueryJobsInRam(
                         ranges::views::filter(job_rng_filter_job_type) |
                         ranges::views::filter(job_rng_filter_licenses) |
                         ranges::views::filter(job_rng_filter_nodename_list) |
-                        ranges::views::filter(job_rng_filter_array_child) |
-                        ranges::views::take(project_array_rows
-                                                ? std::numeric_limits<size_t>::max()
-                                                : num_limit);
+                        ranges::views::filter(job_rng_filter_array_child);
 
   auto consume_resolution = [&](const Resolution& resolution) {
     if (!std::holds_alternative<Resolved>(resolution.outcome)) return;
@@ -7125,16 +7122,26 @@ void JobScheduler::QueryJobsInRam(
   auto running_rng = m_running_job_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng =
+  auto filtered_source_rng =
       req_steps | ranges::views::keys |
       ranges::views::transform(get_job_ptr_by_id) |
-      ranges::views::filter([](auto* job_ptr) { return job_ptr != nullptr; }) |
-      joined_filters;
+      ranges::views::filter([](auto* job_ptr) { return job_ptr != nullptr; });
 
-  ranges::any_view<JobInCtld*, ranges::category::forward> all_job_rng =
+  auto all_source_rng =
       pd_r_rng |
-      ranges::views::transform([](auto& it) { return it.second.get(); }) |
-      joined_filters;
+      ranges::views::transform([](auto& it) { return it.second.get(); });
+
+  ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng;
+  ranges::any_view<JobInCtld*, ranges::category::forward> all_job_rng;
+  if (project_array_rows) {
+    filtered_job_rng = filtered_source_rng | joined_filters;
+    all_job_rng = all_source_rng | joined_filters;
+  } else {
+    filtered_job_rng = filtered_source_rng | joined_filters |
+                       ranges::views::take(num_limit);
+    all_job_rng = all_source_rng | joined_filters |
+                  ranges::views::take(num_limit);
+  }
 
   ranges::any_view<JobInCtld*, ranges::category::forward> id_filtered_job_rng =
       no_ids_constraint ? all_job_rng : filtered_job_rng;
