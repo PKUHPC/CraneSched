@@ -1,7 +1,7 @@
 add_subdirectory(CraneCtld)
+add_subdirectory(Craned)
 add_subdirectory(Utilities)
 add_subdirectory(Misc)
-
 # Tests are intentionally excluded from the default build.  Keep one explicit
 # aggregate target so CI can build every registered unit-test executable
 # without duplicating the target list in an external script.

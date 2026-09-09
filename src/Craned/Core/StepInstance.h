@@ -21,6 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include "GroupResolver.h"
 #include "SupervisorStub.h"
 #include "crane/Tracing.h"
 
@@ -33,6 +34,13 @@ struct StepInstance {
   pid_t supv_pid;
 
   crane::grpc::StepToD step_to_d;
+  // Keep the submitted and node-authorized group lists separate. The
+  // submitted list is used for diagnostics; only resolved_gids is forwarded
+  // to the supervisor and execution paths.
+  std::vector<uint32_t> requested_gids;
+  std::vector<gid_t> resolved_gids;
+  gid_t primary_gid{0};
+  std::string prepare_error_reason;
   std::string
       traceparent;  // W3C traceparent from JobToD for distributed tracing
 
@@ -98,6 +106,10 @@ struct StepInstance {
   }
 
   CraneErrCode Prepare(const Common::CgroupPathInfo& job_path_info);
+
+  const std::string& PrepareErrorReason() const noexcept {
+    return prepare_error_reason;
+  }
 
   CraneErrCode SpawnSupervisor(const EnvMap& job_env_map);
 

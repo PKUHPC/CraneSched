@@ -110,6 +110,7 @@ nav:
       - Account Management:
           - cacctmgr: command/cacctmgr.md
   - Reference:
+    - Execution Groups: reference/execution_groups.md
     - Exit Codes: reference/exit_code.md
     - Job Status: reference/job_status.md
     - Error Codes: reference/error_code.md

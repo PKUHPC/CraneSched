@@ -70,6 +70,8 @@ std::vector<std::string> FindNodesNotInConfig_(
   return invalid_nodes;
 }
 
+constexpr size_t kMaxExecutionGroups = 256;
+
 bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
                                    crane::grpc::JobStatus status,
                                    absl::Time end_time, absl::Time suspend_time,
@@ -1160,6 +1162,9 @@ bool JobScheduler::Init() {
 std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
     const JobInCtld* job) {
   if (job == nullptr) return std::unexpected("null job pointer");
+  if (job->gids.empty()) return std::unexpected("GID list must not be empty");
+  if (job->gids.size() > kMaxExecutionGroups)
+    return std::unexpected("GID list exceeds maximum size");
 
 #ifndef HAVE_PMIX
   if (job->IsPmix()) {
@@ -1173,6 +1178,9 @@ std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
 std::expected<void, std::string> JobScheduler::PreStepSubmitCheck(
     const CommonStepInCtld* step) {
   if (step == nullptr) return std::unexpected("null step pointer");
+  if (step->gids.empty()) return std::unexpected("GID list must not be empty");
+  if (step->gids.size() > kMaxExecutionGroups)
+    return std::unexpected("GID list exceeds maximum size");
 
 #ifndef HAVE_PMIX
   if (step->IsPmix()) {
@@ -8586,6 +8594,12 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 }
 
 CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
+  if (job->gids.empty()) {
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARAM,
+        "GID list must contain the effective GID as its first element"));
+  }
+
   if (!CheckIfTimeLimitIsValid(job->time_limit))
     return std::unexpected(FormatRichErr(
         CraneErrCode::ERR_TIME_TIMIT_BEYOND,

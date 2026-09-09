@@ -54,6 +54,16 @@ bool ShouldLogInitialTerminalSizeDiagnostic() {
   return count.fetch_add(1, std::memory_order_relaxed) <
          kInitialTerminalSizeDiagnosticLimit;
 }
+
+template <typename SecurityContext>
+void SetResolvedSupplementalGroups_(const std::vector<gid_t>& gids,
+                                    SecurityContext* security_context) {
+  security_context->clear_supplemental_groups();
+  if (gids.size() < 2) return;
+  for (size_t i = 1; i < gids.size(); ++i) {
+    security_context->add_supplemental_groups(static_cast<int64_t>(gids[i]));
+  }
+}
 }  // namespace
 
 using namespace std::chrono_literals;
@@ -969,8 +979,10 @@ CraneErrCode ProcInstance::SetChildProcProperty_() {
 
   auto& pwd = m_parent_step_inst_->pwd;
   std::vector<gid_t> gids = m_parent_step_inst_->gids;
-
-  if (!std::ranges::contains(gids, pwd.Gid())) gids.emplace_back(pwd.Gid());
+  if (gids.empty()) {
+    fmt::print(stderr, "[Subprocess] Error: resolved group list is empty\n");
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
 
   int rc = setgroups(gids.size(), gids.data());
   if (rc == -1) {
@@ -979,7 +991,6 @@ CraneErrCode ProcInstance::SetChildProcProperty_() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // FIXME: gids[0] or pwd.Gid()
   rc = setresgid(gids[0], gids[0], gids[0]);
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setegid() failed: {}\n",
@@ -1438,7 +1449,9 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
-  gid_t gid = m_parent_step_inst_->pwd.Gid();
+  gid_t gid = m_parent_step_inst_->gids.empty()
+                  ? m_parent_step_inst_->pwd.Gid()
+                  : m_parent_step_inst_->gids.front();
 
   // Generate hash for pod name and uid.
   std::string h16 = MakeHashId_(job_id, job_name, node_name);
@@ -1489,6 +1502,12 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
 
   // security context
   auto* sec_ctx = linux_config->mutable_security_context();
+  if (m_parent_step_inst_->gids.empty()) {
+    CRANE_ERROR("Container job #{} has no resolved execution groups", job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  const gid_t resolved_primary_gid = m_parent_step_inst_->gids.front();
+  SetResolvedSupplementalGroups_(m_parent_step_inst_->gids, sec_ctx);
   auto* ns_options = sec_ctx->mutable_namespace_options();
   ns_options->set_network(
       static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().network()));
@@ -1516,7 +1535,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
     // If user is root or using userns, run_as_* is always allowed.
     // Non-root user w/o userns cannot use run_as_* other than its own.
     sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+    sec_ctx->mutable_run_as_group()->set_value(resolved_primary_gid);
   } else {
     CRANE_ERROR(
         "Pod #{} is not allowed to use other identities when not "
@@ -2017,7 +2036,9 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   const std::string& step_name = GetParentStep().name();
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
-  gid_t gid = m_parent_step_inst_->pwd.Gid();
+  gid_t gid = m_parent_step_inst_->gids.empty()
+                  ? m_parent_step_inst_->pwd.Gid()
+                  : m_parent_step_inst_->gids.front();
 
   // Using job_id/step_id to generate unique name in container metadata
   m_container_config_.mutable_metadata()->set_name(
@@ -2041,6 +2062,14 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   auto* sec_ctx =
       m_container_config_.mutable_linux()->mutable_security_context();
 
+  if (m_parent_step_inst_->gids.empty()) {
+    CRANE_ERROR("Container #{}.{} has no resolved execution groups", job_id,
+                step_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  const gid_t resolved_primary_gid = m_parent_step_inst_->gids.front();
+  SetResolvedSupplementalGroups_(m_parent_step_inst_->gids, sec_ctx);
+
   // Currently we don't support setting namespace mode per container.
   sec_ctx->mutable_namespace_options()->CopyFrom(
       m_pod_config_.mutable_linux()
@@ -2053,7 +2082,7 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
     // If user is root or using userns, run_as_* is always allowed.
     // Non-root user w/o userns cannot use run_as_* other than its own.
     sec_ctx->mutable_run_as_user()->set_value(pod_meta->run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(pod_meta->run_as_group());
+    sec_ctx->mutable_run_as_group()->set_value(resolved_primary_gid);
   } else {
     CRANE_ERROR(
         "Container #{}.{} is not allowed to use other identities when not "
@@ -3369,7 +3398,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
           .envs = m_step_.GetTaskEpilogEnv(task_id),
           .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
-          .run_gid = task->GetParentStep().gid()[0],
+          .run_gid = task->GetParentStep().gids()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
@@ -3399,7 +3428,7 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
           .envs = m_step_.GetTaskEpilogEnv(task_id),
           .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
           .run_uid = task->GetParentStep().uid(),
-          .run_gid = task->GetParentStep().gid()[0],
+          .run_gid = task->GetParentStep().gids()[0],
           .output_size = g_config.JobLifecycleHook.MaxOutputSize};
 
       if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
