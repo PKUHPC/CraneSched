@@ -416,6 +416,32 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
+bool StepInstance::AllTaskProcessesExited() const {
+  for (const auto& [task_id, task] : m_task_map_) {
+    if (task->GetExecId().has_value() &&
+        !task->GetFinalInfo()->raw_exit.has_value()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void StepInstance::KillAllTaskProcesses() {
+  if (step_user_cg &&
+      CgroupManager::GetCgroupVersion() ==
+          Common::CgConstant::CgroupVersion::CGROUP_V2 &&
+      step_user_cg->KillAllProcesses(SIGKILL)) {
+    return;
+  }
+
+  for (const auto& [task_id, task] : m_task_map_) {
+    if (!task->GetExecId().has_value()) continue;
+    if (task->Kill(SIGKILL) != CraneErrCode::SUCCESS) {
+      CRANE_WARN("[Task #{}] Failed to kill residual task processes.", task_id);
+    }
+  }
+}
+
 void StepInstance::InitOomBaseline() {
   // Use the step-level workload cgroup selected by Supervisor.
   if (!step_user_cg) {
@@ -3288,6 +3314,22 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   for (auto task : not_found_tasks) {
     m_sigchld_queue_.enqueue(task);
   }
+
+  MaybeKillResidualTaskProcesses_();
+}
+
+void TaskManager::MaybeKillResidualTaskProcesses_() {
+  if (!m_step_.IsCrun() || m_residual_process_cleanup_started_ ||
+      m_step_.AllTaskFinished() || !m_step_.AllTaskProcessesExited()) {
+    return;
+  }
+
+  m_residual_process_cleanup_started_ = true;
+  CRANE_INFO(
+      "[Step #{}.{}] All task processes exited; killing residual task "
+      "processes before waiting for output EOF.",
+      m_step_.job_id, m_step_.step_id);
+  m_step_.KillAllTaskProcesses();
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {
