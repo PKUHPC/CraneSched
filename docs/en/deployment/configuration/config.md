@@ -116,8 +116,6 @@ Hostname rules:
 
 - `craned` matches the local short hostname and full hostname against `name` and
   `NodeHostname`.
-- Node-related CLI arguments accept `name`, the full `NodeHostname`, or its
-  short hostname; CraneCtld normalizes all of them to `name`.
 - When TLS is enabled, configure `ControlMachine` and `NodeHostname` as FQDNs
   ending with `TLS.DomainSuffix`.
 

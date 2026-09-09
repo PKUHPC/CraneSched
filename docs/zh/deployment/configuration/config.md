@@ -115,7 +115,6 @@ Nodes:
 Hostname 规则：
 
 - `craned` 会用本机 short hostname 和完整 hostname 匹配 `name` 与 `NodeHostname`。
-- 节点相关 CLI 参数同时接受 `name`、`NodeHostname` 完整名和其 short hostname，控制端会统一转换为 `name`。
 - 启用 TLS 时，`ControlMachine` 和 `NodeHostname` 需要配置为以 `TLS.DomainSuffix` 结尾的 FQDN。
 
 **节点范围表示法：**
