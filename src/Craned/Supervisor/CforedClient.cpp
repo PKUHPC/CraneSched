@@ -1088,15 +1088,16 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                    bool signaled) {
   CRANE_DEBUG("[Task #{}] Process stopped with exit_code: {}, signaled: {}.",
               task_id, exit_code, signaled);
-  // Store exit info in meta. TASK_EXIT_STATUS is only enqueued after
-  // output is fully drained, so that all TASK_OUTPUT messages precede it.
+  // Store exit info in meta. TASK_EXIT_STATUS is only enqueued after both
+  // stdout and stderr are fully drained, so all TASK_OUTPUT messages precede
+  // it.
   absl::MutexLock lock(&m_mtx_);
   auto& meta = m_fwd_meta_map[task_id];
   meta.proc_stopped = true;
   meta.exit_code = exit_code;
   meta.signaled = signaled;
-  if (meta.output_stopped) {
-    // Output already drained — safe to send EXIT_STATUS now.
+  if (meta.output_stopped && meta.err_stopped) {
+    // Both output streams are drained — safe to send EXIT_STATUS now.
     m_task_fwd_req_queue_.enqueue(FwdRequest{
         .type = StreamStepIORequest::TASK_EXIT_STATUS,
         .data = TaskFinishStatus{.task_id = task_id,
@@ -1104,7 +1105,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                  .signaled = signaled},
     });
   }
-  return meta.output_stopped;
+  return meta.output_stopped && meta.err_stopped;
 }
 
 void CforedClient::TaskEnd(task_id_t task_id) {
