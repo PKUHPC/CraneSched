@@ -319,7 +319,7 @@ void StepInCtld::RecoverFromDb(
   type = step_to_ctld.type();
   job_id = step_to_ctld.job_id();
   uid = step_to_ctld.uid();
-  gids = {step_to_ctld.gid().begin(), step_to_ctld.gid().end()};
+  gids = {step_to_ctld.gids().begin(), step_to_ctld.gids().end()};
 
   name = step_to_ctld.name();
   cwd = step_to_ctld.cwd();
@@ -464,7 +464,7 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
   cwd = job.cwd;
 
   uid = job.uid;
-  gids = {job.gid};
+  gids = job.gids;
 
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
@@ -541,7 +541,7 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
   step.set_requeue_if_failed(requeue_if_failed);
 
   step.set_uid(uid);
-  step.mutable_gid()->Assign(gids.begin(), gids.end());
+  step.mutable_gids()->Assign(gids.begin(), gids.end());
 
   // No batch/ia/io meta need to set
   // No script to set
@@ -598,7 +598,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_node_num(this->node_num);
 
   step_to_d.set_uid(uid);
-  step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+  step_to_d.mutable_gids()->Assign(this->gids.begin(), this->gids.end());
   // No need to set batch/ia/io meta and script
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
   step_to_d.set_get_user_env(this->get_user_env);
@@ -981,7 +981,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   cwd = job.cwd;
 
   uid = job.uid;
-  gids = {job.gid};
+  gids = job.gids;
 
   ntasks_per_node_min = job.ntasks_per_node_min;
   ntasks_per_node_max = job.ntasks_per_node_max;
@@ -1132,7 +1132,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   step.set_requeue_if_failed(requeue_if_failed);
   step.set_get_user_env(get_user_env);
-  step.mutable_gid()->Assign(gids.begin(), gids.end());
+  step.mutable_gids()->Assign(gids.begin(), gids.end());
 
   if (job.type == crane::grpc::Batch) {
     step.mutable_batch_meta()->CopyFrom(job.JobToCtld().batch_meta());
@@ -1183,7 +1183,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   cwd = step_to_ctld.cwd();
 
   uid = step_to_ctld.uid();
-  gids = step_to_ctld.gid() | std::ranges::to<std::vector>();
+  gids = step_to_ctld.gids() | std::ranges::to<std::vector>();
 
   requeue_if_failed = step_to_ctld.requeue_if_failed();
 
@@ -1274,7 +1274,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->ntasks_per_node_max);
 
   step_to_d.set_uid(uid);
-  step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+  step_to_d.mutable_gids()->Assign(this->gids.begin(), this->gids.end());
 
   auto* task_res_map = step_to_d.mutable_task_res_map();
   auto task_it = this->craned_task_map.find(craned_id);
@@ -2023,9 +2023,10 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
     SetUsername(password_entry->Username());
   }
 
-  // Note: gid is egid, which may be different from the
-  // primary group of the user in `password_entry`.
-  gid = val.gid();
+  // The first requested GID is the effective execution group. It may differ
+  // from the passwd primary group and is kept as the scalar projection below.
+  gids = {val.gids().begin(), val.gids().end()};
+  gid = gids.empty() ? 0 : gids.front();
 
   account = val.account();
   name = val.name();

@@ -844,6 +844,9 @@ struct JobInCtld {
   crane::grpc::JobType type;
 
   uid_t uid;
+  // Ordered groups from the submission request; element zero is the
+  // effective/primary execution GID.
+  std::vector<gid_t> gids;
   gid_t gid;
   std::string account;
   std::string name;

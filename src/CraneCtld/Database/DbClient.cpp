@@ -5301,7 +5301,8 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           cpus_req.raw_value(), mem_req, job_to_ctld.name(), env_str,
           static_cast<int32_t>(job_to_ctld.uid()),
           // 10-14
-          static_cast<int32_t>(job_to_ctld.gid()),
+          static_cast<int32_t>(job_to_ctld.gids_size() > 0 ? job_to_ctld.gids(0)
+                                                           : 0),
           util::HostNameListToStr(runtime_attr.craned_ids()),
           runtime_attr.craned_ids().size(), 0, job_to_ctld.partition_name(),
           // 15-19
@@ -5688,8 +5689,8 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           step_to_ctld.name(),
           env_str,
           step_to_ctld.uid(),
-          std::vector<gid_t>(step_to_ctld.gid().begin(),
-                             step_to_ctld.gid().end()),
+          std::vector<gid_t>(step_to_ctld.gids().begin(),
+                             step_to_ctld.gids().end()),
           util::HostNameListToStr(runtime_attr.craned_ids()),
           // 10-14
           runtime_attr.craned_ids_size(),

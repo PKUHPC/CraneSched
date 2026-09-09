@@ -34,6 +34,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
       step_id(step_to_d.step_id()),
       supv_pid(0),
       step_to_d(step_to_d),
+      requested_gids(step_to_d.gids().begin(), step_to_d.gids().end()),
       status(StepStatus::Configuring) {}
 
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
@@ -43,6 +44,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       step_id(step_to_d.step_id()),
       supv_pid(supv_pid),
       step_to_d(step_to_d),
+      requested_gids(step_to_d.gids().begin(), step_to_d.gids().end()),
       status(status),
       supervisor_stub(supervisor_stub) {}
 
@@ -101,6 +103,29 @@ void StepInstance::CleanUp(bool async) {
 }
 
 CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
+  auto resolved = GroupResolver::ResolveStep(step_to_d, requested_gids);
+  if (!resolved) {
+    prepare_error_reason = resolved.error();
+    CRANE_ERROR("[Step #{}.{}] Group validation failed: {}", job_id, step_id,
+                prepare_error_reason);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (resolved->diagnostics.HasMismatch()) {
+    const auto& d = resolved->diagnostics;
+    CRANE_WARN(
+        "[Step #{}.{}] GID list differs from node NSS groups: uid={} "
+        "requested_primary_gid={} requested_supplementary_count={} "
+        "accepted_supplementary_count={} dropped_gid_count={} "
+        "backend_only_gid_count={}",
+        job_id, step_id, GroupResolver::ExecutionUid(step_to_d),
+        resolved->gids.front(), d.requested_supplementary_count,
+        d.accepted_supplementary_count, d.dropped_supplementary_count,
+        d.backend_only_count);
+  }
+  resolved_gids = resolved->gids;
+  primary_gid = resolved_gids.front();
+  step_to_d.mutable_gids()->Assign(resolved_gids.begin(), resolved_gids.end());
+
   job_path_info = path_info;
   cg_str = CgroupManager::CgroupStrByStepId(path_info.cg_str, step_id, true);
 

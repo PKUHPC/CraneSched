@@ -347,12 +347,12 @@ PmixServer::SetupFork(uint32_t rank) {
 bool PmixServer::InfoSet_(const Config& config,
                           const crane::grpc::StepToD& step) {
   m_pmix_step_info_.uid = step.uid();
-  if (step.gid().empty()) {
+  if (step.gids().empty()) {
     CRANE_ERROR("[Step#{}.{}] GID list is empty, cannot initialize PMIx.",
                 step.job_id(), step.step_id());
     return false;
   }
-  m_pmix_step_info_.gid = step.gid()[0];
+  m_pmix_step_info_.gid = step.gids()[0];
   m_pmix_step_info_.job_id = step.job_id();
   m_pmix_step_info_.step_id = step.step_id();
   m_pmix_step_info_.nspace = fmt::format(
