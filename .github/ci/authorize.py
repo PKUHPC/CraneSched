@@ -332,7 +332,7 @@ def _resolve_pr_merge(
     *,
     sleeper: Sleeper,
     retry_delays: tuple[float, ...] = _MERGE_RETRY_DELAYS,
-) -> str:
+) -> tuple[str, str]:
     attempts = len(retry_delays) + 1
     pending_reason = "GitHub has not computed the proposed merge"
 
@@ -356,10 +356,17 @@ def _resolve_pr_merge(
                 parents = commit_parents_resolver(context.repository, merge_sha)
                 if parents is None:
                     pending_reason = "the proposed merge commit is not available"
-                elif parents != (context.event_sha, context.pr_head_sha):
+                elif len(parents) != 2 or any(
+                    not SHA_RE.fullmatch(parent) for parent in parents
+                ):
                     raise AuthorizationError(
-                        "proposed merge parents do not match the trusted base and "
-                        "event head"
+                        "proposed merge commit does not have exactly two full-SHA "
+                        "parents"
+                    )
+                elif parents[1] != context.pr_head_sha:
+                    raise AuthorizationError(
+                        "proposed merge parents: second parent does not match the "
+                        "current pull request head"
                     )
                 else:
                     final_snapshot = pull_request_lookup(context.repository, number)
@@ -374,7 +381,11 @@ def _resolve_pr_merge(
                     ):
                         final_ref_sha = merge_ref_resolver(context.repository, number)
                         if final_ref_sha == merge_sha:
-                            return merge_sha
+                            # The first parent is the base used to construct the
+                            # live proposed merge. It may legitimately differ from
+                            # the base SHA captured by the original event when the
+                            # PR remains mergeable while master advances.
+                            return merge_sha, parents[0]
                         pending_reason = (
                             "the pull request merge ref changed during authorization"
                         )
@@ -438,7 +449,7 @@ def authorize_dispatch(
         ):
             raise AuthorizationError("pull request merge validation is unavailable")
         backend_sha = context.pr_head_sha
-        routing_sha = _resolve_pr_merge(
+        routing_sha, pr_base_sha = _resolve_pr_merge(
             context,
             pr_number,
             pull_request_lookup,
@@ -447,7 +458,6 @@ def authorize_dispatch(
             sleeper=sleeper,
             retry_delays=retry_delays,
         )
-        pr_base_sha = context.event_sha
         pr_head_sha = context.pr_head_sha
         pr_merge_sha = routing_sha
         if branch_resolver is None:

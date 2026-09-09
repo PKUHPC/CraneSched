@@ -253,15 +253,32 @@ class AuthorizationPolicyTest(unittest.TestCase):
         self.assertEqual(result["pr_base_sha"], WORKFLOW_SHA)
         self.assertEqual(result["routing_sha"], MERGE_SHA)
 
-    def test_stale_api_base_does_not_allow_an_untrusted_merge_parent(self) -> None:
-        with self.assertRaisesRegex(authorize.AuthorizationError, "parents"):
-            _authorize(
-                pull_request_lookup=lambda _repo, _number: _snapshot(base_sha="e" * 40),
-                commit_parents_resolver=lambda _repo, _sha: (
-                    "e" * 40,
-                    BACKEND_SHA,
-                ),
-            )
+    def test_live_proposed_base_may_advance_beyond_event_base(self) -> None:
+        proposed_base = "f" * 40
+
+        result = _authorize(
+            _context(pr_base_sha="e" * 40),
+            commit_parents_resolver=lambda _repo, _sha: (
+                proposed_base,
+                BACKEND_SHA,
+            ),
+        )
+
+        self.assertEqual(result["pr_base_sha"], proposed_base)
+        self.assertEqual(result["pr_head_sha"], BACKEND_SHA)
+        self.assertEqual(result["routing_sha"], MERGE_SHA)
+
+    def test_stale_api_base_does_not_override_live_proposed_base(self) -> None:
+        result = _authorize(
+            pull_request_lookup=lambda _repo, _number: _snapshot(base_sha="e" * 40),
+            commit_parents_resolver=lambda _repo, _sha: (
+                "e" * 40,
+                BACKEND_SHA,
+            ),
+        )
+
+        self.assertEqual(result["pr_base_sha"], "e" * 40)
+        self.assertEqual(result["pr_head_sha"], BACKEND_SHA)
 
     def test_waits_for_github_to_compute_mergeability(self) -> None:
         snapshots = iter(
