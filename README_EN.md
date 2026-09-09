@@ -22,8 +22,6 @@ We welcome community contributions.
 
 **Documentation**: <https://pkuhpc.github.io/CraneSched/>
 
-**Developer build SOP**: [Sharing build cache across worktrees](./docs/en/development/worktree-build-cache.md)
-
 **Demo cluster** (test account: demo_admin / demo_admin): <https://hpc.pku.edu.cn/demo/cranesched>
 
 # Highlights
