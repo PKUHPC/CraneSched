@@ -565,6 +565,22 @@ bool StepInstance::AllTaskMainProcessesExited() const {
   return true;
 }
 
+void StepInstance::KillAllTaskProcesses() {
+  if (step_user_cg &&
+      CgroupManager::GetCgroupVersion() ==
+          Common::CgConstant::CgroupVersion::CGROUP_V2 &&
+      step_user_cg->KillAllProcesses(SIGKILL)) {
+    return;
+  }
+
+  for (const auto& [task_id, task] : m_task_map_) {
+    if (!task->GetExecId().has_value()) continue;
+    if (task->Kill(SIGKILL) != CraneErrCode::SUCCESS) {
+      CRANE_WARN("[Task #{}] Failed to kill residual task processes.", task_id);
+    }
+  }
+}
+
 void StepInstance::InitOomBaseline() {
   // Use the step-level workload cgroup selected by Supervisor.
   if (!step_user_cg) {
@@ -3425,18 +3441,21 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     m_sigchld_queue_.enqueue(task);
   }
 
-  if (m_step_.IsCrun() && !m_residual_processes_killed_ &&
-      !m_step_.AllTaskFinished() && m_step_.AllTaskMainProcessesExited()) {
-    CRANE_INFO(
-        "[Step #{}.{}] All task main processes exited; killing residual "
-        "processes before waiting for output EOF.",
-        m_step_.job_id, m_step_.step_id);
-    m_residual_processes_killed_ = true;
-    for (task_id_t task_id : m_step_.GetTaskIds()) {
-      auto* task = m_step_.GetTaskInstance(task_id);
-      if (task->GetExecId().has_value()) task->Kill(SIGKILL);
-    }
+  MaybeKillResidualTaskProcesses_();
+}
+
+void TaskManager::MaybeKillResidualTaskProcesses_() {
+  if (!m_step_.IsCrun() || m_residual_process_cleanup_started_ ||
+      m_step_.AllTaskFinished() || !m_step_.AllTaskMainProcessesExited()) {
+    return;
   }
+
+  m_residual_process_cleanup_started_ = true;
+  CRANE_INFO(
+      "[Step #{}.{}] All task processes exited; killing residual task "
+      "processes before waiting for output EOF.",
+      m_step_.job_id, m_step_.step_id);
+  m_step_.KillAllTaskProcesses();
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {
