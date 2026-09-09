@@ -378,8 +378,9 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Time limit exceeds the partition's per-job wall time limit",
         "Partition max submit jobs per user exceeded",
 
-        // 110
-        "Partition max submit jobs per account exceeded"
+        // 110 - 111
+        "Partition max submit jobs per account exceeded",
+        "Requested nodes are not in the partition"
     };
 // clang-format on
 

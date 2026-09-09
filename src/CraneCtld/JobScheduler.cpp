@@ -58,6 +58,18 @@ std::vector<std::string> FindNodesNotInPartition_(
   return invalid_nodes;
 }
 
+std::vector<std::string> FindNodesNotInConfig_(
+    const std::unordered_set<std::string>& requested_nodes) {
+  std::vector<std::string> invalid_nodes;
+  invalid_nodes.reserve(requested_nodes.size());
+  for (const auto& node : requested_nodes) {
+    if (!g_config.Nodes.contains(node)) invalid_nodes.emplace_back(node);
+  }
+
+  std::sort(invalid_nodes.begin(), invalid_nodes.end());
+  return invalid_nodes;
+}
+
 bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
                                    crane::grpc::JobStatus status,
                                    absl::Time end_time, absl::Time suspend_time,
@@ -8468,13 +8480,29 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   job->MutableJobToCtld()->set_excludes(
       util::HostNameListToStr(job->excluded_nodes));
 
-  auto invalid_nodes =
+  auto invalid_nodes = FindNodesNotInConfig_(job->included_nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                      "Invalid --nodelist value: unknown nodes '{}'",
+                      absl::StrJoin(invalid_nodes, ", ")));
+  }
+
+  invalid_nodes =
       FindNodesNotInPartition_(job->included_nodes, part_meta.nodes);
   if (!invalid_nodes.empty()) {
-    return std::unexpected(FormatRichErr(
-        CraneErrCode::ERR_INVALID_NODE_LIST,
-        "Invalid --nodelist value: nodes '{}' are not in partition '{}'",
-        absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION,
+                      "Requested nodes '{}' are not in partition '{}'",
+                      absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+  }
+
+  invalid_nodes = FindNodesNotInConfig_(job->excluded_nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+                      "Invalid --exclude value: unknown nodes '{}'",
+                      absl::StrJoin(invalid_nodes, ", ")));
   }
 
   invalid_nodes =
@@ -8904,15 +8932,32 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   if (part_it != g_config.Partitions.end()) {
     Config::Partition const& part_meta = part_it->second;
 
-    auto invalid_nodes =
+    auto invalid_nodes = FindNodesNotInConfig_(step->included_nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Invalid --nodelist value for step #{}.{}: unknown nodes '{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "));
+      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+    }
+
+    invalid_nodes =
         FindNodesNotInPartition_(step->included_nodes, part_meta.nodes);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR(
-          "Invalid --nodelist value for step #{}.{}: nodes '{}' are not in "
-          "partition '{}'",
+          "Requested nodes for step #{}.{}: nodes '{}' are not in partition "
+          "'{}'",
           step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
           step->job->partition_id);
-      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+      return std::unexpected(
+          CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION);
+    }
+
+    invalid_nodes = FindNodesNotInConfig_(step->excluded_nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR("Invalid --exclude value for step #{}.{}: unknown nodes '{}'",
+                  step->job_id, step->StepId(),
+                  absl::StrJoin(invalid_nodes, ", "));
+      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
     }
 
     invalid_nodes =
