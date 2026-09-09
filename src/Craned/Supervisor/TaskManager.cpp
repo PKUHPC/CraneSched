@@ -556,9 +556,10 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
 bool StepInstance::AllTaskMainProcessesExited() const {
-  for (const auto& task : m_task_map_ | std::views::values) {
-    if (task->GetExecId().has_value() &&
-        !task->GetFinalInfo()->raw_exit.has_value()) {
+  for (const auto& task_entry : m_task_map_) {
+    const ITaskInstance* task_instance = task_entry.second.get();
+    if (task_instance->GetExecId().has_value() &&
+        !task_instance->GetFinalInfo()->raw_exit.has_value()) {
       return false;
     }
   }
