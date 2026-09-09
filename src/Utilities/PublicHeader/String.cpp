@@ -194,6 +194,11 @@ bool ParseNodeList(const std::string &node_str,
   return true;
 }
 
+std::string ShortHostname(const std::string &hostname) {
+  const auto dot_pos = hostname.find('.');
+  return dot_pos == std::string::npos ? hostname : hostname.substr(0, dot_pos);
+}
+
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list) {
   std::string name_str;

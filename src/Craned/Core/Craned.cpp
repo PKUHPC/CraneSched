@@ -115,12 +115,6 @@ void RegisterNodeAddrOrExit_(const std::string& node_addr,
   }
 }
 
-std::string ShortHostname_(const std::string& hostname) {
-  const auto dot_pos = hostname.find('.');
-  if (dot_pos == std::string::npos) return hostname;
-  return hostname.substr(0, dot_pos);
-}
-
 }  // namespace
 
 CraneErrCode RecoverCgForJobSteps(
@@ -1280,7 +1274,7 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  const std::string short_hostname = ShortHostname_(g_config.Hostname);
+  const std::string short_hostname = util::ShortHostname(g_config.Hostname);
   auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
   if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
       short_hostname != g_config.Hostname) {

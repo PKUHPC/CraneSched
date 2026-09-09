@@ -432,11 +432,12 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
-  if (!craned_meta_map_.Contains(node_name)) {
+  const CranedId craned_id = ResolveCranedIdAlias(node_name);
+  if (!craned_meta_map_.Contains(craned_id)) {
     return reply;
   }
 
-  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(node_name);
+  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
 
   auto* craned_info = list->Add();
   SetGrpcCranedInfoByCranedMeta_(*craned_meta, craned_info);
@@ -704,7 +705,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   std::list<std::string> hosts_list;
   util::ParseHostList(hosts, &hosts_list);
   std::unordered_set<std::string> req_nodes;
-  for (auto& host : hosts_list) req_nodes.insert(std::move(host));
+  for (auto& host : hosts_list) req_nodes.insert(ResolveCranedIdAlias(host));
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {

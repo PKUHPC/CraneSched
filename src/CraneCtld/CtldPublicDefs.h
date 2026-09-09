@@ -257,6 +257,9 @@ struct Config {
 
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  // Maps user-facing node aliases (NodeName, NodeHostname and short
+  // NodeHostname) to the canonical CranedId used by the scheduler.
+  std::unordered_map<std::string, CranedId> CranedIdByAlias;
   std::unordered_map<std::string, Partition> Partitions;
   std::string DefaultPartition;
 
@@ -320,6 +323,20 @@ inline Ctld::Config g_config{};
 inline Ctld::RunTimeStatus g_runtime_status{};
 
 namespace Ctld {
+
+inline CranedId ResolveCranedIdAlias(const std::string& node) {
+  auto it = g_config.CranedIdByAlias.find(node);
+  return it == g_config.CranedIdByAlias.end() ? node : it->second;
+}
+
+inline void CanonicalizeCranedIdSet(
+    std::unordered_set<std::string>* craned_ids) {
+  std::unordered_set<std::string> canonical_ids;
+  canonical_ids.reserve(craned_ids->size());
+  for (const auto& craned_id : *craned_ids)
+    canonical_ids.emplace(ResolveCranedIdAlias(craned_id));
+  *craned_ids = std::move(canonical_ids);
+}
 
 struct InteractiveMeta {
   InteractiveMeta() = default;

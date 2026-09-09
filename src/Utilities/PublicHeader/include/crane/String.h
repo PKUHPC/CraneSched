@@ -85,6 +85,8 @@ std::string ReadableMemory(uint64_t memory_bytes);
 
 CraneExpected<uint64_t> ParseMemory(const std::string& mem);
 
+std::string ShortHostname(const std::string& hostname);
+
 bool ParseHostList(const std::string& host_str,
                    std::list<std::string>* host_list);
 

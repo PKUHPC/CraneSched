@@ -26,6 +26,8 @@ CraneSched分为前端和后端，前端主要是用Go开发，后端主要是�
 
 **CraneSched 文档地址**：[CraneSched Documents](https://pkuhpc.github.io/CraneSched/)
 
+**开发者构建 SOP**：[多 worktree 构建缓存](./docs/zh/development/worktree-build-cache.md)
+
 **CraneSched Demo 集群**（试用账号：demo_admin，密码：demo_admin）：[CraneSched-Demo](https://hpc.pku.edu.cn/demo/cranesched)
 
 # CraneSched  设计理念

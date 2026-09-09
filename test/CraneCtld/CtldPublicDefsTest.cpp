@@ -23,6 +23,20 @@
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
 
+TEST(CtldPublicDefs, ResolvesCranedIdAliases) {
+  auto original_aliases = std::move(g_config.CranedIdByAlias);
+  g_config.CranedIdByAlias = {
+      {"node01", "node01"},
+      {"node01.pku.edu.cn", "node01"},
+  };
+
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node01"), "node01");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node01.pku.edu.cn"), "node01");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node999"), "node999");
+
+  g_config.CranedIdByAlias = std::move(original_aliases);
+}
+
 namespace {
 
 google::protobuf::Timestamp TimestampAt(int64_t seconds) {
