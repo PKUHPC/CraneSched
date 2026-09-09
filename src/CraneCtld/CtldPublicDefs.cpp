@@ -804,6 +804,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
     if (this->Status() == crane::grpc::JobStatus::Running) {
       this->StepOnNodeCompleting(craned_id);
+      this->StepOnNodeFinish(craned_id);
       context->rn_step_raw_ptrs.insert(this);
       if (this->AllNodesCompleting()) {
         action = DaemonStepAction::StartCleanup;
