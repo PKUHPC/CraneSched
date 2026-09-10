@@ -26,6 +26,8 @@
 namespace Craned::Supervisor {
 
 class CforedClient {
+  friend class SupervisorExitTestPeer;
+
   struct X11FdInfo {
     int fd;
     std::shared_ptr<uvw::tcp_handle> sock;
