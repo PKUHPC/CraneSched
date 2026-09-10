@@ -257,8 +257,8 @@ struct Config {
 
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
-  // Maps user-facing node aliases (NodeName, NodeHostname and short
-  // NodeHostname) to the canonical CranedId used by the scheduler.
+  // Maps NodeName and NodeHostname to the canonical CranedId used by the
+  // scheduler.
   std::unordered_map<std::string, CranedId> CranedIdByAlias;
   std::unordered_map<std::string, Partition> Partitions;
   std::string DefaultPartition;

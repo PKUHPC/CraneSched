@@ -766,7 +766,7 @@ message PartitionInfo {
 }
 
 message CranedInfo {
-  string hostname = 1;
+  string hostname = 1;  // Canonical NodeName.
   CranedResourceState resource_state = 2;
   CranedControlState control_state = 3;
   CranedPowerState power_state = 4;
@@ -786,6 +786,9 @@ message CranedInfo {
 
   // Physical CPU topology of this node.
   NodeTopoInfo node_topo_info = 17;
+
+  string node_hostname = 18;  // Configured NodeHostname.
+  string node_addr = 19;      // Configured NodeAddr.
 }
 
 message ReservationInfo {

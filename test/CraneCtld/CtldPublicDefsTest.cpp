@@ -26,12 +26,13 @@
 TEST(CtldPublicDefs, ResolvesCranedIdAliases) {
   auto original_aliases = std::move(g_config.CranedIdByAlias);
   g_config.CranedIdByAlias = {
-      {"node01", "node01"},
-      {"node01.pku.edu.cn", "node01"},
+      {"crnd1", "crnd1"},
+      {"host01.pku.edu.cn", "crnd1"},
   };
 
-  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node01"), "node01");
-  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node01.pku.edu.cn"), "node01");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("crnd1"), "crnd1");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("host01.pku.edu.cn"), "crnd1");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("host01"), "host01");
   EXPECT_EQ(Ctld::ResolveCranedIdAlias("node999"), "node999");
 
   g_config.CranedIdByAlias = std::move(original_aliases);

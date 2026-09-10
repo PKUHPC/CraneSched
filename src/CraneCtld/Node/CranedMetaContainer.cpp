@@ -1122,6 +1122,8 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
       ConvertCpuCountForClient(craned_meta.res_in_use.GetCpuSet().cpu_count));
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
+  craned_info->set_node_hostname(craned_meta.static_meta.node_hostname);
+  craned_info->set_node_addr(craned_meta.static_meta.node_addr);
   craned_info->set_craned_version(craned_meta.remote_meta.craned_version);
   craned_info->mutable_craned_start_time()->set_seconds(
       ToUnixSeconds(craned_meta.remote_meta.craned_start_time));
