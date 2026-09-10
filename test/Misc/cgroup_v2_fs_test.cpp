@@ -1,17 +1,39 @@
+// The generated CRI Signal enum must be parsed before signal macros from GTest.
+// clang-format off
 #include "CgroupV2Fs.h"
-
 #include <gtest/gtest.h>
+// clang-format on
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <thread>
+
+namespace Craned::Common {
+
+class CgroupManagerTestPeer {
+ public:
+  static void InstallFastPathBackend(
+      std::shared_ptr<CgroupV2FsBackend> backend) {
+    CgroupManager::m_v2_fs_backend_ = std::move(backend);
+  }
+
+  [[nodiscard]] static bool HasFastPathBackend() {
+    return CgroupManager::m_v2_fs_backend_ != nullptr;
+  }
+};
+
+}  // namespace Craned::Common
 
 namespace {
 
 using Craned::Common::CG_V2_REQUIRED_CONTROLLERS;
+using Craned::Common::CgroupManager;
+using Craned::Common::CgroupManagerTestPeer;
 using Craned::Common::CgroupV2CleanupMode;
 using Craned::Common::CgroupV2FsBackend;
 using Craned::Common::CgConstant::ControllerFile;
@@ -112,9 +134,8 @@ TEST(CgroupV2FsBackendTest, DirectResourceWriteAndMigrationUseCgroupFiles) {
   WriteText(fs.Root() / "crane/job_1/cpu.max", "");
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
-  ASSERT_TRUE(backend.WriteControllerFile("crane/job_1",
-                                          ControllerFile::CPU_MAX_V2,
-                                          "1000 65536"));
+  ASSERT_TRUE(backend.WriteControllerFile(
+      "crane/job_1", ControllerFile::CPU_MAX_V2, "1000 65536"));
   EXPECT_EQ("1000 65536", ReadText(fs.Root() / "crane/job_1/cpu.max"));
 
   ASSERT_TRUE(backend.MigrateProcIn("crane/job_1", 12345));
@@ -142,9 +163,162 @@ TEST(CgroupV2FsBackendTest, AsyncJanitorDrainsQueuedRmdir) {
   std::filesystem::create_directories(path);
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
-  ASSERT_TRUE(backend.Destroy("crane/job_1"));
+  std::atomic_uint completion_count{0};
+  std::atomic_bool completion_succeeded{false};
+  std::atomic_bool completion_observed_removal{false};
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    completion_succeeded.store(succeeded, std::memory_order_release);
+    completion_observed_removal.store(!std::filesystem::exists(path),
+                                      std::memory_order_release);
+    completion_count.fetch_add(1, std::memory_order_release);
+  }));
   EXPECT_TRUE(backend.DrainJanitor(std::chrono::seconds{2}));
   EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_TRUE(completion_observed_removal.load(std::memory_order_acquire));
+}
+
+TEST(CgroupV2FsBackendTest, AsyncJanitorRetriesAndCompletesExactlyOnce) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  auto blocker = path / "regular-file-blocks-rmdir";
+  WriteText(blocker, "block");
+
+  CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+  std::atomic_uint completion_count{0};
+  std::atomic_bool completion_succeeded{false};
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    completion_succeeded.store(succeeded, std::memory_order_release);
+    completion_count.fetch_add(1, std::memory_order_release);
+  }));
+
+  // The initial attempt sees the regular file and fails. Removing it before
+  // the first backoff expires lets the queued retry prove its callback path.
+  std::this_thread::sleep_for(std::chrono::milliseconds{100});
+  ASSERT_TRUE(std::filesystem::remove(blocker));
+  EXPECT_TRUE(backend.DrainJanitor(std::chrono::seconds{2}));
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+}
+
+TEST(CgroupV2FsBackendTest, DestructorDrainsRetryBeforeStoppingJanitor) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  auto blocker = path / "regular-file-blocks-rmdir";
+  WriteText(blocker, "block");
+
+  std::atomic_uint completion_count{0};
+  std::atomic_bool completion_succeeded{false};
+  std::jthread unblocker([blocker] {
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+  });
+  {
+    CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+    ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+      completion_succeeded.store(succeeded, std::memory_order_release);
+      completion_count.fetch_add(1, std::memory_order_release);
+    }));
+  }
+  unblocker.join();
+
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+}
+
+TEST(CgroupV2FsBackendTest,
+     StopAcceptingRejectsNewCleanupAndCompletesItExactlyOnce) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  WriteText(path / "regular-file-blocks-rmdir", "block");
+
+  CgroupV2FsBackend backend(CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+  std::atomic_uint first_completion_count{0};
+  std::atomic_bool first_completion_succeeded{true};
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    first_completion_succeeded.store(succeeded, std::memory_order_release);
+    first_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+
+  EXPECT_FALSE(
+      backend.StopAcceptingAndDrainJanitor(std::chrono::milliseconds{0}));
+  EXPECT_FALSE(first_completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(first_completion_count.load(std::memory_order_acquire), 1U);
+
+  std::atomic_uint rejected_completion_count{0};
+  EXPECT_FALSE(backend.Destroy("crane/job_2", [&](bool succeeded) {
+    EXPECT_FALSE(succeeded);
+    rejected_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+  EXPECT_EQ(rejected_completion_count.load(std::memory_order_acquire), 1U);
+}
+
+TEST(CgroupV2FsBackendTest,
+     ManagerShutdownDrainsBeforeResetWithOutstandingCgroupOwner) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+  auto blocker = path / "regular-file-blocks-rmdir";
+  WriteText(blocker, "block");
+
+  auto backend = std::make_shared<CgroupV2FsBackend>(
+      CgroupV2CleanupMode::ASYNC_RMDIR, fs.Root());
+  auto live_cgroup = std::make_unique<Craned::Common::CgroupV2>(
+      "crane/job_1", nullptr, 1, backend);
+  CgroupManagerTestPeer::InstallFastPathBackend(backend);
+  ASSERT_TRUE(CgroupManagerTestPeer::HasFastPathBackend());
+  ASSERT_EQ(backend.use_count(), 3);
+
+  std::atomic_uint completion_count{0};
+  std::atomic_bool completion_succeeded{false};
+  ASSERT_TRUE(backend->Destroy("crane/job_1", [&](bool succeeded) {
+    completion_succeeded.store(succeeded, std::memory_order_release);
+    completion_count.fetch_add(1, std::memory_order_release);
+  }));
+
+  std::jthread unblocker([blocker] {
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+  });
+  CgroupManager::ShutdownCgroupV2FastPath();
+  unblocker.join();
+
+  EXPECT_FALSE(CgroupManagerTestPeer::HasFastPathBackend());
+  EXPECT_EQ(backend.use_count(), 2);
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_TRUE(completion_succeeded.load(std::memory_order_acquire));
+  EXPECT_EQ(completion_count.load(std::memory_order_acquire), 1U);
+
+  std::atomic_uint rejected_completion_count{0};
+  EXPECT_FALSE(live_cgroup->Destroy([&](bool succeeded) {
+    EXPECT_FALSE(succeeded);
+    rejected_completion_count.fetch_add(1, std::memory_order_release);
+  }));
+  EXPECT_EQ(rejected_completion_count.load(std::memory_order_acquire), 1U);
+  live_cgroup.reset();
+}
+
+TEST(CgroupV2FsBackendTest, SyncRmdirCompletesAfterPhysicalRemoval) {
+  FakeCgroupFs fs;
+  auto path = fs.Root() / "crane/job_1";
+  std::filesystem::create_directories(path);
+
+  CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
+  bool completion_called = false;
+  ASSERT_TRUE(backend.Destroy("crane/job_1", [&](bool succeeded) {
+    EXPECT_TRUE(succeeded);
+    EXPECT_FALSE(std::filesystem::exists(path));
+    completion_called = true;
+  }));
+  EXPECT_TRUE(completion_called);
 }
 
 }  // namespace

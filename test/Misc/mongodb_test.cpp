@@ -26,6 +26,7 @@
 #include <mongocxx/instance.hpp>
 #include <utility>
 
+#include "Account/AccountDefs.h"
 #include "CtldPublicDefs.h"
 
 using namespace mongocxx;

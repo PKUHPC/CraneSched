@@ -100,11 +100,49 @@ Enable tracing in the cluster configuration:
 Tracing:
   Enabled: true
   Level: debug
+  ExecutionFlow:
+    Enabled: false
+    HeartbeatIntervalSeconds: 5
 ```
 
 `Level` controls span creation. `basic` creates only core lifecycle spans, `detailed` additionally creates scheduler, status-change, cgroup, and task detail spans, and `debug` creates all spans compiled into the binary. The effective level is the lower value of runtime `Level` and the compiled maximum `CRANE_TRACE_COMPILED_MAX_LEVEL`.
 
 Error bucket routing only applies to spans that have already been created and exported. If a debug-only span is not created at `basic` level, it will not be created later just because that code path records an error status.
+
+### Execution-flow lifecycle points
+
+Execution-flow instrumentation is an independent, test-oriented layer on top
+of tracing. Build with both `CRANE_ENABLE_TRACING=ON` and
+`CRANE_ENABLE_EXECUTION_FLOW=ON`; the `ci-debug` preset enables both. All other
+presets leave execution-flow instrumentation disabled unless explicitly
+requested. CMake rejects execution flow without tracing.
+
+At runtime, `Tracing.ExecutionFlow.Enabled` controls `flow/v1/*` instant spans
+and service pipeline heartbeats. A normal Batch job is instrumented only when
+its submitted environment contains `CRANE_EXECUTION_FLOW_ID` with exactly 32
+strictly lowercase hexadecimal characters. Uppercase values are rejected, not
+normalized. The validated value is propagated to Craned and Supervisor. Array
+and container jobs are excluded from the first contract version. The job must
+be submitted with `--no-requeue`; requeue-enabled submissions, later requeue
+attempts, and additional common/`crun` steps emit only an enumerated
+`unsupported` diagnostic. Unsupported submissions do not propagate the flow
+ID to Craned or Supervisor.
+
+Flow spans are classified as core even at the `basic` trace level. They record
+stable identifiers, enumerated state/outcome values, logical service identity,
+process-unique service identity and a process-local event sequence; they never
+record commands, full environment contents, credentials or arbitrary error
+text. This facility observes the state machine only and never advances or
+repairs job state.
+
+The trace plugin stores ordinary distributed-tracing spans in the `spans`
+measurement and execution-flow points in the schema-defined
+`execution_flow_points` measurement. Both measurements use the configured
+core shard buckets; execution-flow failures copied to the error bucket keep
+the same measurement. Keeping the measurements separate prevents attributes
+that intentionally have different wire types, such as `job_id`, from causing
+InfluxDB field-type conflicts. Consumers must select the measurement for the
+data model they query rather than treating the bucket as a single schema.
 
 The plugin list is configured in the independent `plugin.yaml` file.
 
@@ -400,7 +438,9 @@ CraneSpanExporter  ->  PluginClient (gRPC, Unix socket)
   v
 cplugind  ->  trace.so (TraceHook handler)
   v
-InfluxDB 2.x  (measurement: "spans")
+InfluxDB 2.x
+  | ordinary traces: measurement "spans"
+  | execution flow:  measurement "execution_flow_points"
   v
 query_trace.py / Grafana / custom queries
 ```

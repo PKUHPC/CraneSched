@@ -56,6 +56,61 @@ project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 # Options start here ----------------------------------------------------------------------------
 
 option(CRANE_ENABLE_TRACING "Enable OpenTelemetry tracing pipeline" OFF)
+option(CRANE_ENABLE_EXECUTION_FLOW
+        "Enable execution-flow lifecycle point instrumentation" OFF)
+if (CRANE_ENABLE_EXECUTION_FLOW AND NOT CRANE_ENABLE_TRACING)
+    message(FATAL_ERROR
+            "CRANE_ENABLE_EXECUTION_FLOW requires CRANE_ENABLE_TRACING=ON")
+endif ()
+if (CRANE_ENABLE_EXECUTION_FLOW)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH "$ENV{PYTHONPATH}" CACHE STRING
+            "Python module path used by the execution-flow schema generator")
+    mark_as_advanced(CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+    set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+    if (CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH)
+        set(CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND
+                "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CRANE_EXECUTION_FLOW_SCHEMA_PYTHONPATH}"
+                "${Python3_EXECUTABLE}")
+    endif ()
+    execute_process(
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
+                    -c "import yaml"
+            RESULT_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT
+            ERROR_VARIABLE CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR)
+    if (NOT CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_RESULT EQUAL 0)
+        message(FATAL_ERROR
+                "Execution-flow schema generation requires PyYAML for "
+                "${Python3_EXECUTABLE}: ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_ERROR}")
+    endif ()
+    set(CRANE_EXECUTION_FLOW_SCHEMA
+            "${CMAKE_CURRENT_SOURCE_DIR}/schemas/execution-flow/v1.yaml")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_execution_flow_schema.py")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_CATALOG
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Utilities/OpenTelemetry/include/crane/ExecutionFlowSchema.h")
+    set(CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP
+            "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/crane_execution_flow_schema_check.stamp")
+    add_custom_command(
+            OUTPUT "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}"
+            COMMAND ${CRANE_EXECUTION_FLOW_SCHEMA_PYTHON_COMMAND}
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR}"
+                    --schema "${CRANE_EXECUTION_FLOW_SCHEMA}"
+                    --output "${CRANE_EXECUTION_FLOW_SCHEMA_CATALOG}"
+                    --check
+            COMMAND "${CMAKE_COMMAND}" -E touch
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}"
+            DEPENDS
+                    "${CRANE_EXECUTION_FLOW_SCHEMA}"
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_GENERATOR}"
+                    "${CRANE_EXECUTION_FLOW_SCHEMA_CATALOG}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Checking generated execution-flow schema catalog"
+            VERBATIM)
+    add_custom_target(crane_execution_flow_schema_check
+            DEPENDS "${CRANE_EXECUTION_FLOW_SCHEMA_CHECK_STAMP}")
+endif ()
 set(CRANE_TRACE_COMPILED_MAX_LEVEL "debug" CACHE STRING
         "Maximum tracing level compiled into binaries: basic, detailed, or debug")
 set_property(CACHE CRANE_TRACE_COMPILED_MAX_LEVEL PROPERTY STRINGS basic detailed debug)
@@ -437,6 +492,50 @@ if (CRANE_ENABLE_TESTS)
     # Test source files may include lots of warnings and errors.
     # Exclude it from 'all' target
     add_subdirectory(test EXCLUDE_FROM_ALL)
+
+    # Because the test tree is EXCLUDE_FROM_ALL, `cmake --build` never produces
+    # the test executables. ctest then resolves every gtest_discover_tests entry
+    # to a <name>_NOT_BUILT placeholder and the suite reports nothing while
+    # looking like it ran. Give CI a single target that builds them all.
+    add_custom_target(crane_tests)
+
+    # Targets that do not compile against the current tree. Neither is touched
+    # by the execution-flow work; both were simply invisible while the test tree
+    # was never built. Naming them here (rather than dropping the aggregate
+    # target) means a newly added test is gated by default, and un-breaking one
+    # is a one-line deletion.
+    #
+    #   utility_test      - the req_map..req_map5 cases compare a raw
+    #                       DeviceMap-shaped map against DedicatedResourceInNode.
+    #                       operator<=(DeviceMap, DedicatedResourceInNode) was
+    #                       removed by ResourceV3 (#867) without updating the
+    #                       test. The other 15 cases in the file are fine, so
+    #                       this needs those 5 ported to the V3 model (or
+    #                       dropped), not a build fix.
+    #   misc_mongodb_test - written against the pre-#884 account schema: it
+    #                       still expects Ctld::User::allowed_partition_qos_map,
+    #                       which no longer exists. Needs a rewrite against
+    #                       Account/AccountDefs.h, and a live MongoDB to run.
+    set(CRANE_TESTS_KNOWN_BROKEN
+            utility_test
+            misc_mongodb_test)
+
+    function(crane_add_test_executables directory)
+        get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+        foreach (child IN LISTS children)
+            crane_add_test_executables("${child}")
+        endforeach ()
+        get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach (target IN LISTS targets)
+            get_target_property(target_type ${target} TYPE)
+            if (target_type STREQUAL "EXECUTABLE"
+                    AND NOT ${target} IN_LIST CRANE_TESTS_KNOWN_BROKEN)
+                add_dependencies(crane_tests ${target})
+            endif ()
+        endforeach ()
+    endfunction()
+
+    crane_add_test_executables("${CMAKE_CURRENT_SOURCE_DIR}/test")
 endif ()
 
 # Adopt GNU standard installation directories

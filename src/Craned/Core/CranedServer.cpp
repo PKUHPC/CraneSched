@@ -27,6 +27,7 @@
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "crane/CriClient.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/String.h"
 #include "crane/TraceConfigProto.h"
 #include "crane/Tracing.h"
@@ -58,6 +59,7 @@ grpc::Status CranedServiceImpl::UpdateTraceConfig(
   auto applied_config = crane::ApplyRuntimeTraceConfig(request->config());
   g_config.Tracing.Enabled = applied_config.enabled;
   g_config.Tracing.Level = applied_config.runtime_level;
+  CRANE_EXECUTION_FLOW_RECONCILE();
   if (applied_config.clamped) {
     CRANE_WARN(
         "Tracing runtime level {} exceeds compiled max level {}; effective "

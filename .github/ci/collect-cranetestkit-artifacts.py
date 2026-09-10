@@ -23,6 +23,10 @@ MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_CHECKPOINT_BYTES = 16 * 1024 * 1024
 MAX_LOG_FILES = 2048
 MAX_LOG_SCAN = 8192
+MAX_FLOW_FILES = 512
+MAX_FLOW_FILE_BYTES = 2 * 1024 * 1024
+MAX_TOTAL_FLOW_BYTES = 16 * 1024 * 1024
+MAX_FLOW_DETAIL_ITEMS = 16
 MAX_FAILURE_ROWS = 50
 MAX_INFRASTRUCTURE_ROWS = 20
 MAX_SLOW_CASE_ROWS = 10
@@ -33,6 +37,11 @@ DENIED_NAME = re.compile(
 )
 LOG_RELATIVE = re.compile(
     r"^[A-Za-z0-9_.-]+/[0-9]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.log$"
+)
+FLOW_RELATIVE = re.compile(
+    r"^(?:(?:[A-Za-z0-9_.-]+)/[0-9]+/)?flow/(?:shard-[0-9]+\.progress\.json|"
+    r"shard-[0-9]+\.(?:commands|events)\.ndjson|"
+    r"cases/TC[A-Za-z0-9.-]+/[0-9a-f]{32}/iteration-[0-9]+\.ndjson)$"
 )
 CASE_LEVEL_DIAGNOSTIC = re.compile(
     r"^(?:case was not run|missing case result):\s*\S+\s*$", re.IGNORECASE
@@ -53,6 +62,10 @@ REDACTIONS = (
     re.compile(r"\b(?:hvs\.[A-Za-z0-9_-]+|s\.[A-Za-z0-9]{16,})\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     re.compile(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+"),
+    re.compile(
+        r'(?i)((?:"(?:password|passwd|token|secret|cookie|private[_-]?key|'
+        r'client[_-]?secret)"\s*:\s*"))(?:[^"\\]|\\.)*(?=")'
+    ),
     re.compile(
         r"(?i)((?:password|passwd|token|secret|cookie|private[_-]?key|client[_-]?secret)"
         r"\s*[:=]\s*)[^\s,;]+"
@@ -176,6 +189,21 @@ def _escape_markdown(value: object) -> str:
         .replace("\r", " ")
         .replace("\n", " ")
     )
+
+
+def _flow_detail_strings(value: object) -> tuple[str, ...]:
+    """Return a small, type-safe subset of an untrusted flow-result list."""
+
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in islice(value, MAX_FLOW_DETAIL_ITEMS * 4):
+        if not isinstance(item, str) or not item:
+            continue
+        result.append(item[:512])
+        if len(result) == MAX_FLOW_DETAIL_ITEMS:
+            break
+    return tuple(result)
 
 
 def _reject_json_constant(constant: str) -> object:
@@ -757,6 +785,117 @@ def _write_summary(
     )
     lines.append("")
 
+    flow_summary = result.get("execution_flow")
+    flow_subject_count = None
+    if isinstance(flow_summary, dict):
+        flow_subject_count = _integer(flow_summary.get("subject_count"))
+    if flow_subject_count is not None and flow_subject_count > 0:
+        status_counts = flow_summary.get("status_counts")
+        mode_counts = flow_summary.get("mode_counts")
+        contract_counts = flow_summary.get("contract_counts")
+        if not isinstance(status_counts, dict):
+            status_counts = {}
+        if not isinstance(mode_counts, dict):
+            mode_counts = {}
+        if not isinstance(contract_counts, dict):
+            contract_counts = {}
+        contracts = ", ".join(
+            f"{name} ({count})"
+            for name, count in sorted(contract_counts.items())
+            if isinstance(name, str) and _integer(count) is not None
+        )
+        modes = ", ".join(
+            f"{name} ({count})"
+            for name, count in (
+                ("shadow", mode_counts.get("shadow")),
+                ("enforce", mode_counts.get("enforce")),
+            )
+            if _integer(count) is not None and _integer(count) > 0
+        )
+        lines.extend(["### Execution flow contracts", ""])
+        _append_table(
+            lines,
+            (
+                "Cases",
+                "Subjects",
+                "Satisfied",
+                "Violations",
+                "Inconclusive",
+                "Unsupported",
+                "Modes",
+                "Contracts",
+            ),
+            [
+                (
+                    _integer(flow_summary.get("case_count")) or 0,
+                    flow_subject_count,
+                    _integer(status_counts.get("satisfied")) or 0,
+                    _integer(status_counts.get("flow_violation")) or 0,
+                    _integer(status_counts.get("trace_pipeline_inconclusive")) or 0,
+                    _integer(status_counts.get("unsupported")) or 0,
+                    modes or "unavailable",
+                    contracts or "unavailable",
+                )
+            ],
+        )
+        flow_findings: list[tuple[object, ...]] = []
+        for case in cases:
+            if not isinstance(case, dict):
+                continue
+            iterations = case.get("execution_flow")
+            if not isinstance(iterations, list):
+                continue
+            for iteration in iterations:
+                if not isinstance(iteration, dict):
+                    continue
+                subjects = iteration.get("subjects")
+                if not isinstance(subjects, list):
+                    continue
+                for subject in subjects:
+                    if (
+                        not isinstance(subject, dict)
+                        or subject.get("status") == "satisfied"
+                    ):
+                        continue
+                    expected = subject.get("expected_next")
+                    codes = subject.get("violation_codes")
+                    expected_items = _flow_detail_strings(expected)
+                    code_items = _flow_detail_strings(codes)
+                    flow_findings.append(
+                        (
+                            case.get("id", "unavailable"),
+                            iteration.get("mode", "unavailable"),
+                            subject.get("process_index", "unavailable"),
+                            subject.get("status", "unavailable"),
+                            subject.get("last_point") or "-",
+                            ", ".join(expected_items) if expected_items else "-",
+                            ", ".join(code_items) if code_items else "-",
+                        )
+                    )
+        if flow_findings:
+            lines.append("")
+            _append_table(
+                lines,
+                (
+                    "Case",
+                    "Mode",
+                    "Process",
+                    "Verdict",
+                    "Last point",
+                    "Expected",
+                    "Codes",
+                ),
+                flow_findings[:MAX_FAILURE_ROWS],
+            )
+            if len(flow_findings) > MAX_FAILURE_ROWS:
+                lines.extend(
+                    [
+                        "",
+                        f"Showing {MAX_FAILURE_ROWS} of {len(flow_findings)} flow findings.",
+                    ]
+                )
+        lines.append("")
+
     if infrastructure_messages:
         lines.extend(["### Infrastructure errors", ""])
         lines.extend(
@@ -1077,8 +1216,9 @@ def main() -> int:
             if logs_root.is_dir() and not logs_root.is_symlink():
                 for source in sorted(islice(logs_root.rglob("*.log"), MAX_LOG_SCAN)):
                     relative_under_logs = source.relative_to(logs_root)
+                    remaining = MAX_TOTAL_LOG_BYTES - total
                     if (
-                        total >= MAX_TOTAL_LOG_BYTES
+                        remaining <= 0
                         or log_files >= MAX_LOG_FILES
                         or not SAFE_LOG_NAME.fullmatch(source.name)
                         or DENIED_NAME.search(str(relative_under_logs))
@@ -1091,12 +1231,44 @@ def main() -> int:
                     entry = _copy_text(
                         safe,
                         destination / "logs" / relative_under_logs,
-                        tail_bytes=MAX_LOG_BYTES,
+                        tail_bytes=min(MAX_LOG_BYTES, remaining),
                     )
                     entry["path"] = str(Path("logs") / relative_under_logs)
                     entries.append(entry)
-                    total += min(safe.stat().st_size, MAX_LOG_BYTES)
+                    total += min(safe.stat().st_size, MAX_LOG_BYTES, remaining)
                     log_files += 1
+
+            flow_total = 0
+            flow_files = 0
+            logs_root = run_root / "logs"
+            if logs_root.is_dir() and not logs_root.is_symlink():
+                for source in sorted(islice(logs_root.rglob("*"), MAX_LOG_SCAN)):
+                    relative_under_logs = source.relative_to(logs_root)
+                    remaining = MAX_TOTAL_FLOW_BYTES - flow_total
+                    if (
+                        remaining <= 0
+                        or flow_files >= MAX_FLOW_FILES
+                        or DENIED_NAME.search(str(relative_under_logs))
+                        or not FLOW_RELATIVE.fullmatch(str(relative_under_logs))
+                    ):
+                        continue
+                    relative = Path("logs") / relative_under_logs
+                    safe = _safe_source(run_root, relative)
+                    if safe is None:
+                        continue
+                    entry = _copy_text(
+                        safe,
+                        destination / relative,
+                        tail_bytes=min(MAX_FLOW_FILE_BYTES, remaining),
+                    )
+                    entry["path"] = str(relative)
+                    entries.append(entry)
+                    flow_total += min(
+                        safe.stat().st_size,
+                        MAX_FLOW_FILE_BYTES,
+                        remaining,
+                    )
+                    flow_files += 1
 
     manifest = {
         "apiVersion": "cranesched.io/v1alpha1",

@@ -21,6 +21,7 @@
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
+#include "crane/ExecutionFlow.h"
 
 namespace Ctld {
 
@@ -572,6 +573,8 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   *job_to_d.mutable_res() = static_cast<crane::grpc::ResourceInNodeV3>(
       m_allocated_res_.At(craned_id));
   if (!job->Traceparent().empty()) job_to_d.set_traceparent(job->Traceparent());
+  if (auto flow_id = job->ExecutionFlowIdValue(); !flow_id.empty())
+    job_to_d.set_execution_flow_id(std::move(flow_id));
   if (auto identity = job->GetArrayTaskIdentity(); identity.has_value()) {
     auto* array_task = job_to_d.mutable_array_task();
     array_task->set_array_job_id(identity->array_job_id);
@@ -603,6 +606,10 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
   step_to_d.set_get_user_env(this->get_user_env);
   step_to_d.set_extra_attr(extra_attr);
+  if (auto flow_id = job->ExecutionFlowIdValue(); !flow_id.empty()) {
+    step_to_d.set_requeue_count(this->RequeueCount());
+    step_to_d.set_execution_flow_id(std::move(flow_id));
+  }
 
   for (const auto& hostname : this->m_craned_ids_)
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
@@ -740,6 +747,9 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         this->SetPendingFinalStatus(crane::grpc::JobStatus::Invalid);
         this->SetPendingFinalExitCode(0U);
 
+        CRANE_FLOW_EMIT(DaemonAllConfigured,
+                        job->ExecutionFlowContextForStep(this->StepId()));
+
         // After all daemon steps running, create the primary step from the
         // submitted job.
         context->rn_step_raw_ptrs.insert(this);
@@ -864,6 +874,8 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     }
 
     this->SetStatus(crane::grpc::JobStatus::Completing);
+    CRANE_FLOW_EMIT(DaemonAllCompleting,
+                    job->ExecutionFlowContextForStep(this->StepId()));
     for (const auto& node_id : this->ExecutionNodes()) {
       context->craned_step_free_map[node_id][job->JobId()].insert(
           kDaemonStepId);
@@ -914,6 +926,9 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
     CRANE_INFO("[Step #{}.{}] finished with status {}.", job_id, this->StepId(),
                this->Status());
+    CRANE_FLOW_EMIT(DaemonAllTerminal,
+                    job->ExecutionFlowContextForStep(this->StepId()),
+                    static_cast<int64_t>(this->Status()));
     // Daemon step terminated by user before primary step created
     if (job->PrimaryStepStatus() == crane::grpc::JobStatus::Invalid) {
       return std::pair{this->Status(), this->ExitCode()};
@@ -1292,6 +1307,12 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_cwd(this->cwd);
   step_to_d.set_get_user_env(this->get_user_env);
   step_to_d.set_extra_attr(extra_attr);
+  if (this->IsPrimaryStep()) {
+    if (auto flow_id = job->ExecutionFlowIdValue(); !flow_id.empty()) {
+      step_to_d.set_requeue_count(this->RequeueCount());
+      step_to_d.set_execution_flow_id(std::move(flow_id));
+    }
+  }
 
   step_to_d.set_get_user_env(this->get_user_env);
 
@@ -1456,6 +1477,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
         this->SetPendingFinalExitCode(0U);
         this->SetRunningNodes(this->ExecutionNodes());
 
+        CRANE_FLOW_EMIT(StepAllConfigured,
+                        job->ExecutionFlowContextForStep(step_id));
+
         // Primary: Update job status when primary step is Running.
         if (this->IsPrimaryStep()) {
           job->SetStatus(crane::grpc::JobStatus::Running);
@@ -1484,9 +1508,10 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   case crane::grpc::JobStatus::Running:
   case crane::grpc::JobStatus::Completing:
     if (new_status == crane::grpc::JobStatus::Completing) {
+      const bool was_all_completing = this->AllNodesCompleting();
       this->StepOnNodeCompleting(craned_id);
       context->rn_step_raw_ptrs.insert(this);
-      step_all_completing = this->AllNodesCompleting();
+      step_all_completing = !was_all_completing && this->AllNodesCompleting();
       if (!step_all_completing) {
         CRANE_DEBUG("[Step #{}.{}] got Completing, waiting for {} more nodes.",
                     job_id, step_id,
@@ -1545,6 +1570,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                job_id, step_id, crane::grpc::JobStatus::Completing,
                this->Status());
     this->SetStatus(crane::grpc::JobStatus::Completing);
+
+    CRANE_FLOW_EMIT(StepAllCompleting,
+                    job->ExecutionFlowContextForStep(step_id));
 
     // Notify frontend (interactive steps)
     if (this->ia_meta.has_value()) {
@@ -1631,6 +1659,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
     }
     CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id, step_id,
                this->Status());
+
+    CRANE_FLOW_EMIT(StepAllTerminal, job->ExecutionFlowContextForStep(step_id),
+                    static_cast<int64_t>(this->Status()));
 
     // Primary step: trigger daemon FreeSteps for job-level cleanup. The daemon
     // terminal is sent by Craned only after local job resources are gone.
@@ -1849,9 +1880,56 @@ bool JobInCtld::ShouldRequeue() const {
          status != crane::grpc::Cancelled;
 }
 
+std::optional<crane::FlowContext> JobInCtld::RequestedExecutionFlowContext()
+    const {
+  return RequestedExecutionFlowContext(SubmitTraceparent());
+}
+
+std::optional<crane::FlowContext> JobInCtld::RequestedExecutionFlowContext(
+    std::string_view traceparent) const {
+  return crane::MakeExecutionFlowContext(requested_execution_flow_id_,
+                                         traceparent, JobId());
+}
+
+std::optional<crane::FlowContext> JobInCtld::ExecutionFlowContext() const {
+  if (!requested_execution_flow_id_ ||
+      ExecutionFlowUnsupportedReason().has_value())
+    return std::nullopt;
+  return crane::MakeExecutionFlowContext(requested_execution_flow_id_,
+                                         Traceparent(), JobId());
+}
+
+std::optional<crane::FlowContext> JobInCtld::ExecutionFlowContextForStep(
+    step_id_t step_id) const {
+  if (step_id != kDaemonStepId && step_id != kPrimaryStepId)
+    return std::nullopt;
+  auto context = ExecutionFlowContext();
+  if (context) context->Step(step_id);
+  return context;
+}
+
+std::string JobInCtld::ExecutionFlowIdValue() const {
+  if (!requested_execution_flow_id_ ||
+      ExecutionFlowUnsupportedReason().has_value())
+    return {};
+  return crane::FlowEmitter::CorrelationValue(requested_execution_flow_id_);
+}
+
+std::optional<crane::FlowUnsupportedReason>
+JobInCtld::ExecutionFlowUnsupportedReason() const {
+  if (!m_steps_.empty()) return crane::FlowUnsupportedReason::kExtraCommonStep;
+  return crane::ExecutionFlowJobUnsupportedReason(
+      IsBatch(), IsContainer(), IsArrayParent() || IsArrayChild(),
+      job_to_ctld.no_requeue(), RequeueCount());
+}
+
 void JobInCtld::ResetForRequeue() {
   requeue_count++;
   runtime_attr.set_requeue_count(requeue_count);
+
+  CRANE_FLOW_EMIT(JobUnsupportedAtRequeue,
+                  RequestedExecutionFlowContext(Traceparent()),
+                  crane::FlowUnsupportedReason::kRequeueAttempt);
 
   requeue_requested = false;
   runtime_attr.set_requeue_requested(false);
@@ -2036,6 +2114,8 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   cwd = val.cwd();
 
   for (const auto& [k, v] : val.env()) env[k] = v;
+
+  requested_execution_flow_id_ = crane::ExecutionFlowIdFromEnvironment(env);
 
   get_user_env = val.get_user_env();
   requeue_if_failed = val.requeue_if_failed();

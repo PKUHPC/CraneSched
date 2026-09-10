@@ -1312,7 +1312,8 @@ class JobScheduler {
       const char* reason);
   void DispatchFreeSteps_(
       CranedId craned_id,
-      std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps,
+      std::unordered_map<job_id_t, crane::FlowContext> flow_contexts = {});
   void DispatchTerminateSteps_(
       CranedId craned_id,
       std::unordered_map<job_id_t, std::set<step_id_t>> steps);

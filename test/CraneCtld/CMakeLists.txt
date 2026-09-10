@@ -73,6 +73,7 @@ target_link_libraries(ctld_public_defs_test
         spdlog::spdlog
         concurrentqueue
         crane_proto_lib
+        crane_tracer
 
         Utility_PublicHeader
         Utility_PasswordEntry

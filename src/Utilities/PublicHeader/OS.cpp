@@ -115,14 +115,17 @@ bool CreateFile(std::string const& p) {
 }
 
 bool CreateFolders(std::string const& p) {
-  if (std::filesystem::exists(p)) return true;
-
   std::error_code ec;
-  bool ok = std::filesystem::create_directories(p, ec);
+  if (std::filesystem::create_directories(p, ec)) return true;
 
-  if (!ok) CRANE_ERROR("Failed to create folder {}: {}", p, ec.message());
+  // A concurrent creator can win after our call starts. In that case the
+  // standard reports false without an error because the directory now exists.
+  if (!ec && std::filesystem::is_directory(p, ec)) return true;
 
-  return ok;
+  if (!ec) ec = std::make_error_code(std::errc::not_a_directory);
+  CRANE_ERROR("Failed to create folder {}: {}", p, ec.message());
+
+  return false;
 }
 
 bool CreateFoldersForFile(std::string const& p) {

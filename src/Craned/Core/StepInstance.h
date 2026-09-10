@@ -21,7 +21,10 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include <functional>
+
 #include "SupervisorStub.h"
+#include "crane/ExecutionFlow.h"
 #include "crane/Tracing.h"
 
 namespace Craned {
@@ -79,7 +82,23 @@ struct StepInstance {
                         StepStatus status,
                         std::shared_ptr<SupervisorStub> supervisor_stub);
   ~StepInstance() = default;
-  void CleanUp(bool async = true);
+
+  struct CleanupResult {
+    bool cgroup_present{true};
+    bool processes_drained{true};
+    bool cgroup_destroyed{true};
+    bool step_directory_removed{true};
+
+    [[nodiscard]] bool Succeeded() const {
+      // An absent cgroup is an idempotent no-op (for example after recovery or
+      // duplicate cleanup), not a cleanup failure.
+      return processes_drained && cgroup_destroyed && step_directory_removed;
+    }
+  };
+
+  using CleanupCompletion = std::function<void(CleanupResult)>;
+  void CleanUp(bool async = true, CleanupCompletion completion = {});
+  [[nodiscard]] std::optional<crane::FlowContext> ExecutionFlowContext() const;
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
@@ -108,5 +127,7 @@ struct StepInstance {
   // Not implemented yet.
   CraneExpected<void> TerminateStep(
       crane::grpc::TerminateSource terminate_source);
+
+  std::optional<crane::FlowId> execution_flow_id_;
 };
 }  // namespace Craned

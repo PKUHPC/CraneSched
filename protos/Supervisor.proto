@@ -124,6 +124,8 @@ message InitSupervisorRequest {
   bool tracing_enabled = 41;
   optional string traceparent = 42;  // W3C traceparent for distributed tracing
   string trace_level = 43;
+  bool execution_flow_enabled = 44;
+  uint32 execution_flow_heartbeat_interval_seconds = 45;
 }
 
 message SupervisorReady {

@@ -127,6 +127,7 @@ class ArtifactCollectionTest(unittest.TestCase):
         workers: dict[str, list[int]],
         infrastructure_errors: list[str] | None = None,
         missing_case_ids: list[str] | None = None,
+        execution_flow: dict[str, object] | None = None,
     ) -> Path:
         run_root = root / "runs/gh-123-1"
         planned_shards = [
@@ -187,12 +188,124 @@ class ArtifactCollectionTest(unittest.TestCase):
                 "started_at": "2026-07-16T00:00:00Z",
                 "finished_at": "2026-07-16T00:01:05.200000Z",
                 "phase_durations_seconds": {"wait": 59.999, "total": 65.2},
+                "execution_flow": execution_flow
+                or {
+                    "case_count": 0,
+                    "iteration_count": 0,
+                    "subject_count": 0,
+                    "status_counts": {},
+                    "mode_counts": {},
+                    "contract_counts": {},
+                },
             },
         )
         self._write_json(
             run_root / "state.json", {"phase": "stopped", "exit_code": exit_code}
         )
         return run_root
+
+    def test_summary_renders_bounded_execution_flow_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = self._case("4.1.0.4", "passed", 2.0, name="batch_flow")
+            case["execution_flow"] = [
+                {
+                    "apiVersion": "cranesched.io/flow-result/v1",
+                    "contract": "batch/v1",
+                    "mode": "shadow",
+                    "iteration": 0,
+                    "deadline_at": "2026-07-30T00:03:00Z",
+                    "subjects": [
+                        {
+                            "process_index": 0,
+                            "flow_id": "0" * 32,
+                            "job_ids": [42],
+                            "status": "flow_violation",
+                            "last_point": "flow/v1/ctld/job/resources_released",
+                            "expected_next": ["embedded_persisted"],
+                            "pipeline_healthy": True,
+                            "violation_codes": ["edge_deadline_exceeded"],
+                        }
+                    ],
+                }
+            ]
+            run_root = self._run(
+                root,
+                [case],
+                exit_code=0,
+                shards=[[case]],
+                workers={"wrl02": [0]},
+                execution_flow={
+                    "case_count": 1,
+                    "iteration_count": 1,
+                    "subject_count": 1,
+                    "status_counts": {
+                        "satisfied": 0,
+                        "flow_violation": 1,
+                        "trace_pipeline_inconclusive": 0,
+                        "unsupported": 0,
+                    },
+                    "mode_counts": {"shadow": 1, "enforce": 0},
+                    "contract_counts": {"batch/v1": 1},
+                },
+            )
+            destination = root / "artifact"
+
+            self._collect(run_root, destination)
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+
+            self.assertIn("### Execution flow contracts", summary)
+            self.assertIn("batch/v1 (1)", summary)
+            self.assertIn("flow_violation", summary)
+            self.assertIn("edge_deadline_exceeded", summary)
+
+    def test_summary_filters_malformed_execution_flow_detail_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = self._case("4.1.0.4", "passed", 2.0, name="batch_flow")
+            case["execution_flow"] = [
+                {
+                    "mode": "shadow",
+                    "subjects": [
+                        {
+                            "process_index": 0,
+                            "status": "trace_pipeline_inconclusive",
+                            "expected_next": [
+                                None,
+                                42,
+                                {"not": "text"},
+                                *[f"point-{index}" for index in range(100)],
+                            ],
+                            "violation_codes": [False, "pipeline_gap"],
+                        }
+                    ],
+                }
+            ]
+            run_root = self._run(
+                root,
+                [case],
+                exit_code=2,
+                shards=[[case]],
+                workers={"wrl02": [0]},
+                execution_flow={
+                    "case_count": 1,
+                    "iteration_count": 1,
+                    "subject_count": 1,
+                    "status_counts": {"trace_pipeline_inconclusive": 1},
+                    "mode_counts": {"shadow": 1},
+                    "contract_counts": {"batch/v1": 1},
+                },
+            )
+            destination = root / "artifact"
+
+            self._collect(run_root, destination)
+            summary = (destination / "summary.md").read_text(encoding="utf-8")
+
+            self.assertIn("pipeline_gap", summary)
+            self.assertIn("point-0", summary)
+            self.assertIn("point-15", summary)
+            self.assertNotIn("point-16", summary)
+            self.assertNotIn("{'not': 'text'}", summary)
 
     def test_allowlists_and_redacts_failure_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -254,6 +367,27 @@ class ArtifactCollectionTest(unittest.TestCase):
                 "SHOULD_NOT_BE_COPIED\n", encoding="utf-8"
             )
             (run_root / "logs/wrl02/0/link.log").symlink_to(allowed_log)
+            flow_case = (
+                run_root
+                / "logs/wrl02/0/flow/cases/TC4-1-0-3"
+                / ("a" * 32)
+                / "iteration-0.ndjson"
+            )
+            flow_case.parent.mkdir(parents=True)
+            flow_case.write_text(
+                '{"type":"validator_event","token":"secret-token"}\n',
+                encoding="utf-8",
+            )
+            flow_progress = run_root / "logs/wrl02/0/flow/shard-0.progress.json"
+            flow_progress.write_text('{"flow_status":"progress"}\n', encoding="utf-8")
+            flow_events = run_root / "logs/wrl02/0/flow/shard-0.events.ndjson"
+            flow_events.write_text('{"type":"health"}\n', encoding="utf-8")
+            (run_root / "logs/wrl02/0/flow/unapproved.json").write_text(
+                "SHOULD_NOT_BE_COPIED\n", encoding="utf-8"
+            )
+            (run_root / "logs/wrl02/0/flow/shard-1.progress.json").symlink_to(
+                flow_progress
+            )
 
             destination = root / "artifact"
             self._collect(run_root, destination, logs=True)
@@ -263,6 +397,27 @@ class ArtifactCollectionTest(unittest.TestCase):
             self.assertEqual(copied.read_text(encoding="utf-8").count("[REDACTED]"), 2)
             self.assertFalse((destination / "logs/wrl02/0/env.log").exists())
             self.assertFalse((destination / "logs/wrl02/0/link.log").exists())
+            copied_flow_case = destination / flow_case.relative_to(run_root)
+            self.assertTrue(copied_flow_case.is_file())
+            copied_flow_payload = json.loads(
+                copied_flow_case.read_text(encoding="utf-8")
+            )
+            self.assertEqual(copied_flow_payload["token"], "[REDACTED]")
+            self.assertNotIn(
+                "secret-token", copied_flow_case.read_text(encoding="utf-8")
+            )
+            self.assertTrue(
+                (destination / flow_progress.relative_to(run_root)).is_file()
+            )
+            self.assertTrue(
+                (destination / flow_events.relative_to(run_root)).is_file()
+            )
+            self.assertFalse(
+                (destination / "logs/wrl02/0/flow/unapproved.json").exists()
+            )
+            self.assertFalse(
+                (destination / "logs/wrl02/0/flow/shard-1.progress.json").exists()
+            )
             manifest = json.loads(
                 (destination / "artifact-manifest.json").read_text(encoding="utf-8")
             )
@@ -287,6 +442,72 @@ class ArtifactCollectionTest(unittest.TestCase):
             self.assertNotIn("A" * 100, summary)
             self.assertNotIn("<b>", summary)
             self.assertIn("build&#96;\\|&lt;b&gt;[REDACTED]", summary)
+
+    def test_log_and_flow_copy_respect_exact_aggregate_byte_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = self._case("1.0.0.1", "failed", 1.0)
+            run_root = self._run(
+                root,
+                [case],
+                exit_code=1,
+                shards=[[case]],
+                workers={"wrl02": [0]},
+            )
+            service_logs = run_root / "logs/wrl02/0/services"
+            service_logs.mkdir(parents=True)
+            (service_logs / "a.log").write_text("abcdefgh", encoding="utf-8")
+            (service_logs / "b.log").write_text("ijklmnop", encoding="utf-8")
+            flow_logs = run_root / "logs/wrl02/0/flow"
+            flow_logs.mkdir(parents=True)
+            (flow_logs / "shard-0.commands.ndjson").write_text(
+                "abcdefgh", encoding="utf-8"
+            )
+            (flow_logs / "shard-1.events.ndjson").write_text(
+                "ijklmnop", encoding="utf-8"
+            )
+            destination = root / "artifact"
+
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        str(SCRIPT),
+                        "--run-root",
+                        str(run_root),
+                        "--destination",
+                        str(destination),
+                        "--run-id",
+                        "gh-123-1",
+                        "--include-logs",
+                    ],
+                ),
+                mock.patch.object(collection, "MAX_LOG_BYTES", 8),
+                mock.patch.object(collection, "MAX_TOTAL_LOG_BYTES", 10),
+                mock.patch.object(collection, "MAX_FLOW_FILE_BYTES", 8),
+                mock.patch.object(collection, "MAX_TOTAL_FLOW_BYTES", 10),
+            ):
+                self.assertEqual(collection.main(), 0)
+
+            copied_service_logs = tuple(
+                (destination / "logs/wrl02/0/services").glob("*.log")
+            )
+            copied_flow_logs = tuple((destination / "logs/wrl02/0/flow").glob("*"))
+            self.assertEqual(sum(path.stat().st_size for path in copied_service_logs), 10)
+            self.assertEqual(sum(path.stat().st_size for path in copied_flow_logs), 10)
+            self.assertEqual(
+                (destination / "logs/wrl02/0/services/b.log").read_text(
+                    encoding="utf-8"
+                ),
+                "op",
+            )
+            self.assertEqual(
+                (destination / "logs/wrl02/0/flow/shard-1.events.ndjson").read_text(
+                    encoding="utf-8"
+                ),
+                "op",
+            )
 
     def test_pass_summary_shows_shards_timing_and_top_ten_slowest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

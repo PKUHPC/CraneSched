@@ -1,6 +1,7 @@
 add_executable(craned
         CtldClient.h
         CtldClient.cpp
+        CleanupLifecycle.h
         JobManager.h
         JobManager.cpp
         SupervisorStub.cpp

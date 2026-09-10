@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <string>
 
 #ifdef CRANE_ENABLE_TRACING
@@ -36,12 +37,27 @@ class TracerManager {
   bool Initialize(const std::string& service_name);
 
 #ifdef CRANE_ENABLE_TRACING
+  // How ended spans reach the exporter.
+  //
+  // kBatched hands them to the SDK's batch processor, which exports from its
+  // own thread. This is what production wants: SimpleSpanProcessor exports
+  // synchronously from OnEnd under a global mutex, so every span end became a
+  // blocking plugin RPC on whatever thread produced it -- including the
+  // scheduler's single status-change thread and the single cgroup janitor
+  // worker. Execution flow made that acute by adding tens of points per job.
+  //
+  // kSynchronous keeps the old behaviour for tests that assert on a span the
+  // moment it ends, where a background export would just be a race.
+  enum class SpanExportMode { kBatched, kSynchronous };
+
   bool Initialize(
       const std::string& service_name,
-      std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter);
+      std::unique_ptr<opentelemetry::sdk::trace::SpanExporter> extra_exporter,
+      SpanExportMode export_mode = SpanExportMode::kBatched);
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer>
   GetTracerSafe() {
+    std::lock_guard lock{tracer_mutex_};
     return tracer_;
   }
 #endif
@@ -58,6 +74,7 @@ class TracerManager {
   ~TracerManager() = default;
 
 #ifdef CRANE_ENABLE_TRACING
+  mutable std::mutex tracer_mutex_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
       tracer_provider_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;
