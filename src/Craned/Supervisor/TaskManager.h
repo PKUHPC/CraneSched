@@ -498,6 +498,8 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
 };
 
 class ProcInstance : public ITaskInstance {
+  friend class SupervisorExitTestPeer;
+
  public:
   explicit ProcInstance(StepInstance* step_spec, task_id_t task_id)
       : ITaskInstance(step_spec, task_id) {}
@@ -573,6 +575,8 @@ class ProcInstance : public ITaskInstance {
 };
 
 class TaskManager {
+  friend class SupervisorExitTestPeer;
+
  public:
   explicit TaskManager();
   ~TaskManager();
