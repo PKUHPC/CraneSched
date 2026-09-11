@@ -410,6 +410,7 @@ jobs:
             --preset ci-debug \
             --ccache-dir "$CRANETESTKIT_CCACHE_DIR" \
             --fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR" \
+            --run-unit-tests \
             --publish-root "$CRANETESTKIT_NFS_ROOT" \
             | tee "$build_log"
           build_json="$(tail -n 1 "$build_log")"
