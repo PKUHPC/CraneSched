@@ -434,9 +434,7 @@ add_subdirectory(src)
 # Tests
 if (CRANE_ENABLE_TESTS)
     enable_testing()
-    # Test source files may include lots of warnings and errors.
-    # Exclude it from 'all' target
-    add_subdirectory(test EXCLUDE_FROM_ALL)
+    add_subdirectory(test)
 endif ()
 
 # Adopt GNU standard installation directories

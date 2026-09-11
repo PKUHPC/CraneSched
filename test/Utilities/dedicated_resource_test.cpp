@@ -170,63 +170,42 @@ TEST(DEDICATED_RES_NODE, minus2) {
   ASSERT_EQ(res, resourceInNode2);
 }
 
-TEST(DEDICATED_RES_NODE, req_map) {
-  std::unordered_map<std::string /*name*/,
-                     std::pair<uint64_t /*untyped req count*/,
-                               std::unordered_map<std::string /*type*/,
-                                                  uint64_t /*type total*/>>>
-      req;
-  req["GPU"] = {1, {{"A100", 1}}};
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert(
+TEST(DEDICATED_RES_NODE, request_fits) {
+  ResourceView request;
+  request.GetGresMap()["GPU"] = GresCount{2, {{"A100", 1}}};
+  ResourceInNodeV3 available;
+  available.GetGres()["GPU"]["A100"].insert(
       {slots[0], slots[1], slots[3], slots[2]});
-  ASSERT_LE(req, resourceInNode);
+  EXPECT_LE(request, available);
 }
 
-TEST(DEDICATED_RES_NODE, req_map2) {
-  using req_t = std::unordered_map<
-      std::string /*name*/,
-      std::pair<
-          uint64_t /*untyped req count*/,
-          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
-  req_t req;
-  req["GPU"] = {4, {{"A100", 1}}};
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert(
+TEST(DEDICATED_RES_NODE, request_total_exceeds_available) {
+  ResourceView request;
+  request.GetGresMap()["GPU"] = GresCount{5, {{"A100", 1}}};
+  ResourceInNodeV3 available;
+  available.GetGres()["GPU"]["A100"].insert(
       {slots[0], slots[1], slots[3], slots[2]});
-  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
-               req, resourceInNode);
+  EXPECT_FALSE(request <= available);
 }
 
-TEST(DEDICATED_RES_NODE, req_map3) {
-  using req_t = std::unordered_map<
-      std::string /*name*/,
-      std::pair<
-          uint64_t /*untyped req count*/,
-          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
-  req_t req;
-  req["GPU"] = {1, {}};
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0]});
-  ASSERT_LE(req, resourceInNode);
+TEST(DEDICATED_RES_NODE, untyped_request_uses_typed_slot) {
+  ResourceView request;
+  request.GetGresMap()["GPU"] = GresCount{1};
+  ResourceInNodeV3 available;
+  available.GetGres()["GPU"]["A100"].insert({slots[0]});
+  EXPECT_LE(request, available);
 }
 
-TEST(DEDICATED_RES_NODE, req_map4) {
-  using req_t = std::unordered_map<
-      std::string /*name*/,
-      std::pair<
-          uint64_t /*untyped req count*/,
-          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
-  req_t req;
-  req["GPU"] = {4, {{"A100", 1}}};
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["B100"].insert(
+TEST(DEDICATED_RES_NODE, request_type_unavailable) {
+  ResourceView request;
+  request.GetGresMap()["GPU"] = GresCount{5, {{"A100", 1}}};
+  ResourceInNodeV3 available;
+  available.GetGres()["GPU"]["B100"].insert(
       {slots[0], slots[1], slots[3], slots[2]});
-  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
-               req, resourceInNode);
+  EXPECT_FALSE(request <= available);
 }
 
-TEST(DEDICATED_RES_NODE, req_map5) {
+TEST(Network, get_ip_addr_version) {
   ASSERT_EQ(6, crane::GetIpAddrVer("3001:0da8:82a3:0:0:8B2E:0270:7224"));
   ASSERT_EQ(6, crane::GetIpAddrVer("::1"));
   ASSERT_EQ(6, crane::GetIpAddrVer("ff::1:2"));
@@ -235,16 +214,13 @@ TEST(DEDICATED_RES_NODE, req_map5) {
   ASSERT_EQ(4, crane::GetIpAddrVer("10.11.82.1"));
   ASSERT_EQ(4, crane::GetIpAddrVer("127.0.0.1"));
   ASSERT_EQ(-1, crane::GetIpAddrVer("lijunlin"));
-  using req_t = std::unordered_map<
-      std::string /*name*/,
-      std::pair<
-          uint64_t /*untyped req count*/,
-          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
-  req_t req;
-  req["GPU"] = {4, {{"A100", 1}}};
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["XPU"]["B100"].insert(
+}
+
+TEST(DEDICATED_RES_NODE, request_device_unavailable) {
+  ResourceView request;
+  request.GetGresMap()["GPU"] = GresCount{5, {{"A100", 1}}};
+  ResourceInNodeV3 available;
+  available.GetGres()["XPU"]["B100"].insert(
       {slots[0], slots[1], slots[3], slots[2]});
-  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
-               req, resourceInNode);
+  EXPECT_FALSE(request <= available);
 }

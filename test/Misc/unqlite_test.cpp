@@ -17,14 +17,11 @@
  */
 
 #include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/timestamp.pb.h>
 #include <gtest/gtest.h>
-#include <spdlog/fmt/fmt.h>
 #include <unqlite.h>
 
-#include "protos/math.pb.h"
-
-std::string db_dir{CRANE_BUILD_DIRECTORY};
-std::string db_file = fmt::format("{}/unqlite.db", db_dir);
+constexpr char kDbFile[] = ":mem:";
 
 void PrintErrorAndRollback(unqlite *pDb, int rc) {
   if (rc != UNQLITE_OK) {
@@ -48,7 +45,7 @@ TEST(Unqlite, Simple) {
   unqlite *pDb;
 
   // Open our database;
-  rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+  rc = unqlite_open(&pDb, kDbFile, UNQLITE_OPEN_CREATE);
   if (rc != UNQLITE_OK) {
     GTEST_FAIL();
   }
@@ -105,13 +102,13 @@ TEST(Unqlite, Simple) {
 }
 
 TEST(Unqlite, Transaction) {
-  int i, rc;
+  int rc;
   unqlite *pDb;
   unqlite_int64 nBytes;
   std::string r_buf;
 
   // Open our database;
-  rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+  rc = unqlite_open(&pDb, kDbFile, UNQLITE_OPEN_CREATE);
   if (rc != UNQLITE_OK) {
     GTEST_FAIL();
   }
@@ -166,24 +163,24 @@ FailTransaction:
 }
 
 TEST(Unqlite, Protobuf) {
-  int i, rc;
+  int rc;
   unqlite *pDb;
 
+  using google::protobuf::Timestamp;
   using google::protobuf::io::CodedOutputStream;
   using google::protobuf::io::StringOutputStream;
-  using grpc_example::MaxRequest;
 
   std::string buf;
   StringOutputStream stringOutputStream(&buf);
   CodedOutputStream codedOutputStream(&stringOutputStream);
 
-  MaxRequest request1;
-  request1.set_a(1);
-  request1.set_b(2);
+  Timestamp request1;
+  request1.set_seconds(1);
+  request1.set_nanos(2);
 
-  MaxRequest request2;
-  request2.set_a(3);
-  request2.set_b(4);
+  Timestamp request2;
+  request2.set_seconds(3);
+  request2.set_nanos(4);
 
   std::size_t TotalSize{0};
 
@@ -201,7 +198,7 @@ TEST(Unqlite, Protobuf) {
   GTEST_LOG_(INFO) << "Total size: " << TotalSize;
 
   // Open our database;
-  rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+  rc = unqlite_open(&pDb, kDbFile, UNQLITE_OPEN_CREATE);
   if (rc != UNQLITE_OK) {
     GTEST_FAIL();
   }
@@ -218,9 +215,9 @@ TEST(Unqlite, Protobuf) {
   StringOutputStream AppendStringOutputStream(&append_buf);
   CodedOutputStream AppendCodedOutputStream(&AppendStringOutputStream);
 
-  MaxRequest r3;
-  r3.set_a(5);
-  r3.set_b(6);
+  Timestamp r3;
+  r3.set_seconds(5);
+  r3.set_nanos(6);
 
   unqlite_int64 nAppendBytes{sizeof(int32_t)};
   AppendCodedOutputStream.WriteLittleEndian32(r3.ByteSizeLong());
@@ -265,7 +262,7 @@ TEST(Unqlite, Protobuf) {
   sz = static_cast<int>(usz);
   ASSERT_TRUE(codedInputStream.GetDirectBufferPointer(&p, &sz));
   GTEST_LOG_(INFO) << "Sz: " << sz;
-  MaxRequest request1_r;
+  Timestamp request1_r;
   EXPECT_TRUE(request1_r.ParseFromArray(p, usz));
   codedInputStream.Skip(usz);
   GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
@@ -273,7 +270,7 @@ TEST(Unqlite, Protobuf) {
   codedInputStream.ReadLittleEndian32(&usz);
   sz = static_cast<int>(usz);
   ASSERT_TRUE(codedInputStream.GetDirectBufferPointer(&p, &sz));
-  MaxRequest request2_r;
+  Timestamp request2_r;
   EXPECT_TRUE(request2_r.ParseFromArray(p, usz));
   codedInputStream.Skip(usz);
   GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
@@ -281,18 +278,18 @@ TEST(Unqlite, Protobuf) {
   codedInputStream.ReadLittleEndian32(&usz);
   sz = static_cast<int>(usz);
   ASSERT_TRUE(codedInputStream.GetDirectBufferPointer(&p, &sz));
-  MaxRequest request3_r;
+  Timestamp request3_r;
   EXPECT_TRUE(request3_r.ParseFromArray(p, usz));
   codedInputStream.Skip(usz);
   GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
 
   // Reverse order
-  EXPECT_EQ(request1_r.a(), 1);
-  EXPECT_EQ(request1_r.b(), 2);
-  EXPECT_EQ(request2_r.a(), 3);
-  EXPECT_EQ(request2_r.b(), 4);
-  EXPECT_EQ(request3_r.a(), 5);
-  EXPECT_EQ(request3_r.b(), 6);
+  EXPECT_EQ(request1_r.seconds(), 1);
+  EXPECT_EQ(request1_r.nanos(), 2);
+  EXPECT_EQ(request2_r.seconds(), 3);
+  EXPECT_EQ(request2_r.nanos(), 4);
+  EXPECT_EQ(request3_r.seconds(), 5);
+  EXPECT_EQ(request3_r.nanos(), 6);
 
   // Auto-commit the transaction and close our handle.
   unqlite_close(pDb);
@@ -303,7 +300,7 @@ class Jx9Test : public testing::Test {
     int rc;
 
     // Open our database;
-    rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+    rc = unqlite_open(&pDb, kDbFile, UNQLITE_OPEN_CREATE);
     if (rc != UNQLITE_OK) {
       GTEST_FAIL();
     }
