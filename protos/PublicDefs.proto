@@ -82,6 +82,7 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
+  CRANE_FUTURE = 4;
 }
 
 enum CranedPowerState {
@@ -786,6 +787,10 @@ message CranedInfo {
 
   // Physical CPU topology of this node.
   NodeTopoInfo node_topo_info = 17;
+
+  repeated string features = 18;
+  // True if this node is a FUTURE node mapped to a running craned.
+  bool dynamic_mapped = 19;
 }
 
 message ReservationInfo {

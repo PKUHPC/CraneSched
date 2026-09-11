@@ -153,6 +153,11 @@ class CtldClientStateMachine {
   std::shared_ptr<spdlog::logger> m_logger_;
 };
 
+// Used by -F/--future mode before the node identity is determined: probe
+// local hardware and block until CraneCtld maps this craned to a FUTURE
+// placeholder node. Returns the CranedId of the mapped node.
+CranedId MapToFutureNodeBlocking();
+
 class CtldClient {
  public:
   CtldClient();
