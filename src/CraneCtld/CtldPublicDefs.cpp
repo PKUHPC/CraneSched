@@ -18,11 +18,75 @@
 
 #include "CtldPublicDefs.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace Ctld {
+
+namespace {
+
+int64_t AccountingTimestampSeconds(absl::Time value) {
+  if (value == absl::InfiniteFuture() ||
+      value >= absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    return kJobMaxTimeStampSec;
+  }
+  if (value == absl::InfinitePast() || value <= absl::UnixEpoch()) return 0;
+  return absl::ToUnixSeconds(NormalizeAccountingTime(value));
+}
+
+}  // namespace
+
+bool IsAccountingTimeSet(absl::Time value) {
+  return value > absl::UnixEpoch() &&
+         value < absl::FromUnixSeconds(kJobMaxTimeStampSec) &&
+         value != absl::InfinitePast() && value != absl::InfiniteFuture();
+}
+
+absl::Time NormalizeAccountingTime(absl::Time value) {
+  if (value == absl::InfinitePast() || value <= absl::UnixEpoch())
+    return absl::UnixEpoch();
+  if (value == absl::InfiniteFuture() ||
+      value >= absl::FromUnixSeconds(kJobMaxTimeStampSec))
+    return absl::FromUnixSeconds(kJobMaxTimeStampSec);
+  return absl::FromUnixSeconds(absl::ToUnixSeconds(value));
+}
+
+bool IsValidAccountingTimestamp(const google::protobuf::Timestamp& timestamp) {
+  // The Unix epoch is the unset value used by RuntimeAttr, not a meaningful
+  // Craned completion timestamp.
+  return google::protobuf::util::TimeUtil::IsTimestampValid(timestamp) &&
+         timestamp.seconds() > 0 && timestamp.seconds() < kJobMaxTimeStampSec;
+}
+
+absl::Time AccountingTimeFromTimestamp(
+    const google::protobuf::Timestamp& timestamp) {
+  if (!IsValidAccountingTimestamp(timestamp))
+    return NormalizeAccountingTime(absl::Now());
+  return NormalizeAccountingTime(absl::FromUnixSeconds(timestamp.seconds()) +
+                                 absl::Nanoseconds(timestamp.nanos()));
+}
+
+std::optional<int64_t> CalculateElapsedSeconds(crane::grpc::JobStatus status,
+                                               absl::Time start_time,
+                                               absl::Time end_time,
+                                               absl::Time now) {
+  if (!IsAccountingTimeSet(start_time)) return std::nullopt;
+
+  const absl::Time effective_end =
+      IsFinishedStepStatus(status) ? end_time : now;
+  if (!IsAccountingTimeSet(effective_end)) return std::nullopt;
+  if (effective_end < start_time) {
+    // Pending jobs can expose a predicted start in the future. Keep elapsed
+    // non-negative until that timestamp rather than leaking a negative value.
+    return IsFinishedStepStatus(status) ? std::nullopt
+                                        : std::optional<int64_t>{0};
+  }
+
+  return ToInt64Seconds(effective_end - start_time);
+}
 
 PodMetaInJob::PodMetaInJob(const crane::grpc::PodJobAdditionalMeta& rhs)
     : name(rhs.name()),
@@ -260,14 +324,31 @@ void StepInCtld::SetSubmitTime(absl::Time submit_time) {
       ToUnixSeconds(submit_time));
 }
 void StepInCtld::SetStartTime(absl::Time start_time) {
-  m_start_time_ = start_time;
+  m_start_time_ = NormalizeAccountingTime(start_time);
+  bool end_time_clamped = false;
+  if (IsAccountingTimeSet(m_start_time_) && IsAccountingTimeSet(m_end_time_) &&
+      m_end_time_ < m_start_time_) {
+    m_end_time_ = m_start_time_;
+    end_time_clamped = true;
+  }
   this->m_runtime_attr_.mutable_start_time()->set_seconds(
-      ToUnixSeconds(start_time));
+      AccountingTimestampSeconds(m_start_time_));
+  this->m_runtime_attr_.mutable_start_time()->set_nanos(0);
+  if (end_time_clamped) {
+    this->m_runtime_attr_.mutable_end_time()->set_seconds(
+        AccountingTimestampSeconds(m_end_time_));
+    this->m_runtime_attr_.mutable_end_time()->set_nanos(0);
+  }
 }
 void StepInCtld::SetEndTime(absl::Time end_time) {
-  m_end_time_ = end_time;
+  m_end_time_ = NormalizeAccountingTime(end_time);
+  if (IsAccountingTimeSet(m_start_time_) && IsAccountingTimeSet(m_end_time_) &&
+      m_end_time_ < m_start_time_) {
+    m_end_time_ = m_start_time_;
+  }
   this->m_runtime_attr_.mutable_end_time()->set_seconds(
-      ToUnixSeconds(end_time));
+      AccountingTimestampSeconds(m_end_time_));
+  this->m_runtime_attr_.mutable_end_time()->set_nanos(0);
 }
 
 void StepInCtld::SetPendingFinalStatus(
@@ -377,6 +458,9 @@ void StepInCtld::RecoverFromDb(
       req_node_res_view * node_num + req_task_res_view * ntasks;
   deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
 
+  m_step_to_ctld_ = step_to_ctld;
+  m_runtime_attr_ = runtime_attr;
+
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
   SetStepType(runtime_attr.step_type());
@@ -395,18 +479,28 @@ void StepInCtld::RecoverFromDb(
   m_completing_nodes_ = {runtime_attr.completing_nodes().begin(),
                          runtime_attr.completing_nodes().end()};
 
+  const absl::Time recovered_start_time =
+      absl::FromUnixSeconds(runtime_attr.start_time().seconds());
+  const absl::Time recovered_end_time =
+      absl::FromUnixSeconds(runtime_attr.end_time().seconds());
+  if (IsAccountingTimeSet(recovered_start_time) &&
+      IsAccountingTimeSet(recovered_end_time) &&
+      runtime_attr.start_time().seconds() > runtime_attr.end_time().seconds()) {
+    CRANE_WARN(
+        "[Step #{}.{}] Recovered reverse accounting time start_time={} "
+        "end_time={}; clamping effective_end_time={} reason=recovery_fix.",
+        job_id, StepId(), runtime_attr.start_time().seconds(),
+        runtime_attr.end_time().seconds(), runtime_attr.start_time().seconds());
+  }
   SetSubmitTime(absl::FromUnixSeconds(runtime_attr.submit_time().seconds()));
-  SetStartTime(absl::FromUnixSeconds(runtime_attr.start_time().seconds()));
-  SetEndTime(absl::FromUnixSeconds(runtime_attr.end_time().seconds()));
+  SetStartTime(recovered_start_time);
+  SetEndTime(recovered_end_time);
 
   SetPendingFinalStatus(runtime_attr.pending_final_status());
   SetPendingFinalExitCode(runtime_attr.pending_final_exit_code());
   SetStatus(runtime_attr.status());
   SetExitCode(runtime_attr.exit_code());
   SetHeld(runtime_attr.held());
-
-  m_step_to_ctld_ = step_to_ctld;
-  m_runtime_attr_ = runtime_attr;
 }
 
 void StepInCtld::SetFieldsOfStepInfo(
@@ -608,7 +702,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
 
   step_to_d.mutable_start_time()->set_seconds(
-      ToUnixSeconds(this->m_start_time_));
+      AccountingTimestampSeconds(this->m_start_time_));
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
@@ -642,6 +736,26 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                    const CranedId& craned_id,
                                    const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
+  const bool timestamp_valid = IsValidAccountingTimestamp(timestamp);
+  absl::Time effective_timestamp = AccountingTimeFromTimestamp(timestamp);
+  if (IsFinishedStepStatus(new_status) && !timestamp_valid) {
+    CRANE_WARN(
+        "[Step #{}.{}] Invalid reported_end_time={} start_time={} "
+        "effective_end_time={} reason=invalid_timestamp.",
+        job_id, StepId(), timestamp.seconds(), absl::ToUnixSeconds(StartTime()),
+        absl::ToUnixSeconds(effective_timestamp));
+  }
+  if (IsFinishedStepStatus(new_status) && IsAccountingTimeSet(StartTime()) &&
+      effective_timestamp < StartTime()) {
+    const absl::Time reported_end_time = effective_timestamp;
+    effective_timestamp = StartTime();
+    CRANE_WARN(
+        "[Step #{}.{}] Corrected reported_end_time={} start_time={} "
+        "effective_end_time={} reason=before_start.",
+        job_id, StepId(), absl::ToUnixSeconds(reported_end_time),
+        absl::ToUnixSeconds(StartTime()),
+        absl::ToUnixSeconds(effective_timestamp));
+  }
   const bool is_ctld_prolog_event = craned_id == kCtldPrologInternalNodeIndex;
   if (!is_ctld_prolog_event && !m_execute_nodes_.contains(craned_id)) {
     CRANE_WARN("[Step #{}.{}] Ignoring status {} from non-execution node {}.",
@@ -849,8 +963,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
 
   case DaemonStepAction::StartCleanup: {
     if (cleanup_reason == DaemonCleanupReason::ConfiguringFinished) {
-      this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                       absl::Nanoseconds(timestamp.nanos()));
+      this->SetEndTime(effective_timestamp);
       CRANE_INFO(
           "[Step #{}.{}] Configuring failed with status {}, triggering "
           "daemon cleanup.",
@@ -897,8 +1010,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   }
 
   case DaemonStepAction::ReleaseAndReturnFinalStatus:
-    this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                     absl::Nanoseconds(timestamp.nanos()));
+    this->SetEndTime(effective_timestamp);
 
     context->step_raw_ptrs.insert(this);
     context->step_ptrs.emplace(job->ReleaseDaemonStep());
@@ -1317,7 +1429,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   }
 
   step_to_d.mutable_start_time()->set_seconds(
-      ToUnixSeconds(this->m_start_time_));
+      AccountingTimestampSeconds(this->m_start_time_));
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
@@ -1374,6 +1486,26 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
                                    const CranedId& craned_id,
                                    const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
+  const bool timestamp_valid = IsValidAccountingTimestamp(timestamp);
+  absl::Time effective_timestamp = AccountingTimeFromTimestamp(timestamp);
+  if (IsFinishedStepStatus(new_status) && !timestamp_valid) {
+    CRANE_WARN(
+        "[Step #{}.{}] Invalid reported_end_time={} start_time={} "
+        "effective_end_time={} reason=invalid_timestamp.",
+        job_id, StepId(), timestamp.seconds(), absl::ToUnixSeconds(StartTime()),
+        absl::ToUnixSeconds(effective_timestamp));
+  }
+  if (IsFinishedStepStatus(new_status) && IsAccountingTimeSet(StartTime()) &&
+      effective_timestamp < StartTime()) {
+    const absl::Time reported_end_time = effective_timestamp;
+    effective_timestamp = StartTime();
+    CRANE_WARN(
+        "[Step #{}.{}] Corrected reported_end_time={} start_time={} "
+        "effective_end_time={} reason=before_start.",
+        job_id, StepId(), absl::ToUnixSeconds(reported_end_time),
+        absl::ToUnixSeconds(StartTime()),
+        absl::ToUnixSeconds(effective_timestamp));
+  }
   if (!m_execute_nodes_.contains(craned_id)) {
     CRANE_WARN("[Step #{}.{}] Ignoring status {} from non-execution node {}.",
                job_id, this->StepId(), util::StepStatusToString(new_status),
@@ -1577,9 +1709,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       std::unordered_set<step_id_t> pd_steps;
       CRANE_DEBUG("[Job #{}] primary step completing, terminating other steps.",
                   job_id);
-      const absl::Time cancel_time =
-          absl::FromUnixSeconds(timestamp.seconds()) +
-          absl::Nanoseconds(timestamp.nanos());
+      const absl::Time cancel_time = effective_timestamp;
       for (const auto& comm_step : job->Steps() | std::views::values) {
         if (comm_step->Status() == crane::grpc::JobStatus::Pending) {
           comm_step->SetStatus(crane::grpc::Cancelled);
@@ -1620,8 +1750,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
   // AllNodesFinished (terminal from all nodes = step-level cleanup done).
   // Release step. Primary additionally triggers daemon cleanup.
   if (step_finished && allow_release_on_terminal) {
-    this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                     absl::Nanoseconds(timestamp.nanos()));
+    this->SetEndTime(effective_timestamp);
     if (this->PendingFinalStatus().has_value()) {
       this->SetStatus(this->PendingFinalStatus().value());
       this->SetExitCode(this->PendingFinalExitCode());
@@ -1788,23 +1917,43 @@ void JobInCtld::SetSubmitTimeByUnixSecond(uint64_t val) {
 }
 
 void JobInCtld::SetStartTime(absl::Time const& val) {
-  start_time = val;
-  runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+  start_time = NormalizeAccountingTime(val);
+  bool end_time_clamped = false;
+  if (IsAccountingTimeSet(start_time) && IsAccountingTimeSet(end_time) &&
+      end_time < start_time) {
+    end_time = start_time;
+    end_time_clamped = true;
+  }
+  runtime_attr.mutable_start_time()->set_seconds(
+      AccountingTimestampSeconds(start_time));
+  runtime_attr.mutable_start_time()->set_nanos(0);
+  if (end_time_clamped) {
+    runtime_attr.mutable_end_time()->set_seconds(
+        AccountingTimestampSeconds(end_time));
+    runtime_attr.mutable_end_time()->set_nanos(0);
+  }
 }
 
 void JobInCtld::SetStartTimeByUnixSecond(uint64_t val) {
-  start_time = absl::FromUnixSeconds(val);
-  runtime_attr.mutable_start_time()->set_seconds(val);
+  val = std::min<uint64_t>(val, kJobMaxTimeStampSec);
+  SetStartTime(absl::FromUnixSeconds(static_cast<int64_t>(val)));
 }
 
 void JobInCtld::SetEndTime(absl::Time const& val) {
-  SetEndTimeByUnixSecond(ToUnixSeconds(val));
+  absl::Time normalized = NormalizeAccountingTime(val);
+  if (IsAccountingTimeSet(start_time) && IsAccountingTimeSet(normalized) &&
+      normalized < start_time) {
+    normalized = start_time;
+  }
+  end_time = normalized;
+  runtime_attr.mutable_end_time()->set_seconds(
+      AccountingTimestampSeconds(end_time));
+  runtime_attr.mutable_end_time()->set_nanos(0);
 }
 
 void JobInCtld::SetEndTimeByUnixSecond(uint64_t val) {
   val = std::min<uint64_t>(val, kJobMaxTimeStampSec);
-  end_time = absl::FromUnixSeconds(val);
-  runtime_attr.mutable_end_time()->set_seconds(val);
+  SetEndTime(absl::FromUnixSeconds(static_cast<int64_t>(val)));
 }
 
 void JobInCtld::SetSuspendTime(absl::Time const& val) {
@@ -2098,9 +2247,22 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
   }
 
   nodes_alloc = craned_ids.size();
-  start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
-  end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
-  submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
+  const int64_t recovered_start = runtime_attr.start_time().seconds();
+  const int64_t recovered_end = runtime_attr.end_time().seconds();
+  const absl::Time recovered_start_time =
+      absl::FromUnixSeconds(recovered_start);
+  const absl::Time recovered_end_time = absl::FromUnixSeconds(recovered_end);
+  if (IsAccountingTimeSet(recovered_start_time) &&
+      IsAccountingTimeSet(recovered_end_time) &&
+      recovered_start > recovered_end) {
+    CRANE_WARN(
+        "[Job #{}] Recovered reverse accounting time start_time={} "
+        "end_time={}; clamping effective_end_time={} reason=recovery_fix.",
+        job_id, recovered_start, recovered_end, recovered_start);
+  }
+  SetStartTime(recovered_start_time);
+  SetEndTime(recovered_end_time);
+  SetSubmitTime(absl::FromUnixSeconds(runtime_attr.submit_time().seconds()));
   licenses_count = std::unordered_map{runtime_attr.actual_licenses().begin(),
                                       runtime_attr.actual_licenses().end()};
 

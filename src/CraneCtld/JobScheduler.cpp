@@ -127,6 +127,11 @@ absl::Time EffectiveJobEndTimeAfterTimeConstraintChange_(
   if (deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec))
     end_time = std::min(end_time, deadline_time);
 
+  if (IsAccountingTimeSet(job.StartTime()) && IsAccountingTimeSet(end_time) &&
+      end_time < job.StartTime()) {
+    end_time = job.StartTime();
+  }
+
   return end_time;
 }
 
@@ -273,7 +278,9 @@ bool JobScheduler::Init() {
         }
         auto now = absl::Now();
         auto max_end_time = job->EndTime();
-        auto end_time = std::min(now, max_end_time);
+        auto end_time = IsAccountingTimeSet(max_end_time)
+                            ? std::min(now, max_end_time)
+                            : now;
         job->SetEndTime(end_time);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
@@ -551,6 +558,7 @@ bool JobScheduler::Init() {
       crane::grpc::JobStatus::Failed,
       crane::grpc::JobStatus::ExceedTimeLimit,
       crane::grpc::JobStatus::Cancelled,
+      crane::grpc::JobStatus::Deadline,
       crane::grpc::JobStatus::OutOfMemory,
   };
   auto mark_job_invalid = [this, &recovered_running_jobs](JobInCtld* job) {
@@ -2688,7 +2696,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
         end_time_updates.emplace_back(target, new_end_time);
         running_jobs_craneds.emplace_back(
             target->JobId(), target->executing_craned_ids,
-            absl::ToInt64Seconds(new_end_time - target->StartTime()),
+            std::max<int64_t>(
+                0, absl::ToInt64Seconds(new_end_time - target->StartTime())),
             deadline_time);
       }
     }
@@ -2724,7 +2733,8 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
     for (const auto& [target, end_time] : end_time_updates) {
       auto runtime_attr = target->RuntimeAttr();
       runtime_attr.mutable_end_time()->set_seconds(
-          absl::ToUnixSeconds(end_time));
+          absl::ToUnixSeconds(NormalizeAccountingTime(end_time)));
+      runtime_attr.mutable_end_time()->set_nanos(0);
       if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
               0, target->JobDbId(), runtime_attr)) {
         CRANE_ERROR("Failed to persist runtime end_time for job #{}.",
@@ -3168,7 +3178,15 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       if (job->SuspendTime() != absl::InfinitePast()) {
         absl::Duration suspended_duration = absl::Now() - job->SuspendTime();
         if (suspended_duration > absl::ZeroDuration()) {
-          absl::Time new_end_time = job->EndTime() + suspended_duration;
+          absl::Time base_end_time = job->EndTime();
+          if (!IsAccountingTimeSet(base_end_time) &&
+              IsAccountingTimeSet(job->StartTime())) {
+            // A running job should always have an end time. Reconstruct it
+            // from the start and limit if recovery exposed an unset value.
+            base_end_time = job->StartTime() + job->time_limit;
+          }
+          absl::Time new_end_time =
+              NormalizeAccountingTime(base_end_time + suspended_duration);
 
           // If deadline is set, take the minimum of extended end_time and
           // deadline
@@ -3209,8 +3227,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       // Effective time limit for craned = end_time - start_time
       // (includes original time_limit + total suspended time, capped by
       // deadline if set).
-      new_time_limit_secs =
-          absl::ToInt64Seconds(job->EndTime() - job->StartTime());
+      new_time_limit_secs = std::max<int64_t>(
+          0, absl::ToInt64Seconds(job->EndTime() - job->StartTime()));
 
       // Also send deadline to craned if it's set
       if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
@@ -6077,18 +6095,49 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         job->SetStatus(job_finished_status.value().first);
         job->SetExitCode(job_finished_status.value().second);
 
-        absl::Time end_time = absl::FromUnixSeconds(timestamp.seconds()) +
-                              absl::Nanoseconds(timestamp.nanos());
+        const bool timestamp_valid = IsValidAccountingTimestamp(timestamp);
+        absl::Time end_time = AccountingTimeFromTimestamp(timestamp);
+        if (!timestamp_valid) {
+          CRANE_WARN(
+              "[Job #{} step {}] Invalid reported_end_time={} (start_time={}); "
+              "using effective_end_time={} reason=invalid_timestamp.",
+              job->JobId(), step_id, timestamp.seconds(),
+              absl::ToUnixSeconds(job->StartTime()),
+              absl::ToUnixSeconds(end_time));
+        }
+
+        if (IsAccountingTimeSet(job->StartTime()) &&
+            end_time < job->StartTime()) {
+          const absl::Time reported_end_time = end_time;
+          end_time = job->StartTime();
+          CRANE_WARN(
+              "[Job #{} step {}] Corrected reported_end_time={} start_time={} "
+              "effective_end_time={} reason=before_start.",
+              job->JobId(), step_id, absl::ToUnixSeconds(reported_end_time),
+              absl::ToUnixSeconds(job->StartTime()),
+              absl::ToUnixSeconds(end_time));
+        }
         absl::Time expected_end_time = job->EndTime();
 
-        if (end_time >
-            expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
-          CRANE_WARN(
-              "[Job #{}] Reported end_time {} exceeds expected end_time {} by "
-              "more than {}s. Adjusting to expected end_time.",
-              job->JobId(), absl::FormatTime(end_time),
-              absl::FormatTime(expected_end_time), kEndTimeToleranceSec);
+        if (IsAccountingTimeSet(expected_end_time) &&
+            end_time >
+                expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
+          const absl::Time reported_end_time = end_time;
           end_time = expected_end_time;
+          if (IsAccountingTimeSet(job->StartTime()) &&
+              end_time < job->StartTime()) {
+            end_time = job->StartTime();
+          }
+          CRANE_WARN(
+              "[Job #{} step {}] Corrected reported_end_time={} start_time={} "
+              "effective_end_time={} reason=after_expected_end.",
+              job->JobId(), step_id, absl::ToUnixSeconds(reported_end_time),
+              absl::ToUnixSeconds(job->StartTime()),
+              absl::ToUnixSeconds(end_time));
+        }
+        if (IsAccountingTimeSet(job->StartTime()) &&
+            end_time < job->StartTime()) {
+          end_time = job->StartTime();
         }
         job->SetEndTime(end_time);
 
@@ -6953,8 +7002,11 @@ void JobScheduler::QueryJobsInRam(
         req_step_it->second.contains(step->StepId())) {
       auto* step_info = step_info_list->Add();
       step->SetFieldsOfStepInfo(step_info);
-      step_info->mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(now - step->StartTime()));
+      if (auto elapsed = CalculateElapsedSeconds(
+              step->Status(), step->StartTime(), step->EndTime(), now);
+          elapsed.has_value()) {
+        step_info->mutable_elapsed_time()->set_seconds(elapsed.value());
+      }
       step_info->mutable_req_total_res_view()->set_cpu_count(
           ConvertCpuCountForClient(step->req_total_res_view.GetCpuCount()));
       step_info->mutable_allocated_res_view()->set_cpu_count(
@@ -6967,8 +7019,11 @@ void JobScheduler::QueryJobsInRam(
 
     crane::grpc::JobInfo job_info;
     job.SetFieldsOfJobInfo(&job_info);
-    job_info.mutable_elapsed_time()->set_seconds(
-        ToInt64Seconds(now - job.StartTime()));
+    if (auto elapsed = CalculateElapsedSeconds(
+            job.EffectiveDisplayStatus(), job.StartTime(), job.EndTime(), now);
+        elapsed.has_value()) {
+      job_info.mutable_elapsed_time()->set_seconds(elapsed.value());
+    }
     job_info.mutable_req_total_res_view()->set_cpu_count(
         ConvertCpuCountForClient(job.req_total_res_view.GetCpuCount()));
     job_info.mutable_allocated_res_view()->set_cpu_count(
@@ -6979,12 +7034,18 @@ void JobScheduler::QueryJobsInRam(
         (display_status == crane::grpc::JobStatus::Running ||
          display_status == crane::grpc::JobStatus::Configuring)) {
       absl::Time expected_end_time = job.EndTime();
-      if (expected_end_time < now) {
+      if (IsAccountingTimeSet(expected_end_time) && expected_end_time < now) {
         job_info.set_status(crane::grpc::JobStatus::Completing);
         job_info.mutable_end_time()->set_seconds(
             ToUnixSeconds(expected_end_time));
-        job_info.mutable_elapsed_time()->set_seconds(
-            ToInt64Seconds(expected_end_time - job.StartTime()));
+        if (auto elapsed = CalculateElapsedSeconds(
+                crane::grpc::JobStatus::Completed, job.StartTime(),
+                expected_end_time, now);
+            elapsed.has_value()) {
+          job_info.mutable_elapsed_time()->set_seconds(elapsed.value());
+        } else {
+          job_info.clear_elapsed_time();
+        }
       }
     }
 

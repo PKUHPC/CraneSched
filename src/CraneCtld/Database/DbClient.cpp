@@ -305,6 +305,7 @@ bsoncxx::document::value MakePendingAggregationFilter_() {
               make_array(
                   static_cast<int32_t>(crane::grpc::JobStatus::Cancelled),
                   static_cast<int32_t>(crane::grpc::JobStatus::Completed),
+                  static_cast<int32_t>(crane::grpc::JobStatus::Deadline),
                   static_cast<int32_t>(crane::grpc::JobStatus::OutOfMemory),
                   static_cast<int32_t>(crane::grpc::JobStatus::ExceedTimeLimit),
                   static_cast<int32_t>(crane::grpc::JobStatus::Failed))))));
@@ -497,12 +498,29 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
 
 bool MongodbClient::InsertRecoveredJob(
     const crane::grpc::JobInEmbeddedDb& job_in_embedded_db) {
-  document job_doc = JobInEmbeddedDbToDocument_(job_in_embedded_db);
+  crane::grpc::JobInEmbeddedDb recovered = job_in_embedded_db;
+  auto* recovered_runtime = recovered.mutable_runtime_attr();
+  const absl::Time recovered_start =
+      absl::FromUnixSeconds(recovered_runtime->start_time().seconds());
+  const absl::Time recovered_end =
+      absl::FromUnixSeconds(recovered_runtime->end_time().seconds());
+  if (IsAccountingTimeSet(recovered_start) &&
+      IsAccountingTimeSet(recovered_end) && recovered_start > recovered_end) {
+    CRANE_WARN(
+        "[Job #{}] Recovered reverse accounting time start_time={} "
+        "end_time={}; clamping effective_end_time={} reason=recovery_fix.",
+        recovered_runtime->job_id(), recovered_runtime->start_time().seconds(),
+        recovered_runtime->end_time().seconds(),
+        recovered_runtime->start_time().seconds());
+    recovered_runtime->mutable_end_time()->set_seconds(
+        recovered_runtime->start_time().seconds());
+  }
+  document job_doc = JobInEmbeddedDbToDocument_(recovered);
 
   // Create filter by job_id
   document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(
-                                  job_in_embedded_db.runtime_attr().job_id())));
+  filter.append(
+      kvp("job_id", static_cast<int32_t>(recovered.runtime_attr().job_id())));
 
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
@@ -542,7 +560,7 @@ bool MongodbClient::InsertRecoveredJob(
       CRANE_WARN(
           "Transaction failed for job {} aggregation. "
           "Will be recovered on startup.",
-          job_in_embedded_db.runtime_attr().job_id());
+          recovered.runtime_attr().job_id());
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -552,6 +570,10 @@ bool MongodbClient::InsertRecoveredJob(
 }
 
 bool MongodbClient::InsertJob(JobInCtld* job) {
+  if (job == nullptr) {
+    CRANE_ERROR("Cannot insert a null JobInCtld.");
+    return false;
+  }
   if (job->EndTime() < job->StartTime()) {
     CRANE_ERROR("Job #{} end time {} is invalid, start time {}.", job->JobId(),
                 job->EndTime(), job->StartTime());
@@ -640,6 +662,15 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
             *GetSession_(), bulk_options);
 
     for (const auto& job : jobs) {
+      if (job == nullptr) {
+        CRANE_ERROR("Cannot insert a null JobInCtld.");
+        return false;
+      }
+      if (job->EndTime() < job->StartTime()) {
+        CRANE_ERROR("Job #{} end time {} is invalid, start time {}.",
+                    job->JobId(), job->EndTime(), job->StartTime());
+        return false;
+      }
       document job_doc = JobInCtldToDocument_(job);
 
       // Create filter by (job_id, requeue_count) composite key
@@ -1042,13 +1073,19 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_partition(
             std::string(view["partition_name"].get_string().value));
 
-        job_info.mutable_start_time()->set_seconds(
-            view["time_start"].get_int64().value);
-        job_info.mutable_end_time()->set_seconds(
-            view["time_end"].get_int64().value);
+        const int64_t time_start = ViewValueOr_(view["time_start"], int64_t{0});
+        const int64_t time_end = ViewValueOr_(view["time_end"], int64_t{0});
+        job_info.mutable_start_time()->set_seconds(time_start);
+        job_info.mutable_end_time()->set_seconds(time_end);
 
         job_info.set_status(static_cast<crane::grpc::JobStatus>(
             view["state"].get_int32().value));
+        if (auto elapsed = CalculateElapsedSeconds(
+                job_info.status(), absl::FromUnixSeconds(time_start),
+                absl::FromUnixSeconds(time_end), absl::Now());
+            elapsed.has_value()) {
+          job_info.mutable_elapsed_time()->set_seconds(elapsed.value());
+        }
         job_info.mutable_time_limit()->set_seconds(
             view["timelimit"].get_int64().value);
         job_info.mutable_submit_time()->set_seconds(
@@ -1498,7 +1535,25 @@ MongodbClient::FetchArrayTaskAggregateInfo(job_id_t array_job_id) {
 
 bool MongodbClient::InsertRecoveredStep(
     crane::grpc::StepInEmbeddedDb const& step_in_embedded_db) {
-  document step_doc = StepInEmbeddedDbToDocument_(step_in_embedded_db);
+  crane::grpc::StepInEmbeddedDb recovered = step_in_embedded_db;
+  auto* recovered_runtime = recovered.mutable_runtime_attr();
+  const absl::Time recovered_start =
+      absl::FromUnixSeconds(recovered_runtime->start_time().seconds());
+  const absl::Time recovered_end =
+      absl::FromUnixSeconds(recovered_runtime->end_time().seconds());
+  if (IsAccountingTimeSet(recovered_start) &&
+      IsAccountingTimeSet(recovered_end) && recovered_start > recovered_end) {
+    CRANE_WARN(
+        "[Step #{}.{}] Recovered reverse accounting time start_time={} "
+        "end_time={}; clamping effective_end_time={} reason=recovery_fix.",
+        recovered.step_to_ctld().job_id(), recovered_runtime->step_id(),
+        recovered_runtime->start_time().seconds(),
+        recovered_runtime->end_time().seconds(),
+        recovered_runtime->start_time().seconds());
+    recovered_runtime->mutable_end_time()->set_seconds(
+        recovered_runtime->start_time().seconds());
+  }
+  document step_doc = StepInEmbeddedDbToDocument_(recovered);
   job_id_t job_id = step_in_embedded_db.step_to_ctld().job_id();
 
   // Filter by job_id
@@ -1531,6 +1586,19 @@ bool MongodbClient::InsertRecoveredStep(
 
 bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   if (steps.empty()) return false;
+
+  for (const auto* step : steps) {
+    if (step == nullptr) {
+      CRANE_ERROR("Cannot insert a null StepInCtld.");
+      return false;
+    }
+    if (step->EndTime() < step->StartTime()) {
+      CRANE_ERROR("Step #{}.{} end time {} is invalid, start time {}.",
+                  step->job_id, step->StepId(), step->EndTime(),
+                  step->StartTime());
+      return false;
+    }
+  }
 
   // Group steps by (job_id, requeue_count) composite key
   using JobRequeueKey = std::pair<job_id_t, int32_t>;
@@ -1634,10 +1702,21 @@ void MongodbClient::AppendToAccUsageTable(
                             : "";
     // Get job start/end time and resources
     auto time_start = ViewGetArithmeticValue_<int64_t>(job_doc["time_start"]);
-    if (time_start == 0) {
+    auto time_end = ViewGetArithmeticValue_<int64_t>(job_doc["time_end"]);
+    if (time_start <= 0 || time_end == kJobMaxTimeStampSec) {
+      CRANE_WARN(
+          "Skipping accounting aggregation for job document with unset time "
+          "start_time={} end_time={} reason=invalid_interval.",
+          time_start, time_end);
       return;
     }
-    auto time_end = ViewGetArithmeticValue_<int64_t>(job_doc["time_end"]);
+    if (time_end < time_start) {
+      CRANE_WARN(
+          "Skipping accounting aggregation for job document with reverse "
+          "time start_time={} end_time={} reason=invalid_interval.",
+          time_start, time_end);
+      return;
+    }
     auto cpus_alloc = cpu_t::from_raw_value(
         ViewGetArithmeticValue_<int64_t>(job_doc["cpus_alloc"]));
     auto nodes_alloc = ViewGetArithmeticValue_<int64_t>(job_doc["nodes_alloc"]);
@@ -1672,7 +1751,21 @@ void MongodbClient::AppendToAccUsageTable(const JobInCtld* job,
   using namespace std::chrono;
 
   try {
-    if (job->StartTimeInUnixSecond() == 0) {
+    if (job->StartTimeInUnixSecond() <= 0 ||
+        job->EndTimeInUnixSecond() == kJobMaxTimeStampSec) {
+      CRANE_WARN(
+          "Skipping accounting aggregation for job #{} with unset time "
+          "start_time={} end_time={} reason=invalid_interval.",
+          job->JobId(), job->StartTimeInUnixSecond(),
+          job->EndTimeInUnixSecond());
+      return;
+    }
+    if (job->EndTimeInUnixSecond() < job->StartTimeInUnixSecond()) {
+      CRANE_WARN(
+          "Skipping accounting aggregation for job #{} with reverse time "
+          "start_time={} end_time={} reason=invalid_interval.",
+          job->JobId(), job->StartTimeInUnixSecond(),
+          job->EndTimeInUnixSecond());
       return;
     }
     // Build JobAggregationInfo from JobInCtld
@@ -5760,13 +5853,19 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_info->set_craned_list(view["nodelist"].get_string().value.data());
   step_info->set_node_num(view["nodes_alloc"].get_int32().value);
 
-  step_info->mutable_start_time()->set_seconds(
-      view["time_start"].get_int64().value);
-  step_info->mutable_end_time()->set_seconds(
-      view["time_end"].get_int64().value);
+  const int64_t time_start = ViewValueOr_(view["time_start"], int64_t{0});
+  const int64_t time_end = ViewValueOr_(view["time_end"], int64_t{0});
+  step_info->mutable_start_time()->set_seconds(time_start);
+  step_info->mutable_end_time()->set_seconds(time_end);
 
   step_info->set_status(
       static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value));
+  if (auto elapsed = CalculateElapsedSeconds(
+          step_info->status(), absl::FromUnixSeconds(time_start),
+          absl::FromUnixSeconds(time_end), absl::Now());
+      elapsed.has_value()) {
+    step_info->mutable_elapsed_time()->set_seconds(elapsed.value());
+  }
   step_info->mutable_time_limit()->set_seconds(
       view["timelimit"].get_int64().value);
   step_info->mutable_submit_time()->set_seconds(

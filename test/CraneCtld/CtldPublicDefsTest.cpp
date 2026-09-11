@@ -125,6 +125,110 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
+TEST(CtldAccountingTimeTest, SettersUseWholeSecondsAndPreserveOrdering) {
+  const absl::Time precise =
+      absl::FromUnixSeconds(1'700'000'000) + absl::Nanoseconds(900);
+
+  Ctld::JobInCtld job;
+  job.SetStartTime(precise);
+  job.SetEndTime(precise);
+  EXPECT_EQ(job.StartTime(), absl::FromUnixSeconds(1'700'000'000));
+  EXPECT_EQ(job.EndTime(), absl::FromUnixSeconds(1'700'000'000));
+  EXPECT_EQ(job.RuntimeAttr().start_time().seconds(), 1'700'000'000);
+  EXPECT_EQ(job.RuntimeAttr().end_time().seconds(), 1'700'000'000);
+
+  job.SetStartTime(absl::FromUnixSeconds(1'700'000'200));
+  job.SetEndTime(absl::FromUnixSeconds(1'700'000'100));
+  EXPECT_EQ(job.EndTime(), job.StartTime());
+
+  job.SetEndTime(absl::FromUnixSeconds(1'700'000'100));
+  job.SetStartTime(absl::FromUnixSeconds(1'700'000'200));
+  EXPECT_EQ(job.EndTime(), job.StartTime());
+  EXPECT_EQ(job.RuntimeAttr().end_time().seconds(), 1'700'000'200);
+
+  job.SetEndTimeByUnixSecond(0);
+  EXPECT_EQ(job.EndTime(), absl::UnixEpoch());
+  EXPECT_EQ(job.RuntimeAttr().end_time().seconds(), 0);
+  EXPECT_EQ(job.RuntimeAttr().end_time().nanos(), 0);
+
+  Ctld::CommonStepInCtld step;
+  step.SetStartTime(absl::FromUnixSeconds(1'700'000'300));
+  step.SetEndTime(absl::FromUnixSeconds(1'700'000'299));
+  EXPECT_EQ(step.EndTime(), step.StartTime());
+}
+
+TEST(CtldAccountingTimeTest, InvalidRemoteTimestampFallsBackToNow) {
+  google::protobuf::Timestamp invalid;
+  EXPECT_FALSE(Ctld::IsValidAccountingTimestamp(invalid));
+  const absl::Time before = absl::Now();
+  const absl::Time effective = Ctld::AccountingTimeFromTimestamp(invalid);
+  const absl::Time after = absl::Now();
+  EXPECT_GE(effective, absl::FromUnixSeconds(absl::ToUnixSeconds(before)));
+  EXPECT_LE(effective, absl::FromUnixSeconds(absl::ToUnixSeconds(after)));
+}
+
+TEST(CtldAccountingTimeTest, MaximumTimestampIsAnUnsetSentinel) {
+  google::protobuf::Timestamp sentinel;
+  sentinel.set_seconds(kJobMaxTimeStampSec);
+  EXPECT_FALSE(Ctld::IsValidAccountingTimestamp(sentinel));
+  EXPECT_FALSE(
+      Ctld::IsAccountingTimeSet(absl::FromUnixSeconds(kJobMaxTimeStampSec)));
+
+  Ctld::JobInCtld job;
+  job.SetStartTime(absl::InfinitePast());
+  job.SetEndTime(absl::InfiniteFuture());
+  EXPECT_EQ(job.StartTime(), absl::UnixEpoch());
+  EXPECT_EQ(job.EndTime(), absl::FromUnixSeconds(kJobMaxTimeStampSec));
+}
+
+TEST(CtldAccountingTimeTest, ElapsedUsesTerminalEndAndNeverReturnsNegative) {
+  const auto start = absl::FromUnixSeconds(1'700'000'000);
+  EXPECT_EQ(
+      Ctld::CalculateElapsedSeconds(crane::grpc::JobStatus::Completed, start,
+                                    absl::FromUnixSeconds(1'700'000'005),
+                                    absl::FromUnixSeconds(1'700'000'200)),
+      std::optional<int64_t>{5});
+  EXPECT_EQ(
+      Ctld::CalculateElapsedSeconds(crane::grpc::JobStatus::Cancelled, start,
+                                    start, absl::FromUnixSeconds(200)),
+      std::optional<int64_t>{0});
+  EXPECT_FALSE(
+      Ctld::CalculateElapsedSeconds(crane::grpc::JobStatus::Failed, start,
+                                    absl::FromUnixSeconds(1'699'999'999),
+                                    absl::FromUnixSeconds(1'700'000'200))
+          .has_value());
+  EXPECT_EQ(Ctld::CalculateElapsedSeconds(crane::grpc::JobStatus::Running,
+                                          start, absl::FromUnixSeconds(0),
+                                          absl::FromUnixSeconds(1'700'000'003)),
+            std::optional<int64_t>{3});
+  EXPECT_EQ(Ctld::CalculateElapsedSeconds(crane::grpc::JobStatus::Pending,
+                                          absl::FromUnixSeconds(1'700'000'010),
+                                          absl::FromUnixSeconds(0),
+                                          absl::FromUnixSeconds(1'700'000'003)),
+            std::optional<int64_t>{0});
+  EXPECT_FALSE(Ctld::CalculateElapsedSeconds(
+                   crane::grpc::JobStatus::Completed, absl::UnixEpoch(),
+                   absl::FromUnixSeconds(1'700'000'005),
+                   absl::FromUnixSeconds(1'700'000'200))
+                   .has_value());
+}
+
+TEST(CtldAccountingTimeTest, RecoveryClampsReverseJobTimeInMemory) {
+  crane::grpc::RuntimeAttrOfJob runtime_attr;
+  runtime_attr.set_job_id(77);
+  runtime_attr.set_status(crane::grpc::JobStatus::Pending);
+  runtime_attr.mutable_start_time()->set_seconds(1'700'000'010);
+  runtime_attr.mutable_end_time()->set_seconds(1'700'000'005);
+
+  Ctld::JobInCtld job;
+  job.SetFieldsByRuntimeAttrOfJob(runtime_attr);
+
+  EXPECT_EQ(job.StartTime(), absl::FromUnixSeconds(1'700'000'010));
+  EXPECT_EQ(job.EndTime(), job.StartTime());
+  EXPECT_EQ(job.RuntimeAttr().end_time().seconds(), 1'700'000'010);
+  EXPECT_EQ(job.RuntimeAttr().end_time().nanos(), 0);
+}
+
 TEST(CtldStepStateMachineTest,
      DaemonConfigureFailureCleansAndReturnsFailureAfterTerminalReports) {
   constexpr job_id_t kJobId = 42;
