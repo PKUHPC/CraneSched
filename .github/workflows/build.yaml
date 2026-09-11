@@ -392,6 +392,23 @@ jobs:
             esac
           done
 
+      - name: Build backend and frontend artifacts
+        id: build-artifacts
+        run: |
+          set -euo pipefail
+          build_output="$RUNNER_TEMP/crane-build-output"
+          mkdir -p "$build_output"
+          exec {maintenance_lock_fd}<"$CRANETESTKIT_CACHE_ROOT/.maintenance.lock"
+          /usr/bin/flock --shared "$maintenance_lock_fd"
+          "$CRANETESTKIT_EXECUTABLE" env build \
+            --backend "$GITHUB_WORKSPACE/sources/CraneSched" \
+            --frontend "$GITHUB_WORKSPACE/sources/CraneSched-FrontEnd" \
+            --output "$build_output" \
+            --preset ci-debug \
+            --ccache-dir "$CRANETESTKIT_CCACHE_DIR" \
+            --fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR" \
+            --phase build
+
       - name: Build and run backend unit tests
         id: unit-tests
         run: |
@@ -407,7 +424,7 @@ jobs:
             --preset ci-debug \
             --ccache-dir "$CRANETESTKIT_CCACHE_DIR" \
             --fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR" \
-            --unit-tests-only
+            --phase unit-tests
 
       - name: Build and publish exact packages
         id: build
@@ -427,6 +444,7 @@ jobs:
             --preset ci-debug \
             --ccache-dir "$CRANETESTKIT_CCACHE_DIR" \
             --fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR" \
+            --phase package \
             --publish-root "$CRANETESTKIT_NFS_ROOT" \
             | tee "$build_log"
           build_json="$(tail -n 1 "$build_log")"

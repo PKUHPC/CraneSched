@@ -206,14 +206,19 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             workflow,
         )
 
-    def test_unit_tests_are_a_separate_stage_before_package_build(self) -> None:
+    def test_build_unit_tests_and_package_are_separate_ordered_stages(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        build = workflow.index("- name: Build backend and frontend artifacts")
         unit_tests = workflow.index("- name: Build and run backend unit tests")
         package = workflow.index("- name: Build and publish exact packages")
+        self.assertLess(build, unit_tests)
         self.assertLess(unit_tests, package)
 
+        build_block = workflow[build:unit_tests]
+        self.assertIn("--phase build", build_block)
+
         unit_tests_block = workflow[unit_tests:package]
-        self.assertIn("--unit-tests-only", unit_tests_block)
+        self.assertIn("--phase unit-tests", unit_tests_block)
         self.assertIn('"$CRANETESTKIT_CCACHE_DIR"', unit_tests_block)
         self.assertIn('"$CRANETESTKIT_FETCHCONTENT_DIR"', unit_tests_block)
 
@@ -221,7 +226,7 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         if package_end == -1:
             package_end = len(workflow)
         package_block = workflow[package:package_end]
-        self.assertNotIn("--run-unit-tests", package_block)
+        self.assertIn("--phase package", package_block)
 
     def test_frontend_routing_is_sha_pinned_and_fully_reported(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
