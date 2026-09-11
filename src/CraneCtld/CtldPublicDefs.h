@@ -338,6 +338,19 @@ inline void CanonicalizeCranedIdSet(
   *craned_ids = std::move(canonical_ids);
 }
 
+inline void CanonicalizeCranedIdList(std::list<CranedId>* craned_ids) {
+  std::unordered_set<CranedId> seen_ids;
+  seen_ids.reserve(craned_ids->size());
+  for (auto it = craned_ids->begin(); it != craned_ids->end();) {
+    *it = ResolveCranedIdAlias(*it);
+    if (!seen_ids.emplace(*it).second) {
+      it = craned_ids->erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 struct InteractiveMeta {
   InteractiveMeta() = default;
 

@@ -1346,8 +1346,11 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
 
   crane::grpc::ModifyCranedStateRequest normalized_request = *request;
   normalized_request.clear_craned_ids();
-  for (const auto& craned_id : request->craned_ids())
-    normalized_request.add_craned_ids(ResolveCranedIdAlias(craned_id));
+  std::list<CranedId> craned_ids(request->craned_ids().begin(),
+                                 request->craned_ids().end());
+  CanonicalizeCranedIdList(&craned_ids);
+  for (const auto& craned_id : craned_ids)
+    normalized_request.add_craned_ids(craned_id);
   request = &normalized_request;
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
@@ -2838,8 +2841,11 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
 
   crane::grpc::EnableAutoPowerControlRequest normalized_request = *request;
   normalized_request.clear_craned_ids();
-  for (const auto& craned_id : request->craned_ids())
-    normalized_request.add_craned_ids(ResolveCranedIdAlias(craned_id));
+  std::list<CranedId> craned_ids(request->craned_ids().begin(),
+                                 request->craned_ids().end());
+  CanonicalizeCranedIdList(&craned_ids);
+  for (const auto& craned_id : craned_ids)
+    normalized_request.add_craned_ids(craned_id);
   request = &normalized_request;
 
   CRANE_INFO(

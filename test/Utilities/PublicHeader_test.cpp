@@ -42,7 +42,7 @@ TEST(String, ParseNodeList) {
   }
 }
 
-TEST(String, ShortHostnameDropsOnlyTheDomainSuffix) {
+TEST(String, ShortHostnameKeepsTheFirstDnsLabel) {
   EXPECT_EQ(util::ShortHostname("node01.pku.edu.cn"), "node01");
   EXPECT_EQ(util::ShortHostname("node01"), "node01");
 }

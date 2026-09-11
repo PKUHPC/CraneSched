@@ -4725,8 +4725,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
       !util::ParseHostList(request.craned_regex(), &craned_ids)) {
     return std::unexpected("Invalid craned_regex");
   }
-  for (auto& craned_id : craned_ids)
-    craned_id = ResolveCranedIdAlias(craned_id);
+  CanonicalizeCranedIdList(&craned_ids);
   uint32_t node_num = craned_ids.size();
 
   absl::Time start_time =
