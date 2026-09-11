@@ -434,8 +434,8 @@ add_subdirectory(src)
 # Tests
 if (CRANE_ENABLE_TESTS)
     enable_testing()
-    # Keep test targets out of the default build; build them explicitly when
-    # running the test suite.
+    # Test source files may include lots of warnings and errors.
+    # Exclude it from 'all' target
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
