@@ -434,7 +434,9 @@ add_subdirectory(src)
 # Tests
 if (CRANE_ENABLE_TESTS)
     enable_testing()
-    add_subdirectory(test)
+    # Keep test targets out of the default build; build them explicitly when
+    # running the test suite.
+    add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
 # Adopt GNU standard installation directories
