@@ -233,9 +233,8 @@ class StepInstance {
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
 
   bool AllTaskFinished() const;
-  void KillAllTaskProcesses();
-
   bool AllTaskMainProcessesExited() const;
+  bool KillAllTaskProcesses();
 
   EnvMap GetStepProcessEnv() const;
 
