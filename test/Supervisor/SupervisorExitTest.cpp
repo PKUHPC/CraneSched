@@ -50,6 +50,12 @@ class SupervisorExitTestPeer {
     meta.err_stopped = stderr_eof;
   }
 
+  static void ProcessOutputEof(CforedClient& client, task_id_t task_id,
+                               bool is_stdout) {
+    client.HandleOutputStop_(task_id, is_stdout);
+    client.CleanStopTaskIOQueueCb_();
+  }
+
   static void EnqueueOutput(CforedClient& client, task_id_t task_id,
                             bool is_stdout, std::string_view output) {
     auto data = std::make_unique<char[]>(output.size());
@@ -83,9 +89,10 @@ class RecordingProcess : public ProcInstance {
 
   CraneErrCode Kill(int signal_number) override {
     signals.push_back(signal_number);
-    return CraneErrCode::SUCCESS;
+    return succeeds ? CraneErrCode::SUCCESS : CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
+  bool succeeds{true};
   std::vector<int> signals;
 };
 
@@ -126,7 +133,8 @@ class SupervisorExitTest : public testing::Test {
     g_config.StepSpec.set_type(crane::grpc::Interactive);
     g_config.StepSpec.mutable_interactive_meta()->set_interactive_type(
         crane::grpc::Crun);
-    m_manager_ = std::make_unique<TaskManager>();
+    g_task_mgr = std::make_unique<TaskManager>();
+    m_manager_ = g_task_mgr.get();
     m_manager_->Shutdown();
     m_manager_->Wait();
     Step().InitCforedClient();
@@ -135,7 +143,8 @@ class SupervisorExitTest : public testing::Test {
 
   void TearDown() override {
     SupervisorExitTestPeer::Clear(Client());
-    m_manager_.reset();
+    g_task_mgr.reset();
+    m_manager_ = nullptr;
     g_config.StepSpec = m_previous_step_;
     CgroupManager::SetCgroupVersion(m_previous_version_);
   }
@@ -158,7 +167,7 @@ class SupervisorExitTest : public testing::Test {
     return result;
   }
 
-  std::unique_ptr<TaskManager> m_manager_;
+  TaskManager* m_manager_{nullptr};
 
  private:
   StepToSupv m_previous_step_;
@@ -200,6 +209,20 @@ TEST_F(SupervisorExitTest, FallsBackToTaskProcessesWhenCgroupKillFails) {
   EXPECT_EQ(task.signals, std::vector<int>{SIGKILL});
   SupervisorExitTestPeer::PollExits(*m_manager_);
   EXPECT_EQ(task.signals.size(), 1);
+}
+
+TEST_F(SupervisorExitTest, RetriesResidualCleanupAfterKillFailure) {
+  auto& task = AddTask(0, 900001);
+  auto& cgroup = AddCgroup();
+  cgroup.succeeds = false;
+  task.succeeds = false;
+
+  SupervisorExitTestPeer::ProcessExit(*m_manager_, 900001, 0);
+  EXPECT_EQ(task.signals, std::vector<int>{SIGKILL});
+
+  task.succeeds = true;
+  SupervisorExitTestPeer::PollExits(*m_manager_);
+  EXPECT_EQ(task.signals, (std::vector<int>{SIGKILL, SIGKILL}));
 }
 
 TEST_F(SupervisorExitTest, UsesTaskProcessGroupsForCgroupV1) {
@@ -265,6 +288,19 @@ TEST_F(SupervisorExitTest, ExitStatusFollowsBufferedStdoutAndStderr) {
             (std::vector{StreamStepIORequest::TASK_OUTPUT,
                          StreamStepIORequest::TASK_ERR_OUTPUT,
                          StreamStepIORequest::TASK_EXIT_STATUS}));
+}
+
+TEST_F(SupervisorExitTest, FinalEofSendsDeferredExitStatusAfterProcessExit) {
+  SupervisorExitTestPeer::SetEof(Client(), 0, false, false);
+  EXPECT_FALSE(Client().TaskProcessStop(0, 7, false));
+  EXPECT_TRUE(SupervisorExitTestPeer::DrainRequests(Client()).empty());
+
+  SupervisorExitTestPeer::ProcessOutputEof(Client(), 0, true);
+  EXPECT_TRUE(SupervisorExitTestPeer::DrainRequests(Client()).empty());
+
+  SupervisorExitTestPeer::ProcessOutputEof(Client(), 0, false);
+  EXPECT_EQ(SupervisorExitTestPeer::DrainRequests(Client()),
+            (std::vector{StreamStepIORequest::TASK_EXIT_STATUS}));
 }
 
 }  // namespace
