@@ -218,7 +218,7 @@ class StepInstance {
 
   bool AllTaskFinished() const;
   bool AllTaskProcessesExited() const;
-  void KillAllTaskProcesses();
+  bool KillAllTaskProcesses();
 
   EnvMap GetStepProcessEnv() const;
 
