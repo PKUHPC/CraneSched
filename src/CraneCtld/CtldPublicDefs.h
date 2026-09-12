@@ -1277,30 +1277,6 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   return CheckIfTimeLimitSecIsValid(sec);
 }
 
-// Accounting timestamps are persisted at whole-second precision.  Keeping
-// the in-memory representation at the same precision prevents a timestamp
-// captured late in a second from becoming later than an end timestamp that
-// was serialized by truncating that same value.
-absl::Time NormalizeAccountingTime(absl::Time value);
-
-// Return whether value is a real accounting timestamp. Unix epoch (zero) and
-// the maximum timestamp sentinel are intentionally treated as unset.
-bool IsAccountingTimeSet(absl::Time value);
-
-// Craned timestamps are untrusted wall-clock input.  Invalid protobuf values
-// are replaced with a current, normalized Ctld timestamp.
-bool IsValidAccountingTimestamp(const google::protobuf::Timestamp& timestamp);
-absl::Time AccountingTimeFromTimestamp(
-    const google::protobuf::Timestamp& timestamp);
-
-// Return elapsed wall-clock seconds for a job or step state. Terminal states
-// use their persisted end time so they do not continue accumulating time while
-// they remain in the in-memory map.
-std::optional<int64_t> CalculateElapsedSeconds(crane::grpc::JobStatus status,
-                                               absl::Time start_time,
-                                               absl::Time end_time,
-                                               absl::Time now);
-
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

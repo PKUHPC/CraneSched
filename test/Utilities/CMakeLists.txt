@@ -16,6 +16,7 @@ target_link_libraries(utility_test
         )
 
 add_executable(public_header_test
+        AccountingTime_test.cpp
         PublicHeader_test.cpp)
 target_link_libraries(public_header_test
         GTest::gtest
