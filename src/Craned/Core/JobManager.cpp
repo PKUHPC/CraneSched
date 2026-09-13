@@ -704,6 +704,18 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps,
         }
       }
 
+      // Resolve groups synchronously while acknowledging AllocSteps. This
+      // makes the scheduler's per-node allocation barrier include the NSS
+      // authorization check, so a node cannot report allocation success and
+      // only reject the step after ExecuteSteps has already been dispatched.
+      auto resolved = GroupResolver::ResolveStep(step);
+      if (!resolved) {
+        CRANE_ERROR(
+            "[Step #{}.{}] Group validation failed during allocation: {}",
+            job_id, step_id, resolved.error());
+        fail_step(job_id, step_id);
+        continue;
+      }
       // Simply wrap the job structure within an Execution structure and
       // pass it to the event loop. The cgroup field of this job is initialized
       // in the corresponding handler.
@@ -1754,11 +1766,15 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to prepare.", job_id, step_id);
     step_ptr->err_before_supv_start = true;
+    const auto& prepare_reason = step_ptr->PrepareErrorReason();
     SendCompletingAndTerminal_(
         job_id, step_id, crane::grpc::JobStatus::Failed,
-        ExitCode::EC_CGROUP_ERR,
-        fmt::format("Cannot create cgroup for the instance of step {}.{}",
-                    job_id, step_id));
+        prepare_reason.empty() ? ExitCode::EC_CGROUP_ERR
+                               : ExitCode::EC_SPAWN_FAILED,
+        prepare_reason.empty()
+            ? fmt::format("Cannot create cgroup for the instance of step {}.{}",
+                          job_id, step_id)
+            : prepare_reason);
     return;
   }
   err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());

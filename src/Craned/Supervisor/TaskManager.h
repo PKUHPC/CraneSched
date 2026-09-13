@@ -110,7 +110,7 @@ class StepInstance {
         task_ids(step.task_res_map() | std::views::keys |
                  std::ranges::to<std::vector<task_id_t>>()),
         uid(step.uid()),
-        gids(step.gid().begin(), step.gid().end()) {
+        gids(step.gids().begin(), step.gids().end()) {
     interactive_type =
         step.type() == crane::grpc::JobType::Interactive
             ? std::optional(step.interactive_meta().interactive_type())
