@@ -260,6 +260,15 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       (*init_req.mutable_craned_id_to_node_addr())[craned_id] =
           g_config.CranedIdToNodeAddr.at(craned_id);
     }
+#ifdef CRANE_ENABLE_BPF
+    if (CgroupManager::IsCgV2()) {
+      for (const auto& [slot, indices] :
+           CgroupManager::bpf_runtime_info.DeviceIndices()) {
+        auto& entry = (*init_req.mutable_bpf_device_indices())[slot];
+        for (uint32_t index : indices) entry.add_indices(index);
+      }
+    }
+#endif
     init_req.set_log_dir(g_config.Supervisor.LogDir);
     init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
     init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
