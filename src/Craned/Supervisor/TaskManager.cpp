@@ -2575,7 +2575,7 @@ CraneErrCode ProcInstance::Kill(int signum) {
   if (m_pid_ != 0) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
-    // Send the signal to the whole process group.
+    // Send the signal to every process in the task cgroup.
     bool success = this->m_task_cg_->KillAllProcesses(signum);
     if (success) return CraneErrCode::SUCCESS;
 

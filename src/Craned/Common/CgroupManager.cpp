@@ -27,6 +27,8 @@
 
 #include <bit>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
 
 #include "CgroupV2Fs.h"
 
@@ -35,9 +37,7 @@
 #  include <bpf/libbpf.h>
 #  include <linux/bpf.h>
 
-#  include <cerrno>
 #  include <cstdarg>
-#  include <cstring>
 #  include <string_view>
 #endif
 
@@ -1742,12 +1742,14 @@ bool CgroupV1::KillAllProcesses(int signum) {
     return false;
   }
 
+  bool success = true;
   for (int i = 0; i < controller_count; ++i) {
     struct cgroup_controller* controller =
         cgroup_get_controller_by_index(m_cgroup_info_.NativeHandle(), i);
     if (controller == nullptr) {
       CRANE_ERROR("Failed to get controller by index {} for cgroup \"{}\"", i,
                   cg_name);
+      success = false;
       continue;
     }
     const char* controller_str = cgroup_get_controller_name(controller);
@@ -1760,15 +1762,20 @@ bool CgroupV1::KillAllProcesses(int signum) {
 
     if (rc == 0) {
       for (int j = 0; j < size; ++j) {
-        kill(-pids[j], signum);
+        if (kill(pids[j], signum) != 0 && errno != ESRCH) {
+          CRANE_ERROR("Failed to signal process {} in cgroup {}: {}", pids[j],
+                      cg_name, strerror(errno));
+          success = false;
+        }
       }
       free(pids);
     } else {
       CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\" controller {}:{}",
                   cg_name, controller_str, cgroup_strerror(rc));
+      success = false;
     }
   }
-  return true;
+  return success;
 }
 
 bool CgroupV1::Empty() {
@@ -2303,12 +2310,16 @@ bool CgroupV2::KillAllProcesses(int signum) {
                         const_cast<char*>(controller), &pids, &size);
 
   if (rc == 0) {
+    bool success = true;
     for (int i = 0; i < size; ++i) {
-      // Kill the process group
-      kill(-pids[i], signum);
+      if (kill(pids[i], signum) != 0 && errno != ESRCH) {
+        CRANE_ERROR("Failed to signal process {} in cgroup {}: {}", pids[i],
+                    cg_name, strerror(errno));
+        success = false;
+      }
     }
     free(pids);
-    return true;
+    return success;
   }
 
   CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,

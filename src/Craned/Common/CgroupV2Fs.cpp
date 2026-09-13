@@ -394,14 +394,15 @@ bool CgroupV2FsBackend::SignalAllProcesses(const std::string& cgroup_name,
                strerror(err));
     return false;
   }
+  bool success = true;
   for (pid_t pid : pids) {
-    if (kill(-pid, signum) != 0 && errno != ESRCH) {
-      CRANE_WARN("Failed to signal process group {} in cgroup {}: {}", pid,
+    if (kill(pid, signum) != 0 && errno != ESRCH) {
+      CRANE_WARN("Failed to signal process {} in cgroup {}: {}", pid,
                  cgroup_name, strerror(errno));
-      return false;
+      success = false;
     }
   }
-  return true;
+  return success;
 }
 
 bool CgroupV2FsBackend::KillAllProcesses(const std::string& cgroup_name,
