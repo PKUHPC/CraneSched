@@ -1063,7 +1063,8 @@ class JobScheduler {
 
   void CollectJobIdsForModify(const crane::grpc::ModifyJobRequest& request,
                               crane::grpc::ModifyJobReply* response,
-                              std::vector<job_id_t>* job_ids);
+                              std::vector<job_id_t>* job_ids,
+                              std::optional<uid_t> required_owner_uid);
 
   CraneExpectedRich<std::future<CraneExpected<job_id_t>>> SubmitJobToScheduler(
       std::unique_ptr<JobInCtld> job);
