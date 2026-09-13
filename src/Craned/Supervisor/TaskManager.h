@@ -217,6 +217,8 @@ class StepInstance {
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
 
   bool AllTaskFinished() const;
+  bool AllTaskProcessesExited() const;
+  bool KillAllTaskProcesses();
 
   EnvMap GetStepProcessEnv() const;
 
@@ -276,6 +278,9 @@ class ITaskInstance {
   }
 
   [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
+  [[nodiscard]] const TaskFinalInfo* GetFinalInfo() const {
+    return &m_final_info_;
+  }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -474,6 +479,8 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
 };
 
 class ProcInstance : public ITaskInstance {
+  friend class SupervisorExitTestPeer;
+
  public:
   explicit ProcInstance(StepInstance* step_spec, task_id_t task_id)
       : ITaskInstance(step_spec, task_id) {}
@@ -549,6 +556,8 @@ class ProcInstance : public ITaskInstance {
 };
 
 class TaskManager {
+  friend class SupervisorExitTestPeer;
+
  public:
   explicit TaskManager();
   ~TaskManager();
@@ -699,6 +708,7 @@ class TaskManager {
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
+  void MaybeKillResidualTaskProcesses_();
 
   // Container exited
   void EvCleanCriEventQueueCb_();
@@ -780,6 +790,7 @@ class TaskManager {
       m_grpc_migrate_ssh_proc_to_cgroup_queue_;
 
   std::atomic_bool m_supervisor_exit_;
+  bool m_residual_process_cleanup_started_{false};
   std::thread m_uvw_thread_;
 
   // This is the gate for daemon step. Daemon step will not exit when all tasks
