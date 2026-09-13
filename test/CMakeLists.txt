@@ -14,6 +14,9 @@ set(CRANE_UNIT_TEST_TARGETS
     misc_cgroup_v2_fs_test
     misc_pam_util_test
 )
+if (TARGET misc_bpf_device_test)
+    list(APPEND CRANE_UNIT_TEST_TARGETS misc_bpf_device_test)
+endif ()
 if (TARGET misc_tracer_manager_test)
     list(APPEND CRANE_UNIT_TEST_TARGETS misc_tracer_manager_test)
 endif ()
