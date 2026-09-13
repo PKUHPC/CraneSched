@@ -3682,7 +3682,8 @@ void JobScheduler::JobModifyLuaCheck(
 
 void JobScheduler::CollectJobIdsForModify(
     const crane::grpc::ModifyJobRequest& request,
-    crane::grpc::ModifyJobReply* response, std::vector<job_id_t>* job_ids) {
+    crane::grpc::ModifyJobReply* response, std::vector<job_id_t>* job_ids,
+    std::optional<uid_t> required_owner_uid) {
   if (request.job_ids().empty()) return;
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
@@ -3724,6 +3725,34 @@ void JobScheduler::CollectJobIdsForModify(
 
   auto resolved_ids =
       job_steps | std::views::keys | ranges::to<std::vector<job_id_t>>();
+
+  if (required_owner_uid) {
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    LockGuard running_guard(&m_running_job_map_mtx_);
+    std::erase_if(resolved_ids, [&](job_id_t job_id) {
+      JobInCtld* job = nullptr;
+      auto pd_it = m_pending_job_map_.find(job_id);
+      if (pd_it != m_pending_job_map_.end()) {
+        job = pd_it->second.get();
+      } else {
+        auto rn_it = m_running_job_map_.find(job_id);
+        if (rn_it != m_running_job_map_.end()) job = rn_it->second.get();
+      }
+
+      if (job == nullptr) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{} was not found in pending queue.", job_id));
+        return true;
+      }
+
+      if (job->uid == *required_owner_uid) return false;
+
+      response->add_not_modified_jobs(job_id);
+      response->add_not_modified_reasons("Permission denied");
+      return true;
+    });
+  }
 
   if (g_config.JobSubmitLuaScript.empty()) {
     *job_ids = std::move(resolved_ids);

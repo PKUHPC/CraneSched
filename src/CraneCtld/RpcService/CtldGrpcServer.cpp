@@ -1136,7 +1136,11 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
   using ModifyJobRequest = crane::grpc::ModifyJobRequest;
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (!res) {
+  std::optional<uid_t> required_owner_uid;
+  if (!res && res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE &&
+      request->attribute() == ModifyJobRequest::Hold) {
+    required_owner_uid = request->uid();
+  } else if (!res) {
     for (const auto& selector : request->job_ids()) {
       response->add_not_modified_jobs(selector.job_id());
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
@@ -1149,7 +1153,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
   }
 
   std::vector<job_id_t> job_ids;
-  g_job_scheduler->CollectJobIdsForModify(*request, response, &job_ids);
+  g_job_scheduler->CollectJobIdsForModify(*request, response, &job_ids,
+                                          required_owner_uid);
 
   CraneErrCode err;
   if (request->attribute() == ModifyJobRequest::TimeLimit) {
