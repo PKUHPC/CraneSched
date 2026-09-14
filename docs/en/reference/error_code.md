@@ -49,7 +49,7 @@
 | 45 | `ERR_INVALID_EX_NODE_LIST` | Node name is illegal | Contact administrator to modify node name | Invalid exclude node list |
 | 46 | `ERR_TIME_TIMIT_BEYOND` | Set time limit exceeds the range specified by user configuration | Modify time limit value or contact administrator to modify user configuration | Time-limit reached the user's limit |
 | 47 | `ERR_CPUS_PER_TASK_BEYOND` | Current running task CPU core usage reached user configuration limit | Contact administrator to adjust user configuration according to actual situation or modify task configuration | cpus-per-task reached the user's limit |
-| 48 | `ERR_NO_ENOUGH_NODE` | Submitted task request limited by node count, core count or memory | Contact administrator to adjust node configuration according to actual situation | Nodes num not enough for task |
+| 48 | `ERR_NO_ENOUGH_NODE` | Requested node configuration is not available | Reduce per-node resource requests, relax `--nodelist`/`--exclude` constraints, or choose a suitable partition or reservation | Requested node configuration is not available |
 | 49 | `ERR_SYSTEM_ERR` | System error | | Linux Error |
 | 50 | `ERR_EXISTING_TASK` | | | |
 | 51 | `ERR_BEYOND_TASK_ID` | Number of pending tasks exceeded the set maximum or system error | If task count exceeds limit, consider canceling some tasks or waiting for tasks to complete | System error occurred or the number of pending tasks exceeded maximum value |

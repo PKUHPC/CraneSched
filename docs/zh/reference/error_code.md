@@ -49,7 +49,7 @@
 | 45 | `ERR_INVALID_EX_NODE_LIST` | 节点的名称非法 | 联系管理员修改节点名称 | Invalid exclude node list |
 | 46 | `ERR_TIME_TIMIT_BEYOND` | 设定的时间限制超出了用户的配置所规定的范围 | 修改时间限制数值或是联系管理员修改用户配置 | Time-limit reached the user's limit |
 | 47 | `ERR_CPUS_PER_TASK_BEYOND` | 当前运行任务使用cpu核数达到用户配置上限 | 联系管理员根据实际情况调整用户配置或自行修改任务配置 | cpus-per-task reached the user's limit |
-| 48 | `ERR_NO_ENOUGH_NODE` | 提交任务申请节点或核心数或内存数受限 | 联系管理员根据实际情况调整节点配置 | Nodes num not enough for task |
+| 48 | `ERR_NO_ENOUGH_NODE` | 请求的节点配置不可用 | 降低单节点资源需求、放宽 `--nodelist`/`--exclude` 约束，或选择合适的分区或预留 | Requested node configuration is not available |
 | 49 | `ERR_SYSTEM_ERR` | 系统错误 | | Linux Error |
 | 50 | `ERR_EXISTING_TASK` | | | |
 | 51 | `ERR_BEYOND_TASK_ID` | 等待中的任务数超过了设定的最大数或是系统错误 | 如果是任务数超出限制,考虑取消一部分任务或者是等待任务执行完毕 | System error occurred or the number of pending tasks exceeded maximum value |
