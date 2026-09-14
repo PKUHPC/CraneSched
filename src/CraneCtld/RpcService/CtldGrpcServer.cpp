@@ -1062,7 +1062,8 @@ grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
   if (request->craned_name().empty()) {
     *response = g_meta_container->QueryAllCranedInfo();
   } else {
-    *response = g_meta_container->QueryCranedInfo(request->craned_name());
+    *response = g_meta_container->QueryCranedInfo(
+        ResolveCranedIdAlias(request->craned_name()));
   }
 
   return grpc::Status::OK;
@@ -1348,6 +1349,15 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
+  crane::grpc::ModifyCranedStateRequest normalized_request = *request;
+  normalized_request.clear_craned_ids();
+  std::list<CranedId> craned_ids(request->craned_ids().begin(),
+                                 request->craned_ids().end());
+  CanonicalizeCranedIdList(&craned_ids);
+  for (const auto& craned_id : craned_ids)
+    normalized_request.add_craned_ids(craned_id);
+  request = &normalized_request;
+
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
     for (auto crane_id : request->craned_ids()) {
@@ -1595,6 +1605,13 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
   const size_t probe_limit = num_limit + 1;
+
+  crane::grpc::QueryJobsInfoRequest normalized_request = *request;
+  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
+    normalized_request.set_filter_nodename_list(
+        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
+  }
+  request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
   // Query jobs in RAM
@@ -2827,6 +2844,15 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  crane::grpc::EnableAutoPowerControlRequest normalized_request = *request;
+  normalized_request.clear_craned_ids();
+  std::list<CranedId> craned_ids(request->craned_ids().begin(),
+                                 request->craned_ids().end());
+  CanonicalizeCranedIdList(&craned_ids);
+  for (const auto& craned_id : craned_ids)
+    normalized_request.add_craned_ids(craned_id);
+  request = &normalized_request;
+
   CRANE_INFO(
       "Received enable auto power control request for {} nodes, enable: {}",
       request->craned_ids_size(), request->enable());
@@ -3098,7 +3124,13 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
 
-  bool ok = g_db_client->QueryJobSizeSummary(request, writer);
+  crane::grpc::QueryJobSizeSummaryRequest normalized_request = *request;
+  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
+    normalized_request.set_filter_nodename_list(
+        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
+  }
+
+  bool ok = g_db_client->QueryJobSizeSummary(&normalized_request, writer);
   if (!ok) {
     return {grpc::StatusCode::INTERNAL, "QueryJobSizeSummary failed"};
   }

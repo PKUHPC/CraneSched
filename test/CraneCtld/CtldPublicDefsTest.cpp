@@ -19,9 +19,43 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <list>
+#include <vector>
 
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
+
+TEST(CtldPublicDefs, ResolvesCranedIdAliases) {
+  auto original_aliases = std::move(g_config.CranedIdByAlias);
+  g_config.CranedIdByAlias = {
+      {"crnd1", "crnd1"},
+      {"host01.pku.edu.cn", "crnd1"},
+  };
+
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("crnd1"), "crnd1");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("host01.pku.edu.cn"), "crnd1");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("host01"), "host01");
+  EXPECT_EQ(Ctld::ResolveCranedIdAlias("node999"), "node999");
+
+  g_config.CranedIdByAlias = std::move(original_aliases);
+}
+
+TEST(CtldPublicDefs, CanonicalizesCranedIdListsInInputOrder) {
+  auto original_aliases = std::move(g_config.CranedIdByAlias);
+  g_config.CranedIdByAlias = {
+      {"host01.pku.edu.cn", "crnd1"},
+      {"host02.pku.edu.cn", "crnd2"},
+  };
+
+  std::list<CranedId> craned_ids{"host02.pku.edu.cn", "crnd1",
+                                 "host01.pku.edu.cn", "crnd2"};
+  Ctld::CanonicalizeCranedIdList(&craned_ids);
+
+  EXPECT_EQ(std::vector<CranedId>(craned_ids.begin(), craned_ids.end()),
+            (std::vector<CranedId>{"crnd2", "crnd1"}));
+
+  g_config.CranedIdByAlias = std::move(original_aliases);
+}
 
 namespace {
 

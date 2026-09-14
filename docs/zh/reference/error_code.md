@@ -112,3 +112,4 @@
 | 108 | `ERR_PARTITION_TIME_BEYOND` | 作业时间限制超过 Partition 的 `max_wall_duration_per_job` 限制 | 减少作业时间限制或联系管理员提升 Partition 时间限制 | Time limit exceeds the partition's per-job wall time limit |
 | 109 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER` | 用户在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per user exceeded |
 | 110 | `ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT` | 账号在该 Partition 的提交作业数超过 `max_submit_jobs` 限制 | 等待部分作业完成或联系管理员提升 Partition 提交作业数限制 | Partition max submit jobs per account exceeded |
+| 111 | `ERR_REQUESTED_NODES_NOT_IN_PARTITION` | 请求的节点不属于所选 Partition | 修改 `--nodelist` 或选择包含所请求节点的 Partition | Requested nodes are not in the partition |

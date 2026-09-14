@@ -663,6 +663,22 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      g_config.CranedIdByAlias.clear();
+      auto register_node_alias = [](const std::string& alias,
+                                    const std::string& craned_id) {
+        auto [it, inserted] =
+            g_config.CranedIdByAlias.emplace(alias, craned_id);
+        if (!inserted && it->second != craned_id) {
+          CRANE_ERROR("Node hostname alias '{}' is used by both '{}' and '{}'.",
+                      alias, it->second, craned_id);
+          std::exit(1);
+        }
+      };
+      for (const auto& [craned_id, node] : g_config.Nodes) {
+        register_node_alias(craned_id, craned_id);
+        register_node_alias(node->node_hostname, craned_id);
+      }
+
       std::unordered_set nodes_without_part = g_config.Nodes |
                                               ranges::views::keys |
                                               ranges::to<std::unordered_set>();

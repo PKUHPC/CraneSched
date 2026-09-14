@@ -42,6 +42,11 @@ TEST(String, ParseNodeList) {
   }
 }
 
+TEST(String, ShortHostnameKeepsTheFirstDnsLabel) {
+  EXPECT_EQ(util::ShortHostname("node01.pku.edu.cn"), "node01");
+  EXPECT_EQ(util::ShortHostname("node01"), "node01");
+}
+
 TEST(String, ParseHostListKeepsDeterministicOrder) {
   using util::ParseHostList;
 

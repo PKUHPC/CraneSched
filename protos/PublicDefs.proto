@@ -766,7 +766,7 @@ message PartitionInfo {
 }
 
 message CranedInfo {
-  string hostname = 1;
+  string hostname = 1;  // Canonical NodeName.
   CranedResourceState resource_state = 2;
   CranedControlState control_state = 3;
   CranedPowerState power_state = 4;
@@ -786,6 +786,9 @@ message CranedInfo {
 
   // Physical CPU topology of this node.
   NodeTopoInfo node_topo_info = 17;
+
+  string node_hostname = 18;  // Configured NodeHostname.
+  string node_addr = 19;      // Configured NodeAddr.
 }
 
 message ReservationInfo {
@@ -959,6 +962,7 @@ enum ErrCode {
   ERR_PARTITION_TIME_BEYOND = 108;                  // Partition max_wall_duration_per_job exceeded
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 109;     // Partition max_submit_jobs exceeded (user dimension)
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT = 110;  // Partition max_submit_jobs exceeded (account dimension)
+  ERR_REQUESTED_NODES_NOT_IN_PARTITION = 111;       // Requested nodes are not in the partition
 }
 
 enum EntityType {

@@ -18,9 +18,11 @@
 
 #include "JobScheduler.h"
 
+#include <absl/strings/str_join.h>
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
 
+#include <algorithm>
 #include <iterator>
 #include <map>
 
@@ -42,6 +44,31 @@ namespace Ctld {
 using namespace std::chrono_literals;
 
 namespace {
+
+std::vector<std::string> FindNodesNotInPartition_(
+    const std::unordered_set<std::string>& requested_nodes,
+    const std::unordered_set<std::string>& partition_nodes) {
+  std::vector<std::string> invalid_nodes;
+  invalid_nodes.reserve(requested_nodes.size());
+  for (const auto& node : requested_nodes) {
+    if (!partition_nodes.contains(node)) invalid_nodes.emplace_back(node);
+  }
+
+  std::sort(invalid_nodes.begin(), invalid_nodes.end());
+  return invalid_nodes;
+}
+
+std::vector<std::string> FindNodesNotInConfig_(
+    const std::unordered_set<std::string>& requested_nodes) {
+  std::vector<std::string> invalid_nodes;
+  invalid_nodes.reserve(requested_nodes.size());
+  for (const auto& node : requested_nodes) {
+    if (!g_config.Nodes.contains(node)) invalid_nodes.emplace_back(node);
+  }
+
+  std::sort(invalid_nodes.begin(), invalid_nodes.end());
+  return invalid_nodes;
+}
 
 bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
                                    crane::grpc::JobStatus status,
@@ -4030,6 +4057,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
   std::unordered_set<std::string> filter_nodes_set(
       std::begin(request.filter_nodes()), std::end(request.filter_nodes()));
+  CanonicalizeCranedIdSet(&filter_nodes_set);
   auto rng_filter_nodes = [&](JobInCtld* job) {
     if (request.filter_nodes().empty()) return true;
 
@@ -4481,6 +4509,7 @@ crane::grpc::AttachContainerStepReply JobScheduler::AttachContainerStep(
     }
 
     auto exec_nodes = step->ExecutionNodes();
+    const auto requested_node = ResolveCranedIdAlias(request.node_name());
     if (request.node_name().empty()) {
       if (exec_nodes.size() > 1) {
         auto* err = response.mutable_status();
@@ -4493,8 +4522,8 @@ crane::grpc::AttachContainerStepReply JobScheduler::AttachContainerStep(
       }
       // Set default node name to the only running node
       target_craned_id = *exec_nodes.begin();
-    } else if (exec_nodes.contains(request.node_name())) {
-      target_craned_id = request.node_name();
+    } else if (exec_nodes.contains(requested_node)) {
+      target_craned_id = requested_node;
     } else {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
@@ -4513,7 +4542,9 @@ crane::grpc::AttachContainerStepReply JobScheduler::AttachContainerStep(
     return response;
   }
 
-  return stub->AttachContainerStep(request);
+  auto normalized_request = request;
+  normalized_request.set_node_name(target_craned_id);
+  return stub->AttachContainerStep(normalized_request);
 }
 
 crane::grpc::ExecInContainerStepReply JobScheduler::ExecInContainerStep(
@@ -4623,6 +4654,7 @@ crane::grpc::ExecInContainerStepReply JobScheduler::ExecInContainerStep(
     }
 
     auto exec_nodes = step->ExecutionNodes();
+    const auto requested_node = ResolveCranedIdAlias(request.node_name());
     if (request.node_name().empty()) {
       if (exec_nodes.size() > 1) {
         auto* err = response.mutable_status();
@@ -4635,8 +4667,8 @@ crane::grpc::ExecInContainerStepReply JobScheduler::ExecInContainerStep(
       }
       // Set default node name to the only running node
       target_craned_id = *exec_nodes.begin();
-    } else if (exec_nodes.contains(request.node_name())) {
-      target_craned_id = request.node_name();
+    } else if (exec_nodes.contains(requested_node)) {
+      target_craned_id = requested_node;
     } else {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
@@ -4655,7 +4687,9 @@ crane::grpc::ExecInContainerStepReply JobScheduler::ExecInContainerStep(
     return response;
   }
 
-  return stub->ExecInContainerStep(request);
+  auto normalized_request = request;
+  normalized_request.set_node_name(target_craned_id);
+  return stub->ExecInContainerStep(normalized_request);
 }
 
 crane::grpc::CreateReservationReply JobScheduler::CreateResv(
@@ -4720,6 +4754,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
       !util::ParseHostList(request.craned_regex(), &craned_ids)) {
     return std::unexpected("Invalid craned_regex");
   }
+  CanonicalizeCranedIdList(&craned_ids);
   uint32_t node_num = craned_ids.size();
 
   absl::Time start_time =
@@ -6911,6 +6946,7 @@ void JobScheduler::QueryJobsInRam(
   std::unordered_set<std::string> req_nodename_list(
       request->filter_nodename_list().begin(),
       request->filter_nodename_list().end());
+  CanonicalizeCranedIdSet(&req_nodename_list);
   auto job_rng_filter_nodename_list = [&](auto* job_ptr) {
     if (no_nodename_list_constraint) return true;
     for (const auto& nodename : job_ptr->RuntimeAttr().craned_ids()) {
@@ -8440,7 +8476,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         check_qos_result.error(), "{}", CraneErrStr(check_qos_result.error())));
   }
 
-  if (!job->JobToCtld().nodelist().empty() && job->included_nodes.empty()) {
+  if (!job->JobToCtld().nodelist().empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().nodelist(), &nodes);
     if (!ok)
@@ -8448,10 +8484,12 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
                                            "Invalid --nodelist value '{}'",
                                            job->JobToCtld().nodelist()));
 
-    for (auto&& node : nodes) job->included_nodes.emplace(std::move(node));
+    job->included_nodes.clear();
+    for (auto&& node : nodes)
+      job->included_nodes.emplace(ResolveCranedIdAlias(node));
   }
 
-  if (!job->JobToCtld().excludes().empty() && job->excluded_nodes.empty()) {
+  if (!job->JobToCtld().excludes().empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(job->JobToCtld().excludes(), &nodes);
     if (!ok)
@@ -8459,7 +8497,49 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
           CraneErrCode::ERR_INVALID_EX_NODE_LIST,
           "Invalid --exclude value '{}'", job->JobToCtld().excludes()));
 
-    for (auto&& node : nodes) job->excluded_nodes.emplace(std::move(node));
+    job->excluded_nodes.clear();
+    for (auto&& node : nodes)
+      job->excluded_nodes.emplace(ResolveCranedIdAlias(node));
+  }
+  CanonicalizeCranedIdSet(&job->included_nodes);
+  CanonicalizeCranedIdSet(&job->excluded_nodes);
+  job->MutableJobToCtld()->set_nodelist(
+      util::HostNameListToStr(job->included_nodes));
+  job->MutableJobToCtld()->set_excludes(
+      util::HostNameListToStr(job->excluded_nodes));
+
+  auto invalid_nodes = FindNodesNotInConfig_(job->included_nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                      "Invalid --nodelist value: unknown nodes '{}'",
+                      absl::StrJoin(invalid_nodes, ", ")));
+  }
+
+  invalid_nodes =
+      FindNodesNotInPartition_(job->included_nodes, part_meta.nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION,
+                      "Requested nodes '{}' are not in partition '{}'",
+                      absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+  }
+
+  invalid_nodes = FindNodesNotInConfig_(job->excluded_nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+                      "Invalid --exclude value: unknown nodes '{}'",
+                      absl::StrJoin(invalid_nodes, ", ")));
+  }
+
+  invalid_nodes =
+      FindNodesNotInPartition_(job->excluded_nodes, part_meta.nodes);
+  if (!invalid_nodes.empty()) {
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+        "Invalid --exclude value: nodes '{}' are not in partition '{}'",
+        absl::StrJoin(invalid_nodes, ", "), job->partition_id));
   }
 
   if (!job->JobToCtld().licenses_count().empty()) {
@@ -8850,25 +8930,74 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
 }
 
 CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
-  if (!step->StepToCtld().nodelist().empty() && step->included_nodes.empty()) {
+  if (!step->StepToCtld().nodelist().empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().nodelist(), &nodes);
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
 
-    for (auto&& node : nodes) step->included_nodes.emplace(std::move(node));
+    step->included_nodes.clear();
+    for (auto&& node : nodes)
+      step->included_nodes.emplace(ResolveCranedIdAlias(node));
   }
 
-  if (!step->StepToCtld().excludes().empty() && step->excluded_nodes.empty()) {
+  if (!step->StepToCtld().excludes().empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().excludes(), &nodes);
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
 
-    for (auto&& node : nodes) step->excluded_nodes.emplace(std::move(node));
+    step->excluded_nodes.clear();
+    for (auto&& node : nodes)
+      step->excluded_nodes.emplace(ResolveCranedIdAlias(node));
   }
+  CanonicalizeCranedIdSet(&step->included_nodes);
+  CanonicalizeCranedIdSet(&step->excluded_nodes);
+  step->MutableStepToCtld()->set_nodelist(
+      util::HostNameListToStr(step->included_nodes));
+  step->MutableStepToCtld()->set_excludes(
+      util::HostNameListToStr(step->excluded_nodes));
 
   auto part_it = g_config.Partitions.find(step->job->partition_id);
   if (part_it != g_config.Partitions.end()) {
     Config::Partition const& part_meta = part_it->second;
+
+    auto invalid_nodes = FindNodesNotInConfig_(step->included_nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Invalid --nodelist value for step #{}.{}: unknown nodes '{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "));
+      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
+    }
+
+    invalid_nodes =
+        FindNodesNotInPartition_(step->included_nodes, part_meta.nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Requested nodes for step #{}.{}: nodes '{}' are not in partition "
+          "'{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
+          step->job->partition_id);
+      return std::unexpected(
+          CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION);
+    }
+
+    invalid_nodes = FindNodesNotInConfig_(step->excluded_nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR("Invalid --exclude value for step #{}.{}: unknown nodes '{}'",
+                  step->job_id, step->StepId(),
+                  absl::StrJoin(invalid_nodes, ", "));
+      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+    }
+
+    invalid_nodes =
+        FindNodesNotInPartition_(step->excluded_nodes, part_meta.nodes);
+    if (!invalid_nodes.empty()) {
+      CRANE_ERROR(
+          "Invalid --exclude value for step #{}.{}: nodes '{}' are not in "
+          "partition '{}'",
+          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
+          step->job->partition_id);
+      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+    }
 
     bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
     bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();

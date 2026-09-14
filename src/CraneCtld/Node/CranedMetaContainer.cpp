@@ -432,11 +432,12 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
-  if (!craned_meta_map_.Contains(node_name)) {
+  const CranedId craned_id = ResolveCranedIdAlias(node_name);
+  if (!craned_meta_map_.Contains(craned_id)) {
     return reply;
   }
 
-  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(node_name);
+  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
 
   auto* craned_info = list->Add();
   SetGrpcCranedInfoByCranedMeta_(*craned_meta, craned_info);
@@ -704,7 +705,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   std::list<std::string> hosts_list;
   util::ParseHostList(hosts, &hosts_list);
   std::unordered_set<std::string> req_nodes;
-  for (auto& host : hosts_list) req_nodes.insert(std::move(host));
+  for (auto& host : hosts_list) req_nodes.insert(ResolveCranedIdAlias(host));
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
@@ -1121,6 +1122,8 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
       ConvertCpuCountForClient(craned_meta.res_in_use.GetCpuSet().cpu_count));
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
+  craned_info->set_node_hostname(craned_meta.static_meta.node_hostname);
+  craned_info->set_node_addr(craned_meta.static_meta.node_addr);
   craned_info->set_craned_version(craned_meta.remote_meta.craned_version);
   craned_info->mutable_craned_start_time()->set_seconds(
       ToUnixSeconds(craned_meta.remote_meta.craned_start_time));
