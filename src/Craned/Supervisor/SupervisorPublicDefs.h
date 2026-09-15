@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/CriClient.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 
@@ -57,6 +58,9 @@ struct Config {
     bool Enabled{false};
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    std::chrono::seconds CriRequestTimeout{cri::kCriDefaultReqTimeout};
+    std::chrono::seconds ImagePullingTimeout{
+        cri::kCriDefaultImagePullingTimeout};
 
     struct DnsConfig {
       std::string ClusterDomain{"cluster.local"};

@@ -29,7 +29,9 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -64,10 +66,24 @@ inline constexpr std::string_view kCriFQDNKey = "fqdn";
 // Annotations are used for external systems
 inline constexpr std::string_view kCriAnnotationPrefix = "cranesched.internal/";
 
-inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
-    std::chrono::seconds(5);
-inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
-    std::chrono::seconds(60);
+inline constexpr std::chrono::seconds kCriDefaultReqTimeout{120};
+inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout{600};
+inline constexpr std::chrono::seconds kCriEventStreamReconnectInterval{5};
+inline constexpr std::chrono::seconds kCriMaxTimeout{
+    std::numeric_limits<int32_t>::max()};
+inline constexpr std::chrono::seconds kCriMaxImagePullingTimeout{3600};
+
+struct CriClientConfig {
+  std::chrono::seconds request_timeout{kCriDefaultReqTimeout};
+  std::chrono::seconds image_pulling_timeout{kCriDefaultImagePullingTimeout};
+
+  bool IsValid() const {
+    return request_timeout > std::chrono::seconds::zero() &&
+           request_timeout <= kCriMaxTimeout &&
+           image_pulling_timeout > std::chrono::seconds::zero() &&
+           image_pulling_timeout <= kCriMaxImagePullingTimeout;
+  }
+};
 
 inline constexpr uint32_t kCriMinRuntimeMajor = 1;
 inline constexpr uint32_t kCriMinRuntimeMinor = 7;
@@ -87,7 +103,8 @@ class CriClient {
   CriClient& operator=(const CriClient&&) = delete;
 
   void InitChannelAndStub(const std::filesystem::path& runtime_service,
-                          const std::filesystem::path& image_service);
+                          const std::filesystem::path& image_service,
+                          CriClientConfig config = {});
 
   // ==== Runtime Service ====
   CraneExpectedRich<api::VersionResponse> GetVersion() const;
@@ -255,6 +272,7 @@ class CriClient {
   std::shared_ptr<grpc::Channel> m_is_channel_;
   std::shared_ptr<api::RuntimeService::Stub> m_rs_stub_;
   std::shared_ptr<api::ImageService::Stub> m_is_stub_;
+  CriClientConfig m_config_;
 };
 
 }  // namespace cri

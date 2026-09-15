@@ -423,6 +423,12 @@ Container:
   # Path to image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # Timeout for unary CRI requests, in seconds
+  CriRequestTimeout: 120
+
+  # Timeout for pulling images, in seconds (1-3600)
+  ImagePullingTimeout: 600
+
   # DNS configuration (optional)
   Dns:
     ClusterDomain: "cluster.local"

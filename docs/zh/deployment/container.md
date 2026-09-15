@@ -417,6 +417,12 @@ Container:
   # CRI 镜像服务套接字（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # 普通 CRI 请求超时时间，单位：秒
+  CriRequestTimeout: 120
+
+  # 镜像拉取超时时间，单位：秒
+  ImagePullingTimeout: 600
+
   # DNS 配置
   Dns:
     ClusterDomain: "cluster.local"
@@ -447,6 +453,8 @@ Container:
 | `Enabled` | bool | `false` | 是否启用容器功能。设为 `true` 以启用 |
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
+| `CriRequestTimeout` | integer | `120` | 普通 CRI 请求超时时间，单位为秒。容器事件流使用独立的重连间隔 |
+| `ImagePullingTimeout` | integer | `600` | CRI 镜像拉取请求超时时间，单位为秒，取值范围为 `1-3600`。任务可通过 `ccon run --pull-timeout` 覆盖（`0` 表示使用此默认值） |
 
 ### DNS 配置
 

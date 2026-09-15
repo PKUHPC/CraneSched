@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
+#include "crane/CriClient.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 #include "crane/TracerManager.h"
@@ -114,6 +115,9 @@ struct Config {
     bool UserNsEnabledByDefault{true};
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    std::chrono::seconds CriRequestTimeout{cri::kCriDefaultReqTimeout};
+    std::chrono::seconds ImagePullingTimeout{
+        cri::kCriDefaultImagePullingTimeout};
 
     struct DnsConfig {
       std::string ClusterDomain{"cluster.local"};

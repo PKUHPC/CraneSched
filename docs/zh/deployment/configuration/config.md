@@ -419,6 +419,12 @@ Container:
   # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # 普通 CRI 请求超时时间，单位：秒
+  CriRequestTimeout: 120
+
+  # 镜像拉取超时时间，单位：秒，取值范围：1-3600
+  ImagePullingTimeout: 600
+
   # DNS 配置
   Dns:
     ClusterDomain: "cluster.local"
