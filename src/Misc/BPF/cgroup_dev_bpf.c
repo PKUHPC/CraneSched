@@ -1,115 +1,55 @@
-// DO NOT
-#include <linux/types.h>
-// REORDER
-#include <linux/bpf.h>
-// THESE
+/**
+ * Copyright (c) 2026 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "DevicePolicy.h"
+// Linux BPF types must be declared before the helper prototypes.
+
 #include <bpf/bpf_helpers.h>
-// HEADERS
-#include <bpf/bpf_core_read.h>
 
-enum BPF_PERMISSION { ALLOW = 0, DENY };
-
-#pragma pack(push, 8)
-struct BpfKey {
-  __u64 cgroup_id;
-  __u32 major;
-  __u32 minor;
-};
-#pragma pack(pop)
-
-#pragma pack(push, 8)
-struct BpfDeviceMeta {
-  __u32 major;
-  __u32 minor;
-  __s32 permission;
-  __s16 access;
-  __s16 type;
-};
-#pragma pack(pop)
-
-#define MAX_ENTRIES 4096
-
+// A missing entry means unmanaged, so this must never evict entries.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __type(key, struct BpfKey);
-  __type(value, struct BpfDeviceMeta);
-  __uint(max_entries, MAX_ENTRIES);
-  __uint(pinning, LIBBPF_PIN_BY_NAME);
-} craned_dev_map SEC(".maps");
+  __uint(max_entries, MAX_MANAGED_DEVICES);
+  __uint(map_flags, BPF_F_RDONLY_PROG);
+  __type(key, struct DeviceKey);
+  __type(value, __u32);
+} managed_devices SEC(".maps");
+
+// The kernel selects storage belonging to the effective attachment, even
+// when the process lives in an arbitrary descendant without its own program.
+struct {
+  __uint(type, BPF_MAP_TYPE_CGROUP_STORAGE);
+  __type(key, struct bpf_cgroup_storage_key);
+  __type(value, struct DevicePolicy);
+} device_policies SEC(".maps");
 
 SEC("cgroup/dev")
 int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
-  // Using CO-RE to read ctx fields
-  __u32 major = BPF_CORE_READ(ctx, major);
-  __u32 minor = BPF_CORE_READ(ctx, minor);
-  __u32 access_type = BPF_CORE_READ(ctx, access_type);
-
-  struct BpfKey key = {bpf_get_current_cgroup_id(), major, minor};
-  // value.major in map(0,0,0) contains log level
-  struct BpfKey log_key = {(__u64)0, (__u32)0, (__u32)0};
-  struct BpfDeviceMeta *log_level_meta;
-
-  log_level_meta =
-      (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &log_key);
-  int enable_logging;
-  if (!log_level_meta) {
-    enable_logging = 0;
-  } else {
-    enable_logging = log_level_meta->major;
-  }
-
-  if (enable_logging) bpf_printk("ctx cgroup ID : %lu\n", key.cgroup_id);
-  struct BpfDeviceMeta *meta;
-
-  meta = (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &key);
-  if (!meta) {
-    if (enable_logging) {
-      bpf_printk("BpfDeviceMeta not found for key cgroup ID: %llu,\n",
-                 key.cgroup_id);
-      bpf_printk("Access allowed for device major=%d, minor=%d\n", major,
-                 minor);
-    }
-    return 1;
-  }
-
-  __s16 type = access_type & 0xFFFF;
-  __s16 access = access_type >> 16;
-
-  if (enable_logging)
-    bpf_printk("meta Device major=%d, minor=%d, access_type=%d\n", meta->major,
-               meta->minor, meta->access);
-
-  if (major == meta->major && minor == meta->minor) {
-    if (meta->permission == DENY) {
-      int flag = 1;
-      if (access & BPF_DEVCG_ACC_READ)
-        if (meta->access & BPF_DEVCG_ACC_READ) {
-          if (enable_logging)
-            bpf_printk("Read access denied for device major=%d, minor=%d\n",
-                       major, minor);
-          flag &= 0;
-        }
-      if (access & BPF_DEVCG_ACC_WRITE)
-        if (meta->access & BPF_DEVCG_ACC_WRITE) {
-          if (enable_logging)
-            bpf_printk("Write access denied for device major=%d, minor=%d\n",
-                       major, minor);
-          flag &= 0;
-        }
-      if (access & BPF_DEVCG_ACC_MKNOD)
-        if (meta->access & BPF_DEVCG_ACC_MKNOD) {
-          if (enable_logging)
-            bpf_printk("Write access denied for device major=%d, minor=%d\n",
-                       major, minor);
-          flag &= 0;
-        }
-      return flag;
-    }
-  }
-
-  if (enable_logging)
-    bpf_printk("Access allowed for device major=%d, minor=%d\n", major, minor);
-  return 1;
+  struct DeviceKey key = {
+      .type = ctx->access_type & 0xffff,
+      .major = ctx->major,
+      .minor = ctx->minor,
+  };
+  __u32 *index = bpf_map_lookup_elem(&managed_devices, &key);
+  if (!index) return 1;
+  if (*index >= MAX_MANAGED_DEVICES) return 0;
+  struct DevicePolicy *policy = bpf_get_local_storage(&device_policies, 0);
+  return DevicePolicyAllows(policy, *index, ctx->access_type >> 16);
 }
 
 char _license[] SEC("license") = "GPL";
