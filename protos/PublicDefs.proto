@@ -604,6 +604,7 @@ message ContainerJobAdditionalMeta {
     string password = 3;
     string server_address = 4;
     string pull_policy = 5;
+    optional int64 image_pulling_timeout_seconds = 7;
   }
 
   ImageInfo image = 6;
