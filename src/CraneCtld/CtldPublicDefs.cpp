@@ -21,6 +21,7 @@
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
+#include "crane/AccountingTime.h"
 
 namespace Ctld {
 
@@ -260,14 +261,24 @@ void StepInCtld::SetSubmitTime(absl::Time submit_time) {
       ToUnixSeconds(submit_time));
 }
 void StepInCtld::SetStartTime(absl::Time start_time) {
-  m_start_time_ = start_time;
+  m_start_time_ = util::accounting::Normalize(start_time);
   this->m_runtime_attr_.mutable_start_time()->set_seconds(
-      ToUnixSeconds(start_time));
+      ToUnixSeconds(m_start_time_));
+  this->m_runtime_attr_.mutable_start_time()->set_nanos(0);
 }
 void StepInCtld::SetEndTime(absl::Time end_time) {
-  m_end_time_ = end_time;
+  const absl::Time reported_end = util::accounting::Normalize(end_time);
+  m_end_time_ = util::accounting::ClampEnd(m_start_time_, reported_end);
+  if (m_end_time_ != reported_end) {
+    CRANE_WARN(
+        "[Step #{}.{}] Corrected reported_end_time={} start_time={} "
+        "effective_end_time={} reason=before_start.",
+        job_id, StepId(), absl::ToUnixSeconds(reported_end),
+        absl::ToUnixSeconds(m_start_time_), absl::ToUnixSeconds(m_end_time_));
+  }
   this->m_runtime_attr_.mutable_end_time()->set_seconds(
-      ToUnixSeconds(end_time));
+      ToUnixSeconds(m_end_time_));
+  this->m_runtime_attr_.mutable_end_time()->set_nanos(0);
 }
 
 void StepInCtld::SetPendingFinalStatus(
@@ -1788,23 +1799,33 @@ void JobInCtld::SetSubmitTimeByUnixSecond(uint64_t val) {
 }
 
 void JobInCtld::SetStartTime(absl::Time const& val) {
-  start_time = val;
+  start_time = util::accounting::Normalize(val);
   runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+  runtime_attr.mutable_start_time()->set_nanos(0);
 }
 
 void JobInCtld::SetStartTimeByUnixSecond(uint64_t val) {
-  start_time = absl::FromUnixSeconds(val);
-  runtime_attr.mutable_start_time()->set_seconds(val);
+  val = std::min<uint64_t>(val, kJobMaxTimeStampSec);
+  SetStartTime(absl::FromUnixSeconds(static_cast<int64_t>(val)));
 }
 
 void JobInCtld::SetEndTime(absl::Time const& val) {
-  SetEndTimeByUnixSecond(ToUnixSeconds(val));
+  const absl::Time reported_end = util::accounting::Normalize(val);
+  end_time = util::accounting::ClampEnd(start_time, reported_end);
+  if (end_time != reported_end) {
+    CRANE_WARN(
+        "[Job #{}] Corrected reported_end_time={} start_time={} "
+        "effective_end_time={} reason=before_start.",
+        job_id, absl::ToUnixSeconds(reported_end),
+        absl::ToUnixSeconds(start_time), absl::ToUnixSeconds(end_time));
+  }
+  runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+  runtime_attr.mutable_end_time()->set_nanos(0);
 }
 
 void JobInCtld::SetEndTimeByUnixSecond(uint64_t val) {
   val = std::min<uint64_t>(val, kJobMaxTimeStampSec);
-  end_time = absl::FromUnixSeconds(val);
-  runtime_attr.mutable_end_time()->set_seconds(val);
+  SetEndTime(absl::FromUnixSeconds(static_cast<int64_t>(val)));
 }
 
 void JobInCtld::SetSuspendTime(absl::Time const& val) {

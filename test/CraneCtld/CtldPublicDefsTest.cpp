@@ -159,6 +159,36 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
+TEST(CtldAccountingTimeTest, TerminalReportIsClampedToStart) {
+  const absl::Time start =
+      absl::FromUnixSeconds(1'700'000'000) + absl::Milliseconds(900);
+
+  Ctld::JobInCtld job;
+  job.SetStartTime(start);
+  job.SetEndTime(start - absl::Seconds(1));
+  EXPECT_EQ(job.StartTime(), absl::FromUnixSeconds(1'700'000'000));
+  EXPECT_EQ(job.EndTime(), job.StartTime());
+  EXPECT_EQ(job.RuntimeAttr().start_time().nanos(), 0);
+  EXPECT_EQ(job.RuntimeAttr().end_time().nanos(), 0);
+}
+
+TEST(CtldAccountingTimeTest, PendingCancellationAllowsZeroElapsedTime) {
+  const absl::Time cancel_time =
+      absl::FromUnixSeconds(1'700'000'000) + absl::Milliseconds(900);
+
+  Ctld::JobInCtld job;
+  job.SetStatus(crane::grpc::JobStatus::Cancelled);
+  job.SetStartTime(cancel_time);
+  job.SetEndTime(cancel_time);
+  EXPECT_EQ(job.EndTime(), job.StartTime());
+
+  Ctld::CommonStepInCtld step;
+  step.SetStatus(crane::grpc::JobStatus::Cancelled);
+  step.SetStartTime(cancel_time);
+  step.SetEndTime(cancel_time);
+  EXPECT_EQ(step.EndTime(), step.StartTime());
+}
+
 TEST(CtldStepStateMachineTest,
      DaemonConfigureFailureCleansAndReturnsFailureAfterTerminalReports) {
   constexpr job_id_t kJobId = 42;

@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <mongocxx/exception/exception.hpp>
 
+#include "crane/AccountingTime.h"
+
 namespace Ctld {
 
 using bsoncxx::builder::basic::kvp;
@@ -1042,13 +1044,20 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_partition(
             std::string(view["partition_name"].get_string().value));
 
-        job_info.mutable_start_time()->set_seconds(
-            view["time_start"].get_int64().value);
-        job_info.mutable_end_time()->set_seconds(
-            view["time_end"].get_int64().value);
+        const int64_t time_start = view["time_start"].get_int64().value;
+        const int64_t time_end = view["time_end"].get_int64().value;
+        job_info.mutable_start_time()->set_seconds(time_start);
+        job_info.mutable_end_time()->set_seconds(time_end);
 
         job_info.set_status(static_cast<crane::grpc::JobStatus>(
             view["state"].get_int32().value));
+        if (IsFinishedStepStatus(job_info.status())) {
+          if (auto elapsed = util::accounting::ElapsedSeconds(
+                  absl::FromUnixSeconds(time_start),
+                  absl::FromUnixSeconds(time_end))) {
+            job_info.mutable_elapsed_time()->set_seconds(*elapsed);
+          }
+        }
         job_info.mutable_time_limit()->set_seconds(
             view["timelimit"].get_int64().value);
         job_info.mutable_submit_time()->set_seconds(
@@ -5760,13 +5769,20 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_info->set_craned_list(view["nodelist"].get_string().value.data());
   step_info->set_node_num(view["nodes_alloc"].get_int32().value);
 
-  step_info->mutable_start_time()->set_seconds(
-      view["time_start"].get_int64().value);
-  step_info->mutable_end_time()->set_seconds(
-      view["time_end"].get_int64().value);
+  const int64_t time_start = view["time_start"].get_int64().value;
+  const int64_t time_end = view["time_end"].get_int64().value;
+  step_info->mutable_start_time()->set_seconds(time_start);
+  step_info->mutable_end_time()->set_seconds(time_end);
 
   step_info->set_status(
       static_cast<crane::grpc::JobStatus>(view["state"].get_int32().value));
+  if (IsFinishedStepStatus(step_info->status())) {
+    if (auto elapsed =
+            util::accounting::ElapsedSeconds(absl::FromUnixSeconds(time_start),
+                                             absl::FromUnixSeconds(time_end))) {
+      step_info->mutable_elapsed_time()->set_seconds(*elapsed);
+    }
+  }
   step_info->mutable_time_limit()->set_seconds(
       view["timelimit"].get_int64().value);
   step_info->mutable_submit_time()->set_seconds(
