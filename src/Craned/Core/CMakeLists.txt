@@ -9,6 +9,10 @@ add_executable(craned
         CranedServer.cpp
         CranedForPamServer.h
         CranedForPamServer.cpp
+        NodeGarbageCollectionService.h
+        NodeGarbageCollectionService.cpp
+        SupervisorLogGcTask.h
+        SupervisorLogGcTask.cpp
         Craned.cpp
         StepInstance.cpp
         StepInstance.h
