@@ -291,7 +291,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Invalid exclude node list",
         "Time limit reached the user's limit",
         "CPUs per task reached the user's limit",
-        "Not enough nodes for the job",
+        "Requested node configuration is not available",
         "System error",
 
         // 50 - 54
