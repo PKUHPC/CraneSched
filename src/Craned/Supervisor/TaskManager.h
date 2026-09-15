@@ -187,8 +187,18 @@ class StepInstance {
   void InitCriClient() {
     CRANE_ASSERT(g_config.Container.Enabled);
     m_cri_client_ = std::make_unique<cri::CriClient>();
-    m_cri_client_->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
-                                      g_config.Container.ImageEndpoint);
+    auto cri_config = cri::CriClientConfig{
+        .request_timeout = g_config.Container.CriRequestTimeout,
+        .image_pulling_timeout = g_config.Container.ImagePullingTimeout};
+    if (m_step_to_supv_.has_container_meta() &&
+        m_step_to_supv_.container_meta().has_image() &&
+        m_step_to_supv_.container_meta().image().has_image_pulling_timeout_seconds()) {
+      cri_config.image_pulling_timeout = std::chrono::seconds(
+          m_step_to_supv_.container_meta().image().image_pulling_timeout_seconds());
+    }
+    m_cri_client_->InitChannelAndStub(
+        g_config.Container.RuntimeEndpoint, g_config.Container.ImageEndpoint,
+        cri_config);
   }
   [[nodiscard]] const cri::CriClient* GetCriClient() const {
     return m_cri_client_.get();

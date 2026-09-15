@@ -419,6 +419,12 @@ Container:
   # CRI image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
 
+  # Timeout for unary CRI requests, in seconds
+  CriRequestTimeout: 5
+
+  # Timeout for pulling images, in seconds
+  ImagePullingTimeout: 600
+
   # DNS configuration
   Dns:
     ClusterDomain: "cluster.local"
@@ -449,6 +455,8 @@ Container:
 | `Enabled` | bool | `false` | Whether to enable the container feature. Set to `true` to enable |
 | `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
 | `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
+| `CriRequestTimeout` | integer | `5` | Timeout for unary CRI requests, in seconds. The container event stream uses its own reconnect interval. |
+| `ImagePullingTimeout` | integer | `600` | Timeout for the CRI image pulling request, in seconds. |
 
 ### DNS Configuration
 

@@ -21,6 +21,7 @@
 #include <grpcpp/client_context.h>
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "absl/strings/ascii.h"
 #include "crane/GrpcHelper.h"
@@ -60,7 +61,13 @@ CriClient::~CriClient() {
 }
 
 void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
-                                   const std::filesystem::path& image_service) {
+                                   const std::filesystem::path& image_service,
+                                   CriClientConfig config) {
+  if (!config.IsValid()) {
+    throw std::invalid_argument(
+        "CRI timeouts must be between 1 and 2147483647 seconds");
+  }
+  m_config_ = config;
   m_event_stream_supported_ = true;
 
   if (runtime_service == image_service) {
@@ -84,7 +91,7 @@ CraneExpectedRich<api::VersionResponse> CriClient::GetVersion() const {
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->Version(&context, request, &response);
   if (!status.ok()) {
@@ -216,7 +223,7 @@ void CriClient::RuntimeConfig() const {
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->RuntimeConfig(&context, request, &response);
   if (!status.ok()) {
@@ -246,7 +253,7 @@ std::optional<std::string> CriClient::GetImageId(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_name);
@@ -337,10 +344,9 @@ std::optional<std::string> CriClient::PullImage(
   PullImageRequest request{};
   PullImageResponse response{};
 
-  // TODO: Make it configurable in config files, now setting to 1 minutes
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultImagePullingTimeout);
+                       m_config_.image_pulling_timeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_name);
@@ -376,7 +382,7 @@ CraneExpectedRich<std::string> CriClient::RunPodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.mutable_config()->CopyFrom(*config);
   auto status = m_rs_stub_->RunPodSandbox(&context, request, &response);
@@ -402,7 +408,7 @@ CraneExpectedRich<void> CriClient::StopPodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->StopPodSandbox(&context, request, &response);
@@ -428,7 +434,7 @@ CraneExpectedRich<void> CriClient::RemovePodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->RemovePodSandbox(&context, request, &response);
@@ -454,7 +460,7 @@ CraneExpectedRich<api::PodSandboxStatus> CriClient::GetPodSandboxStatus(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_pod_sandbox_id(pod_sandbox_id);
   request.set_verbose(verbose);
@@ -490,7 +496,7 @@ CraneExpectedRich<std::vector<api::PodSandbox>> CriClient::ListPodSandbox()
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->ListPodSandbox(&context, request, &response);
   if (!status.ok()) {
@@ -529,7 +535,7 @@ CraneExpectedRich<std::vector<api::PodSandbox>> CriClient::ListPodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->ListPodSandbox(&context, request, &response);
   if (!status.ok()) {
@@ -591,7 +597,7 @@ CraneExpectedRich<std::string> CriClient::CreateContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_pod_sandbox_id(pod_id);
   request.mutable_sandbox_config()->CopyFrom(pod_config);
@@ -619,7 +625,7 @@ CraneExpectedRich<void> CriClient::StartContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_container_id(container_id);
   auto status = m_rs_stub_->StartContainer(&context, request, &response);
@@ -645,7 +651,7 @@ CraneExpectedRich<void> CriClient::StopContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_container_id(container_id);
   request.set_timeout(timeout);
@@ -672,7 +678,7 @@ CraneExpectedRich<void> CriClient::RemoveContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_container_id(container_id);
   auto status = m_rs_stub_->RemoveContainer(&context, request, &response);
@@ -699,7 +705,7 @@ CraneExpectedRich<std::string> CriClient::Attach(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_container_id(container_id);
   request.set_tty(tty);
@@ -731,7 +737,7 @@ CraneExpectedRich<std::string> CriClient::Exec(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   request.set_container_id(container_id);
   for (const auto& cmd : command) {
@@ -871,8 +877,8 @@ void CriClient::ContainerEventStreamLoop_() {
     if (!m_event_stream_stop_) {
       CRANE_INFO(
           "Container event stream disconnected, reconnecting in {} seconds...",
-          kCriDefaultReqTimeout);
-      std::this_thread::sleep_for(kCriDefaultReqTimeout);
+          kCriEventStreamReconnectInterval);
+      std::this_thread::sleep_for(kCriEventStreamReconnectInterval);
     }
   }
 
@@ -903,7 +909,7 @@ CraneExpectedRich<std::vector<api::Container>> CriClient::ListContainers()
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {
@@ -943,7 +949,7 @@ CraneExpectedRich<std::vector<api::Container>> CriClient::ListContainers(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       m_config_.request_timeout);
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {

@@ -408,6 +408,24 @@ void ParseContainerConfig(const YAML::Node& container_config) {
       YamlValueOr(container_config["ImageEndpoint"],
                   g_config.Container.RuntimeEndpoint.string());
 
+  const auto request_timeout =
+      YamlValueOr<int64_t>(container_config["CriRequestTimeout"],
+                           cri::kCriDefaultReqTimeout.count());
+  const auto image_pulling_timeout =
+      YamlValueOr<int64_t>(container_config["ImagePullingTimeout"],
+                           cri::kCriDefaultImagePullingTimeout.count());
+  if (!cri::CriClientConfig{std::chrono::seconds(request_timeout),
+                            std::chrono::seconds(image_pulling_timeout)}
+           .IsValid()) {
+    CRANE_ERROR(
+        "Container.CriRequestTimeout and Container.ImagePullingTimeout "
+        "must be between 1 and 2147483647 seconds.");
+    std::exit(1);
+  }
+  g_config.Container.CriRequestTimeout = std::chrono::seconds(request_timeout);
+  g_config.Container.ImagePullingTimeout =
+      std::chrono::seconds(image_pulling_timeout);
+
   // Prepend unix protocol
   g_config.Container.RuntimeEndpoint =
       fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
@@ -1604,8 +1622,10 @@ void GlobalVariableInit() {
   // If Container is enabled, connect to CRI runtime.
   if (g_config.Container.Enabled) {
     g_cri_client = std::make_unique<cri::CriClient>();
-    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
-                                     g_config.Container.ImageEndpoint);
+    g_cri_client->InitChannelAndStub(
+        g_config.Container.RuntimeEndpoint, g_config.Container.ImageEndpoint,
+        {.request_timeout = g_config.Container.CriRequestTimeout,
+         .image_pulling_timeout = g_config.Container.ImagePullingTimeout});
 
     auto runtime_version = g_cri_client->GetVersion();
     if (!runtime_version.has_value()) {
