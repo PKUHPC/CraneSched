@@ -1,4 +1,5 @@
-#include "CgroupV2Fs.h"
+#include "CgroupManager.h"
+// Precompiled header comes first (CRI signal enums precede signal.h macros).
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -8,6 +9,9 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <set>
+
+#include "CgroupV2Fs.h"
 
 namespace {
 
@@ -112,9 +116,8 @@ TEST(CgroupV2FsBackendTest, DirectResourceWriteAndMigrationUseCgroupFiles) {
   WriteText(fs.Root() / "crane/job_1/cpu.max", "");
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
-  ASSERT_TRUE(backend.WriteControllerFile("crane/job_1",
-                                          ControllerFile::CPU_MAX_V2,
-                                          "1000 65536"));
+  ASSERT_TRUE(backend.WriteControllerFile(
+      "crane/job_1", ControllerFile::CPU_MAX_V2, "1000 65536"));
   EXPECT_EQ("1000 65536", ReadText(fs.Root() / "crane/job_1/cpu.max"));
 
   ASSERT_TRUE(backend.MigrateProcIn("crane/job_1", 12345));
@@ -145,6 +148,32 @@ TEST(CgroupV2FsBackendTest, AsyncJanitorDrainsQueuedRmdir) {
   ASSERT_TRUE(backend.Destroy("crane/job_1"));
   EXPECT_TRUE(backend.DrainJanitor(std::chrono::seconds{2}));
   EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(CgroupV2FsBackendTest, RecoveryScanIncludesOnlyCanonicalCgroups) {
+  using Craned::Common::CgroupManager;
+  FakeCgroupFs fs;
+  const std::set<std::string> expected{"job_1",
+                                       "job_1/step_2/system",
+                                       "job_1/step_2/user",
+                                       "job_1/step_2/user/task_3",
+                                       "job_4",
+                                       "job_4/step_5/system",
+                                       "overflow/job_6",
+                                       "overflow/job_6/step_7/system",
+                                       "overflow/job_6/step_7/user",
+                                       "overflow/job_6/step_7/user/task_8"};
+  for (const auto& path : expected) fs.PrepareNode(fs.Root() / path);
+  fs.PrepareNode(fs.Root() / "job_1/step_2/user/task_3/custom/task_9");
+  fs.PrepareNode(
+      fs.Root() /
+      "job_1/step_2/user/task_3/overflow/job_9/step_10/user/task_11");
+  std::set<std::string> actual;
+  for (const auto& ids : CgroupManager::GetIdsFromCgroupV2_(fs.Root()))
+    actual.emplace(CgroupManager::CgroupStrByParsedIds(ids));
+  // A step's structural directory must not invent a missing user cgroup;
+  // nested user directories must not invent extra Crane jobs or tasks.
+  EXPECT_EQ(actual, expected);
 }
 
 }  // namespace
