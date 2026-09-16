@@ -16,9 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CgroupManager.h"
-// Precompiled header comes first (CRI signal enums precede signal.h macros).
-
 #include <bpf/bpf.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
@@ -42,7 +39,6 @@
 namespace {
 using Craned::Common::BpfDeviceCatalog;
 using Craned::Common::BpfRuntimeInfo;
-using Craned::Common::CgroupManager;
 namespace fs = std::filesystem;
 
 TEST(DevicePolicy, PermissionCombinationsAndBitmapBoundaries) {
@@ -67,17 +63,6 @@ TEST(DevicePolicy, PermissionCombinationsAndBitmapBoundaries) {
       EXPECT_FALSE(DevicePolicyAllows(&policy, index, BPF_DEVCG_ACC_READ));
     }
   }
-}
-
-TEST(DevicePolicy, TaskPolicyPresenceDistinguishesInheritanceFromEmptyPolicy) {
-  crane::grpc::ResourceInNodeV3 resource;
-  EXPECT_FALSE(CgroupManager::TaskHasDevicePolicy(resource));
-  resource.mutable_gres();
-  EXPECT_FALSE(CgroupManager::TaskHasDevicePolicy(resource));
-  // An explicit GRES entry with no allocated slots still needs a local deny
-  // policy, both when the supervisor creates the task and during recovery.
-  (*resource.mutable_gres()->mutable_name_type_map())["gpu"];
-  EXPECT_TRUE(CgroupManager::TaskHasDevicePolicy(resource));
 }
 
 // Opt-in local kernel test. Only child processes enter a private test cgroup;
@@ -291,7 +276,6 @@ TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
   EXPECT_EQ(PinnedId("device_access", true), program_id);
   EXPECT_EQ(PinnedId("managed_devices"), devices_id);
   EXPECT_EQ(PinnedId("device_policies"), policies_id);
-  EXPECT_TRUE(runtime_->RecoverPolicy(task));
   EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDWR), 0);
   EXPECT_FALSE(runtime_->Reconfigure(catalog_));
   auto changed = catalog_;
@@ -308,16 +292,7 @@ TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
 
   // A non-ready attachment rejects managed devices before publication.
   auto staging = Group(step, "staging");
-  int prog_fd = bpf_obj_get((paths_.pins / "device_access").c_str());
-  int cg_fd = open(staging.c_str(), O_RDONLY | O_DIRECTORY);
-  ASSERT_GE(prog_fd, 0);
-  ASSERT_GE(cg_fd, 0);
-  EXPECT_EQ(
-      bpf_prog_attach(prog_fd, cg_fd, BPF_CGROUP_DEVICE, BPF_F_ALLOW_OVERRIDE),
-      0);
-  close(cg_fd);
-  close(prog_fd);
-  EXPECT_FALSE(runtime_->RecoverPolicy(staging));
+  AttachUnready(staging);
   EXPECT_EQ(OpenIn(staging, "/dev/null", O_RDONLY), EPERM);
   EXPECT_EQ(OpenIn(staging, "/dev/full", O_RDONLY), 0);
 
@@ -364,95 +339,53 @@ TEST_F(BpfDeviceKernel, CapacityAndInvalidIndex) {
   EXPECT_FALSE(recovered.Initialize(catalog_));
 }
 
-TEST_F(BpfDeviceKernel, StepUserRecoveryRequiresReadyLocalPolicy) {
+TEST_F(BpfDeviceKernel, StepAndTaskPoliciesSurviveRuntimeRestart) {
   auto job = Group(Group(cgroup_, "overflow"), "job_1");
   auto step = Group(job, "step_2");
   auto system = Group(step, "system");
   auto user = Group(step, "user");
+  auto inherited_task = Group(user, "task_1");
+  auto independent_task = Group(user, "task_2");
+  auto denied_task = Group(user, "task_3");
+  auto inherited_leaf = Group(inherited_task, "user_created");
+  auto independent_leaf = Group(independent_task, "user_created");
+  auto denied_leaf = Group(denied_task, "user_created");
   ASSERT_TRUE(runtime_->SetDeviceAccess(job, {"pair"}, true, true, true));
   ASSERT_TRUE(runtime_->SetDeviceAccess(system, {"null"}, true, true, true));
-  EXPECT_TRUE(runtime_->RecoverPolicy(system));
-  // Neither a healthy system sibling nor a ready Job policy is sufficient.
-  EXPECT_FALSE(runtime_->RecoverPolicy(user));
-  EXPECT_EQ(PolicyCount(), 2);
-  AttachUnready(user);
-  EXPECT_FALSE(runtime_->RecoverPolicy(user));
-  EXPECT_EQ(OpenIn(user, "/dev/null", O_RDONLY), EPERM);
-
-  ASSERT_TRUE(runtime_->SetDeviceAccess(user, {"zero"}, true, true, true));
-  const auto program_id = PinnedId("device_access", true);
-  runtime_.reset();
-  runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
-  ASSERT_TRUE(runtime_->Initialize(catalog_));
-  EXPECT_TRUE(runtime_->RecoverPolicy(system));
-  EXPECT_TRUE(runtime_->RecoverPolicy(user));
-  EXPECT_EQ(PinnedId("device_access", true), program_id);
-  EXPECT_EQ(PolicyCount(), 3);
-  EXPECT_EQ(OpenIn(user, "/dev/null", O_RDONLY), EPERM);
-  EXPECT_EQ(OpenIn(user, "/dev/zero", O_RDWR), 0);
-}
-
-TEST_F(BpfDeviceKernel, InheritedTaskRecoveryRequiresReadyStepPolicy) {
-  auto job = Group(cgroup_, "job_1");
-  auto user = Group(Group(job, "step_2"), "user");
-  auto task = Group(user, "task_3");
-  auto leaf = Group(task, "user_created");
-  crane::grpc::ResourceInNodeV3 resource;
-  const bool local_policy = CgroupManager::TaskHasDevicePolicy(resource);
-  ASSERT_FALSE(local_policy);
-
-  ASSERT_TRUE(runtime_->SetDeviceAccess(job, {"pair"}, true, true, true));
-  EXPECT_FALSE(runtime_->RecoverPolicy(task, local_policy));
-  AttachUnready(user);
-  EXPECT_FALSE(runtime_->RecoverPolicy(task, local_policy));
-  ASSERT_TRUE(runtime_->SetDeviceAccess(user, {"null"}, true, true, true));
-  runtime_.reset();
-  runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
-  ASSERT_TRUE(runtime_->Initialize(catalog_));
-  EXPECT_TRUE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(PolicyCount(), 2);  // Recovery does not attach to inherited tasks.
-  EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDWR), 0);
-  EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDONLY), EPERM);
-
-  // An unexpected local override must be reported, never silently reused or
-  // overwritten as though this task were still inheriting its step's policy.
-  ASSERT_TRUE(runtime_->SetDeviceAccess(task, {"zero"}, true, true, true));
-  EXPECT_FALSE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(PolicyCount(), 3);
-  EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDONLY), EPERM);
-  EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDWR), 0);
-}
-
-TEST_F(BpfDeviceKernel, IndependentTaskRecoveryRequiresOwnReadyPolicy) {
-  auto user = Group(Group(Group(cgroup_, "job_1"), "step_2"), "user");
-  auto task = Group(user, "task_3");
-  auto leaf = Group(task, "user_created");
-  crane::grpc::ResourceInNodeV3 resource;
-  (*resource.mutable_gres()->mutable_name_type_map())["gpu"];
-  const bool local_policy = CgroupManager::TaskHasDevicePolicy(resource);
-  ASSERT_TRUE(local_policy);
-
   ASSERT_TRUE(runtime_->SetDeviceAccess(user, {"pair"}, true, true, true));
-  EXPECT_FALSE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(PolicyCount(), 1);
-  AttachUnready(task);
-  EXPECT_FALSE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDONLY), EPERM);
+  ASSERT_TRUE(
+      runtime_->SetDeviceAccess(independent_task, {"zero"}, true, true, true));
+  ASSERT_TRUE(runtime_->SetDeviceAccess(denied_task, {}, true, true, true));
 
-  ASSERT_TRUE(runtime_->SetDeviceAccess(task, {"null"}, true, true, true));
-  EXPECT_TRUE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDWR), 0);
-  EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDONLY), EPERM);
+  auto check_access = [&] {
+    EXPECT_EQ(OpenIn(system, "/dev/null", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(system, "/dev/zero", O_RDONLY), EPERM);
+    EXPECT_EQ(OpenIn(user, "/dev/null", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(user, "/dev/zero", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(inherited_leaf, "/dev/null", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(inherited_leaf, "/dev/zero", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(independent_leaf, "/dev/null", O_RDONLY), EPERM);
+    EXPECT_EQ(OpenIn(independent_leaf, "/dev/zero", O_RDWR), 0);
+    EXPECT_EQ(OpenIn(denied_leaf, "/dev/null", O_RDONLY), EPERM);
+    EXPECT_EQ(OpenIn(denied_leaf, "/dev/zero", O_RDONLY), EPERM);
+    EXPECT_EQ(OpenIn(denied_leaf, "/dev/full", O_RDONLY), 0);
+    EXPECT_EQ(PolicyCount(), 5);  // No policy for inherited tasks/descendants.
+  };
+  check_access();
 
-  // A ready empty policy is valid and must survive recovery as deny-all.
-  ASSERT_TRUE(runtime_->SetDeviceAccess(task, {}, true, true, true));
+  const auto program_id = PinnedId("device_access", true);
+  const auto devices_id = PinnedId("managed_devices");
+  const auto policies_id = PinnedId("device_policies");
   runtime_.reset();
+  check_access();
+
+  // Reopen the runtime only. No Job/Step/Task policy replay, attachment, or
+  // policy validation is needed to preserve enforcement across a restart.
   runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
   ASSERT_TRUE(runtime_->Initialize(catalog_));
-  EXPECT_TRUE(runtime_->RecoverPolicy(task, local_policy));
-  EXPECT_EQ(PolicyCount(), 2);
-  EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDONLY), EPERM);
-  EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDONLY), EPERM);
-  EXPECT_EQ(OpenIn(leaf, "/dev/full", O_RDONLY), 0);
+  EXPECT_EQ(PinnedId("device_access", true), program_id);
+  EXPECT_EQ(PinnedId("managed_devices"), devices_id);
+  EXPECT_EQ(PinnedId("device_policies"), policies_id);
+  check_access();
 }
 }  // namespace
