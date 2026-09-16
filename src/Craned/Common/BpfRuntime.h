@@ -60,7 +60,11 @@ class BpfRuntimeInfo {
   BpfResult SetDeviceAccess(const std::filesystem::path& cgroup,
                             const std::unordered_set<std::string>& slots,
                             bool read, bool write, bool mknod);
-  BpfResult RecoverPolicy(const std::filesystem::path& cgroup);
+  // An inherited task must have no local attachment and a ready policy on its
+  // immediate parent (the step's user cgroup). Never fall back past that
+  // parent.
+  BpfResult RecoverPolicy(const std::filesystem::path& cgroup,
+                          bool local_policy = true);
   // Reserved for a future coordinated device/policy reconfiguration. Ordinary
   // daemon restarts must never take this path or renumber existing devices.
   BpfResult Reconfigure(const BpfDeviceCatalog& catalog);
@@ -71,6 +75,7 @@ class BpfRuntimeInfo {
   BpfResult Validate_();
   BpfResult ResolveIndices_(const BpfDeviceCatalog& catalog);
   std::expected<bool, std::string> Attached_(int cgroup_fd) const;
+  BpfResult RecoverLocalPolicy_(int cgroup_fd) const;
   void Close_();
 
   Paths m_paths_;
