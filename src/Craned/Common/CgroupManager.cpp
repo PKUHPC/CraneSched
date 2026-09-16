@@ -802,6 +802,11 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpenV2Fast_(
                                     m_v2_fs_backend_);
 }
 
+bool CgroupManager::TaskHasDevicePolicy(
+    const crane::grpc::ResourceInNodeV3& resource) {
+  return !resource.gres().name_type_map().empty();
+}
+
 CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(
     const std::string& cgroup_str,
@@ -837,8 +842,8 @@ CgroupManager::AllocateAndGetCgroup(
     if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
       return cg_unique_ptr;
     }
-    if (apply_device_policy &&
-        !static_cast<CgroupV2*>(cg_unique_ptr.get())->RecoverDevicePolicy())
+    if (!static_cast<CgroupV2*>(cg_unique_ptr.get())
+             ->RecoverDevicePolicy(apply_device_policy))
       return std::unexpected(CraneErrCode::ERR_EBPF);
 #endif
 
@@ -1036,7 +1041,11 @@ std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
             std::filesystem::relative(it.path(), root_cgroup_path).string();
         auto parsed_ids = ParseIdsFromCgroupStr_(rel_path);
         auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
-        if (job_id_opt.has_value()) ids.emplace(parsed_ids);
+        // Only Crane's canonical paths are recovery targets. Structural step
+        // directories and arbitrary user descendants are not policy cgroups.
+        if (job_id_opt.has_value() &&
+            CgroupStrByParsedIds(parsed_ids) == rel_path)
+          ids.emplace(parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error& e) {
@@ -1937,8 +1946,9 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverDevicePolicy() {
-  auto result = CgroupManager::bpf_runtime_info.RecoverPolicy(CgroupPath());
+bool CgroupV2::RecoverDevicePolicy(bool local_policy) {
+  auto result =
+      CgroupManager::bpf_runtime_info.RecoverPolicy(CgroupPath(), local_policy);
   if (!result)
     CRANE_ERROR("Recover device policy for {}: {}", CgroupName(),
                 result.error());
