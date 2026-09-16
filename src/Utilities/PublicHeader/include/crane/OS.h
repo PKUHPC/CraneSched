@@ -54,7 +54,7 @@ struct RunPrologEpilogArgs {
   uid_t run_uid;
   gid_t run_gid;
   uint64_t output_size;
-  std::function<bool(pid_t)> at_child_setup_cb;
+  std::function<bool(pid_t)> at_parent_setup_cb;
   using ForkAndWatchFn =
       std::function<std::optional<std::pair<pid_t, std::future<int>>>(
           std::function<pid_t()> do_fork)>;
