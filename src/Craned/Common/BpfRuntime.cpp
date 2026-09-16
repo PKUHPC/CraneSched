@@ -357,7 +357,8 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
   return {};
 }
 
-BpfResult BpfRuntimeInfo::RecoverPolicy(const std::filesystem::path& cgroup) {
+BpfResult BpfRuntimeInfo::RecoverPolicy(const std::filesystem::path& cgroup,
+                                        bool local_policy) {
   std::lock_guard lock(m_mutex_);
   if (m_program_fd_ < 0)
     return std::unexpected("BPF runtime is not initialized");
@@ -365,12 +366,25 @@ BpfResult BpfRuntimeInfo::RecoverPolicy(const std::filesystem::path& cgroup) {
   if (!process_lock) return std::unexpected(process_lock.error());
   FileDescriptor fd(open(cgroup.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   if (fd.Get() < 0) return Error("Open recovered policy cgroup");
+  if (local_policy) return RecoverLocalPolicy_(fd.Get());
+
   auto attached = Attached_(fd.Get());
+  if (!attached) return std::unexpected(attached.error());
+  if (*attached)
+    return std::unexpected("Inherited task has an unexpected device policy");
+  FileDescriptor parent_fd(
+      openat(fd.Get(), "..", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  if (parent_fd.Get() < 0) return Error("Open recovered task's step cgroup");
+  return RecoverLocalPolicy_(parent_fd.Get());
+}
+
+BpfResult BpfRuntimeInfo::RecoverLocalPolicy_(int cgroup_fd) const {
+  auto attached = Attached_(cgroup_fd);
   if (!attached) return std::unexpected(attached.error());
   if (!*attached)
     return std::unexpected("Recovered cgroup has no device policy");
   struct stat statbuf{};
-  if (fstat(fd.Get(), &statbuf) < 0)
+  if (fstat(cgroup_fd, &statbuf) < 0)
     return Error("Stat recovered policy cgroup");
   bpf_cgroup_storage_key key{};
   key.cgroup_inode_id = statbuf.st_ino;
