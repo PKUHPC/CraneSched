@@ -2247,7 +2247,7 @@ CraneErrCode ProcInstance::Prepare() {
     // attaches the shared program with a separate task policy. An explicit
     // empty task policy can also be installed by passing true to the allocator.
     const bool apply_task_device_policy =
-        CgroupManager::TaskHasDevicePolicy(task_resource);
+        !task_resource.gres().name_type_map().empty();
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
         CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
                                          task_id),

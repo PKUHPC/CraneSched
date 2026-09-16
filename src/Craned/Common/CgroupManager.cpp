@@ -802,11 +802,6 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpenV2Fast_(
                                     m_v2_fs_backend_);
 }
 
-bool CgroupManager::TaskHasDevicePolicy(
-    const crane::grpc::ResourceInNodeV3& resource) {
-  return !resource.gres().name_type_map().empty();
-}
-
 CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(
     const std::string& cgroup_str,
@@ -836,19 +831,9 @@ CgroupManager::AllocateAndGetCgroup(
   if (cg_unique_ptr == nullptr)
     return std::unexpected(CraneErrCode::ERR_CGROUP);
 
-  // If just recover cgroup, do not trigger plugin and apply res limit.
-  if (recover) {
-#ifdef CRANE_ENABLE_BPF
-    if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
-      return cg_unique_ptr;
-    }
-    if (!static_cast<CgroupV2*>(cg_unique_ptr.get())
-             ->RecoverDevicePolicy(apply_device_policy))
-      return std::unexpected(CraneErrCode::ERR_EBPF);
-#endif
-
-    return cg_unique_ptr;
-  }
+  // Recovery only reopens the cgroup. Existing resource limits and BPF
+  // attachments/storage survive the daemon and need no per-cgroup replay.
+  if (recover) return cg_unique_ptr;
 
   ResourceInNodeV3 res_v3(resource);
   if (min_mem != 0) {
@@ -937,19 +922,6 @@ CraneErrCode CgroupManager::SetCgroupResource(
   if (ok) return CraneErrCode::SUCCESS;
   resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
   return CraneErrCode::ERR_CGROUP;
-}
-
-CraneErrCode CgroupManager::RecoverCgroupWithResource(
-    CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource) {
-#ifdef CRANE_ENABLE_BPF
-  if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
-    return CraneErrCode::SUCCESS;
-  }
-  if (!static_cast<CgroupV2*>(cg)->RecoverDevicePolicy())
-    return CraneErrCode::ERR_EBPF;
-#endif
-
-  return CraneErrCode::SUCCESS;
 }
 
 CgroupPathInfo CgroupManager::MakeCgroupPathInfo(job_id_t job_id,
@@ -1041,11 +1013,7 @@ std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
             std::filesystem::relative(it.path(), root_cgroup_path).string();
         auto parsed_ids = ParseIdsFromCgroupStr_(rel_path);
         auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
-        // Only Crane's canonical paths are recovery targets. Structural step
-        // directories and arbitrary user descendants are not policy cgroups.
-        if (job_id_opt.has_value() &&
-            CgroupStrByParsedIds(parsed_ids) == rel_path)
-          ids.emplace(parsed_ids);
+        if (job_id_opt.has_value()) ids.emplace(parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error& e) {
@@ -1944,17 +1912,6 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
   return false;
 #endif
 }
-
-#ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverDevicePolicy(bool local_policy) {
-  auto result =
-      CgroupManager::bpf_runtime_info.RecoverPolicy(CgroupPath(), local_policy);
-  if (!result)
-    CRANE_ERROR("Recover device policy for {}: {}", CgroupName(),
-                result.error());
-  return result.has_value();
-}
-#endif
 
 bool CgroupV2::KillAllProcesses(int signum) {
   if (m_v2_fs_backend_) {

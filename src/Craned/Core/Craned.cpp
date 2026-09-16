@@ -169,10 +169,6 @@ CraneErrCode RecoverCgForJobSteps(
   };
 
   bool has_int_recovery = false;
-  bool recover_device_policy = false;
-#ifdef CRANE_ENABLE_BPF
-  recover_device_policy = CgroupManager::IsCgV2();
-#endif
   for (auto ids : rn_job_ids_with_cg) {
     auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] = ids;
     job_id_t job_id = job_id_opt.value();
@@ -192,32 +188,8 @@ CraneErrCode RecoverCgForJobSteps(
           is_overflow ? std::string(kOverflowCgName) : job_name;
     }
 
-    if (task_id_opt.has_value()) {
-      // The supervisor owns task handles, but Craned must validate their BPF
-      // state before accepting recovery. Invalid steps are cleaned above at
-      // the step level; no task in those steps is recovered independently.
-      if (!recover_device_policy ||
-          !rn_step_from_ctld.contains({job_id, step_id_opt.value()}))
-        continue;
-      const auto& step =
-          rn_step_from_ctld.at({job_id, step_id_opt.value()})->step_to_d;
-      auto task = step.task_res_map().find(task_id_opt.value());
-      if (task == step.task_res_map().end()) {
-        CRANE_ERROR("Cannot recover device policy for unknown task #{}.{}.{}",
-                    job_id, step_id_opt.value(), task_id_opt.value());
-        return CraneErrCode::ERR_EBPF;
-      }
-      auto task_cg_str = CgroupManager::CgroupStrByParsedIds(ids);
-      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-          task_cg_str, task->second, true, 0U, false,
-          CgroupManager::TaskHasDevicePolicy(task->second));
-      if (!cg_expt.has_value()) {
-        CRANE_ERROR("Task cgroup {} is found but not recoverable.",
-                    task_cg_str);
-        if (cg_expt.error() == CraneErrCode::ERR_EBPF) return cg_expt.error();
-      }
-      continue;
-    }
+    // For craned, we don't care task cgroup
+    if (task_id_opt.has_value()) continue;
     if (step_id_opt.has_value()) {
       step_id_t step_id = step_id_opt.value();
       // Step cgroup recovery
@@ -225,10 +197,10 @@ CraneErrCode RecoverCgForJobSteps(
         // Step is found in both ctld and cgroup
         auto& step_instance = rn_step_from_ctld.at({job_id, step_id});
 
-        // Also validate ordinary steps' user policies, even though their
-        // handles remain owned by the supervisors.
-        if (!recover_device_policy && !step_instance->IsDaemonStep() &&
-            !system_flag) {
+        // For common step cgroup, craned only cares about system cgroup
+        // For daemon step cgroup, craned cares about both system and user
+        // cgroup
+        if (!step_instance->IsDaemonStep() && !system_flag) {
           continue;
         }
         CRANE_DEBUG("Recover existing cgroup for step {} of job #{}", step_id,
@@ -249,7 +221,6 @@ CraneErrCode RecoverCgForJobSteps(
               "Cgroup for step {} of job #{} is found but not "
               "recoverable.",
               step_id, job_id);
-          if (cg_expt.error() == CraneErrCode::ERR_EBPF) return cg_expt.error();
         }
       } else {
         // Step is found in cgroup but not in ctld. Cleaning up.
@@ -278,7 +249,6 @@ CraneErrCode RecoverCgForJobSteps(
         }
       } else {
         CRANE_ERROR("Cgroup for job #{} not recoverable.", job_id);
-        if (cg_expt.error() == CraneErrCode::ERR_EBPF) return cg_expt.error();
       }
       continue;
     }
@@ -1525,11 +1495,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
 
   /******************* Recover job cgroup info *******************/
-  if (auto result = RecoverCgForJobSteps(job_map, step_map);
-      result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to recover cgroup state: {}", static_cast<int>(result));
-    std::exit(1);
-  }
+  RecoverCgForJobSteps(job_map, step_map);
 
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
