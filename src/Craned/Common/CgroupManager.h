@@ -456,9 +456,6 @@ class CgroupV2 : public CgroupInterface {
   bool SetDeviceAccess(const std::unordered_set<SlotId>& devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
-#ifdef CRANE_ENABLE_BPF
-  bool RecoverDevicePolicy(bool local_policy = true);
-#endif
   bool KillAllProcesses(int signum) override;
 
   bool Empty() override;
@@ -567,17 +564,11 @@ class CgroupManager {
       const crane::grpc::ResourceInNodeV3& resource, bool recover,
       std::uint64_t min_mem = 0U, bool is_int_job = false,
       bool apply_device_policy = true);
-  // Use the same policy-presence rule for task creation and recovery. A named
-  // GRES entry with no slots is an explicit empty policy, not inheritance.
-  static bool TaskHasDevicePolicy(
-      const crane::grpc::ResourceInNodeV3& resource);
   static CraneExpected<std::unique_ptr<CgroupInterface>> CreateOrOpenCgroup(
       const std::string& cgroup_str, bool retrieve);
   static CraneErrCode SetCgroupResource(
       CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource,
       std::uint64_t min_mem = 0U);
-  static CraneErrCode RecoverCgroupWithResource(
-      CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource);
 
   /**
    * \brief Job-level cgroup allocation with INT/overflow CPU pool routing.
