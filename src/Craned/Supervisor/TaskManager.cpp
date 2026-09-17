@@ -85,7 +85,9 @@ CraneErrCode StepInstance::Prepare() {
   }
 
   // Init CriClient before preparation
-  if (IsPod() || IsContainer()) InitCriClient();
+  if ((IsPod() || IsContainer()) && InitCriClient() != CraneErrCode::SUCCESS) {
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
 
   // Init cfored
   if (IsCrun()) {
@@ -2949,7 +2951,9 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     g_craned_client->StepStatusChangeAsync(
         StepStatus::Completing, status.max_exit_code,
         status.final_reason_on_termination, status.final_status_on_termination);
-    ShutdownSupervisorAsync();
+    ShutdownSupervisorAsync(status.final_status_on_termination,
+                            status.max_exit_code,
+                            status.final_reason_on_termination);
   }
 }
 
@@ -3067,6 +3071,7 @@ void TaskManager::EvExecuteDaemonPodCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
+      SetAllowDaemonShutdown();
       FinalizeTaskAsync(
           task_id, TaskFinalizeCause::STEP_PWD_LOOKUP_FAILED,
           std::format("Failed to look up password entry for uid {}",
@@ -3078,6 +3083,7 @@ void TaskManager::EvExecuteDaemonPodCb_() {
     err = m_step_.Prepare();
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to prepare pod: {}", static_cast<int>(err));
+      SetAllowDaemonShutdown();
       FinalizeTaskAsync(task_id, TaskFinalizeCause::STEP_PREPARE_FAILED,
                         std::format("Failed to prepare pod step, code: {}",
                                     static_cast<int>(err)));
@@ -3093,6 +3099,7 @@ void TaskManager::EvExecuteDaemonPodCb_() {
 
     // Launch execution for pod.
     err = LaunchExecution_(instance);
+    if (err != CraneErrCode::SUCCESS) SetAllowDaemonShutdown();
     if (err == CraneErrCode::SUCCESS) {
       auto pod_id = instance->GetExecId().value();
       CRANE_INFO("Pod is running, pod id: {}.", std::get<std::string>(pod_id));
