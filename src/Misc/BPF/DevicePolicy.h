@@ -16,7 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Shared userspace/BPF ABI. Changing this layout requires a new pin namespace.
+// Shared userspace/BPF ABI. Changing this layout requires clearing old pins
+// before starting the new daemon.
 #ifndef CRANE_BPF_DEVICE_POLICY_H
 #define CRANE_BPF_DEVICE_POLICY_H
 
