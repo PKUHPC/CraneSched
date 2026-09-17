@@ -685,10 +685,12 @@ message JobInfo {
   int32 requeue_count = 46;
   bool requeue_if_failed = 47;
 
+  // The submitted spec for normal/history queries. In queue/accounting
+  // queries, an active array parent carries its remaining unmaterialized
+  // range here.
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;
-  // Set only for queue/accounting projections of unmaterialized array tasks.
-  ArraySpec pending_array_spec = 52;
+  reserved 52;
 }
 
 message StepInfo {

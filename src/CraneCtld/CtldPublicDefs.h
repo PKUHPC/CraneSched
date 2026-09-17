@@ -98,6 +98,16 @@ constexpr bool kDefaultTrackWCKey = false;
 constexpr bool kDefaultJobRequeue = true;
 constexpr int32_t kDefaultMaxRequeueCount = 5;
 
+struct JobInfoDisplayOrder {
+  bool operator()(const crane::grpc::JobInfo& lhs,
+                  const crane::grpc::JobInfo& rhs) const {
+    if (lhs.status() != rhs.status()) return lhs.status() < rhs.status();
+    if (lhs.priority() != rhs.priority())
+      return lhs.priority() > rhs.priority();
+    return lhs.job_id() > rhs.job_id();
+  }
+};
+
 struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
@@ -1056,9 +1066,9 @@ struct JobInCtld {
   // Persisted to the database via RuntimeAttr.
   absl::Time suspend_time{absl::InfinitePast()};
 
-  // Mirrors ArrayMeta::parent_start_event_triggered_ for array parents so the
-  // running representation can be synthesized without consulting ArrayManager.
-  // Transient cache — recovery re-populates via ArrayMeta on startup.
+  // Mirrors ArrayMeta::parent_start_event_triggered_ so later scheduling
+  // attempts do not overwrite the aggregate start time. Transient cache;
+  // recovery re-populates it through ArrayMeta.
   bool array_parent_started{false};
 
   // Helper function
@@ -1177,16 +1187,6 @@ struct JobInCtld {
   void SetArrayParentStarted(bool started) { array_parent_started = started; }
   bool IsArrayParentStarted() const { return array_parent_started; }
 
-  // Effective status for display/filtering. Array parents stay stored as
-  // Pending while running so they don't appear in running maps; surface them
-  // as Running here once at least one child has started.
-  crane::grpc::JobStatus EffectiveDisplayStatus() const {
-    if (IsArrayParent() && status == crane::grpc::Pending &&
-        array_parent_started) {
-      return crane::grpc::Running;
-    }
-    return status;
-  }
   void SetArrayTaskIdentity(job_id_t array_job_id, array_task_id_t task_id);
   [[nodiscard]] std::optional<job_id_t> ArrayJobId() const {
     if (!runtime_attr.has_array_task()) {

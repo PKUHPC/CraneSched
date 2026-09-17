@@ -29,7 +29,7 @@ cacct
 
 :   **适用于：** `作业`, `作业步`  
 指定查询的作业ID（逗号分隔列表）。支持父任务 `jobid`、已物化子任务 `jobid_arraytaskid` 以及对应的 `.stepid` 形式（例如
-`-j=2,2_0,2.1,2_0.1`）。只指定数组父任务时，输出包含父聚合记录、已物化子任务和未物化范围投影；精确任务选择器返回真实子任务或单元素 pending 投影。输出中的 `jobid_[range]` 仅是展示格式，不能作为输入选择器。
+`-j=2,2_0,2.1,2_0.1`）。只指定数组父任务时，输出包含已物化子任务和一条父记录：仍有未物化任务时为 pending 父容器，数组结束后为终态父聚合。精确任务选择器在子任务物化后返回真实子任务；尚未物化时用于定位同一个 pending 父容器并返回其完整剩余范围，其中可能包含选择器未指定的任务索引。输出中的 `jobid_[range]` 仅是展示格式，不能作为输入选择器。
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -121,10 +121,8 @@ cacct
 
 显示默认格式时，会显示以下字段：
 
-- **JobId**：规范的 raw 作业或作业步标识。普通作业为 `jobid`/`jobid.stepid`；已物化数组子任务使用其分配到的真实 `jobid`（作业步为 `jobid.stepid`）。未物化任务投影显示为 `array_job_id_[range]`。
+- **JobId**：规范的 raw 作业或作业步标识。普通作业为 `jobid`/`jobid.stepid`；已物化数组子任务使用其分配到的真实 `jobid`（作业步为 `jobid.stepid`）。pending 数组父容器显示为 `array_job_id_[range]`。
 - **ArrayJobId**：数组父任务ID；非数组作业为空。
-- **ArrayTaskId**：数组任务索引；父聚合记录和非数组作业为空。
-- **ArraySpec**：完整数组范围规格（存在时包含步长和并发限制）。
 - **JobName**：作业或作业步名称
 - **Partition**：作业/作业步运行的分区
 - **Account**：作业/作业步计费的账户
@@ -132,7 +130,7 @@ cacct
 - **State**：作业/作业步状态（如COMPLETED、FAILED、CANCELLED）
 - **ExitCode**：退出码（格式：exitcode:signal，见[退出码参考](../reference/exit_code.md)）
 
-对于父任务 ID 为 `P` 的数组，cacct 保留父聚合记录，并且不筛掉已物化子任务。子任务保留规范的真实 raw JobId，使用 `ArrayJobId=P` 和 `ArrayTaskId=i` 标识归属。尚未物化的任务显示为 pending 行，例如 `P_[start-end]`；其 JSON 中会提供 `pending_array_spec`。这与 cqueue 不同：cqueue 在全部任务物化后隐藏已完成的父聚合，并在文本中将子任务格式化为 `P_i`。
+对于父任务 ID 为 `P` 的数组，cacct 不筛掉已物化子任务。子任务保留真实 raw JobId，使用 `ArrayJobId=P` 和 `ArrayTaskId=i` 标识归属。仍有未物化任务时，现有父记录作为 pending 容器显示为 `P_[start-end:stride%maxConcurrent]`（没有可选项时省略相应部分），其 JSON 的 `array_spec` 携带当前剩余范围。父容器为空后暂不展示，直到数组聚合结束；终态父记录使用真实 JobId `P` 和完整提交规格。cqueue 不展示终态父聚合，并在文本中将子任务格式化为 `P_i`。
 
 ## 格式说明符
 
@@ -147,10 +145,10 @@ cacct
 | %E / %EndTime         | 作业/作业步的结束时间                  |
 | %e / %ExitCode        | 退出码（格式：exitcode:signal）      |
 | %h / %Held            | 作业的保持状态                      |
-| %j / %JobID           | 规范的真实 raw 作业ID；作业步为 `jobid.stepid`，pending 投影为 `array_job_id_[range]` |
+| %j / %JobID           | 规范的真实 raw 作业ID；作业步为 `jobid.stepid`，pending 父容器为 `array_job_id_[range]` |
 | %ArrayJobId           | 数组父任务ID（非数组作业为空）                 |
 | %ArrayTaskId          | 数组任务索引（父任务/非数组作业为空）           |
-| %ArraySpec            | 完整数组范围规格                               |
+| %ArraySpec            | 数组范围规格；活动父容器为当前剩余范围，终态父记录为完整提交规格 |
 | %K / %Wckey           | 工作负载特征键                      |
 | %k / %Comment         | 作业的备注                        |
 | %L / %NodeList        | 作业/作业步运行的节点列表                |

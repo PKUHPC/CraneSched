@@ -1091,8 +1091,7 @@ class JobScheduler {
   void QueryJobsInRam(
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
-      size_t num_limit,
-      std::vector<crane::grpc::JobInfo>* extra_job_info_list = nullptr);
+      size_t num_limit);
 
   void QueryQueueStateSummary(
       const crane::grpc::QueryQueueStateSummaryRequest* request,

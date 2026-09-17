@@ -994,6 +994,8 @@ bool MongodbClient::FetchJobRecords(
     AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
   }
   pipeline.match(filter.view());
+  pipeline.sort(make_document(kvp("state", 1), kvp("priority", -1),
+                              kvp("job_id", -1)));
   const size_t mongo_limit = std::min(
       limit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
   pipeline.limit(static_cast<int32_t>(mongo_limit));

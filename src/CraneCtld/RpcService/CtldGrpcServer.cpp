@@ -1604,9 +1604,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
 
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
-  const size_t probe_limit =
-      num_limit == std::numeric_limits<size_t>::max() ? num_limit
-                                                       : num_limit + 1;
+  const size_t probe_limit = num_limit == std::numeric_limits<size_t>::max()
+                                 ? num_limit
+                                 : num_limit + 1;
 
   crane::grpc::QueryJobsInfoRequest normalized_request = *request;
   for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
@@ -1616,36 +1616,24 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
-  std::vector<crane::grpc::JobInfo> extra_job_info_list;
   // Query jobs in RAM
-  g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit,
-                                   &extra_job_info_list);
+  g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
   const bool accounting_query =
       request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
 
   auto sort_truncate_and_move_to_proto = [&job_info_map,
-                                          &extra_job_info_list,
                                           response](size_t limit) -> void {
     auto* job_info_list = response->mutable_job_info_list();
-    job_info_list->Reserve(job_info_map.size() + extra_job_info_list.size());
+    job_info_list->Reserve(job_info_map.size());
     for (auto it = job_info_map.begin(); it != job_info_map.end();) {
       auto* new_job_info = job_info_list->Add();
       *new_job_info = std::move(it->second);
       it = job_info_map.erase(it);
     }
-    for (auto& job_info : extra_job_info_list) {
-      auto* new_job_info = job_info_list->Add();
-      *new_job_info = std::move(job_info);
-    }
-    extra_job_info_list.clear();
 
     std::sort(job_info_list->begin(), job_info_list->end(),
-              [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-                return (a.status() == b.status())
-                           ? (a.priority() > b.priority())
-                           : (a.status() < b.status());
-              });
+              JobInfoDisplayOrder{});
 
     const bool has_more = job_info_list->size() > limit;
     response->set_has_more(has_more);

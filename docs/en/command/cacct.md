@@ -32,10 +32,11 @@ Configuration file path. Default: "/etc/crane/config.yaml".
 
 :   **Applies to:** `Job`, `Step`  
 Specify job IDs to query (comma-separated list). Supports a parent `jobid`, a materialized `jobid_arraytaskid`, and
-their `.stepid` forms (for example, `-j=2,2_0,2.1,2_0.1`). A plain array parent selector includes the parent
-aggregate, its materialized children, and any unmaterialized range projections. Exact task selectors match the
-materialized child or produce a singleton pending projection. The displayed `jobid_[range]` form is output-only and is
-not accepted as an input selector.
+their `.stepid` forms (for example, `-j=2,2_0,2.1,2_0.1`). A plain array parent selector includes its materialized
+children and one parent record: the pending container while unmaterialized tasks remain, or the terminal aggregate
+after the array finishes. Exact task selectors match the materialized child; before materialization they locate the same
+pending parent and return its complete remaining range, which can include task indexes not named by the selector. The
+displayed `jobid_[range]` form is output-only and is not accepted as an input selector.
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
@@ -124,11 +125,9 @@ Customize output format using format specifiers. Fields are identified by a perc
 When displaying default format, the following fields are shown:
 
 - **JobId**: Canonical raw job or step identifier. Regular jobs use `jobid`/`jobid.stepid`; materialized array children
-  use their allocated raw `jobid` (and `jobid.stepid` for steps). An unmaterialized task projection is shown as
+  use their allocated raw `jobid` (and `jobid.stepid` for steps). A pending array parent container is shown as
   `array_job_id_[range]`.
 - **ArrayJobId**: Parent array job ID; empty for non-array jobs.
-- **ArrayTaskId**: Task index; empty for non-array jobs and array parent aggregates.
-- **ArraySpec**: Full array range specification, including stride and concurrency limit when present.
 - **JobName**: Job or job step name
 - **Partition**: Partition where job/job step runs
 - **Account**: Account billed for job/job step
@@ -136,11 +135,13 @@ When displaying default format, the following fields are shown:
 - **State**: Job/job step state (e.g., COMPLETED, FAILED, CANCELLED)
 - **ExitCode**: Exit code (format: exitcode:signal, see [Exit Code Reference](../reference/exit_code.md))
 
-For an array with parent ID `P`, cacct keeps the parent aggregate and lists materialized children without filtering them
-out. Children retain their canonical raw job IDs, while `ArrayJobId=P` and `ArrayTaskId=i` identify each child. Any
-unmaterialized work is represented by a pending row such as `P_[start-end]`; its `ArrayJobId` is `P` and its
-`pending_array_spec` is available in JSON. This differs from cqueue, which hides the completed parent aggregate after all
-tasks materialize and formats child IDs as `P_i` in text output.
+For an array with parent ID `P`, cacct lists materialized children without filtering them out. Children retain their
+canonical raw job IDs, while `ArrayJobId=P` and `ArrayTaskId=i` identify each child. While unmaterialized work remains,
+the existing parent record is a pending container shown as `P_[start-end:stride%maxConcurrent]`, with optional parts
+omitted when absent; its `ArrayJobId` is `P` and its `array_spec` contains the remaining range in JSON. After the
+container becomes empty, it is omitted until the parent reaches a terminal aggregate state; the terminal parent then
+uses raw JobId `P` and the full submitted `array_spec`. cqueue never shows the terminal parent aggregate and formats
+child IDs as `P_i` in text output.
 
 ## Format Specifiers
 
@@ -155,10 +156,10 @@ The following format identifiers are supported (case-insensitive):
 | %E / %EndTime         | End time of job/job step                            |
 | %e / %ExitCode        | Exit code (format: exitcode:signal)                 |
 | %h / %Held            | Hold state of job                                   |
-| %j / %JobID           | Canonical raw job ID; steps use `jobid.stepid`, pending projections use `array_job_id_[range]` |
+| %j / %JobID           | Canonical raw job ID; steps use `jobid.stepid`, active parent containers use `array_job_id_[range]` |
 | %ArrayJobId           | Parent array job ID (empty for non-array jobs)       |
 | %ArrayTaskId          | Array task index (empty for parents/non-array jobs)  |
-| %ArraySpec            | Full array range specification                      |
+| %ArraySpec            | Full array range specification; active parent containers carry the remaining range |
 | %K / %Wckey           | Workload characterization key                       |
 | %k / %Comment         | Comment for job                                     |
 | %L / %NodeList        | List of nodes where job/job step runs               |

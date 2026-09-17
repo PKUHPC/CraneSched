@@ -18,8 +18,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <list>
+#include <queue>
 #include <vector>
 
 #include "CtldPublicDefs.h"
@@ -55,6 +57,51 @@ TEST(CtldPublicDefs, CanonicalizesCranedIdListsInInputOrder) {
             (std::vector<CranedId>{"crnd2", "crnd1"}));
 
   g_config.CranedIdByAlias = std::move(original_aliases);
+}
+
+TEST(CtldPublicDefs, JobInfoDisplayOrderIsDeterministic) {
+  auto make_job = [](job_id_t job_id, crane::grpc::JobStatus status,
+                     uint32_t priority) {
+    crane::grpc::JobInfo job;
+    job.set_job_id(job_id);
+    job.set_status(status);
+    job.set_priority(priority);
+    return job;
+  };
+
+  std::vector<crane::grpc::JobInfo> jobs{
+      make_job(1, crane::grpc::Running, 100),
+      make_job(2, crane::grpc::Pending, 1),
+      make_job(3, crane::grpc::Pending, 5),
+      make_job(4, crane::grpc::Pending, 5),
+  };
+  const auto unsorted_jobs = jobs;
+
+  std::sort(jobs.begin(), jobs.end(), Ctld::JobInfoDisplayOrder{});
+
+  ASSERT_EQ(jobs.size(), 4);
+  EXPECT_EQ(jobs[0].job_id(), 4);
+  EXPECT_EQ(jobs[1].job_id(), 3);
+  EXPECT_EQ(jobs[2].job_id(), 2);
+  EXPECT_EQ(jobs[3].job_id(), 1);
+
+  std::priority_queue<crane::grpc::JobInfo,
+                      std::vector<crane::grpc::JobInfo>,
+                      Ctld::JobInfoDisplayOrder>
+      top_jobs;
+  for (const auto& job : unsorted_jobs) {
+    if (top_jobs.size() < 2) {
+      top_jobs.push(job);
+    } else if (Ctld::JobInfoDisplayOrder{}(job, top_jobs.top())) {
+      top_jobs.pop();
+      top_jobs.push(job);
+    }
+  }
+
+  ASSERT_EQ(top_jobs.size(), 2);
+  EXPECT_EQ(top_jobs.top().job_id(), 3);
+  top_jobs.pop();
+  EXPECT_EQ(top_jobs.top().job_id(), 4);
 }
 
 namespace {

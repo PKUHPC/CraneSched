@@ -91,11 +91,8 @@ std::optional<crane::grpc::ArraySpec> ArrayMeta::RemainingTaskSpec() const {
   if (!next_task_id.has_value()) return std::nullopt;
 
   const auto& full_spec = parent_job_->JobToCtld().array_spec();
-  crane::grpc::ArraySpec remaining;
+  crane::grpc::ArraySpec remaining(full_spec);
   remaining.set_start(*next_task_id);
-  remaining.set_end(full_spec.end());
-  uint32_t stride = ArrayUtil::Stride(full_spec);
-  if (stride > 1) remaining.set_stride(stride);
   return remaining;
 }
 
@@ -106,8 +103,9 @@ ArrayMeta::MaterializedChildren() const {
   for (const auto& [task_id, child_job_id] : child_job_id_by_task_id_) {
     children.emplace_back(task_id, child_job_id);
   }
-  std::sort(children.begin(), children.end(),
-            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  std::sort(
+      children.begin(), children.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
   return children;
 }
 
@@ -249,10 +247,6 @@ void ArrayMeta::FinishForTerminalStatus(crane::grpc::JobStatus status,
 bool ArrayMeta::MarkParentStarted(absl::Time start_time) {
   if (parent_job_ == nullptr || parent_start_event_triggered_) return false;
   parent_job_->SetStartTime(start_time);
-  // Parent's stored Status stays Pending while running; the "Running"
-  // representation is synthesized at query time from
-  // parent_start_event_triggered_ (mirrored to JobInCtld::array_parent_started)
-  // to keep the pending map free of Running-status entries.
   parent_job_->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                        start_time);
   parent_start_event_triggered_ = true;

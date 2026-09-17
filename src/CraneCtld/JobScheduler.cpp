@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <iterator>
 #include <map>
+#include <queue>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -2148,7 +2149,7 @@ void JobScheduler::ScheduleThread_() {
           continue;
         }
         if (job->IsArrayChild() && job->ArrayJobId().has_value()) {
-          // Transitions the parent to Running and fires AFTER deps once.
+          // Records the parent's first start and fires AFTER deps once.
           // The parent's deadline timer is intentionally NOT removed here:
           // later children still need it to enforce the array's deadline.
           // It is cleared when the parent itself finalizes (timer fire,
@@ -4027,7 +4028,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
   auto rng_filter_state = [&](JobInCtld* job) {
     return request.filter_state() == crane::grpc::Invalid ||
-           job->EffectiveDisplayStatus() == request.filter_state();
+           job->Status() == request.filter_state();
   };
 
   auto rng_filter_partition = [&](JobInCtld* job) {
@@ -6829,53 +6830,20 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 void JobScheduler::QueryJobsInRam(
     const crane::grpc::QueryJobsInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
-    size_t num_limit,
-    std::vector<crane::grpc::JobInfo>* extra_job_info_list) {
+    size_t num_limit) {
   auto now = absl::Now();
   const auto query_mode = request->mode();
-  const bool queue_query =
-      query_mode == crane::grpc::QUERY_JOBS_INFO_QUEUE;
+  const bool queue_query = query_mode == crane::grpc::QUERY_JOBS_INFO_QUEUE;
   const bool accounting_query =
       query_mode == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
-  const bool project_array_rows =
+  const bool include_array_parent_container =
       (queue_query || accounting_query) && !request->option_query_steps_only();
   const bool include_live_array_children = queue_query || accounting_query;
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
   std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
       array_selector_by_child_job_id;
-  std::unordered_map<job_id_t, std::vector<crane::grpc::ArraySpec>>
-      pending_array_specs_by_parent;
-  std::unordered_set<job_id_t> pending_array_parent_all;
   const auto& req_steps = job_steps;
-
-  auto pending_array_specs_for_job = [&](JobInCtld* job_ptr)
-      -> std::vector<crane::grpc::ArraySpec> {
-    if (!project_array_rows || job_ptr == nullptr ||
-        !job_ptr->IsArrayParent()) {
-      return {};
-    }
-
-    if (pending_array_parent_all.contains(job_ptr->JobId())) {
-      if (auto remaining = m_array_manager_->RemainingTaskSpec(
-              job_ptr->JobId());
-          remaining.has_value()) {
-        return {*remaining};
-      }
-      return {};
-    }
-
-    auto selected_it = pending_array_specs_by_parent.find(job_ptr->JobId());
-    if (selected_it != pending_array_specs_by_parent.end()) {
-      return selected_it->second;
-    }
-    if (auto remaining =
-            m_array_manager_->RemainingTaskSpec(job_ptr->JobId());
-        remaining.has_value()) {
-      return {*remaining};
-    }
-    return {};
-  };
 
   auto job_rng_filter_time = [&](auto* job_ptr) {
     JobInCtld& job = *job_ptr;
@@ -6975,13 +6943,8 @@ void JobScheduler::QueryJobsInRam(
   std::unordered_set<int> req_job_states(request->filter_states().begin(),
                                          request->filter_states().end());
   auto job_rng_filter_state = [&](auto* job_ptr) {
-    JobInCtld& job = *job_ptr;
-    auto projected_pending_specs = pending_array_specs_for_job(job_ptr);
-    auto display_status = !projected_pending_specs.empty()
-                              ? crane::grpc::JobStatus::Pending
-                              : job.EffectiveDisplayStatus();
     return no_job_states_constraint ||
-           req_job_states.contains(display_status);
+           req_job_states.contains(job_ptr->Status());
   };
 
   bool no_job_types_constraint = request->filter_job_types().empty();
@@ -7050,16 +7013,11 @@ void JobScheduler::QueryJobsInRam(
   for (const auto& selector : request->filter_job_ids()) {
     JobInCtld* selected_job = get_job_ptr_by_id(selector.job_id());
     std::unordered_set<step_id_t> selector_steps(selector.steps().begin(),
-                                                  selector.steps().end());
+                                                 selector.steps().end());
 
     if (include_live_array_children && !selector.has_array_task_id() &&
         selected_job != nullptr && selected_job->IsArrayParent()) {
       MergeJobSteps(job_steps, selected_job->JobId(), selector_steps);
-      if (project_array_rows &&
-          m_array_manager_->RemainingTaskSpec(selected_job->JobId())
-              .has_value()) {
-        pending_array_parent_all.insert(selected_job->JobId());
-      }
       for (const auto& [task_id, child_job_id] :
            m_array_manager_->MaterializedChildren(selected_job->JobId())) {
         MergeJobSteps(job_steps, child_job_id, selector_steps);
@@ -7075,10 +7033,10 @@ void JobScheduler::QueryJobsInRam(
       continue;
     }
 
-    if (project_array_rows && selector.has_array_task_id() &&
+    if (include_array_parent_container && selector.has_array_task_id() &&
         selected_job != nullptr && selected_job->IsArrayParent() &&
-        !m_array_manager_->MaterializedChildJobId(
-            selected_job->JobId(), selector.array_task_id())) {
+        !m_array_manager_->MaterializedChildJobId(selected_job->JobId(),
+                                                  selector.array_task_id())) {
       auto remaining =
           m_array_manager_->RemainingTaskSpec(selected_job->JobId());
       if (!remaining.has_value() ||
@@ -7086,22 +7044,7 @@ void JobScheduler::QueryJobsInRam(
         continue;
       }
 
-      MergeJobSteps(job_steps, selected_job->JobId(),
-                    selector_steps);
-      crane::grpc::ArraySpec pending_spec;
-      pending_spec.set_start(selector.array_task_id());
-      pending_spec.set_end(selector.array_task_id());
-      auto& selected_specs =
-          pending_array_specs_by_parent[selected_job->JobId()];
-      const bool already_selected = std::ranges::any_of(
-          selected_specs, [&](const auto& spec) {
-            return spec.start() == pending_spec.start() &&
-                   spec.end() == pending_spec.end() &&
-                   spec.has_stride() == pending_spec.has_stride() &&
-                   (!spec.has_stride() ||
-                    spec.stride() == pending_spec.stride());
-          });
-      if (!already_selected) selected_specs.push_back(std::move(pending_spec));
+      MergeJobSteps(job_steps, selected_job->JobId(), selector_steps);
     }
   }
 
@@ -7122,66 +7065,68 @@ void JobScheduler::QueryJobsInRam(
     }
   };
 
-  auto append_job_info = [&](JobInCtld* job_ptr) {
+  auto build_job_info = [&](JobInCtld* job_ptr)
+      -> std::optional<crane::grpc::JobInfo> {
     JobInCtld& job = *job_ptr;
-    auto pending_array_specs = pending_array_specs_for_job(job_ptr);
-    if (queue_query && job.IsArrayParent() &&
-        pending_array_specs.empty()) {
-      return;
-    }
+    std::optional<crane::grpc::ArraySpec> remaining_array_spec;
+    if (job.IsArrayParent()) {
+      // Step queries return steps belonging to materialized children only;
+      // the parent is a scheduling container and has no user-visible steps.
+      if ((queue_query || accounting_query) &&
+          request->option_query_steps_only()) {
+        return std::nullopt;
+      }
 
-    auto build_job_info = [&](const std::optional<crane::grpc::ArraySpec>&
-                                  pending_spec) {
-      crane::grpc::JobInfo job_info;
-      job.SetFieldsOfJobInfo(&job_info);
-      job_info.mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(now - job.StartTime()));
-      job_info.mutable_req_total_res_view()->set_cpu_count(
-          ConvertCpuCountForClient(job.req_total_res_view.GetCpuCount()));
-      job_info.mutable_allocated_res_view()->set_cpu_count(
-          ConvertCpuCountForClient(job.allocated_res_view.GetCpuCount()));
-
-      crane::grpc::JobStatus display_status = job.EffectiveDisplayStatus();
-      if (!job.IsArrayParent() &&
-          (display_status == crane::grpc::JobStatus::Running ||
-           display_status == crane::grpc::JobStatus::Configuring)) {
-        absl::Time expected_end_time = job.EndTime();
-        if (expected_end_time < now) {
-          job_info.set_status(crane::grpc::JobStatus::Completing);
-          job_info.mutable_end_time()->set_seconds(
-              ToUnixSeconds(expected_end_time));
-          job_info.mutable_elapsed_time()->set_seconds(
-              ToInt64Seconds(expected_end_time - job.StartTime()));
+      if (include_array_parent_container) {
+        remaining_array_spec = m_array_manager_->RemainingTaskSpec(job.JobId());
+        if (!remaining_array_spec.has_value()) {
+          // Queue never exposes the empty parent. Accounting does the same
+          // until the aggregate reaches a terminal state; the terminal parent
+          // is then supplied by RAM or MongoDB as the real parent record.
+          const bool hide_empty_parent =
+              queue_query ||
+              (accounting_query && !IsFinishedStepStatus(job.Status()));
+          if (hide_empty_parent) return std::nullopt;
         }
       }
-
-      if (pending_spec.has_value()) {
-        job_info.set_status(crane::grpc::JobStatus::Pending);
-        *job_info.mutable_pending_array_spec() = *pending_spec;
-      }
-
-      auto* proto_steps = job_info.mutable_step_info_list();
-      append_step_fn(proto_steps, job.DaemonStep());
-      append_step_fn(proto_steps, job.PrimaryStep());
-
-      for (const auto& step : job.Steps() | std::views::values) {
-        append_step_fn(proto_steps, step.get());
-      }
-      return job_info;
-    };
-
-    if (pending_array_specs.empty()) {
-      job_info_map->emplace(job.JobId(), build_job_info(std::nullopt));
-      return;
     }
 
-    auto first_spec = pending_array_specs.front();
-    job_info_map->emplace(job.JobId(), build_job_info(first_spec));
-    if (extra_job_info_list != nullptr) {
-      for (size_t i = 1; i < pending_array_specs.size(); ++i) {
-        extra_job_info_list->push_back(build_job_info(pending_array_specs[i]));
+    crane::grpc::JobInfo job_info;
+    job.SetFieldsOfJobInfo(&job_info);
+    job_info.mutable_elapsed_time()->set_seconds(
+        ToInt64Seconds(now - job.StartTime()));
+    job_info.mutable_req_total_res_view()->set_cpu_count(
+        ConvertCpuCountForClient(job.req_total_res_view.GetCpuCount()));
+    job_info.mutable_allocated_res_view()->set_cpu_count(
+        ConvertCpuCountForClient(job.allocated_res_view.GetCpuCount()));
+
+    if (remaining_array_spec.has_value()) {
+      job_info.set_status(crane::grpc::JobStatus::Pending);
+      *job_info.mutable_array_spec() = *remaining_array_spec;
+    }
+
+    crane::grpc::JobStatus display_status = job_info.status();
+    if (!job.IsArrayParent() &&
+        (display_status == crane::grpc::JobStatus::Running ||
+         display_status == crane::grpc::JobStatus::Configuring)) {
+      absl::Time expected_end_time = job.EndTime();
+      if (expected_end_time < now) {
+        job_info.set_status(crane::grpc::JobStatus::Completing);
+        job_info.mutable_end_time()->set_seconds(
+            ToUnixSeconds(expected_end_time));
+        job_info.mutable_elapsed_time()->set_seconds(
+            ToInt64Seconds(expected_end_time - job.StartTime()));
       }
     }
+
+    auto* proto_steps = job_info.mutable_step_info_list();
+    append_step_fn(proto_steps, job.DaemonStep());
+    append_step_fn(proto_steps, job.PrimaryStep());
+
+    for (const auto& step : job.Steps() | std::views::values) {
+      append_step_fn(proto_steps, step.get());
+    }
+    return job_info;
   };
 
   auto pending_rng = m_pending_job_map_ | ranges::views::all;
@@ -7193,26 +7138,38 @@ void JobScheduler::QueryJobsInRam(
       ranges::views::transform(get_job_ptr_by_id) |
       ranges::views::filter([](auto* job_ptr) { return job_ptr != nullptr; });
 
-  auto all_source_rng =
-      pd_r_rng |
-      ranges::views::transform([](auto& it) { return it.second.get(); });
+  auto all_source_rng = pd_r_rng | ranges::views::transform([](auto& it) {
+                          return it.second.get();
+                        });
 
-  ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng;
-  ranges::any_view<JobInCtld*, ranges::category::forward> all_job_rng;
-  if (project_array_rows) {
-    filtered_job_rng = filtered_source_rng | joined_filters;
-    all_job_rng = all_source_rng | joined_filters;
-  } else {
-    filtered_job_rng = filtered_source_rng | joined_filters |
-                       ranges::views::take(num_limit);
-    all_job_rng = all_source_rng | joined_filters |
-                  ranges::views::take(num_limit);
-  }
+  ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng =
+      filtered_source_rng | joined_filters;
+  ranges::any_view<JobInCtld*, ranges::category::forward> all_job_rng =
+      all_source_rng | joined_filters;
 
   ranges::any_view<JobInCtld*, ranges::category::forward> id_filtered_job_rng =
       no_ids_constraint ? all_job_rng : filtered_job_rng;
 
-  ranges::for_each(id_filtered_job_rng, append_job_info);
+  std::priority_queue<crane::grpc::JobInfo,
+                      std::vector<crane::grpc::JobInfo>, JobInfoDisplayOrder>
+      top_jobs;
+  for (JobInCtld* job : id_filtered_job_rng) {
+    auto job_info = build_job_info(job);
+    if (!job_info.has_value() || num_limit == 0) continue;
+
+    if (top_jobs.size() < num_limit) {
+      top_jobs.push(std::move(*job_info));
+    } else if (JobInfoDisplayOrder{}(*job_info, top_jobs.top())) {
+      top_jobs.pop();
+      top_jobs.push(std::move(*job_info));
+    }
+  }
+
+  while (!top_jobs.empty()) {
+    auto job_info = top_jobs.top();
+    top_jobs.pop();
+    job_info_map->emplace(job_info.job_id(), std::move(job_info));
+  }
 }
 
 bool JobScheduler::QueryStepAndNodeRegex(
@@ -7262,9 +7219,8 @@ void JobScheduler::QueryQueueStateSummary(
   uint64_t total = 0;
 
   auto count_job = [&](const JobInCtld& job) {
-    // Queue output projects an active array parent to one pending range row.
-    // Once every task has been materialized, the parent is an accounting-only
-    // aggregate and must not inflate queue counts alongside its children.
+    // Once every task has been materialized, the empty parent container must
+    // not inflate queue counts alongside its children.
     if (job.IsArrayParent() && job.ArrayMaterializationComplete()) return;
 
     const int status = job.IsArrayParent()
