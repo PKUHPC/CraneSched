@@ -81,6 +81,19 @@ struct Partition {
 
 struct Config {
   struct CranedConfig {
+    struct NodeGarbageCollectionConfig {
+      bool Enabled{false};
+      uint32_t IntervalSec{3600};
+      uint32_t InitialDelaySec{300};
+
+      struct LogCleanupConfig {
+        bool Enabled{true};
+        uint32_t RetentionSec{7 * 24 * 3600};
+        uint32_t MaxDeletePerCycle{500};
+      };
+      LogCleanupConfig LogCleanup;
+    };
+
     uint32_t PingIntervalSec;
     uint32_t CtldTimeoutSec;
     uint64_t MaxLogFileSize;
@@ -90,6 +103,7 @@ struct Config {
     uint32_t CgroupOpConcurrency{0};
     bool CgroupV2FastPath{true};
     std::string CgroupV2CleanupMode{"sync_rmdir"};
+    NodeGarbageCollectionConfig NodeGarbageCollection;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {
