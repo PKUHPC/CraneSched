@@ -19,7 +19,7 @@ else ()
     set(BPF_COMPILER ${CMAKE_C_COMPILER})
 endif ()
 
-# Always use -g for BPF CO-RE
+# Emit BTF and CO-RE relocation metadata for the BPF object.
 list(APPEND BPF_COMPILE_OPTIONS -O2 -g)
 foreach (include_dir IN LISTS LIBBPF_INCLUDE_DIR)
     list(APPEND BPF_COMPILE_OPTIONS "-I${include_dir}")
