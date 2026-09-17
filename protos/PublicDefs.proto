@@ -207,7 +207,8 @@ message JobToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  uint32 gid = 14;  // egid
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 14;
 
   Dependencies dependencies = 15;
 
@@ -323,7 +324,8 @@ message StepToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  repeated uint32 gid = 14;
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 14;
 
   uint32 ntasks = 15;
 
@@ -425,7 +427,8 @@ message StepToD {
   StepType step_type = 5;
 
   uint32 uid = 6;
-  repeated uint32 gid = 7;
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 7;
   map<uint32 /*task id*/, ResourceInNodeV3> task_res_map = 8;
 
   // For execution step
