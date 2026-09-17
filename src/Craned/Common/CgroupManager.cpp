@@ -48,6 +48,10 @@
 #include "crane/Tracing.h"
 
 namespace Craned::Common {
+#ifdef CRANE_ENABLE_BPF
+static int LibbpfPrintCallback(enum libbpf_print_level level,
+                               const char* format, va_list args);
+#endif
 namespace {
 
 constexpr char kCgroupOpConcurrencyEnv[] = "CRANE_CGROUP_OP_CONCURRENCY";
@@ -336,7 +340,7 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
     ControllersMounted();
 
 #ifdef CRANE_ENABLE_BPF
-    bpf_runtime_info.SetLogEnabled(debug_level < spdlog::level::info);
+    libbpf_set_print(LibbpfPrintCallback);
 #endif
 
     if (m_cgroup_v2_fast_path_enabled_) {
@@ -802,7 +806,7 @@ CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(
     const std::string& cgroup_str,
     const crane::grpc::ResourceInNodeV3& resource, bool recover,
-    std::uint64_t min_mem, bool is_int_job) {
+    std::uint64_t min_mem, bool is_int_job, bool apply_device_policy) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -827,18 +831,9 @@ CgroupManager::AllocateAndGetCgroup(
   if (cg_unique_ptr == nullptr)
     return std::unexpected(CraneErrCode::ERR_CGROUP);
 
-  // If just recover cgroup, do not trigger plugin and apply res limit.
-  if (recover) {
-#ifdef CRANE_ENABLE_BPF
-    if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
-      return cg_unique_ptr;
-    }
-    auto* cg_v2_ptr = dynamic_cast<CgroupV2*>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromCgSpec(resource);
-#endif
-
-    return cg_unique_ptr;
-  }
+  // Recovery only reopens the cgroup. Existing resource limits and BPF
+  // attachments/storage survive the daemon and need no per-cgroup replay.
+  if (recover) return cg_unique_ptr;
 
   ResourceInNodeV3 res_v3(resource);
   if (min_mem != 0) {
@@ -863,7 +858,8 @@ CgroupManager::AllocateAndGetCgroup(
                              static_cast<double>(res_v3.GetCpuSet().cpu_count));
   resource_span.SetAttribute("mem_bytes",
                              static_cast<int64_t>(res_v3.GetMemoryBytes()));
-  bool ok = ResourceInNodeV3Allocator::Allocate(res_v3, cg_unique_ptr.get());
+  bool ok = ResourceInNodeV3Allocator::Allocate(res_v3, cg_unique_ptr.get(),
+                                                apply_device_policy);
   resource_span.SetAttribute("elapsed_ms", MsSince(set_resource_begin));
   if (!ok)
     resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
@@ -926,19 +922,6 @@ CraneErrCode CgroupManager::SetCgroupResource(
   if (ok) return CraneErrCode::SUCCESS;
   resource_span.SetStatus(crane::StatusCode::kError, "set_resource_failed");
   return CraneErrCode::ERR_CGROUP;
-}
-
-CraneErrCode CgroupManager::RecoverCgroupWithResource(
-    CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource) {
-#ifdef CRANE_ENABLE_BPF
-  if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
-    return CraneErrCode::SUCCESS;
-  }
-  auto* cg_v2_ptr = dynamic_cast<CgroupV2*>(cg);
-  cg_v2_ptr->RecoverFromCgSpec(resource);
-#endif
-
-  return CraneErrCode::SUCCESS;
 }
 
 CgroupPathInfo CgroupManager::MakeCgroupPathInfo(job_id_t job_id,
@@ -1038,83 +1021,6 @@ std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
   }
   return ids;
 }
-
-std::unordered_map<ino_t, CgroupStrParsedIds>
-CgroupManager::GetCgInoJobIdMapCgroupV2_(
-    const std::filesystem::path& root_cgroup_path) {
-  std::unordered_map<ino_t, CgroupStrParsedIds> cg_id_map;
-
-  // If the directory not existed, return an empty map.
-  if (!std::filesystem::exists(root_cgroup_path)) return cg_id_map;
-
-  try {
-    for (const auto& it :
-         std::filesystem::directory_iterator(root_cgroup_path)) {
-      if (it.is_directory()) {
-        auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
-        if (!job_id_opt.has_value()) continue;
-
-        struct stat cg_stat{};
-        if (stat(it.path().c_str(), &cg_stat) != 0) {
-          CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
-                      std::strerror(errno));
-          continue;
-        }
-
-        cg_id_map.emplace(cg_stat.st_ino, parsed_ids);
-      }
-    }
-  } catch (const std::filesystem::filesystem_error& e) {
-    CRANE_ERROR("Error: {}", e.what());
-  }
-  return cg_id_map;
-}
-
-#ifdef CRANE_ENABLE_BPF
-
-CraneExpected<absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>>>
-CgroupManager::GetJobBpfMapCgroupsV2_(
-    const std::filesystem::path& root_cgroup_path) {
-  std::unordered_map cg_ino_job_id_map =
-      GetCgInoJobIdMapCgroupV2_(root_cgroup_path);
-  bool init_ebpf = !bpf_runtime_info.Valid();
-  if (init_ebpf) {
-    if (!bpf_runtime_info.InitializeBpfObj())
-      return std::unexpected(CraneErrCode::ERR_EBPF);
-  }
-
-  absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>> results;
-
-  auto add_job = [&results, &cg_ino_job_id_map](BpfKey* key) {
-    // Skip log level record.
-    if (key->cgroup_id == 0) {
-      return;
-    }
-    CRANE_ASSERT(cg_ino_job_id_map.contains(key->cgroup_id));
-    results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
-  };
-
-  auto pre_key = std::make_unique<BpfKey>();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr,
-                            pre_key.get(), sizeof(BpfKey)) < 0) {
-    CRANE_INFO("Failed to get first key of bpf map or no running jobs.");
-    if (init_ebpf) bpf_runtime_info.CloseBpfObj();
-    return results;
-  }
-
-  add_job(pre_key.get());
-  auto cur_key = std::make_unique<BpfKey>();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
-                               cur_key.get(), sizeof(BpfKey)) == 0) {
-    add_job(cur_key.get());
-    pre_key.swap(cur_key);
-  }
-  if (init_ebpf) bpf_runtime_info.CloseBpfObj();
-
-  return results;
-}
-#endif
 
 Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
     const crane::grpc::ResourceInNodeV3& res_in_node) {
@@ -1862,165 +1768,38 @@ static int LibbpfPrintCallback(enum libbpf_print_level level,
   return 0;
 }
 
-BpfRuntimeInfo::BpfRuntimeInfo()
-    : bpf_enable_logging_(false),
-      bpf_obj_(nullptr),
-      bpf_prog_(nullptr),
-      dev_map_(nullptr),
-      bpf_prog_fd_(-1),
-      bpf_mtx_(std::make_unique<absl::Mutex>()),
-      cgroup_count_(0) {}
-
-BpfRuntimeInfo::~BpfRuntimeInfo() {
-  bpf_obj_ = nullptr;
-  bpf_prog_ = nullptr;
-  dev_map_ = nullptr;
-  bpf_prog_fd_ = -1;
-  cgroup_count_ = 0;
-}
-
-bool BpfRuntimeInfo::InitializeBpfObj() {
-  absl::MutexLock lk(bpf_mtx_.get());
-
-  if (cgroup_count_ == 0) {
-    // Set up libbpf logging callback to forward logs to Crane's logging system
-    libbpf_set_print(LibbpfPrintCallback);
-
-    bpf_obj_ = bpf_object__open_file(CgConstant::kBpfObjectFilePath, nullptr);
-    if (bpf_obj_ == nullptr) {
-      CRANE_ERROR("Failed to open BPF object file {}: {}",
-                  CgConstant::kBpfObjectFilePath, std::strerror(errno));
-      return false;
-    }
-
-    if (auto err = bpf_object__load(bpf_obj_); err != 0) {
-      CRANE_ERROR("Failed to load BPF object {}: {} {}",
-                  CgConstant::kBpfObjectFilePath, err, std::strerror(errno));
-      bpf_object__close(bpf_obj_);
-      return false;
-    }
-
-    bpf_prog_ =
-        bpf_object__find_program_by_name(bpf_obj_, CgConstant::kBpfProgramName);
-    if (bpf_prog_ == nullptr) {
-      CRANE_ERROR("Failed to find BPF program {}: {}",
-                  CgConstant::kBpfProgramName, std::strerror(errno));
-      bpf_object__close(bpf_obj_);
-      return false;
-    }
-
-    bpf_prog_fd_ = bpf_program__fd(bpf_prog_);
-    if (bpf_prog_fd_ < 0) {
-      CRANE_ERROR("Failed to get BPF program file descriptor {}: {}",
-                  CgConstant::kBpfObjectFilePath, std::strerror(errno));
-      bpf_object__close(bpf_obj_);
-      return false;
-    }
-
-    dev_map_ = bpf_object__find_map_by_name(bpf_obj_, CgConstant::kBpfMapName);
-    if (dev_map_ == nullptr) {
-      CRANE_ERROR("Failed to find BPF map {}: {}", CgConstant::kBpfMapName,
-                  std::strerror(errno));
-      close(bpf_prog_fd_);
-      bpf_object__close(bpf_obj_);
-      return false;
-    }
-
-    struct BpfKey key = {.cgroup_id = static_cast<uint64_t>(0),
-                         .major = static_cast<uint32_t>(0),
-                         .minor = static_cast<uint32_t>(0)};
-    struct BpfDeviceMeta meta = {
-        .major = static_cast<uint32_t>(bpf_enable_logging_),
-        .minor = static_cast<uint32_t>(0),
-        .permission = 0,
-        .access = static_cast<int16_t>(0),
-        .type = static_cast<int16_t>(0)};
-    if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
-                             sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-      CRANE_ERROR("Failed to set debug log level in BPF: {}",
-                  std::strerror(errno));
-      return false;
+bool CgroupManager::InitializeDeviceControl() {
+  if (!IsCgV2()) return true;
+  BpfDeviceCatalog catalog;
+  for (const auto& [slot, device] : g_this_node_device) {
+    auto& keys = catalog[slot];
+    for (const auto& meta : device->device_file_metas) {
+      uint32_t type;
+      if (meta.op_type == 'c')
+        type = BPF_DEVCG_DEV_CHAR;
+      else if (meta.op_type == 'b')
+        type = BPF_DEVCG_DEV_BLOCK;
+      else {
+        CRANE_ERROR("Invalid device type for {}", meta.path);
+        return false;
+      }
+      keys.push_back({type, meta.major, meta.minor});
     }
   }
-  return ++cgroup_count_ >= 1;
-}
-
-void BpfRuntimeInfo::CloseBpfObj() {
-  absl::MutexLock lk(bpf_mtx_.get());
-  if (Valid() && --cgroup_count_ == 0) {
-    close(bpf_prog_fd_);
-    bpf_object__close(bpf_obj_);
-    bpf_prog_fd_ = -1;
-    bpf_obj_ = nullptr;
-    bpf_prog_ = nullptr;
-    dev_map_ = nullptr;
-  }
-}
-
-void BpfRuntimeInfo::Destroy() {
-  absl::MutexLock lock(bpf_mtx_.get());
-  if (!Valid()) return;
-  auto pre_key = std::make_unique<BpfKey>();
-  if (bpf_map__get_next_key(dev_map_, nullptr, pre_key.get(), sizeof(BpfKey)) <
-      0) {
-    return;
-  }
-
-  int bpf_map_count = 1;
-  auto cur_key = std::make_unique<BpfKey>();
-  while (bpf_map__get_next_key(dev_map_, pre_key.get(), cur_key.get(),
-                               sizeof(BpfKey)) == 0) {
-    pre_key.swap(cur_key);
-    ++bpf_map_count;
-  }
-  // always one key for logging
-  if (bpf_map_count == 1) {
-    // All jobs end
-    RmBpfDeviceMap();
-  }
-}
-
-void BpfRuntimeInfo::RmBpfDeviceMap() {
-  try {
-    if (std::filesystem::exists(CgConstant::kBpfDeviceMapFilePath)) {
-      std::filesystem::remove(CgConstant::kBpfDeviceMapFilePath);
-      CRANE_TRACE("Successfully removed: {}",
-                  CgConstant::kBpfDeviceMapFilePath);
-    } else {
-      CRANE_TRACE("File does not exist: {}", CgConstant::kBpfDeviceMapFilePath);
-    }
-  } catch (const std::filesystem::filesystem_error& e) {
-    CRANE_ERROR("Error: {}", e.what());
-  }
+  auto result = bpf_runtime_info.Initialize(catalog);
+  if (!result) CRANE_ERROR("Initialize device control: {}", result.error());
+  return result.has_value();
 }
 #endif
 
 CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id)
-    : CgroupInterface(name, handle, id) {
-#ifdef CRANE_ENABLE_BPF
-  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
-    CRANE_TRACE("Bpf object initialization succeed");
-  } else {
-    CRANE_TRACE("Bpf object initialization failed");
-  }
-#endif
-}
+    : CgroupInterface(name, handle, id) {}
 
 CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
                    std::shared_ptr<CgroupV2FsBackend> fs_backend)
     : CgroupV2(name, handle, id) {
   m_v2_fs_backend_ = std::move(fs_backend);
 }
-
-#ifdef CRANE_ENABLE_BPF
-// For recovery
-CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
-                   std::vector<BpfDeviceMeta>& cgroup_bpf_devices)
-    : CgroupV2(name, handle, id) {
-  m_cgroup_bpf_devices = std::move(cgroup_bpf_devices);
-  m_bpf_attached_ = true;
-}
-#endif
 
 /**
  *If a controller implements an absolute resource guarantee and/or limit,
@@ -2130,163 +1909,16 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
-    CRANE_WARN("BPF is not initialized.");
-    return false;
-  }
-  int cgroup_fd;
-
-  // Directly operating on filesystem requires full path with system prefix.
-  std::filesystem::path cg_full_path = CgroupPath();
-
-  cgroup_fd = open(cg_full_path.c_str(), O_RDONLY);
-  if (cgroup_fd < 0) {
-    CRANE_ERROR("Failed to open cgroup {}: {}", cg_full_path.string(),
-                std::strerror(errno));
-    return false;
-  }
-
-  int16_t access = 0;
-  if (set_read) access |= BPF_DEVCG_ACC_READ;
-  if (set_write) access |= BPF_DEVCG_ACC_WRITE;
-  if (set_mknod) access |= BPF_DEVCG_ACC_MKNOD;
-
-  auto& bpf_devices = m_cgroup_bpf_devices;
-  for (const auto& this_device : g_this_node_device | std::views::values) {
-    if (!devices.contains(this_device->slot_id)) {
-      for (const auto& dev_meta : this_device->device_file_metas) {
-        int16_t op_type = 0;
-        if (dev_meta.op_type == 'c') {
-          op_type |= BPF_DEVCG_DEV_CHAR;
-        } else if (dev_meta.op_type == 'b') {
-          op_type |= BPF_DEVCG_DEV_BLOCK;
-        } else {
-          op_type |= static_cast<int16_t>(0xffff);
-        }
-        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
-                               BPF_PERMISSION::DENY, access, op_type});
-      }
-    }
-  }
-  {
-    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
-    for (auto& bpf_device : bpf_devices) {
-      struct BpfKey key = {.cgroup_id = m_cgroup_info_.GetCgroupId(),
-                           .major = bpf_device.major,
-                           .minor = bpf_device.minor};
-      if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
-                               &key, sizeof(BpfKey), &bpf_device,
-                               sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
-        CRANE_ERROR(
-            "Failed to update BPF map major {},minor {} cgroup id {}: {}",
-            bpf_device.major, bpf_device.minor, key.cgroup_id,
-            std::strerror(errno));
-        close(cgroup_fd);
-        return false;
-      }
-    }
-
-    // No need to attach ebpf prog twice.
-    if (!m_bpf_attached_) {
-      if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
-                          cgroup_fd, BPF_CGROUP_DEVICE,
-                          BPF_F_ALLOW_MULTI) < 0) {
-        CRANE_ERROR("Failed to attach BPF program to cgroup {}: {}",
-                    m_cgroup_info_.GetCgroupName(), std::strerror(errno));
-        close(cgroup_fd);
-        return false;
-      }
-      m_bpf_attached_ = true;
-    }
-  }
-  close(cgroup_fd);
-  return true;
-#endif
-
-#ifndef CRANE_ENABLE_BPF
-  CRANE_WARN(
-      "BPF is disabled in craned, you can use Cgroup V1 to set devices "
-      "access");
+  auto result = CgroupManager::bpf_runtime_info.SetDeviceAccess(
+      CgroupPath(), devices, set_read, set_write, set_mknod);
+  if (!result)
+    CRANE_ERROR("Set device policy for {}: {}", CgroupName(), result.error());
+  return result.has_value();
+#else
+  CRANE_WARN("BPF is disabled; Cgroup V2 device isolation is unavailable.");
   return false;
 #endif
 }
-
-#ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(
-    const crane::grpc::ResourceInNodeV3& resource) {
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
-    CRANE_WARN("BPF is not initialized.");
-    return false;
-  }
-
-  int cgroup_fd;
-
-  // Directly operating on filesystem requires full path with system prefix.
-  std::filesystem::path cg_full_path = CgroupPath();
-
-  cgroup_fd = open(cg_full_path.c_str(), O_RDONLY);
-  if (cgroup_fd < 0) {
-    CRANE_ERROR("Failed to open cgroup {}: {}", cg_full_path.string(),
-                std::strerror(errno));
-    return false;
-  }
-
-  int16_t access = 0;
-  if (CgConstant::kCgLimitDeviceRead) access |= BPF_DEVCG_ACC_READ;
-  if (CgConstant::kCgLimitDeviceWrite) access |= BPF_DEVCG_ACC_WRITE;
-  if (CgConstant::kCgLimitDeviceMknod) access |= BPF_DEVCG_ACC_MKNOD;
-
-  std::unordered_set<std::string> all_request_slots;
-  for (const auto& type_slots_map :
-       resource.gres().name_type_map() | std::views::values) {
-    for (const auto& slots :
-         type_slots_map.type_slots_map() | std::views::values)
-      all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
-  };
-
-  auto& bpf_devices = m_cgroup_bpf_devices;
-  for (const auto& this_device : g_this_node_device | std::views::values) {
-    if (!all_request_slots.contains(this_device->slot_id)) {
-      for (const auto& dev_meta : this_device->device_file_metas) {
-        int16_t op_type = 0;
-        if (dev_meta.op_type == 'c') {
-          op_type |= BPF_DEVCG_DEV_CHAR;
-        } else if (dev_meta.op_type == 'b') {
-          op_type |= BPF_DEVCG_DEV_BLOCK;
-        } else {
-          op_type |= static_cast<int16_t>(0xffff);
-        }
-        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
-                               BPF_PERMISSION::DENY, access, op_type});
-      }
-    }
-  }
-  m_bpf_attached_ = true;
-  return true;
-}
-
-bool CgroupV2::EraseBpfDeviceMap() {
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
-    CRANE_WARN("BPF is not initialized.");
-    return false;
-  }
-  absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
-  for (const auto& bpf_meta : m_cgroup_bpf_devices) {
-    struct BpfKey key = {.cgroup_id = m_cgroup_info_.GetCgroupId(),
-                         .major = bpf_meta.major,
-                         .minor = bpf_meta.minor};
-    if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(), &key,
-                             sizeof(BpfKey), BPF_ANY) < 0) {
-      CRANE_ERROR(
-          "Failed to delete BPF map major {},minor {} in cgroup id {}: {}",
-          bpf_meta.major, bpf_meta.minor, key.cgroup_id, std::strerror(errno));
-      return false;
-    }
-  }
-
-  return true;
-}
-#endif
 
 bool CgroupV2::KillAllProcesses(int signum) {
   if (m_v2_fs_backend_) {
@@ -2357,24 +1989,13 @@ bool CgroupV2::Empty() {
 }
 
 void CgroupV2::Destroy() {
+  // The kernel releases attachments and policy storage with the cgroup.
+  // Failed removal must leave running processes protected.
   if (m_v2_fs_backend_) {
-#ifdef CRANE_ENABLE_BPF
-    if (!m_cgroup_bpf_devices.empty()) {
-      EraseBpfDeviceMap();
-    }
-    CgroupManager::bpf_runtime_info.CloseBpfObj();
-#endif
     m_v2_fs_backend_->Destroy(m_cgroup_info_.GetCgroupName());
     return;
   }
-
   CgroupInterface::Destroy();
-#ifdef CRANE_ENABLE_BPF
-  if (!m_cgroup_bpf_devices.empty()) {
-    EraseBpfDeviceMap();
-  }
-  CgroupManager::bpf_runtime_info.CloseBpfObj();
-#endif
 }
 
 bool CgroupV2::MigrateProcIn(pid_t pid) {
@@ -2426,6 +2047,7 @@ bool DedicatedResourceAllocator::Allocate(
     // On cgroup v2 without BPF, device isolation is unavailable.
     // If job doesn't request devices, warn and continue.
     // If job requests devices, fail — can't guarantee isolation.
+#ifndef CRANE_ENABLE_BPF
     if (CgroupManager::GetCgroupVersion() ==
         CgConstant::CgroupVersion::CGROUP_V2) {
       if (all_request_slots.empty()) {
@@ -2439,7 +2061,8 @@ bool DedicatedResourceAllocator::Allocate(
           "Job requests devices but BPF is not available.");
       return false;
     }
-    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+#endif
+    CRANE_WARN("Allocate device access failed.");
     return false;
   }
 
@@ -2463,6 +2086,7 @@ bool DedicatedResourceAllocator::Allocate(
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
                            CgConstant::kCgLimitDeviceMknod)) {
+#ifndef CRANE_ENABLE_BPF
     if (CgroupManager::GetCgroupVersion() ==
         CgConstant::CgroupVersion::CGROUP_V2) {
       if (all_request_slots.empty()) {
@@ -2476,7 +2100,8 @@ bool DedicatedResourceAllocator::Allocate(
           "Job requests devices but BPF is not available.");
       return false;
     }
-    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+#endif
+    CRANE_WARN("Allocate device access failed.");
     return false;
   }
 
@@ -2681,7 +2306,8 @@ std::string CgroupManager::FormatCpusetString_(const std::set<uint32_t>& cpus) {
 }
 
 bool ResourceInNodeV3Allocator::Allocate(const ResourceInNodeV3& resource,
-                                         CgroupInterface* cg) {
+                                         CgroupInterface* cg,
+                                         bool apply_device_policy) {
   bool ok = true;
 
   // CPU: cpuset for INT jobs, quota for all
@@ -2714,12 +2340,13 @@ bool ResourceInNodeV3Allocator::Allocate(const ResourceInNodeV3& resource,
       all_request_slots.insert(slots.cbegin(), slots.cend());
   }
 
-  if (g_this_node_device.empty()) return true;
+  if (!apply_device_policy) return ok;
+  if (g_this_node_device.empty()) return ok;
 
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
                            CgConstant::kCgLimitDeviceMknod)) {
-    CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    CRANE_WARN("Allocate device access failed.");
     return false;
   }
 

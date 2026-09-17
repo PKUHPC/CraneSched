@@ -24,12 +24,6 @@
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
-#ifdef CRANE_ENABLE_BPF
-#  include <bpf/bpf.h>
-#  include <bpf/libbpf.h>
-#  include <linux/bpf.h>
-#endif
-
 #include <array>
 #include <cxxopts.hpp>
 
@@ -138,40 +132,6 @@ CraneErrCode RecoverCgForJobSteps(
   } else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
     rn_job_ids_with_cg = CgroupManager::GetIdsFromCgroupV2_(
         kSystemCgPathPrefix / kRootCgNamePrefix);
-
-#ifdef CRANE_ENABLE_BPF
-    auto job_id_bpf_key_vec_map = CgroupManager::GetJobBpfMapCgroupsV2_(
-        kSystemCgPathPrefix / kRootCgNamePrefix);
-    if (!job_id_bpf_key_vec_map) {
-      CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
-      return CraneErrCode::ERR_EBPF;
-    }
-
-    for (const auto& [ids, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      auto job_id = std::get<kParsedJobIdIdx>(ids).value();
-      auto step_id = std::get<kParsedStepIdIdx>(ids);
-      if (step_id.has_value()) {
-        if (rn_step_from_ctld.contains({job_id, step_id.value()})) {
-          continue;
-        } else {
-          CRANE_DEBUG("Erase bpf map entry for rn step {} {} not in Ctld.",
-                      job_id, step_id.value());
-        }
-      }
-      if (rn_jobs_from_ctld.contains(job_id))
-        continue;
-      else
-        CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
-      for (const auto& key : bpf_key_vec) {
-        if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
-                                 &key, sizeof(BpfKey), BPF_ANY) < 0) {
-          CRANE_ERROR(
-              "Failed to delete BPF map major {},minor {} in cgroup id {}",
-              key.major, key.minor, key.cgroup_id);
-        }
-      }
-    }
-#endif
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
@@ -1585,6 +1545,10 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
+
+#ifdef CRANE_ENABLE_BPF
+  if (!CgroupManager::InitializeDeviceControl()) std::exit(1);
+#endif
 
   // Initialize CPU pool (overflow cgroup and pool state)
   {

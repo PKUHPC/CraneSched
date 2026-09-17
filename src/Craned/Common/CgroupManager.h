@@ -34,7 +34,7 @@
 #include <string_view>
 
 #ifdef CRANE_ENABLE_BPF
-#  include <bpf/libbpf.h>
+#  include "BpfRuntime.h"
 #endif
 
 namespace Craned::Common {
@@ -129,13 +129,6 @@ inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
 inline constexpr std::string_view kMemoryOomControlFileV1 =
     "memory.oom_control";
 
-#ifdef CRANE_ENABLE_BPF
-inline const char* kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
-inline const char* kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
-inline const char* kBpfMapName = "craned_dev_map";
-inline const char* kBpfProgramName = "craned_device_access";
-#endif
-
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -202,28 +195,6 @@ constexpr std::string_view GetControllerFileStringView(
 }
 
 }  // namespace CgConstant
-
-#ifdef CRANE_ENABLE_BPF
-enum BPF_PERMISSION { ALLOW = 0, DENY };
-
-#  pragma pack(push, 8)
-struct BpfKey {
-  uint64_t cgroup_id;
-  uint32_t major;
-  uint32_t minor;
-};
-#  pragma pack(pop)
-
-#  pragma pack(push, 8)
-struct BpfDeviceMeta {
-  uint32_t major;
-  uint32_t minor;
-  int permission;
-  int16_t access;
-  int16_t type;
-};
-#  pragma pack(pop)
-#endif
 
 class ControllerFlags {
  public:
@@ -342,39 +313,6 @@ enum class CgroupV2CleanupMode : uint8_t {
 
 class CgroupV2FsBackend;
 
-#ifdef CRANE_ENABLE_BPF
-class BpfRuntimeInfo {
- public:
-  BpfRuntimeInfo();
-  ~BpfRuntimeInfo();
-
-  bool InitializeBpfObj();
-  void CloseBpfObj();
-  void Destroy();
-  static void RmBpfDeviceMap();
-
-  struct bpf_object* BpfObj() { return bpf_obj_; }
-  struct bpf_program* BpfProgram() { return bpf_prog_; }
-  absl::Mutex* BpfMutex() { return bpf_mtx_.get(); }
-  struct bpf_map* BpfDevMap() { return dev_map_; }
-  int BpfProgFd() { return bpf_prog_fd_; }
-  void SetLogEnabled(bool enabled) { bpf_enable_logging_ = enabled; }
-  bool Valid() const {
-    return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
-           cgroup_count_ > 0;
-  }
-
- private:
-  bool bpf_enable_logging_;
-  struct bpf_object* bpf_obj_;
-  struct bpf_program* bpf_prog_;
-  struct bpf_map* dev_map_;
-  int bpf_prog_fd_;
-  std::unique_ptr<absl::Mutex> bpf_mtx_;
-  size_t cgroup_count_;
-};
-#endif
-
 class Cgroup {
  public:
   Cgroup(const std::string& name, struct cgroup* handle, uint64_t id = 0)
@@ -479,11 +417,6 @@ class CgroupV2 : public CgroupInterface {
   CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
            std::shared_ptr<CgroupV2FsBackend> fs_backend);
 
-#ifdef CRANE_ENABLE_BPF
-  CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
-           std::vector<BpfDeviceMeta>& cgroup_bpf_devices);
-#endif
-
   ~CgroupV2() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -523,10 +456,6 @@ class CgroupV2 : public CgroupInterface {
   bool SetDeviceAccess(const std::unordered_set<SlotId>& devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
-#ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const crane::grpc::ResourceInNodeV3& resource);
-  bool EraseBpfDeviceMap();
-#endif
   bool KillAllProcesses(int signum) override;
 
   bool Empty() override;
@@ -539,11 +468,6 @@ class CgroupV2 : public CgroupInterface {
                             std::string_view value);
 
   std::shared_ptr<CgroupV2FsBackend> m_v2_fs_backend_;
-
-#ifdef CRANE_ENABLE_BPF
-  bool m_bpf_attached_{false};
-  std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
-#endif
 };
 
 CraneErrCode SetCpuAffinity(pid_t pid, std::vector<int> cpu_ids);
@@ -562,7 +486,11 @@ class DedicatedResourceAllocator {
 // Note: cpuset is managed by CpuPoolManager separately.
 class ResourceInNodeV3Allocator {
  public:
-  static bool Allocate(const ResourceInNodeV3& resource, CgroupInterface* cg);
+  // A task without an independent GRES policy inherits the step policy. The
+  // flag is explicit so task-level GRES can be enabled when the resource
+  // model starts carrying it, without changing cgroup allocation semantics.
+  static bool Allocate(const ResourceInNodeV3& resource, CgroupInterface* cg,
+                       bool apply_device_policy = true);
 };
 
 using CgroupStrParsedIds =
@@ -634,14 +562,13 @@ class CgroupManager {
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string& cgroup_str,
       const crane::grpc::ResourceInNodeV3& resource, bool recover,
-      std::uint64_t min_mem = 0U, bool is_int_job = false);
+      std::uint64_t min_mem = 0U, bool is_int_job = false,
+      bool apply_device_policy = true);
   static CraneExpected<std::unique_ptr<CgroupInterface>> CreateOrOpenCgroup(
       const std::string& cgroup_str, bool retrieve);
   static CraneErrCode SetCgroupResource(
       CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource,
       std::uint64_t min_mem = 0U);
-  static CraneErrCode RecoverCgroupWithResource(
-      CgroupInterface* cg, const crane::grpc::ResourceInNodeV3& resource);
 
   /**
    * \brief Job-level cgroup allocation with INT/overflow CPU pool routing.
@@ -729,12 +656,7 @@ class CgroupManager {
       const std::filesystem::path& root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
-  static CraneExpected<
-      absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2_(const std::filesystem::path& root_cgroup_path);
-#endif
-
-#ifdef CRANE_ENABLE_BPF
+  static bool InitializeDeviceControl();
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
 
@@ -751,9 +673,6 @@ class CgroupManager {
   static std::unique_ptr<CgroupInterface> CreateOrOpenV2Fast_(
       const std::string& cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
-
-  static std::unordered_map<ino_t, CgroupStrParsedIds>
-  GetCgInoJobIdMapCgroupV2_(const std::filesystem::path& root_cgroup_path);
 
   // --- CPU Pool internals ---
   static std::string FormatCpusetString_(const std::set<uint32_t>& cpus);
