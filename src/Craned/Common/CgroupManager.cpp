@@ -2028,11 +2028,7 @@ bool DedicatedResourceAllocator::Allocate(
   };
 
   // No devices registered on this node — nothing to restrict
-#ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::IsCgV2() && g_this_node_device.empty()) return true;
-#else
   if (g_this_node_device.empty()) return true;
-#endif
 
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
@@ -2074,11 +2070,7 @@ bool DedicatedResourceAllocator::Allocate(
   };
 
   // No devices registered on this node — nothing to restrict
-#ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::IsCgV2() && g_this_node_device.empty()) return true;
-#else
   if (g_this_node_device.empty()) return true;
-#endif
 
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
@@ -2338,11 +2330,7 @@ bool ResourceInNodeV3Allocator::Allocate(const ResourceInNodeV3& resource,
   }
 
   if (!apply_device_policy) return ok;
-#ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::IsCgV2() && g_this_node_device.empty()) return ok;
-#else
   if (g_this_node_device.empty()) return ok;
-#endif
 
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
