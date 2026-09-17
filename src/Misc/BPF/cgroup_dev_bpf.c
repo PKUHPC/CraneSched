@@ -21,6 +21,15 @@
 
 #include <bpf/bpf_helpers.h>
 
+// Keep the device-controller context local to the BPF object while allowing
+// libbpf to relocate its fields against the target kernel's BTF. The flavor
+// suffix is stripped during CO-RE type matching.
+struct bpf_cgroup_dev_ctx___local {
+  __u32 access_type;
+  __u32 major;
+  __u32 minor;
+} __attribute__((preserve_access_index));
+
 // A missing entry means unmanaged, so this must never evict entries.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -39,7 +48,7 @@ struct {
 } device_policies SEC(".maps");
 
 SEC("cgroup/dev")
-int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
+int craned_device_access(struct bpf_cgroup_dev_ctx___local *ctx) {
   struct DeviceKey key = {
       .type = ctx->access_type & 0xffff,
       .major = ctx->major,
