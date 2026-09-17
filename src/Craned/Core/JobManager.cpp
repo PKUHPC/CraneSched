@@ -237,7 +237,6 @@ EnvMap JobInD::GetJobEnvMap() {
     return std::to_string(static_cast<uint32_t>(it - nodelist.begin()));
   };
 
-  auto alloc_node_num = daemon_step_to_d.nodelist().size();
   ResourceInNodeV3 step_res_v3(daemon_step_to_d.res());
   auto mem_in_node =
       step_res_v3.GetMemoryBytes() / (static_cast<uint64_t>(1024 * 1024));
@@ -291,19 +290,34 @@ EnvMap JobInD::GetJobEnvMap() {
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
-    env_map.emplace("SLURM_JOBID", std::to_string(job_id));
-    env_map.emplace("SLURM_JOB_ID", std::to_string(job_id));
-    env_map.emplace("SLURM_NODEID", node_id_to_str());
-    env_map.emplace("SLURMD_NODENAME", g_config.CranedIdOfThisNode);
-    env_map.emplace("SLURM_WORKING_DIR", daemon_step_to_d.submit_dir());
-    env_map.emplace("SLURM_JOB_NODELIST", slurm_nodelist);
-    env_map.emplace("SLURM_NODELIST", slurm_nodelist);
+    env_map.insert_or_assign("SLURM_JOBID", std::to_string(job_id));
+    env_map.insert_or_assign("SLURM_JOB_ID", std::to_string(job_id));
+    env_map.insert_or_assign("SLURM_NODEID", node_id_to_str());
+    env_map.insert_or_assign("SLURMD_NODENAME", g_config.CranedIdOfThisNode);
+    env_map.insert_or_assign("SLURM_WORKING_DIR",
+                             daemon_step_to_d.submit_dir());
+    env_map.insert_or_assign("SLURM_JOB_NODELIST", slurm_nodelist);
+    env_map.insert_or_assign("SLURM_NODELIST", slurm_nodelist);
+    env_map.insert_or_assign("SLURM_JOB_NAME", daemon_step_to_d.name());
+    env_map.insert_or_assign("SLURM_JOB_PARTITION", job_to_d.partition());
+    env_map.insert_or_assign("SLURM_JOB_NUM_NODES",
+                             std::to_string(daemon_step_to_d.node_num()));
+    env_map.insert_or_assign("SLURM_SUBMIT_DIR", daemon_step_to_d.submit_dir());
+    env_map.insert_or_assign("SLURM_NTASKS",
+                             std::to_string(daemon_step_to_d.ntasks()));
+    env_map.insert_or_assign(
+        "SLURM_CPUS_PER_TASK",
+        std::format("{:g}", daemon_step_to_d.cpus_per_task()));
+    env_map.insert_or_assign(
+        "SLURM_CPUS_ON_NODE",
+        std::format("{:g}", static_cast<double>(cpus_on_node)));
+    env_map.insert_or_assign("SLURM_MEM_PER_NODE", std::to_string(mem_in_node));
     if (job_to_d.has_array_task()) {
       const auto& array_task = job_to_d.array_task();
-      env_map.emplace("SLURM_ARRAY_JOB_ID",
-                      std::to_string(array_task.array_job_id()));
-      env_map.emplace("SLURM_ARRAY_TASK_ID",
-                      std::to_string(array_task.task_id()));
+      env_map.insert_or_assign("SLURM_ARRAY_JOB_ID",
+                               std::to_string(array_task.array_job_id()));
+      env_map.insert_or_assign("SLURM_ARRAY_TASK_ID",
+                               std::to_string(array_task.task_id()));
     }
   }
 
