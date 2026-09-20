@@ -281,9 +281,22 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
-    env_map.emplace("SLURM_CPU_BIND_TYPE", "none");
-    env_map.emplace("SLURM_STEP_NUM_TASKS",
-                    std::to_string(m_step_to_supv_.task_node_list().size()));
+    env_map.insert_or_assign("SLURM_CPU_BIND_TYPE", "none");
+    env_map.insert_or_assign(
+        "SLURM_STEP_NUM_TASKS",
+        std::to_string(m_step_to_supv_.task_node_list().size()));
+    env_map.insert_or_assign("SLURM_NTASKS",
+                             std::to_string(m_step_to_supv_.ntasks()));
+    env_map.insert_or_assign(
+        "SLURM_CPUS_PER_TASK",
+        std::format("{:g}", m_step_to_supv_.cpus_per_task()));
+    env_map.insert_or_assign(
+        "SLURM_CPUS_ON_NODE",
+        std::format("{:g}", m_step_to_supv_.res().cpu_count()));
+    env_map.insert_or_assign(
+        "SLURM_MEM_PER_NODE",
+        std::to_string(m_step_to_supv_.res().memory_bytes() /
+                       static_cast<uint64_t>(1024 * 1024)));
     // The set of task IDs running on the current node
     const auto& task_res_map = m_step_to_supv_.task_res_map();
     std::vector<task_id_t> gtids;
@@ -291,7 +304,8 @@ EnvMap StepInstance::GetStepProcessEnv() const {
     for (const auto& [task_id, resource] : task_res_map) {
       gtids.emplace_back(task_id);
     }
-    env_map.emplace("SLURM_GTIDS", fmt::format("{}", fmt::join(gtids, ",")));
+    env_map.insert_or_assign("SLURM_GTIDS",
+                             fmt::format("{}", fmt::join(gtids, ",")));
   }
 
   return env_map;
@@ -493,7 +507,7 @@ void ITaskInstance::InitEnvMap() {
     m_env_.emplace(name, value);
   }
   for (const auto& [name, value] : m_parent_step_inst_->GetStepProcessEnv()) {
-    m_env_.emplace(name, value);
+    m_env_.insert_or_assign(name, value);
   }
   if (g_config.EnableSlurmCompatibleEnv) {
     // Global task id

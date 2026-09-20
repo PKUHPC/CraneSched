@@ -1283,7 +1283,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_name(this->name);
 
   step_to_d.set_node_num(this->node_num);
+  step_to_d.set_ntasks(this->ntasks);
   step_to_d.set_ntasks_per_node(this->ntasks_per_node_max);
+  step_to_d.set_cpus_per_task(this->req_task_res_view.CpuCountDouble());
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gids()->Assign(this->gids.begin(), this->gids.end());
