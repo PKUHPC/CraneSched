@@ -20,6 +20,16 @@ target_link_libraries(misc_cgroup_v2_fs_test
 )
 gtest_discover_tests(misc_cgroup_v2_fs_test)
 
+add_executable(misc_pam_util_test pam_util_test.cpp)
+target_include_directories(misc_pam_util_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/Misc/Pam
+)
+target_link_libraries(misc_pam_util_test
+        GTest::gtest GTest::gtest_main
+        pam_crane
+)
+gtest_discover_tests(misc_pam_util_test)
+
 if (CRANE_ENABLE_TRACING)
     add_executable(misc_tracer_manager_test tracer_manager_test.cpp)
     target_link_libraries(misc_tracer_manager_test
