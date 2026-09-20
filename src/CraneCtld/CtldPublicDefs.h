@@ -494,6 +494,7 @@ struct ContainerMetaInJob {
     std::string password;
     std::string server_address;
     std::string pull_policy;
+    std::optional<int64_t> image_pulling_timeout_seconds;
   };
 
   std::string name;
