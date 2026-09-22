@@ -139,6 +139,20 @@ int InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
+    if (msg.container_config().has_cri_request_timeout_seconds()) {
+      g_config.Container.CriRequestTimeout = std::chrono::seconds(
+          msg.container_config().cri_request_timeout_seconds());
+    }
+    if (msg.container_config().has_image_pulling_timeout_seconds()) {
+      g_config.Container.ImagePullingTimeout = std::chrono::seconds(
+          msg.container_config().image_pulling_timeout_seconds());
+    }
+    if (!cri::CriClientConfig{g_config.Container.CriRequestTimeout,
+                              g_config.Container.ImagePullingTimeout}
+             .IsValid()) {
+      CRANE_ERROR("Invalid CRI timeout configuration received from Craned.");
+      std::exit(1);
+    }
 
     if (msg.container_config().has_dns_config()) {
       const auto& dc = msg.container_config().dns_config();

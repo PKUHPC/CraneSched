@@ -82,11 +82,16 @@ ContainerMetaInJob::ContainerMetaInJob(
     : name(rhs.name()),
       labels(rhs.labels().begin(), rhs.labels().end()),
       annotations(rhs.annotations().begin(), rhs.annotations().end()),
-      image_info{.image = rhs.image().image(),
-                 .username = rhs.image().username(),
-                 .password = rhs.image().password(),
-                 .server_address = rhs.image().server_address(),
-                 .pull_policy = rhs.image().pull_policy()},
+      image_info{
+          .image = rhs.image().image(),
+          .username = rhs.image().username(),
+          .password = rhs.image().password(),
+          .server_address = rhs.image().server_address(),
+          .pull_policy = rhs.image().pull_policy(),
+          .image_pulling_timeout_seconds =
+              rhs.image().has_image_pulling_timeout_seconds()
+                  ? std::optional(rhs.image().image_pulling_timeout_seconds())
+                  : std::nullopt},
       command(rhs.command()),
       args(rhs.args().begin(), rhs.args().end()),
       workdir(rhs.workdir()),
@@ -106,6 +111,10 @@ ContainerMetaInJob::operator crane::grpc::ContainerJobAdditionalMeta() const {
   image->set_password(this->image_info.password);
   image->set_server_address(this->image_info.server_address);
   image->set_pull_policy(this->image_info.pull_policy);
+  if (this->image_info.image_pulling_timeout_seconds.has_value()) {
+    image->set_image_pulling_timeout_seconds(
+        this->image_info.image_pulling_timeout_seconds.value());
+  }
 
   result.set_name(this->name);
 
