@@ -855,6 +855,8 @@ message CranedInfo {
   repeated string features = 33;
   // True if this node is a FUTURE node mapped to a running craned.
   bool dynamic_mapped = 34;
+  // True if the node was created at runtime rather than in config.yaml.
+  bool dynamic = 35;
 }
 
 message ReservationInfo {

@@ -196,7 +196,7 @@ Nodes:
 
   # FUTURE placeholder nodes: no real machine is bound at startup. A machine
   # running `craned -F [feature]` is mapped to an unmapped FUTURE node whose
-  # cpu/memory spec is satisfied by the local hardware (and which carries the
+  # CPU count matches and memory is sufficient (and which carries the
   # given feature, if specified). FUTURE nodes must belong to a partition and
   # should not configure NodeHostname/NodeAddr.
   # - name: "future[01-02]"

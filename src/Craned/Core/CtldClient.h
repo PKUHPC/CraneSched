@@ -155,8 +155,8 @@ class CtldClientStateMachine {
 
 // Used by -F/--future mode before the node identity is determined: probe
 // local hardware and block until CraneCtld maps this craned to a FUTURE
-// placeholder node. Returns the CranedId of the mapped node.
-CranedId MapToFutureNodeBlocking();
+// placeholder node. Returns its identity and configured resources.
+crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking();
 
 class CtldClient {
  public:
@@ -214,6 +214,8 @@ class CtldClient {
                              std::optional<std::string> reason = std::nullopt);
 
   void UpdateNodeDrainState(bool is_drain, const std::string& reason);
+
+  grpc::Status QueryAllCranedInfo(crane::grpc::QueryCranedInfoReply* reply);
 
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
