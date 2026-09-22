@@ -101,6 +101,13 @@ Nodes:
       - name: gpu
         type: a100
         DeviceFileRegex: /dev/nvidia[0-3]
+
+  # FUTURE 占位节点（动态节点）
+  - name: "future[01-02]"
+    cpu: 8
+    memory: 32G
+    state: FUTURE
+    features: [gpu, highmem]
 ```
 
 **节点参数：**
@@ -111,6 +118,8 @@ Nodes:
 - **cpu**：CPU 核心数
 - **memory**：总内存（支持 K、M、G、T 后缀）
 - **gres**：通用资源，如 GPU（可选）
+- **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数等于配置值、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量。
+- **features**：可选，字符串列表形式的节点标签，目前用于 `craned -F <feature>` 的映射过滤
 
 Hostname 规则：
 
