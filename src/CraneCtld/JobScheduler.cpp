@@ -2783,13 +2783,15 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       target->SetEndTime(end_time);
     }
 
-    if (absl_deadline_time) {
-      if (is_pending &&
-          job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    if (is_pending && absl_deadline_time) {
+      // The job deadline has already been updated above, so use the requested
+      // value rather than the old value when updating the pending timer.
+      if (absl_deadline_time.value() !=
+          absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
         m_job_deadline_timer_create_queue_.enqueue(
             {job_id, deadline_time.value()});
         m_job_deadline_timer_create_async_handle_->send();
-      } else if (is_pending) {
+      } else {
         m_job_deadline_timer_del_queue_.enqueue(job_id);
         m_job_deadline_timer_del_async_handle_->send();
       }
