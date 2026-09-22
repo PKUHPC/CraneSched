@@ -439,6 +439,37 @@ ERRO[0000] command execution failed
 
 ### Create and Delete Commands
 
+#### Create and Delete Dynamic Nodes
+
+Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
+
+```bash
+ccontrol create node NodeName=future[01-02] State=FUTURE CPUs=8 RealMemory=32G Partition=CPU Features=compute
+craned -F compute
+ccontrol show node future01
+```
+
+`NodeName`, `State`, `CPUs`, `RealMemory`, and `Partition` are required.
+`Partition` accepts existing partition names separated by commas. `Features` is an optional tag list.
+`Sockets` defaults to 1 and must divide the CPU count. Memory without a suffix is in MiB; B, K, M, and G are also accepted.
+Mapping requires an equal CPU count, at least the configured memory, and a case-insensitive feature match.
+This version supports FUTURE nodes with CPU, memory, socket, and feature definitions. CLOUD, EXTERNAL, dynamic GRES, and `-Z` registration are not supported.
+The compute daemon receives the mapped resource definition from the controller; its local configuration must still provide the controller connection and runtime settings.
+
+A new node appears as `State=future`; after mapping and registration it carries the `dynamic_future` marker.
+Definitions and actual machine mappings are persisted in a `.nodes` file beside the controller database path and restored on controller restart.
+
+```bash
+# Drain the node and wait for jobs and reservations to finish
+ccontrol update NodeName=future01 State=DRAIN Reason="scale-in"
+ccontrol delete node NodeName=future[01-02]
+```
+
+Only nodes created at runtime can be deleted. Job allocations and reservations prevent deletion.
+Batch operations return success or a failure reason for each node. Successful deletion removes the node from queries and partition membership and updates resource totals.
+Nodes defined in the configuration file cannot be deleted with this command.
+Stop the deleted node's craned process; to reconnect it, create a placeholder and restart craned with `-F`.
+
 #### Create Reservation
 
 Create a new resource reservation.

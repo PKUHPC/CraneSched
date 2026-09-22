@@ -812,9 +812,6 @@ void ParseConfig(int argc, char** argv) {
             uint64_t part_mem = 0;
             uint32_t part_cpu = 0;
             for (const auto& node : part.nodes) {
-              // Unmapped FUTURE nodes contribute no resource to the cluster
-              // and should not dilute the derived DefaultMemPerCpu.
-              if (g_config.Nodes[node]->is_future) continue;
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }

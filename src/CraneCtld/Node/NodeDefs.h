@@ -42,6 +42,7 @@ struct CranedStaticMeta {
 
   // True if this is a FUTURE placeholder node in config.
   bool is_future{false};
+  bool dynamic{false};
   std::vector<std::string> features;
 };
 
