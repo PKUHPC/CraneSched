@@ -1094,7 +1094,10 @@ void ParseConfig(int argc, char** argv) {
             RegisterNodeHostnameAliasOrExit_(node_hostname, name);
             g_config.CranedIdToNodeHostname[name] = node_hostname;
             g_config.CranedIdToNodeAddr[name] = node_addr;
-            RegisterNodeAddrOrExit_(node_addr, name);
+            if (!node["state"] ||
+                absl::AsciiStrToUpper(node["state"].as<std::string>()) !=
+                    "FUTURE")
+              RegisterNodeAddrOrExit_(node_addr, name);
             g_config.CranedRes[name] = node_res;
             node_topologies[name] = node_topo;
           }
@@ -1284,16 +1287,27 @@ void ParseConfig(int argc, char** argv) {
   if (g_config.FutureMode) {
     // The node identity is assigned by CraneCtld: block until this craned is
     // mapped to an unmapped FUTURE node matching the local hardware spec.
-    g_config.CranedIdOfThisNode = Craned::MapToFutureNodeBlocking();
-    if (!g_config.CranedRes.contains(g_config.CranedIdOfThisNode)) {
-      CRANE_ERROR(
-          "Mapped FUTURE node {} is not contained in Nodes of the local "
-          "config file!",
-          g_config.CranedIdOfThisNode);
+    auto mapping = MapToFutureNodeBlocking();
+    g_config.CranedIdOfThisNode = mapping.craned_id();
+    const auto& definition = mapping.definition();
+    if (definition.name() != mapping.craned_id() || definition.cpu() == 0 ||
+        definition.memory_bytes() == 0 || definition.sockets() == 0 ||
+        definition.partitions().empty()) {
+      CRANE_ERROR("CraneCtld returned an invalid FUTURE node definition.");
       std::exit(1);
     }
+    auto resource = std::make_shared<ResourceInNodeV3>();
+    resource->GetCpuSet().cpu_count = cpu_t(definition.cpu());
+    for (uint32_t i = 0; i < definition.cpu(); ++i)
+      resource->GetCpuSet().core_ids.insert(i);
+    resource->SetMemoryBytes(definition.memory_bytes());
+    resource->SetMemorySwBytes(definition.memory_bytes());
+    g_config.CranedRes[g_config.CranedIdOfThisNode] = std::move(resource);
+    node_topologies[g_config.CranedIdOfThisNode].sockets = definition.sockets();
+    for (const auto& partition : definition.partitions())
+      g_config.Partitions[partition].nodes.insert(g_config.CranedIdOfThisNode);
   } else {
-    const std::string short_hostname = ShortHostname_(g_config.Hostname);
+    const std::string short_hostname = util::ShortHostname(g_config.Hostname);
     auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
     if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
         short_hostname != g_config.Hostname) {
@@ -1309,9 +1323,8 @@ void ParseConfig(int argc, char** argv) {
     g_config.CranedIdOfThisNode = craned_id_it->second;
   }
 
-    CRANE_INFO("Found this machine {} as CranedId {} in Nodes",
-               g_config.Hostname, g_config.CranedIdOfThisNode);
-  }
+  CRANE_INFO("Found this machine {} as CranedId {} in Nodes", g_config.Hostname,
+             g_config.CranedIdOfThisNode);
   g_config.node_topo_info = node_topologies.at(g_config.CranedIdOfThisNode);
   // get this node device info
   // Todo: Auto detect device

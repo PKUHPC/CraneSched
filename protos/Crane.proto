@@ -106,6 +106,47 @@ message CranedMapFutureNodeReply {
   bool ok = 1;
   string craned_id = 2;
   string reason = 3;
+  DynamicNodeDefinition definition = 4;
+}
+
+message DynamicNodeDefinition {
+  string name = 1;
+  uint32 cpu = 2;
+  uint64 memory_bytes = 3;
+  uint32 sockets = 4;
+  repeated string features = 5;
+  repeated string partitions = 6;
+}
+
+message NodeState {
+  DynamicNodeDefinition definition = 1;
+  bool dynamic = 2;
+  string node_hostname = 3;
+  string node_addr = 4;
+}
+
+message NodeStateSnapshot { repeated NodeState nodes = 1; }
+
+message CreateNodesRequest {
+  uint32 uid = 1;
+  repeated DynamicNodeDefinition nodes = 2;
+}
+
+message CreateNodesReply {
+  repeated string created_nodes = 1;
+  repeated string not_created_nodes = 2;
+  repeated string not_created_reasons = 3;
+}
+
+message DeleteNodesRequest {
+  uint32 uid = 1;
+  repeated string node_names = 2;
+}
+
+message DeleteNodesReply {
+  repeated string deleted_nodes = 1;
+  repeated string not_deleted_nodes = 2;
+  repeated string not_deleted_reasons = 3;
 }
 
 message CranedRegisterRequest {
@@ -1623,6 +1664,8 @@ service CraneCtld {
   rpc ModifyJob(ModifyJobRequest) returns (ModifyJobReply);
 
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+  rpc CreateNodes(CreateNodesRequest) returns (CreateNodesReply);
+  rpc DeleteNodes(DeleteNodesRequest) returns (DeleteNodesReply);
 
   // Possible ErrCodes in reply.code: ERR_INVALID_UID, ERR_INVALID_OP_USER, ERR_PERMISSION_USER,
   // ERR_INVALID_PARTITION, ERR_PARTITION_MISSING, ERR_INVALID_ACCOUNT

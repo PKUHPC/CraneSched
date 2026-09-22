@@ -977,6 +977,15 @@ void CtldClient::UpdateNodeDrainState(bool is_drain,
   if (!status.ok() || !reply.ok()) CRANE_DEBUG("UpdateNodeDrainState failed");
 }
 
+grpc::Status CtldClient::QueryAllCranedInfo(
+    crane::grpc::QueryCranedInfoReply* reply) {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  crane::grpc::QueryCranedInfoRequest request;
+  return m_stub_->QueryCranedInfo(&context, request, reply);
+}
+
 std::map<job_id_t, std::map<step_id_t, StepStatus>>
 CtldClient::GetAllStepStatusChange() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
@@ -1411,7 +1420,11 @@ void CtldClient::NodeHealthCheck_() {
   double mem_gb_config =
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 
-  if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
+  const bool memory_mismatch =
+      g_config.FutureMode
+          ? node_real.memory_gb + kMemoryToleranceGB < mem_gb_config
+          : std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB;
+  if (memory_mismatch) {
     reason = fmt::format(
         "Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
         mem_gb_config, node_real.memory_gb);
@@ -1438,7 +1451,7 @@ void CtldClient::NodeHealthCheck_() {
   return;
 }
 
-CranedId MapToFutureNodeBlocking() {
+crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking() {
   using crane::grpc::CranedMapFutureNodeReply;
   using crane::grpc::CranedMapFutureNodeRequest;
 
@@ -1496,17 +1509,22 @@ CranedId MapToFutureNodeBlocking() {
     if (status.ok() && reply.ok()) {
       CRANE_INFO("This machine {} is mapped to FUTURE node {}.",
                  g_config.Hostname, reply.craned_id());
-      return reply.craned_id();
+      return reply;
     }
 
-    if (!status.ok())
-      CRANE_WARN(
-          "Failed to request FUTURE node mapping from CraneCtld: {}. "
-          "Retry in {}s.",
-          status.error_message(), kCtldClientTimeoutSec);
-    else
-      CRANE_WARN("CraneCtld refused FUTURE node mapping: {} Retry in {}s.",
-                 reply.reason(), kCtldClientTimeoutSec);
+    if (status.ok()) {
+      CRANE_ERROR("CraneCtld refused FUTURE node mapping: {}", reply.reason());
+      std::exit(1);
+    }
+    if (status.error_code() != grpc::StatusCode::UNAVAILABLE &&
+        status.error_code() != grpc::StatusCode::DEADLINE_EXCEEDED) {
+      CRANE_ERROR("FUTURE node mapping failed: {}", status.error_message());
+      std::exit(1);
+    }
+    CRANE_WARN(
+        "Failed to request FUTURE node mapping from CraneCtld: {}. "
+        "Retry in {}s.",
+        status.error_message(), kCtldClientTimeoutSec);
 
     std::this_thread::sleep_for(std::chrono::seconds(kCtldClientTimeoutSec));
   }

@@ -19,6 +19,7 @@
 #include "CranedForPamServer.h"
 
 #include "CranedServer.h"
+#include "CtldClient.h"
 #include "JobManager.h"
 
 namespace Craned {
@@ -34,45 +35,55 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   // May be craned or cfored
   std::string crane_port;
   std::string crane_addr = request->ssh_remote_address();
-  CranedId remote_craned_id;
+  std::string remote_node_hostname;
 
   int ip_ver = crane::GetIpAddrVer(request->ssh_remote_address());
 
   ipv4_t crane_addr4;
   ipv6_t crane_addr6;
-  if (ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) {
-    if (g_config.Ipv4ToCranedHostname.contains(crane_addr4)) {
-      remote_craned_id = g_config.Ipv4ToCranedHostname.at(crane_addr4);
-      CRANE_TRACE(
-          "Receive QueryJobIdFromPortForward from Pam module: "
-          "ssh_remote_port: {}, ssh_remote_address: {}. "
-          "This ssh comes from a CraneD node. uid: {}",
-          request->ssh_remote_port(), request->ssh_remote_address(),
-          request->uid());
-      // In the addresses of CraneD nodes. This ssh request comes from a
-      // CraneD node. Check if the remote port belongs to a job. If so, move
-      // it in to the cgroup of this job.
-      crane_port = g_config.ListenConf.CranedListenPort;
-      remote_is_craned = true;
-    }
-  } else if (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)) {
-    if (g_config.Ipv6ToCranedHostname.contains(crane_addr6)) {
-      remote_craned_id = g_config.Ipv6ToCranedHostname.at(crane_addr6);
-      CRANE_TRACE(
-          "Receive QueryJobIdFromPortForward from Pam module: "
-          "ssh_remote_port: {}, ssh_remote_address: {}. "
-          "This ssh comes from a CraneD node. uid: {}",
-          request->ssh_remote_port(), request->ssh_remote_address(),
-          request->uid());
-      crane_port = g_config.ListenConf.CranedListenPort;
-      remote_is_craned = true;
-    }
-  } else {
-    CRANE_ERROR(
-        "Unknown ip version for address {} or error converting ip to uint",
-        crane_addr);
+  if (!((ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) ||
+        (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)))) {
+    CRANE_ERROR("Invalid SSH remote address {}", crane_addr);
     response->set_ok(false);
     return Status::OK;
+  }
+
+  crane::grpc::QueryCranedInfoReply node_directory;
+  auto directory_status = g_ctld_client->QueryAllCranedInfo(&node_directory);
+  if (!directory_status.ok()) {
+    CRANE_ERROR("Failed to query node directory for PAM: {}",
+                directory_status.error_message());
+    response->set_ok(false);
+    return {directory_status.error_code(),
+            "Failed to query node directory for PAM"};
+  }
+
+  for (const auto &node : node_directory.craned_info_list()) {
+    if (node.resource_state() == crane::grpc::CRANE_FUTURE) continue;
+    bool address_matches;
+    if (ip_ver == 4) {
+      ipv4_t node_addr;
+      address_matches =
+          crane::ResolveIpv4FromHostname(node.node_addr(), &node_addr) &&
+          node_addr == crane_addr4;
+    } else {
+      ipv6_t node_addr;
+      address_matches =
+          crane::ResolveIpv6FromHostname(node.node_addr(), &node_addr) &&
+          node_addr == crane_addr6;
+    }
+    if (!address_matches) continue;
+
+    remote_node_hostname = node.node_hostname();
+    crane_port = g_config.ListenConf.CranedListenPort;
+    remote_is_craned = true;
+    CRANE_TRACE(
+        "Receive QueryJobIdFromPortForward from Pam module: "
+        "ssh_remote_port: {}, ssh_remote_address: {}. "
+        "This ssh comes from a CraneD node. uid: {}",
+        request->ssh_remote_port(), request->ssh_remote_address(),
+        request->uid());
+    break;
   }
 
   if (!remote_is_craned) {
@@ -94,11 +105,10 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   if (g_config.ListenConf.TlsConfig.Enabled) {
     if (remote_is_craned) {
       grpc::ChannelArguments channel_args;
-      SetTlsTargetNameOverride(
-          &channel_args, g_config.CranedIdToNodeHostname.at(remote_craned_id));
+      SetTlsTargetNameOverride(&channel_args, remote_node_hostname);
       channel_of_remote_service = CreateTcpTlsCustomChannelByIp(
-          g_config.CranedIdToNodeAddr.at(remote_craned_id), crane_port,
-          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+          crane_addr, crane_port, g_config.ListenConf.TlsConfig.TlsCerts,
+          channel_args);
     } else {
       std::string remote_hostname;
       if (ip_ver == 4) {

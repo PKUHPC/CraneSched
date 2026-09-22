@@ -18,6 +18,13 @@
 
 #include "Node/CranedMetaContainer.h"
 
+#include <absl/strings/match.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <filesystem>
+#include <fstream>
+
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -26,8 +33,6 @@ namespace Ctld {
 void CranedMetaContainer::CranedUp(
     const CranedId& craned_id,
     const crane::grpc::CranedRemoteMeta& remote_meta) {
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-
   if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
     std::vector<crane::NetworkInterface> interfaces;
     for (const auto& interface : remote_meta.network_interfaces()) {
@@ -36,7 +41,7 @@ void CranedMetaContainer::CranedUp(
     g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+  auto part_ids = GetNodePartitions_(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -50,7 +55,7 @@ void CranedMetaContainer::CranedUp(
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[craned_id];
-  CRANE_ASSERT(node_meta);
+  if (!node_meta) return;
   if (node_meta->alive) {
     CRANE_TRACE("Craned {} is trying to up, but it's already alive, skip it.",
                 craned_id);
@@ -81,8 +86,7 @@ void CranedMetaContainer::CranedUp(
 }
 
 void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+  auto part_ids = GetNodePartitions_(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -99,7 +103,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[craned_id];
-  if (!node_meta->alive) {
+  if (!node_meta || !node_meta->alive) {
     UnlockResReduceEvents();
     CRANE_TRACE("Craned {} trying to down, but it's not alive, skip clean.",
                 craned_id);
@@ -123,9 +127,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
   auto craned_meta_ptr = craned_meta_map_.GetValueExclusivePtr(craned_id);
-  CRANE_ASSERT(craned_meta_ptr);
-
-  return craned_meta_ptr->alive;
+  return craned_meta_ptr && craned_meta_ptr->alive;
 }
 
 int CranedMetaContainer::GetOnlineCranedCount() {
@@ -183,7 +185,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     return;
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+  auto part_ids = GetNodePartitions_(node_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -199,6 +201,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
+  if (!node_meta) return;
 
   node_meta->rn_job_res_map.emplace(job_id, job_node_res);
 
@@ -230,7 +233,7 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
     return;
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+  auto part_ids = GetNodePartitions_(node_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -244,6 +247,7 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
+  if (!node_meta) return;
 
   auto resource_iter = node_meta->rn_job_res_map.find(job_id);
   if (resource_iter == node_meta->rn_job_res_map.end()) {
@@ -373,8 +377,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       auto& craned_meta = craned_map[craned_name];
       craned_meta.static_meta.partition_ids.emplace_back(part_name);
 
-      craned_id_part_ids_map_[craned_name].emplace_back(part_name);
-
       part_meta.craned_ids.emplace(craned_name);
 
       if (craned_meta.static_meta.is_future) {
@@ -419,8 +421,10 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         part_meta.partition_global_meta.node_cnt);
   }
 
+  for (auto& [id, node] : craned_map) node.static_meta.partition_ids.sort();
   craned_meta_map_.InitFromMap(std::move(craned_map));
   partition_meta_map_.InitFromMap(std::move(partition_map));
+  RestoreNodeState_();
 }
 
 crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryAllCranedInfo() {
@@ -443,11 +447,8 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
   auto* list = reply.mutable_craned_info_list();
 
   const CranedId craned_id = ResolveCranedIdAlias(node_name);
-  if (!craned_meta_map_.Contains(craned_id)) {
-    return reply;
-  }
-
   auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  if (!craned_meta) return reply;
 
   auto* craned_info = list->Add();
   SetGrpcCranedInfoByCranedMeta_(*craned_meta, craned_info);
@@ -697,6 +698,7 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryResvInfo(
 
 crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest& request) {
+  absl::MutexLock lifecycle_lock(&m_node_lifecycle_mtx_);
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_list = reply.mutable_partitions();
 
@@ -885,13 +887,12 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   std::vector<CranedId> affected_nodes;
 
   for (auto craned_id : request.craned_ids()) {
-    if (!craned_meta_map_.Contains(craned_id)) {
+    auto craned_meta = craned_meta_map_[craned_id];
+    if (!craned_meta) {
       reply.add_not_modified_nodes(craned_id);
       reply.add_not_modified_reasons("Invalid node name specified.");
       continue;
     }
-
-    auto craned_meta = craned_meta_map_[craned_id];
 
     if (craned_meta->static_meta.is_future && !craned_meta->future_mapped) {
       reply.add_not_modified_nodes(craned_id);
@@ -968,7 +969,7 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
 
   auto craned_meta = craned_meta_map_[craned_id];
 
-  if (!craned_meta->alive) {
+  if (!craned_meta || !craned_meta->alive) {
     CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.",
                 craned_id);
     if (is_drain) UnlockResReduceEvents();
@@ -991,16 +992,323 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   return true;
 }
 
+std::list<PartitionId> CranedMetaContainer::GetNodePartitions_(
+    const CranedId& node_id) {
+  auto node = craned_meta_map_[node_id];
+  return node ? node->static_meta.partition_ids : std::list<PartitionId>{};
+}
+
+crane::grpc::DynamicNodeDefinition CranedMetaContainer::NodeDefinition_(
+    const CranedMeta& node) {
+  crane::grpc::DynamicNodeDefinition definition;
+  const auto& meta = node.static_meta;
+  definition.set_name(meta.hostname);
+  definition.set_cpu(static_cast<uint32_t>(meta.res.GetCpuSet().cpu_count));
+  definition.set_memory_bytes(meta.res.GetMemoryBytes());
+  definition.set_sockets(meta.node_topo_info.sockets);
+  for (const auto& feature : meta.features) definition.add_features(feature);
+  for (const auto& partition : meta.partition_ids)
+    definition.add_partitions(partition);
+  return definition;
+}
+
+std::string CranedMetaContainer::ValidateNodeDefinition_(
+    const crane::grpc::DynamicNodeDefinition& definition) {
+  const auto& name = definition.name();
+  if (name.empty() || name.find_first_not_of(
+                          "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "0123456789-_.") != std::string::npos)
+    return "Invalid node name.";
+  if (craned_meta_map_.Contains(name) ||
+      g_config.CranedIdByAlias.contains(name))
+    return "Node name or alias already exists.";
+  if (definition.cpu() == 0 || definition.memory_bytes() == 0 ||
+      definition.sockets() == 0 || definition.sockets() > definition.cpu() ||
+      definition.cpu() % definition.sockets() != 0)
+    return "CPU and memory must be positive; sockets must evenly divide CPUs.";
+  if (definition.partitions().empty())
+    return "At least one partition must be specified.";
+  std::unordered_set<std::string> partitions;
+  for (const auto& partition : definition.partitions()) {
+    if (!partition_meta_map_.Contains(partition))
+      return fmt::format("Unknown partition {}.", partition);
+    if (!partitions.emplace(partition).second) return "Duplicate partition.";
+  }
+  std::unordered_set<std::string> features;
+  for (const auto& feature : definition.features()) {
+    if (feature.empty() ||
+        feature.find_first_of(" ,\t\r\n") != std::string::npos)
+      return "Invalid feature.";
+    if (!features.emplace(absl::AsciiStrToLower(feature)).second)
+      return "Duplicate feature.";
+  }
+  return {};
+}
+
+void CranedMetaContainer::InsertDynamicNode_(
+    const crane::grpc::DynamicNodeDefinition& definition) {
+  CranedMeta node;
+  auto& meta = node.static_meta;
+  meta.hostname = definition.name();
+  meta.node_hostname = definition.name();
+  meta.node_addr = definition.name();
+  meta.port = std::strtoul(g_config.CranedListenConf.CranedListenPort.c_str(),
+                           nullptr, 10);
+  meta.is_future = true;
+  meta.dynamic = true;
+  meta.features.assign(definition.features().begin(),
+                       definition.features().end());
+  meta.partition_ids.assign(definition.partitions().begin(),
+                            definition.partitions().end());
+  meta.partition_ids.sort();
+  meta.node_topo_info.sockets = definition.sockets();
+  meta.res.GetCpuSet().cpu_count = cpu_t(definition.cpu());
+  for (uint32_t cpu = 0; cpu < definition.cpu(); ++cpu)
+    meta.res.GetCpuSet().core_ids.insert(cpu);
+  meta.res.SetMemoryBytes(definition.memory_bytes());
+  meta.res.SetMemorySwBytes(definition.memory_bytes());
+  node.res_total = meta.res;
+  node.res_avail = meta.res;
+  node.remote_meta.craned_version = "unknown";
+  node.remote_meta.sys_rel_info.name = "unknown";
+
+  auto partitions = partition_meta_map_.GetMapSharedPtr();
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> partition_locks;
+  for (const auto& id : meta.partition_ids)
+    partition_locks.emplace_back(partitions->at(id).GetExclusivePtr());
+  auto nodes = craned_meta_map_.GetMapExclusivePtr();
+  nodes->emplace(definition.name(), std::move(node));
+  for (auto& partition : partition_locks) {
+    partition->craned_ids.emplace(definition.name());
+    auto& global = partition->partition_global_meta;
+    global.node_cnt = partition->craned_ids.size();
+    global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
+  }
+}
+
+bool CranedMetaContainer::SaveNodeState_(
+    const crane::grpc::NodeStateSnapshot& snapshot) {
+  const std::string path = g_config.CraneCtldDbPath + ".nodes";
+  const std::string temporary = path + ".tmp";
+  const std::string bytes = snapshot.SerializeAsString();
+  int fd =
+      open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (fd == -1) {
+    CRANE_ERROR("Cannot open node state {}: {}", temporary, strerror(errno));
+    return false;
+  }
+  size_t written = 0;
+  while (written < bytes.size()) {
+    ssize_t n = write(fd, bytes.data() + written, bytes.size() - written);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) break;
+    written += n;
+  }
+  bool ok = written == bytes.size() && fsync(fd) == 0;
+  if (close(fd) != 0) ok = false;
+  if (ok) ok = rename(temporary.c_str(), path.c_str()) == 0;
+  if (!ok) {
+    CRANE_ERROR("Cannot save node state {}: {}", path, strerror(errno));
+    unlink(temporary.c_str());
+    return false;
+  }
+  auto directory = std::filesystem::path(path).parent_path();
+  if (directory.empty()) directory = ".";
+  fd = open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd == -1 || fsync(fd) != 0)
+    CRANE_ERROR("Cannot sync node state directory {}: {}", directory.string(),
+                strerror(errno));
+  if (fd != -1) close(fd);
+  return true;
+}
+
+void CranedMetaContainer::RestoreNodeState_() {
+  const std::string path = g_config.CraneCtldDbPath + ".nodes";
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    if (!std::filesystem::exists(path)) return;
+    CRANE_ERROR("Cannot open node state {}.", path);
+    std::exit(1);
+  }
+  if (!m_node_state_.ParseFromIstream(&file)) {
+    CRANE_ERROR("Cannot parse node state {}.", path);
+    std::exit(1);
+  }
+  std::unordered_set<std::string> restored;
+  for (const auto& state : m_node_state_.nodes()) {
+    const auto& definition = state.definition();
+    std::string error;
+    if (!restored.emplace(definition.name()).second)
+      error = "Duplicate persisted node.";
+    else if (state.dynamic())
+      error = ValidateNodeDefinition_(definition);
+    else {
+      auto node = craned_meta_map_[definition.name()];
+      if (!node || !node->static_meta.is_future)
+        error = "Persisted FUTURE node is absent from configuration.";
+      else if (definition.cpu() !=
+                   static_cast<uint32_t>(
+                       node->static_meta.res.GetCpuSet().cpu_count) ||
+               definition.memory_bytes() !=
+                   node->static_meta.res.GetMemoryBytes())
+        error = "Persisted FUTURE node resources differ from configuration.";
+    }
+    if (!error.empty()) {
+      CRANE_ERROR("Cannot restore node {}: {}", definition.name(), error);
+      std::exit(1);
+    }
+    if (state.dynamic()) InsertDynamicNode_(definition);
+    if (!state.node_hostname().empty() && !state.node_addr().empty())
+      ClaimFutureNode_(definition.name(), state.node_hostname(),
+                       state.node_addr());
+    else if (!state.node_hostname().empty() || !state.node_addr().empty()) {
+      CRANE_ERROR("Incomplete persisted mapping for node {}.",
+                  definition.name());
+      std::exit(1);
+    }
+  }
+}
+
+crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
+    const crane::grpc::CreateNodesRequest& request) {
+  absl::MutexLock lock(&m_node_lifecycle_mtx_);
+  crane::grpc::CreateNodesReply reply;
+  for (const auto& definition : request.nodes()) {
+    auto error = ValidateNodeDefinition_(definition);
+    if (error.empty()) {
+      auto snapshot = m_node_state_;
+      auto* state = snapshot.add_nodes();
+      *state->mutable_definition() = definition;
+      state->set_dynamic(true);
+      if (!SaveNodeState_(snapshot))
+        error = "Failed to persist node definition.";
+      else {
+        InsertDynamicNode_(definition);
+        m_node_state_ = std::move(snapshot);
+        reply.add_created_nodes(definition.name());
+        CRANE_INFO("User {} created FUTURE node {}.", request.uid(),
+                   definition.name());
+      }
+    }
+    if (!error.empty()) {
+      reply.add_not_created_nodes(definition.name());
+      reply.add_not_created_reasons(error);
+    }
+  }
+  return reply;
+}
+
+crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
+    const crane::grpc::DeleteNodesRequest& request) {
+  absl::MutexLock lock(&m_node_lifecycle_mtx_);
+  auto keeper_lock = g_craned_keeper->GetLifecycleLock();
+  crane::grpc::DeleteNodesReply reply;
+  for (const auto& id : request.node_names()) {
+    LockResReduceEvents();
+    auto part_ids = GetNodePartitions_(id);
+    auto partitions = partition_meta_map_.GetMapSharedPtr();
+    std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr>
+        partition_locks;
+    for (const auto& part_id : part_ids)
+      partition_locks.emplace_back(partitions->at(part_id).GetExclusivePtr());
+    auto nodes = craned_meta_map_.GetMapExclusivePtr();
+    auto it = nodes->find(id);
+    std::string error;
+    if (it == nodes->end())
+      error = "Unknown node.";
+    else {
+      const auto& node = *it->second.RawPtr();
+      if (!node.static_meta.dynamic)
+        error = "Only manually created nodes can be deleted.";
+      else if (!node.rn_job_res_map.empty())
+        error = "Node has allocated or completing jobs.";
+      else if (!node.resv_in_node_map.empty())
+        error = "Node belongs to a reservation.";
+      else {
+        auto snapshot = m_node_state_;
+        auto* states = snapshot.mutable_nodes();
+        for (int i = 0; i < states->size(); ++i) {
+          if (states->Get(i).definition().name() == id) {
+            states->DeleteSubrange(i, 1);
+            break;
+          }
+        }
+        if (!SaveNodeState_(snapshot))
+          error = "Failed to persist node deletion.";
+        else {
+          g_craned_keeper->RetireCraned(id);
+          for (auto& partition : partition_locks) {
+            auto& global = partition->partition_global_meta;
+            if (node.future_mapped) {
+              global.res_total -= node.res_total;
+              global.res_avail -= node.res_avail;
+              global.res_total_inc_dead -= node.static_meta.res;
+            }
+            if (node.alive) --global.alive_craned_cnt;
+            partition->craned_ids.erase(id);
+            global.node_cnt = partition->craned_ids.size();
+            global.nodelist_str =
+                util::HostNameListToStr(partition->craned_ids);
+          }
+          nodes->erase(it);
+          m_node_state_ = std::move(snapshot);
+          reply.add_deleted_nodes(id);
+          CRANE_INFO("User {} deleted node {}.", request.uid(), id);
+        }
+      }
+    }
+    if (error.empty())
+      AddResReduceEventsAndUnlock(
+          {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{id})});
+    else {
+      UnlockResReduceEvents();
+      reply.add_not_deleted_nodes(id);
+      reply.add_not_deleted_reasons(error);
+    }
+  }
+  return reply;
+}
+
 crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
     const crane::grpc::CranedMapFutureNodeRequest& request,
     const std::string& craned_addr) {
   crane::grpc::CranedMapFutureNodeReply reply;
 
-  absl::MutexLock lock(&m_future_map_mtx_);
+  absl::MutexLock lock(&m_node_lifecycle_mtx_);
+  auto keeper_lock = g_craned_keeper->GetLifecycleLock();
+  if (request.hostname().empty() || craned_addr.empty()) {
+    reply.set_reason("Hostname and address are required.");
+    return reply;
+  }
 
   constexpr double kBytesPerGB = 1024 * 1024 * 1024;
   double real_mem_gb =
       static_cast<double>(request.memory_bytes()) / kBytesPerGB;
+
+  auto persist_mapping = [&](const CranedId& id) {
+    auto snapshot = m_node_state_;
+    bool found = false;
+    for (auto& state : *snapshot.mutable_nodes()) {
+      if (state.definition().name() == id) {
+        state.set_node_hostname(request.hostname());
+        state.set_node_addr(craned_addr);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      auto node = craned_meta_map_[id];
+      if (!node) return false;
+      auto* state = snapshot.add_nodes();
+      *state->mutable_definition() = NodeDefinition_(*node);
+      state->set_dynamic(node->static_meta.dynamic);
+      state->set_node_hostname(request.hostname());
+      state->set_node_addr(craned_addr);
+    }
+    if (!SaveNodeState_(snapshot)) return false;
+    m_node_state_ = std::move(snapshot);
+    return true;
+  };
 
   // A restarted craned on an already mapped machine reuses its previous
   // mapping instead of claiming (and thus leaking) another node.
@@ -1019,7 +1327,36 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
     }
   }
   if (!selected_id.empty()) {
+    {
+      auto node = craned_meta_map_[selected_id];
+      const auto& meta = node->static_meta;
+      if (request.cpu() !=
+              static_cast<uint32_t>(meta.res.GetCpuSet().cpu_count) ||
+          real_mem_gb + kMemoryToleranceGB <
+              static_cast<double>(meta.res.GetMemoryBytes()) / kBytesPerGB ||
+          (!request.feature().empty() && std::ranges::none_of(
+                                             meta.features,
+                                             [&](const auto& feature) {
+                                               return absl::EqualsIgnoreCase(
+                                                   feature, request.feature());
+                                             }))) {
+        reply.set_reason(
+            "Hardware or feature no longer matches the mapped FUTURE node.");
+        return reply;
+      }
+      if (node->alive && meta.node_addr != craned_addr) {
+        reply.set_reason("FUTURE node is already online at another address.");
+        return reply;
+      }
+    }
+    if (!persist_mapping(selected_id)) {
+      reply.set_ok(false);
+      reply.set_reason("Failed to persist FUTURE mapping.");
+      return reply;
+    }
     craned_meta_map_[selected_id]->static_meta.node_addr = craned_addr;
+    reply.mutable_definition()->CopyFrom(
+        NodeDefinition_(*craned_meta_map_[selected_id]));
     CRANE_INFO("Craned {} at {} reuses its mapping to FUTURE node {}.",
                request.hostname(), craned_addr, selected_id);
     reply.set_ok(true);
@@ -1039,11 +1376,12 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
       if (!static_meta.is_future || craned_meta->future_mapped) continue;
 
       if (!request.feature().empty() &&
-          std::ranges::find(static_meta.features, request.feature()) ==
-              static_meta.features.end())
+          std::ranges::find_if(static_meta.features, [&](const auto& f) {
+            return absl::EqualsIgnoreCase(f, request.feature());
+          }) == static_meta.features.end())
         continue;
 
-      if (request.cpu() <
+      if (request.cpu() !=
           static_cast<uint32_t>(static_meta.res.GetCpuSet().cpu_count))
         continue;
 
@@ -1064,7 +1402,14 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
     return reply;
   }
 
+  if (!persist_mapping(selected_id)) {
+    reply.set_ok(false);
+    reply.set_reason("Failed to persist FUTURE mapping.");
+    return reply;
+  }
   ClaimFutureNode_(selected_id, request.hostname(), craned_addr);
+  reply.mutable_definition()->CopyFrom(
+      NodeDefinition_(*craned_meta_map_[selected_id]));
 
   CRANE_INFO("Craned {} at {} is mapped to FUTURE node {}.", request.hostname(),
              craned_addr, selected_id);
@@ -1074,26 +1419,10 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
   return reply;
 }
 
-bool CranedMetaContainer::ReclaimFutureNode(const CranedId& craned_id,
-                                            const std::string& craned_addr) {
-  absl::MutexLock lock(&m_future_map_mtx_);
-
-  {
-    auto craned_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
-    if (!craned_meta->static_meta.is_future || craned_meta->future_mapped)
-      return false;
-  }
-
-  // The mapping was lost due to a CraneCtld restart. The node keeps its
-  // config-defined spec; only the craned address needs to be re-learned.
-  ClaimFutureNode_(craned_id, "", craned_addr);
-  return true;
-}
-
 void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
                                            const std::string& node_hostname,
                                            const std::string& node_addr) {
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+  auto part_ids = GetNodePartitions_(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -1220,7 +1549,7 @@ void CranedMetaContainer::AddDedicatedResource(
     return;
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+  auto part_ids = GetNodePartitions_(node_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -1234,7 +1563,7 @@ void CranedMetaContainer::AddDedicatedResource(
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
-  if (!node_meta->alive) return;
+  if (!node_meta || !node_meta->alive) return;
 
   // Find how many resource should add,
   // under the constraint of configured count
@@ -1270,6 +1599,7 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   craned_info->mutable_res_alloc()->set_cpu_count(
       ConvertCpuCountForClient(craned_meta.res_in_use.GetCpuSet().cpu_count));
 
+  craned_info->set_dynamic(craned_meta.static_meta.dynamic);
   craned_info->set_hostname(craned_meta.static_meta.hostname);
   craned_info->set_node_hostname(craned_meta.static_meta.node_hostname);
   craned_info->set_node_addr(craned_meta.static_meta.node_addr);

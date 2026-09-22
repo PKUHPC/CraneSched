@@ -414,6 +414,14 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ModifyCranedStateRequest* request,
       crane::grpc::ModifyCranedStateReply* response) override;
 
+  grpc::Status CreateNodes(grpc::ServerContext* context,
+                           const crane::grpc::CreateNodesRequest* request,
+                           crane::grpc::CreateNodesReply* response) override;
+
+  grpc::Status DeleteNodes(grpc::ServerContext* context,
+                           const crane::grpc::DeleteNodesRequest* request,
+                           crane::grpc::DeleteNodesReply* response) override;
+
   grpc::Status ModifyPartitionAcl(
       grpc::ServerContext* context,
       const crane::grpc::ModifyPartitionAclRequest* request,
