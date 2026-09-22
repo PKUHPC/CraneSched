@@ -27,8 +27,13 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "crane/PublicHeader.h"
+
+using EnvMap = std::unordered_map<std::string, std::string>;
+
+EnvMap FilterJobEnvForSshSession(EnvMap env);
 
 bool PamGetUserName(pam_handle_t *pamh, std::string *username);
 

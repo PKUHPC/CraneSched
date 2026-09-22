@@ -53,6 +53,18 @@ static void FreePamResp(struct pam_response *pr, int num_msg) {
   free(pr);
 }
 
+EnvMap FilterJobEnvForSshSession(EnvMap env) {
+  // DISPLAY is allocated by sshd for each X11 forwarding session. A value
+  // captured at job submission would overwrite the active endpoint.
+  env.erase("DISPLAY");
+
+  // XAUTHORITY belongs to the originating X11 session. Reusing it may select
+  // stale credentials instead of the cookie installed for this SSH session.
+  env.erase("XAUTHORITY");
+
+  return env;
+}
+
 void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
                      bool *initialized) {
   g_pam_config.CraneConfigFilePath = kDefaultConfigPath;
@@ -441,7 +453,9 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     }
 
     pam_syslog(pamh, LOG_ERR, "[Crane] QueryJobEnvVariablesForward succeeded.");
-    for (const auto &[name, value] : reply.env_map()) {
+    auto env = FilterJobEnvForSshSession(
+        EnvMap{reply.env_map().begin(), reply.env_map().end()});
+    for (const auto &[name, value] : env) {
       int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
       if (ret != PAM_SUCCESS) {
         pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed", name.c_str(),
