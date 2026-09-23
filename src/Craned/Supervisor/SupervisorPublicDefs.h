@@ -43,7 +43,7 @@ struct TaskStatusChangeQueueElem {
 
 struct Config {
 #ifdef CRANE_ENABLE_BPF
-  Common::BpfDeviceIndices BpfDeviceIndices;
+  Common::ManagedDeviceIndicesBySlot managed_device_indices_by_slot;
 #endif
   struct CforedListenConf {
     struct TlsCertConfig {
