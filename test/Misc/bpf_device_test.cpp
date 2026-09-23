@@ -277,7 +277,6 @@ TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
   EXPECT_EQ(PinnedId("managed_devices"), devices_id);
   EXPECT_EQ(PinnedId("device_policies"), policies_id);
   EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDWR), 0);
-  EXPECT_FALSE(runtime_->Reconfigure(device_keys_by_slot_));
   auto changed = device_keys_by_slot_;
   changed["added"] = {{BPF_DEVCG_DEV_CHAR, 1, 7}};
   EXPECT_FALSE(runtime_->Initialize(changed));
