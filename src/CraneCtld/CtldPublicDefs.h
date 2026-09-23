@@ -831,6 +831,7 @@ struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   std::string cmd_line;
   std::optional<StepInteractiveMeta> ia_meta;
+  bool external_launcher{false};
 
   /* -----------
    * Fields that may change at run time.

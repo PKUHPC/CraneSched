@@ -357,6 +357,8 @@ message StepToCtld {
   optional uint64 mem_per_node = 38;
   optional GresMap gres_per_node = 39;
   google.protobuf.Timestamp deadline_time = 40;
+  // Launcher step that reuses the parent job allocation (Slurm external launcher).
+  bool external_launcher = 41;
 }
 
 message RuntimeAttrOfStep {
