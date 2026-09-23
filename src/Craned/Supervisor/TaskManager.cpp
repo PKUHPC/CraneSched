@@ -281,6 +281,9 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
+    if (m_step_to_supv_.external_launcher()) {
+      env_map.insert_or_assign("SLURM_EXTERNAL_LAUNCHER", "1");
+    }
     env_map.insert_or_assign("SLURM_CPU_BIND_TYPE", "none");
     env_map.insert_or_assign(
         "SLURM_STEP_NUM_TASKS",
