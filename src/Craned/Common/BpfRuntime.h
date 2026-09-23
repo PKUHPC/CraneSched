@@ -27,7 +27,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../../Misc/BPF/DevicePolicy.h"
+#include "Misc/BPF/DevicePolicy.h"
 
 namespace Craned::Common {
 
