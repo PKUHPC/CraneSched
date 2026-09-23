@@ -33,8 +33,8 @@ namespace Craned::Common {
 
 // Only the device manager assigns indices. Supervisors receive a snapshot of
 // these associations; device discovery is not repeated when applying a policy.
-using BpfDeviceCatalog = std::map<std::string, std::vector<DeviceKey>>;
-using BpfDeviceIndices = std::map<std::string, std::vector<uint32_t>>;
+using ManagedDeviceKeysBySlot = std::map<std::string, std::vector<DeviceKey>>;
+using ManagedDeviceIndicesBySlot = std::map<std::string, std::vector<uint32_t>>;
 using BpfResult = std::expected<void, std::string>;
 
 class BpfRuntimeInfo {
@@ -52,23 +52,23 @@ class BpfRuntimeInfo {
   BpfRuntimeInfo& operator=(const BpfRuntimeInfo&) = delete;
 
   // Craned bootstraps once or reuses the existing program/maps without writing
-  // to them. A changed catalog requires an explicit reconfiguration.
-  BpfResult Initialize(const BpfDeviceCatalog& catalog);
+  // to them. A changed device set requires an explicit reconfiguration.
+  BpfResult Initialize(const ManagedDeviceKeysBySlot& device_keys_by_slot);
   // A supervisor only opens existing state and installs Craned's slot indices.
-  BpfResult Connect(const BpfDeviceIndices& indices);
-  BpfDeviceIndices DeviceIndices() const;
+  BpfResult Connect(const ManagedDeviceIndicesBySlot& indices_by_slot);
+  ManagedDeviceIndicesBySlot DeviceIndicesBySlot() const;
   BpfResult SetDeviceAccess(const std::filesystem::path& cgroup,
                             const std::unordered_set<std::string>& slots,
                             bool read, bool write, bool mknod);
   // Reserved for a future coordinated device/policy reconfiguration. Ordinary
   // daemon restarts must never take this path or renumber existing devices.
-  BpfResult Reconfigure(const BpfDeviceCatalog& catalog);
+  BpfResult Reconfigure(const ManagedDeviceKeysBySlot& device_keys_by_slot);
 
  private:
   BpfResult Open_();
-  BpfResult Create_(const BpfDeviceCatalog& catalog);
-  BpfResult Validate_();
-  BpfResult ResolveIndices_(const BpfDeviceCatalog& catalog);
+  BpfResult Create_(const ManagedDeviceKeysBySlot& device_keys_by_slot);
+  BpfResult LoadManagedDeviceIndices_();
+  BpfResult ResolveIndices_(const ManagedDeviceKeysBySlot& device_keys_by_slot);
   std::expected<bool, std::string> Attached_(int cgroup_fd) const;
   void Close_();
 
@@ -79,7 +79,7 @@ class BpfRuntimeInfo {
   int m_policies_fd_{-1};
   uint32_t m_program_id_{};
   std::unordered_set<uint32_t> m_indices_;
-  BpfDeviceIndices m_device_indices_;
+  ManagedDeviceIndicesBySlot m_device_indices_by_slot_;
 };
 
 }  // namespace Craned::Common

@@ -73,14 +73,6 @@ DeviceIdentity Identity(const DeviceKey& key) {
   return {key.type, key.major, key.minor};
 }
 
-std::expected<bpf_map_info, std::string> MapInfo(int fd) {
-  bpf_map_info info{};
-  uint32_t size = sizeof(info);
-  if (bpf_obj_get_info_by_fd(fd, &info, &size) < 0)
-    return Error("Read BPF map metadata");
-  return info;
-}
-
 }  // namespace
 
 static_assert(sizeof(DeviceKey) == 12);
@@ -99,45 +91,7 @@ void BpfRuntimeInfo::Close_() {
   m_program_id_ = 0;
 }
 
-BpfResult BpfRuntimeInfo::Open_() {
-  if (m_program_fd_ >= 0) return {};
-  m_program_fd_ = bpf_obj_get((m_paths_.pins / "device_access").c_str());
-  if (m_program_fd_ < 0) return Error("Open pinned device program");
-  m_devices_fd_ = bpf_obj_get((m_paths_.pins / "managed_devices").c_str());
-  m_policies_fd_ = bpf_obj_get((m_paths_.pins / "device_policies").c_str());
-  auto result = Validate_();
-  if (!result) Close_();
-  return result;
-}
-
-BpfResult BpfRuntimeInfo::Validate_() {
-  auto devices = MapInfo(m_devices_fd_);
-  auto policies = MapInfo(m_policies_fd_);
-  if (!devices) return std::unexpected(devices.error());
-  if (!policies) return std::unexpected(policies.error());
-  if (devices->type != BPF_MAP_TYPE_HASH ||
-      devices->key_size != sizeof(DeviceKey) ||
-      devices->value_size != sizeof(uint32_t) ||
-      devices->max_entries != MAX_MANAGED_DEVICES ||
-      policies->type != BPF_MAP_TYPE_CGROUP_STORAGE ||
-      policies->key_size != sizeof(bpf_cgroup_storage_key) ||
-      policies->value_size != sizeof(DevicePolicy))
-    return std::unexpected("Incompatible pinned BPF device ABI");
-
-  std::array<uint32_t, 2> map_ids{};
-  bpf_prog_info info{};
-  info.nr_map_ids = map_ids.size();
-  info.map_ids = reinterpret_cast<uint64_t>(map_ids.data());
-  uint32_t size = sizeof(info);
-  if (bpf_obj_get_info_by_fd(m_program_fd_, &info, &size) < 0)
-    return Error("Read pinned device program metadata");
-  const std::set<uint32_t> actual(map_ids.begin(), map_ids.end());
-  if (info.type != BPF_PROG_TYPE_CGROUP_DEVICE ||
-      info.nr_map_ids != map_ids.size() ||
-      actual != std::set<uint32_t>{devices->id, policies->id})
-    return std::unexpected("Pinned device program references different maps");
-  m_program_id_ = info.id;
-
+BpfResult BpfRuntimeInfo::LoadManagedDeviceIndices_() {
   m_indices_.clear();
   DeviceKey key{}, next{};
   const DeviceKey* previous = nullptr;
@@ -154,9 +108,42 @@ BpfResult BpfRuntimeInfo::Validate_() {
   return {};
 }
 
-BpfResult BpfRuntimeInfo::Create_(const BpfDeviceCatalog& catalog) {
+BpfResult BpfRuntimeInfo::Open_() {
+  if (m_program_fd_ >= 0) return {};
+  m_program_fd_ = bpf_obj_get((m_paths_.pins / "device_access").c_str());
+  if (m_program_fd_ < 0) return Error("Open pinned device program");
+  m_devices_fd_ = bpf_obj_get((m_paths_.pins / "managed_devices").c_str());
+  if (m_devices_fd_ < 0) {
+    auto error = Error("Open pinned managed device map");
+    Close_();
+    return error;
+  }
+  m_policies_fd_ = bpf_obj_get((m_paths_.pins / "device_policies").c_str());
+  if (m_policies_fd_ < 0) {
+    auto error = Error("Open pinned device policy map");
+    Close_();
+    return error;
+  }
+
+  // The pin set is deployment-owned. An ABI upgrade must remove all three
+  // pins after old jobs/cgroups are drained before starting the new daemon.
+  bpf_prog_info info{};
+  uint32_t size = sizeof(info);
+  if (bpf_obj_get_info_by_fd(m_program_fd_, &info, &size) < 0) {
+    auto error = Error("Read pinned device program metadata");
+    Close_();
+    return error;
+  }
+  m_program_id_ = info.id;
+  auto result = LoadManagedDeviceIndices_();
+  if (!result) Close_();
+  return result;
+}
+
+BpfResult BpfRuntimeInfo::Create_(
+    const ManagedDeviceKeysBySlot& device_keys_by_slot) {
   std::map<DeviceIdentity, uint32_t> assigned;
-  for (const auto& [slot, keys] : catalog) {
+  for (const auto& [slot, keys] : device_keys_by_slot) {
     if (keys.empty()) return std::unexpected("Empty device slot: " + slot);
     for (const auto& key : keys) {
       if (key.type != BPF_DEVCG_DEV_CHAR && key.type != BPF_DEVCG_DEV_BLOCK)
@@ -221,27 +208,29 @@ BpfResult BpfRuntimeInfo::Create_(const BpfDeviceCatalog& catalog) {
   return Open_();
 }
 
-BpfResult BpfRuntimeInfo::ResolveIndices_(const BpfDeviceCatalog& catalog) {
-  BpfDeviceIndices resolved;
+BpfResult BpfRuntimeInfo::ResolveIndices_(
+    const ManagedDeviceKeysBySlot& device_keys_by_slot) {
+  ManagedDeviceIndicesBySlot resolved;
   std::set<DeviceIdentity> configured;
-  for (const auto& [slot, keys] : catalog) {
+  for (const auto& [slot, keys] : device_keys_by_slot) {
     if (keys.empty()) return std::unexpected("Empty device slot: " + slot);
     for (const auto& key : keys) {
       uint32_t index;
       if (bpf_map_lookup_elem(m_devices_fd_, &key, &index) < 0)
         return std::unexpected(
-            "Device catalog changed; Reconfigure required: " + slot);
+            "Managed device keys changed; Reconfigure required: " + slot);
       resolved[slot].push_back(index);
       configured.insert(Identity(key));
     }
   }
   if (configured.size() != m_indices_.size())
     return std::unexpected("Managed device set changed; Reconfigure required");
-  m_device_indices_ = std::move(resolved);
+  m_device_indices_by_slot_ = std::move(resolved);
   return {};
 }
 
-BpfResult BpfRuntimeInfo::Initialize(const BpfDeviceCatalog& catalog) {
+BpfResult BpfRuntimeInfo::Initialize(
+    const ManagedDeviceKeysBySlot& device_keys_by_slot) {
   std::lock_guard lock(m_mutex_);
   auto process_lock = LockRuntime(m_paths_.lock);
   if (!process_lock) return std::unexpected(process_lock.error());
@@ -252,31 +241,32 @@ BpfResult BpfRuntimeInfo::Initialize(const BpfDeviceCatalog& catalog) {
       const bool exists =
           std::filesystem::exists(m_paths_.pins / "device_access", ec);
       if (exists || ec) return result;
-      result = Create_(catalog);
+      result = Create_(device_keys_by_slot);
       if (!result) return result;
     }
   }
-  return ResolveIndices_(catalog);
+  return ResolveIndices_(device_keys_by_slot);
 }
 
-BpfResult BpfRuntimeInfo::Connect(const BpfDeviceIndices& indices) {
+BpfResult BpfRuntimeInfo::Connect(
+    const ManagedDeviceIndicesBySlot& indices_by_slot) {
   std::lock_guard lock(m_mutex_);
   auto process_lock = LockRuntime(m_paths_.lock);
   if (!process_lock) return std::unexpected(process_lock.error());
   if (auto result = Open_(); !result) return result;
-  for (const auto& [slot, values] : indices) {
+  for (const auto& [slot, values] : indices_by_slot) {
     if (values.empty()) return std::unexpected("Empty device slot: " + slot);
     for (uint32_t index : values)
       if (!m_indices_.contains(index))
         return std::unexpected("Unknown device index for slot: " + slot);
   }
-  m_device_indices_ = indices;
+  m_device_indices_by_slot_ = indices_by_slot;
   return {};
 }
 
-BpfDeviceIndices BpfRuntimeInfo::DeviceIndices() const {
+ManagedDeviceIndicesBySlot BpfRuntimeInfo::DeviceIndicesBySlot() const {
   std::lock_guard lock(m_mutex_);
-  return m_device_indices_;
+  return m_device_indices_by_slot_;
 }
 
 std::expected<bool, std::string> BpfRuntimeInfo::Attached_(
@@ -318,8 +308,8 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
     if (!mknod) policy.mknod_bits[word] |= bit;
   }
   for (const auto& slot : slots) {
-    auto it = m_device_indices_.find(slot);
-    if (it == m_device_indices_.end())
+    auto it = m_device_indices_by_slot_.find(slot);
+    if (it == m_device_indices_by_slot_.end())
       return std::unexpected("Unknown allocated device slot: " + slot);
     for (uint32_t index : it->second) {
       auto word = index >> 6;
@@ -357,7 +347,7 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
   return {};
 }
 
-BpfResult BpfRuntimeInfo::Reconfigure(const BpfDeviceCatalog&) {
+BpfResult BpfRuntimeInfo::Reconfigure(const ManagedDeviceKeysBySlot&) {
   return std::unexpected("BPF device Reconfigure is not implemented");
 }
 
