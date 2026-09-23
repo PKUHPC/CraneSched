@@ -2283,9 +2283,6 @@ uint32_t JobInCtld::SchedulePendingSteps(
       // Slurm external-launcher steps overlap the job allocation and do not
       // consume StepResAvail. Each launcher task receives its node's full job
       // allocation; the launcher owns any descendants it later starts.
-      if (step->node_num != 0 && step->node_num > CranedIds().size()) {
-        break;
-      }
       ResourceV3 step_alloc_res;
       task_id_t task_id = 0;
       for (const auto& craned_id : CranedIds()) {
@@ -2298,11 +2295,24 @@ uint32_t JobInCtld::SchedulePendingSteps(
       step->SetAllocatedRes(step_alloc_res);
       step->SetCranedIds(CranedIds());
       step->allocated_craneds_regex = util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(CranedIds());
-      step->SetExecutionNodes(CranedIds());
+      const auto node_set = CranedIds() | std::ranges::to<std::unordered_set>();
+      step->SetConfiguringNodes(node_set);
+      step->SetExecutionNodes(node_set);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::JobStatus::Configuring);
       step->deadline_time = deadline_time;
+      if (step->ia_meta.has_value()) {
+        const auto& meta = step->ia_meta.value();
+        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+            .job_id = step->job_id,
+            .step_id = step->StepId(),
+            .res_allocate_expt{
+                StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                    .allocated_craned_regex = step->allocated_craneds_regex,
+                    .allocated_craned_ids = step->CranedIds(),
+                    .craned_task_map = step->craned_task_map,
+                    .ntasks_total = step->ntasks}}});
+      }
       pending_step_ids_.pop();
       ++popped_count;
       scheduled_steps->push_back(step);
