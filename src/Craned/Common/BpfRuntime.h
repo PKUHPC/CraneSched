@@ -60,9 +60,6 @@ class BpfRuntimeInfo {
   BpfResult SetDeviceAccess(const std::filesystem::path& cgroup,
                             const std::unordered_set<std::string>& slots,
                             bool read, bool write, bool mknod);
-  // Reserved for a future coordinated device/policy reconfiguration. Ordinary
-  // daemon restarts must never take this path or renumber existing devices.
-  BpfResult Reconfigure(const ManagedDeviceKeysBySlot& device_keys_by_slot);
 
  private:
   BpfResult Open_();
