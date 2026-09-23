@@ -1067,8 +1067,6 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     // Give one launcher task per allocated node access to that node's full
     // allocation; Hydra will fork the actual MPI ranks from this process.
     CRANE_ASSERT(job.CranedIds().size() == job.node_num);
-    CRANE_ASSERT(job.node_num == node_num);
-    CRANE_ASSERT(ntasks == node_num);
     for (const auto& craned_id : job.CranedIds()) {
       craned_task_map[craned_id].insert(cur_task_id);
       task_res_map[cur_task_id] = job.AllocatedRes().At(craned_id);
@@ -2285,8 +2283,7 @@ uint32_t JobInCtld::SchedulePendingSteps(
       // Slurm external-launcher steps overlap the job allocation and do not
       // consume StepResAvail. Each launcher task receives its node's full job
       // allocation; the launcher owns any descendants it later starts.
-      if (step->ntasks != step->node_num ||
-          step->node_num != CranedIds().size()) {
+      if (step->node_num != 0 && step->node_num > CranedIds().size()) {
         break;
       }
       ResourceV3 step_alloc_res;
