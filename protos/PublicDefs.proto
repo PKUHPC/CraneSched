@@ -481,6 +481,7 @@ message StepToD {
   string sh_script = 36;
 
   optional ArrayTaskIdentity array_task = 39;
+  bool external_launcher = 40;
 }
 
 message JobStepsToD {

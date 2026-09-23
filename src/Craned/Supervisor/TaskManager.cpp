@@ -373,6 +373,9 @@ EnvMap StepInstance::GetStepProcessEnv() const {
     ResourceInNodeV3 step_res(m_step_to_supv_.res());
     const cpu_t cpus_on_node = step_res.GetCpuSet().cpu_count;
     const uint64_t gpus_on_node = step_res.ToResourceView().GpuCount();
+    if (m_step_to_supv_.external_launcher()) {
+      env_map.insert_or_assign("SLURM_EXTERNAL_LAUNCHER", "1");
+    }
     env_map.insert_or_assign("SLURM_CPU_BIND_TYPE", "none");
     env_map.insert_or_assign(
         "SLURM_CPUS_ON_NODE",

@@ -1307,6 +1307,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_ntasks(this->ntasks);
   step_to_d.set_ntasks_per_node(this->ntasks_per_node_max);
   step_to_d.set_cpus_per_task(this->req_task_res_view.CpuCountDouble());
+  step_to_d.set_external_launcher(this->external_launcher);
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gids()->Assign(this->gids.begin(), this->gids.end());
@@ -1704,6 +1705,7 @@ void CommonStepInCtld::RecoverFromDb(
 
   /* Fields only in CommonStepInCtld */
   cmd_line = StepToCtld().cmd_line();
+  external_launcher = StepToCtld().external_launcher();
 
   allocated_craneds_regex =
       util::HostNameListToStr(step_in_db.runtime_attr().craned_ids());
@@ -2319,7 +2321,8 @@ uint32_t JobInCtld::SchedulePendingSteps(
       }
       step->SetAllocatedRes(step_alloc_res);
       step->SetCranedIds(CranedIds());
-      step->allocated_craneds_regex = util::HostNameListToStr(step->CranedIds());
+      step->allocated_craneds_regex =
+          util::HostNameListToStr(step->CranedIds());
       const auto node_set = CranedIds() | std::ranges::to<std::unordered_set>();
       step->SetConfiguringNodes(node_set);
       step->SetExecutionNodes(node_set);
