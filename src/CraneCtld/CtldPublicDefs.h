@@ -831,6 +831,7 @@ struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   std::string cmd_line;
   std::optional<StepInteractiveMeta> ia_meta;
+  bool external_launcher{false};
 
   /* -----------
    * Fields that may change at run time.
@@ -1241,7 +1242,9 @@ struct JobInCtld {
     if (m_steps_.contains(step_id)) {
       auto step =
           std::unique_ptr<CommonStepInCtld>(m_steps_.at(step_id).release());
-      step_res_avail_ += step->AllocatedRes();
+      if (!step->external_launcher) {
+        step_res_avail_ += step->AllocatedRes();
+      }
       m_steps_.erase(step_id);
       return step;
     }

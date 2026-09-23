@@ -1062,6 +1062,16 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
     craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
     task_res_map[cur_task_id] =
         job.AllocatedRes().At(job.executing_craned_ids.front());
+  } else if (external_launcher) {
+    // Slurm's external launcher step does not consume the job allocation.
+    // Give one launcher task per allocated node access to that node's full
+    // allocation; Hydra will fork the actual MPI ranks from this process.
+    CRANE_ASSERT(job.CranedIds().size() == job.node_num);
+    for (const auto& craned_id : job.CranedIds()) {
+      craned_task_map[craned_id].insert(cur_task_id);
+      task_res_map[cur_task_id] = job.AllocatedRes().At(craned_id);
+      ++cur_task_id;
+    }
   } else {
     CRANE_ASSERT(job.CranedIds().size() == job.node_num);
     const uint64_t minimum_task_count =
@@ -1208,6 +1218,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   node_num = step_to_ctld.node_num();
   ntasks_per_node_max = step_to_ctld.ntasks_per_node();
   ntasks = step_to_ctld.ntasks();
+  external_launcher = step_to_ctld.external_launcher();
 
   req_node_res_view.SetToZero();
   req_task_res_view.SetToZero();
@@ -2265,6 +2276,46 @@ uint32_t JobInCtld::SchedulePendingSteps(
       // step has been removed
       ++popped_count;
       pending_step_ids_.pop();
+      continue;
+    }
+
+    if (step->external_launcher) {
+      // Slurm external-launcher steps overlap the job allocation and do not
+      // consume StepResAvail. Each launcher task receives its node's full job
+      // allocation; the launcher owns any descendants it later starts.
+      ResourceV3 step_alloc_res;
+      task_id_t task_id = 0;
+      for (const auto& craned_id : CranedIds()) {
+        step_alloc_res.AddResourceInNode(craned_id,
+                                         AllocatedRes().At(craned_id));
+        step->craned_task_map[craned_id].insert(task_id);
+        step->task_res_map[task_id] = AllocatedRes().At(craned_id);
+        ++task_id;
+      }
+      step->SetAllocatedRes(step_alloc_res);
+      step->SetCranedIds(CranedIds());
+      step->allocated_craneds_regex = util::HostNameListToStr(step->CranedIds());
+      const auto node_set = CranedIds() | std::ranges::to<std::unordered_set>();
+      step->SetConfiguringNodes(node_set);
+      step->SetExecutionNodes(node_set);
+      step->SetStartTime(now);
+      step->SetStatus(crane::grpc::JobStatus::Configuring);
+      step->deadline_time = deadline_time;
+      if (step->ia_meta.has_value()) {
+        const auto& meta = step->ia_meta.value();
+        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+            .job_id = step->job_id,
+            .step_id = step->StepId(),
+            .res_allocate_expt{
+                StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                    .allocated_craned_regex = step->allocated_craneds_regex,
+                    .allocated_craned_ids = step->CranedIds(),
+                    .craned_task_map = step->craned_task_map,
+                    .ntasks_total = step->ntasks}}});
+      }
+      pending_step_ids_.pop();
+      ++popped_count;
+      scheduled_steps->push_back(step);
       continue;
     }
 
