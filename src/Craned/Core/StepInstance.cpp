@@ -223,7 +223,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 #ifdef CRANE_ENABLE_BPF
     if (CgroupManager::IsCgV2()) {
       for (const auto& [slot, indices] :
-           CgroupManager::bpf_runtime_info.DeviceIndices()) {
+           CgroupManager::bpf_runtime_info.DeviceIndicesBySlot()) {
         auto& entry = (*init_req.mutable_bpf_device_indices())[slot];
         for (uint32_t index : indices) entry.add_indices(index);
       }

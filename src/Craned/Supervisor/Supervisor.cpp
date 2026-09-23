@@ -105,7 +105,7 @@ int InitFromStdin(int argc, char** argv) {
   g_config.StepSpec = msg.step_spec();
 #ifdef CRANE_ENABLE_BPF
   for (const auto& [slot, entry] : msg.bpf_device_indices()) {
-    g_config.BpfDeviceIndices[slot] =
+    g_config.managed_device_indices_by_slot[slot] =
         std::vector<uint32_t>(entry.indices().begin(), entry.indices().end());
   }
 #endif
@@ -372,7 +372,7 @@ void GlobalVariableInit(int grpc_output_fd) {
 #ifdef CRANE_ENABLE_BPF
   if (Craned::Common::CgroupManager::IsCgV2()) {
     auto result = Craned::Common::CgroupManager::bpf_runtime_info.Connect(
-        g_config.BpfDeviceIndices);
+        g_config.managed_device_indices_by_slot);
     if (!result) {
       CRANE_ERROR("Connect to device control: {}", result.error());
       std::exit(1);

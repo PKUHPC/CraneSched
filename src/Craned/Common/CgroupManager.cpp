@@ -1763,9 +1763,9 @@ static int LibbpfPrintCallback(enum libbpf_print_level level,
 
 bool CgroupManager::InitializeDeviceControl() {
   if (!IsCgV2()) return true;
-  BpfDeviceCatalog catalog;
+  ManagedDeviceKeysBySlot device_keys_by_slot;
   for (const auto& [slot, device] : g_this_node_device) {
-    auto& keys = catalog[slot];
+    auto& keys = device_keys_by_slot[slot];
     for (const auto& meta : device->device_file_metas) {
       uint32_t type;
       if (meta.op_type == 'c')
@@ -1779,7 +1779,7 @@ bool CgroupManager::InitializeDeviceControl() {
       keys.push_back({type, meta.major, meta.minor});
     }
   }
-  auto result = bpf_runtime_info.Initialize(catalog);
+  auto result = bpf_runtime_info.Initialize(device_keys_by_slot);
   if (!result) CRANE_ERROR("Initialize device control: {}", result.error());
   return result.has_value();
 }

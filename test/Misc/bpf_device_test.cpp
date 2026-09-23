@@ -37,8 +37,8 @@
 #include "BpfRuntime.h"
 
 namespace {
-using Craned::Common::BpfDeviceCatalog;
 using Craned::Common::BpfRuntimeInfo;
+using Craned::Common::ManagedDeviceKeysBySlot;
 namespace fs = std::filesystem;
 
 TEST(DevicePolicy, PermissionCombinationsAndBitmapBoundaries) {
@@ -86,13 +86,13 @@ class BpfDeviceKernel : public testing::Test {
     cgroup_ = fs::path("/sys/fs/cgroup") / temp_.filename();
     ASSERT_TRUE(fs::create_directory(cgroup_));
     groups_.push_back(cgroup_);
-    catalog_ = {
+    device_keys_by_slot_ = {
         {"null", {{BPF_DEVCG_DEV_CHAR, 1, 3}}},
         {"zero", {{BPF_DEVCG_DEV_CHAR, 1, 5}}},
         {"pair", {{BPF_DEVCG_DEV_CHAR, 1, 3}, {BPF_DEVCG_DEV_CHAR, 1, 5}}},
         {"block", {{BPF_DEVCG_DEV_BLOCK, 1, 3}}}};
     runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
-    auto result = runtime_->Initialize(catalog_);
+    auto result = runtime_->Initialize(device_keys_by_slot_);
     ASSERT_TRUE(result.has_value()) << result.error();
   }
 
@@ -218,12 +218,12 @@ class BpfDeviceKernel : public testing::Test {
   bool mounted_{};
   std::vector<fs::path> groups_;
   BpfRuntimeInfo::Paths paths_;
-  BpfDeviceCatalog catalog_;
+  ManagedDeviceKeysBySlot device_keys_by_slot_;
   std::unique_ptr<BpfRuntimeInfo> runtime_;
 };
 
 TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
-  auto indices = runtime_->DeviceIndices();
+  auto indices = runtime_->DeviceIndicesBySlot();
   EXPECT_EQ(indices.at("null").front(), indices.at("pair").front());
   EXPECT_EQ(indices.at("zero").front(), indices.at("pair").back());
   EXPECT_NE(indices.at("null"), indices.at("block"));
@@ -271,17 +271,17 @@ TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
   runtime_.reset();
   EXPECT_EQ(OpenIn(leaf, "/dev/null", O_RDONLY), EPERM);
   runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
-  ASSERT_TRUE(runtime_->Initialize(catalog_));
-  EXPECT_EQ(runtime_->DeviceIndices(), indices);
+  ASSERT_TRUE(runtime_->Initialize(device_keys_by_slot_));
+  EXPECT_EQ(runtime_->DeviceIndicesBySlot(), indices);
   EXPECT_EQ(PinnedId("device_access", true), program_id);
   EXPECT_EQ(PinnedId("managed_devices"), devices_id);
   EXPECT_EQ(PinnedId("device_policies"), policies_id);
   EXPECT_EQ(OpenIn(leaf, "/dev/zero", O_RDWR), 0);
-  EXPECT_FALSE(runtime_->Reconfigure(catalog_));
-  auto changed = catalog_;
+  EXPECT_FALSE(runtime_->Reconfigure(device_keys_by_slot_));
+  auto changed = device_keys_by_slot_;
   changed["added"] = {{BPF_DEVCG_DEV_CHAR, 1, 7}};
   EXPECT_FALSE(runtime_->Initialize(changed));
-  EXPECT_EQ(runtime_->DeviceIndices(), indices);
+  EXPECT_EQ(runtime_->DeviceIndicesBySlot(), indices);
 
   BpfRuntimeInfo supervisor(paths_);
   ASSERT_TRUE(supervisor.Connect(indices));
@@ -311,7 +311,7 @@ TEST_F(BpfDeviceKernel, CapacityAndInvalidIndex) {
   BpfRuntimeInfo::Paths capacity_paths = paths_;
   capacity_paths.pins = temp_ / "bpf" / "capacity";
   BpfRuntimeInfo capacity(capacity_paths);
-  BpfDeviceCatalog devices;
+  ManagedDeviceKeysBySlot devices;
   auto& keys = devices["all"];
   for (uint32_t i = 0; i <= MAX_MANAGED_DEVICES; ++i)
     keys.push_back({BPF_DEVCG_DEV_CHAR, 1, i});
@@ -320,7 +320,8 @@ TEST_F(BpfDeviceKernel, CapacityAndInvalidIndex) {
   keys.pop_back();
   auto result = capacity.Initialize(devices);
   ASSERT_TRUE(result) << result.error();
-  EXPECT_EQ(capacity.DeviceIndices().at("all").size(), MAX_MANAGED_DEVICES);
+  EXPECT_EQ(capacity.DeviceIndicesBySlot().at("all").size(),
+            MAX_MANAGED_DEVICES);
   for (const char* name :
        {"device_access", "managed_devices", "device_policies"})
     ASSERT_TRUE(fs::remove(capacity_paths.pins / name));
@@ -336,7 +337,7 @@ TEST_F(BpfDeviceKernel, CapacityAndInvalidIndex) {
   close(fd);
   EXPECT_EQ(OpenIn(task, "/dev/null", O_RDONLY), EPERM);
   BpfRuntimeInfo recovered(paths_);
-  EXPECT_FALSE(recovered.Initialize(catalog_));
+  EXPECT_FALSE(recovered.Initialize(device_keys_by_slot_));
 }
 
 TEST_F(BpfDeviceKernel, StepAndTaskPoliciesSurviveRuntimeRestart) {
@@ -382,7 +383,7 @@ TEST_F(BpfDeviceKernel, StepAndTaskPoliciesSurviveRuntimeRestart) {
   // Reopen the runtime only. No Job/Step/Task policy replay, attachment, or
   // policy validation is needed to preserve enforcement across a restart.
   runtime_ = std::make_unique<BpfRuntimeInfo>(paths_);
-  ASSERT_TRUE(runtime_->Initialize(catalog_));
+  ASSERT_TRUE(runtime_->Initialize(device_keys_by_slot_));
   EXPECT_EQ(PinnedId("device_access", true), program_id);
   EXPECT_EQ(PinnedId("managed_devices"), devices_id);
   EXPECT_EQ(PinnedId("device_policies"), policies_id);
