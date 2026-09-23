@@ -218,13 +218,15 @@ BpfResult BpfRuntimeInfo::ResolveIndices_(
       uint32_t index;
       if (bpf_map_lookup_elem(m_devices_fd_, &key, &index) < 0)
         return std::unexpected(
-            "Managed device keys changed; Reconfigure required: " + slot);
+            "Managed device keys changed; clear pinned state before restart: " +
+            slot);
       resolved[slot].push_back(index);
       configured.insert(Identity(key));
     }
   }
   if (configured.size() != m_indices_.size())
-    return std::unexpected("Managed device set changed; Reconfigure required");
+    return std::unexpected(
+        "Managed device set changed; clear pinned state before restart");
   m_device_indices_by_slot_ = std::move(resolved);
   return {};
 }
@@ -345,10 +347,6 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
     return error;
   }
   return {};
-}
-
-BpfResult BpfRuntimeInfo::Reconfigure(const ManagedDeviceKeysBySlot&) {
-  return std::unexpected("BPF device Reconfigure is not implemented");
 }
 
 }  // namespace Craned::Common
