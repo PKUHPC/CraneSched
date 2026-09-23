@@ -204,3 +204,7 @@ mount -t debugfs none /sys/kernel/debug
 ```bash
 cat /sys/kernel/debug/tracing/trace_pipe
 ```
+
+## Upgrade the BPF runtime
+
+The pinned program and maps under `/sys/fs/bpf/crane_devices` are a deployment-owned ABI. Before installing a release that changes the BPF program, map layout, or `DevicePolicy`, stop Crane daemons and drain all jobs so that no old cgroup attachment remains. Remove the three pins (`device_access`, `managed_devices`, and `device_policies`) and the empty `crane_devices` directory, then install the new BPF object and start the daemon. Ordinary daemon restarts reuse these pins.

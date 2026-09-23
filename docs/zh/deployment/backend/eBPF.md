@@ -204,3 +204,7 @@ mount -t debugfs none /sys/kernel/debug
 ```bash
 cat /sys/kernel/debug/tracing/trace_pipe
 ```
+
+## 升级 eBPF runtime
+
+`/sys/fs/bpf/crane_devices` 下的 program 和 map 是部署级 ABI。如果新版本修改了 BPF program、map 布局或 `DevicePolicy`，应先停止 Crane daemon 并清空所有作业，确保没有旧 cgroup attachment。然后删除三个 pin（`device_access`、`managed_devices`、`device_policies`）以及空的 `crane_devices` 目录，安装新的 BPF object 后再启动 daemon。普通 daemon 重启会复用这些 pin。
