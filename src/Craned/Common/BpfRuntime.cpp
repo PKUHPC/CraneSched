@@ -28,7 +28,6 @@
 #include <array>
 #include <cerrno>
 #include <memory>
-#include <set>
 #include <system_error>
 #include <tuple>
 #include <utility>
@@ -198,22 +197,14 @@ BpfResult BpfRuntimeInfo::Create_(
 BpfResult BpfRuntimeInfo::ResolveIndices_(
     const ManagedDeviceKeysBySlot& device_keys_by_slot) {
   ManagedDeviceIndicesBySlot resolved;
-  std::set<DeviceIdentity> configured;
   for (const auto& [slot, keys] : device_keys_by_slot) {
-    if (keys.empty()) return std::unexpected("Empty device slot: " + slot);
     for (const auto& key : keys) {
       uint32_t index;
       if (bpf_map_lookup_elem(m_devices_fd_, &key, &index) < 0)
-        return std::unexpected(
-            "Managed device keys changed; clear pinned state before restart: " +
-            slot);
+        return Error("Read managed device index for slot " + slot);
       resolved[slot].push_back(index);
-      configured.insert(Identity(key));
     }
   }
-  if (configured.size() != m_indices_.size())
-    return std::unexpected(
-        "Managed device set changed; clear pinned state before restart");
   m_device_indices_by_slot_ = std::move(resolved);
   return {};
 }
