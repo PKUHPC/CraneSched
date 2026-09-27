@@ -5,6 +5,7 @@ add_library(Utility_PublicHeader
         include/crane/String.h
         include/crane/Network.h
         include/crane/OS.h
+        include/crane/FileDescriptor.h
         include/crane/PublicHeader.h
         include/crane/Lock.h
         include/crane/Pointer.h
