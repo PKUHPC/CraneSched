@@ -33,6 +33,8 @@
 #include <tuple>
 #include <utility>
 
+#include "crane/FileDescriptor.h"
+
 namespace Craned::Common {
 namespace {
 
@@ -42,25 +44,10 @@ std::unexpected<std::string> Error(const std::string& operation,
                          std::system_category().message(error));
 }
 
-class FileDescriptor {
- public:
-  explicit FileDescriptor(int fd = -1) : m_fd_(fd) {}
-  ~FileDescriptor() {
-    if (m_fd_ >= 0) close(m_fd_);
-  }
-  FileDescriptor(FileDescriptor&& other) noexcept
-      : m_fd_(std::exchange(other.m_fd_, -1)) {}
-  FileDescriptor(const FileDescriptor&) = delete;
-  FileDescriptor& operator=(const FileDescriptor&) = delete;
-  int Get() const { return m_fd_; }
-
- private:
-  int m_fd_;
-};
-
-std::expected<FileDescriptor, std::string> LockRuntime(
+std::expected<util::FileDescriptor, std::string> LockRuntime(
     const std::filesystem::path& path) {
-  FileDescriptor fd(open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600));
+  util::FileDescriptor fd(
+      open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600));
   if (fd.Get() < 0) return Error("Open BPF runtime lock");
   while (flock(fd.Get(), LOCK_EX) < 0) {
     if (errno != EINTR) return Error("Lock BPF runtime");
@@ -323,7 +310,8 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
   }
   policy.ready = 1;
 
-  FileDescriptor fd(open(cgroup.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  util::FileDescriptor fd(
+      open(cgroup.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   if (fd.Get() < 0) return Error("Open policy cgroup");
   struct stat statbuf{};
   if (fstat(fd.Get(), &statbuf) < 0) return Error("Stat policy cgroup");
