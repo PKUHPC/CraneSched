@@ -2509,7 +2509,7 @@ void JobScheduler::CreateDeadlineTimerCb_() {
     auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
     deadline_timer->on<uvw::timer_event>(
         [this, job_id, deadline_time](const uvw::timer_event&,
-                                    uvw::timer_handle& h) {
+                                      uvw::timer_handle& h) {
           CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
           h.close();
           LockGuard pending_guard(&m_pending_job_map_mtx_);
