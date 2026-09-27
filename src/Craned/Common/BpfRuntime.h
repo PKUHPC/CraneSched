@@ -25,6 +25,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "Misc/BPF/DevicePolicy.h"
@@ -45,9 +46,9 @@ class BpfRuntimeInfo {
     std::filesystem::path lock = "/run/lock/crane_bpf_devices.lock";
   };
 
-  BpfRuntimeInfo();
-  explicit BpfRuntimeInfo(Paths paths);
-  ~BpfRuntimeInfo();
+  BpfRuntimeInfo() = default;
+  explicit BpfRuntimeInfo(Paths paths) : m_paths_(std::move(paths)) {}
+  ~BpfRuntimeInfo() { Close_(); }
   BpfRuntimeInfo(const BpfRuntimeInfo&) = delete;
   BpfRuntimeInfo& operator=(const BpfRuntimeInfo&) = delete;
 
