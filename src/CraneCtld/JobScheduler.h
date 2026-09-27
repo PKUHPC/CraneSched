@@ -1458,6 +1458,7 @@ class JobScheduler {
     uint32_t exit_code;
     crane::grpc::JobStatus finish_status;
     bool terminate_running_children;
+    std::optional<int64_t> deadline_time{std::nullopt};
   };
 
   using CancelJobQueueElem =

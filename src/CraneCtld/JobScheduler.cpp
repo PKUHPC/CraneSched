@@ -2561,7 +2561,8 @@ void JobScheduler::CancelDeadlineJobCb_() {
           .parent_job_id = job_id,
           .exit_code = ExitCode::EC_REACHED_DEADLINE,
           .finish_status = crane::grpc::JobStatus::Deadline,
-          .terminate_running_children = false});
+          .terminate_running_children = false,
+          .deadline_time = deadline_time});
       continue;
     }
 
@@ -5280,6 +5281,13 @@ void JobScheduler::CleanCancelJobQueueCb_() {
 
     absl::Time cancel_time = absl::Now();
     for (const auto& array_elem : array_parents_to_cancel) {
+      if (array_elem.deadline_time.has_value()) {
+        auto it = m_pending_job_map_.find(array_elem.parent_job_id);
+        if (it == m_pending_job_map_.end() ||
+            absl::ToUnixSeconds(it->second->deadline_time) !=
+                array_elem.deadline_time.value())
+          continue;
+      }
       auto finish_result = m_array_manager_->FinishParentWithStatus(
           array_elem.parent_job_id, array_elem.finish_status,
           array_elem.exit_code, cancel_time);
