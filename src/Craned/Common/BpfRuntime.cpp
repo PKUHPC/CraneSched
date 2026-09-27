@@ -64,10 +64,6 @@ DeviceIdentity Identity(const DeviceKey& key) {
 static_assert(sizeof(DeviceKey) == 12);
 static_assert(sizeof(DevicePolicy) == 1544);
 
-BpfRuntimeInfo::BpfRuntimeInfo() = default;
-BpfRuntimeInfo::BpfRuntimeInfo(Paths paths) : m_paths_(std::move(paths)) {}
-BpfRuntimeInfo::~BpfRuntimeInfo() { Close_(); }
-
 void BpfRuntimeInfo::Close_() {
   // Pins and cgroup attachments outlive this process. Never unpin on a normal
   // shutdown, even when there are currently no policy cgroups.
