@@ -2497,17 +2497,18 @@ void JobScheduler::CreateDeadlineTimerCb_() {
 
     if (deadline_time <= absl::ToUnixSeconds(now)) {
       CRANE_ERROR("Job #{}'s deadline is earlier than now", job_id);
-      m_job_deadline_timer_queue_.enqueue(job_id);
+      m_job_deadline_timer_queue_.enqueue({job_id, deadline_time});
       m_job_deadline_timer_async_handle_->send();
       return;
     }
 
     auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
     deadline_timer->on<uvw::timer_event>(
-        [this, job_id](const uvw::timer_event&, uvw::timer_handle& h) {
+        [this, job_id, deadline_time](const uvw::timer_event&,
+                                      uvw::timer_handle& h) {
           CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
           DelDeadlineTimer_(job_id);
-          m_job_deadline_timer_queue_.enqueue(job_id);
+          m_job_deadline_timer_queue_.enqueue({job_id, deadline_time});
           m_job_deadline_timer_async_handle_->send();
         });
 
@@ -2536,9 +2537,16 @@ void JobScheduler::DelDeadlineTimerCb_() {
 }
 
 void JobScheduler::CancelDeadlineJobCb_() {
-  job_id_t job_id;
+  DeadlineTimerQueueElem event;
   m_pending_job_map_mtx_.Lock();
-  while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
+  while (m_job_deadline_timer_queue_.try_dequeue(event)) {
+    const auto [job_id, deadline_time] = event;
+    auto pd_it = m_pending_job_map_.find(job_id);
+    if (pd_it == m_pending_job_map_.end() ||
+        absl::ToUnixSeconds(pd_it->second->deadline_time) != deadline_time) {
+      continue;
+    }
+
     if (m_array_manager_->IsRegisteredParent(job_id)) {
       m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
           .parent_job_id = job_id,
@@ -2548,14 +2556,11 @@ void JobScheduler::CancelDeadlineJobCb_() {
       continue;
     }
 
-    auto pd_it = m_pending_job_map_.find(job_id);
-    if (pd_it != m_pending_job_map_.end()) {
-      auto& job = pd_it->second;
-      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
-          .job = std::move(job),
-          .finish_status = crane::grpc::JobStatus::Deadline});
-      m_pending_job_map_.erase(pd_it);
-    }
+    auto& job = pd_it->second;
+    m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+        .job = std::move(job),
+        .finish_status = crane::grpc::JobStatus::Deadline});
+    m_pending_job_map_.erase(pd_it);
   }
   m_pending_job_map_mtx_.Unlock();
   m_cancel_job_async_handle_->send();

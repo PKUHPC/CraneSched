@@ -1546,10 +1546,10 @@ class JobScheduler {
 
   ConcurrentQueue<DependencyEvent> m_dependency_event_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
-  ConcurrentQueue<job_id_t> m_job_deadline_timer_queue_;
-
   using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
+  ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_queue_;
+
   std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
   ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
 
