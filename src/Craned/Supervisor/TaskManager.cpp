@@ -2285,16 +2285,13 @@ CraneErrCode ProcInstance::Prepare() {
                                   g_config.JobCgStr, g_config.StepId, task_id));
     const auto& task_resource =
         m_parent_step_inst_->GetStep().task_res_map().at(task_id);
-    // An empty task GRES map means the task inherits the step policy. When
-    // task-level GRES is supplied by the resource model, this automatically
-    // attaches the shared program with a separate task policy. An explicit
-    // empty task policy can also be installed by passing true to the allocator.
-    const bool apply_task_device_policy =
-        !task_resource.gres().name_type_map().empty();
+    // Tasks do not have an independent GRES allocation. Leave the task
+    // cgroup unattached so it inherits the step device policy.
     auto cg_expt = CgroupManager::AllocateAndGetCgroup(
         CgroupManager::CgroupStrByTaskId(g_config.JobCgStr, g_config.StepId,
                                          task_id),
-        task_resource, false, 0U, false, apply_task_device_policy);
+        task_resource, false, 0U, false,
+        /* apply_device_policy = */ false);
     if (!cg_expt.has_value()) {
       CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
                  g_config.JobId, g_config.StepId, task_id,
