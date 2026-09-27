@@ -16,6 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "CgroupManager.h"
+// Precompiled header comes first.
+
 #include <bpf/bpf.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
@@ -35,10 +38,13 @@
 #include <thread>
 
 #include "BpfRuntime.h"
+#include "DeviceManager.h"
 
 namespace {
 using Craned::Common::BpfRuntimeInfo;
+using Craned::Common::CgroupManager;
 using Craned::Common::ManagedDeviceKeysBySlot;
+using Craned::Common::CgConstant::CgroupVersion;
 namespace fs = std::filesystem;
 
 TEST(DevicePolicy, PermissionCombinationsAndBitmapBoundaries) {
@@ -65,6 +71,39 @@ TEST(DevicePolicy, PermissionCombinationsAndBitmapBoundaries) {
   }
 }
 
+// Route allocator device updates to a private runtime; other resource methods
+// are no-ops so these tests do not change CPU or memory controllers.
+class AllocatorCgroup : public Craned::Common::CgroupInterface {
+ public:
+  AllocatorCgroup(BpfRuntimeInfo& runtime, fs::path path)
+      : CgroupInterface("test", nullptr),
+        m_runtime_(runtime),
+        m_path_(std::move(path)) {}
+
+  bool SetCpuCoreLimit(double) override { return true; }
+  bool SetCpuShares(uint64_t) override { return true; }
+  bool SetCpuSet(const std::unordered_set<uint32_t>&) override { return true; }
+  bool SetCpusetMems(const std::string&) override { return true; }
+  bool SetMemoryLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySwLimitBytes(uint64_t) override { return true; }
+  bool SetMemorySoftLimitBytes(uint64_t) override { return true; }
+  bool SetBlockioWeight(uint64_t) override { return true; }
+  bool KillAllProcesses(int) override { return true; }
+  bool Empty() override { return true; }
+  bool SetDeviceAccess(const std::unordered_set<SlotId>& slots, bool read,
+                       bool write, bool mknod) override {
+    ++policy_calls;
+    return m_runtime_.SetDeviceAccess(m_path_, slots, read, write, mknod)
+        .has_value();
+  }
+
+  int policy_calls{0};
+
+ private:
+  BpfRuntimeInfo& m_runtime_;
+  fs::path m_path_;
+};
+
 // Opt-in local kernel test. Only child processes enter a private test cgroup;
 // no Crane service, existing cgroup or existing BPF pin is modified.
 class BpfDeviceKernel : public testing::Test {
@@ -72,6 +111,7 @@ class BpfDeviceKernel : public testing::Test {
   void SetUp() override {
     const char* object = std::getenv("CRANE_BPF_TEST_OBJECT");
     if (!object) GTEST_SKIP() << "Set CRANE_BPF_TEST_OBJECT for kernel tests";
+    CgroupManager::SetCgroupVersion(CgroupVersion::CGROUP_V2);
     ASSERT_EQ(unshare(CLONE_NEWNS), 0) << strerror(errno);
     ASSERT_EQ(mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr), 0);
     char pattern[] = "/tmp/crane-bpf-test-XXXXXX";
@@ -97,6 +137,7 @@ class BpfDeviceKernel : public testing::Test {
   }
 
   void TearDown() override {
+    CgroupManager::SetCgroupVersion(previous_cgroup_version_);
     runtime_.reset();
     for (auto it = groups_.rbegin(); it != groups_.rend(); ++it) {
       EXPECT_EQ(rmdir(it->c_str()), 0) << *it << ": " << strerror(errno);
@@ -214,6 +255,37 @@ class BpfDeviceKernel : public testing::Test {
     return count;
   }
 
+  void CheckSupervisorStepPolicy(
+      const std::unordered_set<std::string>& step_slots) {
+    ASSERT_TRUE(Craned::Common::g_this_node_device.empty());
+    auto job = Group(cgroup_, "job");
+    auto step = Group(job, "step");
+    auto system = Group(step, "system");
+    auto user = Group(step, "user");
+    auto task = Group(user, "task");
+    ASSERT_TRUE(runtime_->SetDeviceAccess(job, {"pair"}, true, true, true));
+    ASSERT_TRUE(
+        runtime_->SetDeviceAccess(system, step_slots, true, true, true));
+
+    BpfRuntimeInfo supervisor(paths_);
+    ASSERT_TRUE(supervisor.Connect(runtime_->DeviceIndicesBySlot()));
+    ResourceInNodeV3 resource;
+    for (const auto& slot : step_slots)
+      resource.GetGres()
+          .name_type_slots_map["gpu"]
+          .type_slots_map["mock"]
+          .insert(slot);
+    AllocatorCgroup user_cg(supervisor, user);
+    ASSERT_TRUE(Craned::Common::ResourceInNodeV3Allocator::Allocate(
+        resource, &user_cg, true));
+    EXPECT_EQ(user_cg.policy_calls, 1);
+    EXPECT_EQ(OpenIn(task, "/dev/null", O_RDONLY),
+              step_slots.contains("null") ? 0 : EPERM);
+    EXPECT_EQ(OpenIn(task, "/dev/zero", O_RDONLY), EPERM);
+  }
+
+  const CgroupVersion previous_cgroup_version_{
+      CgroupManager::GetCgroupVersion()};
   fs::path temp_, cgroup_;
   bool mounted_{};
   std::vector<fs::path> groups_;
@@ -337,6 +409,52 @@ TEST_F(BpfDeviceKernel, CapacityAndInvalidIndex) {
   EXPECT_EQ(OpenIn(task, "/dev/null", O_RDONLY), EPERM);
   BpfRuntimeInfo recovered(paths_);
   EXPECT_FALSE(recovered.Initialize(device_keys_by_slot_));
+}
+
+TEST_F(BpfDeviceKernel, SupervisorAllocatorSubsetStep) {
+  CheckSupervisorStepPolicy({"null"});
+}
+
+TEST_F(BpfDeviceKernel, SupervisorAllocatorEmptyStep) {
+  CheckSupervisorStepPolicy({});
+}
+
+TEST_F(BpfDeviceKernel, SupervisorAllocatorTaskInheritance) {
+  ASSERT_TRUE(Craned::Common::g_this_node_device.empty());
+  auto job = Group(cgroup_, "job");
+  auto user = Group(Group(job, "step"), "user");
+  auto task = Group(user, "task");
+  ASSERT_TRUE(runtime_->SetDeviceAccess(job, {"pair"}, true, true, true));
+  ASSERT_TRUE(runtime_->SetDeviceAccess(user, {"null"}, true, true, true));
+
+  BpfRuntimeInfo supervisor(paths_);
+  ASSERT_TRUE(supervisor.Connect(runtime_->DeviceIndicesBySlot()));
+  ResourceInNodeV3 resource;
+  AllocatorCgroup task_cg(supervisor, task);
+  ASSERT_TRUE(Craned::Common::ResourceInNodeV3Allocator::Allocate(
+      resource, &task_cg, false));
+  EXPECT_EQ(task_cg.policy_calls, 0);
+  EXPECT_EQ(OpenIn(task, "/dev/null", O_RDONLY), 0);
+  EXPECT_EQ(OpenIn(task, "/dev/zero", O_RDONLY), EPERM);
+}
+
+TEST_F(BpfDeviceKernel, NoManagedDevicesNeedsNoAttachment) {
+  auto paths = paths_;
+  paths.pins = temp_ / "bpf" / "capacity";
+  BpfRuntimeInfo runtime(paths);
+  ASSERT_TRUE(runtime.Initialize({}));
+  auto group = Group(cgroup_, "empty");
+  ASSERT_TRUE(runtime.SetDeviceAccess(group, {}, true, true, true));
+
+  int fd = open(group.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  uint32_t count = 0;
+  EXPECT_EQ(bpf_prog_query(fd, BPF_CGROUP_DEVICE, 0, nullptr, nullptr, &count),
+            0);
+  close(fd);
+  EXPECT_EQ(count, 0);
+  EXPECT_EQ(OpenIn(group, "/dev/null", O_RDONLY), 0);
+  EXPECT_FALSE(runtime.SetDeviceAccess(group, {"null"}, true, true, true));
 }
 
 TEST_F(BpfDeviceKernel, StepAndTaskPoliciesSurviveRuntimeRestart) {

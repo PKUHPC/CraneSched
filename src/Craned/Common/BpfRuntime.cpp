@@ -295,6 +295,7 @@ BpfResult BpfRuntimeInfo::SetDeviceAccess(
       policy.mknod_bits[word] |= bit;
     }
   }
+  if (m_indices_.empty()) return {};
   policy.ready = 1;
 
   util::FileDescriptor fd(
