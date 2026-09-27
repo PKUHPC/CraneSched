@@ -2341,7 +2341,12 @@ bool ResourceInNodeV3Allocator::Allocate(const ResourceInNodeV3& resource,
   }
 
   if (!apply_device_policy) return ok;
+#ifdef CRANE_ENABLE_BPF
+  // Supervisors receive BPF indices, not Craned's device discovery table.
+  if (!CgroupManager::IsCgV2() && g_this_node_device.empty()) return ok;
+#else
   if (g_this_node_device.empty()) return ok;
+#endif
 
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
