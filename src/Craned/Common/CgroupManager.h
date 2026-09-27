@@ -486,9 +486,7 @@ class DedicatedResourceAllocator {
 // Note: cpuset is managed by CpuPoolManager separately.
 class ResourceInNodeV3Allocator {
  public:
-  // A task without an independent GRES policy inherits the step policy. The
-  // flag is explicit so task-level GRES can be enabled when the resource
-  // model starts carrying it, without changing cgroup allocation semantics.
+  // Task cgroups pass false here so they inherit the parent step policy.
   static bool Allocate(const ResourceInNodeV3& resource, CgroupInterface* cg,
                        bool apply_device_policy = true);
 };
