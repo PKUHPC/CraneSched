@@ -2481,33 +2481,43 @@ std::future<CraneExpected<step_id_t>> JobScheduler::SubmitStepAsync(
 }
 
 void JobScheduler::CreateDeadlineTimerCb_() {
-  absl::Time now = absl::Now();
-  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  LockGuard pending_guard(&m_pending_job_map_mtx_);
   DeadlineTimerQueueElem elem;
   while (m_job_deadline_timer_create_queue_.try_dequeue(elem)) {
     job_id_t job_id = elem.first;
     int64_t deadline_time = elem.second;
 
-    auto it = m_deadline_timer_map_.find(job_id);
-    if (it != m_deadline_timer_map_.end()) {
-      it->second->close();
-      it->second.reset();
-      m_deadline_timer_map_.erase(it);
+    auto it = m_pending_job_map_.find(job_id);
+    if (it == m_pending_job_map_.end() ||
+        absl::ToUnixSeconds(it->second->deadline_time) != deadline_time)
+      continue;
+
+    auto& timer = it->second->deadline_timer;
+    if (timer) {
+      timer->close();
+      timer.reset();
     }
 
+    absl::Time now = absl::Now();
     if (deadline_time <= absl::ToUnixSeconds(now)) {
       CRANE_ERROR("Job #{}'s deadline is earlier than now", job_id);
       m_job_deadline_timer_queue_.enqueue({job_id, deadline_time});
       m_job_deadline_timer_async_handle_->send();
-      return;
+      continue;
     }
 
     auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
     deadline_timer->on<uvw::timer_event>(
         [this, job_id, deadline_time](const uvw::timer_event&,
-                                      uvw::timer_handle& h) {
+                                    uvw::timer_handle& h) {
           CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
-          DelDeadlineTimer_(job_id);
+          h.close();
+          LockGuard pending_guard(&m_pending_job_map_mtx_);
+          auto it = m_pending_job_map_.find(job_id);
+          if (it == m_pending_job_map_.end() ||
+              it->second->deadline_timer.get() != &h)
+            return;
+          it->second->deadline_timer.reset();
           m_job_deadline_timer_queue_.enqueue({job_id, deadline_time});
           m_job_deadline_timer_async_handle_->send();
         });
@@ -2516,23 +2526,22 @@ void JobScheduler::CreateDeadlineTimerCb_() {
         std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
         std::chrono::seconds(0));
 
-    m_deadline_timer_map_.emplace(job_id, deadline_timer);
+    timer = std::move(deadline_timer);
   }
 }
 
-void JobScheduler::DelDeadlineTimer_(job_id_t job_id) {
-  auto it = m_deadline_timer_map_.find(job_id);
-  if (it != m_deadline_timer_map_.end()) {
-    it->second->close();
-    it->second.reset();
-    m_deadline_timer_map_.erase(it);
+void JobScheduler::DelDeadlineTimerAsync_(JobInCtld* job) {
+  m_pending_job_map_mtx_.AssertHeld();
+  if (job->deadline_timer) {
+    m_job_deadline_timer_del_queue_.enqueue(std::move(job->deadline_timer));
+    m_job_deadline_timer_del_async_handle_->send();
   }
 }
 
 void JobScheduler::DelDeadlineTimerCb_() {
-  job_id_t job_id;
-  while (m_job_deadline_timer_del_queue_.try_dequeue(job_id)) {
-    DelDeadlineTimer_(job_id);
+  std::shared_ptr<uvw::timer_handle> timer;
+  while (m_job_deadline_timer_del_queue_.try_dequeue(timer)) {
+    timer->close();
   }
 }
 
@@ -2797,8 +2806,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             {job_id, deadline_time.value()});
         m_job_deadline_timer_create_async_handle_->send();
       } else {
-        m_job_deadline_timer_del_queue_.enqueue(job_id);
-        m_job_deadline_timer_del_async_handle_->send();
+        DelDeadlineTimerAsync_(job);
       }
     }
   }
@@ -4173,8 +4181,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
           not_found_job_ids.erase(child_id);
         }
       }
-      m_job_deadline_timer_del_queue_.enqueue(job_id);
-      m_job_deadline_timer_del_async_handle_->send();
+      DelDeadlineTimerAsync_(job);
       m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
           .parent_job_id = job_id,
           .exit_code = ExitCode::EC_TERMINATED,
@@ -4186,6 +4193,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
     add_cancelled(job_id);
 
+    DelDeadlineTimerAsync_(job);
     m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
         .job = std::move(it->second),
         .finish_status = crane::grpc::JobStatus::Cancelled});
@@ -8119,10 +8127,7 @@ void JobScheduler::SpliceFinalArrayParentsFromPendingMapNoLock_(
           bundle.array_job_id);
       continue;
     }
-    if (m_job_deadline_timer_del_async_handle_) {
-      m_job_deadline_timer_del_queue_.enqueue(bundle.array_job_id);
-      m_job_deadline_timer_del_async_handle_->send();
-    }
+    DelDeadlineTimerAsync_(it->second.get());
     bundle.parent_job = std::move(it->second);
     m_pending_job_map_.erase(it);
   }
@@ -8274,15 +8279,15 @@ void JobScheduler::PersistAndRequeueJobs_(
         deadline_timer_vec.emplace_back(
             job->JobId(), absl::ToUnixSeconds(job->deadline_time));
     }
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    for (auto& job : requeued)
+      m_pending_job_map_.emplace(job->JobId(), std::move(job));
+
     if (!deadline_timer_vec.empty()) {
       m_job_deadline_timer_create_queue_.enqueue_bulk(
           deadline_timer_vec.data(), deadline_timer_vec.size());
       m_job_deadline_timer_create_async_handle_->send();
     }
-
-    LockGuard pending_guard(&m_pending_job_map_mtx_);
-    for (auto& job : requeued)
-      m_pending_job_map_.emplace(job->JobId(), std::move(job));
   }
 }
 

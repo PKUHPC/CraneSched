@@ -1042,6 +1042,8 @@ struct JobInCtld {
    * However, these fields are NOT persisted on the disk.
    * ----------- */
 
+  std::shared_ptr<uvw::timer_handle> deadline_timer;
+
   // Aggregated from resources of all nodes.
   // Might change at each scheduling cycle.
   ResourceView allocated_res_view;
