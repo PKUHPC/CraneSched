@@ -52,7 +52,8 @@ class BpfRuntimeInfo {
   BpfRuntimeInfo& operator=(const BpfRuntimeInfo&) = delete;
 
   // Craned bootstraps once or reuses the existing program/maps without writing
-  // to them. A changed device set requires an explicit reconfiguration.
+  // to them. Before changing the device set, drain existing jobs/cgroups and
+  // clear the old pins, then restart Craned.
   BpfResult Initialize(const ManagedDeviceKeysBySlot& device_keys_by_slot);
   // A supervisor only opens existing state and installs Craned's slot indices.
   BpfResult Connect(const ManagedDeviceIndicesBySlot& indices_by_slot);
