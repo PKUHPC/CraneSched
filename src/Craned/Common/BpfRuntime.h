@@ -41,7 +41,7 @@ using BpfResult = std::expected<void, std::string>;
 class BpfRuntimeInfo {
  public:
   struct Paths {
-    std::filesystem::path object = CRANE_BPF_OBJECT_PATH;
+    std::filesystem::path object = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
     std::filesystem::path pins = "/sys/fs/bpf/crane_devices";
     std::filesystem::path lock = "/run/lock/crane_bpf_devices.lock";
   };
