@@ -155,13 +155,10 @@ After a successful build, you should find `cgroup_dev_bpf.o` under `src/Misc/BPF
 
 ## Install the eBPF program
 
-From the project root, install the Craned component, including the BPF object:
-
+From the project build directory, copy the compiled BPF object:
 ```bash
-cmake --install build --component cranedc
+cp ./src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
 ```
-
-The BPF object is installed under `${CMAKE_INSTALL_LIBDIR}/bpf`, and its absolute path is compiled into Craned from the same CMake configuration. Set `CMAKE_INSTALL_PREFIX` and `CMAKE_INSTALL_LIBDIR` before building to customize the location. For example, `-DCMAKE_INSTALL_PREFIX=/opt/crane -DCMAKE_INSTALL_LIBDIR=lib` selects `/opt/crane/lib/bpf/cgroup_dev_bpf.o`. Use `DESTDIR` for packaging staging; changing only `cmake --install --prefix` does not update the compiled lookup path.
 
 Verify that the child cgroups have the relevant controllers enabled (e.g., cpu, io, memory):
 ```bash

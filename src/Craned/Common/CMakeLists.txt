@@ -71,10 +71,7 @@ if (CRANE_ENABLE_CGROUP_V2)
 endif ()
 
 if (CRANE_ENABLE_BPF)
-    target_compile_definitions(craned_common PUBLIC
-        CRANE_ENABLE_BPF
-        CRANE_BPF_OBJECT_PATH="${CMAKE_INSTALL_FULL_LIBDIR}/bpf/cgroup_dev_bpf.o"
-    )
+    target_compile_definitions(craned_common PUBLIC -DCRANE_ENABLE_BPF)
 endif ()
 
 # Dependencies

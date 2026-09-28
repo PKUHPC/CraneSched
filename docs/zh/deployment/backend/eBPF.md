@@ -155,13 +155,10 @@ cmake --build build
 
 ## 安装 eBPF 程序
 
-在项目根目录中安装 Craned 组件，其中包含 BPF object：
-
+在项目构建目录中：
 ```bash
-cmake --install build --component cranedc
+cp ./src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
 ```
-
-BPF object 安装到 `${CMAKE_INSTALL_LIBDIR}/bpf`，Craned 使用同一次 CMake 配置生成的绝对路径。自定义安装位置时，请在构建前设置 `CMAKE_INSTALL_PREFIX` 和 `CMAKE_INSTALL_LIBDIR`。例如，`-DCMAKE_INSTALL_PREFIX=/opt/crane -DCMAKE_INSTALL_LIBDIR=lib` 对应 `/opt/crane/lib/bpf/cgroup_dev_bpf.o`。打包暂存使用 `DESTDIR`；仅在安装时使用 `cmake --install --prefix` 不会更新已编译的查找路径。
 
 检查子 cgroup 是否启用了相关 controller（例如 cpu、io、memory 等）：
 ```bash
