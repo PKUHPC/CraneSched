@@ -425,9 +425,6 @@ set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
 # @formatter:on
 
-# Adopt GNU standard installation directories
-include(GNUInstallDirs)
-
 # Proto
 add_subdirectory(protos)
 
@@ -441,6 +438,9 @@ if (CRANE_ENABLE_TESTS)
     # Exclude it from 'all' target
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
+
+# Adopt GNU standard installation directories
+include(GNUInstallDirs)
 
 # Generate the configuration file
 configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
@@ -491,7 +491,7 @@ install(TARGETS csupervisor
 if (CRANE_ENABLE_BPF)
     install(FILES
             ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/bpf"
+            DESTINATION /usr/local/lib64/bpf/
             COMPONENT cranedc
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif ()
