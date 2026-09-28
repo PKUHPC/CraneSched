@@ -2149,6 +2149,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
   job_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
   job_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
+  job_info->mutable_deadline_time()->set_seconds(
+      absl::ToUnixSeconds(deadline_time));
 
   job_info->set_uid(uid);
   job_info->set_gid(gid);
