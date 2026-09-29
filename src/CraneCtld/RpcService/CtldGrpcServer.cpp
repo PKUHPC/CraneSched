@@ -1782,11 +1782,7 @@ crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
   auto* jobs = response.mutable_job_info_list();
   jobs->Reserve(job_info_map.size());
   for (auto& [id, job] : job_info_map) *jobs->Add() = std::move(job);
-  std::sort(jobs->begin(), jobs->end(),
-            [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-              return a.status() == b.status() ? a.priority() > b.priority()
-                                              : a.status() < b.status();
-            });
+  std::sort(jobs->begin(), jobs->end(), JobInfoDisplayOrder{});
   const bool has_more = jobs->size() > num_limit;
   response.set_has_more(has_more);
   if (has_more) jobs->DeleteSubrange(num_limit, jobs->size() - num_limit);
@@ -1823,31 +1819,60 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
 
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
-  const size_t probe_limit = num_limit + 1;
-  auto normalized_request = *request;
-  for (auto& node : *normalized_request.mutable_filter_nodename_list())
-    node = ResolveCranedIdAlias(node);
+  const size_t probe_limit = num_limit == std::numeric_limits<size_t>::max()
+                                 ? num_limit
+                                 : num_limit + 1;
+
+  crane::grpc::QueryJobsInfoRequest normalized_request = *request;
+  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
+    normalized_request.set_filter_nodename_list(
+        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
+  }
   request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
   g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
-  if (job_info_map.size() >= probe_limit ||
-      !request->option_include_completed_jobs()) {
-    if (request->option_include_completed_jobs() &&
-        !g_db_client->FetchJobStepRecords(request, &job_info_map)) {
-      CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
-      return grpc::Status::OK;
+  const bool accounting_query =
+      request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
+
+  if (accounting_query) {
+    // Over-fetch to offset live records removed during raw-job-ID deduplication.
+    size_t db_limit = probe_limit;
+    if (job_info_map.size() <= std::numeric_limits<size_t>::max() - db_limit) {
+      db_limit += job_info_map.size();
+    } else {
+      db_limit = std::numeric_limits<size_t>::max();
     }
-  } else {
-    // Fetch a full probe window: a history record may also be present in RAM.
-    if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
+    if (!g_db_client->FetchJobRecords(request, &job_info_map, db_limit)) {
       CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
       return grpc::Status::OK;
     }
   }
 
-  // One response path, after historical steps have been merged.
+  if (!accounting_query) {
+    if (job_info_map.size() >= probe_limit ||
+        !request->option_include_completed_jobs()) {
+      if (request->option_include_completed_jobs() &&
+          !g_db_client->FetchJobStepRecords(request, &job_info_map)) {
+        CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
+        return grpc::Status::OK;
+      }
+    } else {
+      size_t db_limit = probe_limit;
+      if (job_info_map.size() <=
+          std::numeric_limits<size_t>::max() - db_limit) {
+        db_limit += job_info_map.size();
+      } else {
+        db_limit = std::numeric_limits<size_t>::max();
+      }
+      if (!g_db_client->FetchJobRecords(request, &job_info_map, db_limit)) {
+        CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+        return grpc::Status::OK;
+      }
+    }
+  }
+
   *response = BuildJobQueryReply(std::move(job_info_map), num_limit,
                                  authenticated_uid, is_admin);
   return grpc::Status::OK;
