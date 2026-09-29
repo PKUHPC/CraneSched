@@ -27,6 +27,7 @@
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
+#include "JobQueryPrivacy.h"
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
 #include "Security/VaultClient.h"
@@ -1602,6 +1603,23 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
+  if (!request->has_uid())
+    return {grpc::StatusCode::INVALID_ARGUMENT, "Caller UID is required"};
+
+  std::optional<uint32_t> authenticated_uid;
+  bool is_admin = false;
+  // Non-TLS requests cannot prove a UID, even if they claim to be root.
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    if (auto error = CheckCertAndUIDAllowed_(context, request->uid()); error)
+      return {grpc::StatusCode::UNAUTHENTICATED, *error};
+    const auto admin = g_account_manager->CheckUidIsAdmin(request->uid());
+    if (!admin && admin.error() != CraneErrCode::ERR_USER_NO_PRIVILEGE)
+      return {grpc::StatusCode::PERMISSION_DENIED,
+              "Unable to resolve query user permissions"};
+    authenticated_uid = request->uid();
+    is_admin = admin.has_value();
+  }
+
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
   const size_t probe_limit = num_limit + 1;
@@ -1617,8 +1635,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   // Query jobs in RAM
   g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
-  auto sort_truncate_and_move_to_proto = [&job_info_map,
-                                          response](size_t limit) -> void {
+  auto sort_truncate_and_move_to_proto = [&job_info_map, response,
+                                        authenticated_uid,
+                                        is_admin](size_t limit) -> void {
     auto* job_info_list = response->mutable_job_info_list();
     job_info_list->Reserve(job_info_map.size());
     for (auto it = job_info_map.begin(); it != job_info_map.end();) {
@@ -1638,6 +1657,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     response->set_has_more(has_more);
     if (has_more)
       job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);
+    // Both live and history query paths pass here, after historical step merge.
+    for (auto& job : *job_info_list)
+      job = ProjectJobForQuery(job, authenticated_uid, is_admin);
   };
 
   if (job_info_map.size() >= probe_limit ||
