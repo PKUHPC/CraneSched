@@ -26,6 +26,8 @@
 namespace Craned::Supervisor {
 
 class CforedClient {
+  friend class SupervisorExitTestPeer;
+
   struct X11FdInfo {
     int fd;
     std::shared_ptr<uvw::tcp_handle> sock;
@@ -133,6 +135,8 @@ class CforedClient {
       grpc::ClientAsyncReaderWriter<crane::grpc::StreamStepIORequest,
                                     crane::grpc::StreamStepIOReply>* stream,
       std::atomic<bool>* write_pending);
+
+  void HandleOutputStop_(task_id_t task_id, bool is_stdout);
 
   std::atomic<bool> m_stopped_{false};
   std::atomic<bool> m_wait_reconn_{false};
