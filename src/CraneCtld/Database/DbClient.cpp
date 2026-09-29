@@ -4200,6 +4200,10 @@ void MongodbClient::DocumentAppendItem_(
       image_doc.append(kvp("image", v.image_info.image));
       image_doc.append(kvp("pull_policy", v.image_info.pull_policy));
       image_doc.append(kvp("server_address", v.image_info.server_address));
+      if (v.image_info.pull_timeout_sec.has_value()) {
+        image_doc.append(
+            kvp("pull_timeout_sec", v.image_info.pull_timeout_sec.value()));
+      }
       // NOTE: We DO NOT serialize auth related fields (username/password) for
       // security, which means when a job is done, no credentials in disk.
     }));
@@ -4952,6 +4956,9 @@ ContainerMetaInJob MongodbClient::BsonToContainerMeta(
       }
       if (auto server_elem = image_doc["server_address"]) {
         result.image_info.server_address = server_elem.get_string().value;
+      }
+      if (auto timeout_elem = image_doc["pull_timeout_sec"]) {
+        result.image_info.pull_timeout_sec = timeout_elem.get_int64().value;
       }
       // NOTE: We do not deserialize auth fields (username/password) for
       // security

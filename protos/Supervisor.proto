@@ -75,6 +75,8 @@ message InitSupervisorRequest {
       repeated string options = 4;
     }
     DnsConfig dns_config = 6;
+    optional int64 pull_timeout_sec = 7;
+    optional int64 cri_request_timeout_seconds = 8;
   }
   ContainerConfig container_config = 15;
 

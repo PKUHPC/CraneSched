@@ -86,7 +86,11 @@ ContainerMetaInJob::ContainerMetaInJob(
                  .username = rhs.image().username(),
                  .password = rhs.image().password(),
                  .server_address = rhs.image().server_address(),
-                 .pull_policy = rhs.image().pull_policy()},
+                 .pull_policy = rhs.image().pull_policy(),
+                 .pull_timeout_sec =
+                     rhs.image().has_pull_timeout_sec()
+                         ? std::optional(rhs.image().pull_timeout_sec())
+                         : std::nullopt},
       command(rhs.command()),
       args(rhs.args().begin(), rhs.args().end()),
       workdir(rhs.workdir()),
@@ -106,6 +110,9 @@ ContainerMetaInJob::operator crane::grpc::ContainerJobAdditionalMeta() const {
   image->set_password(this->image_info.password);
   image->set_server_address(this->image_info.server_address);
   image->set_pull_policy(this->image_info.pull_policy);
+  if (this->image_info.pull_timeout_sec.has_value()) {
+    image->set_pull_timeout_sec(this->image_info.pull_timeout_sec.value());
+  }
 
   result.set_name(this->name);
 
