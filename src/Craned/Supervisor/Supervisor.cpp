@@ -143,9 +143,9 @@ int InitFromStdin(int argc, char** argv) {
       g_config.Container.CriRequestTimeout = std::chrono::seconds(
           msg.container_config().cri_request_timeout_seconds());
     }
-    if (msg.container_config().has_image_pulling_timeout_seconds()) {
-      g_config.Container.ImagePullingTimeout = std::chrono::seconds(
-          msg.container_config().image_pulling_timeout_seconds());
+    if (msg.container_config().has_pull_timeout_sec()) {
+      g_config.Container.ImagePullingTimeout =
+          std::chrono::seconds(msg.container_config().pull_timeout_sec());
     }
     if (!cri::CriClientConfig{g_config.Container.CriRequestTimeout,
                               g_config.Container.ImagePullingTimeout}

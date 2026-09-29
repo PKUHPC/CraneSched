@@ -191,13 +191,9 @@ class StepInstance {
         .image_pulling_timeout = g_config.Container.ImagePullingTimeout};
     if (m_step_to_supv_.has_container_meta() &&
         m_step_to_supv_.container_meta().has_image() &&
-        m_step_to_supv_.container_meta()
-            .image()
-            .has_image_pulling_timeout_seconds()) {
-      cri_config.image_pulling_timeout =
-          std::chrono::seconds(m_step_to_supv_.container_meta()
-                                   .image()
-                                   .image_pulling_timeout_seconds());
+        m_step_to_supv_.container_meta().image().has_pull_timeout_sec()) {
+      cri_config.image_pulling_timeout = std::chrono::seconds(
+          m_step_to_supv_.container_meta().image().pull_timeout_sec());
     }
     if (!cri_config.IsValid()) {
       CRANE_ERROR("Invalid CRI timeout configuration for step #{}.{}", job_id,
