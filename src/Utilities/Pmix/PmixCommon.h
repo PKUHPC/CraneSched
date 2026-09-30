@@ -39,6 +39,7 @@ struct Config {
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
+  bool EnableSlurmCompatibleEnv{false};
 };
 
 struct PmixStepInfo {

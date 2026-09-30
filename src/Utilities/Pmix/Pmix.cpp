@@ -204,6 +204,7 @@ PmixServer::~PmixServer() {
 }
 
 bool PmixServer::Init(const Config& config, const crane::grpc::StepToD& step) {
+  m_enable_slurm_compatible_env_ = config.EnableSlurmCompatibleEnv;
 #ifdef HAVE_PMIX
   CRANE_TRACE("[Step#{}.{}] Initializing PmixServer...", step.job_id(),
               step.step_id());
@@ -318,15 +319,74 @@ PmixServer::SetupFork(uint32_t rank) {
     }
   }
 
-  const auto slurm_nodelist =
-      util::HostNameListToStr(m_pmix_step_info_.node_list);
   const auto crane_nodelist = absl::StrJoin(m_pmix_step_info_.node_list, ";");
-  env_map.emplace("SLURM_JOBID", std::to_string(m_pmix_step_info_.job_id));
-  env_map.emplace("SLURM_JOB_NODELIST", slurm_nodelist);
-  env_map.emplace("SLURM_NODELIST", slurm_nodelist);
   env_map.emplace("CRANE_JOB_NODELIST", crane_nodelist);
   env_map.emplace("CRANE_NODELIST", crane_nodelist);
-  env_map.emplace("SLURM_STEP_ID", std::to_string(m_pmix_step_info_.step_id));
+
+  if (!m_enable_slurm_compatible_env_) {
+    const auto slurm_nodelist =
+        util::HostNameListToStr(m_pmix_step_info_.node_list);
+    env_map.emplace("SLURM_JOBID", std::to_string(m_pmix_step_info_.job_id));
+    env_map.emplace("SLURM_JOB_NODELIST", slurm_nodelist);
+    env_map.emplace("SLURM_NODELIST", slurm_nodelist);
+    env_map.emplace("SLURM_STEP_ID", std::to_string(m_pmix_step_info_.step_id));
+  } else {
+    const auto slurm_nodelist = absl::StrJoin(m_pmix_step_info_.node_list, ",");
+    std::vector<uint32_t> task_counts(m_pmix_step_info_.node_list.size(), 0);
+    for (uint32_t node_id : m_pmix_step_info_.task_map) {
+      ++task_counts[node_id];
+    }
+
+    const uint32_t node_count =
+        static_cast<uint32_t>(m_pmix_step_info_.node_list.size());
+    const uint32_t task_count = m_pmix_step_info_.task_num;
+    env_map.insert_or_assign("SLURM_JOBID",
+                             std::to_string(m_pmix_step_info_.job_id));
+    env_map.insert_or_assign("SLURM_JOB_ID",
+                             std::to_string(m_pmix_step_info_.job_id));
+    env_map.insert_or_assign("SLURM_STEP_ID",
+                             std::to_string(m_pmix_step_info_.step_id));
+    env_map.insert_or_assign("SLURM_STEPID",
+                             std::to_string(m_pmix_step_info_.step_id));
+    env_map.insert_or_assign("SLURM_STEP_NODELIST", slurm_nodelist);
+    env_map.insert_or_assign("SLURM_STEP_NUM_NODES",
+                             std::to_string(node_count));
+    env_map.insert_or_assign("SLURM_STEP_NUM_TASKS",
+                             std::to_string(task_count));
+    env_map.insert_or_assign("SLURM_NNODES", std::to_string(node_count));
+    env_map.insert_or_assign("SLURM_NTASKS", std::to_string(task_count));
+    env_map.insert_or_assign("SLURM_NPROCS", std::to_string(task_count));
+
+    env_map.insert_or_assign("SLURM_NODEID",
+                             std::to_string(m_pmix_step_info_.node_id));
+    env_map.insert_or_assign("SLURM_STEP_NODEID",
+                             std::to_string(m_pmix_step_info_.node_id));
+    env_map.insert_or_assign("SLURM_PROCID", std::to_string(rank));
+    env_map.insert_or_assign("SLURM_STEP_PROCID", std::to_string(rank));
+
+    uint32_t local_id = 0;
+    for (uint32_t preceding_rank = 0; preceding_rank < rank; ++preceding_rank) {
+      if (m_pmix_step_info_.task_map[preceding_rank] ==
+          m_pmix_step_info_.node_id) {
+        ++local_id;
+      }
+    }
+    env_map.insert_or_assign("SLURM_LOCALID", std::to_string(local_id));
+    env_map.insert_or_assign("SLURM_STEP_LOCALID", std::to_string(local_id));
+
+    std::vector<uint32_t> gtids;
+    for (uint32_t task_id = 0; task_id < m_pmix_step_info_.task_map.size();
+         ++task_id) {
+      if (m_pmix_step_info_.task_map[task_id] == m_pmix_step_info_.node_id)
+        gtids.emplace_back(task_id);
+    }
+    env_map.insert_or_assign("SLURM_GTIDS",
+                             fmt::format("{}", fmt::join(gtids, ",")));
+
+    const auto task_counts_str = absl::StrJoin(task_counts, ",");
+    env_map.insert_or_assign("SLURM_TASKS_PER_NODE", task_counts_str);
+    env_map.insert_or_assign("SLURM_STEP_TASKS_PER_NODE", task_counts_str);
+  }
 
   if (!env_map.contains("OMPI_MCA_orte_precondition_transports")) {
     char key[64];
