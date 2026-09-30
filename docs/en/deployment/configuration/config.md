@@ -101,6 +101,13 @@ Nodes:
       - name: gpu
         type: a100
         DeviceFileRegex: /dev/nvidia[0-3]
+
+  # FUTURE placeholder nodes (dynamic nodes)
+  - name: "future[01-02]"
+    cpu: 8
+    memory: 32G
+    state: FUTURE
+    features: [gpu, highmem]
 ```
 
 **Node Parameters:**
@@ -111,6 +118,8 @@ Nodes:
 - **cpu**: Number of CPU cores
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
+- **state**: Optional. Only `FUTURE` is supported for now. A FUTURE node is a placeholder with no real machine bound at startup: a machine started with `craned -F [feature]` is mapped to an unmapped FUTURE node whose hardware spec is satisfied by the local hardware (detected CPU count equal to the configured value and memory no less than configured, carrying the given feature if specified). FUTURE nodes must belong to a partition and should not configure `NodeHostname`/`NodeAddr` (they are overridden with the real machine's address at mapping time). An unmapped FUTURE node takes part in neither scheduling nor partition resources.
+- **features**: Optional list of node tags, currently used to filter FUTURE node mapping for `craned -F <feature>`
 
 Hostname rules:
 

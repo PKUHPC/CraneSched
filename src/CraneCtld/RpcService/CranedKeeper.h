@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <mutex>
+
 #include "crane/Lock.h"
 #include "crane/Network.h"
 #include "protos/Crane.grpc.pb.h"
@@ -139,6 +141,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   std::atomic_bool m_disconnected_;
   std::atomic_bool m_registered_{false};
+  bool m_retired_{false};  // Guarded by the keeper lifecycle mutex.
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
@@ -178,6 +181,13 @@ class CranedKeeper {
 
   void Shutdown();
 
+  // Acquire before node metadata locks when changing a node lifecycle.
+  std::unique_lock<std::recursive_mutex> GetLifecycleLock() {
+    return std::unique_lock(m_lifecycle_mtx_);
+  }
+
+  void RetireCraned(const CranedId &craned_id);
+
   uint32_t AvailableCranedCount();
 
   bool IsCranedConnected(const CranedId &craned_id);
@@ -187,10 +197,7 @@ class CranedKeeper {
    * @param craned_id the index of CranedStub
    * @return nullptr if index points to an invalid slot, the pointer to
    * CranedStub otherwise.
-   * @attention It's ok to return the pointer of CranedStub directly. The
-   * CranedStub will not be freed before the CranedIsDown() callback returns.
-   * The callback registerer should do necessary synchronization to clean up all
-   * the usage of the CranedStub pointer before CranedIsDown() returns.
+   * The returned shared pointer keeps an in-flight RPC alive after retirement.
    */
   std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
 
@@ -205,7 +212,7 @@ class CranedKeeper {
   struct CqTag {
     enum Type : uint8_t { kInitializingCraned, kEstablishedCraned };
     Type type;
-    CranedStub *craned;
+    std::shared_ptr<CranedStub> craned;
   };
 
   // Remove stub from unavail/connecting set. Must be called with
@@ -214,10 +221,11 @@ class CranedKeeper {
 
   void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
 
-  CqTag *InitCranedStateMachine_(CranedStub *craned,
+  CqTag *InitCranedStateMachine_(const std::shared_ptr<CranedStub> &craned,
                                  grpc_connectivity_state new_state);
-  CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
-                                        grpc_connectivity_state new_state);
+  CqTag *EstablishedCranedStateMachine_(
+      const std::shared_ptr<CranedStub> &craned,
+      grpc_connectivity_state new_state);
 
   bool CheckNodeTimeoutAndClean(CqTag *tag);
 
@@ -230,6 +238,11 @@ class CranedKeeper {
   // Guarantee that the Craned will not be freed before this callback is
   // called.
   std::function<void(CranedId)> m_craned_disconnected_cb_;
+
+  std::recursive_mutex m_lifecycle_mtx_;
+  // Includes connecting stubs and stubs awaiting their disconnect callback.
+  // Guarded by m_lifecycle_mtx_.
+  std::unordered_map<CranedId, std::shared_ptr<CranedStub>> m_craned_stubs_;
 
   Mutex m_tag_pool_mtx_;
 

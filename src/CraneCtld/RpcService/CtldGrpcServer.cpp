@@ -38,6 +38,20 @@
 
 namespace Ctld {
 
+// Extract the IP part from a grpc peer string like "ipv4:1.2.3.4:port" or
+// "ipv6:[::1]:port". Returns an empty string on failure.
+static std::string PeerIpFromContext(grpc::ServerContext* context) {
+  std::string peer = context->peer();
+  size_t scheme_pos = peer.find(':');
+  size_t port_pos = peer.rfind(':');
+  if (scheme_pos == std::string::npos || port_pos <= scheme_pos + 1) return "";
+
+  std::string ip = peer.substr(scheme_pos + 1, port_pos - scheme_pos - 1);
+  if (ip.starts_with('[') && ip.ends_with(']'))
+    ip = ip.substr(1, ip.size() - 2);
+  return ip;
+}
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -58,12 +72,23 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext* context,
     const crane::grpc::CranedTriggerReverseConnRequest* request,
     google::protobuf::Empty* response) {
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   const auto& craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     CRANE_WARN("Reject register request from unknown node {}",
                request->craned_id());
     return grpc::Status::OK;
+  }
+  {
+    auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+    if (!node || (node->static_meta.is_future && !node->future_mapped))
+      return {grpc::StatusCode::FAILED_PRECONDITION,
+              "FUTURE node must be mapped before connecting"};
+    if (node->static_meta.is_future &&
+        node->static_meta.node_addr != PeerIpFromContext(context))
+      return {grpc::StatusCode::FAILED_PRECONDITION,
+              "Connection does not match the FUTURE node mapping"};
   }
 
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
@@ -80,6 +105,10 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     if (stub != nullptr) {
       stub->SetRegToken(request->token());
       g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
+        auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+        if (g_craned_keeper->GetCranedStub(craned_id) != stub ||
+            !stub->CheckToken(token))
+          return;
         stub->ConfigureCraned(craned_id, token);
       });
     } else {
@@ -90,11 +119,40 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::CranedMapFutureNode(
+    grpc::ServerContext* context,
+    const crane::grpc::CranedMapFutureNodeRequest* request,
+    crane::grpc::CranedMapFutureNodeReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  std::string peer_ip = PeerIpFromContext(context);
+  if (peer_ip.empty()) {
+    CRANE_WARN("Failed to extract peer address '{}' of craned {}.",
+               context->peer(), request->hostname());
+    response->set_ok(false);
+    response->set_reason("Failed to extract craned peer address.");
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->MapFutureNode(*request, peer_ip);
+  if (!response->ok())
+    CRANE_WARN("Failed to map craned {} at {} to a FUTURE node: {}",
+               request->hostname(), peer_ip, response->reason());
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CranedRegister(
     grpc::ServerContext* context,
     const crane::grpc::CranedRegisterRequest* request,
     crane::grpc::CranedRegisterReply* response) {
-  CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
 
   if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
@@ -169,6 +227,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
 grpc::Status CtldForInternalServiceImpl::CranedPing(
     grpc::ServerContext* context, const crane::grpc::CranedPingRequest* request,
     crane::grpc::CranedPingReply* response) {
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   if (!g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject ping from offline node {}", request->craned_id());
     response->set_ok(false);
@@ -1336,6 +1395,50 @@ grpc::Status CraneCtldServiceImpl::ModifyJobsExtraAttrs(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::CreateNodes(
+    grpc::ServerContext* context,
+    const crane::grpc::CreateNodesRequest* request,
+    crane::grpc::CreateNodesReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  if (auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+      !result) {
+    for (const auto& node : request->nodes()) {
+      response->add_not_created_nodes(node.name());
+      response->add_not_created_reasons(CraneErrStr(result.error()));
+    }
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->CreateNodes(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteNodes(
+    grpc::ServerContext* context,
+    const crane::grpc::DeleteNodesRequest* request,
+    crane::grpc::DeleteNodesReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  if (auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+      !result) {
+    for (const auto& name : request->node_names()) {
+      response->add_not_deleted_nodes(name);
+      response->add_not_deleted_reasons(CraneErrStr(result.error()));
+    }
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->DeleteNodes(*request);
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext* context,
     const crane::grpc::ModifyCranedStateRequest* request,
@@ -1574,7 +1677,8 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   const bool propagate =
       !request->has_propagate_to_craned() || request->propagate_to_craned();
   if (propagate && g_craned_keeper) {
-    for (const auto& [craned_id, node] : g_config.Nodes) {
+    auto nodes = g_meta_container->GetCranedMetaMapConstPtr();
+    for (const auto& [craned_id, node] : *nodes) {
       (void)node;
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (!stub || stub->Invalid()) continue;

@@ -58,16 +58,30 @@ std::vector<std::string> FindNodesNotInPartition_(
   return invalid_nodes;
 }
 
-std::vector<std::string> FindNodesNotInConfig_(
+std::vector<std::string> FindUnknownNodes_(
     const std::unordered_set<std::string>& requested_nodes) {
   std::vector<std::string> invalid_nodes;
   invalid_nodes.reserve(requested_nodes.size());
   for (const auto& node : requested_nodes) {
-    if (!g_config.Nodes.contains(node)) invalid_nodes.emplace_back(node);
+    if (!g_meta_container->CheckCranedAllowed(node))
+      invalid_nodes.emplace_back(node);
   }
 
   std::sort(invalid_nodes.begin(), invalid_nodes.end());
   return invalid_nodes;
+}
+
+Config::Partition RuntimePartitionConfig_(const PartitionId& id,
+                                          const Config::Partition& config) {
+  auto result = config;
+  auto partition = g_meta_container->GetPartitionMetasPtr(id);
+  result.nodes = partition->craned_ids;
+  const auto& resources = partition->partition_global_meta.res_total_inc_dead;
+  if (result.default_mem_per_cpu == 0 && result.default_mem_per_node == 0 &&
+      resources.GetCpuCount() > 0)
+    result.default_mem_per_cpu = resources.GetMemoryBytes() /
+                                 static_cast<double>(resources.GetCpuCount());
+  return result;
 }
 
 constexpr size_t kMaxExecutionGroups = 256;
@@ -2189,8 +2203,8 @@ void JobScheduler::ScheduleThread_() {
       // TODO: Refactor here! Add filter chain for post-scheduling stage.
       absl::Time post_sched_time_point = absl::Now();
       for (auto const& craned_id : craned_alloc_job_map | std::views::keys) {
-        g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
-            post_sched_time_point;
+        auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+        if (node) node->last_busy_time = post_sched_time_point;
       }
 
       sched_cycle.SetAttribute("allocated_count",
@@ -7757,11 +7771,9 @@ void SchedulerAlgo::NodeSelect(
       for (const auto& craned_id : craned_ids) {
         auto it = node_state_map.find(craned_id);
         if (it == node_state_map.end()) {
-          auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-          if (!craned_meta) {
-            CRANE_ERROR("Craned {} not found", craned_id);
-            continue;
-          }
+          auto node_it = craned_meta_map->find(craned_id);
+          if (node_it == craned_meta_map->end()) continue;
+          auto craned_meta = node_it->second.GetExclusivePtr();
           if (!craned_meta->alive || craned_meta->drain) {
             CRANE_TRACE("Craned {} is not alive or in drain mode, skip it",
                         craned_id);
@@ -8309,7 +8321,8 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 
   job->partition_priority = part_it->second.priority;
 
-  Config::Partition const& part_meta = part_it->second;
+  const auto part_meta =
+      RuntimePartitionConfig_(job->partition_id, part_it->second);
   CRANE_TRACE(
       "Job {} node res:{}, job res:{}, part default_mem_per_cpu:{}, "
       "default_mem_per_node:{}, max_mem_per_cpu:{}, max_mem_per_node:{}",
@@ -8516,7 +8529,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   job->MutableJobToCtld()->set_excludes(
       util::HostNameListToStr(job->excluded_nodes));
 
-  auto invalid_nodes = FindNodesNotInConfig_(job->included_nodes);
+  auto invalid_nodes = FindUnknownNodes_(job->included_nodes);
   if (!invalid_nodes.empty()) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
@@ -8533,7 +8546,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
                       absl::StrJoin(invalid_nodes, ", "), job->partition_id));
   }
 
-  invalid_nodes = FindNodesNotInConfig_(job->excluded_nodes);
+  invalid_nodes = FindUnknownNodes_(job->excluded_nodes);
   if (!invalid_nodes.empty()) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_EX_NODE_LIST,
@@ -8972,9 +8985,10 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
 
   auto part_it = g_config.Partitions.find(step->job->partition_id);
   if (part_it != g_config.Partitions.end()) {
-    Config::Partition const& part_meta = part_it->second;
+    const auto part_meta =
+        RuntimePartitionConfig_(step->job->partition_id, part_it->second);
 
-    auto invalid_nodes = FindNodesNotInConfig_(step->included_nodes);
+    auto invalid_nodes = FindUnknownNodes_(step->included_nodes);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR(
           "Invalid --nodelist value for step #{}.{}: unknown nodes '{}'",
@@ -8994,7 +9008,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
           CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION);
     }
 
-    invalid_nodes = FindNodesNotInConfig_(step->excluded_nodes);
+    invalid_nodes = FindUnknownNodes_(step->excluded_nodes);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR("Invalid --exclude value for step #{}.{}: unknown nodes '{}'",
                   step->job_id, step->StepId(),

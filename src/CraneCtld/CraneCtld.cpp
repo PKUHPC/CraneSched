@@ -596,6 +596,36 @@ void ParseConfig(int argc, char** argv) {
             node_ptr->node_topo_info.sockets = sockets_val;
           }
 
+          if (node["state"]) {
+            std::string state =
+                absl::AsciiStrToUpper(node["state"].as<std::string>());
+            if (state != "FUTURE") {
+              CRANE_ERROR(
+                  "Invalid state '{}' for node '{}'. Only FUTURE is "
+                  "supported.",
+                  node["state"].Scalar(), node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->is_future = true;
+            if (node["NodeHostname"] || node["NodeAddr"])
+              CRANE_WARN(
+                  "NodeHostname/NodeAddr of FUTURE node '{}' will be "
+                  "overridden when a craned is mapped to it.",
+                  node["name"].Scalar());
+          }
+
+          if (node["features"]) {
+            if (!node["features"].IsSequence()) {
+              CRANE_ERROR(
+                  "Illegal features type for node '{}'. It must be a YAML "
+                  "sequence.",
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->features =
+                node["features"].as<std::vector<std::string>>();
+          }
+
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
