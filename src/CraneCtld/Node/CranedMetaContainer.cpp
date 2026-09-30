@@ -74,6 +74,7 @@ void CranedMetaContainer::CranedUp(
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
+    part_global_meta.res_avail += node_meta->res_avail;
     part_global_meta.alive_craned_cnt++;
   }
 
@@ -115,6 +116,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
+    part_global_meta.res_avail -= node_meta->res_avail;
     part_global_meta.alive_craned_cnt--;
   }
 
@@ -218,7 +220,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail -= job_node_res;
+    if (node_meta->alive) part_global_meta.res_avail -= job_node_res;
     part_global_meta.res_in_use += job_node_res;
   }
 }
@@ -269,7 +271,7 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail += resources;
+    if (node_meta->alive) part_global_meta.res_avail += resources;
     part_global_meta.res_in_use -= resources;
   }
 
@@ -375,7 +377,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
 
       part_meta.craned_ids.emplace(craned_name);
 
-      part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
       part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
 
       CRANE_DEBUG(
