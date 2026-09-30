@@ -442,6 +442,16 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
+bool StepInstance::AllTaskMainProcessesExited() const {
+  for (const auto& task : m_task_map_ | std::views::values) {
+    if (task->GetExecId().has_value() &&
+        !task->GetFinalInfo()->raw_exit.has_value()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void StepInstance::InitOomBaseline() {
   // Use the step-level workload cgroup selected by Supervisor.
   if (!step_user_cg) {
@@ -3177,26 +3187,9 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
 
-  ChangeStepTimeConstraintQueueElem elem;
-  elem.ok_prom = std::move(ok_promise);
-  if (time_limit) {
-    elem.time_limit = time_limit;
-    m_step_.GetMutableStep().mutable_time_limit()->set_seconds(
-        time_limit.value());
-  } else {
-    elem.time_limit =
-        std::optional<int64_t>(m_step_.GetStep().time_limit().seconds());
-  }
-
-  if (deadline_time) {
-    elem.deadline_time = deadline_time;
-    m_step_.GetMutableStep().mutable_deadline_time()->set_seconds(
-        deadline_time.value());
-  } else {
-    elem.deadline_time =
-        std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
-  }
-
+  ChangeStepTimeConstraintQueueElem elem{.ok_prom = std::move(ok_promise),
+                                         .time_limit = time_limit,
+                                         .deadline_time = deadline_time};
   m_step_time_constraint_change_queue_.enqueue(std::move(elem));
   m_change_step_time_constraint_async_handle_->send();
   return ok_future;
@@ -3337,6 +3330,19 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   // Put not found tasks back to the queue
   for (auto task : not_found_tasks) {
     m_sigchld_queue_.enqueue(task);
+  }
+
+  if (m_step_.IsCrun() && !m_residual_processes_killed_ &&
+      !m_step_.AllTaskFinished() && m_step_.AllTaskMainProcessesExited()) {
+    CRANE_INFO(
+        "[Step #{}.{}] All task main processes exited; killing residual "
+        "processes before waiting for output EOF.",
+        m_step_.job_id, m_step_.step_id);
+    m_residual_processes_killed_ = true;
+    for (task_id_t task_id : m_step_.GetTaskIds()) {
+      auto* task = m_step_.GetTaskInstance(task_id);
+      if (task->GetExecId().has_value()) task->Kill(SIGKILL);
+    }
   }
 }
 
@@ -3763,17 +3769,22 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
       continue;
     }
 
+    auto& step = m_step_.GetMutableStep();
+    if (elem.time_limit)
+      step.mutable_time_limit()->set_seconds(elem.time_limit.value());
+    if (elem.deadline_time)
+      step.mutable_deadline_time()->set_seconds(elem.deadline_time.value());
+
     // Delete the old timer.
     DelTerminationTimer_();
     DelSignalTimers_();
     CRANE_TRACE("Delete the old timer.");
 
-    absl::Time start_time =
-        absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
+    absl::Time start_time = absl::FromUnixSeconds(step.start_time().seconds());
     absl::Duration const& new_time_limit =
-        absl::Seconds(elem.time_limit.value());
+        absl::Seconds(step.time_limit().seconds());
     absl::Time deadline_time =
-        absl::FromUnixSeconds(elem.deadline_time.value());
+        absl::FromUnixSeconds(step.deadline_time().seconds());
     absl::Time time_limit_end_time = start_time + new_time_limit;
     bool deadline_reached = now >= deadline_time;
     bool time_limit_reached = now >= time_limit_end_time;
@@ -3795,7 +3806,7 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
       // If the step hasn't timed out, set up a new timer.
       int64_t new_sec;
       int64_t deadline_sec =
-          elem.deadline_time.value() - absl::ToUnixSeconds(now);
+          step.deadline_time().seconds() - absl::ToUnixSeconds(now);
       int64_t new_time_limit_sec =
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
 
@@ -3807,7 +3818,7 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
         new_sec = new_time_limit_sec;
       }
 
-      for (const auto& signal : m_step_.GetStep().signals()) {
+      for (const auto& signal : step.signals()) {
         if (signal.signal_flag() == crane::grpc::Signal_SignalFlag_BATCH_ONLY &&
             !m_step_.IsPrimary())
           continue;

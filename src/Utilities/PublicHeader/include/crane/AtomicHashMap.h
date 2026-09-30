@@ -123,8 +123,8 @@ class AtomicHashMap {
     };
 
     void unlock() {
-      global_map_shared_mutex_->unlock_shared();
       value_mutex_->Unlock();
+      global_map_shared_mutex_->unlock_shared();
     }
   };
 

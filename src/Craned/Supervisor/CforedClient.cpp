@@ -1095,8 +1095,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
   meta.proc_stopped = true;
   meta.exit_code = exit_code;
   meta.signaled = signaled;
-  if (meta.output_stopped) {
-    // Output already drained — safe to send EXIT_STATUS now.
+  if (meta.output_stopped && meta.err_stopped) {
     m_task_fwd_req_queue_.enqueue(FwdRequest{
         .type = StreamStepIORequest::TASK_EXIT_STATUS,
         .data = TaskFinishStatus{.task_id = task_id,
@@ -1104,7 +1103,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                  .signaled = signaled},
     });
   }
-  return meta.output_stopped;
+  return meta.output_stopped && meta.err_stopped;
 }
 
 void CforedClient::TaskEnd(task_id_t task_id) {
