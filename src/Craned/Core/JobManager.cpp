@@ -1426,21 +1426,28 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
 
 CraneExpected<void> JobManager::ChangeAllStepsTimelimit(
     job_id_t job_id, int64_t new_timelimit_sec) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) {
-    CRANE_ERROR("[Job #{}] Failed to find job allocation", job_id);
-    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
-  }
+  std::vector<std::pair<step_id_t, std::shared_ptr<SupervisorStub>>> stubs;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      CRANE_ERROR("[Job #{}] Failed to find job allocation", job_id);
+      return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+    }
 
-  absl::MutexLock lock(job->step_map_mtx.get());
+    absl::MutexLock lock(job->step_map_mtx.get());
+    stubs.reserve(job->step_map.size());
+    for (const auto& [step_id, step] : job->step_map) {
+      stubs.emplace_back(step_id, step->supervisor_stub);
+    }
+  }
 
   // For resume operations, supervisor_stub being unavailable should not be
   // a fatal error. After thaw, processes will naturally resume and the time
   // limit will take effect on the next check.
-  for (auto& [step_id, step] : job->step_map) {
-    if (step->supervisor_stub) {
-      auto err = step->supervisor_stub->ChangeStepTimeConstraint(
-          new_timelimit_sec, std::nullopt);
+  for (const auto& [step_id, stub] : stubs) {
+    if (stub) {
+      auto err =
+          stub->ChangeStepTimeConstraint(new_timelimit_sec, std::nullopt);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_WARN(
             "[Step #{}.{}] Failed to change step timelimit to {} seconds, "
@@ -1997,16 +2004,27 @@ std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
 }
 
 CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
-  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_ptr) {
-    CRANE_WARN("[Job #{}] Failed to suspend: job allocation not found.",
-               job_id);
-    return CraneErrCode::ERR_NON_EXISTENT;
-  }
+  std::shared_ptr<SupervisorStub> primary_stub;
+  std::string job_cg_abs_path;
+  {
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_ptr) {
+      CRANE_WARN("[Job #{}] Failed to suspend: job allocation not found.",
+                 job_id);
+      return CraneErrCode::ERR_NON_EXISTENT;
+    }
 
-  if (!job_ptr->cgroup) {
-    CRANE_WARN("[Job #{}] Failed to suspend: job cgroup not found.", job_id);
-    return CraneErrCode::ERR_NON_EXISTENT;
+    if (!job_ptr->cgroup) {
+      CRANE_WARN("[Job #{}] Failed to suspend: job cgroup not found.", job_id);
+      return CraneErrCode::ERR_NON_EXISTENT;
+    }
+    job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
+
+    absl::MutexLock lock(job_ptr->step_map_mtx.get());
+    auto step_it = job_ptr->step_map.find(kPrimaryStepId);
+    if (step_it != job_ptr->step_map.end()) {
+      primary_stub = step_it->second->supervisor_stub;
+    }
   }
 
   // Cancel the supervisor termination timer for the primary step BEFORE
@@ -2017,23 +2035,17 @@ CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   // killing the process before the time constraint can be updated.
   // The resume flow will set a new timer with the updated time limit via
   // ChangeStepTimeConstraint.
-  {
-    absl::MutexLock lock(job_ptr->step_map_mtx.get());
-    auto step_it = job_ptr->step_map.find(kPrimaryStepId);
-    if (step_it != job_ptr->step_map.end() &&
-        step_it->second->supervisor_stub) {
-      auto err = step_it->second->supervisor_stub->ChangeStepTimeConstraint(
-          kJobMaxTimeStampSec, std::nullopt);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_WARN(
-            "[Step #{}.{}] Failed to cancel timer during suspend, "
-            "but continuing (step may have completed)",
-            job_id, kPrimaryStepId);
-      }
+  if (primary_stub) {
+    auto err = primary_stub->ChangeStepTimeConstraint(kJobMaxTimeStampSec,
+                                                      std::nullopt);
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_WARN(
+          "[Step #{}.{}] Failed to cancel timer during suspend, "
+          "but continuing (step may have completed)",
+          job_id, kPrimaryStepId);
     }
   }
 
-  auto job_cg_abs_path = job_ptr->cgroup->CgroupPath().string();
   bool root_ok = CgroupManager::FreezeCgroupByPath(job_cg_abs_path);
   bool children_ok = CgroupManager::FreezeChildCgroupsByPath(job_cg_abs_path);
   if (!root_ok || !children_ok) {
