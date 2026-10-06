@@ -3192,7 +3192,7 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
     elem.deadline_time = deadline_time;
     m_step_.GetMutableStep().mutable_deadline_time()->set_seconds(
         deadline_time.value());
-  } else {
+  } else if (m_step_.GetStep().has_deadline_time()) {
     elem.deadline_time =
         std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
   }
@@ -3772,14 +3772,16 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
     absl::Duration const& new_time_limit =
         absl::Seconds(elem.time_limit.value());
-    absl::Time deadline_time =
-        absl::FromUnixSeconds(elem.deadline_time.value());
     absl::Time time_limit_end_time = start_time + new_time_limit;
-    bool deadline_reached = now >= deadline_time;
+    bool deadline_reached =
+        elem.deadline_time.has_value() &&
+        now >= absl::FromUnixSeconds(elem.deadline_time.value());
     bool time_limit_reached = now >= time_limit_end_time;
 
     if (deadline_reached &&
-        (!time_limit_reached || deadline_time <= time_limit_end_time)) {
+        (!time_limit_reached ||
+         absl::FromUnixSeconds(elem.deadline_time.value()) <=
+             time_limit_end_time)) {
       StepTerminateQueueElem ev_step_terminate{.cause =
                                                    TaskFinalizeCause::DEADLINE};
       m_step_terminate_queue_.enqueue(ev_step_terminate);
@@ -3794,14 +3796,19 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
     } else {
       // If the step hasn't timed out, set up a new timer.
       int64_t new_sec;
-      int64_t deadline_sec =
-          elem.deadline_time.value() - absl::ToUnixSeconds(now);
       int64_t new_time_limit_sec =
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
 
-      if (deadline_sec <= new_time_limit_sec) {
-        AddTerminationTimer_(deadline_sec, true);
-        new_sec = deadline_sec;
+      if (elem.deadline_time.has_value()) {
+        int64_t deadline_sec =
+            elem.deadline_time.value() - absl::ToUnixSeconds(now);
+        if (deadline_sec <= new_time_limit_sec) {
+          AddTerminationTimer_(deadline_sec, true);
+          new_sec = deadline_sec;
+        } else {
+          AddTerminationTimer_(new_time_limit_sec, false);
+          new_sec = new_time_limit_sec;
+        }
       } else {
         AddTerminationTimer_(new_time_limit_sec, false);
         new_sec = new_time_limit_sec;
@@ -3939,13 +3946,16 @@ void TaskManager::EvGrpcExecuteStepCb_() {
 
     // Add a timer to limit the execution time of a task.
     int64_t time_limit_sec = m_step_.GetStep().time_limit().seconds();
-    int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
-                           absl::ToUnixSeconds(absl::Now());
-    int64_t sec = std::min(deadline_sec, time_limit_sec);
-
-    std::string log_timer =
-        deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
-    bool is_deadline = deadline_sec <= time_limit_sec;
+    int64_t sec = time_limit_sec;
+    std::string log_timer = "time_limit";
+    bool is_deadline = false;
+    if (m_step_.GetStep().has_deadline_time()) {
+      int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
+                             absl::ToUnixSeconds(absl::Now());
+      sec = std::min(deadline_sec, time_limit_sec);
+      log_timer = deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
+      is_deadline = deadline_sec <= time_limit_sec;
+    }
 
     AddTerminationTimer_(sec, is_deadline);
     CRANE_TRACE("Add a {} timer of {} seconds", log_timer, sec);
