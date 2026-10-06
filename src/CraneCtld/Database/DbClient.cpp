@@ -4345,9 +4345,8 @@ void MongodbClient::SubDocumentAppendItem_(sub_document& doc,
   }));
 }
 
-void MongodbClient::DocumentAppendItem_(
-    document& doc, const std::string& key,
-    const std::optional<int64_t>& value) {
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const std::optional<int64_t>& value) {
   if (value.has_value()) doc.append(kvp(key, value.value()));
 }
 
@@ -5322,7 +5321,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
-             std::vector<CranedId>, std::optional<int64_t>,          /*48-49*/
+             std::vector<CranedId>, std::optional<int64_t>,         /*48-49*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
              int64_t, int32_t>                                      /*55-56*/
       values{

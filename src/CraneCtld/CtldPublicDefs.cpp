@@ -393,10 +393,10 @@ void StepInCtld::RecoverFromDb(
 
   req_total_res_view =
       req_node_res_view * node_num + req_task_res_view * ntasks;
-  deadline_time = step_to_ctld.has_deadline_time()
-                      ? absl::FromUnixSeconds(
-                            step_to_ctld.deadline_time().seconds())
-                      : absl::FromUnixSeconds(kJobMaxTimeStampSec);
+  deadline_time =
+      step_to_ctld.has_deadline_time()
+          ? absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds())
+          : absl::FromUnixSeconds(kJobMaxTimeStampSec);
 
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
