@@ -718,11 +718,29 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps,
         }
       }
 
+      const std::vector<uint32_t> requested(step.gids().begin(),
+                                            step.gids().end());
+      // Check the submitted identity before NSS can discard extra groups.
+      if (step.has_pod_meta()) {
+        const auto& pod = step.pod_meta();
+        auto valid = util::os::ValidateContainerIdentity(
+            step.uid(), requested, pod.userns(), pod.run_as_user(),
+            pod.run_as_group());
+        if (!valid) {
+          CRANE_ERROR(
+              "[Step #{}.{}] Container identity validation failed during "
+              "allocation: {}",
+              job_id, step_id, valid.error());
+          fail_step(job_id, step_id);
+          continue;
+        }
+      }
+
       // Resolve groups synchronously while acknowledging AllocSteps. This
       // makes the scheduler's per-node allocation barrier include the NSS
       // authorization check, so a node cannot report allocation success and
       // only reject the step after ExecuteSteps has already been dispatched.
-      auto resolved = Common::ResolveStepGroups(step);
+      auto resolved = util::os::ResolveGroups(step.uid(), requested);
       if (!resolved) {
         CRANE_ERROR(
             "[Step #{}.{}] Group validation failed during allocation: {}",

@@ -28,22 +28,4 @@
 namespace Craned::Common {
 using EnvMap = std::unordered_map<std::string, std::string>;
 constexpr uint32_t kStepRequestCheckIntervalMs = 500;
-
-// Resolve the submitter's host groups before fork; this may call NSS. Pod
-// run-as IDs remain independent and never select the host account.
-std::expected<std::vector<gid_t>, std::string> ResolveStepGroups(
-    const crane::grpc::StepToD& step);
-std::expected<std::vector<gid_t>, std::string> ResolveStepGroups(
-    const crane::grpc::StepToD& step, const std::vector<uint32_t>& requested);
-
-// Configure namespaces before applying the resolved host and Pod identities.
-std::expected<void, std::string> SetContainerIdentity(
-    uid_t host_uid, std::span<const gid_t> host_gids,
-    const crane::grpc::PodJobAdditionalMeta& pod_meta,
-    runtime::v1::LinuxSandboxSecurityContext* ctx);
-std::expected<void, std::string> SetContainerIdentity(
-    uid_t host_uid, std::span<const gid_t> host_gids,
-    const crane::grpc::PodJobAdditionalMeta& pod_meta,
-    runtime::v1::LinuxContainerSecurityContext* ctx);
-
 }  // namespace Craned::Common

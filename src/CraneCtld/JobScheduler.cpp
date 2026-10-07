@@ -34,6 +34,7 @@
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
+#include "crane/OS.h"
 #include "crane/PluginClient.h"
 #include "crane/PrologEpilogExecutor.h"
 #include "crane/Tracing.h"
@@ -1170,7 +1171,7 @@ std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
     if (!job->pod_meta)
       return std::unexpected("container job requires Pod metadata");
     const auto& pod = *job->pod_meta;
-    auto valid = util::ValidateContainerIdentity(
+    auto valid = util::os::ValidateContainerIdentity(
         job->uid, job->gids, pod.userns, pod.run_as_user, pod.run_as_group);
     if (!valid) return valid;
   }
@@ -8965,7 +8966,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
     if (!job->IsContainer() || !job->pod_meta)
       return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
     const auto& pod = *job->pod_meta;
-    auto valid = util::ValidateContainerIdentity(
+    auto valid = util::os::ValidateContainerIdentity(
         step->uid, step->gids, pod.userns, pod.run_as_user, pod.run_as_group);
     if (!valid) {
       CRANE_ERROR("Invalid container identity for step #{}.{}: {}",

@@ -24,7 +24,6 @@
 #include <expected>
 #include <format>
 #include <fpm/fixed.hpp>
-#include <span>
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
@@ -811,13 +810,3 @@ VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
     return false;
   }
 }
-
-namespace util {
-
-// The first host GID is the effective GID. Container IDs do not select an NSS
-// account; mapping bounds are checked on the execution node after SubID lookup.
-std::expected<void, std::string> ValidateContainerIdentity(
-    uint32_t host_uid, std::span<const uint32_t> host_gids, bool userns,
-    uint32_t container_uid, uint32_t container_gid);
-
-}  // namespace util

@@ -103,7 +103,20 @@ void StepInstance::CleanUp(bool async) {
 }
 
 CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
-  auto resolved = Common::ResolveStepGroups(step_to_d, requested_gids);
+  // Validate the original request before filtering groups against node NSS.
+  if (step_to_d.has_pod_meta()) {
+    const auto& pod = step_to_d.pod_meta();
+    auto valid = util::os::ValidateContainerIdentity(
+        step_to_d.uid(), requested_gids, pod.userns(), pod.run_as_user(),
+        pod.run_as_group());
+    if (!valid) {
+      prepare_error_reason = valid.error();
+      CRANE_ERROR("[Step #{}.{}] Container identity validation failed: {}",
+                  job_id, step_id, prepare_error_reason);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+  }
+  auto resolved = util::os::ResolveGroups(step_to_d.uid(), requested_gids);
   if (!resolved) {
     prepare_error_reason = resolved.error();
     CRANE_ERROR("[Step #{}.{}] Group validation failed: {}", job_id, step_id,
