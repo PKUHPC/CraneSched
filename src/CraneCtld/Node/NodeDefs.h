@@ -101,12 +101,14 @@ struct ResvMeta {
 };
 
 struct PartitionGlobalMeta {
-  // total = avail + in-use
+  // Total configured capacity, including unavailable nodes.
   ResourceView res_total;
+  // Schedulable free resources on alive nodes.
   ResourceView res_avail;
+  // Resources allocated to jobs, including jobs on temporarily down nodes.
   ResourceView res_in_use;
 
-  // Include resources in unavailable nodes.
+  // Static capacity used to validate whether a request can ever fit.
   ResourceView res_total_inc_dead;
 
   std::string name;
