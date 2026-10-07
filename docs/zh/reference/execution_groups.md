@@ -49,7 +49,3 @@ namespace 映射始终从容器 ID 0 开始，不随指定的运行身份变化�
 原生 idmapped mount 和 bindfs 均把提交者 UID/EGID 对应到指定的容器 UID/GID（默认 `0:0`），
 挂载转换和新文件创建组不再假定 EGID 等于 NSS 主 GID。
 目前不支持 userns 下继承宿主机补充组的挂载权限。
-
-这是一次破坏性协议升级。Backend、FrontEnd、Craned、Cfored 和客户端必须
-在同一个版本窗口切换，禁止旧 scalar GID 客户端与新 Backend 混跑，也不要
-在部署过程中混用不同版本。

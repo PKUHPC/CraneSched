@@ -64,7 +64,3 @@ Native idmapped mounts and bindfs map the submitter's UID/EGID to the selected
 container UID/GID (default `0:0`). Mount translation and new-file group ownership
 no longer assume that the EGID equals the NSS primary GID. Preserving host
 supplementary-group mount permissions with userns is currently unsupported.
-
-This is a breaking protocol change. Backend, FrontEnd, Craned, Cfored, and
-client binaries must be upgraded as one version window. Do not run an old
-scalar-GID client with a new Backend or mix versions during deployment.
