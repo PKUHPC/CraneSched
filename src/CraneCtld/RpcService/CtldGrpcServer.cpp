@@ -1774,6 +1774,27 @@ crane::grpc::JobInfo ProjectJobForQuery(
   return result;
 }
 
+crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
+    std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map,
+    size_t num_limit, std::optional<uint32_t> authenticated_uid,
+    bool is_admin) {
+  crane::grpc::QueryJobsInfoReply response;
+  auto* jobs = response.mutable_job_info_list();
+  jobs->Reserve(job_info_map.size());
+  for (auto& [id, job] : job_info_map) *jobs->Add() = std::move(job);
+  std::sort(jobs->begin(), jobs->end(),
+            [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
+              return a.status() == b.status() ? a.priority() > b.priority()
+                                              : a.status() < b.status();
+            });
+  const bool has_more = jobs->size() > num_limit;
+  response.set_has_more(has_more);
+  if (has_more) jobs->DeleteSubrange(num_limit, jobs->size() - num_limit);
+  for (auto& job : *jobs)
+    job = ProjectJobForQuery(job, authenticated_uid, is_admin);
+  response.set_ok(true);
+  return response;
+}
 }  // namespace
 
 grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
@@ -1811,25 +1832,6 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
   g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
-  auto finish = [&] {
-    auto* jobs = response->mutable_job_info_list();
-    jobs->Reserve(job_info_map.size());
-    for (auto& [id, job] : job_info_map) *jobs->Add() = std::move(job);
-    std::sort(jobs->begin(), jobs->end(),
-              [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-                return a.status() == b.status() ? a.priority() > b.priority()
-                                                : a.status() < b.status();
-              });
-    const bool has_more = jobs->size() > num_limit;
-    response->set_has_more(has_more);
-    if (has_more) jobs->DeleteSubrange(num_limit, jobs->size() - num_limit);
-    // Filter both RAM/history paths after historical steps have been merged.
-    for (auto& job : *jobs)
-      job = ProjectJobForQuery(job, authenticated_uid, is_admin);
-    response->set_ok(true);
-    return grpc::Status::OK;
-  };
-
   if (job_info_map.size() >= probe_limit ||
       !request->option_include_completed_jobs()) {
     if (request->option_include_completed_jobs() &&
@@ -1837,15 +1839,18 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
       CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
       return grpc::Status::OK;
     }
-    return finish();
+  } else {
+    // Fetch a full probe window: a history record may also be present in RAM.
+    if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+      return grpc::Status::OK;
+    }
   }
 
-  // Fetch a full probe window: a history record may also be present in RAM.
-  if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
-    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
-    return grpc::Status::OK;
-  }
-  return finish();
+  // One response path, after historical steps have been merged.
+  *response = BuildJobQueryReply(std::move(job_info_map), num_limit,
+                                 authenticated_uid, is_admin);
+  return grpc::Status::OK;
 }
 
 grpc::Status CraneCtldServiceImpl::QueryQueueStateSummary(

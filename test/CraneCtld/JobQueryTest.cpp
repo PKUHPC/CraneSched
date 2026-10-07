@@ -7,7 +7,7 @@
 #include <set>
 #include <string>
 
-// Compile the production file so its private projection helpers stay private.
+// Test the production helpers without exporting them or replacing dependencies.
 #include "RpcService/CtldGrpcServer.cpp"
 #include "google/protobuf/util/message_differencer.h"
 #include "protos/Crane.pb.h"
@@ -16,6 +16,7 @@ namespace {
 using crane::grpc::JobInfo;
 using crane::grpc::QUERY_VISIBILITY_DETAILS;
 using crane::grpc::QUERY_VISIBILITY_PUBLIC;
+using Ctld::BuildJobQueryReply;
 using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
 
@@ -24,10 +25,11 @@ void AddUnknown(google::protobuf::Message* message) {
       12345, kPrivate);
 }
 
-JobInfo MakeJob() {
+JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
+                uint32_t priority = 9) {
   JobInfo job;
-  job.set_job_id(71);
-  job.set_uid(1001);
+  job.set_job_id(id);
+  job.set_uid(owner);
   job.set_gid(100);
   job.set_name("public-job");
   job.set_type(crane::grpc::Container);
@@ -40,7 +42,7 @@ JobInfo MakeJob() {
   job.set_node_num(2);
   job.set_ntasks(8);
   job.set_status(crane::grpc::Running);
-  job.set_priority(9);
+  job.set_priority(priority);
   job.set_held(true);
   job.set_exit_code(3);
   job.set_requeue_count(2);
@@ -126,7 +128,7 @@ JobInfo MakeJob() {
   return job;
 }
 
-TEST(JobQueryPrivacy, PublicViewPreservesEveryKnownSummaryField) {
+TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   const auto source = MakeJob();
   auto expected = source;
   expected.clear_cmd_line();
@@ -149,7 +151,7 @@ TEST(JobQueryPrivacy, PublicViewPreservesEveryKnownSummaryField) {
   EXPECT_EQ(result.SerializeAsString().find(kPrivate), std::string::npos);
 }
 
-TEST(JobQueryPrivacy, OwnerAndAdministratorRetainDetailsExceptPassword) {
+TEST(JobQuery, OwnerAndAdministratorRetainDetailsExceptPassword) {
   const auto source = MakeJob();
   auto expected = source;
   expected.set_query_visibility(QUERY_VISIBILITY_DETAILS);
@@ -169,7 +171,7 @@ TEST(JobQueryPrivacy, OwnerAndAdministratorRetainDetailsExceptPassword) {
             kPrivate);
 }
 
-TEST(JobQueryPrivacy, UnauthenticatedClaimsCannotReadDetailsEvenForRoot) {
+TEST(JobQuery, UnauthenticatedClaimsCannotReadDetailsEvenForRoot) {
   auto source = MakeJob();
   source.set_uid(0);
   for (const bool claimed_admin : {false, true}) {
@@ -179,7 +181,7 @@ TEST(JobQueryPrivacy, UnauthenticatedClaimsCannotReadDetailsEvenForRoot) {
   }
 }
 
-TEST(JobQueryPrivacy, StepsRequireParentAndStepOwnership) {
+TEST(JobQuery, StepsRequireParentAndStepOwnership) {
   auto source = MakeJob();
   source.mutable_step_info_list(0)->set_uid(1002);
   auto result = ProjectJobForQuery(source, 1001, false);
@@ -198,7 +200,7 @@ TEST(JobQueryPrivacy, StepsRequireParentAndStepOwnership) {
       result.step_info_list(0).container_meta().image().password().empty());
 }
 
-TEST(JobQueryPrivacy, UnknownNestedFieldsCannotLeakOrAlterSource) {
+TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   auto source = MakeJob();
   AddUnknown(&source);
   AddUnknown(source.mutable_start_time());
@@ -221,7 +223,7 @@ TEST(JobQueryPrivacy, UnknownNestedFieldsCannotLeakOrAlterSource) {
       google::protobuf::util::MessageDifferencer::Equals(before, source));
 }
 
-TEST(JobQueryPrivacy, PreservesOneofAndOptionalPresence) {
+TEST(JobQuery, PreservesOneofAndOptionalPresence) {
   auto source = MakeJob();
   source.set_pending_reason("Resources");
   source.mutable_dependency_status()->set_infinite_future(false);
@@ -239,8 +241,7 @@ TEST(JobQueryPrivacy, PreservesOneofAndOptionalPresence) {
   EXPECT_TRUE(result.dependency_status().has_infinite_past());
 }
 
-TEST(JobQueryPrivacy,
-     ContainerKindSurvivesRedactionWithoutIncludingHostScripts) {
+TEST(JobQuery, ContainerKindSurvivesRedactionWithoutIncludingHostScripts) {
   for (const auto kind : {crane::grpc::PRIMARY, crane::grpc::COMMON}) {
     for (const bool has_container : {false, true}) {
       auto source = MakeJob();
@@ -257,7 +258,7 @@ TEST(JobQueryPrivacy,
   }
 }
 
-TEST(JobQueryPrivacy, CallerUidPresenceIsDifferentFromRoot) {
+TEST(JobQuery, CallerUidPresenceIsDifferentFromRoot) {
   crane::grpc::QueryJobsInfoRequest request;
   EXPECT_FALSE(request.has_uid());
   request.set_uid(0);
@@ -265,6 +266,99 @@ TEST(JobQueryPrivacy, CallerUidPresenceIsDifferentFromRoot) {
   ASSERT_TRUE(parsed.ParseFromString(request.SerializeAsString()));
   EXPECT_TRUE(parsed.has_uid());
   EXPECT_EQ(parsed.uid(), 0);
+}
+
+TEST(JobQuery, ReplySortsLimitsAndRedactsEveryReturnedJob) {
+  std::unordered_map<job_id_t, JobInfo> jobs{{1, MakeJob(1, 1002, 5)},
+                                             {2, MakeJob(2, 1002, 9)},
+                                             {3, MakeJob(3, 1002, 100)}};
+  jobs.at(1).set_status(crane::grpc::Pending);
+  jobs.at(2).set_status(crane::grpc::Pending);
+  const auto reply = BuildJobQueryReply(jobs, 2, 1001, false);
+  ASSERT_TRUE(reply.ok());
+  ASSERT_EQ(reply.job_info_list_size(), 2);
+  EXPECT_TRUE(reply.has_more());
+  EXPECT_EQ(reply.job_info_list(0).job_id(), 2);
+  EXPECT_EQ(reply.job_info_list(1).job_id(), 1);
+  EXPECT_EQ(reply.SerializeAsString().find(kPrivate), std::string::npos);
+  for (const auto& job : reply.job_info_list()) {
+    EXPECT_EQ(job.query_visibility(), QUERY_VISIBILITY_PUBLIC);
+    ASSERT_EQ(job.step_info_list_size(), 1);
+    EXPECT_EQ(job.step_info_list(0).query_visibility(),
+              QUERY_VISIBILITY_PUBLIC);
+  }
+}
+
+TEST(JobQuery, SequentialCallerViewsPreserveSourceRecords) {
+  const std::unordered_map<job_id_t, JobInfo> jobs{{1, MakeJob(1, 1001, 2)},
+                                                   {2, MakeJob(2, 1002, 1)}};
+  const auto first = jobs.at(1).SerializeAsString();
+  const auto second = jobs.at(2).SerializeAsString();
+  for (uint32_t uid : {1001U, 1002U}) {
+    const auto reply = BuildJobQueryReply(jobs, 2, uid, false);
+    ASSERT_TRUE(reply.ok());
+    ASSERT_EQ(reply.job_info_list_size(), 2);
+    EXPECT_FALSE(reply.has_more());
+    for (const auto& job : reply.job_info_list()) {
+      const bool owner = job.uid() == uid;
+      EXPECT_EQ(job.cmd_line(), owner ? kPrivate : "");
+      EXPECT_EQ(job.query_visibility(),
+                owner ? QUERY_VISIBILITY_DETAILS : QUERY_VISIBILITY_PUBLIC);
+      ASSERT_EQ(job.step_info_list_size(), 1);
+      const auto& step = job.step_info_list(0);
+      EXPECT_EQ(step.cmd_line(), owner ? kPrivate : "");
+      EXPECT_TRUE(step.container_meta().image().password().empty());
+    }
+  }
+  EXPECT_EQ(jobs.at(1).SerializeAsString(), first);
+  EXPECT_EQ(jobs.at(2).SerializeAsString(), second);
+}
+
+TEST(JobQuery, ReplyRedactsCompletedJobsAndMergedSteps) {
+  auto running = MakeJob(1);
+  auto* finished_step = running.add_step_info_list();
+  *finished_step = running.step_info_list(0);
+  finished_step->set_step_id(7);
+  finished_step->set_status(crane::grpc::Completed);
+  auto completed = MakeJob(2);
+  completed.set_status(crane::grpc::Completed);
+  const auto reply =
+      BuildJobQueryReply({{1, running}, {2, completed}}, 2, 1002, false);
+  ASSERT_TRUE(reply.ok());
+  ASSERT_EQ(reply.job_info_list_size(), 2);
+  ASSERT_EQ(reply.job_info_list(0).step_info_list_size(), 2);
+  EXPECT_EQ(reply.job_info_list(0).step_info_list(1).step_id(), 7);
+  EXPECT_EQ(reply.job_info_list(1).status(), crane::grpc::Completed);
+  EXPECT_EQ(reply.SerializeAsString().find(kPrivate), std::string::npos);
+}
+
+TEST(JobQuery, EmptyReplyIsSuccessfulWithoutExtraMetadata) {
+  const auto reply =
+      BuildJobQueryReply({}, kDefaultQueryJobNumLimit, std::nullopt, false);
+  EXPECT_TRUE(reply.ok());
+  EXPECT_FALSE(reply.has_more());
+  EXPECT_TRUE(reply.job_info_list().empty());
+  EXPECT_EQ(crane::grpc::QueryJobsInfoReply::descriptor()->field_count(), 3);
+}
+
+TEST(JobQuery, RpcRejectsNotReadyAndMissingUidWithoutReturningStaleData) {
+  Ctld::CraneCtldServiceImpl service(nullptr);
+  grpc::ServerContext context;
+  crane::grpc::QueryJobsInfoRequest request;
+  crane::grpc::QueryJobsInfoReply reply;
+  const bool was_ready = g_runtime_status.srv_ready.load();
+  // Both failures precede authentication and any scheduler/database access.
+  for (bool ready : {false, true}) {
+    g_runtime_status.srv_ready = ready;
+    reply.set_ok(true);
+    *reply.add_job_info_list() = MakeJob();
+    const auto status = service.QueryJobsInfo(&context, &request, &reply);
+    EXPECT_EQ(status.error_code(), ready ? grpc::StatusCode::INVALID_ARGUMENT
+                                         : grpc::StatusCode::UNAVAILABLE);
+    EXPECT_FALSE(reply.ok());
+    EXPECT_TRUE(reply.job_info_list().empty());
+  }
+  g_runtime_status.srv_ready = was_ready;
 }
 
 void ExpectFields(const google::protobuf::Descriptor* descriptor,
@@ -278,7 +372,7 @@ void ExpectFields(const google::protobuf::Descriptor* descriptor,
       << ": classify new fields before exposing them";
 }
 
-TEST(JobQueryPrivacy, QuerySchemaRequiresExplicitFieldClassification) {
+TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
   ExpectFields(JobInfo::descriptor(), {"type",
                                        "job_id",
                                        "name",
