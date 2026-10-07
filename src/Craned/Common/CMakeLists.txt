@@ -7,8 +7,6 @@ add_library(craned_common STATIC
     CgroupManager.cpp
     CgroupV2Fs.h
     CgroupV2Fs.cpp
-    CommonPublicDefs.h
-    CommonPublicDefs.cpp
 )
 
 # Set the precompiled header for the common library
