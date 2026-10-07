@@ -7,7 +7,8 @@
 #include <set>
 #include <string>
 
-#include "RpcService/JobQueryPrivacy.h"
+// Compile the production file so its private projection helpers stay private.
+#include "RpcService/CtldGrpcServer.cpp"
 #include "google/protobuf/util/message_differencer.h"
 #include "protos/Crane.pb.h"
 

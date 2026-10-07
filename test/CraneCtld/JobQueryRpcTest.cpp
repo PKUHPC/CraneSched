@@ -4,12 +4,21 @@
 
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
+#include <openssl/ec.h>
+#include <openssl/pem.h>
+#include <unistd.h>
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <string>
 
-#include "RpcService/JobQuery.h"
+#include "Account/AccountManager.h"
+#include "JobScheduler.h"
+#include "RpcService/CtldGrpcServer.h"
+#include "Security/VaultClient.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace {
@@ -40,64 +49,87 @@ JobInfo MakeJob(uint32_t id, uint32_t owner, uint32_t priority = 1) {
   return job;
 }
 
-// Transport adapter around the very same handler used by CraneCtldServiceImpl.
-// Only identity and read dependencies are fakes; no daemon or database starts.
-class QueryTestService final : public crane::grpc::CraneCtld::Service {
- public:
-  Ctld::JobQueryDependencies deps{};
+// The loopback transport supplies an ephemeral certificate to the real RPC
+// implementation. The TLS handshake itself is outside this isolated test.
+std::string MakeCertificate(uint32_t uid) {
+  std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> key_context(
+      EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free);
+  EVP_PKEY* generated_key = nullptr;
+  if (!key_context || EVP_PKEY_keygen_init(key_context.get()) <= 0 ||
+      EVP_PKEY_CTX_set_ec_paramgen_curve_nid(key_context.get(),
+                                             NID_X9_62_prime256v1) <= 0 ||
+      EVP_PKEY_keygen(key_context.get(), &generated_key) <= 0)
+    return {};
+  std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(generated_key,
+                                                          EVP_PKEY_free);
+  std::unique_ptr<X509, decltype(&X509_free)> cert(X509_new(), X509_free);
+  std::unique_ptr<BIO, decltype(&BIO_free)> pem(BIO_new(BIO_s_mem()), BIO_free);
+  if (!key || !cert || !pem) return {};
+  const auto cn = std::to_string(uid) + ".job-query-test";
+  if (X509_set_version(cert.get(), 2) != 1 ||
+      ASN1_INTEGER_set(X509_get_serialNumber(cert.get()), uid + 1) != 1 ||
+      !X509_gmtime_adj(X509_getm_notBefore(cert.get()), -60) ||
+      !X509_gmtime_adj(X509_getm_notAfter(cert.get()), 3600) ||
+      X509_set_pubkey(cert.get(), key.get()) != 1 ||
+      X509_NAME_add_entry_by_txt(
+          X509_get_subject_name(cert.get()), "CN", MBSTRING_ASC,
+          reinterpret_cast<const unsigned char*>(cn.c_str()), -1, -1, 0) != 1 ||
+      X509_set_issuer_name(cert.get(), X509_get_subject_name(cert.get())) !=
+          1 ||
+      X509_sign(cert.get(), key.get(), EVP_sha256()) <= 0 ||
+      PEM_write_bio_X509(pem.get(), cert.get()) != 1)
+    return {};
+  char* data = nullptr;
+  const auto size = BIO_get_mem_data(pem.get(), &data);
+  return {data, static_cast<size_t>(size)};
+}
 
-  grpc::Status QueryJobsInfo(grpc::ServerContext*,
-                             const QueryJobsInfoRequest* request,
-                             QueryJobsInfoReply* response) override {
-    return Ctld::HandleJobQuery(*request, response, deps);
-  }
+using JobQueryResult = std::unordered_map<job_id_t, JobInfo>;
+
+struct QueryReadState {
+  QueryJobsInfoRequest seen_request_;
+  JobQueryResult live_, history_;
+  bool grant_admin_ = false, history_ok_ = true, role_ok_ = true;
+  int auth_calls_ = 0, role_calls_ = 0, ram_calls_ = 0;
+  int history_calls_ = 0, step_calls_ = 0;
+  uint32_t authenticated_uid_ = 0;
+  size_t ram_limit_ = 0, history_limit_ = 0;
 };
 
-class JobQueryRpcTest : public testing::Test {
+QueryReadState* active_state = nullptr;
+
+class QueryTestService final : public crane::grpc::CraneCtld::Service {
+ public:
+  std::string certificate;
+
+  grpc::Status QueryJobsInfo(grpc::ServerContext* context,
+                             const QueryJobsInfoRequest* request,
+                             QueryJobsInfoReply* response) override {
+    if (!certificate.empty())
+      std::const_pointer_cast<grpc::AuthContext>(context->auth_context())
+          ->AddProperty("x509_pem_cert", certificate);
+    return implementation_.QueryJobsInfo(context, request, response);
+  }
+
+ private:
+  Ctld::CraneCtldServiceImpl implementation_{nullptr};
+};
+
+class JobQueryRpcTest : public testing::Test, protected QueryReadState {
  protected:
   void SetUp() override {
-    auto& deps = service_.deps;
-    deps.ready = true;
-    deps.tls_enabled = true;
-    deps.default_limit = 2;
-    deps.authenticate = [this](uint32_t uid) {
-      ++auth_calls_;
-      authenticated_uid_ = uid;
-      return auth_status_;
-    };
-    deps.resolve_admin = [this](uint32_t uid, bool* admin) {
-      ++role_calls_;
-      EXPECT_EQ(uid, authenticated_uid_);
-      *admin = grant_admin_;
-      return role_status_;
-    };
-    deps.resolve_node_alias = [](const std::string& node) {
-      return node == "node-alias" ? "node1" : node;
-    };
-    deps.query_ram = [this](const auto* request, auto* jobs, size_t limit) {
-      ++ram_calls_;
-      seen_request_ = *request;
-      ram_limit_ = limit;
-      *jobs = live_;
-    };
-    deps.query_history = [this](const auto* request, auto* jobs, size_t limit) {
-      ++history_calls_;
-      seen_request_ = *request;
-      history_limit_ = limit;
-      for (const auto& [id, job] : history_) jobs->try_emplace(id, job);
-      return history_ok_;
-    };
-    deps.query_history_steps = [this](const auto* request, auto* jobs) {
-      ++step_calls_;
-      seen_request_ = *request;
-      for (const auto& [id, job] : history_) {
-        auto it = jobs->find(id);
-        if (it == jobs->end()) continue;
-        for (const auto& step : job.step_info_list())
-          *it->second.add_step_info_list() = step;
-      }
-      return history_ok_;
-    };
+    active_state = this;
+    g_runtime_status.srv_ready = true;
+    g_config.ListenConf.TlsConfig.Enabled = true;
+    g_config.CranedIdByAlias["node-alias"] = "node1";
+    g_config.CtldConf.SchedulerRpcThreadPoolSize = 1;
+    // Construct clients, but never call Init()/Connect() or start a database.
+    g_account_manager = std::make_unique<Ctld::AccountManager>();
+    g_job_scheduler = std::make_unique<Ctld::JobScheduler>();
+    g_vault_client = std::make_unique<Ctld::Security::VaultClient>();
+
+    service_.certificate = MakeCertificate(1001);
+    ASSERT_FALSE(service_.certificate.empty());
     grpc::ServerBuilder builder;
     int port = 0;
     builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(),
@@ -106,22 +138,33 @@ class JobQueryRpcTest : public testing::Test {
     server_ = builder.BuildAndStart();
     ASSERT_NE(server_, nullptr);
     ASSERT_GT(port, 0);
-    stub_ = crane::grpc::CraneCtld::NewStub(
-        grpc::CreateChannel("127.0.0.1:" + std::to_string(port),
-                            grpc::InsecureChannelCredentials()));
+    address_ = "127.0.0.1:" + std::to_string(port);
     request_.set_uid(1001);
+    request_.set_num_limit(2);
   }
 
   void TearDown() override {
     if (server_) server_->Shutdown();
+    g_job_scheduler.reset();
+    g_account_manager.reset();
+    g_vault_client.reset();
+    g_runtime_status.srv_ready = false;
+    g_config.CranedIdByAlias.clear();
+    active_state = nullptr;
   }
 
   grpc::Status Query() {
     reply_.Clear();
+    // Authentication context belongs to the connection. A caller change must
+    // get its own connection so a previous certificate cannot be reused.
+    grpc::ChannelArguments arguments;
+    arguments.SetInt(GRPC_ARG_USE_LOCAL_SUBCHANNEL_POOL, 1);
+    auto stub = crane::grpc::CraneCtld::NewStub(grpc::CreateCustomChannel(
+        address_, grpc::InsecureChannelCredentials(), arguments));
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(5));
-    return stub_->QueryJobsInfo(&context, request_, &reply_);
+    return stub->QueryJobsInfo(&context, request_, &reply_);
   }
 
   void ExpectNoDataRead() {
@@ -145,20 +188,27 @@ class JobQueryRpcTest : public testing::Test {
 
   QueryTestService service_;
   std::unique_ptr<grpc::Server> server_;
-  std::unique_ptr<crane::grpc::CraneCtld::Stub> stub_;
-  QueryJobsInfoRequest request_, seen_request_;
+  std::string address_;
+  QueryJobsInfoRequest request_;
   QueryJobsInfoReply reply_;
-  Ctld::JobQueryResult live_, history_;
-  grpc::Status auth_status_, role_status_;
-  bool grant_admin_ = false, history_ok_ = true;
-  int auth_calls_ = 0, role_calls_ = 0, ram_calls_ = 0;
-  int history_calls_ = 0, step_calls_ = 0;
-  uint32_t authenticated_uid_ = 0;
-  size_t ram_limit_ = 0, history_limit_ = 0;
 };
 
+TEST_F(JobQueryRpcTest, ZeroLimitUsesProductionDefault) {
+  request_.set_num_limit(0);
+  ASSERT_TRUE(Query().ok());
+  EXPECT_TRUE(reply_.ok());
+  EXPECT_EQ(ram_limit_, kDefaultQueryJobNumLimit + 1);
+}
+
+TEST_F(JobQueryRpcTest, MissingCertificateStopsBeforeReads) {
+  service_.certificate.clear();
+  EXPECT_EQ(Query().error_code(), grpc::StatusCode::UNAUTHENTICATED);
+  EXPECT_EQ(role_calls_, 0);
+  ExpectNoDataRead();
+}
+
 TEST_F(JobQueryRpcTest, ReadinessFailurePrecedesIdentityAndDataReads) {
-  service_.deps.ready = false;
+  g_runtime_status.srv_ready = false;
   EXPECT_EQ(Query().error_code(), grpc::StatusCode::UNAVAILABLE);
   EXPECT_EQ(auth_calls_, 0);
   ExpectNoDataRead();
@@ -173,6 +223,8 @@ TEST_F(JobQueryRpcTest, MissingUidIsRejectedBeforeIdentityAndDataReads) {
 
 TEST_F(JobQueryRpcTest, ExplicitAuthenticatedRootUidIsNotMissing) {
   request_.set_uid(0);
+  service_.certificate = MakeCertificate(0);
+  ASSERT_FALSE(service_.certificate.empty());
   grant_admin_ = true;
   live_.emplace(1, MakeJob(1, 1002));
   ASSERT_TRUE(Query().ok());
@@ -187,16 +239,17 @@ TEST_F(JobQueryRpcTest, ExplicitAuthenticatedRootUidIsNotMissing) {
 }
 
 TEST_F(JobQueryRpcTest, InvalidCertificateStopsBeforeRoleLookupAndDataReads) {
-  auth_status_ = {grpc::StatusCode::UNAUTHENTICATED,
-                  "certificate UID mismatch"};
+  service_.certificate = MakeCertificate(1002);
+  ASSERT_FALSE(service_.certificate.empty());
   live_.emplace(1, MakeJob(1, 1001));
   EXPECT_EQ(Query().error_code(), grpc::StatusCode::UNAUTHENTICATED);
+  EXPECT_EQ(auth_calls_, 1);
   EXPECT_EQ(role_calls_, 0);
   ExpectNoDataRead();
 }
 
 TEST_F(JobQueryRpcTest, FailedRoleLookupDoesNotGrantDetailsOrReadData) {
-  role_status_ = {grpc::StatusCode::PERMISSION_DENIED, "unknown user"};
+  role_ok_ = false;
   grant_admin_ = true;
   EXPECT_EQ(Query().error_code(), grpc::StatusCode::PERMISSION_DENIED);
   EXPECT_EQ(auth_calls_, 1);
@@ -204,7 +257,7 @@ TEST_F(JobQueryRpcTest, FailedRoleLookupDoesNotGrantDetailsOrReadData) {
 }
 
 TEST_F(JobQueryRpcTest, NonTlsOwnerAndRootClaimsRemainPublic) {
-  service_.deps.tls_enabled = false;
+  g_config.ListenConf.TlsConfig.Enabled = false;
   grant_admin_ = true;
   live_.emplace(1, MakeJob(1, 1001));
   for (auto uid : {1001u, 0u}) {
@@ -228,6 +281,8 @@ TEST_F(JobQueryRpcTest, MixedOwnersAndSequentialQueriesDoNotMutateSources) {
   EXPECT_EQ(reply_.job_info_list(0).cmd_line(), kPrivate);
   ExpectPublic(reply_.job_info_list(1));
   request_.set_uid(1002);
+  service_.certificate = MakeCertificate(1002);
+  ASSERT_FALSE(service_.certificate.empty());
   ASSERT_TRUE(Query().ok());
   ASSERT_EQ(reply_.job_info_list_size(), 2);
   ExpectPublic(reply_.job_info_list(0));
@@ -346,3 +401,120 @@ TEST_F(JobQueryRpcTest,
   EXPECT_EQ(history_limit_, 8);
 }
 }  // namespace
+
+// Link-time substitutes for read dependencies only; no production test hooks.
+void QueryRam(Ctld::JobScheduler*, const QueryJobsInfoRequest* request,
+              JobQueryResult* jobs, size_t limit) asm(JOB_QUERY_WRAP_RAM);
+void QueryRam(Ctld::JobScheduler*, const QueryJobsInfoRequest* request,
+              JobQueryResult* jobs, size_t limit) {
+  auto& state = *active_state;
+  ++state.ram_calls_;
+  state.seen_request_ = *request;
+  state.ram_limit_ = limit;
+  *jobs = state.live_;
+}
+
+bool QueryHistory(Ctld::MongodbClient*, const QueryJobsInfoRequest* request,
+                  JobQueryResult* jobs,
+                  size_t limit) asm(JOB_QUERY_WRAP_HISTORY);
+bool QueryHistory(Ctld::MongodbClient*, const QueryJobsInfoRequest* request,
+                  JobQueryResult* jobs, size_t limit) {
+  auto& state = *active_state;
+  ++state.history_calls_;
+  state.seen_request_ = *request;
+  state.history_limit_ = limit;
+  for (const auto& [id, job] : state.history_) jobs->try_emplace(id, job);
+  return state.history_ok_;
+}
+
+bool QueryHistorySteps(Ctld::MongodbClient*,
+                       const QueryJobsInfoRequest* request,
+                       JobQueryResult* jobs) asm(JOB_QUERY_WRAP_STEPS);
+bool QueryHistorySteps(Ctld::MongodbClient*,
+                       const QueryJobsInfoRequest* request,
+                       JobQueryResult* jobs) {
+  auto& state = *active_state;
+  ++state.step_calls_;
+  state.seen_request_ = *request;
+  for (const auto& [id, job] : state.history_) {
+    auto it = jobs->find(id);
+    if (it == jobs->end()) continue;
+    for (const auto& step : job.step_info_list())
+      *it->second.add_step_info_list() = step;
+  }
+  return state.history_ok_;
+}
+
+CraneExpected<std::string> ResolveAdmin(Ctld::AccountManager*,
+                                        uint32_t uid) asm(JOB_QUERY_WRAP_ADMIN);
+CraneExpected<std::string> ResolveAdmin(Ctld::AccountManager*, uint32_t uid) {
+  auto& state = *active_state;
+  ++state.role_calls_;
+  state.authenticated_uid_ = uid;
+  if (!state.role_ok_)
+    return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
+  if (state.grant_admin_) return std::string("admin");
+  return std::unexpected(CraneErrCode::ERR_USER_NO_PRIVILEGE);
+}
+
+bool AllowCertificate(Ctld::Security::VaultClient*,
+                      const std::string&) asm(JOB_QUERY_WRAP_CERTIFICATE);
+bool AllowCertificate(Ctld::Security::VaultClient*, const std::string&) {
+  ++active_state->auth_calls_;
+  return true;
+}
+
+void SelectAllQos(Ctld::MongodbClient*,
+                  std::list<Ctld::Qos>* result) asm(JOB_QUERY_WRAP_QOS);
+void SelectAllQos(Ctld::MongodbClient*, std::list<Ctld::Qos>* result) {
+  result->clear();
+}
+
+void SelectAllUser(Ctld::MongodbClient*,
+                   std::list<Ctld::User>* result) asm(JOB_QUERY_WRAP_USERS);
+void SelectAllUser(Ctld::MongodbClient*, std::list<Ctld::User>* result) {
+  result->clear();
+}
+
+void SelectAllWckey(Ctld::MongodbClient*,
+                    std::list<Ctld::Wckey>* result) asm(JOB_QUERY_WRAP_WCKEYS);
+void SelectAllWckey(Ctld::MongodbClient*, std::list<Ctld::Wckey>* result) {
+  result->clear();
+}
+
+void SelectAllAccount(
+    Ctld::MongodbClient*,
+    std::list<Ctld::Account>* result) asm(JOB_QUERY_WRAP_ACCOUNTS);
+void SelectAllAccount(Ctld::MongodbClient*, std::list<Ctld::Account>* result) {
+  result->clear();
+}
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  char log_path[] = "/tmp/crane-job-query-test-XXXXXX";
+  const int fd = mkstemp(log_path);
+  if (fd < 0) return EXIT_FAILURE;
+  if (close(fd) != 0) {
+    std::filesystem::remove(log_path);
+    return EXIT_FAILURE;
+  }
+
+  int result = EXIT_FAILURE;
+  try {
+    InitLogger(spdlog::level::off, log_path, false, 1024 * 1024, 1, 128, 1);
+    g_config.CtldConf.LogToConsole = false;
+    g_config.CraneCtldDebugLevel = "off";
+    // mongocxx permits one driver instance per process, including repeated
+    // test runs. Construct the client once; never connect to a database.
+    g_db_client = std::make_unique<Ctld::MongodbClient>();
+    result = RUN_ALL_TESTS();
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "Job-query test setup failed: %s\n", error.what());
+  }
+  g_db_client.reset();
+  g_runtime_status.db_logger.reset();
+  spdlog::shutdown();
+  std::error_code remove_error;
+  std::filesystem::remove(log_path, remove_error);
+  return remove_error ? EXIT_FAILURE : result;
+}
