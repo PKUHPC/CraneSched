@@ -33,6 +33,8 @@ add_executable(cranectld
         RpcService/CranedKeeper.cpp
         RpcService/CtldGrpcServer.h
         RpcService/CtldGrpcServer.cpp
+        RpcService/JobQuery.h
+        RpcService/JobQuery.cpp
         RpcService/JobQueryPrivacy.h
         RpcService/JobQueryPrivacy.cpp
 

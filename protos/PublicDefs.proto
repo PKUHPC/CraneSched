@@ -746,6 +746,8 @@ message StepInfo {
   ResourceView allocated_res_view = 40;
   google.protobuf.Timestamp deadline_time = 41;
   QueryVisibility query_visibility = 42;
+  // Query-only discriminator: container jobs can also contain host scripts.
+  bool is_container = 43;
 }
 
 // Physical CPU topology of a node or job topology constraint.

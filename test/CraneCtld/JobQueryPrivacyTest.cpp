@@ -135,6 +135,7 @@ TEST(JobQueryPrivacy, PublicViewPreservesEveryKnownSummaryField) {
   expected.clear_pod_meta();
   expected.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   for (auto& step : *expected.mutable_step_info_list()) {
+    step.set_is_container(step.has_container_meta());
     step.clear_cmd_line();
     step.clear_cwd();
     step.clear_extra_attr();
@@ -151,6 +152,7 @@ TEST(JobQueryPrivacy, OwnerAndAdministratorRetainDetailsExceptPassword) {
   const auto source = MakeJob();
   auto expected = source;
   expected.set_query_visibility(QUERY_VISIBILITY_DETAILS);
+  expected.mutable_step_info_list(0)->set_is_container(true);
   expected.mutable_step_info_list(0)->set_query_visibility(
       QUERY_VISIBILITY_DETAILS);
   expected.mutable_step_info_list(0)
@@ -234,6 +236,24 @@ TEST(JobQueryPrivacy, PreservesOneofAndOptionalPresence) {
   source.mutable_dependency_status()->set_infinite_past(true);
   result = ProjectJobForQuery(source, 1002, false);
   EXPECT_TRUE(result.dependency_status().has_infinite_past());
+}
+
+TEST(JobQueryPrivacy,
+     ContainerKindSurvivesRedactionWithoutIncludingHostScripts) {
+  for (const auto kind : {crane::grpc::PRIMARY, crane::grpc::COMMON}) {
+    for (const bool has_container : {false, true}) {
+      auto source = MakeJob();
+      auto* step = source.mutable_step_info_list(0);
+      step->set_step_type(kind);
+      if (!has_container) step->clear_container_meta();
+      for (const auto uid : {1001U, 1002U}) {
+        const auto result = ProjectJobForQuery(source, uid, false);
+        EXPECT_EQ(result.step_info_list(0).is_container(), has_container);
+        if (uid == 1002)
+          EXPECT_FALSE(result.step_info_list(0).has_container_meta());
+      }
+    }
+  }
 }
 
 TEST(JobQueryPrivacy, CallerUidPresenceIsDifferentFromRoot) {
@@ -331,7 +351,8 @@ TEST(JobQueryPrivacy, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "execution_node",
                                                      "allocated_res_view",
                                                      "deadline_time",
-                                                     "query_visibility"});
+                                                     "query_visibility",
+                                                     "is_container"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});
   ExpectFields(crane::grpc::GresMap::descriptor(), {"name_gres_map"});

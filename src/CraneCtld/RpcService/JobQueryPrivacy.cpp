@@ -35,6 +35,7 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   crane::grpc::StepInfo result;
   if (details) {
     result = source;
+    result.set_is_container(source.has_container_meta());
     if (result.has_container_meta() && result.container_meta().has_image())
       result.mutable_container_meta()->mutable_image()->clear_password();
     result.DiscardUnknownFields();
@@ -43,6 +44,7 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   }
 
   result.set_type(source.type());
+  result.set_is_container(source.has_container_meta());
   result.set_step_type(source.step_type());
   result.set_job_id(source.job_id());
   result.set_step_id(source.step_id());

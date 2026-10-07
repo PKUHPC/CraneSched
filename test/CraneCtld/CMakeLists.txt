@@ -14,6 +14,16 @@ target_include_directories(job_query_privacy_test PRIVATE
         ${PROJECT_SOURCE_DIR}/src/CraneCtld)
 gtest_discover_tests(job_query_privacy_test)
 
+add_executable(job_query_rpc_test
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/RpcService/JobQuery.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/RpcService/JobQueryPrivacy.cpp
+        JobQueryRpcTest.cpp)
+target_link_libraries(job_query_rpc_test PRIVATE
+        GTest::gtest GTest::gtest_main crane_proto_lib)
+target_include_directories(job_query_rpc_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld)
+gtest_discover_tests(job_query_rpc_test)
+
 add_executable(embedded_db_client_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
