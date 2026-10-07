@@ -2174,10 +2174,15 @@ CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
   const auto& gid_mapping =
       sec_ctx->mutable_namespace_options()->mutable_userns_options()->gids(0);
 
-  // For host UID 1000 / EGID 2000, SubID starts 101000 / 201000 and
-  // container identity 123:456, the offsets are 100123 / 199456.
-  // Host files owned by 1000:2000 appear as kernel IDs 101123:201456
-  // and then as 123:456 inside the unchanged user namespace mapping.
+  // For example, leo has UID 1000 on the host and SubUID range
+  // [101000, 102000). To run as UID 10 inside the container:
+  //   uid_offset = 101000 - 1000 + 10 = 100010
+  // The user namespace maps container UID 10 to kernel UID 101010.
+  // bindfs presents a source file owned by UID 1000 as UID 101010:
+  //   1000(source) + 100010(offset) = 101010(bindfs)
+  // That ownership is shown as UID 10 inside the container; the source
+  // file remains owned by UID 1000.
+  // GIDs use the same calculation with the submitter's effective GID.
   uid_t uid_offset = uid_mapping.host_id() - pwd.Uid() + run_as_user;
   gid_t gid_offset = gid_mapping.host_id() - egid + run_as_group;
 
