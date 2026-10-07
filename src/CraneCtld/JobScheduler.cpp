@@ -34,6 +34,7 @@
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
+#include "crane/ContainerIdentity.h"
 #include "crane/PluginClient.h"
 #include "crane/PrologEpilogExecutor.h"
 #include "crane/Tracing.h"
@@ -1165,6 +1166,15 @@ std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
   if (job->gids.empty()) return std::unexpected("GID list must not be empty");
   if (job->gids.size() > kMaxExecutionGroups)
     return std::unexpected("GID list exceeds maximum size");
+
+  if (job->IsContainer()) {
+    if (!job->pod_meta)
+      return std::unexpected("container job requires Pod metadata");
+    const auto& pod = *job->pod_meta;
+    auto valid = util::ValidateContainerIdentity(
+        job->uid, job->gids, pod.userns, pod.run_as_user, pod.run_as_group);
+    if (!valid) return valid;
+  }
 
 #ifndef HAVE_PMIX
   if (job->IsPmix()) {
@@ -3805,6 +3815,10 @@ CraneExpectedRich<std::future<CraneExpected<job_id_t>>>
 JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   CRANE_TRACE_SCOPE_FROM_REMOTE(validate_span, "submit/validate",
                                 job->SubmitTraceparent());
+
+  if (auto valid = PreJobSubmitCheck(job.get()); !valid)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
 
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
@@ -8594,10 +8608,9 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 }
 
 CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
-  if (job->gids.empty()) {
-    return std::unexpected(FormatRichErr(
-        CraneErrCode::ERR_INVALID_PARAM,
-        "GID list must contain the effective GID as its first element"));
+  if (auto valid = PreJobSubmitCheck(job); !valid) {
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
   }
 
   if (!CheckIfTimeLimitIsValid(job->time_limit))
@@ -8944,6 +8957,25 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
 }
 
 CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
+  // The parent Pod configuration first becomes available during submission
+  // here. Check the submitted groups before scheduling or node reconciliation.
+  if (step->type == crane::grpc::JobType::Container) {
+    const auto* job = step->job;
+    if (job->uid != step->uid)
+      return std::unexpected(CraneErrCode::ERR_PERMISSION_DENIED);
+    if (!job->IsContainer() || !job->pod_meta)
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    const auto& pod = *job->pod_meta;
+    auto valid = util::ValidateContainerIdentity(
+        step->uid, step->gids, pod.userns, pod.run_as_user, pod.run_as_group);
+    if (!valid) {
+      CRANE_ERROR("Invalid container identity for step #{}.{}: {}",
+                  step->job_id, step->StepId(), valid.error());
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    }
+    step->pod_meta = job->pod_meta;
+  }
+
   if (!step->StepToCtld().nodelist().empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().nodelist(), &nodes);
@@ -9142,14 +9174,6 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
 
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
-  }
-
-  if (step->type == crane::grpc::JobType::Container) {
-    // Check if step is send to a job not supporting container
-    if (job->type != crane::grpc::JobType::Container)
-      return std::unexpected{CraneErrCode::ERR_INVALID_PARAM};
-    // Copy pod_meta for step
-    step->pod_meta = job->pod_meta;
   }
 
   std::unordered_set<std::string> avail_nodes;

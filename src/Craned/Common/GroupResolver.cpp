@@ -11,6 +11,7 @@
 #include <ranges>
 #include <unordered_set>
 
+#include "crane/ContainerIdentity.h"
 #include "crane/PasswordEntry.h"
 
 namespace Craned {
@@ -68,11 +69,17 @@ std::expected<ResolvedGroups, std::string> GroupResolver::ResolveStep(
 
 std::expected<ResolvedGroups, std::string> GroupResolver::ResolveStep(
     const crane::grpc::StepToD& step, const std::vector<uint32_t>& requested) {
+  if (step.has_pod_meta()) {
+    const auto& pod = step.pod_meta();
+    auto valid =
+        util::ValidateContainerIdentity(step.uid(), requested, pod.userns(),
+                                        pod.run_as_user(), pod.run_as_group());
+    if (!valid) return std::unexpected(valid.error());
+  }
   return Resolve(ExecutionUid(step), requested);
 }
 
 uid_t GroupResolver::ExecutionUid(const crane::grpc::StepToD& step) noexcept {
-  if (step.has_pod_meta()) return step.pod_meta().run_as_user();
   return step.uid();
 }
 

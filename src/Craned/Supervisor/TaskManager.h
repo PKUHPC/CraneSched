@@ -409,18 +409,18 @@ class ContainerInstance : public ITaskInstance {
 
   // This is wrapper for SetupIdMappedMounts_ and SetupIdMappedBindFs_.
   // NOTE: Must be called only after userns, run_as_* fields are set in config.
-  CraneErrCode ApplyIdMappedMounts_(const PasswordEntry& pwd,
+  CraneErrCode ApplyIdMappedMounts_(const PasswordEntry& pwd, gid_t egid,
                                     cri::api::ContainerConfig* config,
                                     bool use_bindfs);
 
   // Setup id-mapped mounts in rootless containers.
   // NOTE: Called only after userns, run_as_* fields are set in config.
-  CraneErrCode SetupIdMappedMounts_(const PasswordEntry& pwd,
+  CraneErrCode SetupIdMappedMounts_(const PasswordEntry& pwd, gid_t egid,
                                     cri::api::ContainerConfig* config);
 
   // Setup id-mapped bindfs for a mount (workaround for no idmap fs).
   // NOTE: Called only after userns, run_as_* fields are set in config.
-  CraneErrCode SetupIdMappedBindFs_(const PasswordEntry& pwd,
+  CraneErrCode SetupIdMappedBindFs_(const PasswordEntry& pwd, gid_t egid,
                                     cri::api::ContainerConfig* config);
 
   void SetContainerLabels_(uid_t uid, job_id_t job_id, step_id_t step_id,

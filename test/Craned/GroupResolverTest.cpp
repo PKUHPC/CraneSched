@@ -54,14 +54,64 @@ TEST(GroupResolver, RejectsEmptyAndOversizedRequests) {
                    .has_value());
 }
 
-TEST(GroupResolver, ContainerStepUsesPodRunAsUser) {
+TEST(GroupResolver, ContainerStepUsesSubmittingUserGroups) {
+  PasswordEntry current(getuid());
+  ASSERT_TRUE(current.Valid());
+
+  crane::grpc::StepToD step;
+  step.set_uid(current.Uid());
+  step.add_gids(current.Gid());
+  step.mutable_pod_meta()->set_userns(true);
+  // Container IDs do not have to identify a host NSS account.
+  step.mutable_pod_meta()->set_run_as_user(42420);
+  step.mutable_pod_meta()->set_run_as_group(42421);
+
+  auto result = GroupResolver::ResolveStep(step);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->gids.front(), current.Gid());
+  EXPECT_EQ(GroupResolver::ExecutionUid(step), current.Uid());
+  EXPECT_TRUE(GroupResolver::ResolveStep(step, {current.Gid()}));
+}
+
+TEST(GroupResolver, PodUserCannotAuthorizeAnInvalidHostUser) {
   PasswordEntry current(getuid());
   ASSERT_TRUE(current.Valid());
 
   crane::grpc::StepToD step;
   step.set_uid(std::numeric_limits<uint32_t>::max());
   step.add_gids(current.Gid());
-  step.mutable_pod_meta()->set_run_as_user(current.Uid());
+  step.mutable_pod_meta()->set_userns(true);
+
+  EXPECT_FALSE(GroupResolver::ResolveStep(step));
+}
+
+TEST(GroupResolver, RejectsUsernsSupplementaryGroupsBeforeNssReconciliation) {
+  PasswordEntry current(getuid());
+  ASSERT_TRUE(current.Valid());
+  crane::grpc::StepToD step;
+  step.set_uid(current.Uid());
+  step.add_gids(current.Gid());
+  step.add_gids(current.Gid() == 0 ? 1 : 0);
+  step.mutable_pod_meta()->set_userns(true);
+  auto result = GroupResolver::ResolveStep(step);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("supplementary groups"), std::string::npos);
+}
+
+TEST(GroupResolver, ContainerUidNeverSelectsHostNssIdentity) {
+  crane::grpc::StepToD step;
+  step.set_uid(1000);
+  step.mutable_pod_meta()->set_run_as_user(42);
+  EXPECT_EQ(GroupResolver::ExecutionUid(step), 1000);
+}
+
+TEST(GroupResolver, NativeStepUsesSubmittingUserGroups) {
+  PasswordEntry current(getuid());
+  ASSERT_TRUE(current.Valid());
+
+  crane::grpc::StepToD step;
+  step.set_uid(current.Uid());
+  step.add_gids(current.Gid());
 
   auto result = GroupResolver::ResolveStep(step);
   ASSERT_TRUE(result.has_value()) << result.error();
