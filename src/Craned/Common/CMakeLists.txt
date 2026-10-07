@@ -9,6 +9,7 @@ add_library(craned_common STATIC
     CgroupV2Fs.cpp
     GroupResolver.h
     GroupResolver.cpp
+    ContainerIdentity.h
 )
 
 # Set the precompiled header for the common library

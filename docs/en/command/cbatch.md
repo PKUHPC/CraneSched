@@ -103,8 +103,8 @@ Container-related options are used to create Pod jobs that support container exe
 - **--pod**: Enable container mode, creating the job as a Pod job. Once enabled, use `ccon run` within the script to start containers
 - **--pod-name string**: Pod name (defaults to job name)
 - **--pod-port string**: Pod port mapping, format: `HOST:CONTAINER` or `PORT`. Can be used multiple times
-- **--pod-user string**: Run Pod as specified UID[:GID] (default: current user when `--pod-userns=false`)
-- **--pod-userns**: Enable Pod user namespace (default: `true`, maps container user to root)
+- **--pod-user string**: Pod UID[:GID]: mapped container IDs with userns (default `0:0`); otherwise submitter UID/EGID, preserving node-validated supplementary groups
+- **--pod-userns**: Enable Pod user namespace (default follows `Container.UserNsEnabledByDefault`); supports `--pod-user` within the namespace mapping; supplementary groups other than the EGID cause submission to fail
 - **--pod-host-network**: Use host network namespace (default: `false`)
 - **--pod-dns**: Set DNS servers for the Pod (IPv4 only). User-provided DNS servers are prepended (higher priority) before system defaults (default: `Container.Dns.Servers` in config file)
 
@@ -186,8 +186,8 @@ Flags:
       --pod-host-network         Use host network namespace for the pod
       --pod-name string          Name of pod (defaults to job name)
       --pod-port strings         Publish pod port(s) in HOST:CONTAINER or PORT form
-      --pod-user string          Run pod as UID[:GID] (default: current user when --pod-userns=false)
-      --pod-userns               Enable pod user namespace (default true)
+      --pod-user string          Run pod as UID[:GID]; mapped container IDs with userns (default 0:0), otherwise submitter UID/effective GID
+      --pod-userns               Enable pod user namespace; default follows Container.UserNsEnabledByDefault in config (default from config)
   -q, --qos string               QoS used for the job
       --repeat uint32            Submit the job multiple times (default 1)
   -r, --reservation string       Use reserved resources

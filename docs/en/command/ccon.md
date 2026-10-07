@@ -181,11 +181,11 @@ These options configure container runtime parameters:
 
 **-u, --user=&lt;uid[:gid]&gt;**
 
-:   Run container with specified UID. When `--userns=false`, only allows current user and accessible groups.
+:   Specify container UID[:GID]. With userns, IDs must be within the namespace mapping (default `0:0`); without userns, only the submitter's UID/EGID is allowed, preserving node-validated supplementary groups. An omitted GID keeps the mode's default.
 
 **--userns**
 
-:   Enable user namespace. Default: `true` (container user mapped to root).
+:   Enable user namespace; the default follows `Container.UserNsEnabledByDefault`. Supports `--user` within the namespace mapping, defaulting to `0:0`. Submissions with supplementary groups other than the EGID are rejected.
 
 **--network=&lt;mode&gt;**
 
@@ -584,8 +584,8 @@ cbatch train_job.sh
 | `--pod` | Enable container mode, create Pod job |
 | `--pod-name` | Pod name (defaults to job name) |
 | `--pod-port` | Pod port mapping, format: `HOST:CONTAINER` or `PORT` |
-| `--pod-user` | Run Pod as specified UID[:GID] |
-| `--pod-userns` | Enable Pod user namespace (default: true) |
+| `--pod-user` | Container UID[:GID]: mapped IDs with userns (default 0:0), otherwise submitter UID/EGID |
+| `--pod-userns` | Enable Pod user namespace (default follows `Container.UserNsEnabledByDefault`) |
 | `--pod-host-network` | Use host network namespace |
 
 ## See Also

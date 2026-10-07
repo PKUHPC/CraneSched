@@ -34,8 +34,8 @@ class GroupResolver {
   static std::expected<ResolvedGroups, std::string> Resolve(
       uid_t uid, const std::vector<uint32_t>& requested);
 
-  // Resolve the execution identity carried by a step. Container steps use
-  // the pod run-as UID; native steps use the submitting UID.
+  // Resolve the host identity carried by a step. Container steps use their
+  // submitting UID for group authorization; Pod run-as identity is separate.
   static std::expected<ResolvedGroups, std::string> ResolveStep(
       const crane::grpc::StepToD& step);
   static std::expected<ResolvedGroups, std::string> ResolveStep(

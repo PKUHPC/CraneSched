@@ -181,11 +181,11 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 **-u, --user=&lt;uid[:gid]&gt;**
 
-:   以指定 UID 运行容器。当 `--userns=false` 时，仅允许当前用户及其可访问的组。
+:   指定容器 UID[:GID]。启用 userns 时允许映射范围内的容器 ID（默认 `0:0`）；关闭时仅允许提交者的 UID/EGID，并保留节点校验后的补充组。只指定 UID 时，GID 使用对应模式的默认值。
 
 **--userns**
 
-:   启用用户命名空间。默认：`true`（容器内用户映射为 root）。
+:   启用用户命名空间，默认值由 `Container.UserNsEnabledByDefault` 决定。支持用 `--user` 指定映射范围内的身份，默认 `0:0`；提交身份存在不同于 EGID 的补充组时拒绝提交。
 
 **--network=&lt;mode&gt;**
 
