@@ -18,6 +18,8 @@
 
 #include "crane/PublicHeader.h"
 
+#include <algorithm>
+
 // ==================== GresCount ====================
 
 GresCount& GresCount::operator+=(const GresCount& rhs) {
@@ -1015,3 +1017,29 @@ ResourceV3::operator crane::grpc::ResourceV3() const {
 
   return val;
 }
+
+namespace util {
+
+std::expected<void, std::string> ValidateContainerIdentity(
+    uint32_t host_uid, std::span<const uint32_t> host_gids, bool userns,
+    uint32_t container_uid, uint32_t container_gid) {
+  if (host_gids.empty())
+    return std::unexpected("effective group list is empty");
+
+  if (userns) {
+    if (std::ranges::any_of(host_gids.subspan(1), [&](uint32_t gid) {
+          return gid != host_gids.front();
+        }))
+      return std::unexpected(
+          "userns containers do not support supplementary groups; submit "
+          "without extra groups or disable userns");
+    // Mapping bounds are checked on the execution node after resolving SubIDs.
+  } else if (container_uid != host_uid || container_gid != host_gids.front()) {
+    return std::unexpected(
+        "without userns, container UID/GID must match the submitter's "
+        "UID/effective GID");
+  }
+  return {};
+}
+
+}  // namespace util

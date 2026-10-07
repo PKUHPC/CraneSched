@@ -103,26 +103,22 @@ void StepInstance::CleanUp(bool async) {
 }
 
 CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
-  auto resolved = GroupResolver::ResolveStep(step_to_d, requested_gids);
+  auto resolved = Common::ResolveStepGroups(step_to_d, requested_gids);
   if (!resolved) {
     prepare_error_reason = resolved.error();
     CRANE_ERROR("[Step #{}.{}] Group validation failed: {}", job_id, step_id,
                 prepare_error_reason);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  if (resolved->diagnostics.HasMismatch()) {
-    const auto& d = resolved->diagnostics;
+  if (std::ranges::any_of(requested_gids, [&resolved](gid_t gid) {
+        return std::ranges::find(*resolved, gid) == resolved->end();
+      })) {
     CRANE_WARN(
-        "[Step #{}.{}] GID list differs from node NSS groups: uid={} "
-        "requested_primary_gid={} requested_supplementary_count={} "
-        "accepted_supplementary_count={} dropped_gid_count={} "
-        "backend_only_gid_count={}",
-        job_id, step_id, GroupResolver::ExecutionUid(step_to_d),
-        resolved->gids.front(), d.requested_supplementary_count,
-        d.accepted_supplementary_count, d.dropped_supplementary_count,
-        d.backend_only_count);
+        "[Step #{}.{}] Some requested supplementary groups were "
+        "removed because they are unavailable on this node.",
+        job_id, step_id);
   }
-  resolved_gids = resolved->gids;
+  resolved_gids = std::move(*resolved);
   primary_gid = resolved_gids.front();
   step_to_d.mutable_gids()->Assign(resolved_gids.begin(), resolved_gids.end());
 

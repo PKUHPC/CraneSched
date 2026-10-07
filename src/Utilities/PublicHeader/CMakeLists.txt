@@ -2,7 +2,6 @@ add_library(Utility_PublicHeader
         AccountingTime.cpp
         String.cpp Network.cpp OS.cpp PublicHeader.cpp Logger.cpp
         include/crane/AccountingTime.h
-        include/crane/ContainerIdentity.h
         include/crane/String.h
         include/crane/Network.h
         include/crane/OS.h

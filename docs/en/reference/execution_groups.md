@@ -16,9 +16,10 @@ job's batch script and child steps submitted through `ccon run`.
 The Backend performs the final authorization for the job/step UID on each
 execution node. It requires `gids[0]` to exist in that user's NSS group set.
 A missing primary GID fails the step before its payload starts. Supplementary
-groups are intersected with the node's groups; missing values are dropped with a
-bounded warning and execution continues. Groups present on the node but not
-requested by the FrontEnd are never added automatically.
+groups are intersected with the node's groups. If any requested supplementary
+group is removed, the step logs a warning and execution continues. The warning
+does not list group IDs or counts. Groups present on the node but not requested
+by the FrontEnd are never added automatically and do not cause a warning.
 
 For a multi-node step, every node must pass the primary-GID check before the
 allocation is acknowledged. A node failure therefore prevents a partial
