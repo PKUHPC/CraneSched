@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "crane/Logger.h"
 
@@ -87,6 +88,16 @@ class ChildExitWatcher {
 };
 
 namespace util::os {
+
+// Query and authorize the ordered execution groups for a host UID. Call before
+// fork: lookup may invoke NSS. The result keeps the effective GID first.
+std::expected<std::vector<gid_t>, std::string> ResolveGroups(
+    uid_t uid, const std::vector<uint32_t>& requested);
+
+// Require the effective GID to be authorized, intersect supplementary groups,
+// and preserve request order while removing duplicates.
+std::expected<std::vector<gid_t>, std::string> ReconcileGroups(
+    const std::vector<uint32_t>& requested, const std::vector<gid_t>& actual);
 
 bool GetNodeInfo(NodeSpecInfo* info);
 

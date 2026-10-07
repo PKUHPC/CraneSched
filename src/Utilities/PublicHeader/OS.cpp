@@ -26,12 +26,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <charconv>
 #include <cstring>
+#include <format>
 #include <future>
 #include <string>
+#include <unordered_set>
 #include <uvw.hpp>
 #include <vector>
 
@@ -50,6 +53,74 @@
 #endif
 
 namespace util::os {
+
+namespace {
+constexpr size_t kMaxExecutionGroups = 256;
+
+std::expected<std::vector<gid_t>, std::string> GetUserGroups_(uid_t uid) {
+  long buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (buffer_size <= 0) buffer_size = 16384;
+  std::vector<char> buffer(static_cast<size_t>(buffer_size));
+  struct passwd pwd{};
+  struct passwd* entry = nullptr;
+  int rc;
+  while ((rc = getpwuid_r(uid, &pwd, buffer.data(), buffer.size(), &entry)) ==
+         ERANGE) {
+    buffer.resize(buffer.size() * 2);
+  }
+  if (rc != 0 || entry == nullptr) return std::unexpected("user lookup failed");
+
+  int group_count = 16;
+  std::vector<gid_t> groups(static_cast<size_t>(group_count));
+  for (;;) {
+    errno = 0;
+    int requested_count = group_count;
+    rc = getgrouplist(pwd.pw_name, pwd.pw_gid, groups.data(), &requested_count);
+    if (rc >= 0) {
+      if (requested_count < 0 ||
+          static_cast<size_t>(requested_count) > kMaxExecutionGroups)
+        return std::unexpected("user group list exceeds maximum size");
+      groups.resize(static_cast<size_t>(requested_count));
+      return groups;
+    }
+    if (requested_count <= group_count ||
+        static_cast<size_t>(requested_count) > kMaxExecutionGroups)
+      return std::unexpected(
+          std::format("getgrouplist failed: {}", std::strerror(errno)));
+    group_count = requested_count;
+    groups.resize(static_cast<size_t>(group_count));
+  }
+}
+}  // namespace
+
+std::expected<std::vector<gid_t>, std::string> ReconcileGroups(
+    const std::vector<uint32_t>& requested,
+    const std::vector<gid_t>& actual_groups) {
+  if (requested.empty())
+    return std::unexpected("requested group list is empty");
+  if (requested.size() > kMaxExecutionGroups)
+    return std::unexpected("requested group list exceeds maximum size");
+
+  std::unordered_set<gid_t> actual(actual_groups.begin(), actual_groups.end());
+  if (!actual.contains(requested.front()))
+    return std::unexpected(std::format(
+        "PRIMARY_GID_NOT_AUTHORIZED: gid {} is absent from node groups",
+        requested.front()));
+
+  std::vector<gid_t> result;
+  result.reserve(requested.size());
+  for (gid_t gid : requested) {
+    if (actual.erase(gid) != 0) result.push_back(gid);
+  }
+  return result;
+}
+
+std::expected<std::vector<gid_t>, std::string> ResolveGroups(
+    uid_t uid, const std::vector<uint32_t>& requested) {
+  auto actual = GetUserGroups_(uid);
+  if (!actual) return std::unexpected(actual.error());
+  return ReconcileGroups(requested, *actual);
+}
 
 bool GetNodeInfo(NodeSpecInfo* info) {
   if (info == nullptr) return false;

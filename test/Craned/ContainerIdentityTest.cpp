@@ -5,9 +5,9 @@
 
 #include <array>
 
-#include "ContainerIdentity.h"
+#include "CommonPublicDefs.h"
 
-namespace Craned {
+namespace Craned::Common {
 
 template <typename SecurityContext>
 class ContainerIdentityTest : public ::testing::Test {};
@@ -180,4 +180,4 @@ TYPED_TEST(ContainerIdentityTest, PreservesHostNamespaceRestrictions) {
   EXPECT_FALSE(SetContainerIdentity(0, std::array<gid_t, 1>{0}, pod, &ctx));
 }
 
-}  // namespace Craned
+}  // namespace Craned::Common

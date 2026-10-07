@@ -6,7 +6,7 @@ add_subdirectory(Misc)
 # aggregate target so CI can build every registered unit-test executable
 # without duplicating the target list in an external script.
 set(CRANE_UNIT_TEST_TARGETS
-    group_resolver_test
+    execution_groups_test
     container_identity_test
     embedded_db_client_test
     ctld_public_defs_test

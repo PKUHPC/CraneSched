@@ -722,7 +722,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps,
       // makes the scheduler's per-node allocation barrier include the NSS
       // authorization check, so a node cannot report allocation success and
       // only reject the step after ExecuteSteps has already been dispatched.
-      auto resolved = GroupResolver::ResolveStep(step);
+      auto resolved = Common::ResolveStepGroups(step);
       if (!resolved) {
         CRANE_ERROR(
             "[Step #{}.{}] Group validation failed during allocation: {}",

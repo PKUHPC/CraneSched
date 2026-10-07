@@ -32,7 +32,6 @@
 
 #include "CforedClient.h"
 #include "CgroupManager.h"
-#include "ContainerIdentity.h"
 #include "CranedClient.h"
 #include "Pmix.h"
 #include "PmixCommon.h"
@@ -1541,8 +1540,8 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
     }
   }
 
-  auto identity =
-      SetContainerIdentity(uid, m_parent_step_inst_->gids, pod_meta, sec_ctx);
+  auto identity = Common::SetContainerIdentity(uid, m_parent_step_inst_->gids,
+                                               pod_meta, sec_ctx);
   if (!identity) {
     CRANE_ERROR("Invalid container identity for pod #{}: {}", job_id,
                 identity.error());
@@ -2066,8 +2065,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
           ->mutable_security_context()
           ->namespace_options());
 
-  auto identity =
-      SetContainerIdentity(uid, m_parent_step_inst_->gids, *pod_meta, sec_ctx);
+  auto identity = Common::SetContainerIdentity(uid, m_parent_step_inst_->gids,
+                                               *pod_meta, sec_ctx);
   if (!identity) {
     CRANE_ERROR("Invalid container identity for container #{}.{}: {}", job_id,
                 step_id, identity.error());

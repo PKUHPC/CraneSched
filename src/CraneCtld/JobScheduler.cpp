@@ -34,7 +34,6 @@
 #include "Lua/LuaJobHandler.h"
 #include "Node/CranedMetaContainer.h"
 #include "RpcService/CranedKeeper.h"
-#include "crane/ContainerIdentity.h"
 #include "crane/PluginClient.h"
 #include "crane/PrologEpilogExecutor.h"
 #include "crane/Tracing.h"

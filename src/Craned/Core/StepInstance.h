@@ -21,7 +21,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "GroupResolver.h"
 #include "SupervisorStub.h"
 #include "crane/Tracing.h"
 
