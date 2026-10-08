@@ -121,6 +121,8 @@ Nodes:
 - **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数等于配置值、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量。
 - **features**：可选，字符串列表形式的节点标签，目前用于 `craned -F <feature>` 的映射过滤
 
+FUTURE 映射要求启用 TLS，并在控制器配置 `TLS.FutureNodeAllowedHosts`，例如 `"worker[01-02].crane.local"`。该名单填写实际计算机器的证书 CN，不是 FUTURE 占位节点名，且必须与机器的 `gethostname()` 返回值完全一致。每台机器须持有可信 CA 签发的独立客户端证书及私钥，证书名称也应满足反向 TLS 连接的主机名校验要求。未启用 TLS、缺少客户端证书、CN 不匹配或未在名单内的机器均不能认领或改绑 FUTURE 节点。名单缺省或为空时拒绝全部 FUTURE 映射；此配置独立于用于前端证书签发的 `TLS.AllowedNodes`。重连、注册和心跳也校验已绑定的机器身份。升级前请审查旧版本生成的 `.nodes` 绑定；这些历史记录没有经过身份认证，本次修改不会自动清理它们。
+
 Hostname 规则：
 
 - `craned` 会用本机 short hostname 和完整 hostname 匹配 `name` 与 `NodeHostname`。
