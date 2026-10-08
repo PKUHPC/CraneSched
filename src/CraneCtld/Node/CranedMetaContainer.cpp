@@ -896,7 +896,7 @@ void CranedMetaContainer::InsertDynamicNode_(
 
 bool CranedMetaContainer::SaveNodeState_(
     const crane::grpc::NodeStateSnapshot& snapshot) {
-  const std::string path = g_config.CraneCtldDbPath + ".nodes";
+  const std::string path = g_config.CraneCtldDbPath.string() + ".nodes";
   const std::string temporary = path + ".tmp";
   const std::string bytes = snapshot.SerializeAsString();
   int fd =
@@ -931,7 +931,7 @@ bool CranedMetaContainer::SaveNodeState_(
 }
 
 void CranedMetaContainer::RestoreNodeState_() {
-  const std::string path = g_config.CraneCtldDbPath + ".nodes";
+  const std::string path = g_config.CraneCtldDbPath.string() + ".nodes";
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     if (!std::filesystem::exists(path)) return;
