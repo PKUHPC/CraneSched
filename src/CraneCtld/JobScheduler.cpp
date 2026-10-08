@@ -78,7 +78,7 @@ Config::Partition RuntimePartitionConfig_(const PartitionId& id,
   result.nodes = partition->craned_ids;
   const auto& resources = partition->partition_global_meta.res_total_inc_dead;
   if (result.default_mem_per_cpu == 0 && result.default_mem_per_node == 0 &&
-      resources.GetCpuCount() > 0)
+      resources.GetCpuCount() > cpu_t{0})
     result.default_mem_per_cpu = resources.GetMemoryBytes() /
                                  static_cast<double>(resources.GetCpuCount());
   return result;

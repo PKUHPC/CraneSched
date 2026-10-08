@@ -1306,7 +1306,7 @@ void ParseConfig(int argc, char** argv) {
   if (g_config.FutureMode) {
     // The node identity is assigned by CraneCtld: block until this craned is
     // mapped to an unmapped FUTURE node matching the local hardware spec.
-    auto mapping = MapToFutureNodeBlocking();
+    auto mapping = Craned::MapToFutureNodeBlocking();
     g_config.CranedIdOfThisNode = mapping.craned_id();
     const auto& definition = mapping.definition();
     if (definition.name() != mapping.craned_id() || definition.cpu() == 0 ||
