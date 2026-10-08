@@ -24,6 +24,10 @@ TLS:
   CaFilePath: /etc/crane/tls/ca.pem
   DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
+  # Explicit machine certificate CNs allowed to claim FUTURE nodes.
+  # Requires TLS; each CN must exactly match the craned hostname.
+  # Empty or omitted denies FUTURE mapping.
+  # FutureNodeAllowedHosts: "worker[01-02].crane.local"
 
 # Ctld settings
 # the listening address of control machine

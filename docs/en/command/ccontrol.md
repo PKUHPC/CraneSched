@@ -441,6 +441,9 @@ ERRO[0000] command execution failed
 
 #### Create and Delete Dynamic Nodes
 
+FUTURE mapping requires TLS and an explicit controller `TLS.FutureNodeAllowedHosts` list, for example `"worker[01-02].crane.local"`. Entries are actual machine certificate CNs, not placeholder names, and must exactly match the machine's `gethostname()` value. Each machine must hold its own client certificate and private key issued by the trusted CA; certificate names must also satisfy hostname verification for reverse TLS connections. Insecure clients, missing certificates, mismatched CNs and machines outside the list cannot claim or rebind FUTURE nodes. An omitted or empty list denies all FUTURE mappings. This setting is independent of `TLS.AllowedNodes`, which controls frontend certificate signing. Reconnection, registration and heartbeat requests also verify the bound machine identity. Before upgrading, audit existing `.nodes` bindings created by the unauthenticated implementation; those historical bindings have no authenticated provenance.
+
+
 Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
 
 ```bash

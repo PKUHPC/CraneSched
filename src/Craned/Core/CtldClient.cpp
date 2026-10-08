@@ -1455,6 +1455,11 @@ crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking() {
   using crane::grpc::CranedMapFutureNodeReply;
   using crane::grpc::CranedMapFutureNodeRequest;
 
+  if (!g_config.ListenConf.TlsConfig.Enabled) {
+    CRANE_ERROR("FUTURE node mapping requires TLS.Enabled=true.");
+    std::exit(1);
+  }
+
   NodeSpecInfo node_info;
   if (!util::os::GetNodeInfo(&node_info)) {
     CRANE_ERROR("Failed to get node real info.");
@@ -1478,22 +1483,17 @@ crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking() {
 
   const std::string& server_address = g_config.ControlMachineAddr;
   std::shared_ptr<Channel> channel;
-  if (g_config.ListenConf.TlsConfig.Enabled) {
-    if (server_address != g_config.ControlMachine)
-      SetTlsTargetNameOverride(&channel_args, g_config.ControlMachine);
+  if (server_address != g_config.ControlMachine)
+    SetTlsTargetNameOverride(&channel_args, g_config.ControlMachine);
 
-    if (crane::GetIpAddrVer(server_address) != -1) {
-      channel = CreateTcpTlsCustomChannelByIp(
-          server_address, g_config.CraneCtldForInternalListenPort,
-          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
-    } else {
-      channel = CreateTcpTlsCustomChannelByDnsName(
-          server_address, g_config.CraneCtldForInternalListenPort,
-          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
-    }
+  if (crane::GetIpAddrVer(server_address) != -1) {
+    channel = CreateTcpTlsCustomChannelByIp(
+        server_address, g_config.CraneCtldForInternalListenPort,
+        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
   } else {
-    channel = CreateTcpInsecureCustomChannel(
-        server_address, g_config.CraneCtldForInternalListenPort, channel_args);
+    channel = CreateTcpTlsCustomChannelByDnsName(
+        server_address, g_config.CraneCtldForInternalListenPort,
+        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
   }
 
   std::unique_ptr<CraneCtldForInternal::Stub> stub =

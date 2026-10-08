@@ -52,6 +52,27 @@ static std::string PeerIpFromContext(grpc::ServerContext* context) {
   return ip;
 }
 
+// The verified certificate CN is the stable machine identity persisted as
+// node_hostname. Admission is explicit and independent of frontend signers.
+static grpc::Status AuthenticateFutureNode(const grpc::ServerContext* context,
+                                           const std::string& hostname) {
+  const auto& tls = g_config.ListenConf.TlsConfig;
+  const auto auth = context->auth_context();
+  if (!tls.Enabled || !auth || !auth->IsPeerAuthenticated())
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE nodes require an authenticated TLS client certificate"};
+
+  const auto names = auth->FindPropertyValues("x509_common_name");
+  if (names.size() != 1 || hostname.empty() ||
+      std::string_view(names.front().data(), names.front().size()) != hostname)
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE hostname must match the client certificate CN"};
+  if (!tls.FutureNodeAllowedHosts.contains(hostname))
+    return {grpc::StatusCode::PERMISSION_DENIED,
+            "Machine is not in TLS.FutureNodeAllowedHosts"};
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -85,6 +106,11 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     if (!node || (node->static_meta.is_future && !node->future_mapped))
       return {grpc::StatusCode::FAILED_PRECONDITION,
               "FUTURE node must be mapped before connecting"};
+    if (node->static_meta.is_future) {
+      auto authentication =
+          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+      if (!authentication.ok()) return authentication;
+    }
     if (node->static_meta.is_future &&
         node->static_meta.node_addr != PeerIpFromContext(context))
       return {grpc::StatusCode::FAILED_PRECONDITION,
@@ -136,6 +162,9 @@ grpc::Status CtldForInternalServiceImpl::CranedMapFutureNode(
     return grpc::Status::OK;
   }
 
+  auto authentication = AuthenticateFutureNode(context, request->hostname());
+  if (!authentication.ok()) return authentication;
+
   *response = g_meta_container->MapFutureNode(*request, peer_ip);
   if (!response->ok())
     CRANE_WARN("Failed to map craned {} at {} to a FUTURE node: {}",
@@ -149,6 +178,15 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     const crane::grpc::CranedRegisterRequest* request,
     crane::grpc::CranedRegisterReply* response) {
   auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  {
+    auto node = g_meta_container->GetCranedMetaPtr(request->craned_id());
+    if (node && node->static_meta.is_future) {
+      auto authentication =
+          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+      if (!authentication.ok()) return authentication;
+    }
+  }
+
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     response->set_ok(false);
     return grpc::Status::OK;
@@ -228,6 +266,15 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
     grpc::ServerContext* context, const crane::grpc::CranedPingRequest* request,
     crane::grpc::CranedPingReply* response) {
   auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  {
+    auto node = g_meta_container->GetCranedMetaPtr(request->craned_id());
+    if (node && node->static_meta.is_future) {
+      auto authentication =
+          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+      if (!authentication.ok()) return authentication;
+    }
+  }
+
   if (!g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject ping from offline node {}", request->craned_id());
     response->set_ok(false);

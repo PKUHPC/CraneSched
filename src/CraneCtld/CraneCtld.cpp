@@ -293,6 +293,18 @@ void ParseConfig(int argc, char** argv) {
             g_tls_config.DomainSuffix =
                 tls_config["DomainSuffix"].as<std::string>();
 
+          if (tls_config["FutureNodeAllowedHosts"]) {
+            std::list<std::string> hosts;
+            if (!util::ParseHostList(
+                    tls_config["FutureNodeAllowedHosts"].as<std::string>(),
+                    &hosts)) {
+              CRANE_ERROR("Illegal FUTURE node admission host list.");
+              std::exit(1);
+            }
+            g_tls_config.FutureNodeAllowedHosts.insert(hosts.begin(),
+                                                       hosts.end());
+          }
+
           if (tls_config["AllowedNodes"]) {
             std::string nodes = tls_config["AllowedNodes"].as<std::string>();
             std::list<std::string> name_list;
