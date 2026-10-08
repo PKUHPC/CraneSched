@@ -22,7 +22,11 @@ target_include_directories(craned_common
 )
 
 if (CRANE_ENABLE_BPF)
-    target_include_directories(craned_common PUBLIC ${LIBBPF_INCLUDE_DIR})
+    target_sources(craned_common PRIVATE BpfRuntime.cpp BpfRuntime.h)
+    target_include_directories(craned_common PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${LIBBPF_INCLUDE_DIR}
+    )
 endif ()
 
 # Link dependencies for the common library

@@ -35,7 +35,7 @@ endif ()
 add_custom_command(
         OUTPUT ${BPF_OBJECT_FILE}
         COMMAND ${BPF_COMPILER} -target bpf ${BPF_COMPILE_OPTIONS} -D${BPF_ARCH} -c ${BPF_SOURCE_FILE} -o ${BPF_OBJECT_FILE}
-        DEPENDS ${BPF_SOURCE_FILE}
+        DEPENDS ${BPF_SOURCE_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/DevicePolicy.h
         COMMENT "Building BPF object: ${BPF_OBJECT_FILE}"
 )
 

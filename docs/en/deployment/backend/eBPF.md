@@ -140,7 +140,7 @@ CraneSched requires libbpf version ≥ 1.4.6.
 
 ## Build the eBPF program
 
-CraneSched can be built with GCC or Clang, but the eBPF program must be compiled with Clang 19 or newer.
+CraneSched can be built with GCC or Clang, but the eBPF program must be compiled with Clang 19 or newer. The program uses BPF CO-RE relocations and therefore the target node must expose kernel BTF at `/sys/kernel/btf/vmlinux`.
 
 When building CraneSched, make sure Clang is correctly installed and **available in your PATH**, and set the CMake option `-DCRANE_ENABLE_BPF=ON`.
 
@@ -204,3 +204,7 @@ mount -t debugfs none /sys/kernel/debug
 ```bash
 cat /sys/kernel/debug/tracing/trace_pipe
 ```
+
+## Upgrade the BPF runtime
+
+The pinned program and maps under `/sys/fs/bpf/crane_devices` are a deployment-owned ABI. Before installing a release that changes the BPF program, map layout, or `DevicePolicy`, stop Crane daemons and drain all jobs so that no old cgroup attachment remains. Remove the three pins (`device_access`, `managed_devices`, and `device_policies`) and the empty `crane_devices` directory, then install the new BPF object and start the daemon. Ordinary daemon restarts reuse these pins.
