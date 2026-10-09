@@ -690,6 +690,8 @@ message QueryJobsInfoRequest {
   repeated string filter_nodename_list = 14;
 
   bool option_include_completed_jobs = 15;
+  // Required by the query service. Presence distinguishes omission from root.
+  optional uint32 uid = 16;
 }
 
 message QueryJobsInfoReply {

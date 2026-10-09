@@ -1594,77 +1594,262 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   return grpc::Status::OK;
 }
 
+namespace {
+
+// Copy known fields explicitly, including nested messages. New/unknown fields
+// must not become public simply because they were added to a shared schema.
+template <typename Time>
+void CopyTime(const Time& source, Time* target) {
+  target->set_seconds(source.seconds());
+  target->set_nanos(source.nanos());
+}
+
+void CopyResource(const crane::grpc::ResourceView& source,
+                  crane::grpc::ResourceView* target) {
+  target->set_cpu_count(source.cpu_count());
+  target->set_memory_bytes(source.memory_bytes());
+  target->set_memory_sw_bytes(source.memory_sw_bytes());
+  if (source.has_gres_map()) {
+    auto* devices = target->mutable_gres_map()->mutable_name_gres_map();
+    for (const auto& [name, count] : source.gres_map().name_gres_map()) {
+      auto& device = (*devices)[name];
+      device.set_total(count.total());
+      *device.mutable_specified() = count.specified();
+    }
+  }
+}
+
+crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
+                                  bool details) {
+  crane::grpc::StepInfo result;
+  if (details) {
+    result = source;
+    result.set_is_container(source.has_container_meta());
+    if (result.has_container_meta() && result.container_meta().has_image())
+      result.mutable_container_meta()->mutable_image()->clear_password();
+    result.DiscardUnknownFields();
+    result.set_query_visibility(crane::grpc::QUERY_VISIBILITY_DETAILS);
+    return result;
+  }
+
+  result.set_type(source.type());
+  result.set_is_container(source.has_container_meta());
+  result.set_step_type(source.step_type());
+  result.set_job_id(source.job_id());
+  result.set_step_id(source.step_id());
+  result.set_name(source.name());
+  result.set_uid(source.uid());
+  *result.mutable_gid() = source.gid();
+  if (source.has_time_limit())
+    CopyTime(source.time_limit(), result.mutable_time_limit());
+  if (source.has_start_time())
+    CopyTime(source.start_time(), result.mutable_start_time());
+  if (source.has_end_time())
+    CopyTime(source.end_time(), result.mutable_end_time());
+  if (source.has_submit_time())
+    CopyTime(source.submit_time(), result.mutable_submit_time());
+  if (source.has_elapsed_time())
+    CopyTime(source.elapsed_time(), result.mutable_elapsed_time());
+  if (source.has_deadline_time())
+    CopyTime(source.deadline_time(), result.mutable_deadline_time());
+  result.set_node_num(source.node_num());
+  result.set_ntasks(source.ntasks());
+  if (source.has_req_total_res_view())
+    CopyResource(source.req_total_res_view(),
+                 result.mutable_req_total_res_view());
+  if (source.has_allocated_res_view())
+    CopyResource(source.allocated_res_view(),
+                 result.mutable_allocated_res_view());
+  *result.mutable_req_nodes() = source.req_nodes();
+  *result.mutable_exclude_nodes() = source.exclude_nodes();
+  result.set_held(source.held());
+  result.set_status(source.status());
+  result.set_exit_code(source.exit_code());
+  result.set_craned_list(source.craned_list());
+  *result.mutable_execution_node() = source.execution_node();
+  result.set_query_visibility(crane::grpc::QUERY_VISIBILITY_PUBLIC);
+  return result;
+}
+
+// Creates a query view without changing scheduler or persisted data.
+// Only pass a UID after authenticating the caller.
+crane::grpc::JobInfo ProjectJobForQuery(
+    const crane::grpc::JobInfo& source,
+    std::optional<uint32_t> authenticated_uid, bool is_admin) {
+  const bool details = authenticated_uid.has_value() &&
+                       (is_admin || *authenticated_uid == source.uid());
+  crane::grpc::JobInfo result;
+  if (details) {
+    result = source;
+    result.clear_step_info_list();
+    result.DiscardUnknownFields();
+  } else {
+    result.set_type(source.type());
+    result.set_job_id(source.job_id());
+    result.set_name(source.name());
+    result.set_partition(source.partition());
+    result.set_uid(source.uid());
+    result.set_gid(source.gid());
+    result.set_username(source.username());
+    result.set_account(source.account());
+    result.set_qos(source.qos());
+    result.set_reservation(source.reservation());
+    result.set_wckey(source.wckey());
+    if (source.has_time_limit())
+      CopyTime(source.time_limit(), result.mutable_time_limit());
+    if (source.has_start_time())
+      CopyTime(source.start_time(), result.mutable_start_time());
+    if (source.has_end_time())
+      CopyTime(source.end_time(), result.mutable_end_time());
+    if (source.has_submit_time())
+      CopyTime(source.submit_time(), result.mutable_submit_time());
+    if (source.has_elapsed_time())
+      CopyTime(source.elapsed_time(), result.mutable_elapsed_time());
+    if (source.has_deadline_time())
+      CopyTime(source.deadline_time(), result.mutable_deadline_time());
+    result.set_held(source.held());
+    result.set_status(source.status());
+    result.set_exit_code(source.exit_code());
+    result.set_priority(source.priority());
+    result.set_requeue_count(source.requeue_count());
+    result.set_requeue_if_failed(source.requeue_if_failed());
+    result.set_node_num(source.node_num());
+    result.set_ntasks(source.ntasks());
+    if (source.has_req_total_res_view())
+      CopyResource(source.req_total_res_view(),
+                   result.mutable_req_total_res_view());
+    if (source.has_allocated_res_view())
+      CopyResource(source.allocated_res_view(),
+                   result.mutable_allocated_res_view());
+    *result.mutable_licenses_count() = source.licenses_count();
+    *result.mutable_req_nodes() = source.req_nodes();
+    *result.mutable_exclude_nodes() = source.exclude_nodes();
+    if (source.has_pending_reason())
+      result.set_pending_reason(source.pending_reason());
+    else if (source.has_craned_list())
+      result.set_craned_list(source.craned_list());
+    *result.mutable_execution_node() = source.execution_node();
+    result.set_exclusive(source.exclusive());
+    result.set_submit_hostname(source.submit_hostname());
+    if (source.has_array_spec()) {
+      const auto& spec = source.array_spec();
+      auto* output = result.mutable_array_spec();
+      output->set_start(spec.start());
+      output->set_end(spec.end());
+      if (spec.has_stride()) output->set_stride(spec.stride());
+      if (spec.has_max_concurrent())
+        output->set_max_concurrent(spec.max_concurrent());
+    }
+    if (source.has_array_task()) {
+      result.mutable_array_task()->set_array_job_id(
+          source.array_task().array_job_id());
+      result.mutable_array_task()->set_task_id(source.array_task().task_id());
+    }
+    if (source.has_dependency_status()) {
+      const auto& dependency = source.dependency_status();
+      auto* output = result.mutable_dependency_status();
+      output->set_is_or(dependency.is_or());
+      for (const auto& condition : dependency.pending()) {
+        auto* pending = output->add_pending();
+        pending->set_job_id(condition.job_id());
+        pending->set_type(condition.type());
+        pending->set_delay_seconds(condition.delay_seconds());
+      }
+      if (dependency.has_ready_time())
+        CopyTime(dependency.ready_time(), output->mutable_ready_time());
+      else if (dependency.has_infinite_future())
+        output->set_infinite_future(dependency.infinite_future());
+      else if (dependency.has_infinite_past())
+        output->set_infinite_past(dependency.infinite_past());
+    }
+  }
+
+  for (const auto& step : source.step_info_list()) {
+    const bool step_details =
+        details && (is_admin || *authenticated_uid == step.uid());
+    *result.add_step_info_list() = ProjectStep(step, step_details);
+  }
+  result.set_query_visibility(details ? crane::grpc::QUERY_VISIBILITY_DETAILS
+                                      : crane::grpc::QUERY_VISIBILITY_PUBLIC);
+  return result;
+}
+
+crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
+    std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map,
+    size_t num_limit, std::optional<uint32_t> authenticated_uid,
+    bool is_admin) {
+  crane::grpc::QueryJobsInfoReply response;
+  auto* jobs = response.mutable_job_info_list();
+  jobs->Reserve(job_info_map.size());
+  for (auto& [id, job] : job_info_map) *jobs->Add() = std::move(job);
+  std::sort(jobs->begin(), jobs->end(),
+            [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
+              return a.status() == b.status() ? a.priority() > b.priority()
+                                              : a.status() < b.status();
+            });
+  const bool has_more = jobs->size() > num_limit;
+  response.set_has_more(has_more);
+  if (has_more) jobs->DeleteSubrange(num_limit, jobs->size() - num_limit);
+  for (auto& job : *jobs)
+    job = ProjectJobForQuery(job, authenticated_uid, is_admin);
+  response.set_ok(true);
+  return response;
+}
+}  // namespace
+
 grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryJobsInfoRequest* request,
     crane::grpc::QueryJobsInfoReply* response) {
+  response->Clear();
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  if (!request->has_uid())
+    return {grpc::StatusCode::INVALID_ARGUMENT, "Caller UID is required"};
+
+  std::optional<uint32_t> authenticated_uid;
+  bool is_admin = false;
+  // A non-TLS UID is only a claim, including an explicit claim to be root.
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    if (auto error = CheckCertAndUIDAllowed_(context, request->uid()); error)
+      return {grpc::StatusCode::UNAUTHENTICATED, *error};
+    const auto admin = g_account_manager->CheckUidIsAdmin(request->uid());
+    if (!admin && admin.error() != CraneErrCode::ERR_USER_NO_PRIVILEGE)
+      return {grpc::StatusCode::PERMISSION_DENIED,
+              "Unable to resolve query user permissions"};
+    is_admin = admin.has_value();
+    authenticated_uid = request->uid();
+  }
 
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
   const size_t probe_limit = num_limit + 1;
-
-  crane::grpc::QueryJobsInfoRequest normalized_request = *request;
-  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
-    normalized_request.set_filter_nodename_list(
-        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
-  }
+  auto normalized_request = *request;
+  for (auto& node : *normalized_request.mutable_filter_nodename_list())
+    node = ResolveCranedIdAlias(node);
   request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
-  // Query jobs in RAM
   g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
-
-  auto sort_truncate_and_move_to_proto = [&job_info_map,
-                                          response](size_t limit) -> void {
-    auto* job_info_list = response->mutable_job_info_list();
-    job_info_list->Reserve(job_info_map.size());
-    for (auto it = job_info_map.begin(); it != job_info_map.end();) {
-      auto* new_job_info = job_info_list->Add();
-      *new_job_info = std::move(it->second);
-      it = job_info_map.erase(it);
-    }
-
-    std::sort(job_info_list->begin(), job_info_list->end(),
-              [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-                return (a.status() == b.status())
-                           ? (a.priority() > b.priority())
-                           : (a.status() < b.status());
-              });
-
-    const bool has_more = job_info_list->size() > limit;
-    response->set_has_more(has_more);
-    if (has_more)
-      job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);
-  };
 
   if (job_info_map.size() >= probe_limit ||
       !request->option_include_completed_jobs()) {
-    if (request->option_include_completed_jobs()) {
-      // Fetch job finished steps in Mongodb
-      if (!g_db_client->FetchJobStepRecords(request, &job_info_map)) {
-        CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
-        return grpc::Status::OK;
-      }
+    if (request->option_include_completed_jobs() &&
+        !g_db_client->FetchJobStepRecords(request, &job_info_map)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
+      return grpc::Status::OK;
     }
-    sort_truncate_and_move_to_proto(num_limit);
-    response->set_ok(true);
-    return grpc::Status::OK;
+  } else {
+    // Fetch a full probe window: a history record may also be present in RAM.
+    if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+      return grpc::Status::OK;
+    }
   }
 
-  // Query completed jobs in Mongodb
-  // (only for cacct, which sets `option_include_completed_jobs` to true)
-  // Fetch a full probe window because records already present in RAM can also
-  // occur in MongoDB and must not consume the extra-record probe.
-  if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
-    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
-    return grpc::Status::OK;
-  }
-
-  sort_truncate_and_move_to_proto(num_limit);
-  response->set_ok(true);
+  // One response path, after historical steps have been merged.
+  *response = BuildJobQueryReply(std::move(job_info_map), num_limit,
+                                 authenticated_uid, is_admin);
   return grpc::Status::OK;
 }
 
