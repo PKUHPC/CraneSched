@@ -393,7 +393,10 @@ void StepInCtld::RecoverFromDb(
 
   req_total_res_view =
       req_node_res_view * node_num + req_task_res_view * ntasks;
-  deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
+  deadline_time =
+      step_to_ctld.has_deadline_time()
+          ? absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds())
+          : absl::FromUnixSeconds(kJobMaxTimeStampSec);
 
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
@@ -446,6 +449,11 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->mutable_submit_time()->CopyFrom(m_runtime_attr_.submit_time());
   step_info->mutable_start_time()->CopyFrom(m_runtime_attr_.start_time());
   step_info->mutable_end_time()->CopyFrom(m_runtime_attr_.end_time());
+  step_info->clear_deadline_time();
+  if (deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    step_info->mutable_deadline_time()->set_seconds(
+        absl::ToUnixSeconds(deadline_time));
+  }
 
   step_info->set_node_num(node_num);
   step_info->set_ntasks(ntasks);
@@ -1183,7 +1191,10 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   step.set_task_prolog(job.JobToCtld().task_prolog());
   step.set_task_epilog(job.JobToCtld().task_epilog());
 
-  step.mutable_deadline_time()->set_seconds(absl::ToUnixSeconds(deadline_time));
+  if (deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    step.mutable_deadline_time()->set_seconds(
+        absl::ToUnixSeconds(deadline_time));
+  }
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -1341,8 +1352,10 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-  step_to_d.mutable_deadline_time()->set_seconds(
-      ToUnixSeconds(this->deadline_time));
+  if (this->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    step_to_d.mutable_deadline_time()->set_seconds(
+        ToUnixSeconds(this->deadline_time));
+  }
 
   switch (this->type) {
   case crane::grpc::Batch:
@@ -2085,6 +2098,8 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
 
   if (val.has_deadline_time()) {
     deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());
+  } else {
+    deadline_time = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   }
 
   SetHeld(val.hold());
@@ -2156,8 +2171,11 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
   job_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
   job_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
-  job_info->mutable_deadline_time()->set_seconds(
-      absl::ToUnixSeconds(deadline_time));
+  job_info->clear_deadline_time();
+  if (deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+    job_info->mutable_deadline_time()->set_seconds(
+        absl::ToUnixSeconds(deadline_time));
+  }
 
   job_info->set_uid(uid);
   job_info->set_gid(gid);
