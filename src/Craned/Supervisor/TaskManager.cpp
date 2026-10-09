@@ -47,6 +47,45 @@
 
 namespace Craned::Supervisor {
 namespace {
+
+template <typename SecurityContext>
+std::expected<void, std::string> SetContainerIdentity_(
+    uid_t host_uid, std::span<const gid_t> host_gids,
+    const crane::grpc::PodJobAdditionalMeta& pod_meta, SecurityContext* ctx) {
+  auto valid = util::os::ValidateContainerIdentity(
+      host_uid, host_gids, pod_meta.userns(), pod_meta.run_as_user(),
+      pod_meta.run_as_group());
+  if (!valid) return valid;
+
+  if (pod_meta.userns()) {
+    const auto& mappings = ctx->namespace_options().userns_options();
+    auto mapped = [](uint32_t id, const auto& ranges) {
+      return std::ranges::any_of(ranges, [id](const auto& range) {
+        return id >= range.container_id() &&
+               uint64_t{id} - range.container_id() < range.length();
+      });
+    };
+    if (!mapped(pod_meta.run_as_user(), mappings.uids()))
+      return std::unexpected(
+          "container UID is outside the user namespace mapping");
+    if (!mapped(pod_meta.run_as_group(), mappings.gids()))
+      return std::unexpected(
+          "container GID is outside the user namespace mapping");
+  }
+
+  ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
+  ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+  ctx->clear_supplemental_groups();
+  // Do not add image-defined groups to the validated submission identity.
+  ctx->set_supplemental_groups_policy(runtime::v1::Strict);
+  if (!pod_meta.userns()) {
+    for (gid_t gid : host_gids.subspan(1)) {
+      if (gid != host_gids.front()) ctx->add_supplemental_groups(gid);
+    }
+  }
+  return {};
+}
+
 constexpr uint32_t kInitialTerminalSizeDiagnosticLimit = 8;
 
 bool ShouldLogInitialTerminalSizeDiagnostic() {
@@ -55,15 +94,6 @@ bool ShouldLogInitialTerminalSizeDiagnostic() {
          kInitialTerminalSizeDiagnosticLimit;
 }
 
-template <typename SecurityContext>
-void SetResolvedSupplementalGroups_(const std::vector<gid_t>& gids,
-                                    SecurityContext* security_context) {
-  security_context->clear_supplemental_groups();
-  if (gids.size() < 2) return;
-  for (size_t i = 1; i < gids.size(); ++i) {
-    security_context->add_supplemental_groups(static_cast<int64_t>(gids[i]));
-  }
-}
 }  // namespace
 
 using namespace std::chrono_literals;
@@ -1465,9 +1495,6 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
-  gid_t gid = m_parent_step_inst_->gids.empty()
-                  ? m_parent_step_inst_->pwd.Gid()
-                  : m_parent_step_inst_->gids.front();
 
   // Generate hash for pod name and uid.
   std::string h16 = MakeHashId_(job_id, job_name, node_name);
@@ -1522,8 +1549,6 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
     CRANE_ERROR("Container job #{} has no resolved execution groups", job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  const gid_t resolved_primary_gid = m_parent_step_inst_->gids.front();
-  SetResolvedSupplementalGroups_(m_parent_step_inst_->gids, sec_ctx);
   auto* ns_options = sec_ctx->mutable_namespace_options();
   ns_options->set_network(
       static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().network()));
@@ -1545,28 +1570,21 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
     }
   }
 
-  // Setup run_as_user / run_as_group
-  if (uid == 0 || pod_meta.userns() ||
-      (pod_meta.run_as_user() == uid && pod_meta.run_as_group() == gid)) {
-    // If user is root or using userns, run_as_* is always allowed.
-    // Non-root user w/o userns cannot use run_as_* other than its own.
-    sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(resolved_primary_gid);
-  } else {
-    CRANE_ERROR(
-        "Pod #{} is not allowed to use other identities when not "
-        "using userns",
-        job_id);
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  // Setup userns
+  // Resolve mappings before checking the requested container identity.
   if (pod_meta.userns()) {
     if (ResolveUserNsMapping_(m_parent_step_inst_->pwd, sec_ctx) !=
         CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to setup userns config for pod of job #{}", job_id);
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
+  }
+
+  auto identity =
+      SetContainerIdentity_(uid, m_parent_step_inst_->gids, pod_meta, sec_ctx);
+  if (!identity) {
+    CRANE_ERROR("Invalid container identity for pod #{}: {}", job_id,
+                identity.error());
+    return CraneErrCode::ERR_INVALID_PARAM;
   }
 
   return CraneErrCode::SUCCESS;
@@ -2052,9 +2070,6 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   const std::string& step_name = GetParentStep().name();
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
-  gid_t gid = m_parent_step_inst_->gids.empty()
-                  ? m_parent_step_inst_->pwd.Gid()
-                  : m_parent_step_inst_->gids.front();
 
   // Using job_id/step_id to generate unique name in container metadata
   m_container_config_.mutable_metadata()->set_name(
@@ -2083,27 +2098,17 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
                 step_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  const gid_t resolved_primary_gid = m_parent_step_inst_->gids.front();
-  SetResolvedSupplementalGroups_(m_parent_step_inst_->gids, sec_ctx);
-
   // Currently we don't support setting namespace mode per container.
   sec_ctx->mutable_namespace_options()->CopyFrom(
       m_pod_config_.mutable_linux()
           ->mutable_security_context()
           ->namespace_options());
 
-  // Setup run_as_user / run_as_group
-  if (uid == 0 || pod_meta->userns() ||
-      (pod_meta->run_as_user() == uid && pod_meta->run_as_group() == gid)) {
-    // If user is root or using userns, run_as_* is always allowed.
-    // Non-root user w/o userns cannot use run_as_* other than its own.
-    sec_ctx->mutable_run_as_user()->set_value(pod_meta->run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(resolved_primary_gid);
-  } else {
-    CRANE_ERROR(
-        "Container #{}.{} is not allowed to use other identities when not "
-        "using userns",
-        job_id, step_id);
+  auto identity =
+      SetContainerIdentity_(uid, m_parent_step_inst_->gids, *pod_meta, sec_ctx);
+  if (!identity) {
+    CRANE_ERROR("Invalid container identity for container #{}.{}: {}", job_id,
+                step_id, identity.error());
     return CraneErrCode::ERR_INVALID_PARAM;
   }
 
@@ -2126,7 +2131,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
     }
 
     // Check file permissions
-    if (!util::os::CheckUserHasPermission(uid, gid, host_path)) {
+    if (!util::os::CheckUserHasPermission(
+            uid, m_parent_step_inst_->gids.front(), host_path)) {
       CRANE_ERROR("User {} does not have permission to access mount path {}",
                   uid, host_path);
       return CraneErrCode::ERR_INVALID_PARAM;
@@ -2150,8 +2156,9 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
 
   // Setup idmapped mounts if using userns.
   if (pod_meta->userns() &&
-      ApplyIdMappedMounts_(m_parent_step_inst_->pwd, &m_container_config_,
-                           use_bindfs) != CraneErrCode::SUCCESS) {
+      ApplyIdMappedMounts_(
+          m_parent_step_inst_->pwd, m_parent_step_inst_->gids.front(),
+          &m_container_config_, use_bindfs) != CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to apply idmapped mounts for #{}.{}", job_id, step_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -2184,21 +2191,19 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
 }
 
 CraneErrCode ContainerInstance::ApplyIdMappedMounts_(
-    const PasswordEntry& pwd, cri::api::ContainerConfig* config,
+    const PasswordEntry& pwd, gid_t egid, cri::api::ContainerConfig* config,
     bool use_bindfs) {
-  // NOTE: These methods are assuming pwd.Gid() is the same as egid.
-  // which could be problematic. But for most HPC scenarios this should be fine.
   if (use_bindfs) {
     // If idmapped mounts not supported by FS/kernel,
     // use bindfs as a workaround.
-    return SetupIdMappedBindFs_(pwd, config);
+    return SetupIdMappedBindFs_(pwd, egid, config);
   }
   // Use standard linux idmapped mounts
-  return SetupIdMappedMounts_(pwd, config);
+  return SetupIdMappedMounts_(pwd, egid, config);
 }
 
 CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
-    const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
+    const PasswordEntry& pwd, gid_t egid, cri::api::ContainerConfig* config) {
   const auto& sec_ctx = config->mutable_linux()->mutable_security_context();
   uid_t run_as_user = sec_ctx->run_as_user().value();
   gid_t run_as_group = sec_ctx->run_as_group().value();
@@ -2208,17 +2213,17 @@ CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
   const auto& gid_mapping =
       sec_ctx->mutable_namespace_options()->mutable_userns_options()->gids(0);
 
-  // For example, leo is 1000 on host, with a subid range
-  // 101000-102000.
-  // When leo want a userns container and run as 10 inside the container,
-  // then:
+  // For example, leo has UID 1000 on the host and SubUID range
+  // [101000, 102000). To run as UID 10 inside the container:
   //   uid_offset = 101000 - 1000 + 10 = 100010
-  // The bindfs will utilize these to create a FUSE mount point.
-  // When using the mount point inside the container:
-  //   uid 10 in container -> uid 101010 in kernel
-  //   101010(kuid) - 100010(offset) = 1000(leo) on host
+  // The user namespace maps container UID 10 to kernel UID 101010.
+  // bindfs presents a source file owned by UID 1000 as UID 101010:
+  //   1000(source) + 100010(offset) = 101010(bindfs)
+  // That ownership is shown as UID 10 inside the container; the source
+  // file remains owned by UID 1000.
+  // GIDs use the same calculation with the submitter's effective GID.
   uid_t uid_offset = uid_mapping.host_id() - pwd.Uid() + run_as_user;
-  gid_t gid_offset = gid_mapping.host_id() - pwd.Gid() + run_as_group;
+  gid_t gid_offset = gid_mapping.host_id() - egid + run_as_group;
 
   std::vector<std::unique_ptr<bindfs::IdMappedBindFs>> bindfs_mounts;
   bindfs_mounts.reserve(config->mounts().size());
@@ -2227,8 +2232,8 @@ CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
   try {
     for (auto& m : *config->mutable_mounts()) {
       auto mount = std::make_unique<bindfs::IdMappedBindFs>(
-          m.host_path(), m_parent_step_inst_->pwd, pwd.Uid(), pwd.Gid(),
-          uid_offset, gid_offset, g_config.Container.BindFs.BindfsBinary,
+          m.host_path(), pwd, pwd.Uid(), egid, uid_offset, gid_offset,
+          g_config.Container.BindFs.BindfsBinary,
           g_config.Container.BindFs.FusermountBinary,
           g_config.Container.BindFs.MountBaseDir);
 
@@ -2245,7 +2250,7 @@ CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
 }
 
 CraneErrCode ContainerInstance::SetupIdMappedMounts_(
-    const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
+    const PasswordEntry& pwd, gid_t egid, cri::api::ContainerConfig* config) {
   using cri::CriClient;
 
   const auto& sec_ctx = config->mutable_linux()->mutable_security_context();
@@ -2263,7 +2268,7 @@ CraneErrCode ContainerInstance::SetupIdMappedMounts_(
   auto kgid = run_as_group + gid_mapping.host_id();
 
   auto mount_uid_mapping = CriClient::MakeIdMapping(kuid, pwd.Uid(), 1);
-  auto mount_gid_mapping = CriClient::MakeIdMapping(kgid, pwd.Gid(), 1);
+  auto mount_gid_mapping = CriClient::MakeIdMapping(kgid, egid, 1);
 
   // modify mounts, see comments regarding *mapping members
   for (auto& mount : *config->mutable_mounts()) {

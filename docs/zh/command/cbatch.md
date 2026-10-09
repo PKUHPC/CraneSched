@@ -102,8 +102,8 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE TIME    TIMELIMIT NODES 
 - **--pod**: 启用容器模式，将作业创建为 Pod 作业。启用后可在脚本中使用 `ccon run` 启动容器
 - **--pod-name string**: Pod 名称（默认使用作业名）
 - **--pod-port string**: Pod 端口映射，格式：`HOST:CONTAINER` 或 `PORT`。可多次使用
-- **--pod-user string**: 以指定 UID[:GID] 运行 Pod（默认：当 `--pod-userns=false` 时使用当前用户）
-- **--pod-userns**: 启用 Pod 用户命名空间（默认：`true`，容器内用户映射为 root）
+- **--pod-user string**: 指定 Pod UID[:GID]；启用 userns 时允许映射范围内的容器 ID（默认 `0:0`），关闭时仅允许提交者 UID/EGID，并保留节点校验后的补充组
+- **--pod-userns**: 启用 Pod 用户命名空间（默认值由 `Container.UserNsEnabledByDefault` 决定）；支持用 `--pod-user` 指定映射范围内的身份，存在不同于 EGID 的补充组时拒绝提交
 - **--pod-host-network**: 使用宿主机网络命名空间（默认：`false`）
 - **--pod-dns**: 为 Pod 设置 DNS 服务器（仅支持 IPv4）。指定的 DNS server 会被添加到系统默认 DNS 之前（优先级更高，默认使用配置文件 `Container.Dns.Servers`）
 
@@ -186,8 +186,8 @@ Flags:
       --pod-host-network         Use host network namespace for the pod
       --pod-name string          Name of pod (defaults to job name)
       --pod-port strings         Publish pod port(s) in HOST:CONTAINER or PORT form
-      --pod-user string          Run pod as UID[:GID] (default: current user when --pod-userns=false)
-      --pod-userns               Enable pod user namespace (default true)
+      --pod-user string          Run pod as UID[:GID]; mapped container IDs with userns (default 0:0), otherwise submitter UID/effective GID
+      --pod-userns               Enable pod user namespace; default follows Container.UserNsEnabledByDefault in config (default from config)
   -q, --qos string               QoS used for the job
       --repeat uint32            Submit the job multiple times (default 1)
   -r, --reservation string       Use reserved resources
