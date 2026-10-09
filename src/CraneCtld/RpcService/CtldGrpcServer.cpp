@@ -1604,7 +1604,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
 
   const size_t num_limit = request->num_limit() == 0 ? kDefaultQueryJobNumLimit
                                                      : request->num_limit();
-  const size_t probe_limit = num_limit + 1;
+  const size_t probe_limit = num_limit == std::numeric_limits<size_t>::max()
+                                 ? num_limit
+                                 : num_limit + 1;
 
   crane::grpc::QueryJobsInfoRequest normalized_request = *request;
   for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
@@ -1617,6 +1619,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   // Query jobs in RAM
   g_job_scheduler->QueryJobsInRam(request, &job_info_map, probe_limit);
 
+  const bool accounting_query =
+      request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
+
   auto sort_truncate_and_move_to_proto = [&job_info_map,
                                           response](size_t limit) -> void {
     auto* job_info_list = response->mutable_job_info_list();
@@ -1628,17 +1633,30 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     }
 
     std::sort(job_info_list->begin(), job_info_list->end(),
-              [](const crane::grpc::JobInfo& a, const crane::grpc::JobInfo& b) {
-                return (a.status() == b.status())
-                           ? (a.priority() > b.priority())
-                           : (a.status() < b.status());
-              });
+              JobInfoDisplayOrder{});
 
     const bool has_more = job_info_list->size() > limit;
     response->set_has_more(has_more);
     if (has_more)
       job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);
   };
+
+  if (accounting_query) {
+    // Over-fetch to offset live records removed during raw-job-ID deduplication.
+    size_t db_limit = probe_limit;
+    if (job_info_map.size() <= std::numeric_limits<size_t>::max() - db_limit) {
+      db_limit += job_info_map.size();
+    } else {
+      db_limit = std::numeric_limits<size_t>::max();
+    }
+    if (!g_db_client->FetchJobRecords(request, &job_info_map, db_limit)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+      return grpc::Status::OK;
+    }
+    sort_truncate_and_move_to_proto(num_limit);
+    response->set_ok(true);
+    return grpc::Status::OK;
+  }
 
   if (job_info_map.size() >= probe_limit ||
       !request->option_include_completed_jobs()) {
@@ -1658,7 +1676,13 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   // (only for cacct, which sets `option_include_completed_jobs` to true)
   // Fetch a full probe window because records already present in RAM can also
   // occur in MongoDB and must not consume the extra-record probe.
-  if (!g_db_client->FetchJobRecords(request, &job_info_map, probe_limit)) {
+  size_t db_limit = probe_limit;
+  if (job_info_map.size() <= std::numeric_limits<size_t>::max() - db_limit) {
+    db_limit += job_info_map.size();
+  } else {
+    db_limit = std::numeric_limits<size_t>::max();
+  }
+  if (!g_db_client->FetchJobRecords(request, &job_info_map, db_limit)) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }
