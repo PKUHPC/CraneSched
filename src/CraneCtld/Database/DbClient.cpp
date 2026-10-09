@@ -5447,6 +5447,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
     array_task_id = identity->task_id;
   }
   auto array_spec_fields = JobToCtldToArraySpecFields_(job->JobToCtld());
+  std::optional<int64_t> deadline =
+      job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)
+          ? std::optional<int64_t>(absl::ToUnixSeconds(job->deadline_time))
+          : std::nullopt;
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -5538,11 +5542,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->using_default_wckey, g_config.CraneClusterName,
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids,
-             job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)
-                 ? std::optional<int64_t>(
-                       absl::ToUnixSeconds(job->deadline_time))
-                 : std::nullopt,
+             job->executing_craned_ids, deadline,
              // 50-54
              array_job_id, array_task_id, array_spec_fields.start,
              array_spec_fields.end, array_spec_fields.stride,
