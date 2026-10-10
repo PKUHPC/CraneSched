@@ -1331,7 +1331,7 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
     {
       auto node = craned_meta_map_[selected_id];
       const auto& meta = node->static_meta;
-      if (request.cpu() !=
+      if (request.cpu() <
               static_cast<uint32_t>(meta.res.GetCpuSet().cpu_count) ||
           real_mem_gb + kMemoryToleranceGB <
               static_cast<double>(meta.res.GetMemoryBytes()) / kBytesPerGB ||
@@ -1382,7 +1382,7 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
           }) == static_meta.features.end())
         continue;
 
-      if (request.cpu() !=
+      if (request.cpu() <
           static_cast<uint32_t>(static_meta.res.GetCpuSet().cpu_count))
         continue;
 
