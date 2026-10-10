@@ -201,7 +201,10 @@ class CranedKeeper {
    */
   std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
 
-  void SetCranedConnectedCb(std::function<void(CranedId, const RegToken &)> cb);
+  void SetCranedConnectedCb(
+      std::function<void(CranedId, const RegToken &,
+                         const std::shared_ptr<CranedStub> &)>
+          cb);
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
@@ -212,7 +215,8 @@ class CranedKeeper {
   struct CqTag {
     enum Type : uint8_t { kInitializingCraned, kEstablishedCraned };
     Type type;
-    std::shared_ptr<CranedStub> craned;
+    // A connectivity watch must not keep the channel alive during shutdown.
+    std::weak_ptr<CranedStub> craned;
   };
 
   // Remove stub from unavail/connecting set. Must be called with
@@ -227,13 +231,15 @@ class CranedKeeper {
       const std::shared_ptr<CranedStub> &craned,
       grpc_connectivity_state new_state);
 
-  bool CheckNodeTimeoutAndClean(CqTag *tag);
+  bool CheckNodeTimeoutAndClean(const std::shared_ptr<CranedStub> &craned);
 
   void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
 
-  std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
+  std::function<void(CranedId, const RegToken &,
+                     const std::shared_ptr<CranedStub> &)>
+      m_craned_connected_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.

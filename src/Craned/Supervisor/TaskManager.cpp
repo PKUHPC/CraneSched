@@ -145,6 +145,7 @@ CraneErrCode StepInstance::Prepare() {
       pmix::Config pmix_config{
           .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
           .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
+          .CaContent = g_config.CforedListenConf.TlsConfig.CaContent,
           .CompressedRpc = g_config.CompressedRpc,
           .CraneBaseDir = g_config.CraneBaseDir,
           .CraneScriptDir = g_config.CraneScriptDir,

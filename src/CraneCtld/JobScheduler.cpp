@@ -219,7 +219,15 @@ JobScheduler::JobScheduler() {
 }
 
 JobScheduler::~JobScheduler() {
-  m_thread_stop_ = true;
+  Shutdown();
+  // Callbacks drained after Shutdown may enqueue termination RPCs.
+  m_rpc_worker_pool_->wait();
+  m_rpc_worker_pool_.reset();
+  m_ctld_hook_executor_.reset();
+}
+
+void JobScheduler::Shutdown() {
+  if (m_thread_stop_.exchange(true)) return;
   if (m_ctld_hook_executor_) m_ctld_hook_executor_->Shutdown();
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_step_schedule_thread_.joinable()) m_step_schedule_thread_.join();
@@ -233,8 +241,6 @@ JobScheduler::~JobScheduler() {
   if (m_job_deadline_timer_thread_.joinable())
     m_job_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
-  m_rpc_worker_pool_.reset();
-  m_ctld_hook_executor_.reset();
 }
 
 bool JobScheduler::Init() {

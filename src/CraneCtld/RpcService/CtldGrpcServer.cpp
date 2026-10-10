@@ -131,10 +131,12 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     if (stub != nullptr) {
       stub->SetRegToken(request->token());
       g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-        auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
-        if (g_craned_keeper->GetCranedStub(craned_id) != stub ||
-            !stub->CheckToken(token))
-          return;
+        {
+          auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+          if (g_craned_keeper->GetCranedStub(craned_id) != stub ||
+              !stub->CheckToken(token))
+            return;
+        }
         stub->ConfigureCraned(craned_id, token);
       });
     } else {
