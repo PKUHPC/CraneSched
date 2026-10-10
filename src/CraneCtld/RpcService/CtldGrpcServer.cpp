@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include <grpcpp/support/status.h>
+#include <openssl/x509v3.h>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -40,7 +41,7 @@ namespace Ctld {
 
 // Extract the IP part from a grpc peer string like "ipv4:1.2.3.4:port" or
 // "ipv6:[::1]:port". Returns an empty string on failure.
-static std::string PeerIpFromContext(grpc::ServerContext* context) {
+static std::string PeerIpFromContext(const grpc::ServerContext* context) {
   std::string peer = context->peer();
   size_t scheme_pos = peer.find(':');
   size_t port_pos = peer.rfind(':');
@@ -52,24 +53,56 @@ static std::string PeerIpFromContext(grpc::ServerContext* context) {
   return ip;
 }
 
-// The verified certificate CN is the stable machine identity persisted as
-// node_hostname. Admission is explicit and independent of frontend signers.
-static grpc::Status AuthenticateFutureNode(const grpc::ServerContext* context,
-                                           const std::string& hostname) {
+// Verify the persisted machine hostname against the authenticated certificate.
+// Admission is explicit and independent of frontend signers.
+static grpc::Status AuthenticateFutureNode(
+    const grpc::ServerContext* context, const std::string& hostname,
+    const std::string& craned_addr = {}) {
   const auto& tls = g_config.ListenConf.TlsConfig;
   const auto auth = context->auth_context();
   if (!tls.Enabled || !auth || !auth->IsPeerAuthenticated())
     return {grpc::StatusCode::UNAUTHENTICATED,
             "FUTURE nodes require an authenticated TLS client certificate"};
 
-  const auto names = auth->FindPropertyValues("x509_common_name");
-  if (names.size() != 1 || hostname.empty() ||
-      std::string_view(names.front().data(), names.front().size()) != hostname)
-    return {grpc::StatusCode::UNAUTHENTICATED,
-            "FUTURE hostname must match the client certificate CN"};
   if (!tls.FutureNodeAllowedHosts.contains(hostname))
     return {grpc::StatusCode::PERMISSION_DENIED,
             "Machine is not in TLS.FutureNodeAllowedHosts"};
+
+  const auto certs = auth->FindPropertyValues("x509_pem_cert");
+  if (certs.size() != 1 || hostname.empty())
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE nodes require a machine certificate and hostname"};
+  const auto parse_certificate = [](std::string_view pem) {
+    std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+        BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free);
+    return std::unique_ptr<X509, decltype(&X509_free)>(
+        bio ? PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr) : nullptr,
+        &X509_free);
+  };
+  const auto cert =
+      parse_certificate({certs.front().data(), certs.front().size()});
+  static const auto shared_cert =
+      parse_certificate(tls.InternalCerts.CertContent);
+  const auto tls_hostname = util::TlsHostname(hostname, tls.DomainSuffix);
+  const auto names = auth->FindPropertyValues("x509_common_name");
+  const bool matches_hostname =
+      names.size() == 1 &&
+      (std::string_view(names.front().data(), names.front().size()) ==
+           hostname ||
+       std::string_view(names.front().data(), names.front().size()) ==
+           tls_hostname);
+  // User certificates also have wildcard SANs. Only the configured internal
+  // certificate may use a shared identity instead of a machine-specific CN.
+  if (!cert ||
+      (!matches_hostname &&
+       (!shared_cert || X509_cmp(cert.get(), shared_cert.get()) != 0)) ||
+      X509_check_host(cert.get(), tls_hostname.data(), tls_hostname.size(),
+                      X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS, nullptr) != 1)
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE hostname must match the client certificate DNS names"};
+  if (!craned_addr.empty() && craned_addr != PeerIpFromContext(context))
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            "Connection does not match the FUTURE node mapping"};
   return grpc::Status::OK;
 }
 
@@ -108,13 +141,10 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
               "FUTURE node must be mapped before connecting"};
     if (node->static_meta.is_future) {
       auto authentication =
-          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+          AuthenticateFutureNode(context, node->static_meta.node_hostname,
+                                 node->static_meta.node_addr);
       if (!authentication.ok()) return authentication;
     }
-    if (node->static_meta.is_future &&
-        node->static_meta.node_addr != PeerIpFromContext(context))
-      return {grpc::StatusCode::FAILED_PRECONDITION,
-              "Connection does not match the FUTURE node mapping"};
   }
 
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
@@ -184,7 +214,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     auto node = g_meta_container->GetCranedMetaPtr(request->craned_id());
     if (node && node->static_meta.is_future) {
       auto authentication =
-          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+          AuthenticateFutureNode(context, node->static_meta.node_hostname,
+                                 node->static_meta.node_addr);
       if (!authentication.ok()) return authentication;
     }
   }
@@ -272,7 +303,8 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
     auto node = g_meta_container->GetCranedMetaPtr(request->craned_id());
     if (node && node->static_meta.is_future) {
       auto authentication =
-          AuthenticateFutureNode(context, node->static_meta.node_hostname);
+          AuthenticateFutureNode(context, node->static_meta.node_hostname,
+                                 node->static_meta.node_addr);
       if (!authentication.ok()) return authentication;
     }
   }
