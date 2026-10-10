@@ -194,7 +194,8 @@ bool PmixGrpcServer::Init(const Config& config) {
   int selected_port = 0;
   if (config.UseTls) {
     ServerBuilderAddTcpTlsListeningRandomPort(&builder, listen_addr,
-                                              config.TlsCerts, &selected_port);
+                                              config.TlsCerts, config.CaContent,
+                                              &selected_port);
   } else {
     ServerBuilderAddTcpInsecureListeningRandomPort(&builder, listen_addr,
                                                    &selected_port);
