@@ -899,11 +899,13 @@ void CtldClient::InitGrpcChannel(const std::string& server_address,
     if (crane::GetIpAddrVer(server_address) != -1) {
       m_ctld_channel_ = CreateTcpTlsCustomChannelByIp(
           server_address, g_config.CraneCtldForInternalListenPort,
-          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+          g_config.ListenConf.TlsConfig.TlsCerts,
+          g_config.ListenConf.TlsConfig.CaContent, channel_args);
     } else {
       m_ctld_channel_ = CreateTcpTlsCustomChannelByDnsName(
           server_address, g_config.CraneCtldForInternalListenPort,
-          g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+          g_config.ListenConf.TlsConfig.TlsCerts,
+          g_config.ListenConf.TlsConfig.CaContent, channel_args);
     }
   } else {
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
@@ -1525,11 +1527,13 @@ crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking() {
   if (crane::GetIpAddrVer(server_address) != -1) {
     channel = CreateTcpTlsCustomChannelByIp(
         server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+        g_config.ListenConf.TlsConfig.TlsCerts,
+        g_config.ListenConf.TlsConfig.CaContent, channel_args);
   } else {
     channel = CreateTcpTlsCustomChannelByDnsName(
         server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts, channel_args);
+        g_config.ListenConf.TlsConfig.TlsCerts,
+        g_config.ListenConf.TlsConfig.CaContent, channel_args);
   }
 
   std::unique_ptr<CraneCtldForInternal::Stub> stub =

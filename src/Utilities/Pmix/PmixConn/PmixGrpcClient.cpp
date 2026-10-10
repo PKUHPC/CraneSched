@@ -113,7 +113,8 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   if (m_config_.UseTls) {
     SetTlsTargetNameOverride(&channel_args, hostname->second);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
-        address->second, port, m_config_.TlsCerts, channel_args);
+        address->second, port, m_config_.TlsCerts, m_config_.CaContent,
+        channel_args);
   } else {
     craned->m_channel_ =
         CreateTcpInsecureCustomChannel(address->second, port, channel_args);
