@@ -93,6 +93,16 @@ class CranedMetaContainer final {
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
 
+  crane::grpc::CranedMapFutureNodeReply MapFutureNode(
+      const crane::grpc::CranedMapFutureNodeRequest& request,
+      const std::string& craned_addr);
+
+  crane::grpc::CreateNodesReply CreateNodes(
+      const crane::grpc::CreateNodesRequest& request);
+
+  crane::grpc::DeleteNodesReply DeleteNodes(
+      const crane::grpc::DeleteNodesRequest& request);
+
   CraneExpected<void> ModifyPartitionAcl(
       const std::string& partition_name, bool is_allowed_list,
       std::unordered_set<std::string>&& accounts);
@@ -208,12 +218,23 @@ class CranedMetaContainer final {
   // TODO: Move to Reservation Logical Partition.
   ResvMetaAtomicMap resv_meta_map_;
 
-  // A craned node may belong to multiple partitions.
-  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
-  HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
-      craned_id_part_ids_map_;
+  std::list<PartitionId> GetNodePartitions_(const CranedId& node_id);
+  crane::grpc::DynamicNodeDefinition NodeDefinition_(const CranedMeta& node);
+  std::string ValidateNodeDefinition_(
+      const crane::grpc::DynamicNodeDefinition& definition);
+  void InsertDynamicNode_(const crane::grpc::DynamicNodeDefinition& definition);
+  bool SaveNodeState_(const crane::grpc::NodeStateSnapshot& snapshot);
+  void RestoreNodeState_();
+
+  crane::grpc::NodeStateSnapshot m_node_state_;
 
  private:  // Helper functions
+  // Mark a FUTURE node as mapped, record the craned address and add the
+  // node's resource to its partitions. m_node_lifecycle_mtx_ must be held.
+  void ClaimFutureNode_(const CranedId& craned_id,
+                        const std::string& node_hostname,
+                        const std::string& node_addr);
+
   void LoadPartitionAclFromConfig_(const std::string& part_name,
                                    PartitionGlobalMeta& meta);
 
@@ -225,6 +246,9 @@ class CranedMetaContainer final {
   bool logging_enabled{false};
   absl::Mutex
       m_res_reduce_events_mtx_;  // lock before get resv_meta & craned_meta
+
+  // Serializes node definitions, persisted mappings and node lifecycle changes.
+  absl::Mutex m_node_lifecycle_mtx_;
 };
 
 }  // namespace Ctld

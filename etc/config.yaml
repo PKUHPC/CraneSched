@@ -17,13 +17,22 @@ CraneBaseDir: /var/crane/
 # Tls settings
 TLS:
   Enabled: false
+  # PEM certificate chain: host certificate followed by intermediate CAs.
   InternalCertFilePath: /etc/crane/tls/internal.pem
   InternalKeyFilePath: /etc/crane/tls/internal.key
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
+  # Trusted CA bundle used to verify peer certificates.
   CaFilePath: /etc/crane/tls/ca.pem
   DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
+  # Machine hostnames (gethostname) allowed to claim FUTURE nodes.
+  # Requires TLS; certificates must cover the machine's TLS hostname.
+  # Short hostnames are qualified with DomainSuffix for TLS verification.
+  # Both individual and shared wildcard certificates are supported.
+  # Shared nodes reuse the controller's InternalCertFilePath certificate.
+  # Empty or omitted denies FUTURE mapping.
+  # FutureNodeAllowedHosts: "worker[01-02].crane.local"
 
 # Ctld settings
 # the listening address of control machine
@@ -193,6 +202,17 @@ Nodes:
         #   - nvidia.com/gpu=GPU1
         #   - nvidia.com/gpu=GPU2
         #   - nvidia.com/gpu=GPU3
+
+  # FUTURE placeholder nodes: no real machine is bound at startup. A machine
+  # running `craned -F [feature]` is mapped to an unmapped FUTURE node whose
+  # CPU count and memory are sufficient (and which carries the
+  # given feature, if specified). FUTURE nodes must belong to a partition and
+  # should not configure NodeHostname/NodeAddr.
+  # - name: "future[01-02]"
+  #   cpu: 2
+  #   memory: 2G
+  #   state: FUTURE
+  #   features: [gpu, highmem]
 
 # partition information list
 Partitions:

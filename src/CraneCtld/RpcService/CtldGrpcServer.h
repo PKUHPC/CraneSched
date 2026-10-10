@@ -288,6 +288,11 @@ class CtldForInternalServiceImpl final
       const crane::grpc::CranedTriggerReverseConnRequest* request,
       google::protobuf::Empty* response) override;
 
+  grpc::Status CranedMapFutureNode(
+      grpc::ServerContext* context,
+      const crane::grpc::CranedMapFutureNodeRequest* request,
+      crane::grpc::CranedMapFutureNodeReply* response) override;
+
   grpc::Status CranedRegister(
       grpc::ServerContext* context,
       const crane::grpc::CranedRegisterRequest* request,
@@ -408,6 +413,14 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext* context,
       const crane::grpc::ModifyCranedStateRequest* request,
       crane::grpc::ModifyCranedStateReply* response) override;
+
+  grpc::Status CreateNodes(grpc::ServerContext* context,
+                           const crane::grpc::CreateNodesRequest* request,
+                           crane::grpc::CreateNodesReply* response) override;
+
+  grpc::Status DeleteNodes(grpc::ServerContext* context,
+                           const crane::grpc::DeleteNodesRequest* request,
+                           crane::grpc::DeleteNodesReply* response) override;
 
   grpc::Status ModifyPartitionAcl(
       grpc::ServerContext* context,

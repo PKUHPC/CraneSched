@@ -101,6 +101,13 @@ Nodes:
       - name: gpu
         type: a100
         DeviceFileRegex: /dev/nvidia[0-3]
+
+  # FUTURE placeholder nodes (dynamic nodes)
+  - name: "future[01-02]"
+    cpu: 8
+    memory: 32G
+    state: FUTURE
+    features: [gpu, highmem]
 ```
 
 **Node Parameters:**
@@ -111,6 +118,14 @@ Nodes:
 - **cpu**: Number of CPU cores
 - **memory**: Total memory (supports K, M, G, T suffixes)
 - **gres**: Generic resources like GPUs (optional)
+- **state**: Optional. Only `FUTURE` is supported for now. A FUTURE node is a placeholder with no real machine bound at startup: a machine started with `craned -F [feature]` is mapped to an unmapped FUTURE node whose hardware spec is satisfied by the local hardware (detected CPU count and memory no less than configured, carrying the given feature if specified). FUTURE nodes must belong to a partition and should not configure `NodeHostname`/`NodeAddr` (they are overridden with the real machine's address at mapping time). An unmapped FUTURE node takes part in neither scheduling nor partition resources.
+- **features**: Optional list of node tags, currently used to filter FUTURE node mapping for `craned -F <feature>`
+
+FUTURE mapping requires TLS and an explicit controller `TLS.FutureNodeAllowedHosts` list, for example `"worker[01-02].crane.local"`. Entries are actual machine `gethostname()` values, not placeholder names. Both individual and shared wildcard certificates issued by the trusted CA are supported. Certificate DNS SANs (or the CN when DNS SANs are absent) must cover the machine's TLS hostname; for example, `*.crane.local` covers both `worker01.crane.local` and `worker02.crane.local`. Individual certificate CNs must match the machine hostname or its TLS FQDN. Shared certificates must be the same leaf certificate configured in the controller's `TLS.InternalCertFilePath`; user certificates cannot claim nodes. For short machine hostnames, certificate verification and reverse TLS connections append `TLS.DomainSuffix`; the admission list still uses the original short hostname. Insecure clients, missing certificates, mismatched certificate names and machines outside the list cannot claim or rebind FUTURE nodes. An omitted or empty list denies all FUTURE mappings. This setting is independent of `TLS.AllowedNodes`, which controls frontend certificate signing. Reconnection, registration and heartbeat requests also verify certificate identity and the mapped address. Before upgrading, audit existing `.nodes` bindings created by the unauthenticated implementation; those historical bindings have no authenticated provenance.
+
+Scheduling uses the FUTURE definition's resources; detected host resources only establish that the machine has enough capacity. Definitions in `config.yaml` are loaded when ctld starts. Add nodes at runtime with `ccontrol create node` and specify their resources there; definitions and mappings are persisted in the `.nodes` state file without changing configuration or restarting ctld.
+
+`TLS.FutureNodeAllowedHosts` is still loaded when ctld starts; include planned machines in advance. Creating dynamic nodes does not hot-reload `config.yaml`.
 
 Hostname rules:
 
@@ -223,6 +238,16 @@ TLS:
   DomainSuffix: crane.local
   AllowedNodes: "crane[01-10]"
 ```
+
+`CaFilePath` contains the trusted CA bundle used to verify peer certificates;
+configure it on both the controller and compute nodes. `InternalCertFilePath`
+contains the host certificate followed by its intermediate CA certificates in
+issuer order, and `InternalKeyFilePath` contains the corresponding private key.
+When issuing certificates through Vault, include any required `ca_chain` or
+`issuing_ca` instead of saving only `certificate`. FUTURE nodes can use separate
+host certificates issued by the same trusted CA, with both server and client
+authentication enabled. Deployments using a shared self-signed certificate must
+explicitly include that certificate in the `CaFilePath` trust bundle.
 
 ### Gres Configuration
 

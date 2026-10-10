@@ -128,6 +128,11 @@ struct Config {
     DedicatedResourceInNode dedicated_resource;
 
     NodeTopoInfo node_topo_info;
+
+    // True if this is a FUTURE placeholder node waiting for a craned to be
+    // mapped to it.
+    bool is_future{false};
+    std::vector<std::string> features;
   };
 
   struct Partition {
@@ -154,6 +159,7 @@ struct Config {
       TlsCertificates InternalCerts;
       TlsCertificates ExternalCerts;
       std::unordered_set<std::string> AllowedNodes;
+      std::unordered_set<std::string> FutureNodeAllowedHosts;
       std::string CaFilePath;
       std::string CaContent;
       std::string DomainSuffix;

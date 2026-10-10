@@ -293,6 +293,18 @@ void ParseConfig(int argc, char** argv) {
             g_tls_config.DomainSuffix =
                 tls_config["DomainSuffix"].as<std::string>();
 
+          if (tls_config["FutureNodeAllowedHosts"]) {
+            std::list<std::string> hosts;
+            if (!util::ParseHostList(
+                    tls_config["FutureNodeAllowedHosts"].as<std::string>(),
+                    &hosts)) {
+              CRANE_ERROR("Illegal FUTURE node admission host list.");
+              std::exit(1);
+            }
+            g_tls_config.FutureNodeAllowedHosts.insert(hosts.begin(),
+                                                       hosts.end());
+          }
+
           if (tls_config["AllowedNodes"]) {
             std::string nodes = tls_config["AllowedNodes"].as<std::string>();
             std::list<std::string> name_list;
@@ -594,6 +606,36 @@ void ParseConfig(int argc, char** argv) {
               sockets_val = 1;
             }
             node_ptr->node_topo_info.sockets = sockets_val;
+          }
+
+          if (node["state"]) {
+            std::string state =
+                absl::AsciiStrToUpper(node["state"].as<std::string>());
+            if (state != "FUTURE") {
+              CRANE_ERROR(
+                  "Invalid state '{}' for node '{}'. Only FUTURE is "
+                  "supported.",
+                  node["state"].Scalar(), node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->is_future = true;
+            if (node["NodeHostname"] || node["NodeAddr"])
+              CRANE_WARN(
+                  "NodeHostname/NodeAddr of FUTURE node '{}' will be "
+                  "overridden when a craned is mapped to it.",
+                  node["name"].Scalar());
+          }
+
+          if (node["features"]) {
+            if (!node["features"].IsSequence()) {
+              CRANE_ERROR(
+                  "Illegal features type for node '{}'. It must be a YAML "
+                  "sequence.",
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->features =
+                node["features"].as<std::vector<std::string>>();
           }
 
           DedicatedResourceInNode resourceInNode;
@@ -1166,15 +1208,17 @@ void DestroyCtldGlobalVariables() {
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
-  g_craned_keeper.reset();
-  // Craned keeper will query running job from scheduler
+  // Stop task producers before draining callbacks that still use these objects.
+  if (g_craned_keeper) g_craned_keeper->Shutdown();
+  if (g_job_scheduler) g_job_scheduler->Shutdown();
+  g_thread_pool->wait();
   g_job_scheduler.reset();
+  g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
 
-  g_thread_pool->wait();
   g_thread_pool.reset();
   g_plugin_client.reset();
 
@@ -1292,13 +1336,9 @@ void InitializeCtldGlobalVariables() {
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
   g_craned_keeper->SetCranedConnectedCb(
-      [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {
+      [](const CranedId& craned_id, const google::protobuf::Timestamp& token,
+         const std::shared_ptr<CranedStub>& stub) {
         CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (stub == nullptr) {
-          CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
-          return;
-        }
         stub->ConfigureCraned(craned_id, token);
       });
 

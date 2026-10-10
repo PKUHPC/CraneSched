@@ -72,11 +72,11 @@ void ServerBuilderAddTcpInsecureListeningRandomPort(
 
 // TLS variant of ServerBuilderAddTcpInsecureListeningRandomPort.
 // Binds on a random port with mutual TLS; the actual port is written to
-// *selected_port.  Uses certs.CertContent as both the server certificate and
-// the trust anchor (self-signed peer-to-peer pattern).
+// *selected_port.
 void ServerBuilderAddTcpTlsListeningRandomPort(grpc::ServerBuilder* builder,
                                                const std::string& address,
                                                const TlsCertificates& certs,
+                                               const std::string& ca_content,
                                                int* selected_port);
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
@@ -102,12 +102,14 @@ std::shared_ptr<grpc::Channel> CreateTcpInsecureCustomChannel(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
     const std::string& ip, const std::string& port,
-    const TlsCertificates& certs, const grpc::ChannelArguments& args);
+    const TlsCertificates& certs, const std::string& ca_content,
+    const grpc::ChannelArguments& args);
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByDnsName(
     const std::string& dns_name, const std::string& port,
-    const TlsCertificates& certs);
+    const TlsCertificates& certs, const std::string& ca_content);
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByDnsName(
     const std::string& dns_name, const std::string& port,
-    const TlsCertificates& certs, const grpc::ChannelArguments& args);
+    const TlsCertificates& certs, const std::string& ca_content,
+    const grpc::ChannelArguments& args);

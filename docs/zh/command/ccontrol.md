@@ -435,6 +435,39 @@ ERRO[0000] command execution failed
 
 ### Create 和 Delete 命令
 
+#### 创建和删除动态节点
+
+FUTURE 映射要求启用 TLS，并在控制器配置 `TLS.FutureNodeAllowedHosts`，填写实际计算机器的 `gethostname()` 返回值。支持可信 CA 签发的独立证书和共享通配证书，证书 DNS SAN（缺省时使用 CN）须覆盖机器的 TLS 主机名。独立证书 CN 须为机器 hostname 或其 TLS 完整域名；共享证书须与控制器 `TLS.InternalCertFilePath` 中的叶证书相同，普通用户证书不能用于节点映射。短 hostname 在证书校验和反向 TLS 连接时追加 `TLS.DomainSuffix`，准入名单仍使用原始短 hostname。名单缺省或为空时拒绝全部 FUTURE 映射；此配置独立于用于前端证书签发的 `TLS.AllowedNodes`。重连、注册和心跳也校验证书身份及映射地址。
+
+
+管理员可以在线创建 FUTURE 占位节点，无需修改配置文件或重启控制器：
+
+```bash
+ccontrol create node NodeName=future[01-02] State=FUTURE CPUs=8 RealMemory=32G Partition=CPU Features=compute
+craned -F compute
+ccontrol show node future01
+```
+
+`NodeName`、`State`、`CPUs`、`RealMemory` 和 `Partition` 必填。
+`Partition` 支持逗号分隔的已有分区，`Features` 为可选标签列表；`Sockets` 默认为 1，必须整除 CPU 数。
+`RealMemory` 无单位时按 MiB 解释，也支持 B、K、M、G。
+映射要求 CPU 数、物理内存不低于配置值，feature 匹配不区分大小写。
+本轮仅支持 FUTURE，以及 CPU、内存、socket 和 feature 定义；不支持 CLOUD、EXTERNAL、动态 GRES 或 `-Z` 自注册。
+计算节点会从控制器取得映射节点的资源定义，调度容量以创建时指定的 CPU 和内存为准，宿主机探测值仅用于确认资源足够。本地配置仍需包含控制器连接及运行环境配置；运行时创建的定义会持久化，无需修改 `config.yaml` 或重启 ctld。
+
+创建前查询没有该节点；创建后显示 `State=future`；映射上线后显示 `dynamic_future` 标记。
+节点定义和实际主机映射持久化在控制器数据库路径旁的 `.nodes` 文件，控制器重启后恢复。
+
+```bash
+# 排空节点，等待作业清理及预留结束
+ccontrol update NodeName=future01 State=DRAIN Reason="scale-in"
+ccontrol delete node NodeName=future[01-02]
+```
+
+删除仅允许运行时创建的节点。存在作业分配或资源预留时拒绝删除；批量请求按节点返回成功与失败原因。
+删除成功后节点从查询结果和分区成员中消失，资源统计同步更新。配置文件定义的节点不能通过此命令删除。
+应停止已删除节点的 craned；若需要重新接入，重新创建占位节点并以 `-F` 重启 craned。
+
 #### 创建预留
 
 创建新的资源预留。
