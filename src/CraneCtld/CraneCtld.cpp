@@ -1208,15 +1208,17 @@ void DestroyCtldGlobalVariables() {
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
-  g_craned_keeper.reset();
-  // Craned keeper will query running job from scheduler
+  // Stop task producers before draining callbacks that still use these objects.
+  if (g_craned_keeper) g_craned_keeper->Shutdown();
+  if (g_job_scheduler) g_job_scheduler->Shutdown();
+  g_thread_pool->wait();
   g_job_scheduler.reset();
+  g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
 
-  g_thread_pool->wait();
   g_thread_pool.reset();
   g_plugin_client.reset();
 
@@ -1334,13 +1336,9 @@ void InitializeCtldGlobalVariables() {
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
   g_craned_keeper->SetCranedConnectedCb(
-      [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {
+      [](const CranedId& craned_id, const google::protobuf::Timestamp& token,
+         const std::shared_ptr<CranedStub>& stub) {
         CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (stub == nullptr) {
-          CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
-          return;
-        }
         stub->ConfigureCraned(craned_id, token);
       });
 

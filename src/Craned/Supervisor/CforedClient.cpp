@@ -581,7 +581,8 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
     }
     m_cfored_channel_ = CreateTcpTlsChannelByDnsName(
         cfored_fqdn, kCforedDefaultPort,
-        g_config.CforedListenConf.TlsConfig.TlsCerts);
+        g_config.CforedListenConf.TlsConfig.TlsCerts,
+        g_config.CforedListenConf.TlsConfig.CaContent);
   } else {
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);

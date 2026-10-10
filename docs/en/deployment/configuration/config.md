@@ -235,6 +235,16 @@ TLS:
   AllowedNodes: "crane[01-10]"
 ```
 
+`CaFilePath` contains the trusted CA bundle used to verify peer certificates;
+configure it on both the controller and compute nodes. `InternalCertFilePath`
+contains the host certificate followed by its intermediate CA certificates in
+issuer order, and `InternalKeyFilePath` contains the corresponding private key.
+When issuing certificates through Vault, include any required `ca_chain` or
+`issuing_ca` instead of saving only `certificate`. FUTURE nodes can use separate
+host certificates issued by the same trusted CA, with both server and client
+authentication enabled. Deployments using a shared self-signed certificate must
+explicitly include that certificate in the `CaFilePath` trust bundle.
+
 ### Gres Configuration
 
 > Device resource related configuration

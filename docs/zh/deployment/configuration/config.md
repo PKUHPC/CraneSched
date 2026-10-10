@@ -233,6 +233,13 @@ TLS:
   AllowedNodes: "crane[01-10]"
 ```
 
+`CaFilePath` 是校验对端证书的 CA 信任文件，控制器和计算节点都需配置。
+`InternalCertFilePath` 是本机证书链：先放主机证书，再按签发顺序追加中间 CA
+证书；`InternalKeyFilePath` 配置对应的私钥。使用 Vault 签发证书时，不能只保存
+`certificate` 而遗漏所需的 `ca_chain` 或 `issuing_ca`。
+FUTURE 节点可以使用同一可信 CA 签发的独立主机证书，证书需支持服务端和客户端认证。
+已有共享自签证书的部署需将该证书显式加入 `CaFilePath` 的信任文件。
+
 ### Gres配置
 
 > 设备资源相关配置

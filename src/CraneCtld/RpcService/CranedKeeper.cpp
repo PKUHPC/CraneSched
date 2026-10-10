@@ -70,7 +70,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
         "Resetting token.",
         craned_id, status.error_message());
     absl::MutexLock lock(&m_lock_);
-    m_token_.reset();
+    if (m_token_.has_value() && m_token_.value() == token) m_token_.reset();
   }
 }
 
@@ -602,7 +602,6 @@ void CranedKeeper::Shutdown() {
 
   {
     util::lock_guard l(m_connect_craned_mtx_);
-    for (auto &[craned_id, stub] : m_craned_stubs_) stub->m_channel_.reset();
     m_craned_stubs_.clear();
     m_connected_craned_id_stub_map_.clear();
   }
@@ -631,7 +630,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
     if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
     auto lifecycle_lock = GetLifecycleLock();
-    if (m_cq_closed_ || tag->craned->m_retired_) {
+    auto craned = tag->craned.lock();
+    if (m_cq_closed_ || !craned || craned->m_retired_) {
       m_tag_sync_allocator_->delete_object(tag);
       continue;
     }
@@ -641,8 +641,6 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       // by comparing prev_state and current state,
       // and it is handled in state machines.
       // It's fine to ignore the value of ok.
-
-      auto craned = tag->craned;
 
       CqTag *next_tag = nullptr;
       grpc_connectivity_state new_state = craned->m_channel_->GetState(true);
@@ -661,8 +659,10 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
         if (!m_cq_closed_) {
           // CRANE_TRACE("Registering next tag {} for {}", tag->type,
           //            craned->m_craned_id_);
-          if (CheckNodeTimeoutAndClean(tag)) {
+          if (tag->type == CqTag::kEstablishedCraned &&
+              CheckNodeTimeoutAndClean(craned)) {
             m_tag_sync_allocator_->delete_object(next_tag);
+            m_tag_sync_allocator_->delete_object(tag);
             continue;
           }
 
@@ -750,6 +750,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
           !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
+      craned->UpdateLastActiveTime();
       auto it = m_connecting_craned_set_.find(craned->m_craned_id_);
       CRANE_ASSERT(it != m_connecting_craned_set_.end());
       token = it->second;
@@ -758,11 +759,14 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
     if (m_craned_connected_cb_)
       g_thread_pool->detach_task([this, craned, token]() {
-        auto lifecycle_lock = GetLifecycleLock();
-        if (m_cq_closed_ || craned->m_retired_ ||
-            GetCranedStub(craned->m_craned_id_) != craned)
-          return;
-        m_craned_connected_cb_(craned->m_craned_id_, token);
+        {
+          auto lifecycle_lock = GetLifecycleLock();
+          if (m_cq_closed_ || craned->m_retired_ ||
+              GetCranedStub(craned->m_craned_id_) != craned ||
+              !craned->CheckToken(token))
+            return;
+        }
+        m_craned_connected_cb_(craned->m_craned_id_, token, craned);
       });
 
     // Switch to EstablishedCraned state machine
@@ -899,9 +903,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   return nullptr;
 }
 
-bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
-  if (tag->type != CqTag::kEstablishedCraned) return false;
-  auto craned = tag->craned;
+bool CranedKeeper::CheckNodeTimeoutAndClean(
+    const std::shared_ptr<CranedStub> &craned) {
   if (craned->m_last_active_time_.load(std::memory_order_acquire) +
           std::chrono::seconds(g_config.CtldConf.CranedTimeout) >=
       std::chrono::steady_clock::now()) {
@@ -927,7 +930,6 @@ bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
                      craned->m_craned_id_);
   craned->Fini();
   m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
-  m_tag_sync_allocator_->delete_object(tag);
   return true;
 }
 
@@ -969,7 +971,9 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
 }
 
 void CranedKeeper::SetCranedConnectedCb(
-    std::function<void(CranedId, const RegToken &)> cb) {
+    std::function<void(CranedId, const RegToken &,
+                       const std::shared_ptr<CranedStub> &)>
+        cb) {
   m_craned_connected_cb_ = std::move(cb);
 }
 
@@ -995,7 +999,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
   {
     ReaderLock lock(&m_connect_craned_mtx_);
     auto it = m_connecting_craned_set_.find(craned_id);
-    if (it == m_connecting_craned_set_.end() || it->second != token) return;
+    if (it == m_connecting_craned_set_.end() || it->second != token ||
+        m_craned_stubs_.contains(craned_id))
+      return;
   }
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
@@ -1014,40 +1020,48 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     node_hostname = craned_meta->static_meta.node_hostname;
     is_future = craned_meta->static_meta.is_future;
   }
+  std::string ip_addr = node_addr;
+  if (crane::GetIpAddrVer(node_addr) == -1) {
+    lifecycle_lock.unlock();
+    {
+      util::lock_guard guard(s_craned_id_to_ip_cache_map_mtx);
 
-  std::string ip_addr;
-
-  {
-    util::lock_guard guard(s_craned_id_to_ip_cache_map_mtx);
-
-    auto it = is_future ? s_craned_id_to_ip_cache_map.end()
-                        : s_craned_id_to_ip_cache_map.find(craned_id);
-    if (it != s_craned_id_to_ip_cache_map.end()) {
-      if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
-        ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
+      auto it = is_future ? s_craned_id_to_ip_cache_map.end()
+                          : s_craned_id_to_ip_cache_map.find(craned_id);
+      if (it != s_craned_id_to_ip_cache_map.end()) {
+        if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
+          ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
+        } else {
+          CRANE_ASSERT(std::holds_alternative<ipv6_t>(it->second));
+          ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
+        }
       } else {
-        CRANE_ASSERT(std::holds_alternative<ipv6_t>(it->second));
-        ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
-      }
-    } else {
-      ipv4_t ipv4_addr;
-      ipv6_t ipv6_addr;
-      if (crane::ResolveIpv4FromHostname(node_addr, &ipv4_addr)) {
-        ip_addr = crane::Ipv4ToStr(ipv4_addr);
-        if (!is_future)
-          s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
-      } else if (crane::ResolveIpv6FromHostname(node_addr, &ipv6_addr)) {
-        ip_addr = crane::Ipv6ToStr(ipv6_addr);
-        if (!is_future)
-          s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
-      } else {
-        // Just hostname. It should never happen,
-        // but we add error handling here for robustness.
-        CRANE_ERROR("Unresolved node address: {} for Craned {}", node_addr,
-                    craned_id);
-        ip_addr = node_addr;
+        ipv4_t ipv4_addr;
+        ipv6_t ipv6_addr;
+        if (crane::ResolveIpv4FromHostname(node_addr, &ipv4_addr)) {
+          ip_addr = crane::Ipv4ToStr(ipv4_addr);
+          if (!is_future)
+            s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
+        } else if (crane::ResolveIpv6FromHostname(node_addr, &ipv6_addr)) {
+          ip_addr = crane::Ipv6ToStr(ipv6_addr);
+          if (!is_future)
+            s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
+        } else {
+          // Just hostname. It should never happen,
+          // but we add error handling here for robustness.
+          CRANE_ERROR("Unresolved node address: {} for Craned {}", node_addr,
+                      craned_id);
+        }
       }
     }
+
+    lifecycle_lock.lock();
+    if (m_cq_closed_) return;
+    ReaderLock lock(&m_connect_craned_mtx_);
+    auto it = m_connecting_craned_set_.find(craned_id);
+    if (it == m_connecting_craned_set_.end() || it->second != token ||
+        m_craned_stubs_.contains(craned_id))
+      return;
   }
 
   auto craned = std::make_shared<CranedStub>(this);
@@ -1075,7 +1089,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     SetTlsTargetNameOverride(&channel_args, node_hostname);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
-        g_config.ListenConf.TlsConfig.InternalCerts, channel_args);
+        g_config.ListenConf.TlsConfig.InternalCerts,
+        g_config.ListenConf.TlsConfig.CaContent, channel_args);
   } else
     craned->m_channel_ = CreateTcpInsecureCustomChannel(
         ip_addr, g_config.CranedListenConf.CranedListenPort, channel_args);
@@ -1122,6 +1137,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
     // Use a window to limit the maximum number of connecting craned nodes.
     {
       auto lifecycle_lock = GetLifecycleLock();
+      if (m_cq_closed_) break;
       WriterLock connected_writer_lock(&m_connect_craned_mtx_);
       util::lock_guard guard(m_unavail_craned_set_mtx_);
 
