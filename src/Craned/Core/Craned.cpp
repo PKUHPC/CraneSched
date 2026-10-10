@@ -1281,6 +1281,14 @@ void ParseConfig(int argc, char** argv) {
   if (parsed_args.count("future") > 0) {
     g_config.FutureMode = true;
     g_config.FutureFeature = parsed_args["future"].as<std::string>();
+    const auto& args = parsed_args.unmatched();
+    if (!args.empty()) {
+      if (args.size() != 1 || !g_config.FutureFeature.empty()) {
+        CRANE_ERROR("Invalid FUTURE feature arguments.\n{}", options.help());
+        std::exit(1);
+      }
+      g_config.FutureFeature = args.front();
+    }
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
