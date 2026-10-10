@@ -441,7 +441,7 @@ ERRO[0000] command execution failed
 
 #### Create and Delete Dynamic Nodes
 
-FUTURE mapping requires TLS and an explicit controller `TLS.FutureNodeAllowedHosts` list, for example `"worker[01-02].crane.local"`. Entries are actual machine certificate CNs, not placeholder names, and must exactly match the machine's `gethostname()` value. Each machine must hold its own client certificate and private key issued by the trusted CA; certificate names must also satisfy hostname verification for reverse TLS connections. Insecure clients, missing certificates, mismatched CNs and machines outside the list cannot claim or rebind FUTURE nodes. An omitted or empty list denies all FUTURE mappings. This setting is independent of `TLS.AllowedNodes`, which controls frontend certificate signing. Reconnection, registration and heartbeat requests also verify the bound machine identity. Before upgrading, audit existing `.nodes` bindings created by the unauthenticated implementation; those historical bindings have no authenticated provenance.
+FUTURE mapping requires TLS and an explicit controller `TLS.FutureNodeAllowedHosts` list containing actual machine `gethostname()` values. Both individual and shared wildcard certificates issued by the trusted CA are supported; certificate DNS SANs (or the CN when DNS SANs are absent) must cover the machine's TLS hostname. Individual certificate CNs must match the machine hostname or its TLS FQDN. Shared certificates must be the same leaf certificate configured in the controller's `TLS.InternalCertFilePath`; user certificates cannot claim nodes. For short hostnames, certificate verification and reverse TLS connections append `TLS.DomainSuffix`; the admission list still uses the original short hostname. An omitted or empty list denies all FUTURE mappings. This setting is independent of `TLS.AllowedNodes`, which controls frontend certificate signing. Reconnection, registration and heartbeat requests also verify certificate identity and the mapped address.
 
 
 Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
@@ -455,9 +455,9 @@ ccontrol show node future01
 `NodeName`, `State`, `CPUs`, `RealMemory`, and `Partition` are required.
 `Partition` accepts existing partition names separated by commas. `Features` is an optional tag list.
 `Sockets` defaults to 1 and must divide the CPU count. Memory without a suffix is in MiB; B, K, M, and G are also accepted.
-Mapping requires an equal CPU count, at least the configured memory, and a case-insensitive feature match.
+Mapping requires at least the configured CPU count and memory, and a case-insensitive feature match.
 This version supports FUTURE nodes with CPU, memory, socket, and feature definitions. CLOUD, EXTERNAL, dynamic GRES, and `-Z` registration are not supported.
-The compute daemon receives the mapped resource definition from the controller; its local configuration must still provide the controller connection and runtime settings.
+The compute daemon receives the mapped resource definition from the controller. Scheduling capacity uses the CPU and memory specified at creation, while detected host resources only establish that the machine has enough capacity. Its local configuration must still provide the controller connection and runtime settings. Runtime definitions are persisted without changing `config.yaml` or restarting ctld.
 
 A new node appears as `State=future`; after mapping and registration it carries the `dynamic_future` marker.
 Definitions and actual machine mappings are persisted in a `.nodes` file beside the controller database path and restored on controller restart.
