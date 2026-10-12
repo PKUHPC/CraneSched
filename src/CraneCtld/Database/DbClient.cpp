@@ -509,6 +509,11 @@ bool MongodbClient::InsertRecoveredJob(
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
+  if (!job_doc.view()["deadline"]) {
+    update_doc.append(kvp("$unset", [](sub_document unset) {
+      unset.append(kvp("deadline", ""));
+    }));
+  }
   update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
     set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
   }));
@@ -574,6 +579,11 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
+  if (!job_doc.view()["deadline"]) {
+    update_doc.append(kvp("$unset", [](sub_document unset) {
+      unset.append(kvp("deadline", ""));
+    }));
+  }
   update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
     set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
   }));
@@ -655,6 +665,11 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
       // created if document doesn't exist
       document update_doc;
       update_doc.append(kvp("$set", job_doc));
+      if (!job_doc.view()["deadline"]) {
+        update_doc.append(kvp("$unset", [](sub_document unset) {
+          unset.append(kvp("deadline", ""));
+        }));
+      }
       update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
         set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
       }));
