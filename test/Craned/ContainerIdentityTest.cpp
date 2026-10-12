@@ -4,8 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <utility>
 
-// Include the implementation to exercise its private CRI configuration helper
+// Include the implementation to exercise the actual CRI configuration code
 // without exposing a production interface solely for tests.
 #include "../../src/Craned/Supervisor/TaskManager.cpp"
 
@@ -181,5 +182,71 @@ TYPED_TEST(ContainerIdentityTest, PreservesHostNamespaceRestrictions) {
       SetContainerIdentity_(1500, std::array<gid_t, 1>{1600}, pod, &ctx));
   EXPECT_FALSE(SetContainerIdentity_(0, std::array<gid_t, 1>{0}, pod, &ctx));
 }
+
+class ContainerMountIdentityTest
+    : public ::testing::TestWithParam<std::pair<uid_t, gid_t>> {
+ protected:
+  static CraneErrCode ApplyMountMappings(const PasswordEntry& pwd, gid_t egid,
+                                         cri::api::ContainerConfig* config) {
+    ContainerInstance container(nullptr, 0);
+    return container.ApplyIdMappedMounts_(pwd, egid, config, false);
+  }
+};
+
+TEST_P(ContainerMountIdentityTest, MapsHostOwnershipToContainerIdentity) {
+  PasswordEntry pwd(getuid());
+  ASSERT_TRUE(pwd.Valid());
+  // Model newgrp: the effective group differs from the NSS primary group.
+  const gid_t egid = pwd.Gid() == 2000 ? 2001 : 2000;
+  const auto [run_as_uid, run_as_gid] = GetParam();
+  cri::api::ContainerConfig config;
+  auto* ctx = config.mutable_linux()->mutable_security_context();
+  AddMappings(ctx);
+  ctx->mutable_run_as_user()->set_value(run_as_uid);
+  ctx->mutable_run_as_group()->set_value(run_as_gid);
+
+  auto* input = config.add_mounts();
+  input->set_host_path("/host/input");
+  input->set_container_path("/input");
+  input->set_readonly(true);
+  input->set_propagation(cri::api::PROPAGATION_PRIVATE);
+  auto* output = config.add_mounts();
+  output->set_host_path("/host/output");
+  output->set_container_path("/output");
+  output->set_propagation(cri::api::PROPAGATION_BIDIRECTIONAL);
+  const auto original_config = config.SerializeAsString();
+
+  ASSERT_EQ(ApplyMountMappings(pwd, egid, &config), CraneErrCode::SUCCESS);
+  ASSERT_EQ(config.mounts_size(), 2);
+  for (const auto& mount : config.mounts()) {
+    SCOPED_TRACE(mount.container_path());
+    ASSERT_EQ(mount.uidmappings_size(), 1);
+    ASSERT_EQ(mount.gidmappings_size(), 1);
+    // CRI mount container_id holds the source file's host ownership;
+    // host_id holds the kernel ID visible as runAs in the user namespace.
+    EXPECT_EQ(mount.uidmappings(0).container_id(), pwd.Uid());
+    EXPECT_EQ(mount.uidmappings(0).host_id(), 100000 + run_as_uid);
+    EXPECT_EQ(mount.uidmappings(0).length(), 1);
+    EXPECT_EQ(mount.gidmappings(0).container_id(), egid);
+    EXPECT_EQ(mount.gidmappings(0).host_id(), 200000 + run_as_gid);
+    EXPECT_EQ(mount.gidmappings(0).length(), 1);
+  }
+
+  // Only mount mappings change; namespace mappings, runAs, paths and flags
+  // must remain intact.
+  for (auto& mount : *config.mutable_mounts()) {
+    mount.clear_uidmappings();
+    mount.clear_gidmappings();
+  }
+  EXPECT_EQ(config.SerializeAsString(), original_config);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Userns, ContainerMountIdentityTest,
+    ::testing::Values(std::pair<uid_t, gid_t>{0, 0},
+                      std::pair<uid_t, gid_t>{123, 456}),
+    [](const ::testing::TestParamInfo<std::pair<uid_t, gid_t>>& info) {
+      return info.param.first == 0 ? "Root" : "ExplicitUser";
+    });
 
 }  // namespace Craned::Supervisor

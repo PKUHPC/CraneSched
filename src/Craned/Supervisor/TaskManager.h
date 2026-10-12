@@ -379,6 +379,8 @@ class PodInstance : public ITaskInstance {
 };
 
 class ContainerInstance : public ITaskInstance {
+  friend class ContainerMountIdentityTest;
+
  public:
   explicit ContainerInstance(StepInstance* step_spec, task_id_t task_id)
       : ITaskInstance(step_spec, task_id) {}
