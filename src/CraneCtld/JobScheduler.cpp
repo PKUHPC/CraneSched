@@ -8959,7 +8959,8 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
 
 CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   // The parent Pod configuration first becomes available during submission
-  // here. Check the submitted groups before scheduling or node reconciliation.
+  // here. Apply the inherited identity before scheduling or node
+  // reconciliation.
   if (step->type == crane::grpc::JobType::Container) {
     const auto* job = step->job;
     if (job->uid != step->uid)
@@ -8967,6 +8968,16 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
     if (!job->IsContainer() || !job->pod_meta)
       return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
     const auto& pod = *job->pod_meta;
+    if (pod.userns) {
+      if (job->gids.empty())
+        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+
+      // The client does not have the parent Pod metadata. Inherit the parent's
+      // effective group for its user namespace.
+      step->gids.assign(1, job->gids.front());
+      step->MutableStepToCtld()->mutable_gids()->Assign(step->gids.begin(),
+                                                        step->gids.end());
+    }
     auto valid = util::os::ValidateContainerIdentity(
         step->uid, step->gids, pod.userns, pod.run_as_user, pod.run_as_group);
     if (!valid) {

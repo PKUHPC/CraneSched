@@ -185,7 +185,7 @@ These options configure container runtime parameters:
 
 **--userns**
 
-:   Enable user namespace; the default follows `Container.UserNsEnabledByDefault`. Supports `--user` within the namespace mapping, defaulting to `0:0`. Submissions with supplementary groups other than the EGID are rejected.
+:   Enable user namespace; the default follows `Container.UserNsEnabledByDefault`. Supports `--user` within the namespace mapping, defaulting to `0:0`. The job uses only the effective GID and omits supplementary groups. Container steps inherit their parent job's effective GID.
 
 **--network=&lt;mode&gt;**
 

@@ -104,7 +104,7 @@ Container-related options are used to create Pod jobs that support container exe
 - **--pod-name string**: Pod name (defaults to job name)
 - **--pod-port string**: Pod port mapping, format: `HOST:CONTAINER` or `PORT`. Can be used multiple times
 - **--pod-user string**: Pod UID[:GID]: mapped container IDs with userns (default `0:0`); otherwise submitter UID/EGID, preserving node-validated supplementary groups
-- **--pod-userns**: Enable Pod user namespace (default follows `Container.UserNsEnabledByDefault`); supports `--pod-user` within the namespace mapping; supplementary groups other than the EGID cause submission to fail
+- **--pod-userns**: Enable Pod user namespace (default follows `Container.UserNsEnabledByDefault`); supports `--pod-user` within the namespace mapping; the job uses only the effective GID and omits supplementary groups
 - **--pod-host-network**: Use host network namespace (default: `false`)
 - **--pod-dns**: Set DNS servers for the Pod (IPv4 only). User-provided DNS servers are prepended (higher priority) before system defaults (default: `Container.Dns.Servers` in config file)
 

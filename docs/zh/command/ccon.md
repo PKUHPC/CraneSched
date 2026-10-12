@@ -185,7 +185,7 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 
 **--userns**
 
-:   启用用户命名空间，默认值由 `Container.UserNsEnabledByDefault` 决定。支持用 `--user` 指定映射范围内的身份，默认 `0:0`；提交身份存在不同于 EGID 的补充组时拒绝提交。
+:   启用用户命名空间，默认值由 `Container.UserNsEnabledByDefault` 决定。支持用 `--user` 指定映射范围内的身份，默认 `0:0`；作业仅使用有效 EGID，不携带补充组。容器子步骤继承父作业的有效 EGID。
 
 **--network=&lt;mode&gt;**
 

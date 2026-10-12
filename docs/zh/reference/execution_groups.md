@@ -30,18 +30,19 @@ gids[1:] = supplementary GID
 - **未启用 user namespace**：容器以提交者的 UID、有效 GID 和节点校验后的补充组启动。
   显式指定的 UID/GID 必须与提交者 UID/EGID 一致，root 提交者也遵循此规则。
 - **启用 user namespace**：默认容器身份为 `0:0`，可用 `--user` / `--pod-user`
-  指定节点映射范围内的 UID/GID。提交组列表中只要存在不同于
-  EGID 的组，就拒绝提交，不会静默丢弃；重复的 EGID 不算额外补充组。
+  指定节点映射范围内的 UID/GID。作业只使用提交者的有效 EGID，不携带补充组。
+  属于多个宿主机组的用户仍可提交 userns 作业，但作业不保留补充组权限。
   容器 UID/GID 无须存在于宿主机 NSS。
 
 只指定 UID 时，省略的 GID 使用该模式的默认值：userns 为 0，非 userns 为提交者 EGID。
 两个模式均设置 CRI `SupplementalGroupsPolicy=Strict`，避免镜像的
 `/etc/group` 自动追加组；容器运行时须支持此策略。
 
-独立容器作业在前端取得提交身份、解析脚本和命令行中的 userns 选项后立即校验。
-容器子步骤继承父作业的 Pod 设置，在调度端取得父作业后校验。
-调度端和执行节点均有校验，执行节点在 NSS 组交集处理前拒绝 userns 的额外组，
-避免不支持的组被交集处理掩盖。
+独立容器作业在前端取得提交身份、确定脚本和命令行中的最终 userns 选项后，
+仅保留有效 EGID，再校验身份。容器子步骤继承父作业的 Pod 设置；启用 userns 时，
+调度端还会在校验前将子步骤的组列表替换为父作业的有效 EGID。
+即使提交子步骤的进程仍带有补充组，或其 EGID 与父作业不同，也按父作业身份执行。
+调度端和执行节点继续校验 userns 仅使用单个有效组的限制。
 
 userns 的 UID/GID mapping 使用该账户现有的 SubUID/SubGID 区间；SubGID 自动分配
 仍以账户 NSS 主 GID 选择区间，不因某次提交的 EGID 改变而重新分配。

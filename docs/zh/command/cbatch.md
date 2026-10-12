@@ -103,7 +103,7 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE TIME    TIMELIMIT NODES 
 - **--pod-name string**: Pod 名称（默认使用作业名）
 - **--pod-port string**: Pod 端口映射，格式：`HOST:CONTAINER` 或 `PORT`。可多次使用
 - **--pod-user string**: 指定 Pod UID[:GID]；启用 userns 时允许映射范围内的容器 ID（默认 `0:0`），关闭时仅允许提交者 UID/EGID，并保留节点校验后的补充组
-- **--pod-userns**: 启用 Pod 用户命名空间（默认值由 `Container.UserNsEnabledByDefault` 决定）；支持用 `--pod-user` 指定映射范围内的身份，存在不同于 EGID 的补充组时拒绝提交
+- **--pod-userns**: 启用 Pod 用户命名空间（默认值由 `Container.UserNsEnabledByDefault` 决定）；支持用 `--pod-user` 指定映射范围内的身份，作业仅使用有效 EGID，不携带补充组
 - **--pod-host-network**: 使用宿主机网络命名空间（默认：`false`）
 - **--pod-dns**: 为 Pod 设置 DNS 服务器（仅支持 IPv4）。指定的 DNS server 会被添加到系统默认 DNS 之前（优先级更高，默认使用配置文件 `Container.Dns.Servers`）
 

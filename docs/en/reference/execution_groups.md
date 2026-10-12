@@ -39,21 +39,24 @@ or resolves the container UID through host NSS.
 - **With a user namespace:** the default container identity is `0:0`;
   `--user` / `--pod-user` may select any UID/GID covered by the node's namespace
   mapping.
-  Submission fails if any requested group differs from the EGID; groups are
-  never silently discarded to enable userns. Repeated EGIDs are not extra
-  groups. Container IDs do not have to exist in host NSS.
+  The job uses only the submitter's effective GID; supplementary groups are
+  omitted. Users belonging to multiple host groups can submit userns jobs,
+  but those jobs do not retain supplementary-group permissions.
+  Container IDs do not have to exist in host NSS.
 
 A UID without a GID keeps the mode's default GID: 0 with userns, or the
 submitter's EGID without userns. Both modes set CRI
 `SupplementalGroupsPolicy=Strict` to prevent image-defined groups from being
 added. The container runtime must support this policy.
 
-For standalone jobs, the FrontEnd validates identity as soon as submission
-credentials and the userns options from the script and CLI are available.
-Container steps inherit their parent job's Pod configuration and are checked
-when the controller obtains the parent job. The controller and execution
-nodes also validate identity; nodes reject extra userns groups before NSS
-intersection can hide unsupported groups.
+For standalone jobs, the FrontEnd keeps only the effective GID for userns and
+validates identity once submission credentials and the final userns options
+from the script and CLI are available. Container steps inherit their parent
+job's Pod configuration; for userns, the controller also replaces their group
+list with the parent job's effective GID before validation. This applies when
+the submitting process still has supplementary groups or a different EGID.
+The controller and execution nodes retain validation of the single-group
+userns restriction.
 
 Userns UID/GID mappings use the account's existing SubUID/SubGID ranges.
 Managed SubGID allocation still selects the range using the account's NSS
