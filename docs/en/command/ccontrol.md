@@ -4,6 +4,29 @@
 
 ccontrol provides SQL-style syntax for managing nodes, partitions, jobs, and reservations in a CraneSched cluster. The tool supports operations such as viewing status, updating configurations, holding/releasing jobs, and creating/deleting reservations.
 
+## Job Query Visibility
+
+Job and step summaries (state, resources, times, and nodes) remain public.
+Command lines, environments, working directories, extra attributes, and container
+metadata are returned only to authenticated owners or global `Operator/Admin/Root`
+roles. Sharing an account or being a coordinator does not grant private-detail
+access. Step details require access to both the parent job and the step. Container
+image passwords are never returned, including to owners and administrators; the
+original execution and persisted values remain unchanged.
+
+Restricted text fields display `<restricted>` or are omitted. JSON retains field
+types, using empty values or omitted messages and a `query_visibility` value of
+`PUBLIC` or `DETAILS`. User/Job ID filters and output formats do not grant access.
+The same rules apply to `cacct`, `cqueue`, `ccon`, and their Slurm wrappers.
+
+Non-TLS connections cannot authenticate a caller UID, so they receive public
+summaries even for an owner or root. `ccon logs/inspect/inspectp` and updates that
+need the original extra attributes fail explicitly when details are restricted.
+Use matching frontend and backend releases; this feature needs no database migration.
+
+`show config` still displays the local public configuration without an administrator
+check. Configuration permissions and display of TLS file paths are unchanged.
+
 ## Command Structure
 
 ```
