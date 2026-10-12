@@ -138,11 +138,10 @@ TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   expected.clear_pod_meta();
   expected.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   for (auto& step : *expected.mutable_step_info_list()) {
-    step.set_is_container(step.has_container_meta());
     step.clear_cmd_line();
     step.clear_cwd();
     step.clear_extra_attr();
-    step.clear_container_meta();
+    step.mutable_container_meta()->Clear();
     step.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   }
   const auto result = ProjectJobForQuery(source, 1002, false);
@@ -155,7 +154,6 @@ TEST(JobQuery, OwnerAndAdministratorRetainDetailsExceptPassword) {
   const auto source = MakeJob();
   auto expected = source;
   expected.set_query_visibility(QUERY_VISIBILITY_DETAILS);
-  expected.mutable_step_info_list(0)->set_is_container(true);
   expected.mutable_step_info_list(0)->set_query_visibility(
       QUERY_VISIBILITY_DETAILS);
   expected.mutable_step_info_list(0)
@@ -214,6 +212,7 @@ TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   AddUnknown(source.mutable_dependency_status()->mutable_pending(0));
   AddUnknown(source.mutable_dependency_status()->mutable_ready_time());
   AddUnknown(source.mutable_step_info_list(0));
+  AddUnknown(source.mutable_step_info_list(0)->mutable_container_meta());
   const auto before = source;
   const auto public_view = ProjectJobForQuery(source, 1002, false);
   EXPECT_EQ(public_view.SerializeAsString().find(kPrivate), std::string::npos);
@@ -250,9 +249,12 @@ TEST(JobQuery, ContainerKindSurvivesRedactionWithoutIncludingHostScripts) {
       if (!has_container) step->clear_container_meta();
       for (const auto uid : {1001U, 1002U}) {
         const auto result = ProjectJobForQuery(source, uid, false);
-        EXPECT_EQ(result.step_info_list(0).is_container(), has_container);
+        JobInfo parsed;
+        ASSERT_TRUE(parsed.ParseFromString(result.SerializeAsString()));
+        EXPECT_EQ(parsed.step_info_list(0).has_container_meta(), has_container);
         if (uid == 1002)
-          EXPECT_FALSE(result.step_info_list(0).has_container_meta());
+          EXPECT_EQ(parsed.step_info_list(0).container_meta().ByteSizeLong(),
+                    0);
       }
     }
   }
@@ -446,8 +448,7 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "execution_node",
                                                      "allocated_res_view",
                                                      "deadline_time",
-                                                     "query_visibility",
-                                                     "is_container"});
+                                                     "query_visibility"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});
   ExpectFields(crane::grpc::GresMap::descriptor(), {"name_gres_map"});
