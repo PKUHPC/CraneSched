@@ -225,3 +225,5 @@ Vault:
   Password: "123456"
   Tls: false # Set to true when Vault uses TLS; recommended for production environments
 ```
+
+`CraneCtld` logs in to Vault with the userpass credentials above. The resulting token has a limited lifetime (Vault's default is 768 hours). `CraneCtld` renews the token in the background and logs in again when the token reaches the `max_lease_ttl` of the userpass mount or is revoked, so no restart is needed. If `permission denied` / `invalid token` errors keep appearing in the log, check that the user's password and policies in Vault are still valid.

@@ -1177,6 +1177,8 @@ void DestroyCtldGlobalVariables() {
   g_thread_pool->wait();
   g_thread_pool.reset();
   g_plugin_client.reset();
+  // Stops the Vault token maintenance thread.
+  g_vault_client.reset();
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
     if (!util::os::DeleteFile(g_config.KeepalivedConfig.CraneCtldAliveFile))
