@@ -18,6 +18,8 @@
 
 #include "CranedKeeper.h"
 
+#include <openssl/rand.h>
+
 #include <chrono>
 
 #include "JobScheduler.h"
@@ -51,11 +53,29 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
                      ProtoTimestampToString(token));
 
   crane::grpc::ConfigureCranedRequest request;
-  request.set_ok(true);
-  *request.mutable_token() = token;
-  crane::FillRuntimeTraceConfigProto(request.mutable_trace_config());
-
-  g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
+  {
+    auto lifecycle_lock = m_craned_keeper_->GetLifecycleLock();
+    if (m_retired_ ||
+        m_craned_keeper_->GetCranedStub(craned_id).get() != this ||
+        !CheckToken(token))
+      return;
+    request.set_ok(true);
+    *request.mutable_token() = token;
+    {
+      absl::MutexLock lock(&m_lock_);
+      request.set_session_id(m_session_id_);
+    }
+    bool is_future;
+    {
+      auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+      is_future = node && node->static_meta.is_future;
+    }
+    if (is_future)
+      *request.mutable_definition() =
+          g_meta_container->GetNodeDefinition(craned_id);
+    crane::FillRuntimeTraceConfigProto(request.mutable_trace_config());
+    g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
+  }
 
   ClientContext context;
   google::protobuf::Empty reply;
@@ -66,11 +86,8 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(
         g_runtime_status.conn_logger,
-        "ConfigureCraned RPC for Node {} returned with status not ok: {}. "
-        "Resetting token.",
+        "ConfigureCraned RPC for Node {} returned with status not ok: {}.",
         craned_id, status.error_message());
-    absl::MutexLock lock(&m_lock_);
-    if (m_token_.has_value() && m_token_.value() == token) m_token_.reset();
   }
 }
 
@@ -753,7 +770,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       craned->UpdateLastActiveTime();
       auto it = m_connecting_craned_set_.find(craned->m_craned_id_);
       CRANE_ASSERT(it != m_connecting_craned_set_.end());
-      token = it->second;
+      token = it->second.token;
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
@@ -981,25 +998,59 @@ void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
   m_craned_disconnected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
+bool CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
                                          const RegToken &token) {
   auto lifecycle_lock = GetLifecycleLock();
-  if (m_cq_closed_) return;
+  if (m_cq_closed_) return false;
+
+  {
+    ReaderLock lock(&m_connect_craned_mtx_);
+    auto connecting = m_connecting_craned_set_.find(crane_id);
+    if (connecting != m_connecting_craned_set_.end() &&
+        connecting->second.token == token)
+      return true;
+    auto connected = m_connected_craned_id_stub_map_.find(crane_id);
+    if (connected != m_connected_craned_id_stub_map_.end() &&
+        !connected->second->m_disconnected_ &&
+        connected->second->CheckToken(token))
+      return true;
+  }
+  {
+    util::lock_guard guard(m_unavail_craned_set_mtx_);
+    auto pending = m_unavail_craned_set_.find(crane_id);
+    if (pending != m_unavail_craned_set_.end() &&
+        pending->second.token == token)
+      return true;
+  }
+
+  std::string session_id(16, '\0');
+  if (RAND_bytes(reinterpret_cast<unsigned char *>(session_id.data()),
+                 session_id.size()) != 1) {
+    CRANE_ERROR("Failed to generate session for craned {}.", crane_id);
+    return false;
+  }
+  RetireCraned(crane_id);
+  if (g_meta_container->CheckCranedOnline(crane_id))
+    g_meta_container->CranedDown(crane_id);
 
   CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
               ProtoTimestampToString(token));
   util::lock_guard guard(m_unavail_craned_set_mtx_);
-  m_unavail_craned_set_.emplace(crane_id, token);
+  m_unavail_craned_set_.emplace(crane_id,
+                                Session{token, std::move(session_id)});
+  return true;
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
-                                      RegToken token) {
+                                      Session session) {
+  const auto &token = session.token;
   auto lifecycle_lock = GetLifecycleLock();
   if (m_cq_closed_) return;
   {
     ReaderLock lock(&m_connect_craned_mtx_);
     auto it = m_connecting_craned_set_.find(craned_id);
-    if (it == m_connecting_craned_set_.end() || it->second != token ||
+    if (it == m_connecting_craned_set_.end() ||
+        it->second.session_id != session.session_id ||
         m_craned_stubs_.contains(craned_id))
       return;
   }
@@ -1059,14 +1110,15 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     if (m_cq_closed_) return;
     ReaderLock lock(&m_connect_craned_mtx_);
     auto it = m_connecting_craned_set_.find(craned_id);
-    if (it == m_connecting_craned_set_.end() || it->second != token ||
+    if (it == m_connecting_craned_set_.end() ||
+        it->second.session_id != session.session_id ||
         m_craned_stubs_.contains(craned_id))
       return;
   }
 
   auto craned = std::make_shared<CranedStub>(this);
   m_craned_stubs_.emplace(craned_id, craned);
-  craned->SetRegToken(token);
+  craned->SetSession(token, session.session_id);
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -1154,15 +1206,16 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
             !m_craned_stubs_.contains(it->first)) {
           m_connecting_craned_set_.emplace(*it);
           g_thread_pool->detach_task(
-              [this, craned_id = it->first, token = it->second] {
-                ConnectCranedNode_(craned_id, token);
+              [this, craned_id = it->first, session = it->second] {
+                ConnectCranedNode_(craned_id, session);
               });
           fetch_num--;
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Craned {} is already connecting or connected, "
                              "drop new connection request. Token {}.",
-                             it->first, ProtoTimestampToString(it->second));
+                             it->first,
+                             ProtoTimestampToString(it->second.token));
         }
         it = m_unavail_craned_set_.erase(it);
       }

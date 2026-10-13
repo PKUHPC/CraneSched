@@ -288,11 +288,6 @@ class CtldForInternalServiceImpl final
       const crane::grpc::CranedTriggerReverseConnRequest* request,
       google::protobuf::Empty* response) override;
 
-  grpc::Status CranedMapFutureNode(
-      grpc::ServerContext* context,
-      const crane::grpc::CranedMapFutureNodeRequest* request,
-      crane::grpc::CranedMapFutureNodeReply* response) override;
-
   grpc::Status CranedRegister(
       grpc::ServerContext* context,
       const crane::grpc::CranedRegisterRequest* request,

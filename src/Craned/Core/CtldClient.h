@@ -42,6 +42,16 @@ class CtldClientStateMachine {
   CtldClientStateMachine& operator=(CtldClientStateMachine&&) = delete;
   void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
 
+  struct Session {
+    CranedId craned_id;
+    RegToken token;
+    std::string session_id;
+    std::shared_ptr<const ResourceInNodeV3> resource;
+    NodeTopoInfo node_topo_info;
+  };
+
+  Session GetSession();
+
   struct ConfigureArg {
     crane::grpc::ConfigureCranedRequest req;
   };
@@ -60,7 +70,7 @@ class CtldClientStateMachine {
   }
 
   struct RegisterArg {
-    RegToken token;
+    Session session;
     std::set<job_id_t> lost_jobs;
     std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps;
   };
@@ -72,13 +82,13 @@ class CtldClientStateMachine {
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
   bool EvConfigurationDone(
-      const RegToken& token, std::optional<std::set<job_id_t>> lost_jobs,
+      const RegToken& token, const std::string& session_id,
+      std::optional<std::set<job_id_t>> lost_jobs,
       std::optional<std::unordered_map<job_id_t, std::set<step_id_t>>>
           lost_steps);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply,
-                          const RegToken& token);
-  void EvPingFailed();
-  void EvPingSuccess();
+                          const Session& session);
+  bool EvPingReply(bool success, const std::string& session_id);
 
   // Grpc Channel events
   void EvGrpcConnected();
@@ -142,6 +152,9 @@ class CtldClientStateMachine {
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
 
   absl::Mutex m_mtx_;
+  // Job callbacks can read the session while holding job locks.
+  absl::Mutex m_session_mtx_;
+  Session m_session_ ABSL_GUARDED_BY(m_session_mtx_);
   std::atomic_bool m_stopping_{false};
 
   std::thread m_uvw_thread_;
@@ -152,11 +165,6 @@ class CtldClientStateMachine {
 
   std::shared_ptr<spdlog::logger> m_logger_;
 };
-
-// Used by -F/--future mode before the node identity is determined: probe
-// local hardware and block until CraneCtld maps this craned to a FUTURE
-// placeholder node. Returns its identity and configured resources.
-crane::grpc::CranedMapFutureNodeReply MapToFutureNodeBlocking();
 
 class CtldClient {
  public:
@@ -169,8 +177,6 @@ class CtldClient {
 
   CtldClient& operator=(CtldClient const&) = delete;
   CtldClient& operator=(CtldClient&&) = delete;
-
-  void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
   void Init();
 
@@ -220,13 +226,12 @@ class CtldClient {
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
 
-  [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
-
  private:
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(
-      RegToken const& token, std::set<job_id_t> const& lost_jobs,
+      CtldClientStateMachine::Session const& session,
+      std::set<job_id_t> const& lost_jobs,
       std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps);
 
   void AsyncSendThread_();
@@ -239,6 +244,9 @@ class CtldClient {
 
   void NodeHealthCheck_();
 
+  void UpdateNodeDrainState_(const CtldClientStateMachine::Session& session,
+                             bool is_drain, const std::string& reason);
+
   absl::Mutex m_step_status_change_mtx_;
 
   std::list<StepStatusChangeQueueElem> m_step_status_change_list_
@@ -250,8 +258,6 @@ class CtldClient {
   std::shared_ptr<Channel> m_ctld_channel_;
 
   std::unique_ptr<CraneCtldForInternal::Stub> m_stub_;
-
-  CranedId m_craned_id_;
 
   std::atomic<bool> m_grpc_has_initialized_;
   std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;
