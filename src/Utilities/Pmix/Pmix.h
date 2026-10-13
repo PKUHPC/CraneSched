@@ -99,6 +99,8 @@ class PmixServer {
 
   PmixStepInfo m_pmix_step_info_;
 
+  bool m_enable_slurm_compatible_env_{false};
+
   std::chrono::seconds m_timeout_{5};
 
   std::unique_ptr<CranedClient> m_craned_client_;
