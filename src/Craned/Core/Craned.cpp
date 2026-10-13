@@ -1311,29 +1311,12 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  if (g_config.FutureMode) {
-    // The node identity is assigned by CraneCtld: block until this craned is
-    // mapped to an unmapped FUTURE node matching the local hardware spec.
-    auto mapping = Craned::MapToFutureNodeBlocking();
-    g_config.CranedIdOfThisNode = mapping.craned_id();
-    const auto& definition = mapping.definition();
-    if (definition.name() != mapping.craned_id() || definition.cpu() == 0 ||
-        definition.memory_bytes() == 0 || definition.sockets() == 0 ||
-        definition.partitions().empty()) {
-      CRANE_ERROR("CraneCtld returned an invalid FUTURE node definition.");
-      std::exit(1);
-    }
-    auto resource = std::make_shared<ResourceInNodeV3>();
-    resource->GetCpuSet().cpu_count = cpu_t(definition.cpu());
-    for (uint32_t i = 0; i < definition.cpu(); ++i)
-      resource->GetCpuSet().core_ids.insert(i);
-    resource->SetMemoryBytes(definition.memory_bytes());
-    resource->SetMemorySwBytes(definition.memory_bytes());
-    g_config.CranedRes[g_config.CranedIdOfThisNode] = std::move(resource);
-    node_topologies[g_config.CranedIdOfThisNode].sockets = definition.sockets();
-    for (const auto& partition : definition.partitions())
-      g_config.Partitions[partition].nodes.insert(g_config.CranedIdOfThisNode);
-  } else {
+  if (g_config.FutureMode && !g_config.ListenConf.TlsConfig.Enabled) {
+    CRANE_ERROR("FUTURE node registration requires TLS.Enabled=true.");
+    std::exit(1);
+  }
+
+  if (!g_config.FutureMode) {
     const std::string short_hostname = util::ShortHostname(g_config.Hostname);
     auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);
     if (craned_id_it == g_config.NodeHostnameToCranedId.end() &&
@@ -1348,109 +1331,110 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
     g_config.CranedIdOfThisNode = craned_id_it->second;
+
+    CRANE_INFO("Found this machine {} as CranedId {} in Nodes",
+               g_config.Hostname, g_config.CranedIdOfThisNode);
+    g_config.node_topo_info = node_topologies.at(g_config.CranedIdOfThisNode);
+    // get this node device info
+    // Todo: Auto detect device
+    {
+      auto node_res = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
+      auto& devices = each_node_device[g_config.CranedIdOfThisNode];
+      for (auto& dev_arg : devices) {
+        auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
+            dev_arg;
+        auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
+        if (env_injector_enum == InvalidInjector) {
+          CRANE_ERROR("Invalid injector type:{} for device {}.",
+                      env_injector.value_or("EmptyVal"), path_vec);
+          std::exit(1);
+        }
+
+        std::unique_ptr dev = DeviceManager::ConstructDevice(
+            name, type, path_vec, env_injector_enum, cdi_name, cni_pipeline);
+        if (!dev->Init()) {
+          CRANE_ERROR("Access Device {} failed.",
+                      static_cast<std::string>(*dev));
+          std::exit(1);
+        }
+
+        dev->slot_id = dev->device_file_metas.front().path;
+        node_res->GetGres().name_type_slots_map[dev->name][dev->type].emplace(
+            dev->slot_id);
+
+        g_this_node_device[dev->slot_id] = std::move(dev);
+      }
+      each_node_device.clear();
+
+      // Validate CDI consistency: for each (name, type), either ALL slots
+      // have CDI names or NONE do. Partial CDI is a config error.
+      // key: (name, type) -> {has_cdi_count, missing_cdi_count, example_slot}
+      std::map<std::pair<std::string, std::string>,
+               std::tuple<size_t, size_t, std::string>>
+          cdi_consistency;
+      for (const auto& [slot_id, dev] : g_this_node_device) {
+        auto& [has_cnt, miss_cnt, example] =
+            cdi_consistency[{dev->name, dev->type}];
+        if (dev->cdi_name.has_value()) {
+          ++has_cnt;
+        } else {
+          ++miss_cnt;
+          if (example.empty()) example = slot_id;
+        }
+      }
+      for (const auto& [name_type, counts] : cdi_consistency) {
+        const auto& [has_cnt, miss_cnt, example] = counts;
+        if (has_cnt > 0 && miss_cnt > 0) {
+          CRANE_ERROR(
+              "GRES {}:{} has inconsistent CDI configuration: {} slot(s) have "
+              "CDI names but {} slot(s) do not (e.g. '{}'). "
+              "When CDI is configured for a GRES name/type, ALL devices of "
+              "that name/type must have CDI names.",
+              name_type.first, name_type.second, has_cnt, miss_cnt, example);
+          std::exit(1);
+        }
+      }
+
+      // Validate DeviceCniPipeline requires CDI: if a device has cni_pipeline
+      // set, it must also have a valid CDI name (to extract the device
+      // identifier). Check at startup to fail fast.
+      for (const auto& [slot_id, dev] : g_this_node_device) {
+        if (!dev->cni_pipeline.has_value()) continue;
+        if (!dev->cdi_name.has_value()) {
+          CRANE_ERROR(
+              "GRES {}:{} (slot '{}') has DeviceCniPipeline '{}' set but no "
+              "CDI name configured. DeviceCniPipeline requires CDI to extract "
+              "device identifier.",
+              dev->name, dev->type, slot_id, dev->cni_pipeline.value());
+          std::exit(1);
+        }
+        auto extracted =
+            DeviceManager::ExtractCdiDeviceName(dev->cdi_name.value());
+        if (!extracted.has_value()) {
+          CRANE_ERROR("GRES {}:{} (slot '{}'): {}", dev->name, dev->type,
+                      slot_id, extracted.error());
+          std::exit(1);
+        }
+      }
+    }
+
+    std::string part_name;
+    for (const auto& par : g_config.Partitions) {
+      if (par.second.nodes.contains(g_config.CranedIdOfThisNode)) {
+        part_name = par.first;
+        CRANE_INFO("Found CranedId {} in partition {}",
+                   g_config.CranedIdOfThisNode, par.first);
+        break;
+      }
+    }
+    if (part_name.empty()) {
+      CRANE_ERROR("CranedId {} doesn't belong to any partition",
+                  g_config.CranedIdOfThisNode);
+      std::exit(1);
+    }
+
+    CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
   }
-
-  CRANE_INFO("Found this machine {} as CranedId {} in Nodes", g_config.Hostname,
-             g_config.CranedIdOfThisNode);
-  g_config.node_topo_info = node_topologies.at(g_config.CranedIdOfThisNode);
-  // get this node device info
-  // Todo: Auto detect device
-  {
-    auto node_res = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
-    auto& devices = each_node_device[g_config.CranedIdOfThisNode];
-    for (auto& dev_arg : devices) {
-      auto& [name, type, path_vec, env_injector, cdi_name, cni_pipeline] =
-          dev_arg;
-      auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
-      if (env_injector_enum == InvalidInjector) {
-        CRANE_ERROR("Invalid injector type:{} for device {}.",
-                    env_injector.value_or("EmptyVal"), path_vec);
-        std::exit(1);
-      }
-
-      std::unique_ptr dev = DeviceManager::ConstructDevice(
-          name, type, path_vec, env_injector_enum, cdi_name, cni_pipeline);
-      if (!dev->Init()) {
-        CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
-        std::exit(1);
-      }
-
-      dev->slot_id = dev->device_file_metas.front().path;
-      node_res->GetGres().name_type_slots_map[dev->name][dev->type].emplace(
-          dev->slot_id);
-
-      g_this_node_device[dev->slot_id] = std::move(dev);
-    }
-    each_node_device.clear();
-
-    // Validate CDI consistency: for each (name, type), either ALL slots
-    // have CDI names or NONE do. Partial CDI is a config error.
-    // key: (name, type) -> {has_cdi_count, missing_cdi_count, example_slot}
-    std::map<std::pair<std::string, std::string>,
-             std::tuple<size_t, size_t, std::string>>
-        cdi_consistency;
-    for (const auto& [slot_id, dev] : g_this_node_device) {
-      auto& [has_cnt, miss_cnt, example] =
-          cdi_consistency[{dev->name, dev->type}];
-      if (dev->cdi_name.has_value()) {
-        ++has_cnt;
-      } else {
-        ++miss_cnt;
-        if (example.empty()) example = slot_id;
-      }
-    }
-    for (const auto& [name_type, counts] : cdi_consistency) {
-      const auto& [has_cnt, miss_cnt, example] = counts;
-      if (has_cnt > 0 && miss_cnt > 0) {
-        CRANE_ERROR(
-            "GRES {}:{} has inconsistent CDI configuration: {} slot(s) have "
-            "CDI names but {} slot(s) do not (e.g. '{}'). "
-            "When CDI is configured for a GRES name/type, ALL devices of "
-            "that name/type must have CDI names.",
-            name_type.first, name_type.second, has_cnt, miss_cnt, example);
-        std::exit(1);
-      }
-    }
-
-    // Validate DeviceCniPipeline requires CDI: if a device has cni_pipeline
-    // set, it must also have a valid CDI name (to extract the device
-    // identifier). Check at startup to fail fast.
-    for (const auto& [slot_id, dev] : g_this_node_device) {
-      if (!dev->cni_pipeline.has_value()) continue;
-      if (!dev->cdi_name.has_value()) {
-        CRANE_ERROR(
-            "GRES {}:{} (slot '{}') has DeviceCniPipeline '{}' set but no "
-            "CDI name configured. DeviceCniPipeline requires CDI to extract "
-            "device identifier.",
-            dev->name, dev->type, slot_id, dev->cni_pipeline.value());
-        std::exit(1);
-      }
-      auto extracted =
-          DeviceManager::ExtractCdiDeviceName(dev->cdi_name.value());
-      if (!extracted.has_value()) {
-        CRANE_ERROR("GRES {}:{} (slot '{}'): {}", dev->name, dev->type, slot_id,
-                    extracted.error());
-        std::exit(1);
-      }
-    }
-  }
-
-  std::string part_name;
-  for (const auto& par : g_config.Partitions) {
-    if (par.second.nodes.contains(g_config.CranedIdOfThisNode)) {
-      part_name = par.first;
-      CRANE_INFO("Found CranedId {} in partition {}",
-                 g_config.CranedIdOfThisNode, par.first);
-      break;
-    }
-  }
-  if (part_name.empty()) {
-    CRANE_ERROR("CranedId {} doesn't belong to any partition",
-                g_config.CranedIdOfThisNode);
-    std::exit(1);
-  }
-
-  CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 
   auto& meta = g_config.CranedMeta;
   if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {
@@ -1647,8 +1631,8 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
-  // Initialize CPU pool (overflow cgroup and pool state)
-  {
+  // FUTURE resources are initialized when Configure assigns the identity.
+  if (!g_config.FutureMode) {
     auto node_res = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
     if (!CgroupManager::InitCpuPool(node_res->GetCpuSet().core_ids)) {
       CRANE_ERROR("Failed to initialize CPU pool.");
@@ -1720,7 +1704,6 @@ void GlobalVariableInit() {
       Craned::CallbackInvokeMode::SYNC, true);
 
   g_ctld_client->Init();
-  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
   g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
                                  g_config.ControlMachine);

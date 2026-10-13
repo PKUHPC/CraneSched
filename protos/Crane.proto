@@ -34,6 +34,7 @@ message StepStatusChangeRequest {
   string reason = 6;
   google.protobuf.Timestamp timestamp = 7;
   optional JobStatus final_status = 8;
+  bytes session_id = 9;
 }
 
 message StepStatusChangeReply {
@@ -43,6 +44,7 @@ message StepStatusChangeReply {
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
+  FutureNodeCandidate candidate = 3;
 }
 
 message ConfigureCranedRequest {
@@ -50,6 +52,8 @@ message ConfigureCranedRequest {
   map<uint32, JobStepsToD> job_steps = 2;
   google.protobuf.Timestamp token = 3;
   RuntimeTraceConfig trace_config = 4;
+  DynamicNodeDefinition definition = 5;
+  bytes session_id = 6;
 }
 
 message RuntimeTraceConfig {
@@ -95,18 +99,11 @@ message UpdateTraceConfigReply {
   RuntimeTraceConfig config = 3;
 }
 
-message CranedMapFutureNodeRequest {
+message FutureNodeCandidate {
   string hostname = 1;
   uint32 cpu = 2;
   uint64 memory_bytes = 3;
   string feature = 4;
-}
-
-message CranedMapFutureNodeReply {
-  bool ok = 1;
-  string craned_id = 2;
-  string reason = 3;
-  DynamicNodeDefinition definition = 4;
 }
 
 message DynamicNodeDefinition {
@@ -153,6 +150,7 @@ message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
   google.protobuf.Timestamp token = 3;
+  bytes session_id = 4;
 }
 
 message CranedRegisterReply {
@@ -161,6 +159,7 @@ message CranedRegisterReply {
 
 message CranedPingRequest {
   string craned_id = 1;
+  bytes session_id = 2;
 }
 
 message CranedPingReply {
@@ -1539,6 +1538,7 @@ message UpdateNodeDrainStateRequest {
   string craned_id = 1;
   bool drain = 2;
   string reason = 3;
+  bytes session_id = 4;
 }
 
 message UpdateNodeDrainStateReply {
@@ -1593,6 +1593,7 @@ message BroadcastPmixPortRequest {
   uint32 job_id = 3;
   uint32 step_id = 4;
   bytes port = 5;  // grpc port or ucx addr (must bytes)
+  bytes session_id = 6;
 }
 
 message BroadcastPmixPortReply {
@@ -1848,7 +1849,6 @@ service CraneCtldForInternal {
   /* RPCs called from Craned */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
-  rpc CranedMapFutureNode(CranedMapFutureNodeRequest) returns (CranedMapFutureNodeReply);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
   rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);

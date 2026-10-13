@@ -46,9 +46,15 @@ class CranedStub {
   ~CranedStub() = default;
   void Fini();
 
-  void SetRegToken(const RegToken &token) {
+  void SetSession(const RegToken &token, const std::string &session_id) {
     absl::MutexLock l(&m_lock_);
     m_token_ = token;
+    m_session_id_ = session_id;
+  }
+
+  [[nodiscard]] bool CheckSession(const std::string &session_id) {
+    absl::MutexLock l(&m_lock_);
+    return !session_id.empty() && m_session_id_ == session_id;
   }
 
   [[nodiscard]] bool CheckToken(const RegToken &token) {
@@ -71,9 +77,6 @@ class CranedStub {
                        m_craned_id_);
     m_registered_.store(true, std::memory_order_release);
     UpdateLastActiveTime();
-
-    absl::MutexLock l(&m_lock_);
-    m_token_.reset();
   }
 
   CraneExpected<crane::grpc::AllocJobsReply> AllocJobs(
@@ -150,6 +153,7 @@ class CranedStub {
 
   absl::Mutex m_lock_;
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_lock_){std::nullopt};
+  std::string m_session_id_ ABSL_GUARDED_BY(m_lock_);
   std::atomic<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_active_time_;
 
@@ -208,7 +212,7 @@ class CranedKeeper {
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
-  void PutNodeIntoUnavailSet(const std::string &crane_id,
+  bool PutNodeIntoUnavailSet(const std::string &crane_id,
                              const RegToken &token);
 
  private:
@@ -223,7 +227,12 @@ class CranedKeeper {
   // `m_connect_craned_mtx_` held.
   static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
+  struct Session {
+    RegToken token;
+    std::string session_id;
+  };
+
+  void ConnectCranedNode_(CranedId const &craned_id, Session session);
 
   CqTag *InitCranedStateMachine_(const std::shared_ptr<CranedStub> &craned,
                                  grpc_connectivity_state new_state);
@@ -263,9 +272,9 @@ class CranedKeeper {
       m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
-  std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
+  std::unordered_map<CranedId, Session> m_unavail_craned_set_
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
-  std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
+  std::unordered_map<CranedId, Session> m_connecting_craned_set_
       ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;

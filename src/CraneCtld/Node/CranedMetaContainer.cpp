@@ -699,7 +699,7 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryResvInfo(
 
 crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest& request) {
-  absl::MutexLock lifecycle_lock(&m_node_lifecycle_mtx_);
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_list = reply.mutable_partitions();
 
@@ -1013,6 +1013,12 @@ crane::grpc::DynamicNodeDefinition CranedMetaContainer::NodeDefinition_(
   return definition;
 }
 
+crane::grpc::DynamicNodeDefinition CranedMetaContainer::GetNodeDefinition(
+    const CranedId& craned_id) {
+  auto node = craned_meta_map_[craned_id];
+  return node ? NodeDefinition_(*node) : crane::grpc::DynamicNodeDefinition{};
+}
+
 std::string CranedMetaContainer::ValidateNodeDefinition_(
     const crane::grpc::DynamicNodeDefinition& definition) {
   const auto& name = definition.name();
@@ -1172,7 +1178,7 @@ void CranedMetaContainer::RestoreNodeState_() {
 
 crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
     const crane::grpc::CreateNodesRequest& request) {
-  absl::MutexLock lock(&m_node_lifecycle_mtx_);
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::CreateNodesReply reply;
   for (const auto& definition : request.nodes()) {
     auto error = ValidateNodeDefinition_(definition);
@@ -1201,7 +1207,6 @@ crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
 
 crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
     const crane::grpc::DeleteNodesRequest& request) {
-  absl::MutexLock lock(&m_node_lifecycle_mtx_);
   auto keeper_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::DeleteNodesReply reply;
   for (const auto& id : request.node_names()) {
@@ -1270,17 +1275,12 @@ crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
   return reply;
 }
 
-crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
-    const crane::grpc::CranedMapFutureNodeRequest& request,
+std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
+    const crane::grpc::FutureNodeCandidate& request,
     const std::string& craned_addr) {
-  crane::grpc::CranedMapFutureNodeReply reply;
-
-  absl::MutexLock lock(&m_node_lifecycle_mtx_);
   auto keeper_lock = g_craned_keeper->GetLifecycleLock();
-  if (request.hostname().empty() || craned_addr.empty()) {
-    reply.set_reason("Hostname and address are required.");
-    return reply;
-  }
+  if (request.hostname().empty() || craned_addr.empty())
+    return std::unexpected("Hostname and address are required.");
 
   constexpr double kBytesPerGB = 1024 * 1024 * 1024;
   double real_mem_gb =
@@ -1341,28 +1341,20 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
                                                return absl::EqualsIgnoreCase(
                                                    feature, request.feature());
                                              }))) {
-        reply.set_reason(
+        return std::unexpected(
             "Hardware or feature no longer matches the mapped FUTURE node.");
-        return reply;
       }
       if (node->alive && meta.node_addr != craned_addr) {
-        reply.set_reason("FUTURE node is already online at another address.");
-        return reply;
+        return std::unexpected(
+            "FUTURE node is already online at another address.");
       }
     }
-    if (!persist_mapping(selected_id)) {
-      reply.set_ok(false);
-      reply.set_reason("Failed to persist FUTURE mapping.");
-      return reply;
-    }
+    if (!persist_mapping(selected_id))
+      return std::unexpected("Failed to persist FUTURE mapping.");
     craned_meta_map_[selected_id]->static_meta.node_addr = craned_addr;
-    reply.mutable_definition()->CopyFrom(
-        NodeDefinition_(*craned_meta_map_[selected_id]));
     CRANE_INFO("Craned {} at {} reuses its mapping to FUTURE node {}.",
                request.hostname(), craned_addr, selected_id);
-    reply.set_ok(true);
-    reply.set_craned_id(selected_id);
-    return reply;
+    return selected_id;
   }
 
   // Pick the matching node with the smallest hostname for deterministic
@@ -1395,29 +1387,20 @@ crane::grpc::CranedMapFutureNodeReply CranedMetaContainer::MapFutureNode(
   }
 
   if (selected_id.empty()) {
-    reply.set_ok(false);
-    reply.set_reason(
+    return std::unexpected(
         fmt::format("No matching unmapped FUTURE node (cpu: {}, mem: {:.3f}GB, "
                     "feature: '{}').",
                     request.cpu(), real_mem_gb, request.feature()));
-    return reply;
   }
 
-  if (!persist_mapping(selected_id)) {
-    reply.set_ok(false);
-    reply.set_reason("Failed to persist FUTURE mapping.");
-    return reply;
-  }
+  if (!persist_mapping(selected_id))
+    return std::unexpected("Failed to persist FUTURE mapping.");
   ClaimFutureNode_(selected_id, request.hostname(), craned_addr);
-  reply.mutable_definition()->CopyFrom(
-      NodeDefinition_(*craned_meta_map_[selected_id]));
 
   CRANE_INFO("Craned {} at {} is mapped to FUTURE node {}.", request.hostname(),
              craned_addr, selected_id);
 
-  reply.set_ok(true);
-  reply.set_craned_id(selected_id);
-  return reply;
+  return selected_id;
 }
 
 void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
