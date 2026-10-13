@@ -234,6 +234,8 @@ class StepInstance {
 
   bool AllTaskFinished() const;
 
+  bool AllTaskMainProcessesExited() const;
+
   EnvMap GetStepProcessEnv() const;
 
   // Build the environment visible to a task epilog in the supervisor parent.
@@ -802,6 +804,8 @@ class TaskManager {
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
   std::atomic_bool m_allow_daemon_shutdown_{false};
+
+  bool m_residual_processes_killed_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
