@@ -93,9 +93,12 @@ class CranedMetaContainer final {
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
 
-  crane::grpc::CranedMapFutureNodeReply MapFutureNode(
-      const crane::grpc::CranedMapFutureNodeRequest& request,
+  std::expected<CranedId, std::string> MatchFutureNode(
+      const crane::grpc::FutureNodeCandidate& request,
       const std::string& craned_addr);
+
+  crane::grpc::DynamicNodeDefinition GetNodeDefinition(
+      const CranedId& craned_id);
 
   crane::grpc::CreateNodesReply CreateNodes(
       const crane::grpc::CreateNodesRequest& request);
@@ -230,7 +233,7 @@ class CranedMetaContainer final {
 
  private:  // Helper functions
   // Mark a FUTURE node as mapped, record the craned address and add the
-  // node's resource to its partitions. m_node_lifecycle_mtx_ must be held.
+  // node's resource to its partitions. The keeper lifecycle lock must be held.
   void ClaimFutureNode_(const CranedId& craned_id,
                         const std::string& node_hostname,
                         const std::string& node_addr);
@@ -246,9 +249,6 @@ class CranedMetaContainer final {
   bool logging_enabled{false};
   absl::Mutex
       m_res_reduce_events_mtx_;  // lock before get resv_meta & craned_meta
-
-  // Serializes node definitions, persisted mappings and node lifecycle changes.
-  absl::Mutex m_node_lifecycle_mtx_;
 };
 
 }  // namespace Ctld

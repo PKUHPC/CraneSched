@@ -459,6 +459,8 @@ Mapping requires at least the configured CPU count and memory, and a case-insens
 This version supports FUTURE nodes with CPU, memory, socket, and feature definitions. CLOUD, EXTERNAL, dynamic GRES, and `-Z` registration are not supported.
 The compute daemon receives the mapped resource definition from the controller. Scheduling capacity uses the CPU and memory specified at creation, while detected host resources only establish that the machine has enough capacity. Its local configuration must still provide the controller connection and runtime settings. Runtime definitions are persisted without changing `config.yaml` or restarting ctld.
 
+`craned -F` joins asynchronously through the existing configuration and registration flow, initializing resources and recovering jobs after receiving its node definition. The same machine reuses its binding on reconnection; configuration failures retain that binding and retry through the same flow. Each connection has a separate session. After deletion or reassignment, registration, heartbeat, and state updates from an old session are rejected, including when machines share a certificate. Controller restarts restore persisted bindings and establish new sessions. The FUTURE admission protocol requires updating both ctld and craned.
+
 A new node appears as `State=future`; after mapping and registration it carries the `dynamic_future` marker.
 Definitions and actual machine mappings are persisted in a `.nodes` file beside the controller database path and restored on controller restart.
 
