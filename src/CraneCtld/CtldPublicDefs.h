@@ -180,7 +180,6 @@ struct Config {
       TlsCertificates InternalCerts;
       TlsCertificates ExternalCerts;
       std::unordered_set<std::string> AllowedNodes;
-      std::unordered_set<std::string> FutureNodeAllowedHosts;
       std::string CaFilePath;
       std::string CaContent;
       std::string DomainSuffix;
