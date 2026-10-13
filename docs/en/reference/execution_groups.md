@@ -9,12 +9,12 @@ gids[1:] = supplementary GIDs
 ```
 
 The FrontEnd collects the effective GID and the process supplementary groups,
-removes duplicates, and always places the effective GID first. The job/step
-`uid + gids` always identifies the submitter on the host, including a container
-job's batch script and child steps submitted through `ccon run`.
+removes duplicates, and always places the effective GID first. These execution
+groups always describe the submitter's permissions on the host, including a
+container job's batch script and child steps submitted through `ccon run`.
 
-The Backend performs the final authorization for the job/step UID on each
-execution node. It requires `gids[0]` to exist in that user's NSS group set.
+The Backend performs the final authorization for the submitter on each
+execution node. It requires the effective GID to exist in that user's NSS group set.
 A missing primary GID fails the step before its payload starts. Supplementary
 groups are intersected with the node's groups. If any requested supplementary
 group is removed, the step logs a warning and execution continues. The warning
@@ -28,10 +28,9 @@ resource cleanup.
 
 ## Container identity
 
-`job/step.uid + gids` identifies the submitter on the host, while
-`pod_meta.run_as_user/run_as_group` identifies the user inside the container.
-Neither `ccon --user` nor `cbatch --pod-user` overwrites the submitter's groups
-or resolves the container UID through host NSS.
+The submitter's host identity and the identity used inside the container are
+independent. `ccon --user` and `cbatch --pod-user` select only the identity
+inside the container; they do not change the submitter's host group permissions.
 
 - **Without a user namespace:** the container runs with the submitter's UID,
   effective GID, and node-validated supplementary groups. Explicit UID/GID

@@ -8,10 +8,10 @@ gids[1:] = supplementary GID
 ```
 
 前端收集有效 GID 和进程的 supplementary group，去重后保证有效 GID
-位于首项。`job/step.uid + gids` 始终表示提交者的宿主机执行身份，
-包括容器作业的批处理脚本和通过 `ccon run` 提交的子步骤。
+位于首项。这组执行组始终对应提交者在宿主机上的权限，包括容器作业的
+批处理脚本和通过 `ccon run` 提交的子步骤。
 
-后端在每个执行节点按 `job/step.uid` 执行最终校验。`gids[0]` 必须存在于该用户在节点的 NSS
+后端在每个执行节点按提交者身份执行最终校验。有效 GID 必须存在于该用户在节点的
 组集合中；主 GID 缺失时在 payload 启动前失败。supplementary GID 只取
 与节点实际组的交集；有请求的补充组被移除时，步骤只提示部分补充组已移除，
 不列出具体 GID 或数量，并继续执行。节点存在但前端未请求的额外组不会
@@ -23,9 +23,8 @@ gids[1:] = supplementary GID
 
 ## 容器身份
 
-`job/step.uid + gids` 表示提交者的宿主机身份，`pod_meta.run_as_user/run_as_group`
-表示容器内身份。`ccon --user` 和 `cbatch --pod-user` 不会覆盖提交者的组列表，
-也不会按容器 UID 查询宿主机 NSS。
+提交者在宿主机上的身份与容器内的运行身份相互独立。`ccon --user` 和
+`cbatch --pod-user` 只选择容器内的运行身份，不会改变提交者在宿主机上的组权限。
 
 - **未启用 user namespace**：容器以提交者的 UID、有效 GID 和节点校验后的补充组启动。
   显式指定的 UID/GID 必须与提交者 UID/EGID 一致，root 提交者也遵循此规则。
