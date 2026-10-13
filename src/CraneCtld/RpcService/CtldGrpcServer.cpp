@@ -53,8 +53,7 @@ static std::string PeerIpFromContext(const grpc::ServerContext* context) {
   return ip;
 }
 
-// Verify the persisted machine hostname against the authenticated certificate.
-// Admission is explicit and independent of frontend signers.
+// Verify the candidate or persisted hostname against the TLS certificate.
 static grpc::Status AuthenticateFutureNode(
     const grpc::ServerContext* context, const std::string& hostname,
     const std::string& craned_addr = {}) {
@@ -63,10 +62,6 @@ static grpc::Status AuthenticateFutureNode(
   if (!tls.Enabled || !auth || !auth->IsPeerAuthenticated())
     return {grpc::StatusCode::UNAUTHENTICATED,
             "FUTURE nodes require an authenticated TLS client certificate"};
-
-  if (!tls.FutureNodeAllowedHosts.contains(hostname))
-    return {grpc::StatusCode::PERMISSION_DENIED,
-            "Machine is not in TLS.FutureNodeAllowedHosts"};
 
   const auto certs = auth->FindPropertyValues("x509_pem_cert");
   if (certs.size() != 1 || hostname.empty())
@@ -85,12 +80,15 @@ static grpc::Status AuthenticateFutureNode(
       parse_certificate(tls.InternalCerts.CertContent);
   const auto tls_hostname = util::TlsHostname(hostname, tls.DomainSuffix);
   const auto names = auth->FindPropertyValues("x509_common_name");
+  const std::string_view common_name =
+      names.size() == 1
+          ? std::string_view(names.front().data(), names.front().size())
+          : std::string_view{};
+  const auto cn_hostname = common_name.substr(0, common_name.find('.'));
+  // Numeric CN host labels are reserved for user certificate UIDs.
   const bool matches_hostname =
-      names.size() == 1 &&
-      (std::string_view(names.front().data(), names.front().size()) ==
-           hostname ||
-       std::string_view(names.front().data(), names.front().size()) ==
-           tls_hostname);
+      cn_hostname.find_first_not_of("0123456789") != std::string_view::npos &&
+      (common_name == hostname || common_name == tls_hostname);
   // User certificates also have wildcard SANs. Only the configured internal
   // certificate may use a shared identity instead of a machine-specific CN.
   if (!cert ||
@@ -99,7 +97,8 @@ static grpc::Status AuthenticateFutureNode(
       X509_check_host(cert.get(), tls_hostname.data(), tls_hostname.size(),
                       X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS, nullptr) != 1)
     return {grpc::StatusCode::UNAUTHENTICATED,
-            "FUTURE hostname must match the client certificate DNS names"};
+            "FUTURE nodes require a matching machine or shared internal "
+            "certificate"};
   if (!craned_addr.empty() && craned_addr != PeerIpFromContext(context))
     return {grpc::StatusCode::FAILED_PRECONDITION,
             "Connection does not match the FUTURE node mapping"};

@@ -26,13 +26,10 @@ TLS:
   CaFilePath: /etc/crane/tls/ca.pem
   DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
-  # Machine hostnames (gethostname) allowed to claim FUTURE nodes.
-  # Requires TLS; certificates must cover the machine's TLS hostname.
+  # FUTURE node hostnames are learned from craned connection requests.
   # Short hostnames are qualified with DomainSuffix for TLS verification.
-  # Both individual and shared wildcard certificates are supported.
-  # Shared nodes reuse the controller's InternalCertFilePath certificate.
-  # Empty or omitted denies FUTURE mapping.
-  # FutureNodeAllowedHosts: "worker[01-02].crane.local"
+  # Nodes need a matching machine certificate or the controller's shared
+  # InternalCertFilePath certificate; user certificates cannot claim nodes.
 
 # Ctld settings
 # the listening address of control machine

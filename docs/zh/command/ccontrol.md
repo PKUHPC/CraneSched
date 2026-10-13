@@ -437,8 +437,7 @@ ERRO[0000] command execution failed
 
 #### 创建和删除动态节点
 
-FUTURE 映射要求启用 TLS，并在控制器配置 `TLS.FutureNodeAllowedHosts`，填写实际计算机器的 `gethostname()` 返回值。支持可信 CA 签发的独立证书和共享通配证书，证书 DNS SAN（缺省时使用 CN）须覆盖机器的 TLS 主机名。独立证书 CN 须为机器 hostname 或其 TLS 完整域名；共享证书须与控制器 `TLS.InternalCertFilePath` 中的叶证书相同，普通用户证书不能用于节点映射。短 hostname 在证书校验和反向 TLS 连接时追加 `TLS.DomainSuffix`，准入名单仍使用原始短 hostname。名单缺省或为空时拒绝全部 FUTURE 映射；此配置独立于用于前端证书签发的 `TLS.AllowedNodes`。重连、注册和心跳也校验证书身份及映射地址。
-
+FUTURE 映射要求启用 TLS。`cranectld` 从首次反向连接请求的候选信息中获取机器 hostname 并校验客户端证书。短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`。请按[节点定义](../deployment/configuration/config.md#节点定义)的要求部署匹配的机器证书或控制器共享内部证书，普通用户证书不能用于节点映射。机器接入无需维护 hostname 白名单、修改配置或重启控制器。
 
 管理员可以在线创建 FUTURE 占位节点，无需修改配置文件或重启控制器：
 

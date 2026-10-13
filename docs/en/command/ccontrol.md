@@ -441,8 +441,7 @@ ERRO[0000] command execution failed
 
 #### Create and Delete Dynamic Nodes
 
-FUTURE mapping requires TLS and an explicit controller `TLS.FutureNodeAllowedHosts` list containing actual machine `gethostname()` values. Both individual and shared wildcard certificates issued by the trusted CA are supported; certificate DNS SANs (or the CN when DNS SANs are absent) must cover the machine's TLS hostname. Individual certificate CNs must match the machine hostname or its TLS FQDN. Shared certificates must be the same leaf certificate configured in the controller's `TLS.InternalCertFilePath`; user certificates cannot claim nodes. For short hostnames, certificate verification and reverse TLS connections append `TLS.DomainSuffix`; the admission list still uses the original short hostname. An omitted or empty list denies all FUTURE mappings. This setting is independent of `TLS.AllowedNodes`, which controls frontend certificate signing. Reconnection, registration and heartbeat requests also verify certificate identity and the mapped address.
-
+FUTURE mapping requires TLS. `cranectld` learns the machine hostname from the candidate in the initial reverse connection request and verifies the client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections. Deploy a matching machine certificate or the controller's shared internal certificate as described in [Node Definitions](../deployment/configuration/config.md#node-definitions); user certificates cannot claim nodes. Machines can join without a hostname allowlist, configuration edits or a controller restart.
 
 Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
 
