@@ -104,6 +104,7 @@ enum CranedControlState {
   CRANE_WAKE = 4;
   CRANE_POWERON = 5;
   CRANE_UNREGISTER_POWER = 6;
+  CRANE_RESET_TO_FUTURE = 7;
 }
 
 enum JobStatus {
