@@ -1124,6 +1124,8 @@ struct JobInCtld {
   std::vector<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear();
   void CranedIdsAdd(CranedId const& i);
+  void SetTaskNodeList(
+      const std::unordered_map<CranedId, uint32_t>& task_num_by_craned);
 
   void SetPrimaryStepStatus(crane::grpc::JobStatus val);
   crane::grpc::JobStatus PrimaryStepStatus() const { return primary_status; }

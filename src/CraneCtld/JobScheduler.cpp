@@ -1708,6 +1708,7 @@ void JobScheduler::ScheduleThread_() {
         launch_job->SetStartTime(job_in_scheduler->start_time);
         launch_job->SetEndTime(end_time);
         launch_job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
+        launch_job->SetTaskNodeList(job_in_scheduler->craned_id_to_task_num);
         launch_job->SetStepResAvail(job_in_scheduler->allocated_res);
         launch_job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
         launch_job->SetActualLicenses(

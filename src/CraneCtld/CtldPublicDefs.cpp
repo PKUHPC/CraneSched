@@ -625,6 +625,9 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   for (const auto& hostname : this->m_craned_ids_)
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
 
+  step_to_d.mutable_task_node_list()->CopyFrom(
+      job->RuntimeAttr().task_node_list());
+
   step_to_d.mutable_start_time()->set_seconds(
       ToUnixSeconds(this->m_start_time_));
   step_to_d.mutable_submit_time()->set_seconds(
@@ -1777,6 +1780,18 @@ void JobInCtld::CranedIdsAdd(CranedId const& i) {
   *runtime_attr.mutable_craned_ids()->Add() = i;
 }
 
+void JobInCtld::SetTaskNodeList(
+    const std::unordered_map<CranedId, uint32_t>& task_num_by_craned) {
+  auto* task_node_list = runtime_attr.mutable_task_node_list();
+  task_node_list->Clear();
+  uint32_t node_index = 0;
+  for (const auto& craned_id : craned_ids) {
+    for (uint32_t i = 0; i < task_num_by_craned.at(craned_id); ++i)
+      task_node_list->Add(node_index);
+    ++node_index;
+  }
+}
+
 void JobInCtld::SetPrimaryStepStatus(crane::grpc::JobStatus val) {
   primary_status = val;
   runtime_attr.set_primary_step_status(val);
@@ -1902,6 +1917,7 @@ void JobInCtld::ResetForRequeue() {
   pending_reason.clear();
 
   runtime_attr.mutable_actual_licenses()->clear();
+  runtime_attr.mutable_task_node_list()->Clear();
 
   SetStatus(crane::grpc::Pending);
   SetExitCode(0);

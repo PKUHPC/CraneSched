@@ -316,9 +316,7 @@ EnvMap JobInD::GetJobEnvMap() {
     const auto cpus_on_node_str =
         fmt::format("{}", static_cast<double>(cpus_on_node));
     env_map.insert_or_assign("SLURM_CPUS_ON_NODE", cpus_on_node_str);
-    if (daemon_step_to_d.node_num() == 1) {
-      env_map.insert_or_assign("SLURM_JOB_CPUS_PER_NODE", cpus_on_node_str);
-    }
+    env_map.insert_or_assign("SLURM_JOB_CPUS_PER_NODE", cpus_on_node_str);
     env_map.insert_or_assign(
         "SLURM_CPUS_PER_TASK",
         fmt::format("{}", daemon_step_to_d.cpus_per_task()));
