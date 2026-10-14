@@ -146,6 +146,8 @@ class CtldClientStateMachine {
   absl::Mutex m_cb_mutex_;
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
+  // Local recovery may still be running after a handshake times out.
+  bool m_configure_in_progress_ ABSL_GUARDED_BY(m_mtx_) = false;
 
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
