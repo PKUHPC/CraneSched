@@ -293,6 +293,8 @@ ccontrol update nodeName=<节点名> state=<状态> [reason=<原因>]
 - **state**（必需）：节点的新状态
   - `drain` - 阻止在该节点上调度新作业
   - `resume` - 使节点再次可用于调度
+  - `future` - 解除 FUTURE 节点的实机绑定并保留定义；等待作业分配和资源预留
+    结束后，停止该机器的 craned
 - **reason**（排空时必需）：排空节点的原因
 
 **示例：**
@@ -458,6 +460,22 @@ ccontrol show node future01
 
 创建前查询没有该节点；创建后显示 `State=future`；映射上线后显示 `dynamic_future` 标记。
 节点定义和实际主机映射持久化在控制器数据库路径旁的 `.nodes` 文件，控制器重启后恢复。
+
+替换 FUTURE 节点绑定的实机时，使用 `State=FUTURE` 解除绑定：
+
+```bash
+ccontrol update NodeName=future01 State=DRAIN Reason="replace machine"
+# 等待作业清理及预留结束，然后停止机器 A 上的 craned
+ccontrol update NodeName=future01 State=FUTURE
+# 在机器 B 上启动
+craned -F compute
+```
+
+配置文件定义和运行时创建的 FUTURE 节点均支持此操作。重置后显示 `State=future`，
+保留 CPU、内存、socket、feature 和分区成员关系，清除旧实机映射和 session，
+再次映射前不计入分区资源。解绑结果会持久化，控制器重启后仍为空闲占位节点。
+存在作业分配（包括正在清理的作业）或资源预留时拒绝重置。
+应先停止旧 craned，避免其重新抢占占位节点。
 
 ```bash
 # 排空节点，等待作业清理及预留结束

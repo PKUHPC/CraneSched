@@ -862,6 +862,22 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
+  if (request.new_state() == crane::grpc::CRANE_RESET_TO_FUTURE) {
+    auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+    for (const auto& craned_id : request.craned_ids()) {
+      auto error = DeleteOrResetNode_(craned_id, true);
+      if (error.empty()) {
+        reply.add_modified_nodes(craned_id);
+        CRANE_INFO("User {} reset node {} to FUTURE.", request.uid(),
+                   craned_id);
+      } else {
+        reply.add_not_modified_nodes(craned_id);
+        reply.add_not_modified_reasons(error);
+      }
+    }
+    return reply;
+  }
+
   std::vector<crane::grpc::plugin::CranedEventInfo> event_list;
   crane::grpc::plugin::CranedEventInfo event;
 
@@ -1079,12 +1095,13 @@ void CranedMetaContainer::InsertDynamicNode_(
   node.remote_meta.craned_version = "unknown";
   node.remote_meta.sys_rel_info.name = "unknown";
 
+  const auto part_ids = meta.partition_ids;
+  craned_meta_map_.Emplace(definition.name(), std::move(node));
+
   auto partitions = partition_meta_map_.GetMapSharedPtr();
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> partition_locks;
-  for (const auto& id : meta.partition_ids)
+  for (const auto& id : part_ids)
     partition_locks.emplace_back(partitions->at(id).GetExclusivePtr());
-  auto nodes = craned_meta_map_.GetMapExclusivePtr();
-  nodes->emplace(definition.name(), std::move(node));
   for (auto& partition : partition_locks) {
     partition->craned_ids.emplace(definition.name());
     auto& global = partition->partition_global_meta;
@@ -1207,40 +1224,65 @@ crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
 
 crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
     const crane::grpc::DeleteNodesRequest& request) {
-  auto keeper_lock = g_craned_keeper->GetLifecycleLock();
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::DeleteNodesReply reply;
   for (const auto& id : request.node_names()) {
-    LockResReduceEvents();
+    auto error = DeleteOrResetNode_(id, false);
+    if (error.empty()) {
+      reply.add_deleted_nodes(id);
+      CRANE_INFO("User {} deleted node {}.", request.uid(), id);
+    } else {
+      reply.add_not_deleted_nodes(id);
+      reply.add_not_deleted_reasons(error);
+    }
+  }
+  return reply;
+}
+
+std::string CranedMetaContainer::DeleteOrResetNode_(const CranedId& id,
+                                                    bool reset_to_future) {
+  LockResReduceEvents();
+  std::string error;
+  {
     auto part_ids = GetNodePartitions_(id);
     auto partitions = partition_meta_map_.GetMapSharedPtr();
     std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr>
         partition_locks;
     for (const auto& part_id : part_ids)
       partition_locks.emplace_back(partitions->at(part_id).GetExclusivePtr());
-    auto nodes = craned_meta_map_.GetMapExclusivePtr();
-    auto it = nodes->find(id);
-    std::string error;
-    if (it == nodes->end())
+    auto node_meta = craned_meta_map_[id];
+    if (!node_meta)
       error = "Unknown node.";
     else {
-      const auto& node = *it->second.RawPtr();
-      if (!node.static_meta.dynamic)
+      auto& node = *node_meta;
+      if (reset_to_future && !node.static_meta.is_future)
+        error = "Only FUTURE nodes can have their machine binding reset.";
+      else if (!reset_to_future && !node.static_meta.dynamic)
         error = "Only manually created nodes can be deleted.";
       else if (!node.rn_job_res_map.empty())
         error = "Node has allocated or completing jobs.";
       else if (!node.resv_in_node_map.empty())
         error = "Node belongs to a reservation.";
       else {
+        if (reset_to_future && !node.future_mapped) {
+          UnlockResReduceEvents();
+          return {};
+        }
         auto snapshot = m_node_state_;
         auto* states = snapshot.mutable_nodes();
         for (int i = 0; i < states->size(); ++i) {
-          if (states->Get(i).definition().name() == id) {
+          if (states->Get(i).definition().name() != id) continue;
+          if (reset_to_future && node.static_meta.dynamic) {
+            states->Mutable(i)->clear_node_hostname();
+            states->Mutable(i)->clear_node_addr();
+          } else {
             states->DeleteSubrange(i, 1);
-            break;
           }
+          break;
         }
         if (!SaveNodeState_(snapshot))
-          error = "Failed to persist node deletion.";
+          error = reset_to_future ? "Failed to persist FUTURE node reset."
+                                  : "Failed to persist node deletion.";
         else {
           g_craned_keeper->RetireCraned(id);
           for (auto& partition : partition_locks) {
@@ -1251,28 +1293,40 @@ crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
               global.res_total_inc_dead -= node.static_meta.res;
             }
             if (node.alive) --global.alive_craned_cnt;
-            partition->craned_ids.erase(id);
-            global.node_cnt = partition->craned_ids.size();
-            global.nodelist_str =
-                util::HostNameListToStr(partition->craned_ids);
+            if (!reset_to_future) {
+              partition->craned_ids.erase(id);
+              global.node_cnt = partition->craned_ids.size();
+              global.nodelist_str =
+                  util::HostNameListToStr(partition->craned_ids);
+            }
           }
-          nodes->erase(it);
+          if (reset_to_future) {
+            CranedMeta future_node;
+            future_node.static_meta = std::move(node.static_meta);
+            future_node.static_meta.node_hostname = id;
+            future_node.static_meta.node_addr = id;
+            future_node.res_total = future_node.static_meta.res;
+            future_node.res_avail = future_node.static_meta.res;
+            future_node.remote_meta.craned_version = "unknown";
+            future_node.remote_meta.sys_rel_info.name = "unknown";
+            node = std::move(future_node);
+          } else {
+            node.alive = false;
+          }
           m_node_state_ = std::move(snapshot);
-          reply.add_deleted_nodes(id);
-          CRANE_INFO("User {} deleted node {}.", request.uid(), id);
         }
       }
     }
-    if (error.empty())
-      AddResReduceEventsAndUnlock(
-          {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{id})});
-    else {
-      UnlockResReduceEvents();
-      reply.add_not_deleted_nodes(id);
-      reply.add_not_deleted_reasons(error);
-    }
   }
-  return reply;
+  if (error.empty()) {
+    // Erasing takes the node map write lock; release metadata locks first.
+    if (!reset_to_future) craned_meta_map_.Erase(id);
+    AddResReduceEventsAndUnlock(
+        {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{id})});
+  } else {
+    UnlockResReduceEvents();
+  }
+  return error;
 }
 
 std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(

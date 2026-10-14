@@ -295,6 +295,8 @@ ccontrol update nodeName=<nodename> state=<state> [reason=<reason>]
 - **state** (required): New state for the node
   - `drain` - Prevent new jobs from being scheduled on the node
   - `resume` - Make node available for scheduling again
+  - `future` - Release a FUTURE node's machine binding and keep its definition;
+    wait for job allocations and reservations to finish, then stop its craned
 - **reason** (required when draining): Reason for draining the node
 
 **Examples:**
@@ -462,6 +464,25 @@ The compute daemon receives the mapped resource definition from the controller. 
 
 A new node appears as `State=future`; after mapping and registration it carries the `dynamic_future` marker.
 Definitions and actual machine mappings are persisted in a `.nodes` file beside the controller database path and restored on controller restart.
+
+To replace the machine bound to a FUTURE node, release its binding with
+`State=FUTURE`:
+
+```bash
+ccontrol update NodeName=future01 State=DRAIN Reason="replace machine"
+# Wait for jobs and reservations to finish, then stop craned on machine A
+ccontrol update NodeName=future01 State=FUTURE
+# On machine B
+craned -F compute
+```
+
+This works for both configured and runtime-created FUTURE nodes. The node
+returns to `State=future`, retaining its CPU, memory, sockets, features and
+partition membership. The old machine mapping and session are removed, and
+the node stops contributing to partition resources until it is mapped again.
+Binding removal is persisted across controller restarts. Job allocations,
+including completing jobs, and reservations prevent reset. Stop the old
+craned before resetting so it cannot reclaim the placeholder.
 
 ```bash
 # Drain the node and wait for jobs and reservations to finish

@@ -171,55 +171,67 @@ CtldClientStateMachine::Session CtldClientStateMachine::GetSession() {
 
 bool CtldClientStateMachine::EvRecvConfigFromCtld(
     const crane::grpc::ConfigureCranedRequest& request) {
-  absl::MutexLock lk(&m_mtx_);
-  if (m_state_ != State::REQUESTING_CONFIG) {
-    CRANE_LOGGER_WARN(
-        m_logger_,
-        "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
-        static_cast<int>(m_state_));
-    return false;
-  }
-
-  if (request.ok() && request.has_token() &&
-      request.token() == m_reg_token_.value()) {
-    if (g_config.FutureMode &&
-        (request.session_id().empty() || !request.has_definition() ||
-         !ApplyFutureNodeDefinition(request.definition())))
+  {
+    absl::MutexLock lk(&m_mtx_);
+    if (m_state_ != State::REQUESTING_CONFIG) {
+      CRANE_LOGGER_WARN(
+          m_logger_,
+          "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
+          static_cast<int>(m_state_));
       return false;
-    {
-      absl::MutexLock session_lock(&m_session_mtx_);
-      m_session_ = {
-          .craned_id = g_config.CranedIdOfThisNode,
-          .token = request.token(),
-          .session_id = request.session_id(),
-          .resource = g_config.CranedRes.at(g_config.CranedIdOfThisNode),
-          .node_topo_info = g_config.node_topo_info};
     }
-    m_last_op_time_ = std::chrono::steady_clock::now();
-    m_state_ = State::CONFIGURING;
-    ActionConfigure_(request);
-    return true;
-  } else {
-    if (!request.ok()) {
-      CRANE_LOGGER_WARN(m_logger_, "ConfigureCranedRequest failed from Ctld.");
-      m_state_ = State::REQUESTING_CONFIG;
-      ActionRequestConfig_();
-    } else if (!request.has_token()) {
-      CRANE_LOGGER_DEBUG(m_logger_,
-                         "No token in ConfigureCranedRequest from Ctld.");
-      m_state_ = State::REQUESTING_CONFIG;
-      ActionRequestConfig_();
 
+    if (request.ok() && request.has_token() &&
+        request.token() == m_reg_token_.value()) {
+      if (m_configure_in_progress_) {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "Local recovery is still in progress. Ignoring "
+                           "ConfigureCranedRequest.");
+        return false;
+      }
+      if (g_config.FutureMode &&
+          (request.session_id().empty() || !request.has_definition() ||
+           !ApplyFutureNodeDefinition(request.definition())))
+        return false;
+      {
+        absl::MutexLock session_lock(&m_session_mtx_);
+        m_session_ = {
+            .craned_id = g_config.CranedIdOfThisNode,
+            .token = request.token(),
+            .session_id = request.session_id(),
+            .resource = g_config.CranedRes.at(g_config.CranedIdOfThisNode),
+            .node_topo_info = g_config.node_topo_info};
+      }
+      m_last_op_time_ = std::chrono::steady_clock::now();
+      m_state_ = State::CONFIGURING;
+      m_configure_in_progress_ = true;
     } else {
-      CRANE_LOGGER_DEBUG(m_logger_,
-                         "ConfigureCraned failed. Expected to recv token: {} "
-                         "but got {}, waiting for correct reply.",
-                         ProtoTimestampToString(m_reg_token_.value()),
-                         ProtoTimestampToString(request.token()));
-    }
+      if (!request.ok()) {
+        CRANE_LOGGER_WARN(m_logger_,
+                          "ConfigureCranedRequest failed from Ctld.");
+        m_state_ = State::REQUESTING_CONFIG;
+        ActionRequestConfig_();
+      } else if (!request.has_token()) {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "No token in ConfigureCranedRequest from Ctld.");
+        m_state_ = State::REQUESTING_CONFIG;
+        ActionRequestConfig_();
 
-    return false;
+      } else {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "ConfigureCraned failed. Expected to recv token: {} "
+                           "but got {}, waiting for correct reply.",
+                           ProtoTimestampToString(m_reg_token_.value()),
+                           ProtoTimestampToString(request.token()));
+      }
+
+      return false;
+    }
   }
+
+  // Local recovery may block, so let connection and timeout events proceed.
+  ActionConfigure_(request);
+  return true;
 }
 
 bool CtldClientStateMachine::EvConfigurationDone(
@@ -229,24 +241,31 @@ bool CtldClientStateMachine::EvConfigurationDone(
         lost_steps) {
   absl::MutexLock lk(&m_mtx_);
 
-  if (m_state_ != State::CONFIGURING) {
+  if (!m_configure_in_progress_) {
     CRANE_LOGGER_WARN(
         m_logger_,
-        "EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
+        "EvConfigurationDone triggered at incorrect state {}. Ignoring.",
         StateToString(m_state_));
     return false;
   }
 
-  if (!m_reg_token_.has_value() || token != m_reg_token_.value() ||
-      session_id != GetSession().session_id) {
+  const auto session = GetSession();
+  if (token != session.token || session_id != session.session_id) {
     CRANE_LOGGER_WARN(
         m_logger_,
         "EvConfigurationDone triggered with stale token {}. Expected {}. "
         "Ignoring.",
-        ProtoTimestampToString(token),
-        m_reg_token_.has_value() ? ProtoTimestampToString(m_reg_token_.value())
-                                 : "<null>");
+        ProtoTimestampToString(token), ProtoTimestampToString(session.token));
     return false;
+  }
+
+  m_configure_in_progress_ = false;
+  if (m_state_ != State::CONFIGURING) {
+    if (m_state_ == State::REQUESTING_CONFIG) {
+      m_last_op_time_ = std::chrono::steady_clock::now();
+      ActionRequestConfig_();
+    }
+    return true;
   }
 
   m_last_op_time_ = std::chrono::steady_clock::now();
@@ -298,8 +317,6 @@ void CtldClientStateMachine::EvGrpcConnected() {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
-  if (m_state_ == State::CONFIGURING) return;
-
   if (m_state_ != State::DISCONNECTED) {
     CRANE_LOGGER_WARN(
         m_logger_, "EvGrpcConnected triggered at incorrect state {}. Ignoring.",
@@ -315,16 +332,13 @@ void CtldClientStateMachine::EvGrpcConnectionFailed() {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
-  // Finish local recovery before another Configure can change the identity.
-  if (m_state_ != State::CONFIGURING) m_state_ = State::DISCONNECTED;
+  m_state_ = State::DISCONNECTED;
   ActionDisconnected_();
 }
 
 void CtldClientStateMachine::EvTimeout_() {
   absl::MutexLock lk(&m_mtx_);
-  if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED ||
-      m_state_ == State::CONFIGURING)
-    return;
+  if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
   if (m_last_op_time_.value() +
           std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec) >
       std::chrono::steady_clock::now())
@@ -378,9 +392,8 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 
 void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& config_req) {
-  CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
-                     StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_, "Starting configuration for token {}.",
+                     ProtoTimestampToString(config_req.token()));
 
   absl::MutexLock lk(&m_cb_mutex_);
   auto it = m_action_configure_cb_list_.begin();
