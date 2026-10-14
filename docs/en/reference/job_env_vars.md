@@ -31,6 +31,16 @@ CraneSched automatically sets a series of environment variables when executing j
 - **Type**: String
 - **Example**: `normal`
 
+### CRANE_JOB_UID
+- **Description**: UID of the job user
+- **Type**: Integer
+- **Example**: `1000`
+
+### CRANE_JOB_GID
+- **Description**: Primary GID of the job user
+- **Type**: Integer
+- **Example**: `1000`
+
 ---
 
 ## Array Job Environment Variables
@@ -60,6 +70,34 @@ When executing within a job step, CraneSched sets additional step-specific envir
 - **Available**: Only set in step execution context
 - **Note**: If this variable is not set, the process is running as a standalone job, not as a step
 
+### CRANE_STEP_NODELIST
+- **Description**: List of nodes allocated to the current step, separated by semicolons
+- **Type**: String
+- **Example**: `node01;node02`
+- **Available**: Only set in step execution context
+
+### CRANE_STEP_NUM_NODES
+- **Description**: Number of nodes allocated to the current step
+- **Type**: Integer
+- **Example**: `2`
+- **Available**: Only set in step execution context
+
+### CRANE_STEP_NUM_TASKS
+- **Description**: Total number of tasks in the current execution unit
+- **Type**: Integer
+- **Example**: `4`
+
+### CRANE_GTIDS
+- **Description**: Comma-separated global task IDs assigned to the current node
+- **Type**: Integer list
+- **Example**: `0,2`
+
+### CRANE_LOCALID
+- **Description**: Zero-based local index of the current task on its node
+- **Type**: Integer
+- **Example**: `1`
+- **Available**: Only set in task processes and their task epilogs
+
 ---
 
 ## Node and Resource Environment Variables
@@ -73,6 +111,26 @@ When executing within a job step, CraneSched sets additional step-specific envir
 - **Description**: Number of nodes allocated to the job
 - **Type**: Integer
 - **Example**: `3`
+
+### CRANE_JOB_CPUS_PER_NODE
+- **Description**: Number of CPUs allocated to the job on the current node
+- **Type**: Number
+- **Example**: `4`
+
+### CRANE_TASKS_PER_NODE
+- **Description**: Task counts ordered by the node list. It describes the job distribution in a job context and the current step distribution in a step context
+- **Type**: Comma-separated integer list
+- **Example**: `2,1,1`
+
+### CRANED_NODENAME
+- **Description**: Craned node name of the current execution node
+- **Type**: String
+- **Example**: `node01`
+
+### CRANE_WORKING_DIR
+- **Description**: Requested working directory of the current job or step
+- **Type**: String
+- **Example**: `/home/user/project`
 
 ### CRANE_MEM_PER_NODE
 - **Description**: Amount of memory allocated per node in MB
@@ -92,6 +150,11 @@ When executing within a job step, CraneSched sets additional step-specific envir
 - **Description**: Timestamp of the expected job end time (nanoseconds since Unix epoch)
 - **Type**: Integer
 - **Example**: `1699876543000000000`
+
+### CRANE_JOB_START_TIME
+- **Description**: Unix timestamp when the job started, in seconds
+- **Type**: Integer
+- **Example**: `1699876543`
 
 ---
 

@@ -65,7 +65,7 @@ void SetResolvedSupplementalGroups_(const std::vector<gid_t>& gids,
   }
 }
 
-std::vector<uint32_t> GetSlurmTaskCounts_(const StepToSupv& step) {
+std::vector<uint32_t> GetTaskCounts_(const StepToSupv& step) {
   std::vector<uint32_t> counts(step.nodelist_size(), 0);
   for (uint32_t node_index : step.task_node_list()) ++counts[node_index];
   return counts;
@@ -76,7 +76,7 @@ uint32_t GetCurrentStepNodeId_(const StepToSupv& step) {
   return static_cast<uint32_t>(it - step.nodelist().begin());
 }
 
-uint32_t GetSlurmLocalTaskId_(const StepToSupv& step, task_id_t task_id) {
+uint32_t GetLocalTaskId_(const StepToSupv& step, task_id_t task_id) {
   const auto& task_node_list = step.task_node_list();
   const uint32_t node_id = task_node_list.Get(task_id);
   uint32_t local_task_id = 0;
@@ -87,7 +87,7 @@ uint32_t GetSlurmLocalTaskId_(const StepToSupv& step, task_id_t task_id) {
   return local_task_id;
 }
 
-std::string FormatSlurmTaskIds_(const StepToSupv& step) {
+std::string FormatTaskIds_(const StepToSupv& step) {
   std::vector<task_id_t> task_ids;
   task_ids.reserve(step.task_res_map_size());
   for (const auto& entry : step.task_res_map())
@@ -313,6 +313,31 @@ EnvMap StepInstance::GetStepProcessEnv() const {
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_map.emplace("CRANE_TIMELIMIT", time_limit);
 
+  env_map.insert_or_assign("CRANE_WORKING_DIR", m_step_to_supv_.cwd());
+  const uint32_t step_task_count =
+      static_cast<uint32_t>(m_step_to_supv_.task_node_list_size());
+  const uint32_t step_node_count =
+      static_cast<uint32_t>(m_step_to_supv_.nodelist_size());
+  const auto task_ids = FormatTaskIds_(m_step_to_supv_);
+  const auto task_counts = GetTaskCounts_(m_step_to_supv_);
+  const auto task_counts_str = absl::StrJoin(task_counts, ",");
+  env_map.insert_or_assign("CRANE_STEP_NUM_TASKS",
+                           std::to_string(step_task_count));
+  env_map.insert_or_assign("CRANE_GTIDS", task_ids);
+
+  const bool batch_like_primary =
+      IsPrimary() &&
+      (IsBatch() || IsCalloc() || m_step_to_supv_.has_batch_meta());
+  if (!IsDaemon() && !batch_like_primary) {
+    env_map.insert_or_assign("CRANE_STEP_ID",
+                             std::to_string(m_step_to_supv_.step_id()));
+    env_map.insert_or_assign("CRANE_STEP_NODELIST",
+                             absl::StrJoin(m_step_to_supv_.nodelist(), ";"));
+    env_map.insert_or_assign("CRANE_STEP_NUM_NODES",
+                             std::to_string(step_node_count));
+    env_map.insert_or_assign("CRANE_TASKS_PER_NODE", task_counts_str);
+  }
+
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
     const auto slurm_nodelist = absl::StrJoin(m_step_to_supv_.nodelist(), ",");
@@ -335,28 +360,17 @@ EnvMap StepInstance::GetStepProcessEnv() const {
                                std::to_string(gpus_on_node));
     }
     env_map.insert_or_assign("SLURM_WORKING_DIR", m_step_to_supv_.cwd());
-    const uint32_t step_task_count =
-        static_cast<uint32_t>(m_step_to_supv_.task_node_list_size());
     env_map.insert_or_assign("SLURM_STEP_NUM_TASKS",
                              std::to_string(step_task_count));
-    env_map.insert_or_assign("SLURM_GTIDS",
-                             FormatSlurmTaskIds_(m_step_to_supv_));
+    env_map.insert_or_assign("SLURM_GTIDS", task_ids);
 
-    const bool batch_like_primary =
-        IsPrimary() &&
-        (IsBatch() || IsCalloc() || m_step_to_supv_.has_batch_meta());
     if (!IsDaemon() && !batch_like_primary) {
-      const uint32_t step_node_count =
-          static_cast<uint32_t>(m_step_to_supv_.nodelist_size());
-      const auto task_counts = GetSlurmTaskCounts_(m_step_to_supv_);
-
       env_map.insert_or_assign("SLURM_NNODES", std::to_string(step_node_count));
       env_map.insert_or_assign("SLURM_NTASKS", std::to_string(step_task_count));
       env_map.insert_or_assign("SLURM_NPROCS", std::to_string(step_task_count));
       env_map.insert_or_assign(
           "SLURM_NTASKS_PER_NODE",
           std::to_string(m_step_to_supv_.ntasks_per_node()));
-      const auto task_counts_str = absl::StrJoin(task_counts, ",");
       env_map.insert_or_assign("SLURM_TASKS_PER_NODE", task_counts_str);
       env_map.insert_or_assign("SLURM_STEP_TASKS_PER_NODE", task_counts_str);
 
@@ -384,11 +398,12 @@ EnvMap StepInstance::GetTaskEpilogEnv(task_id_t task_id) const {
   // because the task's private m_env_ is initialized only after fork().
   env_map.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
   env_map.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
+  const auto local_task_id =
+      std::to_string(GetLocalTaskId_(m_step_to_supv_, task_id));
+  env_map.insert_or_assign("CRANE_LOCALID", local_task_id);
   if (g_config.EnableSlurmCompatibleEnv) {
     env_map.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
-    env_map.insert_or_assign(
-        "SLURM_LOCALID",
-        std::to_string(GetSlurmLocalTaskId_(m_step_to_supv_, task_id)));
+    env_map.insert_or_assign("SLURM_LOCALID", local_task_id);
 
     const bool batch_like_primary =
         IsPrimary() &&
@@ -398,9 +413,7 @@ EnvMap StepInstance::GetTaskEpilogEnv(task_id_t task_id) const {
       env_map.insert_or_assign("SLURM_NODEID", std::to_string(node_id));
       env_map.insert_or_assign("SLURM_STEP_NODEID", std::to_string(node_id));
       env_map.insert_or_assign("SLURM_STEP_PROCID", std::to_string(task_id));
-      env_map.insert_or_assign(
-          "SLURM_STEP_LOCALID",
-          std::to_string(GetSlurmLocalTaskId_(m_step_to_supv_, task_id)));
+      env_map.insert_or_assign("SLURM_STEP_LOCALID", local_task_id);
     }
   }
 
@@ -589,12 +602,13 @@ void ITaskInstance::InitEnvMap() {
   for (const auto& [name, value] : m_parent_step_inst_->GetStepProcessEnv()) {
     m_env_.insert_or_assign(name, value);
   }
+  const auto local_task_id =
+      std::to_string(GetLocalTaskId_(m_parent_step_inst_->GetStep(), task_id));
+  m_env_.insert_or_assign("CRANE_LOCALID", local_task_id);
   if (g_config.EnableSlurmCompatibleEnv) {
     // Global task id
     m_env_.insert_or_assign("SLURM_PROCID", std::to_string(task_id));
-    m_env_.insert_or_assign("SLURM_LOCALID",
-                            std::to_string(GetSlurmLocalTaskId_(
-                                m_parent_step_inst_->GetStep(), task_id)));
+    m_env_.insert_or_assign("SLURM_LOCALID", local_task_id);
 
     const bool batch_like_primary =
         m_parent_step_inst_->IsPrimary() &&
@@ -606,9 +620,7 @@ void ITaskInstance::InitEnvMap() {
       m_env_.insert_or_assign("SLURM_NODEID", std::to_string(node_id));
       m_env_.insert_or_assign("SLURM_STEP_NODEID", std::to_string(node_id));
       m_env_.insert_or_assign("SLURM_STEP_PROCID", std::to_string(task_id));
-      m_env_.insert_or_assign("SLURM_STEP_LOCALID",
-                              std::to_string(GetSlurmLocalTaskId_(
-                                  m_parent_step_inst_->GetStep(), task_id)));
+      m_env_.insert_or_assign("SLURM_STEP_LOCALID", local_task_id);
     }
   }
 }

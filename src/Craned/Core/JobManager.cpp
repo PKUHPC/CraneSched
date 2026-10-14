@@ -242,12 +242,21 @@ EnvMap JobInD::GetJobEnvMap() {
       step_res_v3.GetMemoryBytes() / (static_cast<uint64_t>(1024 * 1024));
 
   cpu_t cpus_on_node = step_res_v3.GetCpuSet().cpu_count;
+  const auto cpus_on_node_str =
+      fmt::format("{}", static_cast<double>(cpus_on_node));
   auto mem_per_cpu = (cpus_on_node > cpu_t{0})
                          ? (static_cast<double>(mem_in_node) /
                             static_cast<double>(cpus_on_node))
                          : 0.0;
 
+  std::vector<uint32_t> task_counts(daemon_step_to_d.nodelist_size(), 0);
+  for (uint32_t node_index : daemon_step_to_d.task_node_list())
+    ++task_counts[node_index];
+  const auto task_counts_str = absl::StrJoin(task_counts, ",");
+
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
+  env_map.emplace("CRANE_JOB_UID", std::to_string(job_to_d.uid()));
+  env_map.emplace("CRANE_JOB_GID", std::to_string(daemon_step_to_d.gids(0)));
 
   auto time_limit_dur =
       std::chrono::seconds(daemon_step_to_d.time_limit().seconds()) +
@@ -257,6 +266,8 @@ EnvMap JobInD::GetJobEnvMap() {
       std::to_string((std::chrono::system_clock::now() + time_limit_dur)
                          .time_since_epoch()
                          .count()));
+  env_map.emplace("CRANE_JOB_START_TIME",
+                  std::to_string(daemon_step_to_d.start_time().seconds()));
   env_map.emplace("CRANE_JOB_ID", std::to_string(job_id));
   env_map.emplace("CRANE_JOB_NAME", daemon_step_to_d.name());
   env_map.emplace("CRANE_JOB_NODELIST", crane_nodelist);
@@ -266,12 +277,15 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
   env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.submit_dir());
+  env_map.emplace("CRANE_WORKING_DIR", daemon_step_to_d.cwd());
   env_map.emplace("CRANE_CPUS_PER_TASK",
                   std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
+  env_map.emplace("CRANE_JOB_CPUS_PER_NODE", cpus_on_node_str);
   env_map.insert_or_assign("CRANE_MEM_PER_NODE",
                            std::format("{}M", mem_in_node));
   env_map.emplace("CRANE_NTASKS_PER_NODE",
                   std::to_string(daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_TASKS_PER_NODE", task_counts_str);
   env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
   env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
   env_map.emplace("CRANE_NTASKS", std::to_string(daemon_step_to_d.ntasks()));
@@ -279,6 +293,7 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_CPUS_ON_NODE",
                   std::format("{:.2f}", static_cast<double>(cpus_on_node)));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
+  env_map.emplace("CRANED_NODENAME", g_config.CranedIdOfThisNode);
   env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
   if (job_to_d.has_array_task()) {
     const auto& array_task = job_to_d.array_task();
@@ -313,8 +328,6 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.insert_or_assign(
         "SLURM_NTASKS_PER_NODE",
         std::to_string(daemon_step_to_d.ntasks_per_node()));
-    const auto cpus_on_node_str =
-        fmt::format("{}", static_cast<double>(cpus_on_node));
     env_map.insert_or_assign("SLURM_CPUS_ON_NODE", cpus_on_node_str);
     env_map.insert_or_assign("SLURM_JOB_CPUS_PER_NODE", cpus_on_node_str);
     env_map.insert_or_assign(
@@ -337,11 +350,7 @@ EnvMap JobInD::GetJobEnvMap() {
     env_map.insert_or_assign("SLURM_JOB_NODELIST", slurm_nodelist);
     env_map.insert_or_assign("SLURM_NODELIST", slurm_nodelist);
 
-    std::vector<uint32_t> task_counts(daemon_step_to_d.nodelist_size(), 0);
-    for (uint32_t node_index : daemon_step_to_d.task_node_list())
-      ++task_counts[node_index];
-    env_map.insert_or_assign("SLURM_TASKS_PER_NODE",
-                             absl::StrJoin(task_counts, ","));
+    env_map.insert_or_assign("SLURM_TASKS_PER_NODE", task_counts_str);
     if (job_to_d.has_array_task()) {
       const auto& array_task = job_to_d.array_task();
       env_map.insert_or_assign("SLURM_ARRAY_JOB_ID",
