@@ -4,9 +4,12 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <set>
 #include <string>
 
+#include "Array.h"
+#include "Database/EmbeddedDbClient.h"
 // Test the production helpers without exporting them or replacing dependencies.
 #include "RpcService/CtldGrpcServer.cpp"
 #include "google/protobuf/util/message_differencer.h"
@@ -19,6 +22,70 @@ using crane::grpc::QUERY_VISIBILITY_PUBLIC;
 using Ctld::BuildJobQueryReply;
 using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
+
+#ifdef CRANE_HAVE_UNQLITE
+class ArrayChildQueryTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    ASSERT_EQ(g_embedded_db_client, nullptr);
+    char path[] = "/tmp/crane-array-query-XXXXXX";
+    ASSERT_NE(::mkdtemp(path), nullptr);
+    db_dir_ = path;
+    g_embedded_db_client = Ctld::MakeEmbeddedDbClient("Unqlite");
+    ASSERT_TRUE(g_embedded_db_client->Init((db_dir_ / "jobs").string()));
+  }
+
+  void TearDown() override {
+    g_embedded_db_client.reset();
+    if (!db_dir_.empty()) std::filesystem::remove_all(db_dir_);
+  }
+
+  std::filesystem::path db_dir_;
+};
+
+TEST_F(ArrayChildQueryTest, ReleasedParentDoesNotPassSubmissionHoldToChildren) {
+  crane::grpc::JobToCtld submission;
+  submission.set_type(crane::grpc::Batch);
+  submission.set_uid(::getuid());
+  submission.set_hold(true);
+  submission.mutable_time_limit()->set_seconds(300);
+  submission.mutable_array_spec()->set_start(1);
+  submission.mutable_array_spec()->set_end(2);
+
+  Ctld::JobInCtld parent;
+  parent.SetFieldsByJobToCtld(submission);
+  parent.SetStatus(crane::grpc::Pending);
+  ASSERT_TRUE(
+      g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds({&parent}));
+  Ctld::ArrayManager arrays;
+  arrays.RegisterParent(&parent);
+
+  // Release changes runtime state; the original submission remains held.
+  parent.SetHeld(false);
+  ASSERT_TRUE(parent.JobToCtld().hold());
+  for (uint32_t task_id : {1U, 2U}) {
+    auto child = arrays.MaterializeChildForAllocation(&parent, absl::Now());
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->ArrayTaskId(), task_id);
+
+    JobInfo info;
+    child->SetFieldsOfJobInfo(&info);
+    EXPECT_FALSE(info.held());
+    EXPECT_FALSE(child->RuntimeAttr().held());
+    EXPECT_TRUE(parent.JobToCtld().hold());
+
+    crane::grpc::JobInEmbeddedDb stored;
+    ASSERT_TRUE(
+        g_embedded_db_client->FetchJobDataInDb(0, child->JobDbId(), &stored));
+    EXPECT_FALSE(stored.runtime_attr().held());
+    Ctld::JobInCtld recovered;
+    recovered.SetFieldsByJobToCtld(stored.job_to_ctld());
+    recovered.SetFieldsByRuntimeAttrOfJob(stored.runtime_attr());
+    recovered.SetFieldsOfJobInfo(&info);
+    EXPECT_FALSE(info.held());
+  }
+}
+#endif
 
 void AddUnknown(google::protobuf::Message* message) {
   message->GetReflection()->MutableUnknownFields(message)->AddLengthDelimited(

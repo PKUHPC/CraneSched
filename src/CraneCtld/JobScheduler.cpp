@@ -6991,15 +6991,7 @@ void JobScheduler::QueryJobsInRam(
   };
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
-  std::unordered_map<job_id_t, std::pair<job_id_t, array_task_id_t>>
-      array_selector_by_child_job_id;
   const auto& req_steps = job_steps;
-
-  auto job_rng_filter_array_child = [&](auto* job_ptr) {
-    return request->option_include_completed_jobs() ||
-           !job_ptr->IsArrayChild() ||
-           array_selector_by_child_job_id.contains(job_ptr->JobId());
-  };
 
   auto joined_filters = ranges::views::filter(job_rng_filter_account) |
                         ranges::views::filter(job_rng_filter_name) |
@@ -7011,7 +7003,6 @@ void JobScheduler::QueryJobsInRam(
                         ranges::views::filter(job_rng_filter_job_type) |
                         ranges::views::filter(job_rng_filter_licenses) |
                         ranges::views::filter(job_rng_filter_nodename_list) |
-                        ranges::views::filter(job_rng_filter_array_child) |
                         ranges::views::take(num_limit);
 
   auto resolution_view = request->filter_job_ids() |
@@ -7024,8 +7015,6 @@ void JobScheduler::QueryJobsInRam(
 
     const auto& r = std::get<Resolved>(resolution.outcome);
     MergeJobSteps(job_steps, r.job_id, r.steps);
-    if (r.array_origin)
-      array_selector_by_child_job_id.try_emplace(r.job_id, *r.array_origin);
   };
 
   LockGuard pending_guard(&m_pending_job_map_mtx_);
@@ -7090,6 +7079,9 @@ void JobScheduler::QueryJobsInRam(
   auto running_rng = m_running_job_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
+  // Materialized array children are regular in-memory jobs and participate in
+  // the default queue query. Historical completed-job retrieval is handled by
+  // the RPC layer separately.
   ranges::any_view<JobInCtld*, ranges::category::forward> filtered_job_rng =
       req_steps | ranges::views::keys |
       ranges::views::transform(get_job_ptr_by_id) |
