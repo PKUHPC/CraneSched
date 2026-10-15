@@ -306,6 +306,8 @@ message RuntimeAttrOfJob {
 
   // For array parents: whether child jobs have been materialized.
   optional bool array_children_expanded = 28;
+
+  repeated uint32 task_node_list = 29;
 }
 
 message StepToCtld {

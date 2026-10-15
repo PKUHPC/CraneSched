@@ -189,6 +189,23 @@ TEST(CtldAccountingTimeTest, PendingCancellationAllowsZeroElapsedTime) {
   EXPECT_EQ(step.EndTime(), step.StartTime());
 }
 
+TEST(CtldDaemonStepTest, SerializesScheduledTaskNodeList) {
+  Ctld::JobInCtld job;
+  job.SetJobId(1);
+  job.type = crane::grpc::Batch;
+  const std::vector<CranedId> craned_ids{"node-a", "node-b"};
+  SetupJobAllocation(job, craned_ids);
+  job.SetTaskNodeList({{"node-a", 2}, {"node-b", 1}});
+
+  Ctld::DaemonStepInCtld daemon_step;
+  daemon_step.InitFromJob(job);
+  const auto step_to_d = daemon_step.GetStepToD("node-a");
+
+  EXPECT_EQ(std::vector<uint32_t>(step_to_d.task_node_list().begin(),
+                                  step_to_d.task_node_list().end()),
+            (std::vector<uint32_t>{0, 0, 1}));
+}
+
 TEST(CtldStepStateMachineTest,
      DaemonConfigureFailureCleansAndReturnsFailureAfterTerminalReports) {
   constexpr job_id_t kJobId = 42;
