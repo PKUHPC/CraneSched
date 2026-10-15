@@ -121,9 +121,9 @@ Nodes:
 - **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量。
 - **features**：可选，字符串列表形式的节点标签，目前用于 `craned -F <feature>` 的映射过滤
 
-FUTURE 映射要求启用 TLS。首次反向连接请求中，`cranectld` 获取机器上报的 `gethostname()` 并校验已认证的客户端证书。短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`，例如 `worker01` 配合后缀 `crane.local` 使用 `worker01.crane.local`；完整 hostname 按上报值使用。无需维护机器 hostname 白名单或重启控制器。`TLS.AllowedNodes` 用于前端证书签发，与 FUTURE 映射相互独立。
+FUTURE 映射同时支持 `TLS.Enabled=true` 和 `TLS.Enabled=false`，控制器和计算节点须使用相同设置。首次反向连接请求中，`cranectld` 获取机器上报的 `gethostname()` 和连接来源地址。两种模式下，注册、心跳和状态更新均校验映射地址及当前会话。无需维护机器 hostname 白名单或重启控制器。`TLS.AllowedNodes` 用于前端证书签发，与 FUTURE 映射相互独立。
 
-支持独立机器证书和控制器共享内部证书。证书须由可信 CA 签发，DNS SAN（缺省时使用 CN）须覆盖机器的 TLS 主机名。独立证书的 CN 须为机器 hostname 或其 TLS 完整域名，且第一个 CN 标签不能为纯数字，因为纯数字标签保留给用户 UID。共享证书须与控制器 `TLS.InternalCertFilePath` 中的叶证书相同；`*.crane.local` 这样的共享通配证书可供多台机器使用。普通用户证书不能用于节点映射。重连、注册和心跳还会校验证书身份、映射地址及当前会话。
+启用 TLS 时，`cranectld` 还会校验已认证的客户端证书。短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`，例如 `worker01` 配合后缀 `crane.local` 使用 `worker01.crane.local`；完整 hostname 按上报值使用。支持独立机器证书和控制器共享内部证书。证书须由可信 CA 签发，DNS SAN（缺省时使用 CN）须覆盖机器的 TLS 主机名。独立证书的 CN 须为机器 hostname 或其 TLS 完整域名，且第一个 CN 标签不能为纯数字，因为纯数字标签保留给用户 UID。共享证书须与控制器 `TLS.InternalCertFilePath` 中的叶证书相同；`*.crane.local` 这样的共享通配证书可供多台机器使用。普通用户证书不能用于节点映射。
 
 节点的调度资源以 FUTURE 定义为准，宿主机探测值仅用于确认资源足够。`config.yaml` 中的定义在 ctld 启动时加载；运行时新增节点通过 `ccontrol create node` 指定资源，定义及映射持久化到 `.nodes` 状态文件，无需修改配置或重启 ctld。
 

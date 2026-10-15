@@ -28,8 +28,9 @@ TLS:
   AllowedNodes: "cn[15-18]"
   # FUTURE node hostnames are learned from craned connection requests.
   # Short hostnames are qualified with DomainSuffix for TLS verification.
-  # Nodes need a matching machine certificate or the controller's shared
-  # InternalCertFilePath certificate; user certificates cannot claim nodes.
+  # When TLS is enabled, nodes need a matching machine certificate or the
+  # controller's shared InternalCertFilePath certificate; user certificates
+  # cannot claim nodes.
 
 # Ctld settings
 # the listening address of control machine

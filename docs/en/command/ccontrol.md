@@ -443,7 +443,7 @@ ERRO[0000] command execution failed
 
 #### Create and Delete Dynamic Nodes
 
-FUTURE mapping requires TLS. `cranectld` learns the machine hostname from the candidate in the initial reverse connection request and verifies the client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections. Deploy a matching machine certificate or the controller's shared internal certificate as described in [Node Definitions](../deployment/configuration/config.md#node-definitions); user certificates cannot claim nodes. Machines can join without a hostname allowlist, configuration edits or a controller restart.
+FUTURE mapping follows `TLS.Enabled` and supports both encrypted and unencrypted connections; use the same setting on the controller and compute nodes. `cranectld` learns the machine hostname from the candidate in the initial reverse connection request. When TLS is enabled, it also verifies the client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections. In this mode, deploy a matching machine certificate or the controller's shared internal certificate as described in [Node Definitions](../deployment/configuration/config.md#node-definitions); user certificates cannot claim nodes. Both modes verify the mapped address and current session during registration, heartbeat and state updates. Machines can join without a hostname allowlist, configuration edits or a controller restart.
 
 Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
 
