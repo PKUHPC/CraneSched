@@ -28,9 +28,11 @@
 #include <future>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "crane/Logger.h"
 
@@ -87,6 +89,22 @@ class ChildExitWatcher {
 };
 
 namespace util::os {
+
+// Check Crane's container identity restrictions. The first host GID is the
+// effective GID. These checks do not query NSS or validate SubID mappings.
+std::expected<void, std::string> ValidateContainerIdentity(
+    uint32_t host_uid, std::span<const uint32_t> host_gids, bool userns,
+    uint32_t container_uid, uint32_t container_gid);
+
+// Query and authorize the ordered execution groups for a host UID. Call before
+// fork: lookup may invoke NSS. The result keeps the effective GID first.
+std::expected<std::vector<gid_t>, std::string> ResolveGroups(
+    uid_t uid, const std::vector<uint32_t>& requested);
+
+// Require the effective GID to be authorized, intersect supplementary groups,
+// and preserve request order while removing duplicates.
+std::expected<std::vector<gid_t>, std::string> ReconcileGroups(
+    const std::vector<uint32_t>& requested, const std::vector<gid_t>& actual);
 
 bool GetNodeInfo(NodeSpecInfo* info);
 

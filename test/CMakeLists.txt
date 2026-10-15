@@ -7,6 +7,8 @@ add_subdirectory(Misc)
 # without duplicating the target list in an external script.
 set(CRANE_UNIT_TEST_TARGETS
     job_query_test
+    execution_groups_test
+    container_identity_test
     embedded_db_client_test
     ctld_public_defs_test
     dedicated_resource_test
