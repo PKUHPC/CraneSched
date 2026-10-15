@@ -507,14 +507,24 @@ void StartServer(int grpc_output_fd) {
 
   g_craned_client.reset();
   Craned::Common::CgroupManager::ShutdownCgroupV2FastPath();
+
+  // Finish tasks that may still enqueue plugin hooks before stopping the
+  // client that owns their queue.
+  g_thread_pool.reset();
+  // Stop plugin delivery before trace flushing can wait on an unavailable peer.
+  if (g_plugin_client) g_plugin_client->Shutdown();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
   g_plugin_client.reset();
 
-  g_thread_pool->wait();
+  spdlog::default_logger()->flush();
+  spdlog::shutdown();
 
-  std::exit(0);
+  // All supervisor-owned resources have been released above.  Bypass the
+  // process-wide gRPC/OpenSSL exit handler, which can wait for unavailable
+  // plugin channels longer than craned's supervisor cleanup deadline.
+  _exit(0);
 }
 
 void InstallStackTraceHooks() {

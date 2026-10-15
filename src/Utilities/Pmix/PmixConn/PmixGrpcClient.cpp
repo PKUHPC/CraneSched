@@ -116,7 +116,7 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   if (m_config_.UseTls) {
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
-        ip_addr, port, m_config_.TlsCerts, channel_args);
+        ip_addr, port, m_config_.TlsCerts, m_config_.CaContent, channel_args);
   } else {
     craned->m_channel_ =
         CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);

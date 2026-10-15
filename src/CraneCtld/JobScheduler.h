@@ -1031,6 +1031,8 @@ class JobScheduler {
 
   bool Init();
 
+  void Shutdown();
+
   /// \return The future is set to an error code if job submission failed.
   /// Otherwise, it is set to newly allocated job id.
   std::future<CraneExpected<job_id_t>> SubmitJobAsync(
