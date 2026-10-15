@@ -225,3 +225,5 @@ Vault:
   Password: "123456"
   Tls: false # 当 Vault 启用 TLS 时设置为 true，建议生产环境中启用
 ```
+
+`CraneCtld` 使用上述用户名和密码登录 Vault 的 userpass 认证。登录得到的 token 有有效期（默认继承 Vault 的 768 小时）：`CraneCtld` 会在后台定期续期 token，并在 token 达到 userpass 挂载点的 `max_lease_ttl` 或被吊销后自动重新登录，无需重启。若日志中持续出现 `permission denied` / `invalid token`，请检查 Vault 中该用户的密码与策略是否仍然有效。

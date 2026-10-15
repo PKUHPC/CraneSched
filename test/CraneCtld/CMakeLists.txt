@@ -22,6 +22,17 @@ target_precompile_headers(job_query_test PRIVATE
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPreCompiledHeader.h)
 gtest_discover_tests(job_query_test)
 
+# Exercises the production VaultClient against an in-process fake Vault.
+add_executable(vault_client_test VaultClientTest.cpp
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Security/VaultClient.cpp)
+target_link_libraries(vault_client_test PRIVATE
+        GTest::gtest GTest::gtest_main ${job_query_libraries})
+target_compile_definitions(vault_client_test PRIVATE ${job_query_definitions})
+target_include_directories(vault_client_test PRIVATE ${job_query_includes})
+target_precompile_headers(vault_client_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPreCompiledHeader.h)
+gtest_discover_tests(vault_client_test)
+
 add_executable(embedded_db_client_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
