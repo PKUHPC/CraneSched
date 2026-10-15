@@ -1311,11 +1311,6 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname.data());
 
-  if (g_config.FutureMode && !g_config.ListenConf.TlsConfig.Enabled) {
-    CRANE_ERROR("FUTURE node registration requires TLS.Enabled=true.");
-    std::exit(1);
-  }
-
   if (!g_config.FutureMode) {
     const std::string short_hostname = util::ShortHostname(g_config.Hostname);
     auto craned_id_it = g_config.NodeHostnameToCranedId.find(short_hostname);

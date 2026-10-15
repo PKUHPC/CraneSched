@@ -456,7 +456,7 @@ ERRO[0000] command execution failed
 
 #### 创建和删除动态节点
 
-FUTURE 映射要求启用 TLS。`cranectld` 从首次反向连接请求的候选信息中获取机器 hostname 并校验客户端证书。短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`。请按[节点定义](../deployment/configuration/config.md#节点定义)的要求部署匹配的机器证书或控制器共享内部证书，普通用户证书不能用于节点映射。机器接入无需维护 hostname 白名单、修改配置或重启控制器。
+FUTURE 映射遵循 `TLS.Enabled`，同时支持加密与非加密连接，控制器和计算节点须使用相同设置。`cranectld` 从首次反向连接请求的候选信息中获取机器 hostname。启用 TLS 时，还会校验客户端证书，短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`；此时请按[节点定义](../deployment/configuration/config.md#节点定义)的要求部署匹配的机器证书或控制器共享内部证书，普通用户证书不能用于节点映射。两种模式下，注册、心跳和状态更新均校验映射地址及当前会话。机器接入无需维护 hostname 白名单、修改配置或重启控制器。
 
 管理员可以在线创建 FUTURE 占位节点，无需修改配置文件或重启控制器：
 
