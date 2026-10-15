@@ -53,13 +53,19 @@ static std::string PeerIpFromContext(const grpc::ServerContext* context) {
   return ip;
 }
 
-// Verify the candidate or persisted hostname against the TLS certificate.
+// Verify the mapped address and, when enabled, the TLS certificate identity.
 static grpc::Status AuthenticateFutureNode(
     const grpc::ServerContext* context, const std::string& hostname,
     const std::string& craned_addr = {}) {
+  if (!craned_addr.empty() && craned_addr != PeerIpFromContext(context))
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            "Connection does not match the FUTURE node mapping"};
+
   const auto& tls = g_config.ListenConf.TlsConfig;
+  if (!tls.Enabled) return grpc::Status::OK;
+
   const auto auth = context->auth_context();
-  if (!tls.Enabled || !auth || !auth->IsPeerAuthenticated())
+  if (!auth || !auth->IsPeerAuthenticated())
     return {grpc::StatusCode::UNAUTHENTICATED,
             "FUTURE nodes require an authenticated TLS client certificate"};
 
@@ -99,9 +105,6 @@ static grpc::Status AuthenticateFutureNode(
     return {grpc::StatusCode::UNAUTHENTICATED,
             "FUTURE nodes require a matching machine or shared internal "
             "certificate"};
-  if (!craned_addr.empty() && craned_addr != PeerIpFromContext(context))
-    return {grpc::StatusCode::FAILED_PRECONDITION,
-            "Connection does not match the FUTURE node mapping"};
   return grpc::Status::OK;
 }
 
