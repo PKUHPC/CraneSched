@@ -110,6 +110,16 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 请注意，cwrapper 别名仅提供**基本的兼容性**，如需体验高级特性，请使用鹤思的命令行工具。
 
+Slurm 兼容入口按 Slurm 的含义解析选项，部分短选项与鹤思原生命令不同：
+
+| 命令 | Slurm 兼容入口 | 鹤思原生命令 |
+|------|----------------|--------------|
+| `sacct` | `-n/--noheader` 不打印表头；`-p/--parsable`、`-P/--parsable2` 输出 `\|` 分隔结果；`-r/--partition` 按分区筛选；`-s/--state` 按状态筛选；`-N/--nodelist` 按节点筛选；`--name` 按作业名筛选；`--submittime` 按提交时间筛选 | `cacct -N` 不打印表头，`-n` 为作业名，`-p` 为分区，`-t` 为状态，`-w` 为节点，`-s` 为提交时间 |
+| `squeue` | `-h/--noheader` 不打印表头，帮助仅 `--help`；`-o` 中 `%T` 为长状态（如 `PENDING`），`%t` 为短状态（如 `PD`），`%R` 为排队原因或节点列表，`%r` 为排队原因 | `cqueue -N` 不打印表头，`%T` 为作业类型，`%t` 为状态 |
+| `sinfo` | `-h/--noheader` 不打印表头，帮助仅 `--help`；`-o` 使用 Slurm 格式符（`%P %a %l %D %t %T %N %E %F` 等）；`-O` 使用字段名（如 `Partition,Nodes:.5,StateLong`）；`-N` 按节点逐行输出；默认输出为 Slurm 六列 `PARTITION AVAIL TIMELIMIT NODES STATE NODELIST`（`TIMELIMIT` 固定为 `infinite`）；`-R` 输出 `REASON NODELIST` | `cinfo -N` 不打印表头，`-o` 使用 `%p %a %n %s %l`，默认输出五列 |
+
+各入口支持的完整选项与格式符以 `--help` 输出为准。
+
 ## 可选：源码安装
 
 源码安装适用于开发和快速验证。构建依赖与工具的安装方法参见[打包指南](../packaging.md)。准备好环境后执行：
