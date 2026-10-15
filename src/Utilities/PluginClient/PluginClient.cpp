@@ -49,6 +49,7 @@ namespace plugin {
 namespace {
 
 constexpr size_t kPluginHookMaxRequestBytes = 3 * 1024 * 1024;
+constexpr auto kShutdownTimeout = std::chrono::milliseconds(500);
 constexpr char kTraceHookMaxRequestBytesEnv[] =
     "CRANE_TRACE_HOOK_MAX_REQUEST_BYTES";
 
@@ -58,10 +59,27 @@ std::unique_ptr<crane::grpc::plugin::TraceHookRequest> MakeTraceHookRequest() {
 
 }  // namespace
 
-PluginClient::~PluginClient() {
-  m_thread_stop_.store(true);
-  CRANE_TRACE("PluginClient is ending. Waiting for the thread to finish.");
-  if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
+PluginClient::~PluginClient() { Shutdown(); }
+
+void PluginClient::Shutdown() {
+  std::call_once(m_shutdown_once_, [this] {
+    {
+      std::lock_guard lock(m_rpc_mutex_);
+      m_shutdown_deadline_.store(
+          std::chrono::system_clock::now() + kShutdownTimeout,
+          std::memory_order_release);
+      m_stop_notification_.Notify();
+      if (m_active_context_) m_active_context_->TryCancel();
+    }
+    {
+      std::lock_guard lock(m_trace_drain_mutex_);
+      m_trace_drain_cv_.notify_all();
+    }
+    CRANE_TRACE("PluginClient is ending. Waiting for the thread to finish.");
+    if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
+    m_stub_.reset();
+    m_channel_.reset();
+  });
 }
 
 // Note that we do not support TLS in plugin yet.
@@ -94,9 +112,11 @@ bool PluginClient::DrainTraceHooks(std::chrono::microseconds timeout) noexcept {
 
   std::unique_lock lock(m_trace_drain_mutex_);
   auto deadline = std::chrono::steady_clock::now() + timeout;
-  return m_trace_drain_cv_.wait_until(lock, deadline, [&] {
-    return m_trace_hooks_completed_.load(std::memory_order_acquire) >= target;
+  m_trace_drain_cv_.wait_until(lock, deadline, [&] {
+    return m_trace_hooks_completed_.load(std::memory_order_acquire) >= target ||
+           m_stop_notification_.HasBeenNotified();
   });
+  return m_trace_hooks_completed_.load(std::memory_order_acquire) >= target;
 }
 
 void PluginClient::MarkTraceHookCompleted_(const HookEvent& event) {
@@ -106,8 +126,21 @@ void PluginClient::MarkTraceHookCompleted_(const HookEvent& event) {
 
 void PluginClient::MarkTraceHooksCompleted_(size_t count) {
   if (count == 0) return;
-  m_trace_hooks_completed_.fetch_add(count, std::memory_order_release);
+  {
+    std::lock_guard lock(m_trace_drain_mutex_);
+    m_trace_hooks_completed_.fetch_add(count, std::memory_order_release);
+  }
   m_trace_drain_cv_.notify_all();
+}
+
+void PluginClient::EnqueueHook_(HookEvent event) {
+  std::lock_guard lock(m_rpc_mutex_);
+  if (m_stop_notification_.HasBeenNotified()) return;
+
+  const bool is_trace = event.type == HookType::TRACE;
+  if (is_trace) m_trace_hooks_enqueued_.fetch_add(1, std::memory_order_release);
+  if (!m_event_queue_.enqueue(std::move(event)) && is_trace)
+    MarkTraceHooksCompleted_(1);
 }
 
 size_t PluginClient::CountTraceHookEvents_(const std::list<HookEvent>& events) {
@@ -120,15 +153,21 @@ void PluginClient::AsyncSendThread_() {
   bool prev_conn_state = false;
 
   while (true) {
-    bool stopping = m_thread_stop_.load();
+    if (m_stop_notification_.HasBeenNotified() &&
+        (m_event_queue_.size_approx() == 0 ||
+         std::chrono::system_clock::now() >=
+             m_shutdown_deadline_.load(std::memory_order_acquire)))
+      break;
 
-    if (stopping && m_event_queue_.size_approx() == 0) break;
-
-    // Check channel connection (shorter timeout when stopping)
-    auto timeout = stopping ? std::chrono::milliseconds(500)
-                            : std::chrono::milliseconds(3000);
-    auto connected = m_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + timeout);
+    // Poll in short intervals so shutdown does not wait for reconnection.
+    bool connected = m_channel_->GetState(true) == GRPC_CHANNEL_READY;
+    auto connect_deadline =
+        std::chrono::system_clock::now() + std::chrono::seconds(3);
+    while (!connected && !m_stop_notification_.HasBeenNotified() &&
+           std::chrono::system_clock::now() < connect_deadline) {
+      connected = m_channel_->WaitForConnected(
+          std::chrono::system_clock::now() + std::chrono::milliseconds(100));
+    }
 
     if (!prev_conn_state && connected) {
       CRANE_INFO("[Plugin] Plugind is connected.");
@@ -136,16 +175,17 @@ void PluginClient::AsyncSendThread_() {
     prev_conn_state = connected;
 
     if (!connected) {
-      if (stopping) break;  // Don't wait forever during shutdown
+      if (m_stop_notification_.HasBeenNotified()) break;
       CRANE_INFO("[Plugin] Plugind is not connected. Reconnecting...");
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      m_stop_notification_.WaitForNotificationWithTimeout(absl::Seconds(1));
       continue;
     }
 
     auto approx_size = m_event_queue_.size_approx();
     if (approx_size == 0) {
-      if (stopping) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      if (m_stop_notification_.HasBeenNotified()) break;
+      m_stop_notification_.WaitForNotificationWithTimeout(
+          absl::Milliseconds(100));
       continue;
     }
 
@@ -161,9 +201,26 @@ void PluginClient::AsyncSendThread_() {
     while (!events.empty()) {
       auto& e = events.front();
       grpc::ClientContext context;
+      {
+        std::lock_guard lock(m_rpc_mutex_);
+        if (m_stop_notification_.HasBeenNotified()) {
+          const auto shutdown_deadline =
+              m_shutdown_deadline_.load(std::memory_order_acquire);
+          if (std::chrono::system_clock::now() >= shutdown_deadline) {
+            MarkTraceHooksCompleted_(CountTraceHookEvents_(events));
+            break;
+          }
+          context.set_deadline(shutdown_deadline);
+        }
+        m_active_context_ = &context;
+      }
 
       HookDispatchFunc f = s_hook_dispatch_funcs_[size_t(e.type)];
       auto status = (this->*f)(&context, e.msg.get());
+      {
+        std::lock_guard lock(m_rpc_mutex_);
+        m_active_context_ = nullptr;
+      }
 
       if (!status.ok()) {
         CRANE_ERROR(
@@ -174,7 +231,7 @@ void PluginClient::AsyncSendThread_() {
 
         if (status.error_code() == grpc::UNAVAILABLE) {
           // During shutdown, drop unsent events instead of retrying
-          if (stopping) {
+          if (m_stop_notification_.HasBeenNotified()) {
             MarkTraceHooksCompleted_(CountTraceHookEvents_(events));
             break;
           }
@@ -192,6 +249,9 @@ void PluginClient::AsyncSendThread_() {
       events.pop_front();
     }
   }
+
+  HookEvent event;
+  while (m_event_queue_.try_dequeue(event)) MarkTraceHookCompleted_(event);
 }
 
 grpc::Status PluginClient::SendStartHook_(grpc::ClientContext* context,
@@ -377,7 +437,7 @@ void PluginClient::StartHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
   }
 
   for (auto& event : events) {
-    m_event_queue_.enqueue(std::move(event));
+    EnqueueHook_(std::move(event));
   }
 }
 
@@ -421,7 +481,7 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::JobInfo> jobs) {
   }
 
   for (auto& event : events) {
-    m_event_queue_.enqueue(std::move(event));
+    EnqueueHook_(std::move(event));
   }
 }
 
@@ -436,7 +496,7 @@ void PluginClient::CreateCgroupHookAsync(
 
   HookEvent e{HookType::CREATE_CGROUP,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::DestroyCgroupHookAsync(job_id_t job_id,
@@ -448,7 +508,7 @@ void PluginClient::DestroyCgroupHookAsync(job_id_t job_id,
 
   HookEvent e{HookType::DESTROY_CGROUP,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::NodeEventHookAsync(
@@ -462,7 +522,7 @@ void PluginClient::NodeEventHookAsync(
 
   HookEvent e{HookType::INSERT_EVENT,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::UpdatePowerStateHookAsync(
@@ -476,7 +536,7 @@ void PluginClient::UpdatePowerStateHookAsync(
 
   HookEvent e{HookType::UPDATE_POWER_STATE,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::RegisterCranedHookAsync(
@@ -492,7 +552,7 @@ void PluginClient::RegisterCranedHookAsync(
 
   HookEvent e{HookType::REGISTER_CRANED,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::UpdateLicensesHookAsync(
@@ -506,7 +566,7 @@ void PluginClient::UpdateLicensesHookAsync(
 
   HookEvent e{HookType::UPDATE_LICENSES,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
+  EnqueueHook_(std::move(e));
 }
 
 void PluginClient::TraceHookAsync(
@@ -581,11 +641,8 @@ void PluginClient::TraceHookAsync(
         max_request_bytes, m_trace_hook_max_request_bytes_);
   }
 
-  m_trace_hooks_enqueued_.fetch_add(events.size(), std::memory_order_release);
-  size_t enqueued = 0;
   for (auto& event : events) {
-    if (m_event_queue_.enqueue(std::move(event))) ++enqueued;
+    EnqueueHook_(std::move(event));
   }
-  MarkTraceHooksCompleted_(events.size() - enqueued);
 }
 }  // namespace plugin
