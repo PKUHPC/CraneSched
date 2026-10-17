@@ -159,6 +159,77 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
+class StepToDSerializationTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(StepToDSerializationTest, ForwardsExternalLauncherFlag) {
+  Ctld::JobInCtld job{};
+  job.SetJobId(100);
+  SetupJobAllocation(job, {"node-a"});
+
+  crane::grpc::StepToCtld submission;
+  submission.set_job_id(job.JobId());
+  submission.set_type(crane::grpc::JobType::Interactive);
+  submission.set_node_num(1);
+  submission.set_ntasks(1);
+  submission.set_ntasks_per_node(1);
+  if (GetParam()) submission.set_external_launcher(true);
+
+  Ctld::CommonStepInCtld step{};
+  step.job = &job;
+  step.SetFieldsByStepToCtld(submission);
+  step.SetStepId(1);
+  step.SetCranedIds(job.CranedIds());
+  step.SetAllocatedRes(job.AllocatedRes());
+  step.craned_task_map["node-a"].insert(0);
+  step.task_res_map[0] = job.AllocatedRes().At("node-a");
+
+  EXPECT_EQ(step.external_launcher, GetParam());
+  const auto step_to_d = step.GetStepToD("node-a");
+  crane::grpc::StepToD received;
+  ASSERT_TRUE(received.ParseFromString(step_to_d.SerializeAsString()));
+  EXPECT_EQ(received.external_launcher(), GetParam());
+}
+
+TEST_P(StepToDSerializationTest, RecoversExternalLauncherFlag) {
+  Ctld::JobInCtld job{};
+  job.SetJobId(100);
+  SetupJobAllocation(job, {"node-a"});
+
+  crane::grpc::StepToCtld submission;
+  submission.set_job_id(job.JobId());
+  submission.set_type(crane::grpc::JobType::Interactive);
+  submission.set_node_num(1);
+  submission.set_ntasks(1);
+  submission.set_ntasks_per_node(1);
+  submission.set_external_launcher(GetParam());
+
+  Ctld::CommonStepInCtld original{};
+  original.SetFieldsByStepToCtld(submission);
+  original.SetStepId(1);
+  original.SetStepType(crane::grpc::StepType::COMMON);
+  original.SetStatus(crane::grpc::JobStatus::Running);
+  original.SetCranedIds(job.CranedIds());
+  original.SetAllocatedRes(job.AllocatedRes());
+
+  crane::grpc::StepInEmbeddedDb snapshot;
+  *snapshot.mutable_step_to_ctld() = original.StepToCtld();
+  *snapshot.mutable_runtime_attr() = original.RuntimeAttr();
+  crane::grpc::StepInEmbeddedDb stored;
+  ASSERT_TRUE(stored.ParseFromString(snapshot.SerializeAsString()));
+
+  auto recovered = std::make_unique<Ctld::CommonStepInCtld>();
+  recovered->RecoverFromDb(job, stored);
+  EXPECT_EQ(recovered->external_launcher, GetParam());
+  EXPECT_EQ(recovered->GetStepToD("node-a").external_launcher(), GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(LauncherFlag, StepToDSerializationTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                           return info.param ? "ExternalLauncher"
+                                             : "RegularStep";
+                         });
+
 TEST(CtldAccountingTimeTest, TerminalReportIsClampedToStart) {
   const absl::Time start =
       absl::FromUnixSeconds(1'700'000'000) + absl::Milliseconds(900);
