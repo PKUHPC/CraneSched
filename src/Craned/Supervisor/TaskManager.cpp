@@ -3615,8 +3615,9 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
                            fi->reason);
       continue;
     case TaskFinalizeCause::INTERACTIVE_NO_PROCESS:
-      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed,
-                           ExitCode::EC_TERMINATED, fi->reason);
+      // Releasing an allocation without a local process is a normal completion.
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
+                           fi->reason);
       continue;
     case TaskFinalizeCause::DEADLINE:
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Deadline,
