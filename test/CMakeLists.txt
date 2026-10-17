@@ -1,5 +1,6 @@
 add_subdirectory(CraneCtld)
 add_subdirectory(Craned)
+add_subdirectory(Supervisor)
 add_subdirectory(Utilities)
 add_subdirectory(Misc)
 # Tests are intentionally excluded from the default build.  Keep one explicit
@@ -10,6 +11,7 @@ set(CRANE_UNIT_TEST_TARGETS
     execution_groups_test
     container_identity_test
     embedded_db_client_test
+    supervisor_exit_test
     ctld_public_defs_test
     dedicated_resource_test
     public_header_test
