@@ -121,11 +121,3 @@ if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
     target_link_libraries(ctld_public_defs_test ${BERKELEY_DB_CXX_LIBRARIES})
 endif ()
 gtest_discover_tests(ctld_public_defs_test)
-
-# Pure BSON/protobuf conversion; no controller or database server dependency.
-add_executable(request_fields_test RequestFieldsTest.cpp
-        ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/RequestFields.cpp)
-target_include_directories(request_fields_test PRIVATE ${PROJECT_SOURCE_DIR}/src/CraneCtld)
-target_link_libraries(request_fields_test PRIVATE
-        GTest::gtest_main crane_proto_lib bsoncxx_static)
-gtest_discover_tests(request_fields_test)

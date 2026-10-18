@@ -21,9 +21,9 @@
 #include <algorithm>
 #include <bsoncxx/exception/exception.hpp>
 #include <cstdint>
+#include <limits>
 #include <mongocxx/exception/exception.hpp>
 
-#include "RequestFields.h"
 #include "crane/AccountingTime.h"
 
 namespace Ctld {
@@ -1003,7 +1003,7 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_type(
             static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
         job_info.set_job_id(job_id);
-        accounting::RestoreRequestFields(view, &job_info);
+        RestoreRequestFields_(view, &job_info);
 
         job_info.set_node_num(view["nodes_alloc"].get_int32().value);
 
@@ -4808,6 +4808,45 @@ MongodbClient::document MongodbClient::LicenseResourceToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
+void MongodbClient::AppendRequestFields_(document& doc, uint32_t ntasks,
+                                         const GresMap* gres,
+                                         const GresMap& per_node) {
+  doc.append(kvp("request_schema_version", 1),
+             kvp("ntasks", static_cast<int64_t>(ntasks)));
+  DocumentAppendItem_(doc, "gres_per_node", per_node);
+  if (gres) DocumentAppendItem_(doc, "gres_req", *gres);
+}
+
+template <typename Info>
+void MongodbClient::RestoreRequestFields_(const bsoncxx::document::view& view,
+                                          Info* info) {
+  info->clear_ntasks();
+  info->mutable_req_total_res_view()->clear_gres_map();
+  if (auto elem = view["ntasks"]; elem) {
+    const auto value = ViewGetArithmeticValue_<int64_t>(elem);
+    if (value < 0 || value > std::numeric_limits<uint32_t>::max())
+      throw std::out_of_range("Historical ntasks is out of range");
+    info->set_ntasks(static_cast<uint32_t>(value));
+  }
+  if (auto elem = view["gres_req"];
+      elem && elem.type() == bsoncxx::type::k_document) {
+    *info->mutable_req_total_res_view()->mutable_gres_map() =
+        ToGrpcGresMap(BsonToGresMap(elem.get_document().view()));
+  }
+}
+
+std::optional<GresMap> MongodbClient::RecoverRequestedGres_(
+    const crane::grpc::GresMap& per_node, uint32_t nodes,
+    const crane::grpc::GresMap* snapshot) {
+  if (snapshot) return FromGrpcGresMap(*snapshot);
+  // Legacy embedded records cannot determine a nonempty total request when
+  // the normalized node count is unknown.
+  if (nodes == 0 && !per_node.name_gres_map().empty()) return std::nullopt;
+  auto total = FromGrpcGresMap(per_node);
+  for (auto& [name, count] : total) count *= nodes;
+  return total;
+}
+
 GresMap MongodbClient::BsonToGresMap(const bsoncxx::document::view& doc) {
   GresMap gres_map;
 
@@ -5359,16 +5398,15 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           array_spec_fields.max_concurrent, runtime_attr.requeue_count()};
 
   auto doc = DocumentConstructor_(fields, values);
-  const auto gres = accounting::RecoverRequestedGres(
+  const auto gres = RecoverRequestedGres_(
       job_to_ctld.gres_per_node(),
       job_to_ctld.node_num_min() == job_to_ctld.node_num_max()
           ? job_to_ctld.node_num_min()
           : 0,
       runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
                                         : nullptr);
-  accounting::AppendRequestFields(&doc, job_to_ctld.ntasks(),
-                                  gres ? &*gres : nullptr,
-                                  job_to_ctld.gres_per_node());
+  AppendRequestFields_(doc, job_to_ctld.ntasks(), gres ? &*gres : nullptr,
+                       FromGrpcGresMap(job_to_ctld.gres_per_node()));
   return doc;
 }
 
@@ -5547,13 +5585,13 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // case.
   const auto& request = job->JobToCtld();
   const auto& runtime = job->RuntimeAttr();
-  const auto gres = accounting::RecoverRequestedGres(
+  const auto gres = RecoverRequestedGres_(
       request.gres_per_node(),
       request.node_num_min() == request.node_num_max() ? request.node_num_min()
                                                        : 0,
       runtime.has_requested_gres() ? &runtime.requested_gres() : nullptr);
-  accounting::AppendRequestFields(&doc, job->ntasks, gres ? &*gres : nullptr,
-                                  request.gres_per_node());
+  AppendRequestFields_(doc, job->ntasks, gres ? &*gres : nullptr,
+                       FromGrpcGresMap(request.gres_per_node()));
   return doc;
 }
 
@@ -5636,10 +5674,9 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              step->ExecutionNodes()};
 
   auto doc = DocumentConstructor_(fields, values);
-  const auto gres = ToGrpcGresMap(step->req_total_res_view.GetGresMap());
-  accounting::AppendRequestFields(
-      &doc, step->ntasks, &gres,
-      ToGrpcGresMap(step->req_node_res_view.GetGresMap()));
+  AppendRequestFields_(doc, step->ntasks,
+                       &step->req_total_res_view.GetGresMap(),
+                       step->req_node_res_view.GetGresMap());
   return doc;
 }
 
@@ -5770,19 +5807,18 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       };
 
   auto doc = DocumentConstructor_(fields, values);
-  const auto gres = accounting::RecoverRequestedGres(
+  const auto gres = RecoverRequestedGres_(
       step_to_ctld.gres_per_node(), step_to_ctld.node_num(),
       runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
                                         : nullptr);
-  accounting::AppendRequestFields(&doc, step_to_ctld.ntasks(),
-                                  gres ? &*gres : nullptr,
-                                  step_to_ctld.gres_per_node());
+  AppendRequestFields_(doc, step_to_ctld.ntasks(), gres ? &*gres : nullptr,
+                       FromGrpcGresMap(step_to_ctld.gres_per_node()));
   return doc;
 }
 
 void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
                                     crane::grpc::StepInfo* step_info) {
-  accounting::RestoreRequestFields(view, step_info);
+  RestoreRequestFields_(view, step_info);
   // 0  step_id         mod_time      deleted       cpus_req      mem_req
   // 5  step_name       env           id_user       id_group      nodelist
   // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
