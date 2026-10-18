@@ -5540,10 +5540,17 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              static_cast<int32_t>(job->RequeueCount())};
 
   auto doc = DocumentConstructor_(fields, values);
-  const auto gres = ToGrpcGresMap(job->req_total_res_view.GetGresMap());
-  accounting::AppendRequestFields(
-      &doc, job->ntasks, &gres,
-      ToGrpcGresMap(job->req_node_res_view.GetGresMap()));
+  // Recovery of a final requeued job can reach this writer before scheduler
+  // attributes are rebuilt. Prefer the persisted normalized request in that case.
+  const auto& request = job->JobToCtld();
+  const auto& runtime = job->RuntimeAttr();
+  const auto gres = accounting::RecoverRequestedGres(
+      request.gres_per_node(),
+      request.node_num_min() == request.node_num_max() ? request.node_num_min()
+                                                     : 0,
+      runtime.has_requested_gres() ? &runtime.requested_gres() : nullptr);
+  accounting::AppendRequestFields(&doc, job->ntasks, gres ? &*gres : nullptr,
+                                   request.gres_per_node());
   return doc;
 }
 
