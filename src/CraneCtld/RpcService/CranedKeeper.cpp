@@ -55,7 +55,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   crane::grpc::ConfigureCranedRequest request;
   {
     auto lifecycle_lock = m_craned_keeper_->GetLifecycleLock();
-    if (m_retired_ ||
+    if (m_craned_keeper_->IsClosing() || m_retired_ ||
         m_craned_keeper_->GetCranedStub(craned_id).get() != this ||
         !CheckToken(token))
       return;
@@ -68,7 +68,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
     bool is_future;
     {
       auto node = g_meta_container->GetCranedMetaPtr(craned_id);
-      is_future = node && node->static_meta.is_future;
+      is_future = node && node->static_meta.flags[NodeFlags::Future];
     }
     if (is_future)
       *request.mutable_definition() =
@@ -776,13 +776,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
     if (m_craned_connected_cb_)
       g_thread_pool->detach_task([this, craned, token]() {
-        {
-          auto lifecycle_lock = GetLifecycleLock();
-          if (m_cq_closed_ || craned->m_retired_ ||
-              GetCranedStub(craned->m_craned_id_) != craned ||
-              !craned->CheckToken(token))
-            return;
-        }
         m_craned_connected_cb_(craned->m_craned_id_, token, craned);
       });
 
@@ -1069,7 +1062,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
     node_addr = craned_meta->static_meta.node_addr;
     node_hostname = craned_meta->static_meta.node_hostname;
-    is_future = craned_meta->static_meta.is_future;
+    is_future = craned_meta->static_meta.flags[NodeFlags::Future];
   }
   std::string ip_addr = node_addr;
   if (crane::GetIpAddrVer(node_addr) == -1) {

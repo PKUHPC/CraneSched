@@ -114,7 +114,7 @@ static grpc::Status AuthenticateCranedSession(
     const std::string& session_id, bool require_registered = true) {
   auto node = g_meta_container->GetCranedMetaPtr(craned_id);
   if (!node) return {grpc::StatusCode::FAILED_PRECONDITION, "Unknown craned"};
-  if (!node->static_meta.is_future) return grpc::Status::OK;
+  if (!node->static_meta.flags[NodeFlags::Future]) return grpc::Status::OK;
 
   auto authentication = AuthenticateFutureNode(
       context, node->static_meta.node_hostname, node->static_meta.node_addr);
@@ -170,7 +170,7 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     craned_id = std::move(mapping.value());
   } else {
     auto node = g_meta_container->GetCranedMetaPtr(craned_id);
-    if (!node || node->static_meta.is_future)
+    if (!node || node->static_meta.flags[NodeFlags::Future])
       return {grpc::StatusCode::FAILED_PRECONDITION,
               "FUTURE nodes must provide a machine candidate"};
   }
