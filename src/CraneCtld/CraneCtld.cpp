@@ -1163,9 +1163,6 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-#ifdef CRANE_ENABLE_TRACING
-  crane::TracerManager::GetInstance().Shutdown();
-#endif
   g_craned_keeper.reset();
   // Craned keeper will query running job from scheduler
   g_job_scheduler.reset();
@@ -1176,6 +1173,10 @@ void DestroyCtldGlobalVariables() {
 
   g_thread_pool->wait();
   g_thread_pool.reset();
+  if (g_plugin_client) g_plugin_client->Shutdown();
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_plugin_client.reset();
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
