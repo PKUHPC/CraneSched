@@ -391,8 +391,7 @@ void StepInCtld::RecoverFromDb(
     req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
-  req_total_res_view =
-      req_node_res_view * node_num + req_task_res_view * ntasks;
+  SetReqTotalResView(req_node_res_view * node_num + req_task_res_view * ntasks);
   deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
 
   SetStepDbId(runtime_attr.step_db_id());
@@ -497,7 +496,7 @@ void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
 
   req_node_res_view = job.req_node_res_view;
   req_task_res_view = job.req_task_res_view;
-  req_total_res_view = job.req_total_res_view;
+  SetReqTotalResView(job.req_total_res_view);
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
@@ -1018,7 +1017,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   req_node_res_view = job.req_node_res_view;
   req_task_res_view = job.req_task_res_view;
-  req_total_res_view = job.req_total_res_view;
+  SetReqTotalResView(job.req_total_res_view);
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;

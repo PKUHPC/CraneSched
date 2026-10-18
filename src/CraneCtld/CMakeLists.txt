@@ -8,6 +8,7 @@ add_executable(cranectld
         Node/CranedMetaContainer.cpp
         Database/DbClient.h
         Database/DbClient.cpp
+        Database/RequestFields.cpp
         Array.h
         Array.cpp
         JobScheduler.h

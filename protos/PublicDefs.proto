@@ -308,6 +308,9 @@ message RuntimeAttrOfJob {
   optional bool array_children_expanded = 28;
 
   repeated uint32 task_node_list = 29;
+
+  // Normalized query request, retained for recovery archival.
+  GresMap requested_gres = 30;
 }
 
 message StepToCtld {
@@ -387,6 +390,9 @@ message RuntimeAttrOfStep {
   uint32 exit_code = 33;
 
   bool held = 35;
+
+  // Normalized query request, retained for recovery archival.
+  GresMap requested_gres = 36;
 }
 
 message StepNextIdInEmbeddedDb {
@@ -693,7 +699,8 @@ message JobInfo {
   string wckey = 41;
   map<string, string> env = 42;
   string submit_hostname = 43;
-  uint32 ntasks = 44;
+  // Requested task count; absent for historical records without this field.
+  optional uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
   int32 requeue_count = 46;
   bool requeue_if_failed = 47;
@@ -722,7 +729,8 @@ message StepInfo {
   uint32 node_num = 12;
   string cmd_line = 13;
   string cwd = 14;
-  uint32 ntasks = 15;
+  // Requested task count; absent for historical records without this field.
+  optional uint32 ntasks = 15;
   ResourceView req_total_res_view = 17;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;

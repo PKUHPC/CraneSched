@@ -774,6 +774,12 @@ struct StepInCtld {
   void SetHeld(bool held);
   bool Held() const { return m_held_; }
 
+  void SetReqTotalResView(ResourceView value) {
+    req_total_res_view = std::move(value);
+    *m_runtime_attr_.mutable_requested_gres() =
+        ToGrpcGresMap(req_total_res_view.GetGresMap());
+  }
+
   crane::grpc::RuntimeAttrOfStep const& RuntimeAttr() const {
     return m_runtime_attr_;
   }
@@ -1094,6 +1100,12 @@ struct JobInCtld {
 
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
+
+  void SetReqTotalResView(ResourceView value) {
+    req_total_res_view = std::move(value);
+    *runtime_attr.mutable_requested_gres() =
+        ToGrpcGresMap(req_total_res_view.GetGresMap());
+  }
 
   crane::grpc::RuntimeAttrOfJob const& RuntimeAttr() const {
     return runtime_attr;

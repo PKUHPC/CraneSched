@@ -17,6 +17,7 @@
  */
 
 #include "DbClient.h"
+#include "RequestFields.h"
 
 #include <algorithm>
 #include <bsoncxx/exception/exception.hpp>
@@ -1002,6 +1003,7 @@ bool MongodbClient::FetchJobRecords(
         job_info.set_type(
             static_cast<crane::grpc::JobType>(view["type"].get_int32().value));
         job_info.set_job_id(job_id);
+        accounting::RestoreRequestFields(view, &job_info);
 
         job_info.set_node_num(view["nodes_alloc"].get_int32().value);
 
@@ -5356,7 +5358,16 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           // 55-56
           array_spec_fields.max_concurrent, runtime_attr.requeue_count()};
 
-  return DocumentConstructor_(fields, values);
+  auto doc = DocumentConstructor_(fields, values);
+  const auto gres = accounting::RecoverRequestedGres(
+      job_to_ctld.gres_per_node(), job_to_ctld.node_num_min() == job_to_ctld.node_num_max()
+          ? job_to_ctld.node_num_min() : 0,
+      runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
+                                        : nullptr);
+  accounting::AppendRequestFields(&doc, job_to_ctld.ntasks(),
+                                   gres ? &*gres : nullptr,
+                                   job_to_ctld.gres_per_node());
+  return doc;
 }
 
 void MongodbClient::BsonToResourceView(const bsoncxx::document::view& view,
@@ -5528,7 +5539,12 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              array_spec_fields.max_concurrent,
              static_cast<int32_t>(job->RequeueCount())};
 
-  return DocumentConstructor_(fields, values);
+  auto doc = DocumentConstructor_(fields, values);
+  const auto gres = ToGrpcGresMap(job->req_total_res_view.GetGresMap());
+  accounting::AppendRequestFields(
+      &doc, job->ntasks, &gres,
+      ToGrpcGresMap(job->req_node_res_view.GetGresMap()));
+  return doc;
 }
 
 MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
@@ -5609,7 +5625,12 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              step->included_nodes, step->excluded_nodes,
              step->ExecutionNodes()};
 
-  return DocumentConstructor_(fields, values);
+  auto doc = DocumentConstructor_(fields, values);
+  const auto gres = ToGrpcGresMap(step->req_total_res_view.GetGresMap());
+  accounting::AppendRequestFields(
+      &doc, step->ntasks, &gres,
+      ToGrpcGresMap(step->req_node_res_view.GetGresMap()));
+  return doc;
 }
 
 MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
@@ -5738,11 +5759,20 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           runtime_attr.execution_nodes(),
       };
 
-  return DocumentConstructor_(fields, values);
+  auto doc = DocumentConstructor_(fields, values);
+  const auto gres = accounting::RecoverRequestedGres(
+      step_to_ctld.gres_per_node(), step_to_ctld.node_num(),
+      runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
+                                        : nullptr);
+  accounting::AppendRequestFields(&doc, step_to_ctld.ntasks(),
+                                   gres ? &*gres : nullptr,
+                                   step_to_ctld.gres_per_node());
+  return doc;
 }
 
 void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
                                     crane::grpc::StepInfo* step_info) {
+  accounting::RestoreRequestFields(view, step_info);
   // 0  step_id         mod_time      deleted       cpus_req      mem_req
   // 5  step_name       env           id_user       id_group      nodelist
   // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
