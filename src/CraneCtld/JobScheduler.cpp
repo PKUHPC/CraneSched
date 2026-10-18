@@ -8485,7 +8485,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         job->ntasks_per_node_min, job->ntasks_per_node_max);
 
     job->SetReqTotalResView(job->req_node_res_view * job->node_num +
-                             job->req_task_res_view * job->ntasks);
+                            job->req_task_res_view * job->ntasks);
     CRANE_TRACE("Job #{} total res:{}", job->JobId(),
                 util::ReadableResourceView(job->req_total_res_view));
   }
@@ -8914,7 +8914,7 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
       job->node_num = selected_node_num;
       if (job->node_num == 0) {
         job->SetReqTotalResView(job->req_node_res_view * job->node_num_min +
-                                 job->req_task_res_view * job->ntasks);
+                                job->req_task_res_view * job->ntasks);
       } else {
         job->node_num_min = job->node_num;
         job->node_num_max = job->node_num;
@@ -8927,7 +8927,7 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
              job->ntasks - (job->node_num - 1) * job->ntasks_per_node_min});
 
         job->SetReqTotalResView(job->req_node_res_view * job->node_num +
-                                 job->req_task_res_view * job->ntasks);
+                                job->req_task_res_view * job->ntasks);
         CRANE_TRACE("Job #{} total res:{}", job->JobId(),
                     util::ReadableResourceView(job->req_total_res_view));
       }
@@ -9163,7 +9163,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   }
 
   step->SetReqTotalResView(step->req_node_res_view * step->node_num +
-                            step->req_task_res_view * step->ntasks);
+                           step->req_task_res_view * step->ntasks);
 
   return {};
 }

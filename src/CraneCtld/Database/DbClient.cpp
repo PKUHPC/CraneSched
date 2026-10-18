@@ -17,13 +17,13 @@
  */
 
 #include "DbClient.h"
-#include "RequestFields.h"
 
 #include <algorithm>
 #include <bsoncxx/exception/exception.hpp>
 #include <cstdint>
 #include <mongocxx/exception/exception.hpp>
 
+#include "RequestFields.h"
 #include "crane/AccountingTime.h"
 
 namespace Ctld {
@@ -5360,13 +5360,15 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
 
   auto doc = DocumentConstructor_(fields, values);
   const auto gres = accounting::RecoverRequestedGres(
-      job_to_ctld.gres_per_node(), job_to_ctld.node_num_min() == job_to_ctld.node_num_max()
-          ? job_to_ctld.node_num_min() : 0,
+      job_to_ctld.gres_per_node(),
+      job_to_ctld.node_num_min() == job_to_ctld.node_num_max()
+          ? job_to_ctld.node_num_min()
+          : 0,
       runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
                                         : nullptr);
   accounting::AppendRequestFields(&doc, job_to_ctld.ntasks(),
-                                   gres ? &*gres : nullptr,
-                                   job_to_ctld.gres_per_node());
+                                  gres ? &*gres : nullptr,
+                                  job_to_ctld.gres_per_node());
   return doc;
 }
 
@@ -5541,16 +5543,17 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
 
   auto doc = DocumentConstructor_(fields, values);
   // Recovery of a final requeued job can reach this writer before scheduler
-  // attributes are rebuilt. Prefer the persisted normalized request in that case.
+  // attributes are rebuilt. Prefer the persisted normalized request in that
+  // case.
   const auto& request = job->JobToCtld();
   const auto& runtime = job->RuntimeAttr();
   const auto gres = accounting::RecoverRequestedGres(
       request.gres_per_node(),
       request.node_num_min() == request.node_num_max() ? request.node_num_min()
-                                                     : 0,
+                                                       : 0,
       runtime.has_requested_gres() ? &runtime.requested_gres() : nullptr);
   accounting::AppendRequestFields(&doc, job->ntasks, gres ? &*gres : nullptr,
-                                   request.gres_per_node());
+                                  request.gres_per_node());
   return doc;
 }
 
@@ -5772,8 +5775,8 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
                                         : nullptr);
   accounting::AppendRequestFields(&doc, step_to_ctld.ntasks(),
-                                   gres ? &*gres : nullptr,
-                                   step_to_ctld.gres_per_node());
+                                  gres ? &*gres : nullptr,
+                                  step_to_ctld.gres_per_node());
   return doc;
 }
 
