@@ -48,11 +48,17 @@ namespace {
 
 std::vector<std::string> FindNodesNotInPartition_(
     const std::unordered_set<std::string>& requested_nodes,
-    const std::unordered_set<std::string>& partition_nodes) {
+    const PartitionId& partition_id) {
+  if (requested_nodes.empty()) return {};
+
   std::vector<std::string> invalid_nodes;
   invalid_nodes.reserve(requested_nodes.size());
-  for (const auto& node : requested_nodes) {
-    if (!partition_nodes.contains(node)) invalid_nodes.emplace_back(node);
+  {
+    auto partition = g_meta_container->GetPartitionMetasPtr(partition_id);
+    for (const auto& node : requested_nodes) {
+      if (!partition->craned_ids.contains(node))
+        invalid_nodes.emplace_back(node);
+    }
   }
 
   std::sort(invalid_nodes.begin(), invalid_nodes.end());
@@ -72,17 +78,15 @@ std::vector<std::string> FindUnknownNodes_(
   return invalid_nodes;
 }
 
-Config::Partition RuntimePartitionConfig_(const PartitionId& id,
-                                          const Config::Partition& config) {
-  auto result = config;
+uint64_t DefaultMemPerCpu_(const PartitionId& id,
+                           const Config::Partition& config) {
+  if (config.default_mem_per_cpu != 0 || config.default_mem_per_node != 0)
+    return config.default_mem_per_cpu;
+
   auto partition = g_meta_container->GetPartitionMetasPtr(id);
-  result.nodes = partition->craned_ids;
   const auto& resources = partition->partition_global_meta.res_total_inc_dead;
-  if (result.default_mem_per_cpu == 0 && result.default_mem_per_node == 0 &&
-      resources.GetCpuCount() > cpu_t{0})
-    result.default_mem_per_cpu = resources.GetMemoryBytes() /
-                                 static_cast<double>(resources.GetCpuCount());
-  return result;
+  if (resources.GetCpuCount() == cpu_t{0}) return 0;
+  return resources.GetMemoryBytes() / resources.CpuCountDouble();
 }
 
 constexpr size_t kMaxExecutionGroups = 256;
@@ -8342,15 +8346,16 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 
   job->partition_priority = part_it->second.priority;
 
-  const auto part_meta =
-      RuntimePartitionConfig_(job->partition_id, part_it->second);
+  const auto& part_meta = part_it->second;
+  const auto default_mem_per_cpu =
+      DefaultMemPerCpu_(job->partition_id, part_meta);
   CRANE_TRACE(
       "Job {} node res:{}, job res:{}, part default_mem_per_cpu:{}, "
       "default_mem_per_node:{}, max_mem_per_cpu:{}, max_mem_per_node:{}",
       job->JobId(), util::ReadableResourceView(job->req_node_res_view),
-      util::ReadableResourceView(job->req_task_res_view),
-      part_meta.default_mem_per_cpu, part_meta.default_mem_per_node,
-      part_meta.max_mem_per_cpu, part_meta.max_mem_per_node);
+      util::ReadableResourceView(job->req_task_res_view), default_mem_per_cpu,
+      part_meta.default_mem_per_node, part_meta.max_mem_per_cpu,
+      part_meta.max_mem_per_node);
 
   bool user_set_mem_per_cpu = job->JobToCtld().has_mem_per_cpu();
   bool user_set_mem_per_node = job->JobToCtld().has_mem_per_node();
@@ -8374,8 +8379,8 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
       user_set_mem_per_node = true;
       CRANE_TRACE("default_mem_per_node for job #{} is set to {}", job->JobId(),
                   part_meta.default_mem_per_node);
-    } else if (part_meta.default_mem_per_cpu != 0) {
-      auto job_mem_per_cpu = part_meta.default_mem_per_cpu;
+    } else if (default_mem_per_cpu != 0) {
+      auto job_mem_per_cpu = default_mem_per_cpu;
       job->req_task_res_view.SetMemoryBytes(
           static_cast<double>(job->req_task_res_view.GetCpuCount()) *
           job_mem_per_cpu);
@@ -8559,7 +8564,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   }
 
   invalid_nodes =
-      FindNodesNotInPartition_(job->included_nodes, part_meta.nodes);
+      FindNodesNotInPartition_(job->included_nodes, job->partition_id);
   if (!invalid_nodes.empty()) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION,
@@ -8576,7 +8581,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   }
 
   invalid_nodes =
-      FindNodesNotInPartition_(job->excluded_nodes, part_meta.nodes);
+      FindNodesNotInPartition_(job->excluded_nodes, job->partition_id);
   if (!invalid_nodes.empty()) {
     return std::unexpected(FormatRichErr(
         CraneErrCode::ERR_INVALID_EX_NODE_LIST,
@@ -9035,8 +9040,9 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
 
   auto part_it = g_config.Partitions.find(step->job->partition_id);
   if (part_it != g_config.Partitions.end()) {
-    const auto part_meta =
-        RuntimePartitionConfig_(step->job->partition_id, part_it->second);
+    const auto& part_meta = part_it->second;
+    const auto default_mem_per_cpu =
+        DefaultMemPerCpu_(step->job->partition_id, part_meta);
 
     auto invalid_nodes = FindUnknownNodes_(step->included_nodes);
     if (!invalid_nodes.empty()) {
@@ -9047,7 +9053,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
     }
 
     invalid_nodes =
-        FindNodesNotInPartition_(step->included_nodes, part_meta.nodes);
+        FindNodesNotInPartition_(step->included_nodes, step->job->partition_id);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR(
           "Requested nodes for step #{}.{}: nodes '{}' are not in partition "
@@ -9067,7 +9073,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
     }
 
     invalid_nodes =
-        FindNodesNotInPartition_(step->excluded_nodes, part_meta.nodes);
+        FindNodesNotInPartition_(step->excluded_nodes, step->job->partition_id);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR(
           "Invalid --exclude value for step #{}.{}: nodes '{}' are not in "
@@ -9097,8 +9103,8 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->req_node_res_view.SetMemorySwBytes(
             part_meta.default_mem_per_node);
         user_set_mem_per_node = true;
-      } else if (part_meta.default_mem_per_cpu != 0) {
-        auto mem_per_cpu = part_meta.default_mem_per_cpu;
+      } else if (default_mem_per_cpu != 0) {
+        auto mem_per_cpu = default_mem_per_cpu;
         step->req_task_res_view.SetMemoryBytes(
             static_cast<double>(step->req_task_res_view.GetCpuCount()) *
             mem_per_cpu);

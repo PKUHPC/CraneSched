@@ -185,6 +185,8 @@ class CranedKeeper {
 
   void Shutdown();
 
+  bool IsClosing() const { return m_cq_closed_.load(); }
+
   // Acquire before node metadata locks when changing a node lifecycle.
   std::unique_lock<std::recursive_mutex> GetLifecycleLock() {
     return std::unique_lock(m_lifecycle_mtx_);

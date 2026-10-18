@@ -866,7 +866,8 @@ void ParseConfig(int argc, char** argv) {
           std::list<std::string> name_list;
 
           if (node["name"]) {
-            if (!util::ParseHostList(node["name"].Scalar(), &name_list)) {
+            if (!util::ParseHostList(node["name"].Scalar(), &name_list) ||
+                name_list.empty()) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
@@ -915,11 +916,10 @@ void ParseConfig(int argc, char** argv) {
             node_addr_list = node_hostname_list;
           }
 
-          if (node["cpu"]) {
-            uint32_t cpu_count = std::stoul(node["cpu"].as<std::string>());
-            for (uint32_t i = 0; i < cpu_count; ++i)
-              node_res->GetCpuSet().core_ids.insert(i);
-          } else
+          uint32_t cpu_count;
+          if (node["cpu"])
+            cpu_count = node["cpu"].as<uint32_t>();
+          else
             std::exit(1);
 
           if (node["memory"]) {
@@ -936,22 +936,18 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           NodeTopoInfo node_topo;
-          if (node["sockets"]) {
-            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
-            uint32_t cpu_count =
-                static_cast<uint32_t>(node_res->GetCpuSet().core_ids.size());
-            if (sockets_val == 0) {
-              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
-                          node["name"].Scalar());
-              sockets_val = 1;
-            } else if (sockets_val > cpu_count) {
-              CRANE_WARN(
-                  "Sockets {} > cpu count {} for node '{}'. Resetting to 1.",
-                  sockets_val, cpu_count, node["name"].Scalar());
-              sockets_val = 1;
-            }
-            node_topo.sockets = sockets_val;
+          if (node["sockets"])
+            node_topo.sockets = node["sockets"].as<uint32_t>();
+          if (!IsValidNodeResources(cpu_count, node_res->GetMemoryBytes(),
+                                    node_topo.sockets)) {
+            CRANE_ERROR(
+                "Invalid resources for node '{}': CPU and memory must be "
+                "positive; sockets must be positive and evenly divide CPUs.",
+                node["name"].Scalar());
+            std::exit(1);
           }
+          for (uint32_t i = 0; i < cpu_count; ++i)
+            node_res->GetCpuSet().core_ids.insert(i);
 
           std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
@@ -1781,7 +1777,6 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
-  if (g_plugin_client) g_plugin_client->Shutdown();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif

@@ -23,6 +23,8 @@
 
 namespace Ctld {
 
+enum class NodeFlags { Future, Dynamic, _Count };
+
 /**
  * The static information on a Craned (the static part of CranedMeta). This
  * structure is provided when a new Craned node is to be registered in
@@ -40,9 +42,7 @@ struct CranedStaticMeta {
 
   NodeTopoInfo node_topo_info;
 
-  // True if this is a FUTURE placeholder node in config.
-  bool is_future{false};
-  bool dynamic{false};
+  FlagSet<NodeFlags> flags;
   std::vector<std::string> features;
 };
 

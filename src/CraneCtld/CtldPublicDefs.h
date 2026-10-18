@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 
+#include "Node/NodeDefs.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
@@ -129,9 +130,7 @@ struct Config {
 
     NodeTopoInfo node_topo_info;
 
-    // True if this is a FUTURE placeholder node waiting for a craned to be
-    // mapped to it.
-    bool is_future{false};
+    FlagSet<NodeFlags> flags;
     std::vector<std::string> features;
   };
 

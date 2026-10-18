@@ -115,8 +115,9 @@ Nodes:
 - **name**: CraneSched node name or range (e.g., `node[01-10]`). This is the node identifier shown to users and used in partitions.
 - **NodeHostname**: Optional OS hostname or range for matching the local `craned` host. Defaults to `name`.
 - **NodeAddr**: Optional address or range used by `cranectld` to connect to `craned`. Defaults to `NodeHostname`.
-- **cpu**: Number of CPU cores
-- **memory**: Total memory (supports K, M, G, T suffixes)
+- **cpu**: Positive number of CPU cores
+- **memory**: Positive total memory (supports K, M, G, T suffixes)
+- **sockets**: Positive number of CPU sockets, defaults to `1`; must evenly divide `cpu`. Invalid CPU, memory or socket values cause startup to fail for both static and FUTURE nodes.
 - **gres**: Generic resources like GPUs (optional)
 - **state**: Optional. Only `FUTURE` is supported for now. A FUTURE node is a placeholder with no real machine bound at startup: a machine started with `craned -F [feature]` is mapped to an unmapped FUTURE node whose hardware spec is satisfied by the local hardware (detected CPU count and memory no less than configured, carrying the given feature if specified). FUTURE nodes must belong to a partition and should not configure `NodeHostname`/`NodeAddr` (they are overridden with the real machine's address at mapping time). An unmapped FUTURE node takes part in neither scheduling nor partition resources.
 - **features**: Optional list of node tags, currently used to filter FUTURE node mapping for `craned -F <feature>`

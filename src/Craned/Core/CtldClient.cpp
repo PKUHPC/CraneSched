@@ -48,9 +48,9 @@ int64_t ElapsedMs(std::chrono::steady_clock::time_point begin,
 
 bool ApplyFutureNodeDefinition(
     const crane::grpc::DynamicNodeDefinition& definition) {
-  if (definition.name().empty() || definition.cpu() == 0 ||
-      definition.memory_bytes() == 0 || definition.sockets() == 0 ||
-      definition.cpu() % definition.sockets() != 0 ||
+  if (definition.name().empty() ||
+      !IsValidNodeResources(definition.cpu(), definition.memory_bytes(),
+                            definition.sockets()) ||
       definition.partitions().empty()) {
     CRANE_ERROR("CraneCtld returned an invalid FUTURE node definition.");
     return false;

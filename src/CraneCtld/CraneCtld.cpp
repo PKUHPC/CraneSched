@@ -512,7 +512,8 @@ void ParseConfig(int argc, char** argv) {
           std::list<std::string> node_id_list;
 
           if (node["name"]) {
-            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list)) {
+            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list) ||
+                node_id_list.empty()) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
@@ -563,7 +564,7 @@ void ParseConfig(int argc, char** argv) {
           }
 
           if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
+            node_ptr->cpu = node["cpu"].as<uint32_t>();
           else
             std::exit(1);
 
@@ -580,20 +581,15 @@ void ParseConfig(int argc, char** argv) {
 
           // Parse optional sockets field (number of physical CPU sockets).
           // Default value is 1 when not specified.
-          if (node["sockets"]) {
-            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
-            if (sockets_val == 0) {
-              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
-                          node["name"].Scalar());
-              sockets_val = 1;
-            } else if (sockets_val > node_ptr->cpu) {
-              CRANE_WARN(
-                  "Sockets={} for node '{}' exceeds cpu count={}. "
-                  "Resetting to 1.",
-                  sockets_val, node["name"].Scalar(), node_ptr->cpu);
-              sockets_val = 1;
-            }
-            node_ptr->node_topo_info.sockets = sockets_val;
+          if (node["sockets"])
+            node_ptr->node_topo_info.sockets = node["sockets"].as<uint32_t>();
+          if (!IsValidNodeResources(node_ptr->cpu, node_ptr->memory_bytes,
+                                    node_ptr->node_topo_info.sockets)) {
+            CRANE_ERROR(
+                "Invalid resources for node '{}': CPU and memory must be "
+                "positive; sockets must be positive and evenly divide CPUs.",
+                node["name"].Scalar());
+            std::exit(1);
           }
 
           if (node["state"]) {
@@ -606,7 +602,7 @@ void ParseConfig(int argc, char** argv) {
                   node["state"].Scalar(), node["name"].Scalar());
               std::exit(1);
             }
-            node_ptr->is_future = true;
+            node_ptr->flags[Ctld::NodeFlags::Future] = true;
             if (node["NodeHostname"] || node["NodeAddr"])
               CRANE_WARN(
                   "NodeHostname/NodeAddr of FUTURE node '{}' will be "
@@ -1205,7 +1201,6 @@ void DestroyCtldGlobalVariables() {
   g_embedded_db_client.reset();
 
   g_thread_pool.reset();
-  if (g_plugin_client) g_plugin_client->Shutdown();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif

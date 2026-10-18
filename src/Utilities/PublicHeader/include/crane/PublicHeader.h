@@ -598,6 +598,11 @@ struct NodeTopoInfo {
   uint32_t total_cpus{0};
 };
 
+inline bool IsValidNodeResources(uint32_t cpu, uint64_t memory_bytes,
+                                 uint32_t sockets) {
+  return cpu > 0 && memory_bytes > 0 && sockets > 0 && cpu % sockets == 0;
+}
+
 // ResourceInNodeV3: Execution phase resource tracking for a single node
 // Tracks actual hardware resources with specific slot IDs for affinity
 class ResourceInNodeV3 {

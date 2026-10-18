@@ -115,8 +115,9 @@ Nodes:
 - **name**：CraneSched 节点名或范围（例如，`node[01-10]`），也是用户看到和分区中使用的节点标识
 - **NodeHostname**：可选，节点操作系统 hostname 或范围，用于本机 `craned` 匹配身份；默认等于 `name`
 - **NodeAddr**：可选，`cranectld` 连接 `craned` 时使用的地址或范围；默认等于 `NodeHostname`
-- **cpu**：CPU 核心数
-- **memory**：总内存（支持 K、M、G、T 后缀）
+- **cpu**：CPU 核心数，必须大于 0
+- **memory**：总内存，必须大于 0（支持 K、M、G、T 后缀）
+- **sockets**：CPU 插槽数，默认为 `1`，必须大于 0 且能整除 `cpu`。静态节点和 FUTURE 节点配置了非法 CPU、内存或插槽数时均会启动失败。
 - **gres**：通用资源，如 GPU（可选）
 - **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量。
 - **features**：可选，字符串列表形式的节点标签，目前用于 `craned -F <feature>` 的映射过滤
