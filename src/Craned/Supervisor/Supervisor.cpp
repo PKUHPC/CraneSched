@@ -103,6 +103,12 @@ int InitFromStdin(int argc, char** argv) {
   g_config.JobName = msg.job_name();
   g_config.StepId = msg.step_id();
   g_config.StepSpec = msg.step_spec();
+#ifdef CRANE_ENABLE_BPF
+  for (const auto& [slot, entry] : msg.bpf_device_indices()) {
+    g_config.managed_device_indices_by_slot[slot] =
+        std::vector<uint32_t>(entry.indices().begin(), entry.indices().end());
+  }
+#endif
   g_config.CranedIdOfThisNode = msg.craned_id();
   g_config.TaskCount = 1;
   g_config.SupervisorDebugLevel = msg.debug_level();
@@ -377,6 +383,16 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
+#ifdef CRANE_ENABLE_BPF
+  if (Craned::Common::CgroupManager::IsCgV2()) {
+    auto result = Craned::Common::CgroupManager::bpf_runtime_info.Connect(
+        g_config.managed_device_indices_by_slot);
+    if (!result) {
+      CRANE_ERROR("Connect to device control: {}", result.error());
+      std::exit(1);
+    }
+  }
+#endif
   {
     uint32_t pool_size = g_config.ThreadPoolSize > 0
                              ? g_config.ThreadPoolSize
