@@ -110,15 +110,7 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
 
-The Slurm entry points parse options with their Slurm meaning, so some short options differ from the native CraneSched commands:
-
-| Command | Slurm entry point | Native command |
-|---------|-------------------|----------------|
-| `sacct` | `-n/--noheader` omits the header; `-p/--parsable` and `-P/--parsable2` print `\|`-delimited output; `-r/--partition` filters by partition; `-s/--state` by state; `-N/--nodelist` by node; `--name` by job name; `--submittime` by submit time | `cacct -N` omits the header; `-n` is job name, `-p` partition, `-t` state, `-w` node, `-s` submit time |
-| `squeue` | `-h/--noheader` omits the header and help is `--help` only; in `-o`, `%T` is the extended state (e.g. `PENDING`), `%t` the compact state (e.g. `PD`), `%R` the pending reason or node list, `%r` the pending reason | `cqueue -N` omits the header; `%T` is the job type and `%t` the state |
-| `sinfo` | `-h/--noheader` omits the header and help is `--help` only; `-o` takes Slurm specifiers (`%P %a %l %D %t %T %N %E %F`, ...); `-O` takes field names (e.g. `Partition,Nodes:.5,StateLong`); `-N` prints one line per node; the default output has Slurm's six columns `PARTITION AVAIL TIMELIMIT NODES STATE NODELIST` (`TIMELIMIT` is always `infinite`); `-R` prints `REASON NODELIST` | `cinfo -N` omits the header; `-o` takes `%p %a %n %s %l`; the default output has five columns |
-
-Run each entry point with `--help` for the full list of options and specifiers.
+See the [cwrapper command reference](../../command/cwrapper.md) for differences in options and output formats.
 
 ## Optional: Source Installation
 
