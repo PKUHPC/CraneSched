@@ -239,6 +239,34 @@ Required maintainer review, branch protection, the trusted
 `pull_request_target` dispatcher and the restricted Kubernetes identity remain
 part of the repository-level security boundary.
 
+## RPM repository publishing
+
+After the system-test exit contract succeeds, CI uploads the exact tested RPM
+set to Nexus. Publishing runs for `master` pushes and schedules, and manual
+runs loaded from `master` with both source inputs set to `master`. Pull-request
+runs and manual builds of other refs do not publish packages.
+
+The upload step alone receives the repository Actions secrets `CCREPO_URL`,
+`CCREPO_USERNAME` and `CCREPO_PASSWORD`. It skips publishing when any is missing.
+The uploader comes from the pinned trusted CI controls checkout, so restoring
+this feature requires only a Backend change and no AutoTest release deployment.
+Before uploading, the validated AutoTest release rechecks the build manifest,
+RPM metadata, sizes, digests and exact Backend/FrontEnd revisions.
+
+The restored Nexus uploader is `.github/ci/upload-packages.sh`. The workflow
+uses `UPLOAD_MODE=RPM`, repository `crane`, distro `8`, architecture `x86_64`,
+and version channel `master`, preserving the historical URL layout:
+
+```text
+<CCREPO_URL>/repository/crane/master/8/x86_64/RPMS/<RPM filename>
+```
+
+Cache hits also attempt publishing, allowing a workflow rerun to retry an
+earlier upload failure. Each file has at most three attempts, a 15-second
+connection timeout and a 300-second transfer timeout; the entire step has a
+20-minute limit. Missing secrets or upload failures do not change the system
+test result; upload errors remain visible in the optional step's log.
+
 ## Artifacts and result contract
 
 `env build --publish-root` writes an exact package manifest under

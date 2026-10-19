@@ -527,6 +527,60 @@ jobs:
             *) echo "System tests did not produce a valid aggregate exit code." >&2; exit 2 ;;
           esac
 
+      - name: Upload tested RPMs to private repository
+        if: >-
+          github.repository == 'PKUHPC/CraneSched'
+          && github.ref == 'refs/heads/master'
+          && (
+            github.event_name == 'push'
+            || github.event_name == 'schedule'
+            || (
+              github.event_name == 'workflow_dispatch'
+              && inputs.backend_ref == 'master'
+              && inputs.frontend_ref == 'master'
+            )
+          )
+          && steps.collect-artifacts.outputs.exit_code == '0'
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          NEXUS_URL: ${{ secrets.CCREPO_URL }}
+          NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
+          BUILD_MANIFEST: ${{ steps.build.outputs.build_manifest }}
+          VERSION: master
+          RPM_REPO_NAME: crane
+          RPM_ARCH: x86_64
+          RPM_DISTRO: '8'
+          UPLOAD_MODE: RPM
+          CONTINUE_ON_ERROR: 'true'
+        run: |
+          set -euo pipefail
+          if [[ -z "$NEXUS_URL" || -z "$NEXUS_USERNAME" || -z "$NEXUS_PASSWORD" ]]; then
+            echo "::notice::Skipping RPM upload: CCREPO repository secrets are unavailable."
+            exit 0
+          fi
+          PACKAGE_DIR="$(
+            "${CRANETESTKIT_RELEASE_DIR}/.venv/bin/python" -I - "$BUILD_MANIFEST" <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          from crane_testkit.orchestration.build_manifest import load_build_manifest
+
+          path = Path(sys.argv[1])
+          manifest = load_build_manifest(path)
+          expected = (os.environ["BACKEND_SHA"], os.environ["FRONTEND_SHA"])
+          actual = (manifest.inputs.backend_sha, manifest.inputs.frontend_sha)
+          if actual != expected:
+              raise SystemExit("RPM upload manifest does not match the tested source revisions")
+          print(path.parent / "packages")
+          PY
+          )"
+          export PACKAGE_DIR
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+          bash trusted-ci/.github/ci/upload-packages.sh
+
   final-test:
     name: test
     needs:
