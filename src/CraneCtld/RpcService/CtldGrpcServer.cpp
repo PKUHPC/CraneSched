@@ -1653,7 +1653,7 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   if (source.has_deadline_time())
     CopyTime(source.deadline_time(), result.mutable_deadline_time());
   result.set_node_num(source.node_num());
-  result.set_ntasks(source.ntasks());
+  if (source.has_ntasks()) result.set_ntasks(source.ntasks());
   if (source.has_req_total_res_view())
     CopyResource(source.req_total_res_view(),
                  result.mutable_req_total_res_view());
@@ -1714,7 +1714,7 @@ crane::grpc::JobInfo ProjectJobForQuery(
     result.set_requeue_count(source.requeue_count());
     result.set_requeue_if_failed(source.requeue_if_failed());
     result.set_node_num(source.node_num());
-    result.set_ntasks(source.ntasks());
+    if (source.has_ntasks()) result.set_ntasks(source.ntasks());
     if (source.has_req_total_res_view())
       CopyResource(source.req_total_res_view(),
                    result.mutable_req_total_res_view());

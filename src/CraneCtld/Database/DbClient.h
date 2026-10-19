@@ -726,6 +726,16 @@ class MongodbClient {
   document JobInEmbeddedDbToDocument_(
       crane::grpc::JobInEmbeddedDb const& job_in_db);
 
+  // Shared by job/step archival. A null GRES pointer means unknown;
+  // an empty map is a known request with no GRES.
+  void AppendRequestFields_(document& doc, uint32_t ntasks, const GresMap* gres,
+                            const GresMap& per_node);
+  template <typename Info>
+  void RestoreRequestFields_(const bsoncxx::document::view& view, Info* info);
+  static std::optional<GresMap> RecoverRequestedGres_(
+      const crane::grpc::GresMap& per_node, uint32_t nodes,
+      const crane::grpc::GresMap* snapshot);
+
   void AppendJobIdSelectorClause_(
       const crane::grpc::QueryJobsInfoRequest* request, document& filter);
 

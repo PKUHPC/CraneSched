@@ -57,6 +57,76 @@ TEST(CtldPublicDefs, CanonicalizesCranedIdListsInInputOrder) {
   g_config.CranedIdByAlias = std::move(original_aliases);
 }
 
+TEST(CtldPublicDefs, JobRecoveryRetainsNormalizedGresRequest) {
+  crane::grpc::JobToCtld request;
+  request.set_type(crane::grpc::Batch);
+  request.set_ntasks(3);
+  request.set_node_num_min(1);
+  request.set_node_num_max(4);
+  auto& gpu =
+      (*request.mutable_gres_per_node()->mutable_name_gres_map())["gpu"];
+  gpu.set_total(3);
+  (*gpu.mutable_specified())["a100"] = 2;
+
+  Ctld::JobInCtld job;
+  job.SetFieldsByJobToCtld(request);
+  job.SetStatus(crane::grpc::Pending);
+  // Scheduling resolves an elastic request to two nodes. Recovery must keep
+  // this normalized request even before rebuilding the scheduling view.
+  job.SetReqTotalResView(job.req_node_res_view * 2 +
+                         job.req_task_res_view * job.ntasks);
+  crane::grpc::JobInEmbeddedDb record;
+  *record.mutable_job_to_ctld() = job.JobToCtld();
+  *record.mutable_runtime_attr() = job.RuntimeAttr();
+
+  Ctld::JobInCtld recovered;
+  recovered.SetFieldsByJobToCtld(record.job_to_ctld());
+  recovered.SetFieldsByRuntimeAttrOfJob(record.runtime_attr());
+  EXPECT_EQ(recovered.ntasks, 3);
+  ASSERT_TRUE(recovered.RuntimeAttr().has_requested_gres());
+  const auto& total =
+      recovered.RuntimeAttr().requested_gres().name_gres_map().at("gpu");
+  EXPECT_EQ(total.total(), 6);
+  EXPECT_EQ(total.specified().at("a100"), 4);
+  EXPECT_TRUE(recovered.req_total_res_view.GetGresMap().empty());
+}
+
+TEST(CtldPublicDefs, StepRecoveryRetainsRequestAndKnownEmptyGres) {
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  crane::grpc::StepInEmbeddedDb record;
+  auto* request = record.mutable_step_to_ctld();
+  request->set_type(crane::grpc::Interactive);
+  request->set_ntasks(2);
+  request->set_node_num(2);
+  auto& gpu =
+      (*request->mutable_gres_per_node()->mutable_name_gres_map())["gpu"];
+  gpu.set_total(3);
+  (*gpu.mutable_specified())["a100"] = 2;
+  Ctld::CommonStepInCtld original;
+  original.SetFieldsByStepToCtld(*request);
+  original.SetReqTotalResView(original.req_node_res_view * original.node_num +
+                              original.req_task_res_view * original.ntasks);
+  *record.mutable_runtime_attr() = original.RuntimeAttr();
+
+  Ctld::CommonStepInCtld step;
+  step.RecoverFromDb(job, record);
+  EXPECT_EQ(step.ntasks, 2);
+  ASSERT_TRUE(step.RuntimeAttr().has_requested_gres());
+  const auto& total =
+      step.RuntimeAttr().requested_gres().name_gres_map().at("gpu");
+  EXPECT_EQ(total.total(), 6);
+  EXPECT_EQ(total.specified().at("a100"), 4);
+
+  request->clear_gres_per_node();
+  original.SetReqTotalResView({});
+  *record.mutable_runtime_attr() = original.RuntimeAttr();
+  step.RecoverFromDb(job, record);
+  EXPECT_EQ(step.ntasks, 2);
+  ASSERT_TRUE(step.RuntimeAttr().has_requested_gres());
+  EXPECT_TRUE(step.RuntimeAttr().requested_gres().name_gres_map().empty());
+}
+
 namespace {
 
 google::protobuf::Timestamp TimestampAt(int64_t seconds) {
