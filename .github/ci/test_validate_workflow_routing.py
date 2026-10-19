@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 MODULE_PATH = Path(__file__).with_name("validate-workflow-routing.py")
 BUILD_WORKFLOW = Path(__file__).parents[1] / "workflows" / "build.yaml"
@@ -206,27 +208,40 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
             workflow,
         )
 
-    def test_build_unit_tests_and_package_are_separate_ordered_stages(self) -> None:
-        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        build = workflow.index("- name: Build backend and frontend artifacts")
-        unit_tests = workflow.index("- name: Build and run backend unit tests")
-        package = workflow.index("- name: Build and publish exact packages")
-        self.assertLess(build, unit_tests)
-        self.assertLess(unit_tests, package)
+    def test_single_build_publishes_the_manifest_before_system_tests(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["test"]["steps"]
+        build_steps = [
+            step for step in steps
+            if '"$CRANETESTKIT_EXECUTABLE" env build' in step.get("run", "")
+        ]
+        self.assertEqual(len(build_steps), 1)
+        build = build_steps[0]
+        self.assertEqual(build["id"], "build")
+        execute = next(step for step in steps if step.get("id") == "execute")
+        self.assertLess(steps.index(build), steps.index(execute))
 
-        build_block = workflow[build:unit_tests]
-        self.assertIn("--phase build", build_block)
-
-        unit_tests_block = workflow[unit_tests:package]
-        self.assertIn("--phase unit-tests", unit_tests_block)
-        self.assertIn('"$CRANETESTKIT_CCACHE_DIR"', unit_tests_block)
-        self.assertIn('"$CRANETESTKIT_FETCHCONTENT_DIR"', unit_tests_block)
-
-        package_end = workflow.find("\n      - name:", package + 1)
-        if package_end == -1:
-            package_end = len(workflow)
-        package_block = workflow[package:package_end]
-        self.assertIn("--phase package", package_block)
+        command = build["run"]
+        # The deployed TestKit uses one build call; split --phase invocations
+        # were reverted in #995 and must not return through a stale contract.
+        self.assertNotIn("--phase", command)
+        self.assertIn("set -euo pipefail", command)
+        lock = command.index('/usr/bin/flock --shared "$maintenance_lock_fd"')
+        invocation = command.index('"$CRANETESTKIT_EXECUTABLE" env build')
+        self.assertLess(lock, invocation)
+        for option in (
+            '--ccache-dir "$CRANETESTKIT_CCACHE_DIR"',
+            '--fetchcontent-dir "$CRANETESTKIT_FETCHCONTENT_DIR"',
+            '--publish-root "$CRANETESTKIT_NFS_ROOT"',
+        ):
+            self.assertIn(option, command)
+        self.assertIn('echo "build_manifest=$build_manifest"', command)
+        self.assertIn('>> "$GITHUB_OUTPUT"', command)
+        self.assertEqual(
+            execute["env"]["BUILD_MANIFEST"],
+            "${{ steps.build.outputs.build_manifest }}",
+        )
+        self.assertIn('--build-manifest "$BUILD_MANIFEST"', execute["run"])
 
     def test_frontend_routing_is_sha_pinned_and_fully_reported(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
