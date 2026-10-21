@@ -124,7 +124,7 @@ Nodes:
 
 FUTURE mapping supports both `TLS.Enabled=true` and `TLS.Enabled=false`; use the same setting on the controller and compute nodes. During the initial reverse connection request, `cranectld` learns the machine's `gethostname()` value and connection address. Registration, heartbeat and state updates verify the mapped address and current session in both modes. No machine hostname allowlist or controller restart is required. `TLS.AllowedNodes` controls frontend certificate signing and is independent of FUTURE mapping.
 
-When TLS is enabled, `cranectld` also verifies the authenticated client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections; for example, `worker01` with suffix `crane.local` uses `worker01.crane.local`. Full hostnames are used as reported. Both individual machine certificates and the controller's shared internal certificate are supported. Certificates must be issued by the trusted CA, and their DNS SANs (or CN when DNS SANs are absent) must cover the machine's TLS hostname. An individual certificate's CN must match the machine hostname or its TLS FQDN; its first CN label must not be purely numeric, since numeric labels are reserved for user UIDs. Shared certificates must be the same leaf certificate configured in the controller's `TLS.InternalCertFilePath`; a shared wildcard certificate such as `*.crane.local` can cover multiple machines. User certificates cannot claim nodes.
+When TLS is enabled, `cranectld` also verifies the authenticated client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections; for example, `worker01` with suffix `crane.local` uses `worker01.crane.local`. Full hostnames are used as reported. FUTURE nodes use the existing shared internal certificate setup: deploy the same certificate and private key through `TLS.InternalCertFilePath` and `TLS.InternalKeyFilePath` on the controller and compute nodes. The certificate's DNS SANs (or CN when DNS SANs are absent) must cover the machine's TLS hostname; a shared wildcard certificate such as `*.crane.local` can cover multiple machines. User certificates cannot claim nodes.
 
 Scheduling uses the FUTURE definition's resources; detected host resources only establish that the machine has enough capacity. Definitions in `config.yaml` are loaded when ctld starts. Add nodes at runtime with `ccontrol create node` and specify their resources there; definitions and mappings are persisted in the `.nodes` state file without changing configuration or restarting ctld.
 
@@ -239,16 +239,6 @@ TLS:
   DomainSuffix: crane.local
   AllowedNodes: "crane[01-10]"
 ```
-
-`CaFilePath` contains the trusted CA bundle used to verify peer certificates;
-configure it on both the controller and compute nodes. `InternalCertFilePath`
-contains the host certificate followed by its intermediate CA certificates in
-issuer order, and `InternalKeyFilePath` contains the corresponding private key.
-When issuing certificates through Vault, include any required `ca_chain` or
-`issuing_ca` instead of saving only `certificate`. FUTURE nodes can use separate
-host certificates issued by the same trusted CA, with both server and client
-authentication enabled. Deployments using a shared self-signed certificate must
-explicitly include that certificate in the `CaFilePath` trust bundle.
 
 ### Gres Configuration
 
