@@ -1715,6 +1715,11 @@ void CommonStepInCtld::RecoverFromDb(
     const JobInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
 
+  // Common steps inherit the job deadline. Older records may not have the
+  // effective deadline copied into StepToCtld before they were persisted.
+  if (!step_in_db.step_to_ctld().has_deadline_time())
+    deadline_time = job.deadline_time;
+
   /* Fields only in CommonStepInCtld */
   cmd_line = StepToCtld().cmd_line();
   external_launcher = StepToCtld().external_launcher();
