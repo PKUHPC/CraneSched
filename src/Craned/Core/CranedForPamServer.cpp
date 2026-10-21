@@ -19,8 +19,8 @@
 #include "CranedForPamServer.h"
 
 #include "CranedServer.h"
-#include "CtldClient.h"
 #include "JobManager.h"
+#include "crane/String.h"
 
 namespace Craned {
 
@@ -28,176 +28,104 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryStepFromPortForwardRequest *request,
     crane::grpc::QueryStepFromPortForwardReply *response) {
-  bool ok;
-  bool job_id_found = false;
-  bool remote_is_craned = false;
-
-  // May be craned or cfored
-  std::string crane_port;
-  std::string crane_addr = request->ssh_remote_address();
-  std::string remote_node_hostname;
-
-  int ip_ver = crane::GetIpAddrVer(request->ssh_remote_address());
-
-  ipv4_t crane_addr4;
-  ipv6_t crane_addr6;
-  if (!((ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) ||
-        (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)))) {
-    CRANE_ERROR("Invalid SSH remote address {}", crane_addr);
+  const auto &address = request->ssh_remote_address();
+  const int ip_ver = crane::GetIpAddrVer(address);
+  ipv4_t addr4;
+  ipv6_t addr6;
+  CranedId remote_id;
+  if (ip_ver == 4 && crane::StrToIpv4(address, &addr4)) {
+    auto it = g_config.Ipv4ToCranedHostname.find(addr4);
+    if (it != g_config.Ipv4ToCranedHostname.end()) remote_id = it->second;
+  } else if (ip_ver == 6 && crane::StrToIpv6(address, &addr6)) {
+    auto it = g_config.Ipv6ToCranedHostname.find(addr6);
+    if (it != g_config.Ipv6ToCranedHostname.end()) remote_id = it->second;
+  } else {
+    CRANE_ERROR("Invalid SSH remote address {}", address);
     response->set_ok(false);
     return Status::OK;
   }
 
-  crane::grpc::QueryCranedInfoReply node_directory;
-  auto directory_status = g_ctld_client->QueryAllCranedInfo(&node_directory);
-  if (!directory_status.ok()) {
-    CRANE_ERROR("Failed to query node directory for PAM: {}",
-                directory_status.error_message());
-    response->set_ok(false);
-    return {directory_status.error_code(),
-            "Failed to query node directory for PAM"};
-  }
-
-  for (const auto &node : node_directory.craned_info_list()) {
-    if (node.resource_state() == crane::grpc::CRANE_FUTURE) continue;
-    bool address_matches;
-    if (ip_ver == 4) {
-      ipv4_t node_addr;
-      address_matches =
-          crane::ResolveIpv4FromHostname(node.node_addr(), &node_addr) &&
-          node_addr == crane_addr4;
-    } else {
-      ipv6_t node_addr;
-      address_matches =
-          crane::ResolveIpv6FromHostname(node.node_addr(), &node_addr) &&
-          node_addr == crane_addr6;
-    }
-    if (!address_matches) continue;
-
-    remote_node_hostname = node.node_hostname();
-    crane_port = g_config.ListenConf.CranedListenPort;
-    remote_is_craned = true;
-    CRANE_TRACE(
-        "Receive QueryJobIdFromPortForward from Pam module: "
-        "ssh_remote_port: {}, ssh_remote_address: {}. "
-        "This ssh comes from a CraneD node. uid: {}",
-        request->ssh_remote_port(), request->ssh_remote_address(),
-        request->uid());
-    break;
-  }
-
-  if (!remote_is_craned) {
-    // Not in the addresses of CraneD nodes. This ssh request comes from a user.
-    // Check if the user's uid is running a job. If so, move it in to the
-    // cgroup of his first job. If not so, reject this ssh request.
-    CRANE_TRACE(
-        "Receive QueryJobIdFromPortForward from Pam module: "
-        "ssh_remote_port: {}, ssh_remote_address: {}. "
-        "This ssh comes from a user machine. uid: {}",
-        request->ssh_remote_port(), request->ssh_remote_address(),
-        request->uid());
-
-    response->set_from_user(true);
-    crane_port = kCforedDefaultPort;
-  }
-
-  std::shared_ptr<Channel> channel_of_remote_service;
-  if (g_config.ListenConf.TlsConfig.Enabled) {
-    if (remote_is_craned) {
-      grpc::ChannelArguments channel_args;
-      SetTlsTargetNameOverride(&channel_args, remote_node_hostname);
-      channel_of_remote_service = CreateTcpTlsCustomChannelByIp(
-          crane_addr, crane_port, g_config.ListenConf.TlsConfig.TlsCerts,
-          channel_args);
-    } else {
-      std::string remote_hostname;
-      if (ip_ver == 4) {
-        ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
-      } else {
-        CRANE_ASSERT(ip_ver == 6);
-        ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
-      }
-
-      if (ok) {
-        CRANE_TRACE("Remote address {} was resolved as {}",
-                    request->ssh_remote_address(), remote_hostname);
-
-        channel_of_remote_service = CreateTcpTlsChannelByDnsName(
-            remote_hostname, crane_port,
-            g_config.ListenConf.TlsConfig.TlsCerts);
-      } else {
-        CRANE_ERROR("Failed to resolve remote address {}.",
-                    request->ssh_remote_address());
-      }
-    }
-  } else {
-    channel_of_remote_service =
-        CreateTcpInsecureChannel(crane_addr, crane_port);
-  }
-
-  if (!channel_of_remote_service) {
-    CRANE_ERROR("Failed to create channel to {}.",
-                request->ssh_remote_address());
-    response->set_ok(false);
-    return Status::OK;
-  }
-
-  crane::grpc::QueryStepFromPortRequest request_to_remote_service;
-  crane::grpc::QueryStepFromPortReply reply_from_remote_service;
-  grpc::ClientContext context_of_remote_service;
-  Status status_remote_service;
-
-  request_to_remote_service.set_port(request->ssh_remote_port());
-
-  if (remote_is_craned) {
-    std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
-        crane::grpc::Craned::NewStub(channel_of_remote_service);
-    status_remote_service = stub_of_remote_craned->QueryStepFromPort(
-        &context_of_remote_service, request_to_remote_service,
-        &reply_from_remote_service);
-  } else {
-    std::unique_ptr<crane::grpc::CraneForeD::Stub> stub_of_remote_cfored =
-        crane::grpc::CraneForeD::NewStub(channel_of_remote_service);
-    status_remote_service = stub_of_remote_cfored->QueryStepFromPort(
-        &context_of_remote_service, request_to_remote_service,
-        &reply_from_remote_service);
-  }
-
-  if (!status_remote_service.ok()) {
-    CRANE_WARN("QueryJobIdFromPort gRPC call failed: {}. Remote is craned: {}",
-               status_remote_service.error_message(), remote_is_craned);
-  }
-
-  if (status_remote_service.ok() && reply_from_remote_service.ok()) {
+  // Remote port ownership is only a hint. The job must also be allocated on
+  // this node and belong to the SSH user.
+  auto accept_job = [&](job_id_t job_id) {
+    auto job = g_job_mgr->QueryJob(job_id);
+    if (!job || job->Uid() != request->uid()) return false;
+    response->set_job_id(job_id);
     response->set_ok(true);
-    response->set_job_id(reply_from_remote_service.job_id());
+    return true;
+  };
 
-    CRANE_TRACE(
-        "ssh client with remote port {} belongs to job #{}. "
-        "Moving this ssh session process into the job's cgroup",
-        request->ssh_remote_port(), reply_from_remote_service.job_id());
-    return Status::OK;
-  } else {
-    std::optional<JobInfoOfUid> info_opt =
-        g_job_mgr->QueryJobInfoOfUid(request->uid());
-    if (info_opt.has_value()) {
-      auto info = info_opt.value();
-      CRANE_TRACE(
-          "Found a job #{} belonging to uid {}. "
-          "This ssh session process is going to be moved into the job's "
-          "cgroup",
-          info.first_job_id, request->uid());
-      response->set_job_id(info.first_job_id);
-      response->set_ok(true);
+  std::string remote_hostname;
+  if (g_config.ListenConf.TlsConfig.Enabled) {
+    if (!remote_id.empty()) {
+      remote_hostname = g_config.CranedIdToNodeHostname.at(remote_id);
     } else {
-      CRANE_TRACE(
-          "This ssh session can't be moved into uid {}'s jobs. "
-          "This uid has no job on this node. "
-          "Reject this ssh request.");
-      response->set_ok(false);
+      const bool resolved =
+          ip_ver == 4 ? crane::ResolveHostnameFromIpv4(addr4, &remote_hostname)
+                      : crane::ResolveHostnameFromIpv6(addr6, &remote_hostname);
+      if (!resolved)
+        CRANE_WARN("Failed to resolve PAM remote address {}", address);
     }
-    return Status::OK;
   }
+
+  auto query_remote = [&](bool is_craned) {
+    const std::string port =
+        is_craned ? g_config.ListenConf.CranedListenPort : kCforedDefaultPort;
+    std::shared_ptr<Channel> channel;
+    if (g_config.ListenConf.TlsConfig.Enabled) {
+      if (remote_hostname.empty()) return false;
+      grpc::ChannelArguments args;
+      SetTlsTargetNameOverride(
+          &args, util::TlsHostname(remote_hostname,
+                                   g_config.ListenConf.TlsConfig.DomainSuffix));
+      channel = CreateTcpTlsCustomChannelByIp(
+          address, port, g_config.ListenConf.TlsConfig.TlsCerts, args);
+    } else {
+      channel = CreateTcpInsecureChannel(address, port);
+    }
+    if (!channel) return false;
+
+    crane::grpc::QueryStepFromPortRequest remote_request;
+    crane::grpc::QueryStepFromPortReply remote_reply;
+    remote_request.set_port(request->ssh_remote_port());
+    grpc::ClientContext remote_context;
+    remote_context.set_deadline(
+        std::min(context->deadline(),
+                 std::chrono::system_clock::now() +
+                     std::chrono::seconds(kCranedRpcTimeoutSeconds)));
+    Status status;
+    if (is_craned) {
+      auto stub = crane::grpc::Craned::NewStub(channel);
+      status = stub->QueryStepFromPort(&remote_context, remote_request,
+                                       &remote_reply);
+    } else {
+      auto stub = crane::grpc::CraneForeD::NewStub(channel);
+      status = stub->QueryStepFromPort(&remote_context, remote_request,
+                                       &remote_reply);
+    }
+    if (!status.ok()) {
+      CRANE_DEBUG("PAM port query to {}:{} failed: {}", address, port,
+                  status.error_message());
+      return false;
+    }
+    if (!remote_reply.ok() || !accept_job(remote_reply.job_id())) return false;
+    response->set_from_user(!is_craned);
+    return true;
+  };
+
+  response->set_from_user(remote_id.empty());
+  // Static addresses are resolved once at startup. An unknown source can be
+  // either a login host or a dynamically bound craned.
+  if (remote_id.empty() && query_remote(false)) return Status::OK;
+  if (query_remote(true)) return Status::OK;
+
+  auto info = g_job_mgr->QueryJobInfoOfUid(request->uid());
+  if (info && accept_job(info->first_job_id)) return Status::OK;
+
+  CRANE_TRACE("No local job for PAM uid {}. Rejecting SSH request.",
+              request->uid());
+  response->set_ok(false);
+  return Status::OK;
 }
 
 grpc::Status CranedForPamServiceImpl::MigrateSshProcToCgroup(
