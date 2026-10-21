@@ -17,20 +17,18 @@ CraneBaseDir: /var/crane/
 # Tls settings
 TLS:
   Enabled: false
-  # PEM certificate chain: host certificate followed by intermediate CAs.
   InternalCertFilePath: /etc/crane/tls/internal.pem
   InternalKeyFilePath: /etc/crane/tls/internal.key
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
-  # Trusted CA bundle used to verify peer certificates.
   CaFilePath: /etc/crane/tls/ca.pem
   DomainSuffix: crane.local
   AllowedNodes: "cn[15-18]"
   # FUTURE node hostnames are learned from craned connection requests.
   # Short hostnames are qualified with DomainSuffix for TLS verification.
-  # When TLS is enabled, nodes need a matching machine certificate or the
-  # controller's shared InternalCertFilePath certificate; user certificates
-  # cannot claim nodes.
+  # When TLS is enabled, nodes use the controller's shared internal certificate
+  # and private key. The certificate must cover each node's TLS hostname;
+  # user certificates cannot claim nodes.
 
 # Ctld settings
 # the listening address of control machine
