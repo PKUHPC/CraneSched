@@ -78,17 +78,6 @@ std::vector<std::string> FindUnknownNodes_(
   return invalid_nodes;
 }
 
-uint64_t DefaultMemPerCpu_(const PartitionId& id,
-                           const Config::Partition& config) {
-  if (config.default_mem_per_cpu != 0 || config.default_mem_per_node != 0)
-    return config.default_mem_per_cpu;
-
-  auto partition = g_meta_container->GetPartitionMetasPtr(id);
-  const auto& resources = partition->partition_global_meta.res_total_inc_dead;
-  if (resources.GetCpuCount() == cpu_t{0}) return 0;
-  return resources.GetMemoryBytes() / resources.CpuCountDouble();
-}
-
 constexpr size_t kMaxExecutionGroups = 256;
 
 bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
@@ -8347,8 +8336,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   job->partition_priority = part_it->second.priority;
 
   const auto& part_meta = part_it->second;
-  const auto default_mem_per_cpu =
-      DefaultMemPerCpu_(job->partition_id, part_meta);
+  const auto default_mem_per_cpu = part_meta.default_mem_per_cpu;
   CRANE_TRACE(
       "Job {} node res:{}, job res:{}, part default_mem_per_cpu:{}, "
       "default_mem_per_node:{}, max_mem_per_cpu:{}, max_mem_per_node:{}",
@@ -9041,8 +9029,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
   auto part_it = g_config.Partitions.find(step->job->partition_id);
   if (part_it != g_config.Partitions.end()) {
     const auto& part_meta = part_it->second;
-    const auto default_mem_per_cpu =
-        DefaultMemPerCpu_(step->job->partition_id, part_meta);
+    const auto default_mem_per_cpu = part_meta.default_mem_per_cpu;
 
     auto invalid_nodes = FindUnknownNodes_(step->included_nodes);
     if (!invalid_nodes.empty()) {

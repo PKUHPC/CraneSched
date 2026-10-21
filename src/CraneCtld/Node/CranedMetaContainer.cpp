@@ -1169,14 +1169,43 @@ void CranedMetaContainer::RestoreNodeState_() {
       error = ValidateNodeDefinition_(definition);
     else {
       auto node = craned_meta_map_[definition.name()];
-      if (!node || !node->static_meta.flags[NodeFlags::Future])
-        error = "Persisted FUTURE node is absent from configuration.";
-      else if (definition.cpu() !=
-                   static_cast<uint32_t>(
-                       node->static_meta.res.GetCpuSet().cpu_count) ||
-               definition.memory_bytes() !=
-                   node->static_meta.res.GetMemoryBytes())
-        error = "Persisted FUTURE node resources differ from configuration.";
+      if (!node || !node->static_meta.flags[NodeFlags::Future]) {
+        error =
+            "Persisted FUTURE node name/state is absent from configuration.";
+      } else {
+        const auto current = NodeDefinition_(*node);
+        std::vector<std::string> conflicts;
+        if (definition.cpu() != current.cpu()) conflicts.emplace_back("cpu");
+        if (definition.memory_bytes() != current.memory_bytes())
+          conflicts.emplace_back("memory");
+        if (definition.sockets() != current.sockets())
+          conflicts.emplace_back("sockets");
+        auto feature_set = [](const auto& features) {
+          std::set<std::string> result;
+          for (const auto& feature : features)
+            result.emplace(absl::AsciiStrToLower(feature));
+          return result;
+        };
+        if (feature_set(definition.features()) !=
+            feature_set(current.features()))
+          conflicts.emplace_back("features");
+        if (std::set<std::string>(definition.partitions().begin(),
+                                  definition.partitions().end()) !=
+            std::set<std::string>(current.partitions().begin(),
+                                  current.partitions().end()))
+          conflicts.emplace_back("partitions");
+        if (!conflicts.empty())
+          error = fmt::format(
+              "Persisted FUTURE definition conflicts with YAML "
+              "fields: {}.",
+              absl::StrJoin(conflicts, ", "));
+      }
+      if (!error.empty())
+        error +=
+            " Restore the previous YAML and restart Ctld; drain jobs, "
+            "remove reservations, stop the old Craned, then reset the "
+            "node to FUTURE before editing YAML. Keep the .nodes file "
+            "for job recovery.";
     }
     if (!error.empty()) {
       CRANE_ERROR("Cannot restore node {}: {}", definition.name(), error);
@@ -1198,26 +1227,39 @@ crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
     const crane::grpc::CreateNodesRequest& request) {
   auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::CreateNodesReply reply;
+  std::unordered_set<std::string> names;
+  std::vector<std::string> errors;
   for (const auto& definition : request.nodes()) {
-    auto error = ValidateNodeDefinition_(definition);
-    if (error.empty()) {
-      auto snapshot = m_node_state_;
-      auto* state = snapshot.add_nodes();
-      *state->mutable_definition() = definition;
-      state->set_dynamic(true);
-      if (!SaveNodeState_(snapshot))
-        error = "Failed to persist node definition.";
-      else {
-        InsertDynamicNode_(definition);
-        m_node_state_ = std::move(snapshot);
-        reply.add_created_nodes(definition.name());
-        CRANE_INFO("User {} created FUTURE node {}.", request.uid(),
-                   definition.name());
+    errors.emplace_back(names.emplace(definition.name()).second
+                            ? ValidateNodeDefinition_(definition)
+                            : "Duplicate node name in request.");
+  }
+  if (std::ranges::any_of(errors,
+                          [](const auto& error) { return error.empty(); })) {
+    auto snapshot = m_node_state_;
+    for (int i = 0; i < request.nodes_size(); ++i) {
+      if (errors[i].empty()) {
+        auto* state = snapshot.add_nodes();
+        *state->mutable_definition() = request.nodes(i);
+        state->set_dynamic(true);
       }
     }
-    if (!error.empty()) {
+    if (SaveNodeState_(snapshot))
+      m_node_state_ = std::move(snapshot);
+    else
+      for (auto& error : errors)
+        if (error.empty()) error = "Failed to persist node definitions.";
+  }
+  for (int i = 0; i < request.nodes_size(); ++i) {
+    const auto& definition = request.nodes(i);
+    if (errors[i].empty()) {
+      InsertDynamicNode_(definition);
+      reply.add_created_nodes(definition.name());
+      CRANE_INFO("User {} created FUTURE node {}.", request.uid(),
+                 definition.name());
+    } else {
       reply.add_not_created_nodes(definition.name());
-      reply.add_not_created_reasons(error);
+      reply.add_not_created_reasons(errors[i]);
     }
   }
   return reply;
@@ -1342,6 +1384,12 @@ std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
       static_cast<double>(request.memory_bytes()) / kBytesPerGB;
 
   auto persist_mapping = [&](const CranedId& id) {
+    for (const auto& state : m_node_state_.nodes()) {
+      if (state.definition().name() == id &&
+          state.node_hostname() == request.hostname() &&
+          state.node_addr() == craned_addr)
+        return true;
+    }
     auto snapshot = m_node_state_;
     bool found = false;
     for (auto& state : *snapshot.mutable_nodes()) {

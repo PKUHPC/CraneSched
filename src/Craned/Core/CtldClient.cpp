@@ -1088,15 +1088,6 @@ void CtldClient::UpdateNodeDrainState_(
   if (!status.ok() || !reply.ok()) CRANE_DEBUG("UpdateNodeDrainState failed");
 }
 
-grpc::Status CtldClient::QueryAllCranedInfo(
-    crane::grpc::QueryCranedInfoReply* reply) {
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
-  crane::grpc::QueryCranedInfoRequest request;
-  return m_stub_->QueryCranedInfo(&context, request, reply);
-}
-
 std::map<job_id_t, std::map<step_id_t, StepStatus>>
 CtldClient::GetAllStepStatusChange() {
   const auto craned_id = g_ctld_client_sm->GetSession().craned_id;

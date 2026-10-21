@@ -128,6 +128,10 @@ When TLS is enabled, `cranectld` also verifies the authenticated client certific
 
 Scheduling uses the FUTURE definition's resources; detected host resources only establish that the machine has enough capacity. Definitions in `config.yaml` are loaded when ctld starts. Add nodes at runtime with `ccontrol create node` and specify their resources there; definitions and mappings are persisted in the `.nodes` state file without changing configuration or restarting ctld.
 
+FUTURE definitions must omit `gres` or use an empty list; non-empty GRES is rejected because dynamic device initialization is not supported. A `craned -F` configuration may omit local `Nodes` and `Partitions`; independent options such as `CranedForeground` and `Container` still apply.
+
+For a bound YAML FUTURE node, its name, FUTURE state, CPU, memory, sockets, features and partition membership must match the persisted definition on controller restart. Feature order/case and partition order may change without changing their meaning. Partition policies (such as ACLs and memory defaults) may be edited independently. `NodeHostname`/`NodeAddr` do not override a persisted binding. To change a protected field, drain the node and wait for all allocations, including completing jobs, to finish; remove its reservations, stop the old Craned, and run `ccontrol update NodeName=<name> State=FUTURE` with the old YAML still loaded. Then edit YAML, restart Ctld and reconnect Craned. Admission checks CPU, memory and the requested feature again. If restart reports a conflict, restore the previous YAML first and follow this procedure; do not delete the `.nodes` file, which is needed for recovery.
+
 Hostname rules:
 
 - `craned` matches the local short hostname and full hostname against `name` and
@@ -168,7 +172,7 @@ DefaultPartition: CPU
 - **name**: Partition identifier
 - **nodes**: Node range belonging to this partition
 - **priority**: Higher values = higher priority (affects scheduling)
-- **DefaultMemPerCpu**: Default memory per CPU in MB (0 = let scheduler decide)
+- **DefaultMemPerCpu**: Default memory per CPU in MB. When both memory defaults are zero or omitted, compute this once from the YAML partition nodes at startup. An initially empty partition must explicitly configure a positive `DefaultMemPerCpu` or `DefaultMemPerNode`. Node additions/removals do not change this default; jobs, steps and partition queries use the same value.
 - **MaxMemPerCpu**: Maximum memory per CPU in MB (0 = no limit)
 
 ### Scheduling Policy

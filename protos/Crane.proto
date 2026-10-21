@@ -122,7 +122,9 @@ message NodeState {
   string node_addr = 4;
 }
 
-message NodeStateSnapshot { repeated NodeState nodes = 1; }
+message NodeStateSnapshot {
+  repeated NodeState nodes = 1;
+}
 
 message CreateNodesRequest {
   uint32 uid = 1;

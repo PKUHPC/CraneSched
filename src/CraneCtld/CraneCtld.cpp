@@ -624,6 +624,15 @@ void ParseConfig(int argc, char** argv) {
 
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
+            if (node_ptr->flags[Ctld::NodeFlags::Future] &&
+                !node["gres"].IsNull() &&
+                (!node["gres"].IsSequence() || node["gres"].size() != 0)) {
+              CRANE_ERROR(
+                  "FUTURE node '{}': non-empty gres is not supported. Remove "
+                  "gres or configure a static node.",
+                  node["name"].Scalar());
+              std::exit(1);
+            }
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
               const auto& gres_node = gres_it->as<YAML::Node>();
@@ -811,7 +820,14 @@ void ParseConfig(int argc, char** argv) {
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }
-            if (part_cpu != 0) part.default_mem_per_cpu = part_mem / part_cpu;
+            if (part_cpu == 0) {
+              CRANE_ERROR(
+                  "Empty partition '{}': configure a positive DefaultMemPerCpu "
+                  "or DefaultMemPerNode before adding dynamic nodes.",
+                  name);
+              std::exit(1);
+            }
+            part.default_mem_per_cpu = part_mem / part_cpu;
           }
 
           if (partition["MaxMemPerCpu"] &&

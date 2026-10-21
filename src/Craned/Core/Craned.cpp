@@ -1147,13 +1147,13 @@ void ParseConfig(int argc, char** argv) {
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
+      }
 
-        g_config.CranedForeground =
-            YamlValueOr<bool>(config["CranedForeground"], false);
+      g_config.CranedForeground =
+          YamlValueOr<bool>(config["CranedForeground"], false);
 
-        if (config["Container"]) {
-          ParseContainerConfig(config["Container"]);
-        }
+      if (config["Container"]) {
+        ParseContainerConfig(config["Container"]);
       }
 
       if (config["JobLifecycleHook"]) {

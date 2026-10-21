@@ -128,6 +128,10 @@ FUTURE 映射同时支持 `TLS.Enabled=true` 和 `TLS.Enabled=false`，控制器
 
 节点的调度资源以 FUTURE 定义为准，宿主机探测值仅用于确认资源足够。`config.yaml` 中的定义在 ctld 启动时加载；运行时新增节点通过 `ccontrol create node` 指定资源，定义及映射持久化到 `.nodes` 状态文件，无需修改配置或重启 ctld。
 
+FUTURE 定义必须省略 `gres` 或使用空列表；当前不支持动态设备初始化，非空 GRES 会导致配置校验失败。`craned -F` 的本地配置可以省略 `Nodes` 和 `Partitions`，`CranedForeground`、`Container` 等独立选项仍正常生效。
+
+已绑定的 YAML FUTURE 节点在控制器重启时，名称、FUTURE 状态、CPU、内存、sockets、features 和所属分区必须与持久化定义一致；features 顺序和大小写、分区顺序的等价调整允许保留。分区策略（如 ACL、默认内存）可独立修改，`NodeHostname`/`NodeAddr` 不会覆盖已持久化绑定。修改受保护字段前，先 drain 节点，等待全部分配（包括 completing 作业）释放，移除关联 reservation，停止旧 Craned，再在旧 YAML 仍生效时执行 `ccontrol update NodeName=<name> State=FUTURE`。随后修改 YAML、重启 Ctld 并重新接入 Craned；接入时会重新校验 CPU、内存和请求的 feature。如已因冲突无法启动，先恢复旧 YAML，再按上述流程操作；不要删除用于恢复的 `.nodes` 文件。
+
 Hostname 规则：
 
 - `craned` 会用本机 short hostname 和完整 hostname 匹配 `name` 与 `NodeHostname`。
@@ -166,7 +170,7 @@ DefaultPartition: CPU
 - **name**：分区标识符
 - **nodes**：属于此分区的节点范围
 - **priority**：值越高优先级越高（影响调度）
-- **DefaultMemPerCpu**：每个 CPU 的默认内存（MB）（0 = 让调度器决定）
+- **DefaultMemPerCpu**：每 CPU 默认内存（MB）。两个默认内存值均为零或省略时，在启动时按 YAML 分区节点计算一次。初始为空的分区必须显式配置正数 `DefaultMemPerCpu` 或 `DefaultMemPerNode`。后续增删节点不改变默认值，作业、步骤和分区查询使用同一个值。
 - **MaxMemPerCpu**：每个 CPU 的最大内存（MB）（0 = 无限制）
 
 ### 调度策略
