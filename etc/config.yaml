@@ -207,7 +207,7 @@ Nodes:
   # - name: "future[01-02]"
   #   cpu: 2
   #   memory: 2G
-  #   state: FUTURE
+  #   state: FUTURE  # Non-empty gres is not supported for FUTURE nodes.
   #   features: [gpu, highmem]
 
 # partition information list
@@ -220,10 +220,11 @@ Partitions:
     nodes: "cn[17-18]"
     priority: 3
     # DefaultMemPerCpu and DefaultMemPerNode are mutually exclusive.
-    # If neither is set, DefaultMemPerCpu is auto-computed from partition resources.
-    # Optional default memory per cpu in MB, 0 lets scheduler decide
+    # If neither is set, DefaultMemPerCpu is computed from YAML nodes at startup.
+    # Empty partitions require a positive default; node changes do not alter it.
+    # Optional default memory per CPU in MB; 0 uses the policy above.
     DefaultMemPerCpu: 0
-    # Optional default memory per node in MB, 0 lets scheduler decide
+    # Optional default memory per node in MB; 0 uses the policy above.
     # DefaultMemPerNode: 0
     # MaxMemPerCpu and MaxMemPerNode can both be set. 0 indicates no limit.
     MaxMemPerCpu: 0

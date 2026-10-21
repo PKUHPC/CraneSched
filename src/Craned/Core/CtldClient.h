@@ -223,8 +223,6 @@ class CtldClient {
 
   void UpdateNodeDrainState(bool is_drain, const std::string& reason);
 
-  grpc::Status QueryAllCranedInfo(crane::grpc::QueryCranedInfoReply* reply);
-
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
 
