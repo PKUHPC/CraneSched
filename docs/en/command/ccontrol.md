@@ -318,6 +318,8 @@ ccontrol update nodeName=<nodename> state=<state> [reason=<reason>]
 - **state** (required): New state for the node
   - `drain` - Prevent new jobs from being scheduled on the node
   - `resume` - Make node available for scheduling again
+  - `future` - Release a FUTURE node's machine binding and keep its definition;
+    wait for job allocations and reservations to finish, then stop its craned
 - **reason** (required when draining): Reason for draining the node
 
 **Examples:**
@@ -461,6 +463,60 @@ ERRO[0000] command execution failed
 ```
 
 ### Create and Delete Commands
+
+#### Create and Delete Dynamic Nodes
+
+FUTURE mapping follows `TLS.Enabled` and supports both encrypted and unencrypted connections; use the same setting on the controller and compute nodes. `cranectld` learns the machine hostname from the candidate in the initial reverse connection request. When TLS is enabled, it also verifies the client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections. In this mode, deploy the cluster's shared internal certificate and private key as described in [Node Definitions](../deployment/configuration/config.md#node-definitions); user certificates cannot claim nodes. Both modes verify the mapped address and current session during registration, heartbeat and state updates. Machines can join without a hostname allowlist, configuration edits or a controller restart.
+
+Administrators can create FUTURE placeholders without editing configuration or restarting the controller:
+
+```bash
+ccontrol create node NodeName=future[01-02] State=FUTURE CPUs=8 RealMemory=32G Partition=CPU Features=compute
+craned -F compute
+ccontrol show node future01
+```
+
+`NodeName`, `State`, `CPUs`, `RealMemory`, and `Partition` are required.
+`Partition` accepts existing partition names separated by commas. `Features` is an optional tag list.
+`Sockets` defaults to 1 and must divide the CPU count. Memory without a suffix is in MiB; B, K, M, and G are also accepted.
+Mapping requires at least the configured CPU count and memory, and a case-insensitive feature match.
+This version supports FUTURE nodes with CPU, memory, socket, and feature definitions. CLOUD, EXTERNAL, dynamic GRES, and `-Z` registration are not supported.
+The compute daemon receives the mapped resource definition from the controller. Scheduling capacity uses the CPU and memory specified at creation, while detected host resources only establish that the machine has enough capacity. Its local configuration must still provide the controller connection and runtime settings. Runtime definitions are persisted without changing `config.yaml` or restarting ctld.
+
+`craned -F` joins asynchronously through the existing configuration and registration flow, initializing resources and recovering jobs after receiving its node definition. The same machine reuses its binding on reconnection; configuration failures retain that binding and retry through the same flow. Each connection has a separate session. After deletion or reassignment, registration, heartbeat, and state updates from an old session are rejected, including when machines share a certificate. Controller restarts restore persisted bindings and establish new sessions. The FUTURE admission protocol requires updating both ctld and craned.
+
+A new node appears as `State=future`; after mapping and registration it carries the `dynamic_future` marker.
+Definitions and actual machine mappings are persisted in a `.nodes` file beside the controller database path and restored on controller restart.
+
+To replace the machine bound to a FUTURE node, release its binding with
+`State=FUTURE`:
+
+```bash
+ccontrol update NodeName=future01 State=DRAIN Reason="replace machine"
+# Wait for jobs and reservations to finish, then stop craned on machine A
+ccontrol update NodeName=future01 State=FUTURE
+# On machine B
+craned -F compute
+```
+
+This works for both configured and runtime-created FUTURE nodes. The node
+returns to `State=future`, retaining its CPU, memory, sockets, features and
+partition membership. The old machine mapping and session are removed, and
+the node stops contributing to partition resources until it is mapped again.
+Binding removal is persisted across controller restarts. Job allocations,
+including completing jobs, and reservations prevent reset. Stop the old
+craned before resetting so it cannot reclaim the placeholder.
+
+```bash
+# Drain the node and wait for jobs and reservations to finish
+ccontrol update NodeName=future01 State=DRAIN Reason="scale-in"
+ccontrol delete node NodeName=future[01-02]
+```
+
+Only nodes created at runtime can be deleted. Job allocations and reservations prevent deletion.
+Batch operations return success or a failure reason for each node. Successful deletion removes the node from queries and partition membership and updates resource totals.
+Nodes defined in the configuration file cannot be deleted with this command.
+Stop the deleted node's craned process; to reconnect it, create a placeholder and restart craned with `-F`.
 
 #### Create Reservation
 

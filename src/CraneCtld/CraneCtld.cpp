@@ -512,7 +512,8 @@ void ParseConfig(int argc, char** argv) {
           std::list<std::string> node_id_list;
 
           if (node["name"]) {
-            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list)) {
+            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list) ||
+                node_id_list.empty()) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
@@ -563,7 +564,7 @@ void ParseConfig(int argc, char** argv) {
           }
 
           if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
+            node_ptr->cpu = node["cpu"].as<uint32_t>();
           else
             std::exit(1);
 
@@ -580,24 +581,58 @@ void ParseConfig(int argc, char** argv) {
 
           // Parse optional sockets field (number of physical CPU sockets).
           // Default value is 1 when not specified.
-          if (node["sockets"]) {
-            uint32_t sockets_val = node["sockets"].as<uint32_t>(1);
-            if (sockets_val == 0) {
-              CRANE_ERROR("Invalid sockets=0 for node '{}'. Resetting to 1.",
-                          node["name"].Scalar());
-              sockets_val = 1;
-            } else if (sockets_val > node_ptr->cpu) {
-              CRANE_WARN(
-                  "Sockets={} for node '{}' exceeds cpu count={}. "
-                  "Resetting to 1.",
-                  sockets_val, node["name"].Scalar(), node_ptr->cpu);
-              sockets_val = 1;
+          if (node["sockets"])
+            node_ptr->node_topo_info.sockets = node["sockets"].as<uint32_t>();
+          if (!IsValidNodeResources(node_ptr->cpu, node_ptr->memory_bytes,
+                                    node_ptr->node_topo_info.sockets)) {
+            CRANE_ERROR(
+                "Invalid resources for node '{}': CPU and memory must be "
+                "positive; sockets must be positive and evenly divide CPUs.",
+                node["name"].Scalar());
+            std::exit(1);
+          }
+
+          if (node["state"]) {
+            std::string state =
+                absl::AsciiStrToUpper(node["state"].as<std::string>());
+            if (state != "FUTURE") {
+              CRANE_ERROR(
+                  "Invalid state '{}' for node '{}'. Only FUTURE is "
+                  "supported.",
+                  node["state"].Scalar(), node["name"].Scalar());
+              std::exit(1);
             }
-            node_ptr->node_topo_info.sockets = sockets_val;
+            node_ptr->flags[Ctld::NodeFlags::Future] = true;
+            if (node["NodeHostname"] || node["NodeAddr"])
+              CRANE_WARN(
+                  "NodeHostname/NodeAddr of FUTURE node '{}' will be "
+                  "overridden when a craned is mapped to it.",
+                  node["name"].Scalar());
+          }
+
+          if (node["features"]) {
+            if (!node["features"].IsSequence()) {
+              CRANE_ERROR(
+                  "Illegal features type for node '{}'. It must be a YAML "
+                  "sequence.",
+                  node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->features =
+                node["features"].as<std::vector<std::string>>();
           }
 
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
+            if (node_ptr->flags[Ctld::NodeFlags::Future] &&
+                !node["gres"].IsNull() &&
+                (!node["gres"].IsSequence() || node["gres"].size() != 0)) {
+              CRANE_ERROR(
+                  "FUTURE node '{}': non-empty gres is not supported. Remove "
+                  "gres or configure a static node.",
+                  node["name"].Scalar());
+              std::exit(1);
+            }
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
               const auto& gres_node = gres_it->as<YAML::Node>();
@@ -785,7 +820,14 @@ void ParseConfig(int argc, char** argv) {
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }
-            if (part_cpu != 0) part.default_mem_per_cpu = part_mem / part_cpu;
+            if (part_cpu == 0) {
+              CRANE_ERROR(
+                  "Empty partition '{}': configure a positive DefaultMemPerCpu "
+                  "or DefaultMemPerNode before adding dynamic nodes.",
+                  name);
+              std::exit(1);
+            }
+            part.default_mem_per_cpu = part_mem / part_cpu;
           }
 
           if (partition["MaxMemPerCpu"] &&
@@ -1163,19 +1205,21 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
-#ifdef CRANE_ENABLE_TRACING
-  crane::TracerManager::GetInstance().Shutdown();
-#endif
-  g_craned_keeper.reset();
-  // Craned keeper will query running job from scheduler
+  // Stop task producers before draining callbacks that still use these objects.
+  if (g_craned_keeper) g_craned_keeper->Shutdown();
+  if (g_job_scheduler) g_job_scheduler->Shutdown();
+  g_thread_pool->wait();
   g_job_scheduler.reset();
+  g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
 
-  g_thread_pool->wait();
   g_thread_pool.reset();
+#ifdef CRANE_ENABLE_TRACING
+  crane::TracerManager::GetInstance().Shutdown();
+#endif
   g_plugin_client.reset();
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
@@ -1292,13 +1336,9 @@ void InitializeCtldGlobalVariables() {
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
   g_craned_keeper->SetCranedConnectedCb(
-      [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {
+      [](const CranedId& craned_id, const google::protobuf::Timestamp& token,
+         const std::shared_ptr<CranedStub>& stub) {
         CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (stub == nullptr) {
-          CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
-          return;
-        }
         stub->ConfigureCraned(craned_id, token);
       });
 

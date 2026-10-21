@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 
+#include "Node/NodeDefs.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
@@ -128,6 +129,9 @@ struct Config {
     DedicatedResourceInNode dedicated_resource;
 
     NodeTopoInfo node_topo_info;
+
+    FlagSet<NodeFlags> flags;
+    std::vector<std::string> features;
   };
 
   struct Partition {

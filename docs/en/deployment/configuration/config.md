@@ -101,6 +101,13 @@ Nodes:
       - name: gpu
         type: a100
         DeviceFileRegex: /dev/nvidia[0-3]
+
+  # FUTURE placeholder nodes (dynamic nodes)
+  - name: "future[01-02]"
+    cpu: 8
+    memory: 32G
+    state: FUTURE
+    features: [gpu, highmem]
 ```
 
 **Node Parameters:**
@@ -108,9 +115,22 @@ Nodes:
 - **name**: CraneSched node name or range (e.g., `node[01-10]`). This is the node identifier shown to users and used in partitions.
 - **NodeHostname**: Optional OS hostname or range for matching the local `craned` host. Defaults to `name`.
 - **NodeAddr**: Optional address or range used by `cranectld` to connect to `craned`. Defaults to `NodeHostname`.
-- **cpu**: Number of CPU cores
-- **memory**: Total memory (supports K, M, G, T suffixes)
+- **cpu**: Positive number of CPU cores
+- **memory**: Positive total memory (supports K, M, G, T suffixes)
+- **sockets**: Positive number of CPU sockets, defaults to `1`; must evenly divide `cpu`. Invalid CPU, memory or socket values cause startup to fail for both static and FUTURE nodes.
 - **gres**: Generic resources like GPUs (optional)
+- **state**: Optional. Only `FUTURE` is supported for now. A FUTURE node is a placeholder with no real machine bound at startup: a machine started with `craned -F [feature]` is mapped to an unmapped FUTURE node whose hardware spec is satisfied by the local hardware (detected CPU count and memory no less than configured, carrying the given feature if specified). FUTURE nodes must belong to a partition and should not configure `NodeHostname`/`NodeAddr` (they are overridden with the real machine's address at mapping time). An unmapped FUTURE node takes part in neither scheduling nor partition resources.
+- **features**: Optional list of node tags, currently used to filter FUTURE node mapping for `craned -F <feature>`
+
+FUTURE mapping supports both `TLS.Enabled=true` and `TLS.Enabled=false`; use the same setting on the controller and compute nodes. During the initial reverse connection request, `cranectld` learns the machine's `gethostname()` value and connection address. Registration, heartbeat and state updates verify the mapped address and current session in both modes. No machine hostname allowlist or controller restart is required. `TLS.AllowedNodes` controls frontend certificate signing and is independent of FUTURE mapping.
+
+When TLS is enabled, `cranectld` also verifies the authenticated client certificate. Short hostnames are qualified with `TLS.DomainSuffix` for certificate verification and reverse TLS connections; for example, `worker01` with suffix `crane.local` uses `worker01.crane.local`. Full hostnames are used as reported. FUTURE nodes use the existing shared internal certificate setup: deploy the same certificate and private key through `TLS.InternalCertFilePath` and `TLS.InternalKeyFilePath` on the controller and compute nodes. The certificate's DNS SANs (or CN when DNS SANs are absent) must cover the machine's TLS hostname; a shared wildcard certificate such as `*.crane.local` can cover multiple machines. User certificates cannot claim nodes.
+
+Scheduling uses the FUTURE definition's resources; detected host resources only establish that the machine has enough capacity. Definitions in `config.yaml` are loaded when ctld starts. Add nodes at runtime with `ccontrol create node` and specify their resources there; definitions and mappings are persisted in the `.nodes` state file without changing configuration or restarting ctld.
+
+FUTURE definitions must omit `gres` or use an empty list; non-empty GRES is rejected because dynamic device initialization is not supported. A `craned -F` configuration may omit local `Nodes` and `Partitions`; independent options such as `CranedForeground` and `Container` still apply.
+
+For a bound YAML FUTURE node, its name, FUTURE state, CPU, memory, sockets, features and partition membership must match the persisted definition on controller restart. Feature order/case and partition order may change without changing their meaning. Partition policies (such as ACLs and memory defaults) may be edited independently. `NodeHostname`/`NodeAddr` do not override a persisted binding. To change a protected field, drain the node and wait for all allocations, including completing jobs, to finish; remove its reservations, stop the old Craned, and run `ccontrol update NodeName=<name> State=FUTURE` with the old YAML still loaded. Then edit YAML, restart Ctld and reconnect Craned. Admission checks CPU, memory and the requested feature again. If restart reports a conflict, restore the previous YAML first and follow this procedure; do not delete the `.nodes` file, which is needed for recovery.
 
 Hostname rules:
 
@@ -152,7 +172,7 @@ DefaultPartition: CPU
 - **name**: Partition identifier
 - **nodes**: Node range belonging to this partition
 - **priority**: Higher values = higher priority (affects scheduling)
-- **DefaultMemPerCpu**: Default memory per CPU in MB (0 = let scheduler decide)
+- **DefaultMemPerCpu**: Default memory per CPU in MB. When both memory defaults are zero or omitted, compute this once from the YAML partition nodes at startup. An initially empty partition must explicitly configure a positive `DefaultMemPerCpu` or `DefaultMemPerNode`. Node additions/removals do not change this default; jobs, steps and partition queries use the same value.
 - **MaxMemPerCpu**: Maximum memory per CPU in MB (0 = no limit)
 
 ### Scheduling Policy

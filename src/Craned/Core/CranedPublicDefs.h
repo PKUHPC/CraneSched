@@ -66,6 +66,7 @@ struct StepStatusChangeQueueElem {
   std::chrono::steady_clock::time_point enqueue_steady_time{};
   int64_t enqueue_ts_ms{};
   int64_t queue_len_at_enqueue{};
+  CranedId craned_id;
 };
 
 struct JobInfoOfUid {
@@ -202,6 +203,11 @@ struct Config {
 
   std::string Hostname;
   CranedId CranedIdOfThisNode;
+
+  // Set by -F/--future: this craned registers as a FUTURE node whose
+  // identity and resources are assigned by CraneCtld through Configure.
+  bool FutureMode{false};
+  std::string FutureFeature;
 
   std::set<CranedId> NodeList;
   std::unordered_map<std::string, CranedId> NodeHostnameToCranedId;
