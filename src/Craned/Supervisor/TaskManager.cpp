@@ -3281,11 +3281,6 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
       .time_limit = time_limit,
       .deadline_time = deadline_time};
 
-  if (!elem.deadline_time && m_step_.GetStep().has_deadline_time()) {
-    elem.deadline_time =
-        std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
-  }
-
   m_step_time_constraint_change_queue_.enqueue(std::move(elem));
   m_change_step_time_constraint_async_handle_->send();
   return ok_future;
@@ -3868,8 +3863,14 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
     auto& step = m_step_.GetMutableStep();
     if (elem.time_limit)
       step.mutable_time_limit()->set_seconds(elem.time_limit.value());
-    if (elem.deadline_time)
-      step.mutable_deadline_time()->set_seconds(elem.deadline_time.value());
+
+    // Resolve omitted fields here, after earlier queued changes have been
+    // applied. The RPC thread cannot safely observe the event-loop-owned step.
+    std::optional<int64_t> effective_deadline_time = elem.deadline_time;
+    if (!effective_deadline_time && step.has_deadline_time())
+      effective_deadline_time = step.deadline_time().seconds();
+    if (effective_deadline_time)
+      step.mutable_deadline_time()->set_seconds(*effective_deadline_time);
 
     // Delete the old timer.
     DelTerminationTimer_();
@@ -3877,17 +3878,17 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
     CRANE_TRACE("Delete the old timer.");
 
     absl::Time start_time = absl::FromUnixSeconds(step.start_time().seconds());
-    absl::Duration const& new_time_limit =
-        absl::Seconds(elem.time_limit.value());
+    absl::Duration new_time_limit =
+        absl::Seconds(step.time_limit().seconds());
     absl::Time time_limit_end_time = start_time + new_time_limit;
     bool deadline_reached =
-        elem.deadline_time.has_value() &&
-        now >= absl::FromUnixSeconds(elem.deadline_time.value());
+        effective_deadline_time.has_value() &&
+        now >= absl::FromUnixSeconds(*effective_deadline_time);
     bool time_limit_reached = now >= time_limit_end_time;
 
     if (deadline_reached &&
         (!time_limit_reached ||
-         absl::FromUnixSeconds(elem.deadline_time.value()) <=
+         absl::FromUnixSeconds(*effective_deadline_time) <=
              time_limit_end_time)) {
       StepTerminateQueueElem ev_step_terminate{.cause =
                                                    TaskFinalizeCause::DEADLINE};
@@ -3906,9 +3907,9 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
       int64_t new_time_limit_sec =
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
 
-      if (elem.deadline_time.has_value()) {
+      if (effective_deadline_time.has_value()) {
         int64_t deadline_sec =
-            elem.deadline_time.value() - absl::ToUnixSeconds(now);
+            *effective_deadline_time - absl::ToUnixSeconds(now);
         if (deadline_sec <= new_time_limit_sec) {
           AddTerminationTimer_(deadline_sec, true);
           new_sec = deadline_sec;
