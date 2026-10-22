@@ -602,6 +602,9 @@ class MongodbClient {
   void DocumentAppendItem_(document& doc, const std::string& key,
                            const std::optional<PodMetaInJob>& value);
 
+  void DocumentAppendItem_(document& doc, const std::string& key,
+                           const std::optional<int64_t>& value);
+
   void DocumentAppendItem_(
       document& doc, const std::string& key,
       const std::unordered_map<std::string, uint32_t>& value);
