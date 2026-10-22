@@ -3279,10 +3279,9 @@ std::future<CraneErrCode> TaskManager::ChangeStepTimeConstraintAsync(
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
 
-  ChangeStepTimeConstraintQueueElem elem{
-      .ok_prom = std::move(ok_promise),
-      .time_limit = time_limit,
-      .deadline_time = deadline_time};
+  ChangeStepTimeConstraintQueueElem elem{.ok_prom = std::move(ok_promise),
+                                         .time_limit = time_limit,
+                                         .deadline_time = deadline_time};
 
   m_step_time_constraint_change_queue_.enqueue(std::move(elem));
   m_change_step_time_constraint_async_handle_->send();
@@ -3882,18 +3881,16 @@ void TaskManager::EvCleanChangeStepTimeConstraintQueueCb_() {
     CRANE_TRACE("Delete the old timer.");
 
     absl::Time start_time = absl::FromUnixSeconds(step.start_time().seconds());
-    absl::Duration new_time_limit =
-        absl::Seconds(step.time_limit().seconds());
+    absl::Duration new_time_limit = absl::Seconds(step.time_limit().seconds());
     absl::Time time_limit_end_time = start_time + new_time_limit;
     bool deadline_reached =
         effective_deadline_time.has_value() &&
         now >= absl::FromUnixSeconds(*effective_deadline_time);
     bool time_limit_reached = now >= time_limit_end_time;
 
-    if (deadline_reached &&
-        (!time_limit_reached ||
-         absl::FromUnixSeconds(*effective_deadline_time) <=
-             time_limit_end_time)) {
+    if (deadline_reached && (!time_limit_reached ||
+                             absl::FromUnixSeconds(*effective_deadline_time) <=
+                                 time_limit_end_time)) {
       StepTerminateQueueElem ev_step_terminate{.cause =
                                                    TaskFinalizeCause::DEADLINE};
       m_step_terminate_queue_.enqueue(ev_step_terminate);
