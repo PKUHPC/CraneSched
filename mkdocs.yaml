@@ -109,6 +109,7 @@ nav:
           - ccon: command/ccon.md
       - Account Management:
           - cacctmgr: command/cacctmgr.md
+      - Slurm Compatibility: command/cwrapper.md
   - Reference:
     - Execution Groups: reference/execution_groups.md
     - Exit Codes: reference/exit_code.md
@@ -162,6 +163,7 @@ plugins:
             Job Control: 作业控制
             Container: 容器
             Account Management: 账户管理
+            Slurm Compatibility: Slurm 命令兼容
             Reference: 参考文档
             Exit Codes: 退出代码
             Job Status: 作业状态

@@ -110,6 +110,8 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
 
+See the [cwrapper command reference](../../command/cwrapper.md) for differences in options and output formats.
+
 ## Optional: Source Installation
 
 Source installation is intended for development and quick validation. See the [Packaging Guide](../packaging.md) for the build dependencies and tool installation. After preparing the environment, run:
