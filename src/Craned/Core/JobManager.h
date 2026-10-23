@@ -80,6 +80,10 @@ struct JobInD {
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
+  bool job_local_overflow_initialized{false};
+  bool job_local_overflow_cgroup_created{false};
+  std::set<uint32_t> job_local_overflow_cores;
+
   bool is_prolog_run{false};
 
   EnvMap GetJobEnvMap();
