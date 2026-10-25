@@ -1,5 +1,13 @@
 include(FetchContent)
 
+set(MONGO_C_DRIVER_VERSION "1.28.0")
+set(MONGO_CXX_DRIVER_VERSION "3.11.0")
+
+# Both drivers use BUILD_VERSION, but the C++ driver caches a default of 0.0.0.
+# Keep each pinned version in normal scope, including when the C++ driver's
+# older cmake_minimum_required resets policies before creating its cache entry.
+set(CMAKE_POLICY_DEFAULT_CMP0126 NEW)
+
 if (BUILD_SHARED_LIBS)
     set(ENABLE_SHARED ON)
 else ()
@@ -15,11 +23,11 @@ set(ENABLE_EXAMPLES OFF)
 set(ENABLE_AUTOMATIC_INIT_AND_CLEANUP OFF)
 
 if (CRANE_USE_GITEE_SOURCE)
-    set(MONGO_C_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-c-driver-1.28.0.tar.gz")
-    set(MONGO_CXX_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-cxx-driver-r3.11.0.tar.gz")
+    set(MONGO_C_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-c-driver-${MONGO_C_DRIVER_VERSION}.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-cxx-driver-r${MONGO_CXX_DRIVER_VERSION}.tar.gz")
 else ()
-    set(MONGO_C_DRIVER_SRC_URL "https://github.com/mongodb/mongo-c-driver/releases/download/1.28.0/mongo-c-driver-1.28.0.tar.gz")
-    set(MONGO_CXX_DRIVER_SRC_URL "https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.11.0/mongo-cxx-driver-r3.11.0.tar.gz")
+    set(MONGO_C_DRIVER_SRC_URL "https://github.com/mongodb/mongo-c-driver/releases/download/${MONGO_C_DRIVER_VERSION}/mongo-c-driver-${MONGO_C_DRIVER_VERSION}.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://github.com/mongodb/mongo-cxx-driver/releases/download/r${MONGO_CXX_DRIVER_VERSION}/mongo-cxx-driver-r${MONGO_CXX_DRIVER_VERSION}.tar.gz")
 endif ()
 
 FetchContent_Declare(mongo_c_driver_repo
@@ -29,6 +37,7 @@ FetchContent_Declare(mongo_c_driver_repo
         URL_HASH SHA256=BEC90C85361B4A9F89D80243440D53F39B9E706B1FE4BF901C4D3FFD6F50FBDB
         INACTIVITY_TIMEOUT 5
         )
+set(BUILD_VERSION "${MONGO_C_DRIVER_VERSION}")
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
 foreach (MONGO_C_TARGET mongoc_static mongoc_shared)
@@ -52,5 +61,6 @@ FetchContent_Declare(mongocxx
 
 if(NOT mongocxx_POPULATED)
   FetchContent_Populate(mongocxx)
+  set(BUILD_VERSION "${MONGO_CXX_DRIVER_VERSION}")
   add_subdirectory(${mongocxx_SOURCE_DIR} ${mongocxx_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
