@@ -75,6 +75,15 @@ CraneBaseDir: /var/crane/
 - **ClusterName**: Used for identification in multi-cluster environments
 - **CraneBaseDir**: All relative paths are based on this directory
 
+### Slurm-Compatible Environment
+
+```yaml
+# Top-level setting; default: false
+EnableSlurmCompatibleEnv: true
+```
+
+When enabled, jobs and steps generate `SLURM_*` compatibility variables in addition to `CRANE_*` variables for existing scripts and MPI launchers. Restart the affected services after changing the configuration. See [Job Environment Variables](../../reference/job_env_vars.md) for job versus step scope, node-list formats, and task IDs. This switch does not install command entry points such as `srun` or enable every Slurm command option.
+
 ### Node Definitions
 
 Specify compute node resources:

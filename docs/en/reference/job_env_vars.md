@@ -61,14 +61,14 @@ These variables are set only for expanded array tasks.
 
 ## Step Environment Variables
 
-When executing within a job step, CraneSched sets additional step-specific environment variables. These variables help scripts and programs distinguish between running as a standalone job versus running as a step within a job.
+CraneSched sets task counts and identifiers for execution units. `CRANE_STEP_ID`, `CRANE_STEP_NODELIST`, and `CRANE_STEP_NUM_NODES` apply to execution contexts other than DAEMON and batch-like PRIMARY steps, including directly submitted `crun` jobs and `crun` steps inside allocations. Batch scripts and calloc allocation PRIMARY steps do not set these three variables, although they are still implemented as steps internally.
 
 ### CRANE_STEP_ID
 - **Description**: Step ID within the parent job (numeric part only, without the job ID)
 - **Type**: Integer
 - **Example**: `1` (for step 123.1, this value would be `1`)
 - **Available**: Only set in step execution context
-- **Note**: If this variable is not set, the process is running as a standalone job, not as a step
+- **Note**: This variable alone does not determine whether a parent allocation exists; `crun` uses `CRANE_JOB_ID` to decide whether to create a step in an existing allocation.
 
 ### CRANE_STEP_NODELIST
 - **Description**: List of nodes allocated to the current step, separated by semicolons
@@ -133,9 +133,9 @@ When executing within a job step, CraneSched sets additional step-specific envir
 - **Example**: `/home/user/project`
 
 ### CRANE_MEM_PER_NODE
-- **Description**: Amount of memory allocated per node in MB
-- **Type**: Integer
-- **Example**: `4096`
+- **Description**: Memory allocated to the job on the current node, in units of 1024² bytes with an `M` suffix
+- **Type**: String
+- **Example**: `4096M`
 
 ---
 
@@ -216,6 +216,50 @@ When a job is allocated GPU or other accelerator devices, CraneSched sets the co
 
 ---
 
+## Slurm-Compatible Environment Variables
+
+Set the top-level `EnableSlurmCompatibleEnv: true` in the cluster's `config.yaml` to generate the following additional variables; the default is `false`. See [Cluster Configuration](../deployment/configuration/config.md). These variables support scripts and launchers and do not imply support for every Slurm command option.
+
+### Job Information
+
+| Variable | Current meaning |
+| --- | --- |
+| `SLURM_JOB_ID`, `SLURM_JOBID` | Job ID |
+| `SLURM_JOB_NAME`, `SLURM_JOB_ACCOUNT`, `SLURM_JOB_PARTITION`, `SLURM_JOB_QOS` | Job name, account, partition, and QoS |
+| `SLURM_JOB_UID`, `SLURM_JOB_GID` | Job user's UID and effective GID |
+| `SLURM_CLUSTER_NAME`, `SLURMD_NODENAME` | Cluster name and current Craned node name |
+| `SLURM_JOB_NODELIST`, `SLURM_NODELIST` | Full job allocation's node names, comma-separated, without compression such as `node[01-03]` |
+| `SLURM_JOB_NUM_NODES`, `SLURM_JOB_NODES` | Number of nodes in the job allocation |
+| `SLURM_JOB_CPUS_PER_NODE` | CPUs allocated to the job on this node: a single value, not a compressed list for all nodes |
+| `SLURM_SUBMIT_DIR`, `SLURM_SUBMIT_HOST` | Submission directory and host |
+| `SLURM_WORKING_DIR` | Current execution unit's working directory, which can differ from the submission directory |
+| `SLURM_JOB_START_TIME` | Job start time as a Unix timestamp in seconds |
+| `SLURM_ARRAY_JOB_ID`, `SLURM_ARRAY_TASK_ID` | Parent array job ID and task index, set only for expanded array tasks |
+
+### Step and Task Information
+
+| Variable | Current meaning |
+| --- | --- |
+| `SLURM_NNODES` | Job node count in the job context; current step's node count inside a `crun` step |
+| `SLURM_NTASKS`, `SLURM_NPROCS` | Job task count in the job context; number of tasks actually launched in a `crun` step |
+| `SLURM_NTASKS_PER_NODE` | Requested tasks per node for the current job or step |
+| `SLURM_TASKS_PER_NODE` | Actual task counts in node-list order, such as `2,1,1`, without Slurm compression such as `2(x3)` |
+| `SLURM_STEP_ID`, `SLURM_STEPID` | Numeric step ID, with the same context rules as `CRANE_STEP_ID` |
+| `SLURM_STEP_NODELIST`, `SLURM_STEP_NUM_NODES` | Current step's comma-separated node list and node count, with the same context rules as `CRANE_STEP_NODELIST` |
+| `SLURM_STEP_NUM_TASKS` | Tasks actually launched for the current execution unit; for a batch PRIMARY this counts script tasks, not the MPI ranks the full allocation can accommodate |
+| `SLURM_STEP_TASKS_PER_NODE` | Actual task counts in node-list order inside a `crun` step |
+| `SLURM_NODEID`, `SLURM_STEP_NODEID` | Zero-based node index, relative to the step's node list inside a `crun` step. `SLURM_STEP_NODEID` applies only to step contexts |
+| `SLURM_PROCID`, `SLURM_LOCALID` | Zero-based global and node-local task IDs in task processes and task epilogs |
+| `SLURM_STEP_PROCID`, `SLURM_STEP_LOCALID` | Corresponding task IDs in `crun` step processes and task epilogs; PMIx tasks use their ranks |
+| `SLURM_GTIDS` | Comma-separated global task IDs hosted on this node |
+| `SLURM_CPUS_ON_NODE`, `SLURM_CPUS_PER_TASK` | Current execution unit's CPU allocation on this node, and requested CPUs per task |
+| `SLURM_MEM_PER_NODE` | Current execution unit's memory on this node, as an integer in units of 1024² bytes without an `M` suffix |
+| `SLURM_GPUS_ON_NODE` | Current execution unit's GPU count on this node, generated only when greater than zero |
+| `SLURM_CPU_BIND_TYPE` | Currently `none`; this does not imply support for Slurm's `--cpu-bind` option |
+| `SLURM_EXTERNAL_LAUNCHER` | Set to `1` for external launcher steps; `crun` also reads it to enable the mode. See [crun](../command/crun.md) |
+
+In a batch script, `SLURM_NTASKS` describes the full job allocation while the script's `SLURM_STEP_NUM_TASKS` can be `1`. Inside a `crun` step, `SLURM_NTASKS`, `SLURM_NNODES`, and task distribution describe that step; `SLURM_JOB_*` still describe the parent job. Task counts in external launcher steps count launcher processes; the launcher determines the actual MPI rank count.
+
 ## Usage Examples
 
 ### Using in Batch Scripts
@@ -233,7 +277,7 @@ echo "Job Name: $CRANE_JOB_NAME"
 echo "Node List: $CRANE_JOB_NODELIST"
 echo "Number of Nodes: $CRANE_JOB_NUM_NODES"
 echo "Time Limit: $CRANE_TIMELIMIT"
-echo "Memory per Node: ${CRANE_MEM_PER_NODE}MB"
+echo "Memory per Node: ${CRANE_MEM_PER_NODE}"
 
 # If GPUs are allocated
 if [ ! -z "$CUDA_VISIBLE_DEVICES" ]; then

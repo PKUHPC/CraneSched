@@ -488,6 +488,7 @@ Submitted array job 179, array range [0-2].
 
 Notes:
 - `--array` and `--repeat` are mutually exclusive.
+- Expanded array tasks inherit the parent's absolute `--deadline`; it is not recalculated from each task's start time. View it with `cqueue --deadline` or `cacct --deadline`.
 - Array jobs expose the parent array job ID and the current task index separately.
 
 ## Environment Variables

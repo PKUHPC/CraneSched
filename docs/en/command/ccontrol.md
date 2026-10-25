@@ -16,8 +16,8 @@ original execution and persisted values remain unchanged.
 
 Restricted text fields display `<restricted>` or are omitted. JSON retains field
 types, using empty values or omitted messages and a `query_visibility` value of
-`PUBLIC` or `DETAILS`. User/Job ID filters and output formats do not grant access.
-The same rules apply to `cacct`, `cqueue`, `ccon`, and their Slurm wrappers.
+`QUERY_VISIBILITY_PUBLIC` or `QUERY_VISIBILITY_DETAILS`. User/Job ID filters and output formats do not grant access.
+The same rules apply to `cacct`, `cqueue`, `ccon`, `ceff`, the monitor plugin's job queries, and the corresponding Slurm wrappers.
 
 Non-TLS connections cannot authenticate a caller UID, so they receive public
 summaries even for an owner or root. `ccon logs/inspect/inspectp` and updates that
@@ -96,6 +96,8 @@ NodeName=CraneProject State=idle[power_idle] CPU=2.00 AllocCPU=0.00 FreeCPU=2.00
 
 Display information about partitions.
 
+`TotalCPU/TotalMem/TotalGres` include configured capacity on DOWN nodes; `AvailCPU/AvailMem/AvailGres` count free resources on live nodes only. When a node goes DOWN, its free resources leave the available totals; releasing job resources while it remains DOWN does not increase those totals. `Alloc*` can still include unreleased job resources on temporarily unavailable nodes, so do not assume `Total = Avail + Alloc`.
+
 ```bash
 # Show all partitions
 ccontrol show partition
@@ -126,6 +128,10 @@ PartitionName=CPU State=UP
 
 Display information about jobs.
 
+`Deadline` shows the job's absolute deadline in the local time zone, or `unknown` when unset. It differs from the duration limit in `TimeLimit`. Array tasks inherit their parent array's deadline.
+
+For historical records, `CpusPerTask=Unknown` or `gres=Unknown` in `ReqRes` means the old record lacks the requested task count or requested GRES. It does not mean zero or no resource request; a known empty GRES request displays `None`. Requests and allocations are displayed separately, and missing requests cannot be inferred from allocations. See [cacct](cacct.md).
+
 ```bash
 # Show all jobs
 ccontrol show job
@@ -145,7 +151,7 @@ ccontrol show job 12345
 JobId=12345 JobName=Test_Job
         User=root(0) GroupId=root(0) Account=ROOT
         JobState=Running RunTime=00:00:05 TimeLimit=00:03:01 SubmitTime=2026-03-18 20:16:12
-        StartTime=2026-03-18 20:16:14 EndTime=2026-03-18 20:19:15 Partition=CPU NodeList=crane01 ExecutionHost=crane01
+        StartTime=2026-03-18 20:16:14 EndTime=2026-03-18 20:19:15 Deadline=unknown Partition=CPU NodeList=crane01 ExecutionHost=crane01
         CmdLine="cbatch cbatch_test.sh" Workdir=/root
         Priority=0 Qos=UNLIMITED CpusPerTask=1 MemPerNode=20M
         ReqRes:node=1 cpu=1.00 mem=20M gres=None

@@ -311,7 +311,7 @@ $ exit
 
 1. **cfored 要求**：calloc 必须在运行 `cfored` 的节点上运行
 
-2. **资源释放**：退出 calloc shell 将自动终止作业并释放所有分配的资源
+2. **资源释放**：正常结束 calloc 会话会释放分配，作业记录为 `Completed`，`cacct` 的退出码为 `0:0`（JSON 原始值为 `0`）。这是分配会话的完成状态；会话内 `crun` 作业步的结果需单独查询。取消、超时或启动失败仍按各自原因记录。见[退出代码](../reference/exit_code.md)。
 
 3. **交互性质**：与 `cbatch` 不同，calloc 提供用于即时工作的交互式 shell
 

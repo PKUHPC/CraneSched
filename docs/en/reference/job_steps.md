@@ -45,6 +45,17 @@ CraneSched distinguishes between three types of steps:
 
 ---
 
+## External Launcher Steps
+
+Within an existing allocation, `crun --external-launcher` creates a COMMON step for an MPI launcher such as Hydra. This is an execution mode, not a fourth step type.
+
+- One launcher task runs on every node allocated to the parent job; the launcher then creates the actual MPI ranks.
+- Each launcher can access the parent's full allocation on its node. It does not deduct resources from the pool available to ordinary steps or request additional cluster resources. Ordinary steps can overlap with it, so avoid CPU, memory, or GPU contention.
+- This mode uses the parent's full node allocation; ordinary step task-count options should not be used to set the MPI rank count. The parent's lifetime and deadline still apply.
+- With `EnableSlurmCompatibleEnv` enabled, the step exports `SLURM_EXTERNAL_LAUNCHER=1`. The frontend can also detect the mode from this variable; see [crun](../command/crun.md) for accepted values.
+
+The launcher should pass the option through the deployed Slurm compatibility entry point, such as `cwrapper srun`. Both frontend and backend must include this feature. The actual MPI launch method still depends on the MPI runtime and cluster configuration.
+
 ## Step ID Format
 
 Steps are identified using a two-part format:

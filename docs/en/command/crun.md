@@ -216,6 +216,13 @@ Email address to receive job status notifications if --mail-type is specified.
 Send signal to the job if --signal is specified. The format is "&lt;sig_num&gt;[@sig_time]", where sig_num is the signal number and sig_time is the signal sending time, sent sig_time seconds before the time limit.
 
 
+**--external-launcher**
+
+:   **Applies to:** `step`
+Create a step for an external MPI launcher such as Hydra. Use this within an existing allocation (`CRANE_JOB_ID` is set). One launcher task runs on each allocated node with access to the parent's full allocation on that node; the launcher creates the actual MPI ranks. This step does not deduct resources from the pool available to ordinary steps, so avoid resource contention with other steps. This option does not specify the MPI rank count.
+
+    In step mode, `SLURM_EXTERNAL_LAUNCHER` also enables this behavior. After trimming whitespace and ignoring case, an empty value, `0`, `false`, or `no` does not enable it; any other value does. An explicit `--external-launcher` still enables it. The Slurm compatibility entry point `cwrapper srun --external-launcher ...` forwards the option. See [Job Steps](../reference/job_steps.md).
+
 ## Job Mode vs Step Mode
 
 ### Job Mode

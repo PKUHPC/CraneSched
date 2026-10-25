@@ -192,6 +192,13 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 :   **适用于：** `作业`  
 如果指定了--signal，则发送给作业信号。格式为"&lt;sig_num&gt;[@sig_time]"，其中sig_num是信号编号，sig_time是信号发送时间，距离time limit前sig_time秒发送。
 
+**--external-launcher**
+
+:   **适用于：** `作业步`
+为 Hydra 等外部 MPI 启动器创建作业步。必须在已有分配内使用（设置了 `CRANE_JOB_ID`）。每个已分配节点启动一个启动器任务，允许它访问该节点上父作业的完整资源分配；启动器自行创建实际 MPI rank。此步骤不会扣减普通作业步的可用资源，因此使用者需避免与其他步骤争用资源。它不是设置 MPI rank 数量的选项。
+
+    在作业步模式下，也可通过环境变量 `SLURM_EXTERNAL_LAUNCHER` 启用：去除首尾空白并忽略大小写后，空值、`0`、`false`、`no` 均不启用，其余值启用。显式传入 `--external-launcher` 仍会启用。使用 Slurm 兼容入口时，`cwrapper srun --external-launcher ...` 会传递该选项。详见[作业步](../reference/job_steps.md)。
+
 ## 作业模式 vs 作业步模式
 
 ### 作业模式

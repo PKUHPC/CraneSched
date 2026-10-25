@@ -8,6 +8,12 @@ View all jobs and steps in the cluster:
 cacct
 ```
 
+## Query Visibility and Historical Resources
+
+Job state, resources, times, and node summaries remain public. Private details such as comments require an authenticated owner or a global `Operator/Admin/Root` role. Restricted text displays `<restricted>`; JSON retains field types and includes `query_visibility`. Non-TLS queries also receive only public summaries, and user or Job ID filters do not grant access. See [ccontrol](ccontrol.md) for the full policy.
+
+Newly archived jobs and steps retain requested task counts and requested GRES. Older records that did not save these fields remain unknown; allocation values are not substituted for requests. JSON omits missing `ntasks` and `req_total_res_view.gres_map` fields, while a known empty GRES request retains an empty GRES map. JSON consumers should distinguish missing fields from known zero or empty values; `<restricted>` instead indicates an access restriction.
+
 ## Options
 
 **-h, --help**
@@ -25,9 +31,10 @@ Display cacct version information.
 :   **Applies to:** `Job`, `Step`  
 Configuration file path. Default: "/etc/crane/config.yaml".
 
-**%deadline/%Deadline**
+**--deadline**
 
-：Display job deadline
+:   Add the job deadline column to the default output; this flag takes no value. Times use the local time zone, with `unknown` for an unset deadline. For custom output, use `--format "%j %deadline"`. Step rows show their parent job's deadline.
+
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
 :   **Applies to:** `Job`, `Step`  
@@ -140,6 +147,7 @@ The following format identifiers are supported (case-insensitive):
 | %C / %ReqCpus         | Number of requested CPUs                            |
 | %c / %AllocCpus       | Number of allocated CPUs                            |
 | %D / %ElapsedTime     | Elapsed time since job/job step started             |
+| %deadline / %Deadline | Absolute job deadline; step rows use the parent's value |
 | %E / %EndTime         | End time of job/job step                            |
 | %e / %ExitCode        | Exit code (format: exitcode:signal)                 |
 | %h / %Held            | Hold state of job                                   |
