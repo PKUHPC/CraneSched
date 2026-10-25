@@ -159,6 +159,7 @@ crun --ntasks-per-node=8 --mpi=pmix ./main_solver
 
 ## 四、高级配置
 通过在作业脚本中设置环境变量，可以调整 CraneSched PMIx 服务端的行为。
+请在 `crun` 命令前导出这些变量，并确保其 `--export` 策略包含它们。完整输入列表、注入任务的变量和节点列表作用域见[作业环境变量](../../reference/job_env_vars.md)。
 
 ### 4.1 集合通信算法（Fence 类型）
 PMIx fence（屏障同步）支持两种集合算法：
@@ -168,13 +169,15 @@ PMIx fence（屏障同步）支持两种集合算法：
 tree | 树形聚合 | 节点数较多时效率更高 |
 ring | 环形传递 | 节点数较少时延迟更低 |
 
+`CRANE_PMIX_FENCE` 未设置或不是 `tree`、`ring` 时，fence 回调在收集非空数据时选择 `ring`，其他情况选择 `tree`，并非始终默认 `tree`。算法性能还取决于具体工作负载与网络。
+
 **使用环形算法（适合小规模作业）**
 ```bash
 export CRANE_PMIX_FENCE=ring
 crun --nodes=4 --ntasks-per-node=4 --mpi=pmix ./my_program
 ```
 
-**使用树形算法（适合大规模作业，默认即为 tree，可不设置）**
+**显式选择树形算法：**
 ```bash
 export CRANE_PMIX_FENCE=tree
 crun --nodes=64 --ntasks-per-node=16 --mpi=pmix ./my_program
@@ -197,6 +200,12 @@ export CRANE_PMIX_DIRECT_CONN_UCX=true
 crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
 ```
 **该选项需要 CraneSched 在编译时检测到 UCX（pkg-config --libs ucx 成功）。若 CraneSched 未编译 UCX 支持，任务启动失败。**
+仅精确值 `true` 启用该模式，其他值使用 gRPC。
+
+### 4.3 超时与客户端临时目录
+
+- `CRANE_PMIX_TIMEOUT`：PMIx 操作及集合通信清理的超时秒数，默认 `5`。应使用正整数；空值或转换失败时保留默认值。
+- `PMIXP_PMIXLIB_TMPDIR`：可选的客户端文件基础目录，须对作业用户可访问。CraneSched 在其后添加 `pmix.crane.cli/spmix_appdir_<uid>.<job>.<step>`；未设置或为空时使用 PMIx 默认目录。
 
 ## 五、完整示例
 示例 1：单节点 MPI Hello World
@@ -267,7 +276,8 @@ crun --nodes=1 --ntasks-per-node=8 --mpi=pmix ./postprocess data/results
 #CBATCH --partition=IB
 
 export CRANE_PMIX_FENCE=tree
-export CRANE_PMIX_DIRECT_CONN_UCX=true# UCX 传输层同时用于 PMIx 元数据交换和 MPI 点对点通信
+export CRANE_PMIX_DIRECT_CONN_UCX=true
+# 此开关选择 PMIx 元数据传输；MPI 点对点通信由 MPI 自身的传输配置决定
 
 crun --nodes=64 --ntasks-per-node=16 --mpi=pmix \
      ./large_scale_sim -config run.cfg

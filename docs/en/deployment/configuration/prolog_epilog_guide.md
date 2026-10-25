@@ -47,6 +47,8 @@ echo "unset MANPATH"
 echo "print This message has been printed with TaskProlog"
 ```
 
+For compute-node epilogs, CraneSched sets `CRANE_SCRIPT_CONTEXT=epilog`. Task epilogs receive `CRANE_SCRIPT_CONTEXT=task_epilog`, task IDs, and `USER`/`LOGNAME` when account lookup succeeds. Their environment is rebuilt by the supervisor rather than copied from the completed task, so changes made by the task or task prolog are not carried back. Task prologs have no automatically generated context marker. See [Job Environment Variables](../../reference/job_env_vars.md) for the full variable list and scope.
+
 # Failure Handling
 
 - **If a Prolog fails (non-zero exit)** → the node is set to **DRAIN** and the job is **failed**.

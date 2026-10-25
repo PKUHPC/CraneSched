@@ -63,6 +63,8 @@ echo "print This message has been printed with TaskProlog"
 ```
 上述功能仅限于 `task prolog` 脚本。
 
+计算节点上的 epilog 会设置 `CRANE_SCRIPT_CONTEXT=epilog`；task epilog 会设置 `CRANE_SCRIPT_CONTEXT=task_epilog`、任务 ID，并在账户查询成功时补充 `USER`、`LOGNAME`。Task epilog 环境由 supervisor 重新构建，而不是从已结束任务复制，因此不包含任务或 task prolog 后续做出的环境修改。Task prolog 不会自动生成上下文标记。完整变量及作用域见[作业环境变量](../../reference/job_env_vars.md)。
+
 ## 故障处理
 
 - 如果 `Prolog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态且作业会设为失败。
