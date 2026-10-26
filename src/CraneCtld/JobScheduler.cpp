@@ -1955,7 +1955,7 @@ void JobScheduler::ScheduleThread_() {
                   diag_craned_id, job_count, first_job_id, last_job_id,
                   task_wait_ms, log_status);
             } else {
-              CRANE_DEBUG(
+              CRANE_TRACE(
                   "AllocJobsDiag craned_id={} job_count={} first_job_id={} "
                   "last_job_id={} task_wait_ms={} rpc_status={} "
                   "failed_job_count=0",
@@ -2011,7 +2011,7 @@ void JobScheduler::ScheduleThread_() {
         CRANE_WARN("AllocJobsDiag latch_wait_ms={} craned_count={}",
                    latch_wait_ms, craned_alloc_job_map.size());
       } else {
-        CRANE_DEBUG("AllocJobsDiag latch_wait_ms={} craned_count={}",
+        CRANE_TRACE("AllocJobsDiag latch_wait_ms={} craned_count={}",
                     latch_wait_ms, craned_alloc_job_map.size());
       }
       rpc_aj_span.End();
@@ -6527,7 +6527,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
             craned_id, craned_count, job_count, task_wait_ms, rpc_elapsed_ms,
             success);
       } else {
-        CRANE_DEBUG(
+        CRANE_TRACE(
             "FreeJobsFanoutDiag craned_id={} craned_count={} job_count={} "
             "rpc_worker_task_wait_ms={} rpc_elapsed_ms={} success={}",
             craned_id, craned_count, job_count, task_wait_ms, rpc_elapsed_ms,
@@ -6822,7 +6822,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         final_job_result.purge_ms, final_job_result.plugin_hook_enqueue_ms,
         array_parent_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "StatusChangeDbCommitDiag batch_size={} step_update_count={} "
         "job_update_count={} finished_job_count={} step_txn_ms={} "
         "job_txn_ms={} mongo_insert_ms={} total_elapsed_ms={} "

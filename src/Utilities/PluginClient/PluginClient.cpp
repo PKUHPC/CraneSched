@@ -317,7 +317,7 @@ grpc::Status PluginClient::SendTraceHook_(grpc::ClientContext* context,
         static_cast<int>(status.error_code()), elapsed_ms,
         status.error_message());
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "[Plugin] TraceHookSendDiag trace_hook_request_bytes={} span_count={} "
         "grpc_status_code={} elapsed_ms={} error_message={}",
         request->ByteSizeLong(), request->spans_size(),
