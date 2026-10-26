@@ -2270,6 +2270,23 @@ void JobScheduler::ScheduleThread_() {
             std::make_move_iterator(failed_final_array_parents.end()));
         ProcessFinalJobs_(failed_job_raw_ptrs);
 
+        // No daemon/primary step will report completion for these jobs. Close
+        // the existing frontend cancellation handshake and release its tracking
+        // entry before destroying the callbacks stored in the job.
+        for (const auto& job : jobs_failed) {
+          if (!job->IsInteractive()) continue;
+          auto& meta = std::get<InteractiveMeta>(job->meta);
+          const bool send_completion_ack = meta.has_been_cancelled_on_front_end;
+          meta.has_been_cancelled_on_front_end = true;
+          g_thread_pool->detach_task(
+              [cancel = meta.cb_step_cancel, complete = meta.cb_step_completed,
+               cfored = meta.cfored_name, job_id = job->JobId(),
+               send_completion_ack] {
+                if (!send_completion_ack) cancel({job_id, kPrimaryStepId});
+                complete({job_id, kPrimaryStepId, send_completion_ack, cfored});
+              });
+        }
+
         // Failed jobs have been handled properly. Free them explicitly.
         jobs_failed.clear();
 
