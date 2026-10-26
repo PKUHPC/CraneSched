@@ -310,7 +310,7 @@ bool JobScheduler::Init() {
       job_id_t job_id = job->JobId();
 
       CRANE_TRACE("Restore job #{} from embedded running queue.", job->JobId());
-      auto result = AcquireJobAttributes(job.get());
+      auto result = AcquireJobAttributes(job.get(), true);
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
         if (result) {
@@ -414,7 +414,7 @@ bool JobScheduler::Init() {
         mark_job_as_failed = true;
       }
 
-      if (!mark_job_as_failed && !(AcquireJobAttributes(job.get()))) {
+      if (!mark_job_as_failed && !AcquireJobAttributes(job.get(), true)) {
         CRANE_ERROR("AcquireJobAttributes failed for job #{}", job_id);
         mark_job_as_failed = true;
       }
@@ -683,7 +683,7 @@ bool JobScheduler::Init() {
       }
 
       step->RecoverFromDb(*job, step_info);
-      if (auto err_expt = AcquireStepAttributes(step.get());
+      if (auto err_expt = AcquireStepAttributes(step.get(), true);
           !err_expt.has_value()) {
         CRANE_ERROR(
             "[Step #{}.{}] AcquireStepAttributes failed: {}, step dropped!",
@@ -1134,7 +1134,12 @@ bool JobScheduler::Init() {
       auto res = CreateResv_(reservation_req);
       if (res) continue;
 
-      CRANE_ERROR("Failed to add reservation {}: {}", resv_id, res.error());
+      CRANE_ERROR("Failed to add reservation {}: {}", resv_id,
+                  res.error().description());
+      // Do not serve online node changes until recovered reservations have
+      // persisted their selected nodes. Keep the old record on write failure.
+      if (res.error().code() == CraneErrCode::ERR_DB_INSERT_FAILED)
+        return false;
 
       txn_id_t txn_id{0};
       auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
@@ -4796,7 +4801,7 @@ crane::grpc::CreateReservationReply JobScheduler::CreateResv(
   auto res = CreateResv_(request);
   if (!res.has_value()) {
     reply.set_ok(false);
-    reply.set_reason(res.error());
+    reply.set_reason(res.error().description());
   } else {
     reply.set_ok(true);
   }
@@ -4804,9 +4809,8 @@ crane::grpc::CreateReservationReply JobScheduler::CreateResv(
   return reply;
 }
 
-std::expected<void, std::string> JobScheduler::CreateResv_(
+CraneExpectedRich<void> JobScheduler::CreateResv_(
     const crane::grpc::CreateReservationRequest& request) {
-  uint64_t creation_order{0};
   std::vector<std::string> validation_errors;
 
   std::unordered_set<std::string> allowed_accounts;
@@ -4824,8 +4828,9 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     denied_accounts.insert(account);
   }
   if (!validation_errors.empty()) {
-    return std::unexpected(fmt::format("Invalid Accounts: {}",
-                                       absl::StrJoin(validation_errors, ", ")));
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "Invalid Accounts: {}",
+                      absl::StrJoin(validation_errors, ", ")));
   }
 
   std::unordered_set<std::string> allowed_users;
@@ -4843,14 +4848,16 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     denied_users.insert(user);
   }
   if (!validation_errors.empty()) {
-    return std::unexpected(fmt::format("Invalid Users: {}",
-                                       absl::StrJoin(validation_errors, ", ")));
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, "Invalid Users: {}",
+                      absl::StrJoin(validation_errors, ", ")));
   }
 
   std::list<CranedId> craned_ids;
   if (!request.craned_regex().empty() &&
       !util::ParseHostList(request.craned_regex(), &craned_ids)) {
-    return std::unexpected("Invalid craned_regex");
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                                         "Invalid craned_regex"));
   }
   CanonicalizeCranedIdList(&craned_ids);
   uint32_t node_num = craned_ids.size();
@@ -4862,20 +4869,26 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
 
   absl::Time now = absl::Now();
   if (end_time <= now)
-    return std::unexpected("Reservation end time is in the past");
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                      "Reservation end time is in the past"));
 
   if (start_time < now) CRANE_WARN("Reservation start time is in the past");
 
   const PartitionId& partition = request.partition();
   if (partition.empty()) {
     if (node_num == 0) {
-      return std::unexpected("Nodes must be specified if partition is empty");
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
+                        "Nodes must be specified if partition is empty"));
     }
   } else {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
     if (!all_partitions_meta_map->contains(partition)) {
-      return std::unexpected(fmt::format("Partition {} not found", partition));
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARTITION,
+                                           "Partition {} not found",
+                                           partition));
     }
     const auto part_meta_ptr =
         all_partitions_meta_map->at(partition).GetExclusivePtr();
@@ -4889,10 +4902,10 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
         // NodeCnt is valid only when craned_regex is empty
         node_num = request.node_num();
         if (craned_ids.size() < node_num) {
-          return std::unexpected(
-              fmt::format("Not enough nodes in partition {}. "
-                          "Requested: {}, Available: {}",
-                          partition, node_num, craned_ids.size()));
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_NO_RESOURCE,
+              "Not enough nodes in partition {}. Requested: {}, Available: {}",
+              partition, node_num, craned_ids.size()));
         }
       } else {
         // All nodes need to be reserved
@@ -4907,11 +4920,17 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
       }
       if (!validation_errors.empty()) {
         return std::unexpected(
-            fmt::format("Nodes not in partition {}: {}", partition,
-                        util::HostNameListToStr(validation_errors)));
+            FormatRichErr(CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION,
+                          "Nodes not in partition {}: {}", partition,
+                          util::HostNameListToStr(validation_errors)));
       }
     }
   }
+
+  // An empty node list would be expanded again when replayed after restart.
+  if (node_num == 0)
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_NO_RESOURCE,
+                                         "No nodes available for reservation"));
 
   g_meta_container->LockResReduceEvents();
   auto unlock_res_reduce_events =
@@ -4974,7 +4993,8 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
                 "Nodes conflicted by running jobs or other reservation: {}",
                 util::HostNameListToStr(nodes_conflicted));
       }
-      return std::unexpected(failed_msg);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}", failed_msg));
     }
 
     // Preserve the existing candidate selection order above. Only the
@@ -5012,7 +5032,8 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
                 util::HostNameListToStr(nodes_conflicted));
       }
       craned_meta_vec.clear();
-      return std::unexpected(failed_msg);
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_NO_RESOURCE, "{}", failed_msg));
     }
   }
 
@@ -5026,7 +5047,25 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
   {
     auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
     if (resv_meta_map->contains(resv_name)) {
-      return std::unexpected("Reservation name already exists");
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                           "Reservation name already exists"));
+    }
+
+    // Persist before publishing the reservation so a failed write leaves no
+    // allocation in memory and recovery can retain the original DB record.
+    const uint64_t creation_order = ++m_reservation_creation_order_;
+    auto persisted = request;
+    persisted.set_creation_order(creation_order);
+    persisted.set_craned_regex(util::HostNameListToStr(craned_ids));
+    persisted.set_node_num(craned_ids.size());
+    txn_id_t txn_id{0};
+    if (!g_embedded_db_client->BeginReservationDbTransaction(&txn_id) ||
+        !g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name,
+                                                     persisted) ||
+        !g_embedded_db_client->CommitReservationDbTransaction(txn_id)) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_DB_INSERT_FAILED,
+          "Failed to persist selected nodes for reservation {}", resv_name));
     }
 
     std::vector<CranedId> affected_nodes_vec;
@@ -5046,7 +5085,6 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
         {std::make_pair(start_time, std::move(affected_nodes_vec))});
     std::move(unlock_res_reduce_events).Cancel();
 
-    creation_order = ++m_reservation_creation_order_;
     ResvMeta resv{.name = resv_name,
                   .creation_order = creation_order,
                   .part_id = partition,
@@ -5071,30 +5109,12 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
           "Failed to insert reservation meta : Reservation name {} "
           "already exists",
           resv_name);
-      return std::unexpected(
-          fmt::format("Failed to insert reservation meta : Reservation name {} "
-                      "already exists",
-                      resv_name));
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Failed to insert reservation meta : Reservation name {} "
+          "already exists",
+          resv_name));
     }
-  }
-
-  {
-    txn_id_t txn_id{0};
-    bool ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
-    if (!ok) CRANE_ERROR("Failed to begin txn for reservation {}.", resv_name);
-
-    auto persisted = request;
-    persisted.set_creation_order(creation_order);
-    persisted.set_craned_regex(util::HostNameListToStr(craned_ids));
-    persisted.set_node_num(craned_ids.size());
-    ok = g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name,
-                                                     persisted);
-    if (!ok) {
-      CRANE_ERROR("Failed to insert reservation {} to resv DB", resv_name);
-    }
-
-    ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
-    if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_name);
   }
 
   m_resv_timer_queue_.enqueue(std::make_pair(resv_name, end_time));
@@ -8628,7 +8648,8 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(
   return {};
 }
 
-CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job,
+                                                           bool is_recovery) {
   job->node_num_max = std::max(job->node_num_min, job->node_num_max);
   job->node_num =
       job->node_num_min == job->node_num_max ? job->node_num_min : 0;
@@ -8878,21 +8899,25 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
                       absl::StrJoin(invalid_nodes, ", "), job->partition_id));
   }
 
-  invalid_nodes = FindUnknownNodes_(job->excluded_nodes);
-  if (!invalid_nodes.empty()) {
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_EX_NODE_LIST,
-                      "Invalid --exclude value: unknown nodes '{}'",
-                      absl::StrJoin(invalid_nodes, ", ")));
-  }
+  // Exclusions retain their meaning if a node is deleted or leaves the
+  // partition. Only new submissions need to check these names for mistakes.
+  if (!is_recovery) {
+    invalid_nodes = FindUnknownNodes_(job->excluded_nodes);
+    if (!invalid_nodes.empty()) {
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+                        "Invalid --exclude value: unknown nodes '{}'",
+                        absl::StrJoin(invalid_nodes, ", ")));
+    }
 
-  invalid_nodes =
-      FindNodesNotInPartition_(job->excluded_nodes, job->partition_id);
-  if (!invalid_nodes.empty()) {
-    return std::unexpected(FormatRichErr(
-        CraneErrCode::ERR_INVALID_EX_NODE_LIST,
-        "Invalid --exclude value: nodes '{}' are not in partition '{}'",
-        absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+    invalid_nodes =
+        FindNodesNotInPartition_(job->excluded_nodes, job->partition_id);
+    if (!invalid_nodes.empty()) {
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_EX_NODE_LIST,
+          "Invalid --exclude value: nodes '{}' are not in partition '{}'",
+          absl::StrJoin(invalid_nodes, ", "), job->partition_id));
+    }
   }
 
   if (!job->JobToCtld().licenses_count().empty()) {
@@ -9287,7 +9312,8 @@ CraneExpected<void> JobScheduler::HandleUnsetOptionalInStepToCtld(
   return {};
 }
 
-CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
+CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step,
+                                                        bool is_recovery) {
   // The parent Pod configuration first becomes available during submission
   // here. Apply the inherited identity before scheduling or node
   // reconciliation.
@@ -9369,23 +9395,26 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
           CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION);
     }
 
-    invalid_nodes = FindUnknownNodes_(step->excluded_nodes);
-    if (!invalid_nodes.empty()) {
-      CRANE_ERROR("Invalid --exclude value for step #{}.{}: unknown nodes '{}'",
-                  step->job_id, step->StepId(),
-                  absl::StrJoin(invalid_nodes, ", "));
-      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
-    }
+    // Daemon and batch steps inherit the job's historical exclusions.
+    if (!is_recovery) {
+      invalid_nodes = FindUnknownNodes_(step->excluded_nodes);
+      if (!invalid_nodes.empty()) {
+        CRANE_ERROR(
+            "Invalid --exclude value for step #{}.{}: unknown nodes '{}'",
+            step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "));
+        return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+      }
 
-    invalid_nodes =
-        FindNodesNotInPartition_(step->excluded_nodes, step->job->partition_id);
-    if (!invalid_nodes.empty()) {
-      CRANE_ERROR(
-          "Invalid --exclude value for step #{}.{}: nodes '{}' are not in "
-          "partition '{}'",
-          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
-          step->job->partition_id);
-      return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+      invalid_nodes = FindNodesNotInPartition_(step->excluded_nodes,
+                                               step->job->partition_id);
+      if (!invalid_nodes.empty()) {
+        CRANE_ERROR(
+            "Invalid --exclude value for step #{}.{}: nodes '{}' are not in "
+            "partition '{}'",
+            step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
+            step->job->partition_id);
+        return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
+      }
     }
 
     const bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();

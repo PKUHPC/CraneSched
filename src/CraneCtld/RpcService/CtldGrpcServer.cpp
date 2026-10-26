@@ -1733,9 +1733,14 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   const bool propagate =
       !request->has_propagate_to_craned() || request->propagate_to_craned();
   if (propagate && g_craned_keeper) {
-    auto nodes = g_meta_container->GetCranedMetaMapConstPtr();
-    for (const auto& [craned_id, node] : *nodes) {
-      (void)node;
+    std::vector<CranedId> craned_ids;
+    {
+      auto nodes = g_meta_container->GetCranedMetaMapConstPtr();
+      craned_ids.reserve(nodes->size());
+      for (const auto& [craned_id, node] : *nodes)
+        craned_ids.emplace_back(craned_id);
+    }
+    for (const auto& craned_id : craned_ids) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (!stub || stub->Invalid()) continue;
       auto err = stub->UpdateTraceConfig(response->config());
