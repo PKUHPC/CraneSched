@@ -102,6 +102,18 @@ class NativeGateTest(unittest.TestCase):
         self.workflow = {"id": 789, "path": ci.PR_GATE_PATH, "state": "active"}
         self.rows = [listed_pr()]
         self.pr = snapshot()
+        self.jobs = {
+            "total_count": 1,
+            "jobs": [
+                {
+                    "name": "Request system tests",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "labels": ["ubuntu-latest"],
+                    "runner_id": 10,
+                }
+            ],
+        }
         self.get = mock.patch.object(self.api, "_get", side_effect=self._get).start()
         self.get_list = mock.patch.object(
             self.api, "_get_list", side_effect=lambda _path: self.rows
@@ -116,6 +128,8 @@ class NativeGateTest(unittest.TestCase):
             return self.run
         if path.endswith("/actions/workflows/pr-ci.yaml"):
             return self.workflow
+        if path.endswith("/actions/runs/123/attempts/1/jobs?per_page=100"):
+            return self.jobs
         self.fail(f"Unexpected API path: {path}")
 
     def test_fork_with_empty_associations_is_resolved_by_exact_identity(self):
@@ -166,6 +180,33 @@ class NativeGateTest(unittest.TestCase):
                     "state": "active",
                     **changes,
                 }
+                with self.assertRaises(ci.AuthorizationError):
+                    self.api.approved_gate_pr(context())
+
+    def test_successful_workflow_with_skipped_or_wrong_runner_job_is_rejected(self):
+        original = self.jobs["jobs"][0]
+        for changes in (
+            {"conclusion": "skipped"},
+            {"conclusion": "failure"},
+            {"status": "queued"},
+            {"runner_id": 0},
+            {"runner_id": True},
+            {"labels": ["self-hosted", "cranesystemtest"]},
+            {"name": "Fake Gate"},
+        ):
+            with self.subTest(changes=changes):
+                self.jobs = {"total_count": 1, "jobs": [{**original, **changes}]}
+                with self.assertRaises(ci.AuthorizationError):
+                    self.api.approved_gate_pr(context())
+        for invalid in (
+            None,
+            {},
+            {"total_count": True, "jobs": [original]},
+            {"total_count": 1, "jobs": []},
+            {"total_count": 2, "jobs": [original, original]},
+        ):
+            with self.subTest(invalid=invalid):
+                self.jobs = invalid
                 with self.assertRaises(ci.AuthorizationError):
                     self.api.approved_gate_pr(context())
 

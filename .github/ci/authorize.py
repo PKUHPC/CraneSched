@@ -493,6 +493,35 @@ class GitHubApi:
         ):
             raise AuthorizationError("PR gate head identity is invalid")
 
+        jobs = self._get(
+            f"repos/{context.repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+        )
+        if (
+            jobs is None
+            or type(jobs.get("total_count")) is not int
+            or jobs["total_count"] != 1
+        ):
+            raise AuthorizationError("PR gate must contain its one hosted request job")
+        values = jobs.get("jobs")
+        if (
+            not isinstance(values, list)
+            or len(values) != 1
+            or not isinstance(values[0], dict)
+        ):
+            raise AuthorizationError("PR gate jobs response is malformed")
+        job = values[0]
+        if (
+            job.get("name") != "Request system tests"
+            or job.get("status") != "completed"
+            or job.get("conclusion") != "success"
+            or job.get("labels") != ["ubuntu-latest"]
+            or type(job.get("runner_id")) is not int
+            or job["runner_id"] <= 0
+        ):
+            raise AuthorizationError(
+                "PR gate request job did not execute successfully on a hosted runner"
+            )
+
         # GitHub commonly leaves workflow_run.pull_requests empty for forks.
         # Query by owner/branch, then independently verify repository and SHA.
         numbers: list[int] = []

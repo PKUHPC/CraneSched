@@ -46,7 +46,9 @@ accepted boundary of the deployment.
 Before GitHub approves a required fork run, the PR gate cannot complete and
 cannot dispatch the repository runner. The trusted dispatcher rereads the
 source run and verifies its repository, canonical workflow ID, name and path,
-`pull_request` event, completed/success result, and exact attempt. It never
+`pull_request` event, completed/success result, and exact attempt. The one
+`Request system tests` job must also have actually succeeded on its hosted
+runner; a skipped job cannot serve as approval evidence. The dispatcher never
 downloads PR artifacts or consumes PR-produced caches, code, or credentials
 as authorization inputs.
 
