@@ -1228,11 +1228,13 @@ class JobScheduler {
   }
 
   static CraneExpected<void> HandleUnsetOptionalInJobToCtld(JobInCtld* job);
-  static CraneExpectedRich<void> AcquireJobAttributes(JobInCtld* job);
+  static CraneExpectedRich<void> AcquireJobAttributes(JobInCtld* job,
+                                                      bool is_recovery = false);
   static CraneExpectedRich<void> CheckJobValidity(JobInCtld* job);
 
   static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
-  static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
+  static CraneExpected<void> AcquireStepAttributes(StepInCtld* step,
+                                                   bool is_recovery = false);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
   // Pre-submit checks (compile-time capability, feature flags, etc.).
@@ -1326,7 +1328,7 @@ class JobScheduler {
 
   CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
 
-  std::expected<void, std::string> CreateResv_(
+  CraneExpectedRich<void> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
   std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
