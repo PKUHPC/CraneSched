@@ -510,6 +510,11 @@ bool MongodbClient::InsertRecoveredJob(
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
+  if (!job_doc.view()["deadline"]) {
+    update_doc.append(kvp("$unset", [](sub_document unset) {
+      unset.append(kvp("deadline", ""));
+    }));
+  }
   update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
     set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
   }));
@@ -575,6 +580,11 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
+  if (!job_doc.view()["deadline"]) {
+    update_doc.append(kvp("$unset", [](sub_document unset) {
+      unset.append(kvp("deadline", ""));
+    }));
+  }
   update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
     set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
   }));
@@ -656,6 +666,11 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
       // created if document doesn't exist
       document update_doc;
       update_doc.append(kvp("$set", job_doc));
+      if (!job_doc.view()["deadline"]) {
+        update_doc.append(kvp("$unset", [](sub_document unset) {
+          unset.append(kvp("deadline", ""));
+        }));
+      }
       update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
         set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
       }));
@@ -1121,8 +1136,10 @@ bool MongodbClient::FetchJobRecords(
           }
         }
 
-        job_info.mutable_deadline_time()->set_seconds(ViewValueOr_(
-            view["deadline"], std::numeric_limits<int64_t>::max()));
+        if (auto deadline = view["deadline"]; deadline) {
+          job_info.mutable_deadline_time()->set_seconds(
+              deadline.get_int64().value);
+        }
 
         std::string wckey_info;
         bool using_default_wckey =
@@ -1163,6 +1180,10 @@ bool MongodbClient::FetchJobRecords(
         auto* step_info = job_info_ptr->add_step_info_list();
         ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
+        if (job_info_ptr->has_deadline_time()) {
+          step_info->mutable_deadline_time()->CopyFrom(
+              job_info_ptr->deadline_time());
+        }
       }
     }
   } catch (const std::exception& e) {
@@ -1359,6 +1380,10 @@ bool MongodbClient::FetchJobStepRecords(
         auto* step_info = job_info_ptr->add_step_info_list();
         ViewToStepInfo_(step_doc, step_info);
         step_info->set_job_id(job_id);
+        if (job_info_ptr->has_deadline_time()) {
+          step_info->mutable_deadline_time()->CopyFrom(
+              job_info_ptr->deadline_time());
+        }
       }
 
       auto* mutable_licenses = job_info_ptr->mutable_licenses_count();
@@ -4338,6 +4363,11 @@ void MongodbClient::SubDocumentAppendItem_(sub_document& doc,
 }
 
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
+                                        const std::optional<int64_t>& value) {
+  if (value.has_value()) doc.append(kvp(key, value.value()));
+}
+
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
                                         const PartitionToLimitMap& value) {
   doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
     for (const auto& [partition, partition_resource] : value) {
@@ -5347,7 +5377,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
              std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
-             std::vector<CranedId>, int64_t,                        /*48-49*/
+             std::vector<CranedId>, std::optional<int64_t>,         /*48-49*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
              int64_t, int32_t>                                      /*55-56*/
       values{
@@ -5390,7 +5420,10 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
           // 45-49
           job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
-          execution_nodes, job_to_ctld.deadline_time().seconds(),
+          execution_nodes,
+          job_to_ctld.has_deadline_time()
+              ? std::optional<int64_t>(job_to_ctld.deadline_time().seconds())
+              : std::nullopt,
           // 50-54
           array_job_id, array_task_id, array_spec_fields.start,
           array_spec_fields.end, array_spec_fields.stride,
@@ -5480,6 +5513,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
     array_task_id = identity->task_id;
   }
   auto array_spec_fields = JobToCtldToArraySpecFields_(job->JobToCtld());
+  std::optional<int64_t> deadline =
+      job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)
+          ? std::optional<int64_t>(absl::ToUnixSeconds(job->deadline_time))
+          : std::nullopt;
 
   // 0  job_id        job_db_id      mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -5536,7 +5573,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
              std::string, std::unordered_set<CranedId>,             /*45-46*/
              std::unordered_set<CranedId>, std::vector<CranedId>,   /*47-48*/
-             int64_t,                                               /*49*/
+             std::optional<int64_t>,                                /*49*/
              int64_t, int64_t, int64_t, int64_t, int64_t,           /*50-54*/
              int64_t, int32_t>                                      /*55-56*/
       values{                                                       // 0-4
@@ -5571,7 +5608,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->using_default_wckey, g_config.CraneClusterName,
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids, absl::ToUnixSeconds(job->deadline_time),
+             job->executing_craned_ids, deadline,
              // 50-54
              array_job_id, array_task_id, array_spec_fields.start,
              array_spec_fields.end, array_spec_fields.stride,
@@ -6301,7 +6338,7 @@ bool MongodbClient::MigrateV0ToV1_() {
       "nodename_list(=[]), wckey(=\"\"), using_default_wckey(=false), "
       "licenses_alloc(={{}}), cluster(=\"\"), req_nodes(=[]), "
       "exclude_nodes(=[]), submit_hostname(=\"\"), "
-      "execution_nodes(=[]), deadline(=max timestamp), requeue_count(=0), "
+      "execution_nodes(=[]), requeue_count(=0), "
       "aggregated(=false), steps(=[])]...");
 
   try {
@@ -6495,10 +6532,6 @@ bool MongodbClient::MigrateV0ToV1_() {
         kvp("execution_nodes",
             make_document(
                 kvp("$ifNull", make_array("$execution_nodes", make_array())))),
-        kvp("deadline",
-            make_document(
-                kvp("$ifNull",
-                    make_array("$deadline", int64_t{kJobMaxTimeStampSec})))),
         kvp("requeue_count",
             make_document(
                 kvp("$ifNull", make_array("$requeue_count", int32_t{0})))),
