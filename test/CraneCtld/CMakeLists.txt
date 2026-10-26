@@ -35,20 +35,25 @@ gtest_discover_tests(vault_client_test)
 
 add_executable(embedded_db_client_test
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.h
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPublicDefs.cpp
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/EmbeddedDbClient.cpp
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.h
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Database/LegacyEmbeddedDbClient.cpp
 
         EmbeddedDbClientTest.cpp
+        CtldTestStubs.cpp
         )
 target_link_libraries(embedded_db_client_test
         GTest::gtest GTest::gtest_main
+
+        spdlog::spdlog
 
         crane_proto_lib
 
         Utility_PublicHeader
         Utility_PasswordEntry
+        Utility_PrologEpilogExecutor
         crane_tracer
 
         concurrentqueue
@@ -61,6 +66,10 @@ target_link_libraries(embedded_db_client_test
         nlohmann_json
         range-v3::range-v3
         uvw
+        cxxopts
+        Threads::Threads
+        bs_thread_pool
+        yaml-cpp
 
         unqlite
         Backward::Interface

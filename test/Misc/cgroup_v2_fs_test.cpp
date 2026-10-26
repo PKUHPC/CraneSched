@@ -1,6 +1,7 @@
 #include "CgroupV2Fs.h"
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -95,8 +96,16 @@ TEST(CgroupV2FsBackendTest, InodeChangeInvalidatesControllerCache) {
       backend.CreateOrOpen("crane/job_1", CG_V2_REQUIRED_CONTROLLERS, false)
           .has_value());
 
-  std::filesystem::remove_all(fs.Root() / "crane");
+  // Keep the old inode alive so a regular filesystem cannot reuse it.
+  std::filesystem::rename(fs.Root() / "crane", fs.Root() / "crane-retired");
   fs.PrepareNode(fs.Root() / "crane");
+
+  struct stat retired_stat{};
+  struct stat current_stat{};
+  ASSERT_EQ(::stat((fs.Root() / "crane-retired").c_str(), &retired_stat), 0);
+  ASSERT_EQ(::stat((fs.Root() / "crane").c_str(), &current_stat), 0);
+  ASSERT_EQ(retired_stat.st_dev, current_stat.st_dev);
+  ASSERT_NE(retired_stat.st_ino, current_stat.st_ino);
 
   EXPECT_TRUE(
       backend.CreateOrOpen("crane/job_2", CG_V2_REQUIRED_CONTROLLERS, false)
