@@ -18,7 +18,6 @@
 
 #pragma once
 
-#include <security/_pam_macros.h>
 #include <security/pam_ext.h>
 #include <security/pam_modules.h>
 #include <syslog.h>

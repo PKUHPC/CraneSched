@@ -22,65 +22,6 @@
 
 namespace fs = std::filesystem;
 
-namespace Ctld {
-
-void JobInCtld::SetJobId(job_id_t id) {
-  job_id = id;
-  runtime_attr.set_job_id(id);
-}
-
-void JobInCtld::SetJobDbId(job_db_id_t id) {
-  job_db_id = id;
-  runtime_attr.set_job_db_id(id);
-}
-
-void JobInCtld::SetUsername(std::string const& val) {
-  username = val;
-  runtime_attr.set_username(val);
-}
-
-void JobInCtld::SetStatus(crane::grpc::JobStatus val) {
-  status = val;
-  runtime_attr.set_status(val);
-}
-
-void StepInCtld::SetStepType(crane::grpc::StepType type) {
-  step_type = type;
-  m_runtime_attr_.set_step_type(type);
-}
-
-const crane::grpc::StepToCtld& StepInCtld::StepToCtld() const {
-  return m_step_to_ctld_;
-}
-
-crane::grpc::StepToCtld* StepInCtld::MutableStepToCtld() {
-  return &m_step_to_ctld_;
-}
-
-void StepInCtld::SetStepId(step_id_t id) {
-  m_step_id_ = id;
-  m_runtime_attr_.set_step_id(id);
-}
-
-void StepInCtld::SetStepDbId(step_db_id_t id) {
-  m_step_db_id_ = id;
-  m_runtime_attr_.set_step_db_id(id);
-}
-
-void StepInCtld::SetStatus(crane::grpc::JobStatus new_status) {
-  m_status_ = new_status;
-  m_runtime_attr_.set_status(new_status);
-}
-
-void StepInCtld::RecoverFromDb(
-    const JobInCtld& /*job*/,
-    const crane::grpc::StepInEmbeddedDb& /*step_in_db*/) {}
-
-void StepInCtld::SetFieldsOfStepInfo(
-    crane::grpc::StepInfo* /*step_info*/) const noexcept {}
-
-}  // namespace Ctld
-
 namespace {
 
 class TestStepInCtld final : public Ctld::StepInCtld {

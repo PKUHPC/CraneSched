@@ -7,6 +7,12 @@ add_library(pam_crane SHARED
 # remove "lib" prefix
 set_target_properties(pam_crane PROPERTIES PREFIX "")
 
+# Catch unresolved PAM API symbols when building the module, before dlopen.
+# Sanitized shared libraries can resolve runtime symbols from their host.
+if (NOT CRANE_ADDRESS_SANITIZER AND NOT CRANE_THREAD_SANITIZER)
+    target_link_options(pam_crane PRIVATE "LINKER:--no-undefined")
+endif ()
+
 target_include_directories(pam_crane PUBLIC ${PAM_INCLUDE_DIR})
 
 
