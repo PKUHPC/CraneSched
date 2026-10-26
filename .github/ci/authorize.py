@@ -809,7 +809,10 @@ def prepare_pr_check(context: DispatchContext, api: GitHubApi) -> dict[str, str]
         "details_url": url,
         "output": {
             "title": "System tests requested",
-            "summary": "The GitHub-approved PR is being validated and tested.",
+            "summary": (
+                "The GitHub-approved PR is being validated and tested. "
+                f"[View the trusted workflow]({url})."
+            ),
         },
     }
     value = api.write_check(context.repository, body)
@@ -844,9 +847,10 @@ def report_pr_check(
         or current["id"] != check_id
         or current.get("name") != "test"
         or current.get("external_id") != external_id
-        or current.get("details_url") != url
     ):
         raise AuthorizationError("refusing to update an unrelated PR check")
+    # GitHub Actions rewrites details_url to /runs/<check_id>. It is display
+    # metadata; the identity above binds this check to the exact head and attempt.
     results = (
         environment.get("AUTHORIZE_RESULT"),
         environment.get("SYSTEM_TEST_RESULT"),
@@ -864,7 +868,10 @@ def report_pr_check(
             "conclusion": conclusion,
             "output": {
                 "title": f"System tests: {conclusion}",
-                "summary": f"Authorization: {results[0]}; system tests: {results[1]}. See the linked trusted workflow for results.",
+                "summary": (
+                    f"Authorization: {results[0]}; system tests: {results[1]}. "
+                    f"[View the trusted workflow]({url}) for results."
+                ),
             },
         },
         check_id,

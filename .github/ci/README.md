@@ -300,9 +300,11 @@ step creates a `test` check on the exact PR head with status `in_progress`.
 The hosted final job completes that check as successful only if both hosted
 authorization (including routing validation) and `system-test` succeeded.
 Skipped, failed, missing or cancelled jobs never become green. Checks are
-bound to the trusted run ID and attempt, and the reporter verifies their head,
-name, external ID and details URL before updating them. Only the hosted jobs
-receive `checks: write`; the repository runner keeps `contents: read`.
+bound to the trusted run ID and attempt, and the reporter verifies their check
+ID, head, name and external ID before updating them. GitHub Actions rewrites
+`details_url`, so that display field is not used to verify check identity. The
+check summary links directly to the trusted workflow attempt. Only the hosted
+jobs receive `checks: write`; the repository runner keeps `contents: read`.
 Do not remove or rename the existing required `test` check during cutover.
 
 Merge the gate and trusted dispatcher together. PR events before this change

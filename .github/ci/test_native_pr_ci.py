@@ -276,13 +276,14 @@ class PrCheckTest(unittest.TestCase):
     def setUp(self):
         self.api = mock.Mock(spec=ci.GitHubApi)
         self.api.approved_gate_pr.return_value = snapshot()
-        external_id, url = ci._check_identity(context())
+        external_id, _ = ci._check_identity(context())
         self.check = dict(
             id=42,
             name="test",
             head_sha=HEAD_SHA,
             external_id=external_id,
-            details_url=url,
+            # GitHub Actions replaces the submitted workflow URL with this URL.
+            details_url=f"https://github.com/{REPOSITORY}/runs/42",
         )
         self.api.write_check.return_value = self.check
         self.api._get.return_value = self.check
@@ -303,6 +304,7 @@ class PrCheckTest(unittest.TestCase):
         self.assertNotEqual(body["head_sha"], MASTER_SHA)
         self.assertEqual(body["name"], "test")
         self.assertEqual(body["status"], "in_progress")
+        self.assertIn(ci._check_identity(context())[1], body["output"]["summary"])
 
     def test_preparation_failure_cannot_create_a_check(self):
         self.api.approved_gate_pr.side_effect = ci.AuthorizationError("unapproved")
@@ -332,14 +334,26 @@ class PrCheckTest(unittest.TestCase):
                 self.assertEqual(args[1]["status"], "completed")
                 self.assertEqual(args[1]["conclusion"], expected)
                 self.assertEqual(args[2], 42)
+                self.assertIn(
+                    ci._check_identity(context())[1], args[1]["output"]["summary"]
+                )
+
+    def test_github_details_url_is_display_metadata(self):
+        self.api.write_check.reset_mock()
+        ci.report_pr_check(context(), self.api, self.environment)
+        body = self.api.write_check.call_args.args[1]
+        self.assertEqual(body["conclusion"], "success")
+        self.assertNotIn("details_url", body)
 
     def test_cannot_complete_a_check_for_another_head_or_attempt(self):
         for changes in (
             {"head_sha": MASTER_SHA},
             {"external_id": "another-run"},
+            {"external_id": "cranesched-system-test:456:1"},
+            {"external_id": "cranesched-system-test:457:2"},
             {"name": "format"},
             {"id": True},
-            {"details_url": "https://example.invalid"},
+            {"id": 43},
         ):
             with self.subTest(changes=changes):
                 self.api._get.return_value = {**self.check, **changes}
@@ -399,13 +413,13 @@ class CommandLineFlowTest(unittest.TestCase):
     def test_all_three_phases_use_trusted_controls_and_api_resolved_head(self):
         api = mock.Mock(spec=ci.GitHubApi)
         api.approved_gate_pr.return_value = snapshot()
-        external_id, url = ci._check_identity(context())
+        external_id, _ = ci._check_identity(context())
         api.write_check.return_value = {
             "id": 42,
             "name": "test",
             "head_sha": HEAD_SHA,
             "external_id": external_id,
-            "details_url": url,
+            "details_url": f"https://github.com/{REPOSITORY}/runs/42",
         }
         api._get.return_value = api.write_check.return_value
         with tempfile.TemporaryDirectory() as temporary:
