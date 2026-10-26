@@ -6,27 +6,9 @@ on:
   push:
     branches:
       - master
-  pull_request_target:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    branches:
-      - master
-    paths:
-      - '.github/actionlint.yaml'
-      - '.github/workflows/**'
-      - '.github/ci/**'
-      - 'dependencies/**'
-      - 'CMakeModule/**'
-      - 'protos/**'
-      - 'src/**'
-      - 'test/**'
-      - 'etc/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
-      - 'VERSION'
+  workflow_run:
+    workflows: [PR CI Gate]
+    types: [completed]
   workflow_dispatch:
     inputs:
       backend_ref:
@@ -43,8 +25,8 @@ permissions: {}
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request_target'
-      && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'workflow_run'
+      && format('pr-{0}-{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_branch)
       || github.event_name == 'workflow_dispatch'
       && format('manual-{0}', github.run_id)
       || github.ref
@@ -54,13 +36,15 @@ concurrency:
 jobs:
   authorize:
     name: Authorize trusted test dispatch
-    if: github.event_name != 'pull_request_target' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: read
+      actions: read
+      checks: write
       pull-requests: read
     outputs:
+      pr_check_id: ${{ steps.pr.outputs.pr_check_id }}
+      pr_check_sha: ${{ steps.pr.outputs.pr_head_sha }}
       authorized: ${{ steps.authorize.outputs.authorized }}
       backend_sha: ${{ steps.authorize.outputs.backend_sha }}
       routing_sha: ${{ steps.authorize.outputs.routing_sha }}
@@ -82,6 +66,21 @@ jobs:
           clean: true
           set-safe-directory: false
 
+      - name: Resolve approved PR and start its test check
+        id: pr
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: /usr/bin/python3 -I trusted-ci/.github/ci/authorize.py --prepare-pr
+
       - name: Authorize actor and resolve immutable revisions
         id: authorize
         env:
@@ -93,14 +92,8 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           EVENT_SHA: ${{ github.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
-          PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || '' }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || '' }}
-          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || '' }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '' }}
           MANUAL_BACKEND_REF: ${{ inputs.backend_ref || 'master' }}
           MANUAL_FRONTEND_REF: ${{ inputs.frontend_ref || 'master' }}
           FRONTEND_REPOSITORY: PKUHPC/CraneSched-FrontEnd
@@ -582,14 +575,43 @@ jobs:
           bash trusted-ci/.github/ci/upload-packages.sh
 
   final-test:
-    name: test
+    name: ${{ github.event_name == 'workflow_run' && 'Finalize PR system tests' || 'test' }}
     needs:
       - authorize
       - test
     if: always()
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
+      checks: write
     steps:
+      - name: Checkout trusted PR check reporter
+        if: github.event_name == 'workflow_run' && needs.authorize.outputs.pr_check_id != ''
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: trusted-ci
+          sparse-checkout: .github/ci
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+
+      - name: Report system test result to PR head
+        if: always() && github.event_name == 'workflow_run' && needs.authorize.outputs.pr_check_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PR_CHECK_ID: ${{ needs.authorize.outputs.pr_check_id }}
+          PR_CHECK_SHA: ${{ needs.authorize.outputs.pr_check_sha }}
+          AUTHORIZE_RESULT: ${{ needs.authorize.result }}
+          SYSTEM_TEST_RESULT: ${{ needs.test.result }}
+        run: /usr/bin/python3 -I trusted-ci/.github/ci/authorize.py --report-pr-check
+
       - name: Enforce required test check
         env:
           AUTHORIZE_RESULT: ${{ needs.authorize.result }}

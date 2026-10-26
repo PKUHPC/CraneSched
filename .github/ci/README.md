@@ -1,19 +1,21 @@
 # CraneTestKit privileged CI contract
 
-`.github/workflows/build.yaml` is the trusted dispatcher for the K3s system
-suite. Pull requests use `pull_request_target` only to authorize and resolve
-immutable revisions on a GitHub-hosted runner. The hosted job executes only
-trusted controls from `master`; after authorization, it checks out proposed-merge
-workflow files for static inspection but never executes candidate code. A
-privileged job is dispatched only when all of the following are true:
+`.github/workflows/pr-ci.yaml` is a minimal `pull_request` entry point. It
+runs only a no-checkout GitHub-hosted job after GitHub's native fork-workflow
+approval allows it. Configure **Settings > Actions > General > Approval for
+running fork pull request workflows from contributors > Require approval for
+first-time contributors**. GitHub decides which authors and event actors need
+approval; a repository user with write access selects **Approve workflows to
+run**. Existing contributors run according to the same GitHub policy, without
+an additional repository-role check.
 
-- the workflow was loaded from `master`;
-- a same-repository pull request was triggered by a user whose current
-  permission is `maintain` or `admin`; or
-- a fork pull request author or current `maintain`/`admin` user recorded an
-  exact-head `/request-ci` request and a current `maintain` or `admin` user
-  reran that same workflow run;
-- Backend and FrontEnd refs resolve to full commit SHAs.
+`.github/workflows/build.yaml` receives successful gate runs through
+`workflow_run: completed`. Its authorization and reporting jobs execute only
+trusted controls from `master`; proposed-merge workflow files are inspected as
+data. Only after hosted validation does the privileged job build the exact PR
+head. Master push, scheduled runs and maintainer-only manual dispatch retain
+their existing entry points. `pull_request_target` is deliberately absent:
+GitHub runs it regardless of native fork approval settings.
 
 For every authorized Backend pull-request event or approved rerun, the hosted
 job looks for an exact, case-sensitive branch with the same name in
@@ -39,44 +41,34 @@ repositories from dispatching to it, but GitHub does not restrict which
 workflow in `PKUHPC/CraneSched` may request a repository runner. This is an
 accepted boundary of the deployment.
 
-## Fork pull request approval
+## Native fork approval and PR identity
 
-The first `pull_request_target` run for a fork always fails in the hosted
-authorization job and never queues `cranesystemtest`. The fork author or a
-current `maintain`/`admin` user can then comment exactly `/request-ci`. The
-hosted-only `request-ci.yaml` workflow requires an open, non-draft fork PR
-targeting `master`, verifies a non-author requester's current permission, binds
-the request to the current head repository, ref and SHA, and verifies that
-attempt 1 of the latest matching `build.yaml` run failed authorization without
-assigning or starting `system-test`.
+Before GitHub approves a required fork run, the PR gate cannot complete and
+cannot dispatch the repository runner. The trusted dispatcher rereads the
+source run and verifies its repository, canonical workflow ID, name and path,
+`pull_request` event, completed/success result, and exact attempt. It never
+downloads PR artifacts or consumes PR-produced caches, code, or credentials
+as authorization inputs.
 
-The bot reply records a canonical hidden attestation containing the PR number,
-head SHA, original request comment ID and workflow run ID. A maintainer approves
-that exact request by following the reply and selecting **Re-run all jobs**.
-Every rerun checks the rerun actor's current permission and, for a request made
-by someone other than the PR author, the requester's current permission. It
-rereads the original request comment, resolves the current PR and proposed
-merge, and rejects any run, head, base, comment, permission or merge drift. A
-new head requires a new `/request-ci` comment. A maintainer may rerun the same
-attested run again after an infrastructure failure; all checks execute again.
+Fork runs can have an empty `workflow_run.pull_requests` list. Resolve the
+open PR by the source head owner and branch, then require exactly one match
+for the full head repository, ref and SHA and the target repository/master.
+Reread that PR before authorization and reject drafts, closed PRs and changed
+heads. A stale gate or stale rerun cannot approve a new commit. The same
+validation runs again when the trusted dispatcher is manually rerun.
 
-The request workflow has only hosted-runner access and read-only repository and
-Actions permissions plus permission to create or update its issue comment. It
-checks out only the exact default-branch SHA and never checks out or executes PR
-code. Fork authors can request a run but cannot approve or dispatch the
-self-hosted job themselves.
+The former comment-request workflow and bot attestation protocol have been
+removed. Approve or rerun the native **PR CI Gate** workflow through GitHub.
+For infrastructure retries, rerunning the linked trusted system workflow is
+also supported while its source gate attempt and PR head remain current.
 
 The hosted authorization job applies a compensating routing guard before it
 dispatches `test`. For a pull request, it resolves the exact PR head SHA for
 the build, then obtains GitHub's proposed merge commit only for this static
-routing check. The merge commit must have exactly the event's base and head
-commits as parents, in that order; a stale or conflicting snapshot fails
-closed. GitHub can retain stale base and proposed-merge SHAs in a `reopened`
-event payload after `master` advances, so those payload values are syntax
-checked but are not authorization inputs. The trusted base is the
-`pull_request_target` workflow SHA; the current PR API base and the proposed
-merge's first parent must both equal it. The current API head and second parent
-must equal the event head, while the API merge SHA and merge ref must agree.
+routing check. The merge commit must have exactly two full-SHA parents:
+the live proposed base followed by the gate's current PR head. The API merge
+SHA and merge ref must agree. The proposed base can advance beyond the source
+gate's original base while master moves; it does not change the tested head.
 These current values are checked twice with bounded retries before dispatch.
 It requires `.github/workflows/build.yaml:test` to use exactly
 `[self-hosted, cranesystemtest]` and every other workflow job to use the fixed
@@ -236,7 +228,7 @@ pull requests have the same behavior; a contributor applies the patch and
 pushes a normal commit, which then triggers the normal PR events.
 
 Required maintainer review, branch protection, the trusted
-`pull_request_target` dispatcher and the restricted Kubernetes identity remain
+`workflow_run` dispatcher and the restricted Kubernetes identity remain
 part of the repository-level security boundary.
 
 ## RPM repository publishing
@@ -296,13 +288,28 @@ CraneTestKit exit codes remain authoritative:
 - `1`: complete coverage with test failures or errors;
 - `2`: infrastructure error or incomplete coverage.
 
-The privileged job keeps YAML job ID `test` but uses display name
-`system-test`. A hosted `final-test` job uses display name `test`, always runs,
-and succeeds only when authorization and the complete K3s system job both
-succeed. This preserves the existing required check context `test` while making
-an unapproved fork, failed authorization or skipped system job explicitly fail
-instead of appearing as a skipped required check. Do not delete or rename that
-context during cutover.
+The privileged job keeps YAML job ID `test` and display name `system-test`.
+The always-running hosted `final-test` job still enforces complete authorization
+and system-test success for master/manual runs.
+
+`workflow_run` is associated with master, so it cannot by itself satisfy a PR's
+required check. After resolving a valid source gate, the hosted preparation
+step creates a `test` check on the exact PR head with status `in_progress`.
+The hosted final job completes that check as successful only if both hosted
+authorization (including routing validation) and `system-test` succeeded.
+Skipped, failed, missing or cancelled jobs never become green. Checks are
+bound to the trusted run ID and attempt, and the reporter verifies their head,
+name, external ID and details URL before updating them. Only the hosted jobs
+receive `checks: write`; the repository runner keeps `contents: read`.
+Do not remove or rename the existing required `test` check during cutover.
+
+Merge the gate and trusted dispatcher together. PR events before this change
+reaches master use the previous workflow definition and cannot validate the
+new dispatch path. After merge, reopen or update a suitable PR (or rerun a
+native gate run created after cutover) and verify approval, dispatch, and the
+exact-head `test` result. Repository/organization approval policy and branch
+protection must be checked with an account that can read those settings;
+HTTP 403 from a limited PAT does not prove the configured policy.
 
 If two consecutive production runs return infrastructure exit code `2`,
 disable this workflow and restore the previous serial workflow from Git

@@ -13,7 +13,7 @@ MODULE_PATH = Path(__file__).with_name("validate-workflow-routing.py")
 BUILD_WORKFLOW = Path(__file__).parents[1] / "workflows" / "build.yaml"
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "build.yaml"
 WORKFLOWS_DIR = Path(__file__).parents[1] / "workflows"
-REQUEST_WORKFLOW = WORKFLOWS_DIR / "request-ci.yaml"
+REQUEST_WORKFLOW = WORKFLOWS_DIR / "pr-ci.yaml"
 SPEC = importlib.util.spec_from_file_location(
     "cranesched_ci_validate_workflow_routing", MODULE_PATH
 )
@@ -212,7 +212,8 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["test"]["steps"]
         build_steps = [
-            step for step in steps
+            step
+            for step in steps
             if '"$CRANETESTKIT_EXECUTABLE" env build' in step.get("run", "")
         ]
         self.assertEqual(len(build_steps), 1)
@@ -286,13 +287,16 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         self.assertIn("GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}", workflow)
         authorize_job = workflow.index("  authorize:\n")
         privileged_job = workflow.index("  test:\n", authorize_job)
-        self.assertIn("      issues: read\n", workflow[authorize_job:privileged_job])
+        self.assertIn("      actions: read\n", workflow[authorize_job:privileged_job])
 
     def test_final_test_is_hosted_and_never_skipped(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         final_job = workflow.index("  final-test:\n")
         final_block = workflow[final_job:]
-        self.assertIn("    name: test\n", final_block)
+        self.assertIn(
+            "github.event_name == 'workflow_run' && 'Finalize PR system tests' || 'test'",
+            final_block,
+        )
         self.assertIn("    if: always()\n", final_block)
         self.assertIn("    runs-on: ubuntu-latest\n", final_block)
         self.assertIn("      - authorize\n", final_block)
@@ -307,33 +311,31 @@ class WorkflowRoutingPolicyTest(unittest.TestCase):
         self.assertIn("    name: system-test\n", privileged_block)
         self.assertIn("    runs-on: [self-hosted, cranesystemtest]\n", privileged_block)
 
-    def test_request_workflow_is_hosted_and_does_not_execute_pr_code(self) -> None:
+    def test_native_gate_is_hosted_and_has_no_privileged_side_effects(self) -> None:
         workflow = REQUEST_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("  issue_comment:\n", workflow)
-        self.assertIn("      - created\n", workflow)
-        self.assertIn("  contents: read\n", workflow)
-        self.assertIn("  actions: read\n", workflow)
-        self.assertIn("  issues: write\n", workflow)
-        self.assertIn("  pull-requests: write\n", workflow)
-        self.assertNotIn("  pull-requests: read\n", workflow)
+        self.assertIn("  pull_request:\n", workflow)
+        self.assertIn("permissions: {}", workflow)
+        self.assertIn("runs-on: ubuntu-latest", workflow)
+        self.assertIn("github.event.pull_request.draft == false", workflow)
+        for forbidden in (
+            "pull_request_target",
+            "issue_comment",
+            "checkout@",
+            "secrets.",
+            "self-hosted",
+        ):
+            self.assertNotIn(forbidden, workflow)
+        build = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn(
-            "  group: request-fork-ci-${{ github.event.issue.number }}\n", workflow
+            "  workflow_run:\n    workflows: [PR CI Gate]\n    types: [completed]",
+            build,
         )
-        self.assertIn("  cancel-in-progress: false\n", workflow)
+        self.assertNotIn("pull_request_target", build)
+        self.assertIn("--prepare-pr", build)
+        self.assertIn("--report-pr-check", build)
         self.assertIn(
-            "if: github.event.issue.pull_request && "
-            "github.event.comment.body == '/request-ci'",
-            workflow,
+            "PR_CHECK_SHA: ${{ needs.authorize.outputs.pr_check_sha }}", build
         )
-        self.assertIn("    runs-on: ubuntu-latest\n", workflow)
-        self.assertIn("ref: ${{ github.sha }}", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn('[[ "$DEFAULT_BRANCH" == "master" ]]', workflow)
-        self.assertIn("git -C trusted-ci rev-parse HEAD", workflow)
-        self.assertIn("trusted-ci/.github/ci/request_ci.py", workflow)
-        self.assertNotIn("pull_request.head", workflow)
-        self.assertNotIn("secrets.", workflow)
-        self.assertNotIn("self-hosted", workflow)
 
     def test_repository_workflows_obey_routing_policy(self) -> None:
         routing.validate_workflow_routing(WORKFLOWS_DIR)

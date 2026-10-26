@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import json
 import sys
 import unittest
 import urllib.error
@@ -24,14 +23,13 @@ WORKFLOW_SHA = "c" * 40
 MERGE_SHA = "d" * 40
 FORK_HEAD_SHA = "e" * 40
 RUN_ID = 29794463501
-REQUEST_COMMENT_ID = 99123
 FORK_REPOSITORY = "external/CraneSched"
 FORK_AUTHOR = "fork-author"
 
 
 def _context(**overrides):
     values = {
-        "event_name": "pull_request_target",
+        "event_name": "workflow_run",
         "repository": "PKUHPC/CraneSched",
         "workflow_ref": (
             "PKUHPC/CraneSched/.github/workflows/build.yaml@refs/heads/master"
@@ -141,55 +139,19 @@ def _fork_commit_parents(_repository: str, _revision: str) -> tuple[str, ...]:
     return (WORKFLOW_SHA, FORK_HEAD_SHA)
 
 
-def _attestation_comment(**overrides) -> authorize.IssueComment:
-    payload = {
-        "head_sha": FORK_HEAD_SHA,
-        "pr_number": 935,
-        "request_comment_id": REQUEST_COMMENT_ID,
-        "run_id": RUN_ID,
-        "schema": 1,
-    }
-    payload.update(overrides)
-    marker = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return authorize.IssueComment(
-        comment_id=99200,
-        body=(
-            f"<!-- cranesched-ci-request:{marker} -->\n\n"
-            "A maintainer may now use Re-run all jobs."
-        ),
-        author_login="github-actions[bot]",
-        author_type="Bot",
-    )
-
-
-def _request_comment(**overrides) -> authorize.IssueComment:
-    values = {
-        "comment_id": REQUEST_COMMENT_ID,
-        "body": "/request-ci",
-        "author_login": FORK_AUTHOR,
-        "author_type": "User",
-    }
-    values.update(overrides)
-    return authorize.IssueComment(**values)
-
-
 def _authorize(
     context: authorize.DispatchContext | None = None,
     *,
     permission: str = "maintain",
-    actor_permissions: dict[str, str] | None = None,
     resolver=_resolver,
     pull_request_lookup=_pull_request,
     merge_ref_resolver=_merge_ref,
     commit_parents_resolver=_commit_parents,
-    issue_comments_lookup=None,
-    issue_comment_lookup=None,
     branch_resolver=_branch_resolver,
     retry_delays: tuple[float, ...] = (),
 ) -> dict[str, str]:
     resolved_context = context or _context()
     permissions = {resolved_context.triggering_actor: permission}
-    permissions.update(actor_permissions or {})
     return authorize.authorize_dispatch(
         resolved_context,
         lambda _repo, actor: {"permission": permissions.get(actor, "none")},
@@ -197,8 +159,6 @@ def _authorize(
         pull_request_lookup,
         merge_ref_resolver,
         commit_parents_resolver,
-        issue_comments_lookup,
-        issue_comment_lookup,
         branch_resolver=branch_resolver,
         sleeper=lambda _delay: None,
         retry_delays=retry_delays,
@@ -387,201 +347,31 @@ class AuthorizationPolicyTest(unittest.TestCase):
 
         self.assertEqual(result["routing_sha"], MERGE_SHA)
 
-    def test_initial_fork_run_requests_comment_before_permission_lookup(self) -> None:
-        branch_lookups: list[tuple[str, str]] = []
+    def test_native_approved_pr_does_not_require_a_repository_role(self) -> None:
+        for permission in ("none", "read", "triage", "write", "maintain", "admin"):
+            with self.subTest(permission=permission):
+                result = _authorize(permission=permission)
+                self.assertEqual(result["backend_sha"], BACKEND_SHA)
 
+    def test_native_approved_fork_uses_exact_head_without_comments(self) -> None:
         def unexpected_permission(_repo, _actor):
-            self.fail("permission lookup must not run for an initial fork attempt")
+            self.fail("PR authorization must use GitHub native approval")
 
-        def unexpected_branch(repository: str, branch: str) -> str | None:
-            branch_lookups.append((repository, branch))
-            return FRONTEND_SHA
-
-        with self.assertRaisesRegex(authorize.AuthorizationError, "/request-ci"):
-            authorize.authorize_dispatch(
-                _fork_context(run_attempt="1"),
-                unexpected_permission,
-                _resolver,
-                _pull_request,
-                _merge_ref,
-                _commit_parents,
-                branch_resolver=unexpected_branch,
-            )
-
-        self.assertEqual(branch_lookups, [])
-
-    def test_fork_rerun_without_attestation_is_rejected(self) -> None:
-        with self.assertRaisesRegex(authorize.AuthorizationError, "no valid"):
-            _authorize(
-                _fork_context(),
-                pull_request_lookup=_fork_pull_request,
-                commit_parents_resolver=_fork_commit_parents,
-                issue_comments_lookup=lambda _repo, _number: (),
-                issue_comment_lookup=lambda _repo, _number, _comment_id: None,
-            )
-
-    def test_write_only_actor_cannot_approve_fork_rerun(self) -> None:
-        comments_queried = False
-
-        def unexpected_comments(_repo, _number):
-            nonlocal comments_queried
-            comments_queried = True
-            return ()
-
-        with self.assertRaisesRegex(authorize.AuthorizationError, "maintain or admin"):
-            _authorize(
-                _fork_context(),
-                permission="write",
-                pull_request_lookup=_fork_pull_request,
-                commit_parents_resolver=_fork_commit_parents,
-                issue_comments_lookup=unexpected_comments,
-                issue_comment_lookup=lambda _repo, _number, _comment_id: None,
-            )
-
-        self.assertFalse(comments_queried)
-
-    def test_valid_fork_request_allows_maintainer_rerun(self) -> None:
-        result = _authorize(
-            _fork_context(),
-            permission="admin",
-            pull_request_lookup=_fork_pull_request,
-            commit_parents_resolver=_fork_commit_parents,
-            issue_comments_lookup=lambda _repo, _number: (_attestation_comment(),),
-            issue_comment_lookup=lambda _repo, _number, _comment_id: _request_comment(),
+        result = authorize.authorize_dispatch(
+            _fork_context(run_attempt="1"),
+            unexpected_permission,
+            _resolver,
+            _fork_pull_request,
+            _merge_ref,
+            _fork_commit_parents,
+            branch_resolver=_branch_resolver,
         )
-
         self.assertEqual(result["backend_sha"], FORK_HEAD_SHA)
-        self.assertEqual(result["routing_sha"], MERGE_SHA)
-        self.assertEqual(result["pr_head_sha"], FORK_HEAD_SHA)
         self.assertEqual(result["frontend_source"], "matching_branch")
 
-    def test_maintainer_request_allows_a_different_maintainer_to_rerun(self) -> None:
-        result = _authorize(
-            _fork_context(triggering_actor="rerun-maintainer"),
-            permission="admin",
-            actor_permissions={"request-maintainer": "maintain"},
-            pull_request_lookup=_fork_pull_request,
-            commit_parents_resolver=_fork_commit_parents,
-            issue_comments_lookup=lambda _repo, _number: (_attestation_comment(),),
-            issue_comment_lookup=lambda _repo, _number, _comment_id: _request_comment(
-                author_login="request-maintainer"
-            ),
-        )
-
-        self.assertEqual(result["backend_sha"], FORK_HEAD_SHA)
-
-    def test_non_author_requester_must_still_have_maintain_permission(self) -> None:
-        for permission in ("write", "triage", "read", "none"):
-            with (
-                self.subTest(permission=permission),
-                self.assertRaisesRegex(
-                    authorize.AuthorizationError, "current maintain/admin"
-                ),
-            ):
-                _authorize(
-                    _fork_context(),
-                    actor_permissions={"requester": permission},
-                    pull_request_lookup=_fork_pull_request,
-                    commit_parents_resolver=_fork_commit_parents,
-                    issue_comments_lookup=lambda _repo, _number: (
-                        _attestation_comment(),
-                    ),
-                    issue_comment_lookup=lambda _repo, _number, _comment_id: (
-                        _request_comment(author_login="requester")
-                    ),
-                )
-
-    def test_deleted_or_edited_fork_request_is_rejected(self) -> None:
-        for request, message in (
-            (None, "no longer exists"),
-            (_request_comment(body="/request-ci please"), "was edited"),
-            (_request_comment(author_type="Bot"), "not created by a user"),
-            (
-                _request_comment(author_login="someone-else"),
-                "PR author or a current maintain/admin",
-            ),
-        ):
-            with (
-                self.subTest(message=message),
-                self.assertRaisesRegex(authorize.AuthorizationError, message),
-            ):
-                _authorize(
-                    _fork_context(),
-                    pull_request_lookup=_fork_pull_request,
-                    commit_parents_resolver=_fork_commit_parents,
-                    issue_comments_lookup=lambda _repo, _number: (
-                        _attestation_comment(),
-                    ),
-                    issue_comment_lookup=(
-                        lambda _repo, _number, _comment_id, value=request: value
-                    ),
-                )
-
-    def test_fork_attestation_is_bound_to_run_and_head(self) -> None:
-        for marker in (
-            _attestation_comment(run_id=RUN_ID + 1),
-            _attestation_comment(head_sha=BACKEND_SHA),
-        ):
-            with (
-                self.subTest(marker=marker),
-                self.assertRaisesRegex(authorize.AuthorizationError, "no valid"),
-            ):
-                _authorize(
-                    _fork_context(),
-                    pull_request_lookup=_fork_pull_request,
-                    commit_parents_resolver=_fork_commit_parents,
-                    issue_comments_lookup=(
-                        lambda _repo, _number, value=marker: (value,)
-                    ),
-                    issue_comment_lookup=lambda _repo, _number, _comment_id: (
-                        _request_comment()
-                    ),
-                )
-
-    def test_fork_attestation_requires_trusted_bot_and_canonical_marker(self) -> None:
-        valid = _attestation_comment()
-        candidates = (
-            authorize.IssueComment(
-                valid.comment_id,
-                valid.body,
-                "fork-author",
-                "User",
-            ),
-            authorize.IssueComment(
-                valid.comment_id,
-                valid.body.replace(",", ", ", 1),
-                "github-actions[bot]",
-                "Bot",
-            ),
-            _attestation_comment(extra="unexpected"),
-            _attestation_comment(schema=1.0),
-            authorize.IssueComment(
-                valid.comment_id,
-                f"{valid.body}\n<!-- cranesched-ci-request:not-json -->",
-                "github-actions[bot]",
-                "Bot",
-            ),
-        )
-        for candidate in candidates:
-            with (
-                self.subTest(candidate=candidate),
-                self.assertRaisesRegex(authorize.AuthorizationError, "no valid"),
-            ):
-                _authorize(
-                    _fork_context(),
-                    pull_request_lookup=_fork_pull_request,
-                    commit_parents_resolver=_fork_commit_parents,
-                    issue_comments_lookup=(
-                        lambda _repo, _number, value=candidate: (value,)
-                    ),
-                    issue_comment_lookup=lambda _repo, _number, _comment_id: (
-                        _request_comment()
-                    ),
-                )
-
-    def test_non_maintainer_is_rejected(self) -> None:
-        with self.assertRaisesRegex(authorize.AuthorizationError, "maintain or admin"):
-            _authorize(permission="write")
+    def test_old_pr_target_entry_is_rejected(self) -> None:
+        with self.assertRaisesRegex(authorize.AuthorizationError, "unsupported"):
+            _authorize(_context(event_name="pull_request_target"))
 
     def test_push_and_schedule_lock_backend_to_trusted_workflow_sha(self) -> None:
         def unexpected_permission(_repo, _actor):
@@ -947,64 +737,6 @@ class GitHubApiTest(unittest.TestCase):
         self.assertIsNone(snapshot.mergeable)
         self.assertEqual(snapshot.mergeable_state, "unknown")
         self.assertEqual(snapshot.merge_commit_sha, "")
-
-    def test_issue_comments_are_parsed_for_attestation_validation(self) -> None:
-        api = authorize.GitHubApi("test-token")
-        response = {
-            "id": 99200,
-            "body": _attestation_comment().body,
-            "user": {"login": "github-actions[bot]", "type": "Bot"},
-        }
-
-        with mock.patch.object(api, "_get_list", return_value=[response]) as get:
-            comments = api.issue_comments("PKUHPC/CraneSched", 935)
-
-        self.assertEqual(comments, (_attestation_comment(),))
-        self.assertEqual(
-            get.call_args.args[0],
-            "repos/PKUHPC/CraneSched/issues/935/comments?per_page=100&page=1",
-        )
-
-    def test_deleted_comment_author_is_ignored_as_an_untrusted_identity(self) -> None:
-        api = authorize.GitHubApi("test-token")
-        response = {"id": 99201, "body": "old comment", "user": None}
-
-        with mock.patch.object(api, "_get_list", return_value=[response]):
-            comments = api.issue_comments("PKUHPC/CraneSched", 935)
-
-        self.assertEqual(
-            comments,
-            (authorize.IssueComment(99201, "old comment", "", ""),),
-        )
-
-    def test_original_request_comment_is_bound_to_pull_request(self) -> None:
-        api = authorize.GitHubApi("test-token")
-        response = {
-            "id": REQUEST_COMMENT_ID,
-            "body": "/request-ci",
-            "issue_url": "https://api.github.com/repos/PKUHPC/CraneSched/issues/935",
-            "user": {"login": FORK_AUTHOR, "type": "User"},
-        }
-
-        with mock.patch.object(api, "_get", return_value=response):
-            comment = api.issue_comment("PKUHPC/CraneSched", 935, REQUEST_COMMENT_ID)
-        self.assertEqual(comment, _request_comment())
-
-        response["issue_url"] = (
-            "https://api.github.com/repos/PKUHPC/CraneSched/issues/936"
-        )
-        with (
-            mock.patch.object(api, "_get", return_value=response),
-            self.assertRaisesRegex(authorize.AuthorizationError, "unexpected"),
-        ):
-            api.issue_comment("PKUHPC/CraneSched", 935, REQUEST_COMMENT_ID)
-
-    def test_deleted_request_comment_returns_none(self) -> None:
-        api = authorize.GitHubApi("test-token")
-        with mock.patch.object(api, "_get", return_value=None):
-            self.assertIsNone(
-                api.issue_comment("PKUHPC/CraneSched", 935, REQUEST_COMMENT_ID)
-            )
 
     def test_merge_ref_and_commit_parents_are_parsed(self) -> None:
         api = authorize.GitHubApi("test-token")

@@ -1,0 +1,39 @@
+name: PR CI Gate
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - master
+    paths:
+      - '.github/actionlint.yaml'
+      - '.github/workflows/**'
+      - '.github/ci/**'
+      - 'dependencies/**'
+      - 'CMakeModule/**'
+      - 'protos/**'
+      - 'src/**'
+      - 'test/**'
+      - 'etc/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'VERSION'
+
+permissions: {}
+
+concurrency:
+  group: pr-ci-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    name: Request system tests
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass GitHub native fork approval
+        run: 'true'

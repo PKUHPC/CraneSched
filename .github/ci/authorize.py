@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -11,23 +12,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Optional
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_REQUEST_MARKER_PREFIX = "<!-- cranesched-ci-request:"
-_REQUEST_MARKER_RE = re.compile(
-    r"^<!-- cranesched-ci-request:(\{[^\r\n]*\}) -->$", re.MULTILINE
-)
-_REQUEST_MARKER_KEYS = {
-    "head_sha",
-    "pr_number",
-    "request_comment_id",
-    "run_id",
-    "schema",
-}
+PR_GATE_NAME = "PR CI Gate"
+PR_GATE_PATH = ".github/workflows/pr-ci.yaml"
 
 
 class AuthorizationError(RuntimeError):
@@ -52,6 +44,8 @@ class DispatchContext:
     pr_head_sha: str = ""
     run_id: str = ""
     run_attempt: str = ""
+    source_run_id: str = ""
+    source_run_attempt: str = ""
     manual_backend_ref: str = "master"
     manual_frontend_ref: str = "master"
 
@@ -85,28 +79,6 @@ MergeRefResolver = Callable[[str, int], Optional[str]]
 CommitParentsResolver = Callable[[str, str], Optional[tuple[str, ...]]]
 
 
-@dataclass(frozen=True)
-class IssueComment:
-    """The comment identity and content needed for a fork CI request."""
-
-    comment_id: int
-    body: str
-    author_login: str
-    author_type: str
-
-
-@dataclass(frozen=True)
-class RequestAttestation:
-    """A canonical request marker emitted by the trusted hosted workflow."""
-
-    pr_number: int
-    head_sha: str
-    request_comment_id: int
-    run_id: int
-
-
-IssueCommentsLookup = Callable[[str, int], tuple[IssueComment, ...]]
-IssueCommentLookup = Callable[[str, int, int], Optional[IssueComment]]
 Sleeper = Callable[[float], None]
 
 _MERGE_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0, 8.0)
@@ -163,43 +135,6 @@ def _required_positive_integer(value: str, label: str) -> int:
     return int(value)
 
 
-def _parse_request_attestation(body: str) -> RequestAttestation | None:
-    if body.count(_REQUEST_MARKER_PREFIX) != 1:
-        return None
-    matches = _REQUEST_MARKER_RE.findall(body)
-    if len(matches) != 1:
-        return None
-    raw_payload = matches[0]
-    try:
-        payload = json.loads(raw_payload)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict) or set(payload) != _REQUEST_MARKER_KEYS:
-        return None
-    if json.dumps(payload, sort_keys=True, separators=(",", ":")) != raw_payload:
-        return None
-    schema = payload.get("schema")
-    if not isinstance(schema, int) or isinstance(schema, bool) or schema != 1:
-        return None
-    integer_fields = ("pr_number", "request_comment_id", "run_id")
-    if any(
-        not isinstance(payload.get(field), int)
-        or isinstance(payload.get(field), bool)
-        or payload[field] <= 0
-        for field in integer_fields
-    ):
-        return None
-    head_sha = payload.get("head_sha")
-    if not isinstance(head_sha, str) or SHA_RE.fullmatch(head_sha) is None:
-        return None
-    return RequestAttestation(
-        pr_number=payload["pr_number"],
-        head_sha=head_sha,
-        request_comment_id=payload["request_comment_id"],
-        run_id=payload["run_id"],
-    )
-
-
 def _validate_pr_event(context: DispatchContext) -> int:
     if context.pr_base_repository != context.repository:
         raise AuthorizationError("pull request base repository is unexpected")
@@ -220,86 +155,6 @@ def _validate_pr_event(context: DispatchContext) -> int:
     if context.pr_merge_sha and not SHA_RE.fullmatch(context.pr_merge_sha):
         raise AuthorizationError("event proposed merge is not a full commit SHA")
     return _required_pr_number(context.pr_number)
-
-
-def _validate_fork_request(
-    context: DispatchContext,
-    number: int,
-    permission_lookup: PermissionLookup,
-    pull_request_lookup: PullRequestLookup | None,
-    issue_comments_lookup: IssueCommentsLookup | None,
-    issue_comment_lookup: IssueCommentLookup | None,
-) -> None:
-    run_attempt = _required_positive_integer(
-        context.run_attempt, "workflow run attempt"
-    )
-    if run_attempt == 1:
-        raise AuthorizationError(
-            "fork pull requests require approval: the pull request author or a "
-            "maintain/admin user must comment exactly `/request-ci`, then a "
-            "maintainer must use `Re-run all jobs` on the workflow run linked by "
-            "github-actions[bot]"
-        )
-
-    if (
-        pull_request_lookup is None
-        or issue_comments_lookup is None
-        or issue_comment_lookup is None
-    ):
-        raise AuthorizationError("fork CI request validation is unavailable")
-
-    run_id = _required_positive_integer(context.run_id, "workflow run ID")
-    _require_maintainer(context, permission_lookup)
-
-    snapshot = pull_request_lookup(context.repository, number)
-    _validate_pr_snapshot(context, number, snapshot)
-
-    attestations: list[RequestAttestation] = []
-    for comment in issue_comments_lookup(context.repository, number):
-        if (
-            comment.author_login != "github-actions[bot]"
-            or comment.author_type != "Bot"
-        ):
-            continue
-        attestation = _parse_request_attestation(comment.body)
-        if (
-            attestation is not None
-            and attestation.pr_number == number
-            and attestation.head_sha == context.pr_head_sha
-            and attestation.run_id == run_id
-        ):
-            attestations.append(attestation)
-
-    if not attestations:
-        raise AuthorizationError(
-            "no valid `/request-ci` attestation matches this workflow run and PR head"
-        )
-    if len(attestations) != 1:
-        raise AuthorizationError(
-            "multiple `/request-ci` attestations match this workflow run and PR head"
-        )
-
-    attestation = attestations[0]
-    request = issue_comment_lookup(
-        context.repository, number, attestation.request_comment_id
-    )
-    if request is None:
-        raise AuthorizationError("the original `/request-ci` comment no longer exists")
-    if request.comment_id != attestation.request_comment_id:
-        raise AuthorizationError("GitHub returned an unexpected request comment")
-    if request.body != "/request-ci":
-        raise AuthorizationError("the original `/request-ci` comment was edited")
-    if request.author_type != "User":
-        raise AuthorizationError(
-            "the original `/request-ci` comment was not created by a user"
-        )
-    if request.author_login != snapshot.author_login and not _has_maintain_permission(
-        permission_lookup(context.repository, request.author_login)
-    ):
-        raise AuthorizationError(
-            "the original `/request-ci` comment was not created by the PR author "
-            "or a current maintain/admin user"
-        )
 
 
 def _validate_pr_snapshot(
@@ -409,8 +264,6 @@ def authorize_dispatch(
     pull_request_lookup: PullRequestLookup | None = None,
     merge_ref_resolver: MergeRefResolver | None = None,
     commit_parents_resolver: CommitParentsResolver | None = None,
-    issue_comments_lookup: IssueCommentsLookup | None = None,
-    issue_comment_lookup: IssueCommentLookup | None = None,
     *,
     branch_resolver: BranchResolver | None = None,
     sleeper: Sleeper = time.sleep,
@@ -429,19 +282,8 @@ def authorize_dispatch(
     pr_base_sha = ""
     pr_head_sha = ""
     pr_merge_sha = ""
-    if context.event_name == "pull_request_target":
+    if context.event_name == "workflow_run":
         pr_number = _validate_pr_event(context)
-        if context.pr_head_repository == context.repository:
-            _require_maintainer(context, permission_lookup)
-        else:
-            _validate_fork_request(
-                context,
-                pr_number,
-                permission_lookup,
-                pull_request_lookup,
-                issue_comments_lookup,
-                issue_comment_lookup,
-            )
         if (
             pull_request_lookup is None
             or merge_ref_resolver is None
@@ -597,6 +439,152 @@ class GitHubApi:
             raise AuthorizationError("GitHub API returned a non-array response")
         return value
 
+    def approved_gate_pr(self, context: DispatchContext) -> PullRequestSnapshot:
+        """Resolve a completed native-approved gate using only GitHub API data."""
+        run_id = _required_positive_integer(context.source_run_id, "source run ID")
+        attempt = _required_positive_integer(
+            context.source_run_attempt, "source run attempt"
+        )
+        run = self._get(f"repos/{context.repository}/actions/runs/{run_id}")
+        workflow = self._get(f"repos/{context.repository}/actions/workflows/pr-ci.yaml")
+        if run is None or workflow is None:
+            raise AuthorizationError("PR gate metadata is unavailable")
+        workflow_id = workflow.get("id")
+        if (
+            not isinstance(workflow_id, int)
+            or isinstance(workflow_id, bool)
+            or workflow_id <= 0
+            or workflow.get("path") != PR_GATE_PATH
+            or workflow.get("state") != "active"
+            or type(run.get("id")) is not int
+            or run["id"] != run_id
+            or type(run.get("run_attempt")) is not int
+            or run["run_attempt"] != attempt
+            or type(run.get("workflow_id")) is not int
+            or run["workflow_id"] != workflow_id
+            or run.get("name") != PR_GATE_NAME
+            or run.get("path") != PR_GATE_PATH
+            or run.get("event") != "pull_request"
+            or run.get("status") != "completed"
+            or run.get("conclusion") != "success"
+        ):
+            raise AuthorizationError("source is not a successful current PR gate run")
+        repository = run.get("repository")
+        head_repository = run.get("head_repository")
+        if (
+            not isinstance(repository, dict)
+            or repository.get("full_name") != context.repository
+            or not isinstance(head_repository, dict)
+        ):
+            raise AuthorizationError("PR gate repository is unexpected")
+        head_repo = head_repository.get("full_name")
+        head_ref = run.get("head_branch")
+        head_sha = run.get("head_sha")
+        if (
+            not isinstance(head_repo, str)
+            or re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", head_repo) is None
+            or not isinstance(head_ref, str)
+            or not head_ref
+            or any(
+                ord(character) < 32 or ord(character) == 127 for character in head_ref
+            )
+            or not isinstance(head_sha, str)
+            or SHA_RE.fullmatch(head_sha) is None
+        ):
+            raise AuthorizationError("PR gate head identity is invalid")
+
+        # GitHub commonly leaves workflow_run.pull_requests empty for forks.
+        # Query by owner/branch, then independently verify repository and SHA.
+        numbers: list[int] = []
+        for page in range(1, 11):
+            query = urllib.parse.urlencode(
+                {
+                    "state": "open",
+                    "base": "master",
+                    "head": f"{head_repo.split('/')[0]}:{head_ref}",
+                    "per_page": 100,
+                    "page": page,
+                }
+            )
+            values = self._get_list(f"repos/{context.repository}/pulls?{query}")
+            for value in values:
+                if not isinstance(value, dict):
+                    raise AuthorizationError("GitHub pull request list is malformed")
+                head = value.get("head")
+                base = value.get("base")
+                if not isinstance(head, dict) or not isinstance(base, dict):
+                    raise AuthorizationError("GitHub pull request list is malformed")
+                head_repo_value = head.get("repo")
+                base_repo_value = base.get("repo")
+                if not isinstance(head_repo_value, dict) or not isinstance(
+                    base_repo_value, dict
+                ):
+                    raise AuthorizationError("GitHub pull request list is malformed")
+                if (
+                    head_repo_value.get("full_name") == head_repo
+                    and head.get("ref") == head_ref
+                    and head.get("sha") == head_sha
+                    and base_repo_value.get("full_name") == context.repository
+                    and base.get("ref") == "master"
+                    and value.get("state") == "open"
+                ):
+                    number = value.get("number")
+                    if type(number) is not int or number <= 0:
+                        raise AuthorizationError("pull request number is invalid")
+                    numbers.append(number)
+            if len(values) < 100:
+                break
+        else:
+            raise AuthorizationError("PR lookup exceeded the pagination safety limit")
+        if len(numbers) != 1:
+            raise AuthorizationError("PR gate must match exactly one current open PR")
+        snapshot = self.pull_request(context.repository, numbers[0])
+        expected = replace(
+            context,
+            pr_number=str(numbers[0]),
+            pr_base_repository=context.repository,
+            pr_base_ref="master",
+            pr_base_sha=snapshot.base_sha,
+            pr_head_repository=head_repo,
+            pr_head_ref=head_ref,
+            pr_head_sha=head_sha,
+            pr_merge_sha=snapshot.merge_commit_sha,
+        )
+        _validate_pr_event(expected)
+        _validate_pr_snapshot(expected, numbers[0], snapshot)
+        return snapshot
+
+    def write_check(
+        self, repository: str, body: dict[str, object], check_id: int | None = None
+    ) -> dict[str, object]:
+        path = f"repos/{repository}/check-runs"
+        if check_id is not None:
+            path += f"/{check_id}"
+        request = urllib.request.Request(
+            f"https://api.github.com/{path}",
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "User-Agent": "CraneSched-trusted-CI-dispatcher",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            method="POST" if check_id is None else "PATCH",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                if response.status != (201 if check_id is None else 200):
+                    raise AuthorizationError("unexpected check API status")
+                value = json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise AuthorizationError(f"check API failed with HTTP {exc.code}") from None
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise AuthorizationError("check API request failed") from exc
+        if not isinstance(value, dict):
+            raise AuthorizationError("GitHub check response is malformed")
+        return value
+
     def permission(self, repository: str, actor: str) -> dict[str, object]:
         encoded_actor = urllib.parse.quote(actor, safe="")
         value = self._get(
@@ -697,68 +685,6 @@ class GitHubApi:
             mergeable_state=mergeable_state,
         )
 
-    @staticmethod
-    def _parse_issue_comment(value: object) -> IssueComment:
-        if not isinstance(value, dict):
-            raise AuthorizationError("GitHub issue comment response is malformed")
-        user = value.get("user")
-        if user is None:
-            author_login = ""
-            author_type = ""
-        elif isinstance(user, dict):
-            author_login = user.get("login")
-            author_type = user.get("type")
-        else:
-            raise AuthorizationError("GitHub issue comment response is malformed")
-        comment_id = value.get("id")
-        body = value.get("body")
-        if (
-            not isinstance(comment_id, int)
-            or isinstance(comment_id, bool)
-            or comment_id <= 0
-            or not isinstance(body, str)
-            or not isinstance(author_login, str)
-            or not isinstance(author_type, str)
-        ):
-            raise AuthorizationError("GitHub issue comment response is malformed")
-        return IssueComment(
-            comment_id=comment_id,
-            body=body,
-            author_login=author_login,
-            author_type=author_type,
-        )
-
-    def issue_comments(self, repository: str, number: int) -> tuple[IssueComment, ...]:
-        comments: list[IssueComment] = []
-        for page in range(1, 11):
-            values = self._get_list(
-                f"repos/{repository}/issues/{number}/comments?per_page=100&page={page}"
-            )
-            comments.extend(self._parse_issue_comment(value) for value in values)
-            if len(values) < 100:
-                return tuple(comments)
-        raise AuthorizationError(
-            "pull request has too many comments to validate `/request-ci` safely"
-        )
-
-    def issue_comment(
-        self, repository: str, number: int, comment_id: int
-    ) -> IssueComment | None:
-        value = self._get(
-            f"repos/{repository}/issues/comments/{comment_id}",
-            missing_statuses=frozenset({404}),
-        )
-        if value is None:
-            return None
-        expected_issue_url = (
-            f"https://api.github.com/repos/{repository}/issues/{number}"
-        )
-        if value.get("issue_url") != expected_issue_url:
-            raise AuthorizationError(
-                "GitHub returned a request comment from an unexpected pull request"
-            )
-        return self._parse_issue_comment(value)
-
     def merge_ref(self, repository: str, number: int) -> str | None:
         value = self._get(
             f"repos/{repository}/git/ref/pull/{number}/merge",
@@ -800,51 +726,153 @@ def _context_from_environment() -> DispatchContext:
         frontend_repository=os.environ.get(
             "FRONTEND_REPOSITORY", "PKUHPC/CraneSched-FrontEnd"
         ),
-        pr_number=os.environ.get("PR_NUMBER", ""),
-        pr_base_repository=os.environ.get("PR_BASE_REPOSITORY", ""),
-        pr_base_ref=os.environ.get("PR_BASE_REF", ""),
-        pr_base_sha=os.environ.get("PR_BASE_SHA", ""),
-        pr_merge_sha=os.environ.get("PR_MERGE_SHA", ""),
-        pr_head_repository=os.environ.get("PR_HEAD_REPOSITORY", ""),
-        pr_head_ref=os.environ.get("PR_HEAD_REF", ""),
-        pr_head_sha=os.environ.get("PR_HEAD_SHA", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
         run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+        source_run_id=os.environ.get("SOURCE_RUN_ID", ""),
+        source_run_attempt=os.environ.get("SOURCE_RUN_ATTEMPT", ""),
         manual_backend_ref=os.environ.get("MANUAL_BACKEND_REF", "master"),
         manual_frontend_ref=os.environ.get("MANUAL_FRONTEND_REF", "master"),
     )
 
 
-def main() -> int:
-    output_path = Path(os.environ["GITHUB_OUTPUT"])
-    with output_path.open("a", encoding="utf-8") as output:
-        output.write("authorized=false\n")
-    api = GitHubApi(os.environ.get("GH_TOKEN", ""))
-    result = authorize_dispatch(
-        _context_from_environment(),
-        api.permission,
-        api.commit,
-        api.pull_request,
-        api.merge_ref,
-        api.commit_parents,
-        api.issue_comments,
-        api.issue_comment,
-        branch_resolver=api.branch_head,
+def _trusted_context() -> DispatchContext:
+    context = _context_from_environment()
+    expected = f"{context.repository}/.github/workflows/build.yaml@refs/heads/master"
+    if context.workflow_ref != expected or not SHA_RE.fullmatch(context.event_sha):
+        raise AuthorizationError("PR controls must be loaded from master")
+    return context
+
+
+def _resolve_gate_context(context: DispatchContext, api: GitHubApi) -> DispatchContext:
+    snapshot = api.approved_gate_pr(context)
+    return replace(
+        context,
+        pr_number=str(snapshot.number),
+        pr_base_repository=snapshot.base_repository,
+        pr_base_ref=snapshot.base_ref,
+        pr_base_sha=snapshot.base_sha,
+        pr_merge_sha=snapshot.merge_commit_sha,
+        pr_head_repository=snapshot.head_repository,
+        pr_head_ref=snapshot.head_ref,
+        pr_head_sha=snapshot.head_sha,
     )
+
+
+def _check_identity(context: DispatchContext) -> tuple[str, str]:
+    run_id = _required_positive_integer(context.run_id, "workflow run ID")
+    attempt = _required_positive_integer(context.run_attempt, "workflow run attempt")
+    return (
+        f"cranesched-system-test:{run_id}:{attempt}",
+        f"https://github.com/{context.repository}/actions/runs/{run_id}/attempts/{attempt}",
+    )
+
+
+def prepare_pr_check(context: DispatchContext, api: GitHubApi) -> dict[str, str]:
+    if context.event_name != "workflow_run":
+        raise AuthorizationError("PR preparation requires a workflow_run event")
+    context = _resolve_gate_context(context, api)
+    external_id, url = _check_identity(context)
+    body = {
+        "name": "test",
+        "head_sha": context.pr_head_sha,
+        "status": "in_progress",
+        "external_id": external_id,
+        "details_url": url,
+        "output": {
+            "title": "System tests requested",
+            "summary": "The GitHub-approved PR is being validated and tested.",
+        },
+    }
+    value = api.write_check(context.repository, body)
+    if (
+        type(value.get("id")) is not int
+        or value["id"] <= 0
+        or value.get("head_sha") != context.pr_head_sha
+        or value.get("name") != "test"
+        or value.get("external_id") != external_id
+    ):
+        raise AuthorizationError("created PR check has an unexpected identity")
+    return {"pr_check_id": str(value["id"]), "pr_head_sha": context.pr_head_sha}
+
+
+def report_pr_check(
+    context: DispatchContext, api: GitHubApi, environment: dict[str, str]
+) -> None:
+    if context.event_name != "workflow_run":
+        raise AuthorizationError("PR reporting requires a workflow_run event")
+    check_id = _required_positive_integer(
+        environment.get("PR_CHECK_ID", ""), "PR check ID"
+    )
+    head_sha = environment.get("PR_CHECK_SHA", "")
+    if not SHA_RE.fullmatch(head_sha):
+        raise AuthorizationError("PR check SHA is invalid")
+    external_id, url = _check_identity(context)
+    current = api._get(f"repos/{context.repository}/check-runs/{check_id}")
+    if (
+        current is None
+        or current.get("head_sha") != head_sha
+        or type(current.get("id")) is not int
+        or current["id"] != check_id
+        or current.get("name") != "test"
+        or current.get("external_id") != external_id
+        or current.get("details_url") != url
+    ):
+        raise AuthorizationError("refusing to update an unrelated PR check")
+    results = (
+        environment.get("AUTHORIZE_RESULT"),
+        environment.get("SYSTEM_TEST_RESULT"),
+    )
+    if results == ("success", "success"):
+        conclusion = "success"
+    elif "cancelled" in results:
+        conclusion = "cancelled"
+    else:
+        conclusion = "failure"
+    api.write_check(
+        context.repository,
+        {
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": {
+                "title": f"System tests: {conclusion}",
+                "summary": f"Authorization: {results[0]}; system tests: {results[1]}. See the linked trusted workflow for results.",
+            },
+        },
+        check_id,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--prepare-pr", action="store_true")
+    modes.add_argument("--report-pr-check", action="store_true")
+    args = parser.parse_args()
+    context = _trusted_context()
+    api = GitHubApi(os.environ.get("GH_TOKEN", ""))
+    if args.report_pr_check:
+        report_pr_check(context, api, dict(os.environ))
+        return 0
+    output_path = Path(os.environ["GITHUB_OUTPUT"])
+    if args.prepare_pr:
+        result = prepare_pr_check(context, api)
+    else:
+        with output_path.open("a", encoding="utf-8") as output:
+            output.write("authorized=false\n")
+        if context.event_name == "workflow_run":
+            context = _resolve_gate_context(context, api)
+        result = authorize_dispatch(
+            context,
+            api.permission,
+            api.commit,
+            api.pull_request,
+            api.merge_ref,
+            api.commit_parents,
+            branch_resolver=api.branch_head,
+        )
     with output_path.open("a", encoding="utf-8") as output:
-        for name in (
-            "authorized",
-            "backend_sha",
-            "routing_sha",
-            "pr_base_sha",
-            "pr_head_sha",
-            "pr_merge_sha",
-            "frontend_ref",
-            "frontend_sha",
-            "frontend_source",
-            "workflow_sha",
-        ):
-            output.write(f"{name}={result[name]}\n")
+        for name, value in result.items():
+            output.write(f"{name}={value}\n")
     return 0
 
 
