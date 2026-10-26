@@ -9,6 +9,10 @@ View all jobs in the cluster's queues:
 cqueue
 ```
 
+## Query Visibility
+
+Private fields such as command lines and comments are access-controlled and display `<restricted>` in text. JSON retains field types and identifies visibility through `query_visibility`. Non-TLS queries return only public summaries, including for your own jobs. User or Job ID filters do not grant access; see [ccontrol](ccontrol.md). Resource fields displaying `unknown` instead indicate missing historical data, as described in [cacct](cacct.md).
+
 ## Options
 
 **-h, --help**
@@ -26,9 +30,9 @@ Display cqueue version information.
 :   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
-**--deadline** **string**
+**--deadline**
 
-: Display deadline
+:   Add a deadline column to the default job output; this flag takes no value. Times use the local time zone, with `unknown` for an unset deadline. You can also select the field with `--format "%j %deadline"`.
 
 **-F, --full**
 
@@ -158,7 +162,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 |------------|-----------------|-------------------------------------------------------------|
 | %a         | Account         | Account associated with the job                             |
 | %c         | AllocCpus       | CPUs allocated to the job                                   |
-| %C         | ReqCpus         | Total CPUs requested by the job                             |
+| %C | ReqCpus | Requested CPUs per task; `unknown` if the task count is missing |
 | %deadline  | Deadline        | Deadline time of the job                                    |
 | %e         | ElapsedTime     | Elapsed time since job started                              |
 | %h         | Held            | Hold state of the job                                       |

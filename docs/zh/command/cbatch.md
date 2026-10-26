@@ -486,6 +486,7 @@ Submitted array job 179, array range [0-2].
 
 说明：
 - `--array` 与 `--repeat` 互斥。
+- 展开的数组子任务继承父数组的绝对 `--deadline`，不会从各自启动时间重新计算；可用 `cqueue --deadline` 或 `cacct --deadline` 查看。
 - 数组作业会分别暴露整个数组的父作业 ID 与当前任务索引。
 
 ## 环境变量

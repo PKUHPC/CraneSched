@@ -8,6 +8,10 @@ cqueue显示队列中的作业和作业步信息。默认情况下，它显示�
 cqueue
 ```
 
+## 查询可见性
+
+命令行、备注等私有字段受查询权限限制，文本输出为 `<restricted>`；JSON 保留字段类型，并通过 `query_visibility` 标明可见性。非 TLS 查询只返回公开摘要，即使查询自己的作业也如此。筛选用户或 Job ID 不会提升权限，详见 [ccontrol](ccontrol.md)。资源字段的 `unknown` 则表示缺少历史数据，与权限限制不同，见 [cacct](cacct.md)。
+
 ## 选项
 
 **-h, --help**
@@ -25,9 +29,9 @@ cqueue
 :   **适用于：** `作业`, `作业步`  
 配置文件路径。默认值："/etc/crane/config.yaml"。
 
-**Deadline**
+**--deadline**
 
-:   作业的截止时间
+:   在默认作业输出中增加截止时间列，无需传入参数值。时间使用本地时区，未设置时显示 `unknown`。也可用 `--format "%j %deadline"` 指定该字段。
 
 **-F, --full**
 
@@ -147,7 +151,8 @@ cqueue
 |-----|-----------------|-----------------------|
 | %a  | Account         | 与作业关联的账户              |
 | %c  | AllocCpus       | 分配给作业的CPU             |
-| %C  | ReqCpus         | 作业请求的总CPU数            |
+| %C | ReqCpus | 每任务请求的 CPU 数；任务数缺失时为 `unknown` |
+| %deadline | Deadline | 作业的绝对截止时间，未设置时为 `unknown` |
 | %e  | ElapsedTime     | 作业启动以来的经过时间           |
 | %h  | Held            | 作业的保持状态               |
 | %j  | JobID           | 作业ID（数组作业显示为 `jobid_arraytaskid`） |

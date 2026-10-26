@@ -5,6 +5,10 @@ ccon is the container job management tool for CraneSched, used to create, manage
 !!! info "Prerequisites"
     Before using ccon, ensure the cluster has container support enabled. See [Container Deployment](../deployment/container.md).
 
+## Query Visibility
+
+`ps` and `pods` can display public status summaries. Restricted images, commands, and Pod metadata display `<restricted>` or are omitted in text; JSON retains field types and `query_visibility`. `logs`, `inspect`, and `inspectp` require an authenticated owner or a global `Operator/Admin/Root` role and fail explicitly otherwise. Non-TLS connections cannot retrieve private details even for the owner. Image registry passwords are never returned by queries. See [ccontrol](ccontrol.md) for the full policy.
+
 ## Quick Start
 
 Run a simple container job:
@@ -198,6 +202,12 @@ These options configure container runtime parameters:
 **--pull-policy=&lt;policy&gt;**
 
 :   Image pull policy. Supported: `Always`, `IfNotPresent`, `Never`.
+
+**--pull-timeout=&lt;seconds&gt;**
+
+:   Image pull timeout for this container, in seconds. Accepts `1-3600`; the default `0` uses the server's `Container.ImagePullingTimeout` (default: `600` seconds). Place this option after `run`. It applies to both new container jobs and container steps in an existing Pod, without changing the timeout for ordinary CRI requests.
+
+    Example: `ccon -p CPU run --pull-timeout 900 alpine:latest -- echo hello`. See [Container Deployment](../deployment/container.md) for server configuration.
 
 **--dns=&lt;ip-address&gt;**
 

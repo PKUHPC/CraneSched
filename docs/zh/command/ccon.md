@@ -5,6 +5,10 @@ ccon 是鹤思系统的容器作业管理工具，用于创建、管理和监控
 !!! info "前置条件"
     使用 ccon 前，需确保集群已启用容器功能。参见 [容器功能部署](../deployment/container.md)。
 
+## 查询可见性
+
+`ps`、`pods` 可显示公开状态摘要；无权查看的镜像、命令和 Pod 元数据在文本中显示 `<restricted>` 或被省略，JSON 保留字段类型及 `query_visibility`。`logs`、`inspect`、`inspectp` 需要已认证的属主或全局 `Operator/Admin/Root` 权限，否则明确失败；非 TLS 连接即使由属主发起也无法取得私有详情。镜像仓库密码不会在任何查询中返回。完整规则见 [ccontrol](ccontrol.md)。
+
 ## 快速开始
 
 运行一个简单的容器作业：
@@ -198,6 +202,12 @@ ccon [Crane 选项] run [Run 选项] IMAGE [COMMAND] [ARG...]
 **--pull-policy=&lt;policy&gt;**
 
 :   镜像拉取策略。支持：`Always`、`IfNotPresent`、`Never`。
+
+**--pull-timeout=&lt;seconds&gt;**
+
+:   本次容器镜像拉取的超时时间，单位为秒。取值为 `1-3600`；默认值 `0` 表示使用服务端的 `Container.ImagePullingTimeout`（默认 `600` 秒）。该参数放在 `run` 之后，适用于新容器作业及已有 Pod 内的容器作业步；不改变普通 CRI 请求的超时。
+
+    例如：`ccon -p CPU run --pull-timeout 900 alpine:latest -- echo hello`。服务端配置见[容器功能部署](../deployment/container.md)。
 
 **--dns=&lt;ip-address&gt;**
 

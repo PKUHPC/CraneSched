@@ -30,8 +30,12 @@ Crane-defined codes:
 
 ---
 
+## Normal calloc Completion
+
+Normally releasing a `calloc` allocation records the job as `Completed` with exit code `0:0` (raw JSON value `0`). The allocation session does not use an individual `crun` step's exit code as its result; query step results separately. Cancellation, timeout, and startup failure are not normal release.
+
 ## JSON Format Explanation
 
 - Values **0–255** represent the **exit return value**.  
-- Values **256–320** represent **program exit signals**.  
-- Values **above 320** represent **Crane-defined codes**.
+- Values **256–319** represent **program exit signals**.
+- Values **greater than or equal to 320** represent **Crane-defined codes**; for example, `320` means terminated and is displayed as `0:64`.

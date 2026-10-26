@@ -12,8 +12,8 @@ ccontrol提供SQL风格的语法来管理鹤思集群中的节点、分区、作
 容器镜像密码对所有查询者均不回显，执行和持久化所用的原值不变。
 
 文本中的受限字段显示 `<restricted>` 或省略；JSON 保持字段类型，以空值或省略消息块表示，
-并通过 `query_visibility` 区分 `PUBLIC` 与 `DETAILS`。筛选用户、Job ID 或切换输出格式不会提升权限。
-这些规则同样适用于 `cacct`、`cqueue`、`ccon` 及对应的 Slurm wrapper。
+并通过 `query_visibility` 区分 `QUERY_VISIBILITY_PUBLIC` 与 `QUERY_VISIBILITY_DETAILS`。筛选用户、Job ID 或切换输出格式不会提升权限。
+这些规则同样适用于 `cacct`、`cqueue`、`ccon`、`ceff`、监控插件的作业查询及对应的 Slurm wrapper。
 
 非 TLS 连接不能证明调用者 UID，因此只返回公开摘要，即使调用者是作业属主或 root。
 `ccon logs/inspect/inspectp` 和需要读取原始附加属性的更新操作在详情不可见时明确失败。
@@ -89,6 +89,8 @@ NodeName=CraneProject State=idle[power_idle] CPU=2.00 AllocCPU=0.00 FreeCPU=2.00
 
 显示分区的信息。
 
+`TotalCPU/TotalMem/TotalGres` 包含配置中的 DOWN 节点容量；`AvailCPU/AvailMem/AvailGres` 只累计在线节点的空闲资源。节点变为 DOWN 后，其空闲资源不再计入可用量；节点仍为 DOWN 时释放作业资源也不会增加可用量。`Alloc*` 仍可包含暂时离线节点上尚未释放的作业资源，因此不能假定 `Total = Avail + Alloc`。
+
 ```bash
 # 显示所有分区
 ccontrol show partition
@@ -118,6 +120,10 @@ PartitionName=CPU State=UP
 
 显示作业的信息。
 
+`Deadline` 显示作业的绝对截止时间（本地时区），未设置时显示 `unknown`；它不同于 `TimeLimit` 的运行时长限制。数组子任务继承父数组的截止时间。
+
+历史记录中的 `CpusPerTask=Unknown` 或 `ReqRes` 的 `gres=Unknown` 表示旧记录缺少请求任务数或请求 GRES，不能解释为 0 或未请求资源。已知未请求 GRES 时显示 `None`。请求资源和实际分配资源分别展示，不能用后者反推缺失的请求；详见 [cacct](cacct.md)。
+
 ```bash
 # 显示所有作业
 ccontrol show job
@@ -137,7 +143,7 @@ ccontrol show job 12345
 JobId=12345 JobName=Test_Job
         User=root(0) GroupId=root(0) Account=ROOT
         JobState=Running RunTime=00:00:05 TimeLimit=00:03:01 SubmitTime=2026-03-18 20:16:12
-        StartTime=2026-03-18 20:16:14 EndTime=2026-03-18 20:19:15 Partition=CPU NodeList=crane01 ExecutionHost=crane01
+        StartTime=2026-03-18 20:16:14 EndTime=2026-03-18 20:19:15 Deadline=unknown Partition=CPU NodeList=crane01 ExecutionHost=crane01
         CmdLine="cbatch cbatch_test.sh" Workdir=/root
         Priority=0 Qos=UNLIMITED CpusPerTask=1 MemPerNode=20M
         ReqRes:node=1 cpu=1.00 mem=20M gres=None

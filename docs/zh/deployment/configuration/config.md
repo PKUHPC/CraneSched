@@ -75,6 +75,15 @@ CraneBaseDir: /var/crane/
 - **ClusterName**：在多集群环境中用于标识
 - **CraneBaseDir**：所有相对路径基于此目录
 
+### Slurm 兼容环境
+
+```yaml
+# 顶层配置；默认 false
+EnableSlurmCompatibleEnv: true
+```
+
+启用后，作业和作业步在 `CRANE_*` 变量之外还会生成 `SLURM_*` 兼容变量，供现有脚本和 MPI 启动器使用。更改后重启相关服务以载入配置。作业与作业步的变量作用域、节点列表格式和任务编号见[作业环境变量](../../reference/job_env_vars.md)。此开关不会安装 `srun` 等命令入口，也不会自动启用全部 Slurm 命令选项。
+
 ### 节点定义
 
 指定计算节点资源：

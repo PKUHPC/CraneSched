@@ -8,7 +8,17 @@ cacct显示集群中作业和作业步的统计信息。它查询所有作业状
 cacct
 ```
 
+## 查询可见性与历史资源
+
+作业状态、资源、时间和节点摘要可公开查询；备注等私有详情仅向已认证的属主或全局 `Operator/Admin/Root` 返回。受限文本显示 `<restricted>`，JSON 保留字段类型，并包含 `query_visibility`。非 TLS 查询也只返回公开摘要；筛选用户或 Job ID 不会提升权限。完整规则见 [ccontrol](ccontrol.md)。
+
+新归档的作业和作业步保留请求任务数及请求 GRES。旧历史记录若未保存这些字段，则仍为未知；不会用实际分配值补成请求值。JSON 中缺失的 `ntasks` 和 `req_total_res_view.gres_map` 会被省略，已知未请求 GRES 时则保留空的 GRES 映射。读取 JSON 的程序应区分“字段缺失”和“已知为零或空”；`<restricted>` 则表示权限限制。
+
 ## 选项
+
+**--deadline**
+
+:   在默认输出中增加作业截止时间列，无需传入参数值。时间使用本地时区，未设置时显示 `unknown`。自定义输出可用 `--format "%j %deadline"`；作业步行显示父作业的截止时间。
 
 **-h, --help**
 
@@ -141,6 +151,7 @@ cacct
 | %C / %ReqCpus         | 请求的CPU数量                     |
 | %c / %AllocCpus       | 分配的CPU数量                     |
 | %D / %ElapsedTime     | 作业/作业步启动以来的经过时间              |
+| %deadline / %Deadline | 作业的绝对截止时间；作业步行使用父作业的值 |
 | %E / %EndTime         | 作业/作业步的结束时间                  |
 | %e / %ExitCode        | 退出码（格式：exitcode:signal）      |
 | %h / %Held            | 作业的保持状态                      |

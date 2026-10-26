@@ -182,6 +182,7 @@ crun --ntasks-per-node=8 --mpi=pmix ./main_solver
 ## 4. Advanced Configuration
 
 Set environment variables in your job script to adjust the behavior of CraneSched’s PMIx server.
+Ensure they are exported before the `crun` command and included by its `--export` policy. The complete input list, generated task variables, and node-list scope are documented in [Job Environment Variables](../../reference/job_env_vars.md).
 
 ### 4.1 Collective Algorithm (Fence Type)
 
@@ -189,8 +190,10 @@ PMIx fence (barrier synchronization) supports two collective algorithms:
 
 | Value | Algorithm        | Best for                             |
 |-------|------------------|--------------------------------------|
-| tree  | Tree aggregation | Larger node counts (default)         |
+| tree  | Tree aggregation | Larger node counts                   |
 | ring  | Ring pass        | Smaller node counts, lower latency   |
+
+If `CRANE_PMIX_FENCE` is unset or is neither `tree` nor `ring`, the fence callback selects `ring` when collecting nonempty data and `tree` otherwise. The default is not unconditionally `tree`; algorithm performance depends on the workload and network.
 
 Use ring (good for small jobs)
 ```bash
@@ -198,7 +201,7 @@ export CRANE_PMIX_FENCE=ring
 crun --nodes=4 --ntasks-per-node=4 --mpi=pmix ./my_program
 ```
 
-Use tree (good for large jobs; default is tree and can be omitted)
+Explicitly select tree:
 ```bash
 export CRANE_PMIX_FENCE=tree
 crun --nodes=64 --ntasks-per-node=16 --mpi=pmix ./my_program
@@ -224,6 +227,12 @@ crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
 ```
 
 This option requires CraneSched to detect UCX at build time (`pkg-config --libs ucx` must succeed). If CraneSched was not built with UCX support, the task will fail to launch.
+Only the exact value `true` enables this mode; other values use gRPC.
+
+### 4.3 Timeout and Client Temporary Directory
+
+- `CRANE_PMIX_TIMEOUT`: timeout in seconds for PMIx operation/collective cleanup, default `5`. Use a positive whole number; empty values or conversion failures retain the default.
+- `PMIXP_PMIXLIB_TMPDIR`: optional user-accessible base directory for client files. CraneSched appends `pmix.crane.cli/spmix_appdir_<uid>.<job>.<step>`. If unset or empty, PMIx chooses its default directory.
 
 ---
 
@@ -301,7 +310,7 @@ Example 4: High-performance network environment (InfiniBand + UCX)
 
 export CRANE_PMIX_FENCE=tree
 export CRANE_PMIX_DIRECT_CONN_UCX=true
-# UCX transport is used for PMIx metadata exchange and MPI point-to-point communication
+# This switch selects PMIx metadata transport; MPI point-to-point transport is configured by MPI itself
 
 crun --nodes=64 --ntasks-per-node=16 --mpi=pmix \
      ./large_scale_sim -config run.cfg

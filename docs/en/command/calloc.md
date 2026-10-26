@@ -323,7 +323,7 @@ $ exit
 
 1. **cfored Requirement**: calloc must be run on a node where `cfored` is running
 
-2. **Resource Release**: Exiting the calloc shell will automatically terminate the job and release all allocated resources
+2. **Resource Release**: Normal completion of a calloc session releases the allocation and records the job as `Completed`, with exit code `0:0` in `cacct` (raw JSON value `0`). This describes completion of the allocation session; query its `crun` steps separately for their results. Cancellation, timeout, and startup failures retain their respective outcomes. See [Exit Codes](../reference/exit_code.md).
 
 3. **Interactive Nature**: Unlike `cbatch`, calloc provides an interactive shell for immediate work
 
