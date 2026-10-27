@@ -1821,6 +1821,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       ResourceInNodeV3 res_v3(job->job_to_d.res());
       job->path_info =
           CgroupManager::MakeCgroupPathInfo(job->job_id, res_v3.GetCpuSet());
+
+      if (g_config.Plugin.Enabled && g_plugin_client) {
+        g_plugin_client->CreateCgroupHookAsync(
+            job_id, job->cgroup->CgroupName(), job->job_to_d.res());
+      }
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
       SendCompletingAndTerminal_(
