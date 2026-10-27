@@ -4947,7 +4947,8 @@ CraneExpectedRich<void> JobScheduler::CreateResv_(
        allocated_res.EachNodeResMap() | std::views::keys)
     craned_ids.emplace_back(craned_id);
   auto persisted_request = request;
-  persisted_request.set_craned_regex(util::HostNameListToStr(craned_ids));
+  // Preserve full names, including mixed zero-padding, for recovery.
+  persisted_request.set_craned_regex(absl::StrJoin(craned_ids, ","));
   persisted_request.set_node_num(craned_ids.size());
 
   const ResvId& resv_name = request.reservation_name();
@@ -8575,20 +8576,26 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job,
   job->MutableJobToCtld()->set_excludes(
       util::HostNameListToStr(job->excluded_nodes));
 
-  auto invalid_nodes = FindUnknownNodes_(job->included_nodes);
+  // Recovery validates the allocation instead of historical candidates.
+  // Pending jobs check the remaining candidates in CheckJobValidity.
+  const auto required_nodes =
+      is_recovery ? job->CranedIds() | std::ranges::to<std::unordered_set>()
+                  : job->included_nodes;
+  auto invalid_nodes = FindUnknownNodes_(required_nodes);
   if (!invalid_nodes.empty()) {
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_NODE_LIST,
-                      "Invalid --nodelist value: unknown nodes '{}'",
-                      absl::StrJoin(invalid_nodes, ", ")));
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_NODE_LIST, "{}: unknown nodes '{}'",
+        is_recovery ? "Invalid recovered job allocation"
+                    : "Invalid --nodelist value",
+        absl::StrJoin(invalid_nodes, ", ")));
   }
 
-  invalid_nodes =
-      FindNodesNotInPartition_(job->included_nodes, job->partition_id);
+  invalid_nodes = FindNodesNotInPartition_(required_nodes, job->partition_id);
   if (!invalid_nodes.empty()) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION,
-                      "Requested nodes '{}' are not in partition '{}'",
+                      "{} nodes '{}' are not in partition '{}'",
+                      is_recovery ? "Allocated" : "Requested",
                       absl::StrJoin(invalid_nodes, ", "), job->partition_id));
   }
 
@@ -9068,22 +9075,29 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step,
     const auto& part_meta = part_it->second;
     const auto default_mem_per_cpu = part_meta.default_mem_per_cpu;
 
-    auto invalid_nodes = FindUnknownNodes_(step->included_nodes);
+    // Recover the allocated and execution nodes, not historical candidates.
+    auto required_nodes =
+        is_recovery ? step->ExecutionNodes() : step->included_nodes;
+    if (is_recovery)
+      required_nodes.insert(step->CranedIds().begin(), step->CranedIds().end());
+    auto invalid_nodes = FindUnknownNodes_(required_nodes);
     if (!invalid_nodes.empty()) {
-      CRANE_ERROR(
-          "Invalid --nodelist value for step #{}.{}: unknown nodes '{}'",
-          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "));
+      CRANE_ERROR("{} for step #{}.{}: unknown nodes '{}'",
+                  is_recovery ? "Invalid recovered step allocation"
+                              : "Invalid --nodelist value",
+                  step->job_id, step->StepId(),
+                  absl::StrJoin(invalid_nodes, ", "));
       return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
     }
 
     invalid_nodes =
-        FindNodesNotInPartition_(step->included_nodes, step->job->partition_id);
+        FindNodesNotInPartition_(required_nodes, step->job->partition_id);
     if (!invalid_nodes.empty()) {
       CRANE_ERROR(
-          "Requested nodes for step #{}.{}: nodes '{}' are not in partition "
+          "{} nodes for step #{}.{}: nodes '{}' are not in partition "
           "'{}'",
-          step->job_id, step->StepId(), absl::StrJoin(invalid_nodes, ", "),
-          step->job->partition_id);
+          is_recovery ? "Recovered" : "Requested", step->job_id, step->StepId(),
+          absl::StrJoin(invalid_nodes, ", "), step->job->partition_id);
       return std::unexpected(
           CraneErrCode::ERR_REQUESTED_NODES_NOT_IN_PARTITION);
     }
