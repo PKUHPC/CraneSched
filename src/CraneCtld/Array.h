@@ -64,6 +64,10 @@ class ArrayMeta {
   // Materialization bookkeeping (task_id -> child job id).
   std::optional<job_id_t> ChildJobIdOfTask(array_task_id_t task_id) const;
 
+  std::optional<crane::grpc::ArraySpec> RemainingTaskSpec() const;
+  std::vector<std::pair<array_task_id_t, job_id_t>> MaterializedChildren()
+      const;
+
   std::optional<array_task_id_t> NextMaterializableTaskId() const;
   bool WillCompleteMaterializationAfter(array_task_id_t task_id) const;
   std::unique_ptr<JobInCtld> BuildChild(array_task_id_t task_id) const;
@@ -212,6 +216,13 @@ class ArrayManager {
 
   std::vector<job_id_t> RunningChildJobIdsForParent(
       job_id_t parent_job_id) const;
+
+  std::optional<crane::grpc::ArraySpec> RemainingTaskSpec(
+      job_id_t array_job_id) const;
+  std::optional<job_id_t> MaterializedChildJobId(
+      job_id_t array_job_id, array_task_id_t task_id) const;
+  std::vector<std::pair<array_task_id_t, job_id_t>> MaterializedChildren(
+      job_id_t array_job_id) const;
 
   // Resolves a single JobIdSelector. Requires the scheduler's
   // pending-job-map mutex held by the caller (reads m_metas_).
