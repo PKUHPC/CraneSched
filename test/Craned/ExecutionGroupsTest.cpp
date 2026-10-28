@@ -2,6 +2,7 @@
 #include <unistd.h>
 
 #include <limits>
+#include <utility>
 
 #include "crane/OS.h"
 #include "crane/PasswordEntry.h"
@@ -92,6 +93,29 @@ TEST(ExecutionGroups, ResolvesSubmittingUserGroups) {
   auto result = ResolveGroups(current.Uid(), {current.Gid()});
   ASSERT_TRUE(result) << result.error();
   EXPECT_EQ(*result, (std::vector<gid_t>{current.Gid()}));
+}
+
+TEST(ExecutionGroups, QueriesAndMovesSubordinateIdRanges) {
+  PasswordEntry current(getuid());
+  ASSERT_TRUE(current.Valid());
+
+  auto uid_ranges = current.SubUidRanges();
+  auto gid_ranges = current.SubGidRanges();
+  const int uid_count = uid_ranges.Count();
+  const int gid_count = gid_ranges.Count();
+  if (uid_count > 0) EXPECT_GT(uid_ranges.At(0).count, 0u);
+  if (gid_count > 0) EXPECT_GT(gid_ranges.At(0).count, 0u);
+
+  SubIdRanges moved(std::move(uid_ranges));
+  EXPECT_EQ(moved.Count(), uid_count);
+  EXPECT_EQ(uid_ranges.Data(), nullptr);
+  EXPECT_EQ(uid_ranges.Count(), 0);
+
+  // Release any owned UID ranges before taking ownership of the GID ranges.
+  moved = std::move(gid_ranges);
+  EXPECT_EQ(moved.Count(), gid_count);
+  EXPECT_EQ(gid_ranges.Data(), nullptr);
+  EXPECT_EQ(gid_ranges.Count(), 0);
 }
 
 }  // namespace util::os
