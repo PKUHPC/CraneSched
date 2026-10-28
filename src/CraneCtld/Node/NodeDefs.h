@@ -23,6 +23,8 @@
 
 namespace Ctld {
 
+enum class NodeFlags { Future, Dynamic, _Count };
+
 /**
  * The static information on a Craned (the static part of CranedMeta). This
  * structure is provided when a new Craned node is to be registered in
@@ -39,6 +41,9 @@ struct CranedStaticMeta {
   ResourceInNodeV3 res;
 
   NodeTopoInfo node_topo_info;
+
+  FlagSet<NodeFlags> flags;
+  std::vector<std::string> features;
 };
 
 struct CranedRemoteMeta {
@@ -63,6 +68,9 @@ struct CranedMeta {
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
+  // For a FUTURE node, true once a craned has been mapped to it. An unmapped
+  // FUTURE node takes part in neither scheduling nor partition resources.
+  bool future_mapped{false};
   crane::grpc::CranedPowerState power_state{
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 

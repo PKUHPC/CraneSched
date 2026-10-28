@@ -316,6 +316,8 @@ ccontrol update nodeName=<节点名> state=<状态> [reason=<原因>]
 - **state**（必需）：节点的新状态
   - `drain` - 阻止在该节点上调度新作业
   - `resume` - 使节点再次可用于调度
+  - `future` - 解除 FUTURE 节点的实机绑定并保留定义；等待作业分配和资源预留
+    结束后，停止该机器的 craned
 - **reason**（排空时必需）：排空节点的原因
 
 **示例：**
@@ -457,6 +459,56 @@ ERRO[0000] command execution failed
 ```
 
 ### Create 和 Delete 命令
+
+#### 创建和删除动态节点
+
+FUTURE 映射遵循 `TLS.Enabled`，同时支持加密与非加密连接，控制器和计算节点须使用相同设置。`cranectld` 从首次反向连接请求的候选信息中获取机器 hostname。启用 TLS 时，还会校验客户端证书，短 hostname 在证书校验和反向 TLS 连接时自动追加 `TLS.DomainSuffix`；此时请按[节点定义](../deployment/configuration/config.md#节点定义)的要求部署集群共享的内部证书与私钥，普通用户证书不能用于节点映射。两种模式下，注册、心跳和状态更新均校验映射地址及当前会话。机器接入无需维护 hostname 白名单、修改配置或重启控制器。
+
+管理员可以在线创建 FUTURE 占位节点，无需修改配置文件或重启控制器：
+
+```bash
+ccontrol create node NodeName=future[01-02] State=FUTURE CPUs=8 RealMemory=32G Partition=CPU Features=compute
+craned -F compute
+ccontrol show node future01
+```
+
+`NodeName`、`State`、`CPUs`、`RealMemory` 和 `Partition` 必填。
+`Partition` 支持逗号分隔的已有分区，`Features` 为可选标签列表；`Sockets` 默认为 1，必须整除 CPU 数。
+`RealMemory` 无单位时按 MiB 解释，也支持 B、K、M、G。
+映射要求 CPU 数、物理内存不低于配置值，feature 匹配不区分大小写。
+本轮仅支持 FUTURE，以及 CPU、内存、socket 和 feature 定义；不支持 CLOUD、EXTERNAL、动态 GRES 或 `-Z` 自注册。
+计算节点会从控制器取得映射节点的资源定义，调度容量以创建时指定的 CPU 和内存为准，宿主机探测值仅用于确认资源足够。本地配置仍需包含控制器连接及运行环境配置；运行时创建的定义会持久化，无需修改 `config.yaml` 或重启 ctld。
+
+`craned -F` 通过现有配置和注册流程异步接入，收到节点定义后初始化资源并恢复作业。同一机器重连复用原绑定；配置失败时保留绑定并通过该流程重试。每轮连接使用独立 session，节点删除或重新绑定后，旧 session 的注册、心跳和状态更新会被拒绝，即使机器共用证书。控制器重启后恢复持久化绑定并重新建立 session。FUTURE 节点接入协议要求同时更新 ctld 和 craned。
+
+创建前查询没有该节点；创建后显示 `State=future`；映射上线后显示 `dynamic_future` 标记。
+节点定义和实际主机映射持久化在控制器数据库路径旁的 `.nodes` 文件，控制器重启后恢复。
+
+替换 FUTURE 节点绑定的实机时，使用 `State=FUTURE` 解除绑定：
+
+```bash
+ccontrol update NodeName=future01 State=DRAIN Reason="replace machine"
+# 等待作业清理及预留结束，然后停止机器 A 上的 craned
+ccontrol update NodeName=future01 State=FUTURE
+# 在机器 B 上启动
+craned -F compute
+```
+
+配置文件定义和运行时创建的 FUTURE 节点均支持此操作。重置后显示 `State=future`，
+保留 CPU、内存、socket、feature 和分区成员关系，清除旧实机映射和 session，
+再次映射前不计入分区资源。解绑结果会持久化，控制器重启后仍为空闲占位节点。
+存在作业分配（包括正在清理的作业）或资源预留时拒绝重置。
+应先停止旧 craned，避免其重新抢占占位节点。
+
+```bash
+# 排空节点，等待作业清理及预留结束
+ccontrol update NodeName=future01 State=DRAIN Reason="scale-in"
+ccontrol delete node NodeName=future[01-02]
+```
+
+删除仅允许运行时创建的节点。存在作业分配或资源预留时拒绝删除；批量请求按节点返回成功与失败原因。
+删除成功后节点从查询结果和分区成员中消失，资源统计同步更新。配置文件定义的节点不能通过此命令删除。
+应停止已删除节点的 craned；若需要重新接入，重新创建占位节点并以 `-F` 重启 craned。
 
 #### 创建预留
 
