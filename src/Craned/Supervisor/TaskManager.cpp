@@ -556,13 +556,33 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
 bool StepInstance::AllTaskMainProcessesExited() const {
-  for (const auto& task : m_task_map_ | std::views::values) {
-    if (task->GetExecId().has_value() &&
-        !task->GetFinalInfo()->raw_exit.has_value()) {
+  for (const auto& task_entry : m_task_map_) {
+    const ITaskInstance& task_instance = *task_entry.second;
+    if (task_instance.GetExecId().has_value() &&
+        !task_instance.GetFinalInfo()->raw_exit.has_value()) {
       return false;
     }
   }
   return true;
+}
+
+bool StepInstance::KillAllTaskProcesses() {
+  if (step_user_cg &&
+      CgroupManager::GetCgroupVersion() ==
+          Common::CgConstant::CgroupVersion::CGROUP_V2 &&
+      step_user_cg->KillAllProcesses(SIGKILL)) {
+    return true;
+  }
+
+  bool success = true;
+  for (const auto& [task_id, task] : m_task_map_) {
+    if (!task->GetExecId().has_value()) continue;
+    if (task->Kill(SIGKILL) != CraneErrCode::SUCCESS) {
+      CRANE_WARN("[Task #{}] Failed to kill residual task processes.", task_id);
+      success = false;
+    }
+  }
+  return success;
 }
 
 void StepInstance::InitOomBaseline() {
@@ -3425,17 +3445,26 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     m_sigchld_queue_.enqueue(task);
   }
 
-  if (m_step_.IsCrun() && !m_residual_processes_killed_ &&
-      !m_step_.AllTaskFinished() && m_step_.AllTaskMainProcessesExited()) {
-    CRANE_INFO(
-        "[Step #{}.{}] All task main processes exited; killing residual "
-        "processes before waiting for output EOF.",
+  MaybeKillResidualTaskProcesses_();
+}
+
+void TaskManager::MaybeKillResidualTaskProcesses_() {
+  if (!m_step_.IsCrun() || m_residual_process_cleanup_started_ ||
+      m_step_.AllTaskFinished() || !m_step_.AllTaskMainProcessesExited()) {
+    return;
+  }
+
+  CRANE_INFO(
+      "[Step #{}.{}] All task processes exited; killing residual task "
+      "processes before waiting for output EOF.",
+      m_step_.job_id, m_step_.step_id);
+  if (m_step_.KillAllTaskProcesses()) {
+    m_residual_process_cleanup_started_ = true;
+  } else {
+    CRANE_WARN(
+        "[Step #{}.{}] Failed to kill all residual task processes; "
+        "cleanup will be retried.",
         m_step_.job_id, m_step_.step_id);
-    m_residual_processes_killed_ = true;
-    for (task_id_t task_id : m_step_.GetTaskIds()) {
-      auto* task = m_step_.GetTaskInstance(task_id);
-      if (task->GetExecId().has_value()) task->Kill(SIGKILL);
-    }
   }
 }
 
