@@ -235,8 +235,14 @@ class CranedMetaContainer final {
   crane::grpc::NodeStateSnapshot m_node_state_;
 
  private:  // Helper functions
-  // Mark a FUTURE node as mapped, record the craned address and add the
-  // node's resource to its partitions. The keeper lifecycle lock must be held.
+  // Whether node_hostname is already the NodeName or NodeHostname of a node
+  // other than craned_id.
+  bool NodeHostnameConflicts_(const CranedId& craned_id,
+                              const std::string& node_hostname);
+
+  // Mark a FUTURE node as mapped, record the craned address, register its
+  // NodeHostname alias and add the node's resource to its partitions. The
+  // keeper lifecycle lock must be held.
   void ClaimFutureNode_(const CranedId& craned_id,
                         const std::string& node_hostname,
                         const std::string& node_addr);

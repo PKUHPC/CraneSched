@@ -1044,8 +1044,7 @@ std::string CranedMetaContainer::ValidateNodeDefinition_(
                           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
                           "0123456789-_.") != std::string::npos)
     return "Invalid node name.";
-  if (craned_meta_map_.Contains(name) ||
-      g_config.CranedIdByAlias.contains(name))
+  if (craned_meta_map_.Contains(name) || ResolveCranedIdAlias(name) != name)
     return "Node name or alias already exists.";
   if (!IsValidNodeResources(definition.cpu(), definition.memory_bytes(),
                             definition.sockets()))
@@ -1212,10 +1211,15 @@ void CranedMetaContainer::RestoreNodeState_() {
       std::exit(1);
     }
     if (state.dynamic()) InsertDynamicNode_(definition);
-    if (!state.node_hostname().empty() && !state.node_addr().empty())
+    if (!state.node_hostname().empty() && !state.node_addr().empty()) {
+      if (NodeHostnameConflicts_(definition.name(), state.node_hostname())) {
+        CRANE_ERROR("Persisted hostname {} of node {} is used by another node.",
+                    state.node_hostname(), definition.name());
+        std::exit(1);
+      }
       ClaimFutureNode_(definition.name(), state.node_hostname(),
                        state.node_addr());
-    else if (!state.node_hostname().empty() || !state.node_addr().empty()) {
+    } else if (!state.node_hostname().empty() || !state.node_addr().empty()) {
       CRANE_ERROR("Incomplete persisted mapping for node {}.",
                   definition.name());
       std::exit(1);
@@ -1328,6 +1332,10 @@ std::string CranedMetaContainer::DeleteOrResetNode_(const CranedId& id,
                                   : "Failed to persist node deletion.";
         else {
           g_craned_keeper->RetireCraned(id);
+          if (node.static_meta.node_hostname != id) {
+            util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
+            g_config.CranedIdByAlias.erase(node.static_meta.node_hostname);
+          }
           for (auto& partition : partition_locks) {
             auto& global = partition->partition_global_meta;
             if (node.future_mapped) {
@@ -1498,6 +1506,10 @@ std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
                     request.cpu(), real_mem_gb, request.feature()));
   }
 
+  if (NodeHostnameConflicts_(selected_id, request.hostname()))
+    return std::unexpected(fmt::format("Hostname {} is used by another node.",
+                                       request.hostname()));
+
   if (!persist_mapping(selected_id))
     return std::unexpected("Failed to persist FUTURE mapping.");
   ClaimFutureNode_(selected_id, request.hostname(), craned_addr);
@@ -1506,6 +1518,14 @@ std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
              craned_addr, selected_id);
 
   return selected_id;
+}
+
+bool CranedMetaContainer::NodeHostnameConflicts_(
+    const CranedId& craned_id, const std::string& node_hostname) {
+  if (node_hostname == craned_id) return false;
+  if (craned_meta_map_.Contains(node_hostname)) return true;
+  const CranedId owner = ResolveCranedIdAlias(node_hostname);
+  return owner != node_hostname && owner != craned_id;
 }
 
 void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
@@ -1526,8 +1546,13 @@ void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->future_mapped = true;
-  if (!node_hostname.empty())
+  if (!node_hostname.empty()) {
     node_meta->static_meta.node_hostname = node_hostname;
+    if (node_hostname != craned_id) {
+      util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
+      g_config.CranedIdByAlias[node_hostname] = craned_id;
+    }
+  }
   node_meta->static_meta.node_addr = node_addr;
 
   for (auto& partition_meta : part_meta_ptrs) {
