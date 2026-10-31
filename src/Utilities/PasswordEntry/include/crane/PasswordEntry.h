@@ -43,9 +43,14 @@ extern "C" {
 // provided by SubidCompat.cpp (compiled into Utility_PasswordEntry).
 //
 // Also map the newer API names to their legacy equivalents.
-#  define subid_free free
 #  define subid_get_uid_ranges get_subuid_ranges
 #  define subid_get_gid_ranges get_subgid_ranges
+#endif
+
+#if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 5
+// ABI 4 renamed the query functions but still returns malloc-allocated ranges.
+// subid_free was added in ABI 5.
+#  define subid_free free
 #endif
 
 class SubIdRanges {

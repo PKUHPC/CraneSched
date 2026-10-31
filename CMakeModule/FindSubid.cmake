@@ -48,6 +48,10 @@ if (Subid_FOUND AND NOT TARGET Subid::subid)
     IMPORTED_LOCATION             "${SUBID_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${SUBID_INCLUDE_DIR}"
   )
+  if (_kind STREQUAL "STATIC")
+    set_property(TARGET Subid::subid PROPERTY
+      INTERFACE_LINK_LIBRARIES "${CMAKE_DL_LIBS}")
+  endif()
 endif()
 
 mark_as_advanced(SUBID_INCLUDE_DIR SUBID_LIBRARY SUBID_VERSION)
