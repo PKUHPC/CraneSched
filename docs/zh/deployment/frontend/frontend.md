@@ -110,6 +110,8 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 请注意，cwrapper 别名仅提供**基本的兼容性**，如需体验高级特性，请使用鹤思的命令行工具。
 
+选项与输出格式的差异参见 [cwrapper 命令手册](../../command/cwrapper.md)。
+
 ## 可选：源码安装
 
 源码安装适用于开发和快速验证。构建依赖与工具的安装方法参见[打包指南](../packaging.md)。准备好环境后执行：
