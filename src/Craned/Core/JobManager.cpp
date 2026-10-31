@@ -615,7 +615,7 @@ void JobManager::AllocJobs(std::vector<JobInD>&& jobs,
         job_count, first_job_id, last_job_id, job_map_lock_wait_ms,
         uid_map_lock_wait_ms, insert_loop_ms, total_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "JobManagerAllocJobsDiag job_count={} first_job_id={} "
         "last_job_id={} job_map_lock_wait_ms={} uid_map_lock_wait_ms={} "
         "insert_loop_ms={} total_ms={}",
@@ -705,7 +705,7 @@ bool JobManager::FreeJobs(std::set<job_id_t>&& job_ids) {
         "free_job_info_ms={} queue_len={} elapsed_ms={}",
         job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "JobManagerFreeJobsDiag phase=enqueue request_job_count={} "
         "free_job_info_ms={} queue_len={} elapsed_ms={}",
         job_ids.size(), free_job_info_ms, queue_len, elapsed_ms);
@@ -2402,7 +2402,7 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
         jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,
         max_queue_len, evclean_elapsed_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "JobManagerFreeJobsDiag phase=evclean cleanup_batch_size={} "
         "step_count={} queue_wait_ms={} queue_len={} evclean_elapsed_ms={}",
         jobs_to_free.size(), steps_to_free.size(), max_queue_wait_ms,

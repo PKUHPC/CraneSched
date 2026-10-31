@@ -176,7 +176,7 @@ CraneExpected<crane::grpc::AllocJobsReply> CranedStub::AllocJobs(
         m_craned_id_, jobs.size(), first_job_id, last_job_id, timeout_sec,
         elapsed_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "AllocJobsClientDiag craned_id={} job_count={} first_job_id={} "
         "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
         "error_message=",
@@ -222,7 +222,7 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<job_id_t> &jobs) {
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "FreeJobsClientDiag craned_id={} job_count={} first_job_id={} "
         "last_job_id={} timeout_sec={} elapsed_ms={} grpc_status_code=0 "
         "error_message=",
