@@ -7423,6 +7423,15 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       continue;
     }
 
+    if (job->reservation.empty() &&
+        node_state->earliest_reservation_start < earliest_end_time) {
+      job->has_overlapping_reservation = true;
+    }
+    job->has_down_or_drain_node |= !node_state->available;
+    if (!node_state->available) {
+      continue;
+    }
+
     if (topk_nodes_total.size() < job->node_num ||
         topk_ntasks_sum_total < job->ntasks) {
       topk_ntasks_sum_total += ntasks_on_node_total;
@@ -7768,6 +7777,8 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<PartitionId, std::vector<NodeState*>>
       part_node_state_ptrs_map;
 
+  absl::flat_hash_map<CranedId, bool> craned_available_map;
+
   {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -7785,6 +7796,12 @@ void SchedulerAlgo::NodeSelect(
 
   {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+    craned_available_map.reserve(craned_meta_map->size());
+    for (auto& [craned_id, craned_meta_sync] : *craned_meta_map) {
+      auto craned_meta = craned_meta_sync.GetExclusivePtr();
+      craned_available_map.emplace(craned_id,
+                                   craned_meta->alive && !craned_meta->drain);
+    }
     for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
       for (const auto& craned_id : craned_ids) {
         auto it = node_state_map.find(craned_id);
@@ -7794,15 +7811,12 @@ void SchedulerAlgo::NodeSelect(
             CRANE_ERROR("Craned {} not found", craned_id);
             continue;
           }
-          if (!craned_meta->alive || craned_meta->drain) {
-            CRANE_TRACE("Craned {} is not alive or in drain mode, skip it",
-                        craned_id);
-            continue;
-          }
-          it = node_state_map
-                   .emplace(craned_id,
-                            NodeState(craned_id, craned_meta->res_total))
-                   .first;
+          it =
+              node_state_map
+                  .emplace(craned_id,
+                           NodeState(craned_id, craned_meta->res_total,
+                                     craned_meta->alive && !craned_meta->drain))
+                  .first;
         }
       }
     }
@@ -7824,7 +7838,6 @@ void SchedulerAlgo::NodeSelect(
       ResvId, std::pair<absl::Time, absl::flat_hash_map<CranedId, NodeState>>>
       resv_node_state_map;
   absl::flat_hash_map<ResvId, std::vector<NodeState*>> resv_node_state_ptrs_map;
-  absl::flat_hash_map<CranedId, absl::Time> craned_id_first_resv_map;
 
   {
     auto reservation_meta_map = g_meta_container->GetResvMetaMapPtr();
@@ -7834,12 +7847,12 @@ void SchedulerAlgo::NodeSelect(
         CRANE_WARN("Reservation {} expired but not cleaned up", reservation_id);
         continue;
       }
-      for (const CranedId& craned_id : resv_meta->craned_ids) {
-        auto it = craned_id_first_resv_map.find(craned_id);
-        if (it == craned_id_first_resv_map.end()) {
-          craned_id_first_resv_map[craned_id] = resv_meta->start_time;
-        } else if (resv_meta->start_time < it->second) {
-          it->second = resv_meta->start_time;
+      for (const auto& [craned_id, _] : resv_meta->res_total.EachNodeResMap()) {
+        auto node_state_it = node_state_map.find(craned_id);
+        if (node_state_it != node_state_map.end()) {
+          node_state_it->second.earliest_reservation_start =
+              std::min(node_state_it->second.earliest_reservation_start,
+                       resv_meta->start_time);
         }
       }
       if (now >= resv_meta->start_time) {
@@ -7860,8 +7873,16 @@ void SchedulerAlgo::NodeSelect(
         resv_end_time = resv_meta->end_time;
         for (const auto& [craned_id, res] :
              resv_meta->res_total.EachNodeResMap()) {
-          auto it =
-              resv_craned_meta.emplace(craned_id, NodeState(craned_id, res));
+          auto available_it = craned_available_map.find(craned_id);
+          bool available = false;
+          if (available_it == craned_available_map.end()) {
+            CRANE_ERROR("Craned {} in reservation {} not found", craned_id,
+                        reservation_id);
+          } else {
+            available = available_it->second;
+          }
+          resv_craned_meta.emplace(craned_id,
+                                   NodeState(craned_id, res, available));
         }
         auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
         for (auto& [craned_id, node_state] : resv_craned_meta) {
@@ -7940,6 +7961,16 @@ void SchedulerAlgo::NodeSelect(
 
   g_license_manager->CheckLicenseCountSufficient(&job_ptr_vec);
 
+  auto set_candidate_node_reason = [](PdJobInScheduler* job) {
+    if (!job->reason.empty()) return true;
+    if (job->has_overlapping_reservation) {
+      job->reason = "Resource Reserved";
+    } else if (job->has_down_or_drain_node) {
+      job->reason = "Node Down or Drain";
+    }
+    return !job->reason.empty();
+  };
+
   // Schedule pending jobs
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
@@ -7962,12 +7993,20 @@ void SchedulerAlgo::NodeSelect(
       scheduler = &resv_scheduler_map[job->reservation];
     }
 
+    if (auto result = g_account_meta_container->CheckMetaResource(*job);
+        !result) {
+      job->reason = result.error();
+      continue;
+    }
+
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(
         now, job, qos_preempt_map, m_preempting_set_);
 
     if (!ok) {
       // Leave start_time unset
-      job->reason = "Resource";
+      if (!set_candidate_node_reason(job)) {
+        job->reason = "Resource";
+      }
     } else {
       // FIXME: Keep this consistent with deadline-aware placement once the
       // scheduler uses effective job end time.
@@ -7997,18 +8036,10 @@ void SchedulerAlgo::NodeSelect(
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
       if (job->start_time != now) {
+        if (set_candidate_node_reason(job)) {
+          continue;
+        }
         if (job->reservation.empty()) {
-          for (const CranedId& craned_id : job->craned_ids) {
-            auto it = craned_id_first_resv_map.find(craned_id);
-            if (it != craned_id_first_resv_map.end() &&
-                it->second < now + job->time_limit) {
-              job->reason = "Resource Reserved";
-              break;
-            }
-          }
-          if (!job->reason.empty()) {
-            continue;
-          }
           for (const CranedId& craned_id : job->craned_ids) {
             const auto& res_avail = node_state_map.at(craned_id).res_avail;
             if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
