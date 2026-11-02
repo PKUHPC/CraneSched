@@ -133,6 +133,8 @@ struct PdJobInScheduler {
   std::vector<CranedId> craned_ids;
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preempted_jobs;
+  bool has_overlapping_reservation{false};
+  bool has_down_or_drain_node{false};
 
   google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
       req_licenses;
@@ -262,8 +264,7 @@ class SchedulerAlgo {
    * handled.
    * @param[in,out] running_jobs Const reference to the vector of running
    jobs.
-   * @param[in,out] pending_jobs Const reference to the vector of pending
-   jobs,
+   * @param[in,out] pending_jobs Const reference to the vector of pending jobs;
    * results of scheduling are stored in JobInScheduler.
    */
   void NodeSelect(
@@ -298,9 +299,11 @@ class SchedulerAlgo {
 
     const CranedId craned_id;
     const ResourceInNodeV3 res_total;
+    const bool available;
     ResourceInNodeV3 res_avail;
     std::vector<AllocatedRes> allocated_res;
     std::vector<ReservedRes> reserved_res;
+    absl::Time earliest_reservation_start{absl::InfiniteFuture()};
 
     TimeAvailResMap time_avail_res_map;
 
@@ -309,8 +312,12 @@ class SchedulerAlgo {
         absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>>
         qos_job_map;
 
-    NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total)
-        : craned_id(craned_id), res_total(res_total), res_avail(res_total) {}
+    NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total,
+              bool available)
+        : craned_id(craned_id),
+          res_total(res_total),
+          available(available),
+          res_avail(res_total) {}
 
     void InitTimeAvailResMap(const absl::Time& now,
                              const absl::Time& end = absl::InfiniteFuture()) {

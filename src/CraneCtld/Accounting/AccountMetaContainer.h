@@ -114,6 +114,14 @@ class AccountMetaContainer final {
       const PdJobInScheduler& job);
 
   /*
+   * Validate running-slot limits without reserving resources.
+   * IN: job - pending job to be checked
+   * RET: void on success, string describing the pending reason on failure
+   */
+  std::expected<void, std::string> CheckMetaResource(
+      const PdJobInScheduler& job);
+
+  /*
    * Release submit-slot resources when a pending job is cancelled or rejected.
    * IN: job - job whose submit-slot resources should be released
    * IN: count - submit slots to release
@@ -235,10 +243,14 @@ class AccountMetaContainer final {
                                   const Qos& qos, uint32_t count);
 
   // Schedule-time aggregated check across all entities.
-  // Replaces the old CheckMetaResource_.
   std::expected<void, std::string> CheckRunLimits_(
       const PdJobInScheduler& job, const User& user,
-      const AccountRawMap& account_map, const Qos& qos);
+      const AccountRawMap& account_map, const Qos& qos,
+      const ResourceView& resource);
+
+  std::expected<void, std::string> CheckMetaResource_(
+      const PdJobInScheduler& job, const ResourceView& resource,
+      bool should_malloc);
 
   // Atomically increments both QoS and partition counters for user, every
   // account in the chain, and the global QoS map.
