@@ -40,7 +40,9 @@ grpc::Status CranedServiceImpl::Configure(
   bool ok = g_ctld_client_sm->EvRecvConfigFromCtld(*request);
 
   CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
-  return Status::OK;
+  return ok ? Status::OK
+            : Status{grpc::StatusCode::FAILED_PRECONDITION,
+                     "Stale or invalid craned configuration"};
 }
 
 grpc::Status CranedServiceImpl::UpdateTraceConfig(

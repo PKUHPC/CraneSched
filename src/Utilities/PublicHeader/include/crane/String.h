@@ -87,6 +87,9 @@ CraneExpected<uint64_t> ParseMemory(const std::string& mem);
 
 std::string ShortHostname(const std::string& hostname);
 
+std::string TlsHostname(const std::string& hostname,
+                        const std::string& domain_suffix);
+
 bool ParseHostList(const std::string& host_str,
                    std::list<std::string>* host_list);
 
