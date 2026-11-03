@@ -18,12 +18,15 @@
 
 #include "CtldClient.h"
 
+#include <sys/sysinfo.h>
+
+#include <cstdint>
+#include <optional>
 #include <random>
 
 #include "CranedServer.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
-#include "NodeTelemetry.h"
 #include "SupervisorStub.h"
 #include "crane/GrpcHelper.h"
 #include "crane/Network.h"
@@ -33,6 +36,23 @@ namespace Craned {
 using namespace std::chrono_literals;
 
 namespace {
+
+struct NodeTelemetry {
+  uint32_t cpu_load;
+  uint64_t free_memory_mb;
+};
+
+std::optional<NodeTelemetry> ReadNodeTelemetry() {
+  struct sysinfo sample{};
+  if (sysinfo(&sample) != 0) return std::nullopt;
+  // The sinfo contract uses the five-minute load in hundredths and Linux
+  // MemFree, not available memory or unallocated scheduler capacity.
+  const float load =
+      static_cast<float>(sample.loads[1]) / (1U << SI_LOAD_SHIFT);
+  return NodeTelemetry{.cpu_load = static_cast<uint32_t>(load * 100.0),
+                       .free_memory_mb = uint64_t{sample.freeram} *
+                                         sample.mem_unit / (1U << 20)};
+}
 
 int64_t NowUnixMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
