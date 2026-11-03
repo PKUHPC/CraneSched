@@ -127,6 +127,9 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   auto child = std::make_unique<JobInCtld>();
   child->SetFieldsByJobToCtld(parent_job_->JobToCtld());
   child->MutableJobToCtld()->clear_array_spec();
+  // The parent's hold is a scheduling gate. Once the parent is eligible for
+  // materialization, the child must not inherit a submit-time hold flag.
+  child->SetHeld(false);
   child->SetStatus(crane::grpc::Pending);
   child->SetArrayTaskIdentity(parent_job_->JobId(), task_id);
   child->SetUsername(parent_job_->Username());
