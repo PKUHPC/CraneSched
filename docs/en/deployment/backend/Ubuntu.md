@@ -190,11 +190,14 @@ apt install -y \
     libcurl4-openssl-dev \
     libpam0g-dev \
     zlib1g-dev \
+    libpmix-dev \
     libaio-dev \
     libsystemd-dev \
     libelf-dev \
     libsubid-dev
 ```
+
+PMIx support is enabled by default; disabling it or using a custom SDK is documented in the [PMIx guide](../configuration/pmix.md).
 
 !!! info
     `libsubid-dev` is unavailable on Ubuntu 22.04 and older releases. Build and install shadow 4.0+ from [https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/).

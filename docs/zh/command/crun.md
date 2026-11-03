@@ -450,7 +450,7 @@ crun -c 1 "your_program --your_args"
   ```
 
 - `CRANE_PMIX_DIRECT_CONN_UCX=true|false`  
-  启用基于 UCX 的 PMIx 直连模式，让 PMIx 元数据交换（modex、fence）经由 UCX 传输以降低延迟。需要 CraneSched 在编译期启用 UCX（`pkg-config --libs ucx` 可检测）。例如：
+  启用基于 UCX 的 PMIx 直连模式，让 PMIx 元数据交换（modex、fence）经由 UCX 传输以降低延迟。需要 CraneSched 构建时设置 `CRANE_ENABLE_UCX=ON` 并找到兼容的 UCX 开发包。例如：
   ```bash
   export CRANE_PMIX_DIRECT_CONN_UCX=true
   crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program

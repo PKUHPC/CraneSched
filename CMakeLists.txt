@@ -80,6 +80,9 @@ option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 
 option(CRANE_ENABLE_LUA "Enable lua support" ON)
 
+option(CRANE_ENABLE_PMIX "Enable PMIx support" ON)
+option(CRANE_ENABLE_UCX "Enable UCX transport for PMIx" OFF)
+
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
@@ -136,6 +139,30 @@ endif ()
 if (CRANE_USE_SYSTEM_LUA AND NOT CRANE_ENABLE_LUA)
     message(FATAL_ERROR "CRANE_USE_SYSTEM_LUA requires CRANE_ENABLE_LUA to be enabled.")
 endif ()
+
+if (CRANE_ENABLE_UCX AND NOT CRANE_ENABLE_PMIX)
+    message(FATAL_ERROR "CRANE_ENABLE_UCX requires CRANE_ENABLE_PMIX to be enabled.")
+endif ()
+
+# Check optional system dependencies before downloading bundled dependencies.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMakeModule/")
+if (CRANE_ENABLE_PMIX)
+    find_package(PMIx 3 REQUIRED)
+else ()
+    set(PMIx_FOUND FALSE)
+    unset(PMIX_INCLUDE_DIR CACHE)
+    unset(PMIX_LIBRARY CACHE)
+    unset(PMIx_VERSION CACHE)
+endif ()
+
+if (CRANE_ENABLE_UCX)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx>=1.12)
+else ()
+    set(UCX_FOUND FALSE)
+endif ()
+
+message(STATUS "PMIx support: ${CRANE_ENABLE_PMIX}; UCX transport: ${CRANE_ENABLE_UCX}")
 
 # Check and set compiler
 set(REQUIRED_GNU_VERSION 14.0.0)
@@ -361,15 +388,6 @@ set(ZLIB_USE_STATIC_LIBS OFF)
 # EXCLUDE_FROM_ALL excludes all dependencies from being installed
 add_subdirectory(dependencies/cmake EXCLUDE_FROM_ALL)
 add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
-
-# Notify CMake that we have module files to find packages/libs.
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
-
-# Path to PMIx installation prefix (e.g. /opt/pmix). Leave empty to disable.
-# Example: cmake -DWITH_PMIX=/opt/pmix ...
-set(WITH_PMIX "" CACHE PATH "Path to PMIx installation prefix")
-
-find_package(PMIx)
 
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")

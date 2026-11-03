@@ -16,66 +16,35 @@ CraneSched ships with a built-in PMIx server hosted by the Supervisor process on
 
 ### 1.2 Installing OpenPMIx
 
-Build from source (recommended for production). Refer to the OpenPMIx official documentation for details.
+PMIx support is enabled by default. Building CraneSched requires a PMIx 3 or newer SDK; runtime nodes need the matching library.
+Prefer distribution packages: `pmix-devel` on Rocky Linux 9/10, or `libpmix-dev` on Ubuntu. Let the package manager resolve
+libevent, hwloc and other dependencies. Rocky Linux 8 ships PMIx 2.2.5, which does not meet the requirement.
+When distribution packages are insufficient, follow the [OpenPMIx installation guide](https://docs.openpmix.org/en/latest/installing-pmix/index.html)
+to build and distribute a maintained dependency version. Installing it only on the build host is insufficient.
 
-```bash
-sudo dnf install libevent-devel
-sudo dnf install hwloc-devel
-## Recommended to install in a shared directory, such as /nfs
-cd /nfs/software/pmix/src
-wget https://github.com/openpmix/openpmix/releases/download/v3.1.7/pmix-3.1.7.tar.gz
-tar -xzf pmix-3.1.7.tar.gz
-cd pmix-3.1.7
-
-# Note: Use an independent path, which does not affect the system
-./configure --prefix=/nfs/software/pmix/3.1.7 \
-            --enable-embedded-libevent \
-            --enable-embedded-hwloc \
-            --disable-docs \
-            --enable-shared
-
-make -j$(nproc)
-make install
-```
+For a custom installation, set `PMIx_ROOT` or `CMAKE_PREFIX_PATH`. A custom shared-library directory may require
+`CMAKE_INSTALL_RPATH_USE_LINK_PATH=ON`; verify the installed binary's actual library resolution. A matching SONAME alone does not prove version compatibility.
 
 ### 1.3 Installing an MPI Implementation with PMIx Support
 
-Open MPI (recommended)
+Building CraneSched's PMIx support does not require Open MPI. Running MPI applications additionally requires a PMIx-capable
+MPI implementation. Use distribution Open MPI packages or the [Open MPI installation guide](https://docs.open-mpi.org/en/main/installing-open-mpi/index.html)
+to install a compatible version. Validate client/server interoperability and consistent support libraries, including libevent/hwloc,
+with a real MPI job. A version command is insufficient. `crun --mpi=pmix` launches application processes directly without an additional `mpirun` launcher.
 
-Using Open MPI 4.1.6 +  system PMIx as an example. Refer to the Open MPI official documentation for details.
+### 1.4 Configuring CraneSched PMIx Support
 
-```bash
-## Recommended to install in a shared directory, such as /nfs
-cd /nfs/software/openmpi/src
-wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-4.1.6.tar.gz
-tar -xzf openmpi-4.1.6.tar.gz
-cd openmpi-4.1.6
-
-./configure --prefix=/nfs/software/openmpi/4.1.6 \
-            --with-pmix=/nfs/software/pmix/3.1.7 \
-            --enable-mpi-fortran=yes \
-            --enable-mpi-cxx=yes \
-            --enable-shared \
-            --with-slurm \
-            --enable-orterun-prefix-by-default
-
-make -j$(nproc)
-make install
-```
-
-If OpenPMIx was installed via a package manager under `/opt`, you can omit `--with-pmix`; Open MPI’s configure script will detect it automatically.
-
-### 1.4 Confirming CraneSched PMIx Support
-
-PMIx support must be enabled at CraneSched compile time via a CMake option. Please verify with your cluster administrator.
+`CRANE_ENABLE_PMIX` defaults to ON. Missing or incompatible dependencies fail CMake configuration when enabled.
+System packages are discovered automatically; a custom prefix can be selected as follows:
 
 ```bash
-# Administrator enablement example:
-cmake -DWITH_PMIX=/opt/pmix [other options] ..
-# If UCX is also installed, the system will detect it via pkg-config and enable direct connection mode:
-# Check whether UCX is supported
-pkg-config --libs ucx
+cmake -S . -B build -DCRANE_ENABLE_PMIX=ON -DPMIx_ROOT=/opt/pmix
+cmake --build build --parallel 4
 ```
+
+Use `-DCRANE_ENABLE_PMIX=OFF` to disable the feature explicitly. A path hint is not an enable/disable switch.
+UCX transport defaults to OFF. After installing its SDK, opt in with `-DCRANE_ENABLE_UCX=ON`; PMIx must also be enabled,
+and pkg-config must find UCX 1.12 or newer. Merely installing UCX does not change the selected product features.
 
 ---
 
@@ -241,7 +210,7 @@ export CRANE_PMIX_DIRECT_CONN_UCX=true
 crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
 ```
 
-This option requires CraneSched to detect UCX at build time (`pkg-config --libs ucx` must succeed). If CraneSched was not built with UCX support, the task will fail to launch.
+This option requires `CRANE_ENABLE_UCX=ON` and a compatible UCX SDK at build time. If CraneSched was not built with UCX support, the task will fail to launch.
 Only the exact value `true` enables this mode; other values use gRPC.
 
 ### 4.3 Timeout and Client Temporary Directory
@@ -339,12 +308,7 @@ echo "Simulation completed at $(date)"
 
 Q1: Submitting a job shows `PMIx support is not compiled in.`
 
-Cause: CraneSched was compiled without PMIx support (i.e., `-DWITH_PMIX` was not set).
+Cause: CraneSched was built with `CRANE_ENABLE_PMIX=OFF`, or the running artifact predates enabled PMIx support.
 
-Solution: Contact your cluster administrator to recompile CraneSched:
-
-```bash
-# Administrator example
-cmake -DWITH_PMIX=/opt/pmix -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-```
+Solution: Ask the cluster administrator to rebuild CraneSched using
+[Configuring CraneSched PMIx Support](#14-configuring-cranesched-pmix-support).

@@ -201,9 +201,9 @@ g++ -dumpfullversion
 !!! tip
     CentOS 7 自带的 Binutils 较旧。普通构建通常可以继续，但 GCC 官方要求 Binutils 2.35+ 才能可靠使用 LTO。如果 CMake 报告 IPO/LTO 或链接器错误，可将 Binutils 2.41 等较新版本安装到独立前缀后重新配置；无需为普通 GCC 构建额外安装 LLDB。
 
-## 5. 可选：安装 PMIx 和 UCX
+## 5. 安装 PMIx；按需启用 UCX
 
-只有需要通过 `crun --mpi=pmix` 启动 MPI 作业时才需要 PMIx；UCX 仅用于 InfiniBand、RoCE 等高速网络上的可选直连优化。
+默认构建启用 PMIx，必须准备开发依赖；不需要该功能时显式设置 `CRANE_ENABLE_PMIX=OFF`。UCX 仅用于 InfiniBand、RoCE 等高速网络上的可选直连优化。
 
 CentOS 7 上构建 OpenPMIx 前需要：
 
@@ -214,7 +214,7 @@ yum install -y libevent-devel hwloc-devel
 具体版本、Open MPI 构建方式和 UCX 配置请参阅 [PMIx 使用指南](../configuration/pmix.md)。安装时还应遵循以下原则：
 
 1. PMIx、MPI 和 UCX 应安装到所有运行节点均可访问的固定路径，或分别部署到每个节点。
-2. 构建前设置 UCX 的 `PKG_CONFIG_PATH`，并用 `pkg-config --libs ucx` 验证；否则 CraneSched 不会编译 UCX 支持。
+2. 构建前设置 UCX 的 `PKG_CONFIG_PATH`，并用 `pkg-config --libs ucx` 验证；并设置 `CRANE_ENABLE_UCX=ON`，才会编译 UCX 支持。
 3. 使用自定义共享库路径时，在 CMake 中添加 `-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON`，并在每个运行节点用 `ldd` 验证库解析结果。
 4. 安装 OpenPMIx 并不能替代 MPI 实现；运行 MPI 程序仍需 Open MPI 4.1+ 等支持 PMIx 的 MPI。
 
@@ -239,7 +239,7 @@ cmake --build build -j"$(nproc)"
 如果 `libsubid.so` 实际安装在 `/usr/local/lib64`，相应调整 `SUBID_LIBRARY`。如果启用了 PMIx，再添加：
 
 ```bash
--DWITH_PMIX=/path/to/pmix \
+-DCRANE_ENABLE_PMIX=ON -DPMIx_ROOT=/path/to/pmix \
 -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON
 ```
 
@@ -249,7 +249,7 @@ cmake --build build -j"$(nproc)"
 安装前检查关键配置和动态库：
 
 ```bash
-cmake -LA -N build | grep -E 'CMAKE_(C|CXX)_COMPILER|CRANE_ENABLE_CGROUP_V2|CRANE_NATIVE_ARCH_OPT|WITH_PMIX'
+cmake -LA -N build | grep -E 'CMAKE_(C|CXX)_COMPILER|CRANE_ENABLE_CGROUP_V2|CRANE_NATIVE_ARCH_OPT|CRANE_ENABLE_PMIX|CRANE_ENABLE_UCX|PMIx_ROOT'
 ldd build/src/CraneCtld/cranectld | grep 'not found' && exit 1 || true
 ldd build/src/Craned/craned | grep 'not found' && exit 1 || true
 ```
