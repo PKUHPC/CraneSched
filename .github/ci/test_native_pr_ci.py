@@ -142,6 +142,27 @@ class NativeGateTest(unittest.TestCase):
         self.assertEqual(query["state"], ["open"])
         self.assertEqual(query["base"], ["master"])
 
+    def test_reported_checks_do_not_change_gate_authorization(self):
+        def create_check(repository, body):
+            self.assertEqual(repository, REPOSITORY)
+            check = {**body, "id": 40 + len(self.jobs["jobs"])}
+            # GitHub can expose an API-created check in the gate's jobs list.
+            self.jobs["jobs"].insert(
+                0, {**check, "labels": [], "runner_id": None, "steps": []}
+            )
+            self.jobs["total_count"] = len(self.jobs["jobs"])
+            return check
+
+        with mock.patch.object(self.api, "write_check", side_effect=create_check):
+            # Cover authorization after preparation and a later dispatcher rerun.
+            for attempt in ("1", "2"):
+                with self.subTest(attempt=attempt):
+                    dispatch = context(run_attempt=attempt)
+                    prepared = ci.prepare_pr_check(dispatch, self.api)
+                    resolved = ci._resolve_gate_context(dispatch, self.api)
+                    self.assertEqual(prepared["pr_head_sha"], HEAD_SHA)
+                    self.assertEqual(resolved.pr_head_sha, HEAD_SHA)
+
     def test_no_native_success_means_no_pr_lookup(self):
         for changes in (
             {"conclusion": "failure"},
@@ -201,7 +222,7 @@ class NativeGateTest(unittest.TestCase):
         for invalid in (
             None,
             {},
-            {"total_count": True, "jobs": [original]},
+            {"jobs": "not-a-list"},
             {"total_count": 1, "jobs": []},
             {"total_count": 2, "jobs": [original, original]},
         ):

@@ -52,6 +52,10 @@ runner; a skipped job cannot serve as approval evidence. The dispatcher never
 downloads PR artifacts or consumes PR-produced caches, code, or credentials
 as authorization inputs.
 
+GitHub can include API-created `test` result checks in the gate's jobs list.
+Identify the request job by name; the total job/check count is not an
+authorization condition.
+
 Fork runs can have an empty `workflow_run.pull_requests` list. Resolve the
 open PR by the source head owner and branch, then require exactly one match
 for the full head repository, ref and SHA and the target repository/master.

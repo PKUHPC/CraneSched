@@ -496,23 +496,21 @@ class GitHubApi:
         jobs = self._get(
             f"repos/{context.repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
         )
-        if (
-            jobs is None
-            or type(jobs.get("total_count")) is not int
-            or jobs["total_count"] != 1
-        ):
-            raise AuthorizationError("PR gate must contain its one hosted request job")
-        values = jobs.get("jobs")
-        if (
-            not isinstance(values, list)
-            or len(values) != 1
-            or not isinstance(values[0], dict)
-        ):
+        values = jobs.get("jobs") if jobs is not None else None
+        if not isinstance(values, list):
             raise AuthorizationError("PR gate jobs response is malformed")
-        job = values[0]
+        # GitHub can include API-created result checks in the jobs list.
+        # Validate the request job, not the total number of checks.
+        request_jobs = [
+            job
+            for job in values
+            if isinstance(job, dict) and job.get("name") == "Request system tests"
+        ]
+        if len(request_jobs) != 1:
+            raise AuthorizationError("PR gate request job is missing or ambiguous")
+        job = request_jobs[0]
         if (
-            job.get("name") != "Request system tests"
-            or job.get("status") != "completed"
+            job.get("status") != "completed"
             or job.get("conclusion") != "success"
             or job.get("labels") != ["ubuntu-latest"]
             or type(job.get("runner_id")) is not int
