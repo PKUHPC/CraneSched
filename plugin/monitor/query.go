@@ -200,7 +200,7 @@ from(bucket: "%s")
 |> range(start: 0)
 |> filter(fn: (r) =>
     r["_measurement"] == "%s" and
-        (r["_field"] == "cpu_usage" or r["_field"] == "memory_usage" or r["_field"] == "proc_count") and
+        (r["_field"] == "cpu_usage" or r["_field"] == "memory_usage") and
         (%s) and (%s))
 |> group(columns: ["job_id", "hostname", "_field"])
 |> max(column: "_value")`,
@@ -216,7 +216,13 @@ from(bucket: "%s")
 		return nil, fmt.Errorf("execute query failed: %w", err)
 	}
 
-	dataMap := make(map[string]*protos.JobEfficiencyInfo)
+	type efficiencyRecord struct {
+		info      *protos.JobEfficiencyInfo
+		hasCPU    bool
+		hasMemory bool
+	}
+
+	dataMap := make(map[string]*efficiencyRecord)
 	for result.Next() {
 		record := result.Record()
 
@@ -238,10 +244,12 @@ from(bucket: "%s")
 
 		key := fmt.Sprintf("%d:%s", jobID, hostname)
 		if _, exists := dataMap[key]; !exists {
-			dataMap[key] = &protos.JobEfficiencyInfo{
-				JobId:     uint32(jobID),
-				Hostname:  hostname,
-				Timestamp: timestamppb.New(record.Time()),
+			dataMap[key] = &efficiencyRecord{
+				info: &protos.JobEfficiencyInfo{
+					JobId:     uint32(jobID),
+					Hostname:  hostname,
+					Timestamp: timestamppb.New(record.Time()),
+				},
 			}
 		}
 
@@ -259,11 +267,11 @@ from(bucket: "%s")
 
 		switch field {
 		case "cpu_usage":
-			dataMap[key].CpuUsage = value
+			dataMap[key].info.CpuUsage = value
+			dataMap[key].hasCPU = true
 		case "memory_usage":
-			dataMap[key].MemoryUsage = value
-		case "proc_count":
-			dataMap[key].ProcCount = value
+			dataMap[key].info.MemoryUsage = value
+			dataMap[key].hasMemory = true
 		}
 	}
 
@@ -273,7 +281,10 @@ from(bucket: "%s")
 
 	var efficiencyData []*protos.JobEfficiencyInfo
 	for _, data := range dataMap {
-		efficiencyData = append(efficiencyData, data)
+		if !data.hasCPU || !data.hasMemory {
+			continue
+		}
+		efficiencyData = append(efficiencyData, data.info)
 	}
 
 	return efficiencyData, nil

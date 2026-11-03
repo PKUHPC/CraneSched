@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -178,13 +179,37 @@ func (db *InfluxDB) SaveNodeEnergy(data *types.NodeData) error {
 func (db *InfluxDB) SaveJobEnergy(jobData *types.JobData) error {
 	log.Infof("Saving job energy data for job: %d, node: %s", jobData.JobID, jobData.NodeID)
 
+	cpuSeconds := jobData.CgroupStats.CPUStats.UsageSeconds
+	if math.IsNaN(cpuSeconds) || math.IsInf(cpuSeconds, 0) || cpuSeconds < 0 {
+		return fmt.Errorf("invalid CPU usage for job %d: %v", jobData.JobID, cpuSeconds)
+	}
+	cpuUsageFloat := math.Round(cpuSeconds * 1e9)
+	if math.IsInf(cpuUsageFloat, 0) || cpuUsageFloat >= 18446744073709551616.0 {
+		return fmt.Errorf("CPU usage overflows uint64 for job %d: %v", jobData.JobID, cpuSeconds)
+	}
+	cpuUsage := uint64(cpuUsageFloat)
+
+	memoryMB := jobData.CgroupStats.MemoryStats.UsageMB
+	if math.IsNaN(memoryMB) || math.IsInf(memoryMB, 0) || memoryMB < 0 {
+		return fmt.Errorf("invalid memory usage for job %d: %v", jobData.JobID, memoryMB)
+	}
+	memoryUsageFloat := math.Round(memoryMB * 1024 * 1024)
+	if math.IsInf(memoryUsageFloat, 0) || memoryUsageFloat >= 18446744073709551616.0 {
+		return fmt.Errorf("memory usage overflows uint64 for job %d: %v", jobData.JobID, memoryMB)
+	}
+	memoryUsage := uint64(memoryUsageFloat)
+
 	writeAPI := db.client.WriteAPIBlocking(db.org, db.jobBucket)
+	measurement := db.resourceMeasurement
+	if measurement == "" {
+		measurement = "ResourceUsage"
+	}
 
 	p := influxdb2.NewPoint(
-		db.jobBucket,
+		measurement,
 		map[string]string{
-			"node_id": jobData.NodeID,
-			"job_id":  fmt.Sprintf("%d", jobData.JobID),
+			"hostname": jobData.NodeID,
+			"job_id":   fmt.Sprintf("%d", jobData.JobID),
 		},
 		map[string]interface{}{
 			"start_time": jobData.StartTime,
@@ -196,11 +221,11 @@ func (db *InfluxDB) SaveJobEnergy(jobData *types.JobData) error {
 			"gpu_energy_j":    jobData.GPUEnergy,
 			"average_power_w": jobData.AveragePower,
 
-			"cpu_time_usage_seconds": jobData.CgroupStats.CPUStats.UsageSeconds,
+			"cpu_usage":              cpuUsage,
 			"cpu_utilization":        jobData.CgroupStats.CPUStats.Utilization,
 			"gpu_utilization":        jobData.CgroupStats.GPUStats.Utilization,
 			"gpu_memory_utilization": jobData.CgroupStats.GPUStats.MemoryUtil,
-			"memory_usage_mb":        jobData.CgroupStats.MemoryStats.UsageMB,
+			"memory_usage":           memoryUsage,
 			"memory_utilization":     jobData.CgroupStats.MemoryStats.Utilization,
 			"disk_read_mb":           jobData.CgroupStats.IOStats.ReadMB,
 			"disk_write_mb":          jobData.CgroupStats.IOStats.WriteMB,
