@@ -134,9 +134,11 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   }
 
   int cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Created stub for {} at {}:{}, NodeHostname={}. Channel count: "
-              "{}/{}", craned_id, address->second, port, hostname->second,
-              cur_count, m_node_num_ - 1);
+  CRANE_TRACE(
+      "Created stub for {} at {}:{}, NodeHostname={}. Channel count: "
+      "{}/{}",
+      craned_id, address->second, port, hostname->second, cur_count,
+      m_node_num_ - 1);
 
   {
     std::lock_guard<std::mutex> lock(m_mutex_);

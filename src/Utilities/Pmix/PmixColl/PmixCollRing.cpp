@@ -76,8 +76,8 @@ bool PmixCollRing::PmixCollInit(CollType type,
   m_next_craned_id_ = *next_iter;
 
   // compute previous neighbor id as well
-  auto prev_iter = (it == craned_ids.begin()) ? std::prev(craned_ids.end())
-                                                : std::prev(it);
+  auto prev_iter =
+      (it == craned_ids.begin()) ? std::prev(craned_ids.end()) : std::prev(it);
   m_prev_craned_id_ = *prev_iter;
 
   for (int i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
@@ -349,7 +349,7 @@ void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
   const size_t size = payload->size();
 
   PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS, data, size,
-                    coll_ring_ctx.cbdata, RingReleaseFn, payload.release());
+                     coll_ring_ctx.cbdata, RingReleaseFn, payload.release());
 
   coll_ring_ctx.cbfunc = nullptr;
   coll_ring_ctx.cbdata = nullptr;

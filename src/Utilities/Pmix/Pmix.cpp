@@ -604,9 +604,10 @@ bool PmixServer::PmixInit_() {
 
   PMIX_INFO_LOAD(&server_info[server_info_size - 2], PMIX_SERVER_TMPDIR,
                  m_pmix_step_info_.server_tmpdir.c_str(), PMIX_STRING);
-  PMIX_INFO_LOAD(&server_info[server_info_size - 1], PMIX_HOSTNAME,
-                 m_pmix_step_info_.node_hostnames[m_pmix_step_info_.node_id].c_str(),
-                 PMIX_STRING);
+  PMIX_INFO_LOAD(
+      &server_info[server_info_size - 1], PMIX_HOSTNAME,
+      m_pmix_step_info_.node_hostnames[m_pmix_step_info_.node_id].c_str(),
+      PMIX_STRING);
   rc = PMIx_server_init(&s_crane_pmix_module, server_info, server_info_size);
   PMIX_INFO_FREE(server_info, server_info_size);
   if (PMIX_SUCCESS != rc) {
