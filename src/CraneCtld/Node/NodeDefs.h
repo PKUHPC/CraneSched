@@ -45,6 +45,8 @@ struct CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node;
   SystemRelInfo sys_rel_info;
   std::string craned_version;
+  std::optional<uint32_t> cpu_load;
+  std::optional<uint64_t> free_memory_mb;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
 
@@ -58,11 +60,18 @@ struct CranedRemoteMeta {
  * Represent the runtime status on a Craned node.
  * A Node is uniquely identified by (partition id, node index).
  */
+struct SinfoDownReason {
+  std::string text;
+  uint32_t uid;
+  absl::Time time;
+};
+
 struct CranedMeta {
   CranedStaticMeta static_meta;
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
+  bool has_registered{false};
   crane::grpc::CranedPowerState power_state{
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 
@@ -73,6 +82,11 @@ struct CranedMeta {
 
   bool drain{false};
   std::string state_reason{""};
+  std::optional<uint32_t> state_reason_uid;
+  absl::Time state_reason_time{absl::UnixEpoch()};
+  // Compatibility event metadata survives reconnect while still drained.
+  // Native state_reason and its existing consumers are independent.
+  std::optional<SinfoDownReason> sinfo_down_reason;
   absl::Time last_busy_time;
   absl::Time craned_down_time;
 
@@ -84,6 +98,7 @@ struct CranedMeta {
 
 struct ResvMeta {
   ResvId name;
+  uint64_t creation_order{0};
   PartitionId part_id;
   absl::Time start_time;
   absl::Time end_time;

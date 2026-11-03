@@ -58,6 +58,8 @@ void CranedMetaContainer::CranedUp(
   }
 
   node_meta->alive = true;
+  node_meta->has_registered = true;
+  if (!node_meta->drain) node_meta->sinfo_down_reason.reset();
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
   if (remote_meta.has_node_topo_info() &&
@@ -108,6 +110,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   }
   node_meta->alive = false;
   node_meta->craned_down_time = absl::Now();
+  RecordSinfoDownReason(*node_meta, getuid(), node_meta->craned_down_time);
 
   AddResReduceEventsAndUnlock(
       {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
@@ -560,9 +563,101 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   return reply;
 }
 
-crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo() {
+void CranedMetaContainer::UpdateNodeTelemetry(
+    const crane::grpc::CranedPingRequest& request) {
+  auto meta = GetCranedMetaPtr(request.craned_id());
+  if (!meta || !meta->alive) return;
+  meta->remote_meta.cpu_load = request.has_cpu_load()
+                                   ? std::optional{request.cpu_load()}
+                                   : std::nullopt;
+  meta->remote_meta.free_memory_mb =
+      request.has_free_memory_mb() ? std::optional{request.free_memory_mb()}
+                                   : std::nullopt;
+}
+
+crane::grpc::QuerySinfoInfoReply CranedMetaContainer::QuerySinfoInfo(
+    bool reservations_only, const SinfoCompletingJobs& completing_jobs) {
+  crane::grpc::QuerySinfoInfoReply reply;
+  reply.set_schema_version(1);
+  reply.set_cluster_name(g_config.CraneClusterName);
+  // Copy each domain under its existing locks. As with the native independent
+  // queries, this does not promise cross-domain linearizability.
+  auto reservations = QueryAllResvInfo(true);
+  reply.mutable_reservations()->Swap(
+      reservations.mutable_reservation_info_list());
+  if (reservations_only) return reply;
+
+  for (const auto& name : g_config.PartitionOrder) {
+    auto native = QueryPartitionInfo(name);
+    if (native.partition_info_list().empty()) continue;
+    auto* part = reply.add_partitions();
+    *part->mutable_partition() = native.partition_info_list(0);
+    part->set_is_default(name == g_config.DefaultPartition);
+    part->set_priority_job_factor(g_config.Partitions.at(name).priority);
+    part->set_accepts_jobs(true);
+    part->set_time_limit_unlimited(true);
+    part->set_preempt_mode(g_config.Preempt.PreemptMode);
+  }
+
+  const auto now = absl::Now();
+  auto nodes = craned_meta_map_.GetMapConstSharedPtr();
+  for (const auto& name : g_config.NodeOrder) {
+    auto meta = nodes->at(name).GetExclusivePtr();
+    auto* node = reply.add_nodes();
+    SetGrpcCranedInfoByCranedMeta_(*meta, node->mutable_node());
+    const auto allocation = ProjectSinfoAllocation(*meta, completing_jobs);
+    node->set_completing(allocation.completing);
+    *node->mutable_active_allocated_resources() =
+        static_cast<crane::grpc::ResourceInNodeV3>(allocation.active);
+    node->mutable_active_allocated_resources()->set_cpu_count(
+        ConvertCpuCountForClient(allocation.active.GetCpuSet().cpu_count));
+    node->set_responding(meta->alive);
+    node->set_has_registered(meta->has_registered);
+    for (const auto& resource_name : g_config.GresOrder)
+      for (const auto& resource : g_config.Nodes.at(name)->gres_order) {
+        if (resource.name != resource_name) continue;
+        auto* ordered = node->add_gres_order();
+        ordered->set_name(resource.name);
+        ordered->set_type(resource.type);
+        for (const auto& device : resource.devices)
+          ordered->add_devices(device);
+      }
+    node->set_port(meta->static_meta.port);
+    if (!meta->alive) {
+      node->set_cpu_load(0);
+    } else {
+      if (meta->remote_meta.cpu_load)
+        node->set_cpu_load(*meta->remote_meta.cpu_load);
+    }
+    if (meta->remote_meta.free_memory_mb)
+      node->set_free_memory_mb(*meta->remote_meta.free_memory_mb);
+    node->set_reason(meta->state_reason);
+    if (meta->state_reason_uid) node->set_reason_uid(*meta->state_reason_uid);
+    if (meta->state_reason_time != absl::UnixEpoch())
+      node->mutable_reason_time()->set_seconds(
+          absl::ToUnixSeconds(meta->state_reason_time));
+    if (meta->sinfo_down_reason) {
+      node->set_reason(meta->sinfo_down_reason->text);
+      node->set_reason_uid(meta->sinfo_down_reason->uid);
+      node->mutable_reason_time()->set_seconds(
+          absl::ToUnixSeconds(meta->sinfo_down_reason->time));
+    }
+    const auto& configured_node = *g_config.Nodes.at(name);
+    if (auto topology = SinfoSchedulingTopology(
+            configured_node.cpu, configured_node.node_topo_info.sockets))
+      *node->mutable_scheduling_topology() = *topology;
+    for (const auto& [resv_name, interval] : meta->resv_in_node_map)
+      if (interval.first <= now && now < interval.second)
+        node->add_active_reservations(resv_name);
+  }
+  return reply;
+}
+
+crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo(
+    bool slurm_projection) {
   crane::grpc::QueryReservationInfoReply reply;
   auto* list = reply.mutable_reservation_info_list();
+  std::vector<std::pair<uint64_t, crane::grpc::ReservationInfo>> ordered;
 
   auto resv_map_ptr = resv_meta_map_.GetMapConstSharedPtr();
   for (auto&& [resv_id, resv_meta] : *resv_map_ptr) {
@@ -577,8 +672,17 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo() {
         absl::ToUnixSeconds(resv_meta_ptr->end_time) -
         absl::ToUnixSeconds(resv_meta_ptr->start_time));
     reservation_info->set_partition(resv_meta_ptr->part_id);
-    reservation_info->set_craned_regex(
-        util::HostNameListToStr(resv_meta_ptr->craned_ids));
+    if (slurm_projection) {
+      std::list<std::string> assigned_nodes;
+      for (const auto& [id, resources] :
+           resv_meta_ptr->res_total.EachNodeResMap())
+        assigned_nodes.push_back(id);
+      reservation_info->set_craned_regex(
+          util::HostNameListToStr(assigned_nodes));
+    } else {
+      reservation_info->set_craned_regex(
+          util::HostNameListToStr(resv_meta_ptr->craned_ids));
+    }
 
     ResourceView res_total;
     ResourceView res_avail;
@@ -619,6 +723,13 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo() {
         reservation_info->add_allowed_users()->assign(user);
       }
     }
+    if (slurm_projection)
+      ordered.emplace_back(resv_meta_ptr->creation_order, *reservation_info);
+  }
+  if (slurm_projection) {
+    std::ranges::sort(ordered, {}, &decltype(ordered)::value_type::first);
+    list->Clear();
+    for (auto& [order, info] : ordered) list->Add()->Swap(&info);
   }
   return reply;
 }
@@ -897,6 +1008,9 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         }
 
         craned_meta->state_reason = request.reason();
+        craned_meta->state_reason_uid = request.uid();
+        craned_meta->state_reason_time = absl::Now();
+        craned_meta->sinfo_down_reason.reset();
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
@@ -910,6 +1024,9 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
           }
           craned_meta->drain = false;
           craned_meta->state_reason.clear();
+          craned_meta->state_reason_uid.reset();
+          craned_meta->state_reason_time = absl::UnixEpoch();
+          craned_meta->sinfo_down_reason.reset();
         }
 
         reply.add_modified_nodes(craned_id);
@@ -964,6 +1081,10 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
 
   craned_meta->drain = is_drain;
   craned_meta->state_reason = reason;
+  craned_meta->state_reason_uid.reset();
+  craned_meta->state_reason_time =
+      reason.empty() ? absl::UnixEpoch() : absl::Now();
+  craned_meta->sinfo_down_reason.reset();
 
   if (is_drain) {
     AddResReduceEventsAndUnlock({std::make_pair(

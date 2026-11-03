@@ -370,6 +370,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryPartitionInfoRequest* request,
       crane::grpc::QueryPartitionInfoReply* response) override;
 
+  grpc::Status QuerySinfoInfo(
+      grpc::ServerContext* context,
+      const crane::grpc::QuerySinfoInfoRequest* request,
+      crane::grpc::QuerySinfoInfoReply* response) override;
+
   grpc::Status QueryReservationInfo(
       grpc::ServerContext* context,
       const crane::grpc::QueryReservationInfoRequest* request,

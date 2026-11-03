@@ -126,6 +126,12 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+    struct GresResource {
+      std::string name;
+      std::string type;
+      std::vector<std::string> devices;
+    };
+    std::vector<GresResource> gres_order;
 
     NodeTopoInfo node_topo_info;
   };
@@ -257,10 +263,13 @@ struct Config {
 
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::vector<std::string> NodeOrder;
+  std::vector<std::string> GresOrder;
   // Maps NodeName and NodeHostname to the canonical CranedId used by the
   // scheduler.
   std::unordered_map<std::string, CranedId> CranedIdByAlias;
   std::unordered_map<std::string, Partition> Partitions;
+  std::vector<std::string> PartitionOrder;
   std::string DefaultPartition;
 
   Priority PriorityConfig;

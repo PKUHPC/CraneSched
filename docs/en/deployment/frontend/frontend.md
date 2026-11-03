@@ -98,7 +98,6 @@ alias sacct='cwrapper sacct'
 alias sacctmgr='cwrapper sacctmgr'
 alias scancel='cwrapper scancel'
 alias scontrol='cwrapper scontrol'
-alias sinfo='cwrapper sinfo'
 alias squeue='cwrapper squeue'
 alias srun='cwrapper srun'
 alias salloc='cwrapper salloc'
@@ -109,6 +108,13 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
 
 Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
+
+For `sinfo`, install the optional `cranesched-slurm-compat` package. It provides an
+independent `/usr/bin/sinfo` that connects to Crane using `/etc/crane/config.yaml`.
+Remove any existing `sinfo` alias from shell startup files and run `unalias sinfo`
+in an already-open shell. If a Slurm client package owns `/usr/bin/sinfo`, resolve
+the package conflict before installation; do not force an overwrite. Source
+installations can use a separate `PREFIX` and an explicit executable path.
 
 ## Optional: Source Installation
 

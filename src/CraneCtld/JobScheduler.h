@@ -1259,6 +1259,8 @@ class JobScheduler {
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
       size_t num_limit);
 
+  crane::grpc::QuerySinfoInfoReply QuerySinfoInfo(bool reservations_only);
+
   void QueryQueueStateSummary(
       const crane::grpc::QueryQueueStateSummaryRequest* request,
       crane::grpc::QueryQueueStateSummaryReply* response);
@@ -1700,6 +1702,7 @@ class JobScheduler {
 
   using ResvTimerQueueElem = std::pair<ResvId, absl::Time>;
   ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
+  std::atomic<uint64_t> m_reservation_creation_order_{0};
 
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);

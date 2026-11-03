@@ -22,6 +22,7 @@
 // Precompiled header comes first!
 
 #include "Node/NodeDefs.h"
+#include "Node/SinfoProjection.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
@@ -80,6 +81,11 @@ class CranedMetaContainer final {
   crane::grpc::QueryCranedInfoReply QueryCranedInfo(const CranedId& node_name);
 
   crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo();
+
+  crane::grpc::QuerySinfoInfoReply QuerySinfoInfo(
+      bool reservations_only, const SinfoCompletingJobs& completing_jobs);
+
+  void UpdateNodeTelemetry(const crane::grpc::CranedPingRequest& request);
 
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const PartitionId& partition_name);
@@ -142,7 +148,8 @@ class CranedMetaContainer final {
   using ResvMetaPtr =
       util::ManagedScopeExclusivePtr<ResvMeta, ResvMetaAtomicMap::CombinedLock>;
 
-  crane::grpc::QueryReservationInfoReply QueryAllResvInfo();
+  crane::grpc::QueryReservationInfoReply QueryAllResvInfo(
+      bool slurm_projection = false);
 
   crane::grpc::QueryReservationInfoReply QueryResvInfo(const ResvId& resv_name);
 

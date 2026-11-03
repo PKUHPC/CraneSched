@@ -23,6 +23,7 @@ namespace Ctld {
 CranedRemoteMeta::CranedRemoteMeta(
     const crane::grpc::CranedRemoteMeta& grpc_meta)
     : dres_in_node(grpc_meta.dres_in_node()) {
+  this->craned_version = grpc_meta.craned_version();
   this->sys_rel_info.name = grpc_meta.sys_rel_info().name();
   this->sys_rel_info.release = grpc_meta.sys_rel_info().release();
   this->sys_rel_info.version = grpc_meta.sys_rel_info().version();
@@ -30,6 +31,9 @@ CranedRemoteMeta::CranedRemoteMeta(
       absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
   this->system_boot_time =
       absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
+  if (grpc_meta.has_cpu_load()) this->cpu_load = grpc_meta.cpu_load();
+  if (grpc_meta.has_free_memory_mb())
+    this->free_memory_mb = grpc_meta.free_memory_mb();
 
   this->network_interfaces.clear();
   for (const auto& interface : grpc_meta.network_interfaces()) {

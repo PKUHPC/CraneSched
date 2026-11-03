@@ -1182,6 +1182,8 @@ message CranedRemoteMeta {
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
   NodeTopoInfo node_topo_info = 10;
+  optional uint32 cpu_load = 12;
+  optional uint64 free_memory_mb = 13;
 }
 
 enum TxnAction {

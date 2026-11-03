@@ -107,6 +107,8 @@ message CranedRegisterReply {
 
 message CranedPingRequest {
   string craned_id = 1;
+  optional uint32 cpu_load = 2; // Five-minute load in hundredths.
+  optional uint64 free_memory_mb = 3;
 }
 
 message CranedPingReply {
@@ -312,6 +314,60 @@ message QueryPartitionInfoRequest {
 
 message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info_list = 1;
+}
+
+// Read-only data for Slurm-compatible clients. The envelope keeps native
+// cinfo/ccontrol messages and their JSON representation unchanged.
+message QuerySinfoInfoRequest {
+  uint32 uid = 1;
+  bool reservations_only = 2;
+}
+
+message SinfoNodeInfo {
+  CranedInfo node = 1;
+  bool responding = 2;
+  uint32 port = 3;
+  string reason = 4;
+  optional uint32 reason_uid = 5;
+  google.protobuf.Timestamp reason_time = 6;
+  NodeTopoInfo scheduling_topology = 7;
+  repeated string active_reservations = 8;
+  bool completing = 9;
+  // Compatibility projection excluding allocations in job-level cleanup.
+  // Native node.res_alloc retains the scheduler's actual held resources.
+  ResourceInNodeV3 active_allocated_resources = 10;
+  optional uint32 cpu_load = 11;
+  optional uint64 free_memory_mb = 12;
+  // Configured resource/type order and device order; protobuf maps lose both.
+  repeated SinfoGresResource gres_order = 13;
+  bool has_registered = 14;
+}
+
+message SinfoGresResource {
+  string name = 1;
+  string type = 2;
+  repeated string devices = 3;
+}
+
+message SinfoPartitionInfo {
+  PartitionInfo partition = 1;
+  bool is_default = 2;
+  uint32 priority_job_factor = 3;
+  // This is administrative availability, independent of node liveness.
+  bool accepts_jobs = 4;
+  // No partition-level time limit is currently configured by Crane.
+  bool time_limit_unlimited = 5;
+  PreemptMode preempt_mode = 6;
+}
+
+message QuerySinfoInfoReply {
+  // Version of this data contract, not the Slurm compatibility target.
+  uint32 schema_version = 1;
+  string cluster_name = 2;
+  repeated SinfoNodeInfo nodes = 3;
+  // Declaration order is significant for clients' default sorting.
+  repeated SinfoPartitionInfo partitions = 4;
+  repeated ReservationInfo reservations = 5;
 }
 
 message QueryReservationInfoRequest {
@@ -770,6 +826,8 @@ message CreateReservationRequest {
   repeated string denied_users = 10;
 
   uint32 node_num = 11;
+  // Server-assigned persistence metadata. Client-supplied values are ignored.
+  uint64 creation_order = 12;
 }
 
 message CreateReservationReply {
@@ -1604,6 +1662,8 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
 
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+
+  rpc QuerySinfoInfo(QuerySinfoInfoRequest) returns (QuerySinfoInfoReply);
 
   rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
 

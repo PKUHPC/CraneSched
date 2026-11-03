@@ -23,6 +23,7 @@
 #include "CranedServer.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
+#include "NodeTelemetry.h"
 #include "SupervisorStub.h"
 #include "crane/GrpcHelper.h"
 #include "crane/Network.h"
@@ -1022,6 +1023,10 @@ bool CtldClient::CranedRegister_(
   *ready_request.mutable_token() = token;
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
+  if (auto sample = ReadNodeTelemetry()) {
+    grpc_meta->set_cpu_load(sample->cpu_load);
+    grpc_meta->set_free_memory_mb(sample->free_memory_mb);
+  }
   auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
@@ -1030,6 +1035,7 @@ bool CtldClient::CranedRegister_(
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
   grpc_meta->mutable_node_topo_info()->set_sockets(
       g_config.node_topo_info.sockets);
+
 
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
@@ -1358,6 +1364,10 @@ bool CtldClient::Ping_() {
 
   crane::grpc::CranedPingRequest req;
   req.set_craned_id(m_craned_id_);
+  if (auto sample = ReadNodeTelemetry()) {
+    req.set_cpu_load(sample->cpu_load);
+    req.set_free_memory_mb(sample->free_memory_mb);
+  }
   crane::grpc::CranedPingReply reply;
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                      "Sending CranedPing request to CraneCtlD.");

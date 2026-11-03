@@ -183,6 +183,7 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
     return grpc::Status::OK;
   }
   stub->UpdateLastActiveTime();
+  g_meta_container->UpdateNodeTelemetry(*request);
   response->set_ok(true);
 
   return grpc::Status::OK;
@@ -1083,6 +1084,21 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
     *response = g_meta_container->QueryPartitionInfo(request->partition_name());
   }
 
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QuerySinfoInfo(
+    grpc::ServerContext* context,
+    const crane::grpc::QuerySinfoInfoRequest* request,
+    crane::grpc::QuerySinfoInfoReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // Reservation metadata is public to authenticated clients of this API.
+  // Permissions to create, modify, delete or use reservations are unchanged.
+  *response = g_job_scheduler->QuerySinfoInfo(request->reservations_only());
   return grpc::Status::OK;
 }
 
