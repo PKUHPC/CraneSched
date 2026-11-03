@@ -109,12 +109,6 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 
 请注意，cwrapper 别名仅提供**基本的兼容性**，如需体验高级特性，请使用鹤思的命令行工具。
 
-`sinfo` 请安装可选的 `cranesched-slurm-compat` 包。该包提供独立的
-`/usr/bin/sinfo`，通过 `/etc/crane/config.yaml` 连接 Crane。请从 shell 启动文件中
-移除已有的 `sinfo` 别名，并在当前 shell 中执行 `unalias sinfo`。如果 Slurm 客户端包
-已占用 `/usr/bin/sinfo`，应先处理包冲突，不要强制覆盖。源码安装可使用独立的
-`PREFIX`，通过完整路径选择所需程序。
-
 ## 可选：源码安装
 
 源码安装适用于开发和快速验证。构建依赖与工具的安装方法参见[打包指南](../packaging.md)。准备好环境后执行：
