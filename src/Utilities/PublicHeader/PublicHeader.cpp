@@ -407,6 +407,7 @@ ResourceView& ResourceView::operator+=(const ResourceInNodeV3& rhs) {
 ResourceView& ResourceView::operator-=(const ResourceInNodeV3& rhs) {
   ABSL_ASSERT(rhs.GetCpuSet().cpu_count <= m_cpu_count_);
   ABSL_ASSERT(rhs.GetMemoryBytes() <= m_memory_bytes_);
+  ABSL_ASSERT(rhs.GetMemorySwBytes() <= m_memory_sw_bytes_);
   m_cpu_count_ -= rhs.GetCpuSet().cpu_count;
   m_memory_bytes_ -= rhs.GetMemoryBytes();
   m_memory_sw_bytes_ -= rhs.GetMemorySwBytes();
@@ -458,6 +459,7 @@ ResourceView& ResourceView::operator+=(const ResourceView& rhs) {
 ResourceView& ResourceView::operator-=(const ResourceView& rhs) {
   ABSL_ASSERT(rhs.m_cpu_count_ <= m_cpu_count_);
   ABSL_ASSERT(rhs.m_memory_bytes_ <= m_memory_bytes_);
+  ABSL_ASSERT(rhs.m_memory_sw_bytes_ <= m_memory_sw_bytes_);
   m_cpu_count_ -= rhs.m_cpu_count_;
   m_memory_bytes_ -= rhs.m_memory_bytes_;
   m_memory_sw_bytes_ -= rhs.m_memory_sw_bytes_;
@@ -521,6 +523,7 @@ bool ResourceView::GetFeasibleResourceInNode(
   // Check CPU and memory
   if (m_cpu_count_ > avail_res.GetCpuSet().cpu_count) return false;
   if (m_memory_bytes_ > avail_res.GetMemoryBytes()) return false;
+  if (m_memory_sw_bytes_ > avail_res.GetMemorySwBytes()) return false;
 
   ResourceInNodeV3 candidate;
 
@@ -619,6 +622,7 @@ ResourceView operator-(const ResourceView& lhs, const ResourceView& rhs) {
 bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs) {
   if (lhs.m_cpu_count_ > rhs.GetCpuSet().cpu_count) return false;
   if (lhs.m_memory_bytes_ > rhs.GetMemoryBytes()) return false;
+  if (lhs.m_memory_sw_bytes_ > rhs.GetMemorySwBytes()) return false;
 
   // Check GRES: ResourceView uses GresMap (counts), ResourceInNodeV3 uses
   // DedicatedResourceInNode (slot IDs)
@@ -648,6 +652,7 @@ bool operator<=(const ResourceView& lhs, const ResourceInNodeV3& rhs) {
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
   if (lhs.m_cpu_count_ > rhs.m_cpu_count_) return false;
   if (lhs.m_memory_bytes_ > rhs.m_memory_bytes_) return false;
+  if (lhs.m_memory_sw_bytes_ > rhs.m_memory_sw_bytes_) return false;
 
   for (const auto& [name, lhs_gc] : lhs.m_gres_map_) {
     auto rhs_it = rhs.m_gres_map_.find(name);
@@ -789,6 +794,7 @@ ResourceInNodeV3& ResourceInNodeV3::operator+=(const ResourceInNodeV3& rhs) {
 ResourceInNodeV3& ResourceInNodeV3::operator-=(const ResourceInNodeV3& rhs) {
   m_cpu_set_ -= rhs.m_cpu_set_;
   ABSL_ASSERT(m_memory_bytes_ >= rhs.m_memory_bytes_);
+  ABSL_ASSERT(m_memory_sw_bytes_ >= rhs.m_memory_sw_bytes_);
   m_memory_bytes_ -= rhs.m_memory_bytes_;
   m_memory_sw_bytes_ -= rhs.m_memory_sw_bytes_;
   m_gres_ -= rhs.m_gres_;
@@ -886,6 +892,7 @@ ResourceInNodeV3 operator-(const ResourceInNodeV3& lhs,
 bool operator<=(const ResourceInNodeV3& lhs, const ResourceInNodeV3& rhs) {
   if (lhs.GetCpuSet().cpu_count > rhs.GetCpuSet().cpu_count) return false;
   if (lhs.GetMemoryBytes() > rhs.GetMemoryBytes()) return false;
+  if (lhs.GetMemorySwBytes() > rhs.GetMemorySwBytes()) return false;
   return lhs.GetGres() <= rhs.GetGres();
 }
 

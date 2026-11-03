@@ -28,6 +28,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <filesystem>
 #include <fstream>
