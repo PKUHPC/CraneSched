@@ -60,8 +60,7 @@ struct CranedRemoteMeta {
  * Represent the runtime status on a Craned node.
  * A Node is uniquely identified by (partition id, node index).
  */
-struct SinfoDownReason {
-  std::string text;
+struct NodeOutage {
   uint32_t uid;
   absl::Time time;
 };
@@ -84,9 +83,9 @@ struct CranedMeta {
   std::string state_reason{""};
   std::optional<uint32_t> state_reason_uid;
   absl::Time state_reason_time{absl::UnixEpoch()};
-  // Compatibility event metadata survives reconnect while still drained.
-  // Native state_reason and its existing consumers are independent.
-  std::optional<SinfoDownReason> sinfo_down_reason;
+  // Retain the last unexpected outage while drained. Explicit state changes
+  // acknowledge it; registering outside drain also clears it.
+  std::optional<NodeOutage> outage;
   absl::Time last_busy_time;
   absl::Time craned_down_time;
 
@@ -95,6 +94,11 @@ struct CranedMeta {
   absl::flat_hash_map<ResvId, std::pair<absl::Time, absl::Time>>
       resv_in_node_map;
 };
+
+// Present entries identify ending allocations; the set names nodes with
+// unfinished cleanup. An empty set is distinct from an active allocation.
+using AllocationCleanupMap =
+    std::unordered_map<job_id_t, std::unordered_set<CranedId>>;
 
 struct ResvMeta {
   ResvId name;

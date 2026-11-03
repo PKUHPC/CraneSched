@@ -6890,9 +6890,9 @@ crane::grpc::QuerySinfoInfoReply JobScheduler::QuerySinfoInfo(
   // reservation metadata. Keep allocation-ending facts and node resource
   // ownership in the same lifetime, including when a job ID is requeued.
   LockGuard running_guard(&m_running_job_map_mtx_);
-  SinfoCompletingJobs completing_jobs;
+  AllocationCleanupMap completing_jobs;
   for (const auto& [id, job] : m_running_job_map_)
-    if (auto nodes = SinfoCleanupNodes(*job); nodes)
+    if (auto nodes = job->AllocationCleanupNodes(); nodes)
       completing_jobs.emplace(id, std::move(*nodes));
   return g_meta_container->QuerySinfoInfo(false, completing_jobs);
 }

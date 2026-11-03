@@ -792,6 +792,13 @@ message PartitionInfo {
   uint64 max_mem_per_node = 14;
 }
 
+// An unexpected loss of contact, retained until an explicit state update or
+// a successful registration outside drain. Text presentation belongs to clients.
+message NodeOutage {
+  uint32 uid = 1;
+  google.protobuf.Timestamp time = 2;
+}
+
 message CranedInfo {
   string hostname = 1;  // Canonical NodeName.
   CranedResourceState resource_state = 2;
@@ -816,6 +823,18 @@ message CranedInfo {
 
   string node_hostname = 18;  // Configured NodeHostname.
   string node_addr = 19;      // Configured NodeAddr.
+
+  string state_reason = 20;
+  optional uint32 state_reason_uid = 21;
+  google.protobuf.Timestamp state_reason_time = 22;
+  NodeOutage outage = 23;
+  bool responding = 24;
+  bool has_registered = 25;
+  uint32 port = 26;
+  optional uint32 cpu_load = 27;
+  optional uint64 free_memory_mb = 28;
+  // Configured scheduling capacity, independent of reported physical sockets.
+  uint32 configured_sockets = 29;
 }
 
 message ReservationInfo {
@@ -823,7 +842,7 @@ message ReservationInfo {
   google.protobuf.Timestamp start_time = 2;
   google.protobuf.Duration duration = 3;
   string partition = 4;
-  string craned_regex = 5;
+  string craned_regex = 5;  // Actual allocated nodes, for existing clients.
 
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
@@ -833,6 +852,9 @@ message ReservationInfo {
   repeated string denied_accounts = 10;
   repeated string allowed_users = 11;
   repeated string denied_users = 12;
+  // Unformatted allocation membership and stable controller creation order.
+  repeated string allocated_nodes = 13;
+  uint64 creation_order = 14;
 }
 
 message TrimmedPartitionInfo {

@@ -1242,6 +1242,10 @@ struct JobInCtld {
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
+  // Absent while the allocation is active; otherwise nodes still owning
+  // unfinished cleanup work. Caller must hold the running-job lock.
+  std::optional<std::unordered_set<CranedId>> AllocationCleanupNodes() const;
+
   bool AllStepsFinished() const {
     return m_steps_.empty() && !m_primary_step_ && !m_daemon_step_;
   }

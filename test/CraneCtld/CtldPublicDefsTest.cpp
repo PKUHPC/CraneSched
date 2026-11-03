@@ -24,38 +24,8 @@
 
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
-#include "Node/SinfoProjection.h"
 
-TEST(SinfoProjection, DownReasonRecordsEventsWithoutChangingNativeReason) {
-  Ctld::CranedMeta node;
-  node.state_reason = "maintenance";
-  node.state_reason_uid = 1000;
-  node.state_reason_time = absl::FromUnixSeconds(10);
-  Ctld::RecordSinfoDownReason(node, 0, absl::FromUnixSeconds(20));
-  ASSERT_TRUE(node.sinfo_down_reason.has_value());
-  EXPECT_EQ(node.sinfo_down_reason->text, "maintenance : Not responding");
-  EXPECT_EQ(node.sinfo_down_reason->uid, 0);
-  EXPECT_EQ(node.sinfo_down_reason->time, absl::FromUnixSeconds(20));
-  Ctld::RecordSinfoDownReason(node, 0, absl::FromUnixSeconds(30));
-  EXPECT_EQ(node.sinfo_down_reason->text, "maintenance : Not responding");
-  EXPECT_EQ(node.sinfo_down_reason->time, absl::FromUnixSeconds(30));
-  EXPECT_EQ(node.state_reason, "maintenance");
-  EXPECT_EQ(node.state_reason_uid, 1000);
-  EXPECT_EQ(node.state_reason_time, absl::FromUnixSeconds(10));
-}
-
-TEST(SinfoProjection, TopologyUsesConfiguredSchedulingCapacity) {
-  auto topology = Ctld::SinfoSchedulingTopology(8, 2);
-  ASSERT_TRUE(topology.has_value());
-  EXPECT_EQ(topology->total_cpus(), 8);
-  EXPECT_EQ(topology->sockets(), 2);
-  EXPECT_EQ(topology->cores_per_socket(), 4);
-  EXPECT_EQ(topology->threads_per_core(), 1);
-  EXPECT_FALSE(Ctld::SinfoSchedulingTopology(3, 2).has_value());
-  EXPECT_FALSE(Ctld::SinfoSchedulingTopology(0, 1).has_value());
-}
-
-TEST(SinfoProjection, CommonStepCleanupDoesNotEndAllocation) {
+TEST(AllocationLifecycle, CommonStepCleanupDoesNotEndAllocation) {
   Ctld::JobInCtld job;
   auto primary = std::make_unique<Ctld::CommonStepInCtld>();
   primary->SetStatus(crane::grpc::Running);
@@ -67,10 +37,10 @@ TEST(SinfoProjection, CommonStepCleanupDoesNotEndAllocation) {
   common->SetStatus(crane::grpc::Completing);
   common->SetRunningNodes({"n1"});
   job.AddStep(std::move(common));
-  EXPECT_FALSE(Ctld::SinfoCleanupNodes(job).has_value());
+  EXPECT_FALSE(job.AllocationCleanupNodes().has_value());
 }
 
-TEST(SinfoProjection, PrimaryCleanupIncludesDaemonThenTracksEachNode) {
+TEST(AllocationLifecycle, PrimaryCleanupIncludesDaemonThenTracksEachNode) {
   Ctld::JobInCtld job;
   auto primary = std::make_unique<Ctld::CommonStepInCtld>();
   primary->SetStatus(crane::grpc::Completing);
@@ -80,55 +50,30 @@ TEST(SinfoProjection, PrimaryCleanupIncludesDaemonThenTracksEachNode) {
   daemon->SetStatus(crane::grpc::Running);
   daemon->SetRunningNodes({"n1", "n2"});
   job.SetDaemonStep(std::move(daemon));
-  ASSERT_TRUE(Ctld::SinfoCleanupNodes(job).has_value());
-  EXPECT_EQ(*Ctld::SinfoCleanupNodes(job),
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
             (std::unordered_set<CranedId>{"n1", "n2"}));
 
   job.PrimaryStep()->SetStatus(crane::grpc::Completed);
   job.SetPrimaryStepStatus(crane::grpc::Completed);
   job.DaemonStep()->SetStatus(crane::grpc::Completing);
   job.DaemonStep()->StepOnNodeFinish("n1");
-  EXPECT_EQ(*Ctld::SinfoCleanupNodes(job),
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
             (std::unordered_set<CranedId>{"n2"}));
   job.DaemonStep()->StepOnNodeFinish("n2");
-  ASSERT_TRUE(Ctld::SinfoCleanupNodes(job).has_value());
-  EXPECT_TRUE(Ctld::SinfoCleanupNodes(job)->empty());
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_TRUE(job.AllocationCleanupNodes()->empty());
 }
 
-TEST(SinfoProjection, EarlyDaemonFailureEndsAllocationWithoutPrimary) {
+TEST(AllocationLifecycle, EarlyDaemonFailureEndsAllocationWithoutPrimary) {
   Ctld::JobInCtld job;
   auto daemon = std::make_unique<Ctld::DaemonStepInCtld>();
   daemon->SetStatus(crane::grpc::Completing);
   daemon->SetRunningNodes({"n1"});
   job.SetDaemonStep(std::move(daemon));
-  ASSERT_TRUE(Ctld::SinfoCleanupNodes(job).has_value());
-  EXPECT_EQ(*Ctld::SinfoCleanupNodes(job),
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
             (std::unordered_set<CranedId>{"n1"}));
-}
-
-TEST(SinfoProjection, CleanupResourcesAreProjectedWithoutReleasingThem) {
-  Ctld::CranedMeta node;
-  node.static_meta.hostname = "n1";
-  ResourceInNodeV3 active;
-  active.GetCpuSet().cpu_count = cpu_t{1};
-  active.SetMemoryBytes(1024);
-  ResourceInNodeV3 cleanup;
-  cleanup.GetCpuSet().cpu_count = cpu_t{3};
-  cleanup.SetMemoryBytes(4096);
-  node.rn_job_res_map.emplace(1, active);
-  node.rn_job_res_map.emplace(2, cleanup);
-  node.res_in_use = active + cleanup;
-  Ctld::SinfoCompletingJobs jobs{{2, {"n1", "n2"}}};
-  auto projected = Ctld::ProjectSinfoAllocation(node, jobs);
-  EXPECT_TRUE(projected.completing);
-  EXPECT_EQ(projected.active.GetCpuSet().cpu_count, cpu_t{1});
-  EXPECT_EQ(projected.active.GetMemoryBytes(), 1024);
-  EXPECT_EQ(node.res_in_use.GetCpuSet().cpu_count, cpu_t{4});
-  EXPECT_EQ(node.res_in_use.GetMemoryBytes(), 5120);
-  jobs.at(2).erase("n1");
-  projected = Ctld::ProjectSinfoAllocation(node, jobs);
-  EXPECT_FALSE(projected.completing);
-  EXPECT_EQ(projected.active.GetCpuSet().cpu_count, cpu_t{1});
 }
 
 TEST(CtldPublicDefs, ResolvesCranedIdAliases) {

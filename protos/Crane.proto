@@ -316,8 +316,8 @@ message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info_list = 1;
 }
 
-// Read-only data for Slurm-compatible clients. The envelope keeps native
-// cinfo/ccontrol messages and their JSON representation unchanged.
+// Read-only data for Slurm-compatible clients. Reuses native records and adds
+// the allocation lifecycle facts that must be read under the scheduler locks.
 message QuerySinfoInfoRequest {
   uint32 uid = 1;
   bool reservations_only = 2;
@@ -325,22 +325,18 @@ message QuerySinfoInfoRequest {
 
 message SinfoNodeInfo {
   CranedInfo node = 1;
-  bool responding = 2;
-  uint32 port = 3;
-  string reason = 4;
-  optional uint32 reason_uid = 5;
-  google.protobuf.Timestamp reason_time = 6;
-  NodeTopoInfo scheduling_topology = 7;
-  repeated string active_reservations = 8;
-  bool completing = 9;
-  // Compatibility projection excluding allocations in job-level cleanup.
-  // Native node.res_alloc retains the scheduler's actual held resources.
-  ResourceInNodeV3 active_allocated_resources = 10;
-  optional uint32 cpu_load = 11;
-  optional uint64 free_memory_mb = 12;
+  reserved 2 to 12, 14;
+  reserved "responding", "port", "reason", "reason_uid", "reason_time", "scheduling_topology", "active_reservations",
+      "completing", "active_allocated_resources", "cpu_load", "free_memory_mb", "has_registered";
   // Configured resource/type order and device order; protobuf maps lose both.
   repeated SinfoGresResource gres_order = 13;
-  bool has_registered = 14;
+  // Resources still held by ending allocations, included in node.res_alloc.
+  ResourceInNodeV3 cleanup_resources = 15;
+  // This node still owns unfinished work in an ending allocation.
+  bool cleanup_pending = 16;
+  // Exact holdings for subtraction: native node.res_alloc CPU counts are
+  // rounded for display. cleanup_resources also retains exact CPU precision.
+  optional double allocated_cpus = 17;
 }
 
 message SinfoGresResource {
@@ -353,10 +349,8 @@ message SinfoPartitionInfo {
   PartitionInfo partition = 1;
   bool is_default = 2;
   uint32 priority_job_factor = 3;
-  // This is administrative availability, independent of node liveness.
-  bool accepts_jobs = 4;
-  // No partition-level time limit is currently configured by Crane.
-  bool time_limit_unlimited = 5;
+  reserved 4, 5;
+  reserved "accepts_jobs", "time_limit_unlimited";
   PreemptMode preempt_mode = 6;
 }
 
@@ -368,6 +362,8 @@ message QuerySinfoInfoReply {
   // Declaration order is significant for clients' default sorting.
   repeated SinfoPartitionInfo partitions = 4;
   repeated ReservationInfo reservations = 5;
+  // Controller observation time for evaluating reservation intervals.
+  google.protobuf.Timestamp observed_at = 6;
 }
 
 message QueryReservationInfoRequest {
