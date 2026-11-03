@@ -4935,6 +4935,12 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     }
   }
 
+  // Keep the selected membership, not the partition's candidate set. Recovery
+  // must restore the same nodes instead of running node selection again.
+  craned_ids.clear();
+  for (const auto& id : allocated_res.EachNodeResMap() | std::views::keys)
+    craned_ids.push_back(id);
+
   const ResvId& resv_name = request.reservation_name();
   {
     auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
@@ -4998,6 +5004,8 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
 
     auto persisted = request;
     persisted.set_creation_order(creation_order);
+    persisted.set_craned_regex(util::HostNameListToStr(craned_ids));
+    persisted.set_node_num(craned_ids.size());
     ok = g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name,
                                                      persisted);
     if (!ok) {
