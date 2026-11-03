@@ -93,20 +93,16 @@ void PmixGrpcStub::PmixDModexResponseNoBlock(
 
 void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
                                      const std::string& port) {
-  std::string ip_addr = craned_id;
-
-  // ipv4_t ipv4_addr;
-  // ipv6_t ipv6_addr;
-  // if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
-  //   ip_addr = crane::Ipv4ToStr(ipv4_addr);
-  // } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
-  //   ip_addr = crane::Ipv6ToStr(ipv6_addr);
-  // } else {
-  //   // Just hostname. It should never happen,
-  //   // but we add error handling here for robustness.
-  //   CRANE_ERROR("Unresolved hostname: {}", craned_id);
-  //   ip_addr = craned_id;
-  // }
+  const auto hostname = m_config_.CranedIdToNodeHostname.find(craned_id);
+  const auto address = m_config_.CranedIdToNodeAddr.find(craned_id);
+  if (craned_id == m_config_.CranedIdOfThisNode ||
+      hostname == m_config_.CranedIdToNodeHostname.end() ||
+      address == m_config_.CranedIdToNodeAddr.end() ||
+      hostname->second.empty() || address->second.empty()) {
+    CRANE_ERROR("Missing PMIx peer configuration or invalid peer ID: {}",
+                craned_id);
+    return;
+  }
 
   auto craned = std::make_shared<PmixGrpcStub>(this);
 
@@ -115,11 +111,12 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (m_config_.UseTls) {
+    SetTlsTargetNameOverride(&channel_args, hostname->second);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
-        ip_addr, port, m_config_.TlsCerts, channel_args);
+        address->second, port, m_config_.TlsCerts, channel_args);
   } else {
     craned->m_channel_ =
-        CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
+        CreateTcpInsecureCustomChannel(address->second, port, channel_args);
   }
 
   craned->m_stub_ = crane::grpc::pmix::Pmix::NewStub(craned->m_channel_);
@@ -137,8 +134,9 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   }
 
   int cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Created stub for {} {}:{}. Channel count: {}/{}", craned_id,
-              ip_addr, port, cur_count, m_node_num_ - 1);
+  CRANE_TRACE("Created stub for {} at {}:{}, NodeHostname={}. Channel count: "
+              "{}/{}", craned_id, address->second, port, hostname->second,
+              cur_count, m_node_num_ - 1);
 
   {
     std::lock_guard<std::mutex> lock(m_mutex_);

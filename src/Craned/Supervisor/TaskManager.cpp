@@ -209,6 +209,9 @@ CraneErrCode StepInstance::Prepare() {
           .CraneBaseDir = g_config.CraneBaseDir,
           .CraneScriptDir = g_config.CraneScriptDir,
           .CranedUnixSocketPath = g_config.CranedUnixSocketPath,
+          .CranedIdOfThisNode = g_config.CranedIdOfThisNode,
+          .CranedIdToNodeHostname = g_config.CranedIdToNodeHostname,
+          .CranedIdToNodeAddr = g_config.CranedIdToNodeAddr,
           .EnableSlurmCompatibleEnv = g_config.EnableSlurmCompatibleEnv};
 
       if (!pmix_server->Init(pmix_config, m_step_to_supv_)) {
@@ -2983,6 +2986,13 @@ bool TaskManager::ReceivePmixPort(
               g_config.StepId, request.pmix_ports().size());
 
   for (const auto& pmix_port : request.pmix_ports()) {
+    if (pmix_port.craned_id() == g_config.CranedIdOfThisNode ||
+        !g_config.CranedIdToNodeHostname.contains(pmix_port.craned_id()) ||
+        !g_config.CranedIdToNodeAddr.contains(pmix_port.craned_id())) {
+      CRANE_ERROR("[Step#{}.{}] Unexpected PMIx peer ID: {}", g_config.JobId,
+                  g_config.StepId, pmix_port.craned_id());
+      return false;
+    }
     CRANE_TRACE("[Step#{}.{}] Emplacing PMIx stub: craned_id={}, port={}",
                 g_config.JobId, g_config.StepId, pmix_port.craned_id(),
                 pmix_port.port());

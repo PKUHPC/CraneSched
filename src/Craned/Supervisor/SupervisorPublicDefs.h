@@ -21,6 +21,8 @@
 #include "PreCompiledHeader.h"
 // Precompiled header comes first
 
+#include <unordered_map>
+
 #include "CgroupManager.h"
 #include "CommonPublicDefs.h"
 #include "crane/CriClient.h"
@@ -120,6 +122,8 @@ struct Config {
   uint64_t SupervisorMaxLogFileNum;
   uint32_t ThreadPoolSize{kDefaultSupervisorThreadPoolSize};
   CranedId CranedIdOfThisNode;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeAddr;
 
   std::filesystem::path SupervisorUnixSockPath;
 

@@ -181,6 +181,21 @@ crun --ntasks-per-node=8 --mpi=pmix ./main_solver
 
 ## 4. Advanced Configuration
 
+### Node identities, addresses and TLS
+
+PMIx uses the parsed `name` (canonical CranedId), `NodeHostname` and `NodeAddr`
+from the [node configuration](config.md). Craned supplies the local ID to
+Supervisor. Port exchange, peer lookup and tree/ring membership use canonical
+IDs, rather than matching the system hostname directly against the step's IDs.
+PMIx hostname metadata and node maps use `NodeHostname`.
+
+gRPC connects to `NodeAddr` and, when TLS is enabled, verifies the certificate
+against `NodeHostname`, following the controller's Craned connection semantics.
+The existing configuration parser defaults `NodeHostname` to `name` and
+`NodeAddr` to `NodeHostname`. `NodeAddr` is not a node alias. PMIx does not append
+`TLS.DomainSuffix` or require logical IDs to resolve in DNS. Certificates must
+cover the configured `NodeHostname`; non-TLS connections use the same address map.
+
 Set environment variables in your job script to adjust the behavior of CraneSched’s PMIx server.
 Ensure they are exported before the `crun` command and included by its `--export` policy. The complete input list, generated task variables, and node-list scope are documented in [Job Environment Variables](../../reference/job_env_vars.md).
 

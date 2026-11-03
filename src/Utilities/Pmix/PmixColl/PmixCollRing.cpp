@@ -22,6 +22,7 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "Pmix.h"
 
@@ -35,14 +36,14 @@ bool PmixCollRing::PmixCollInit(CollType type,
   m_type_ = type;
   m_procs_.assign(procs.begin(), procs.end());
 
-  std::set<std::string> hostname_set;
+  std::set<CranedId> craned_ids;
 
   for (const auto& proc : procs) {
     if (m_pmix_step_info_.nspace != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : m_pmix_step_info_.node_list) {
-        hostname_set.emplace(hostname);
+      for (const auto& craned_id : m_pmix_step_info_.node_list) {
+        craned_ids.emplace(craned_id);
       }
     } else {
       if (proc.rank >= m_pmix_step_info_.task_map.size()) {
@@ -50,32 +51,32 @@ bool PmixCollRing::PmixCollInit(CollType type,
         return false;
       }
       uint32_t node_id = m_pmix_step_info_.task_map[proc.rank];
-      hostname_set.insert(m_pmix_step_info_.node_list[node_id]);
+      craned_ids.insert(m_pmix_step_info_.node_list[node_id]);
     }
   }
 
-  m_peers_cnt_ = static_cast<uint32_t>(hostname_set.size());
+  m_peers_cnt_ = static_cast<uint32_t>(craned_ids.size());
 
   if (m_peers_cnt_ == 0) {
     CRANE_ERROR("No peers found");
     return false;
   }
 
-  auto it = hostname_set.find(m_pmix_step_info_.hostname);
-  if (it == hostname_set.end()) {
-    CRANE_ERROR("unknown hostname: {}", m_pmix_step_info_.hostname);
+  auto it = craned_ids.find(m_pmix_step_info_.craned_id);
+  if (it == craned_ids.end()) {
+    CRANE_ERROR("unknown CranedId: {}", m_pmix_step_info_.craned_id);
     return false;
   }
-  m_peerid_ = static_cast<int>(std::distance(hostname_set.begin(), it));
+  m_peerid_ = static_cast<int>(std::distance(craned_ids.begin(), it));
 
   auto next_iter = std::next(it);
-  if (next_iter == hostname_set.end()) {
-    next_iter = hostname_set.begin();
+  if (next_iter == craned_ids.end()) {
+    next_iter = craned_ids.begin();
   }
   m_next_craned_id_ = *next_iter;
 
   // compute previous neighbor id as well
-  auto prev_iter = (it == hostname_set.begin()) ? std::prev(hostname_set.end())
+  auto prev_iter = (it == craned_ids.begin()) ? std::prev(craned_ids.end())
                                                 : std::prev(it);
   m_prev_craned_id_ = *prev_iter;
 
@@ -90,7 +91,7 @@ bool PmixCollRing::PmixCollInit(CollType type,
   }
 
   CRANE_TRACE("ring coll {:p}: crane_id = {}, m_next_craned_id_ = {}",
-              static_cast<void*>(this), m_pmix_step_info_.hostname,
+              static_cast<void*>(this), m_pmix_step_info_.craned_id,
               m_next_craned_id_);
 
   return true;
@@ -176,7 +177,7 @@ bool PmixCollRing::CollRingContrib_(CollRingCtx& coll_ring_ctx,
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(data.size());
-    pmix_ring_msg_hdr->set_craned_id(m_pmix_step_info_.hostname);
+    pmix_ring_msg_hdr->set_craned_id(m_pmix_step_info_.craned_id);
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx.seq);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);
@@ -332,17 +333,7 @@ void PmixCollRing::AbortOnTimeout() {
 }
 
 void PmixCollRing::RingReleaseFn(void* rel_data) {
-  auto* cb_data = static_cast<CbData*>(rel_data);
-
-  std::lock_guard lock_guard(cb_data->coll->m_lock_);
-  // Guard against a recycled context: only clear ring_buf when the context
-  // slot still belongs to the same fence sequence.  If the slot has been
-  // reused by a newer collective, touching ring_buf would corrupt its data.
-  if (cb_data->coll_ring_ctx->seq == cb_data->seq) {
-    cb_data->coll_ring_ctx->ring_buf.clear();
-  }
-
-  delete cb_data;
+  delete static_cast<std::string*>(rel_data);
 }
 
 void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
@@ -350,15 +341,15 @@ void PmixCollRing::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
               static_cast<void*>(this), coll_ring_ctx.seq);
   if (!coll_ring_ctx.cbfunc) return;
 
-  auto cb_data = std::make_unique<CbData>();
-  cb_data->coll = shared_from_this();
-  cb_data->coll_ring_ctx = &coll_ring_ctx;
-  cb_data->seq = coll_ring_ctx.seq;
+  // PMIx may consume the data asynchronously after this context is reset or
+  // reused. Keep the payload independent until PMIx invokes RingReleaseFn.
+  auto payload =
+      std::make_unique<std::string>(std::move(coll_ring_ctx.ring_buf));
+  const char* data = payload->data();
+  const size_t size = payload->size();
 
-  PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS,
-                     coll_ring_ctx.ring_buf.data(),
-                     coll_ring_ctx.ring_buf.size(), coll_ring_ctx.cbdata,
-                     RingReleaseFn, cb_data.release());
+  PmixLibModexInvoke(coll_ring_ctx.cbfunc, PMIX_SUCCESS, data, size,
+                    coll_ring_ctx.cbdata, RingReleaseFn, payload.release());
 
   coll_ring_ctx.cbfunc = nullptr;
   coll_ring_ctx.cbdata = nullptr;

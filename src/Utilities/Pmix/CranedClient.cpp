@@ -85,7 +85,7 @@ bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   request.set_job_id(m_pmix_step_info_.job_id);
   request.set_step_id(m_pmix_step_info_.step_id);
   request.set_port(pmix_port);
-  request.set_craned_id(m_pmix_step_info_.hostname);
+  request.set_craned_id(m_pmix_step_info_.craned_id);
   request.mutable_craned_ids()->Add(m_pmix_step_info_.node_list.begin(),
                                     m_pmix_step_info_.node_list.end());
 

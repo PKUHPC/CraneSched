@@ -31,14 +31,14 @@ bool PmixCollTree::PmixCollInit(CollType type,
   m_type_ = type;
   m_procs_.assign(procs.begin(), procs.end());
 
-  std::set<std::string> hostname_set;
+  std::set<CranedId> craned_ids;
 
   for (const auto& proc : procs) {
     if (m_pmix_step_info_.nspace != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : m_pmix_step_info_.node_list) {
-        hostname_set.emplace(hostname);
+      for (const auto& craned_id : m_pmix_step_info_.node_list) {
+        craned_ids.emplace(craned_id);
       }
     } else {
       if (proc.rank >= m_pmix_step_info_.task_map.size()) {
@@ -46,22 +46,22 @@ bool PmixCollTree::PmixCollInit(CollType type,
         return false;
       }
       uint32_t node_id = m_pmix_step_info_.task_map[proc.rank];
-      hostname_set.insert(m_pmix_step_info_.node_list[node_id]);
+      craned_ids.insert(m_pmix_step_info_.node_list[node_id]);
     }
   }
 
-  m_peers_cnt_ = hostname_set.size();
+  m_peers_cnt_ = craned_ids.size();
 
   if (m_peers_cnt_ <= 0) {
     CRANE_ERROR("No peers found");
     return false;
   }
 
-  auto it = hostname_set.find(m_pmix_step_info_.hostname);
-  if (it != hostname_set.end())
-    m_peerid_ = std::distance(hostname_set.begin(), it);
+  auto it = craned_ids.find(m_pmix_step_info_.craned_id);
+  if (it != craned_ids.end())
+    m_peerid_ = std::distance(craned_ids.begin(), it);
   else {
-    CRANE_ERROR("unknown hostname");
+    CRANE_ERROR("unknown CranedId: {}", m_pmix_step_info_.craned_id);
     return false;
   }
 
@@ -89,8 +89,8 @@ bool PmixCollTree::PmixCollInit(CollType type,
      * ourselves there)
      */
     m_parent_host_ = "";
-    for (const auto& host : hostname_set) {
-      if (host == m_pmix_step_info_.hostname) continue;
+    for (const auto& host : craned_ids) {
+      if (host == m_pmix_step_info_.craned_id) continue;
       m_all_chldrn_hl_.emplace_back(host);
     }
     // host[1-3]
@@ -105,28 +105,28 @@ bool PmixCollTree::PmixCollInit(CollType type,
     /*
      * setup parent id's
      */
-    auto it = hostname_set.begin();
-    if (m_parent_peerid_ >= static_cast<std::ptrdiff_t>(hostname_set.size())) {
+    auto it = craned_ids.begin();
+    if (m_parent_peerid_ >= static_cast<std::ptrdiff_t>(craned_ids.size())) {
       CRANE_ERROR("parent_peerid indicates that the host does not exist.");
       return false;
     }
     std::advance(it, m_parent_peerid_);
     m_parent_host_ = *it;
 
-    m_root_host_ = *hostname_set.begin();
+    m_root_host_ = *craned_ids.begin();
 
     m_all_chldrn_hl_.clear();
     m_chldrn_str_.clear();
   }
 
-  if (m_childrn_cnt_ >= static_cast<std::ptrdiff_t>(hostname_set.size())) {
+  if (m_childrn_cnt_ >= static_cast<std::ptrdiff_t>(craned_ids.size())) {
     CRANE_ERROR("childrn_cnt indicates that the host does not exist.");
     return false;
   }
 
   m_childrn_hosts_.resize(m_childrn_cnt_);
   for (size_t i = 0; i < m_childrn_cnt_; i++) {
-    auto iter = std::next(hostname_set.begin(), m_chldrn_ids_[i]);
+    auto iter = std::next(craned_ids.begin(), m_chldrn_ids_[i]);
     m_childrn_hosts_[i] = *iter;
   }
   CRANE_TRACE(
@@ -269,7 +269,7 @@ bool PmixCollTree::ProgressCollect_() {
       pmix_procs->set_nspace(proc.nspace);
       pmix_procs->set_rank(proc.rank);
     }
-    request.set_peer_host(m_pmix_step_info_.hostname);
+    request.set_peer_host(m_pmix_step_info_.craned_id);
     request.set_msg(m_upfwd_buf_);
     request.set_seq(this->m_seq_);
 
@@ -375,7 +375,7 @@ bool PmixCollTree::ProgressUpFwd_() {
       pmix_procs->set_rank(proc.rank);
     }
 
-    request.set_peer_host(m_pmix_step_info_.hostname);
+    request.set_peer_host(m_pmix_step_info_.craned_id);
     request.set_msg(m_downfwd_buf_);
     request.set_seq(this->m_seq_);
 

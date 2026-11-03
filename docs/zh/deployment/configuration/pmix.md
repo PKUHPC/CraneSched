@@ -158,6 +158,17 @@ crun --ntasks-per-node=8 --mpi=pmix ./main_solver
 ```
 
 ## 四、高级配置
+### 节点身份、连接地址与 TLS
+
+PMIx 使用[节点配置](config.md)中已解析的 `name`（规范 CranedId）、`NodeHostname` 和 `NodeAddr`。
+本机身份由 Craned 传入 Supervisor；端口交换、peer 查找和 tree/ring 成员匹配均使用规范 ID，
+不再把系统 `gethostname()` 的返回值直接当作节点 ID。PMIx 对客户端公布的主机名和节点映射使用 `NodeHostname`。
+
+gRPC 连接目的地为 `NodeAddr`，启用 TLS 时按 `NodeHostname` 校验证书，与控制端连接 Craned 的规则一致。
+未配置 `NodeHostname` 时使用 `name`；未配置 `NodeAddr` 时使用 `NodeHostname`，由现有配置解析统一补齐。
+`NodeAddr` 不作为节点别名。PMIx 不拼接 `TLS.DomainSuffix`，也不要求逻辑 ID 能被 DNS 解析。
+证书需覆盖实际配置的 `NodeHostname`；非 TLS 路径仍使用相同的连接地址映射。
+
 通过在作业脚本中设置环境变量，可以调整 CraneSched PMIx 服务端的行为。
 请在 `crun` 命令前导出这些变量，并确保其 `--export` 策略包含它们。完整输入列表、注入任务的变量和节点列表作用域见[作业环境变量](../../reference/job_env_vars.md)。
 

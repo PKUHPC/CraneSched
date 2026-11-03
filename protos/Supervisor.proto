@@ -123,6 +123,10 @@ message InitSupervisorRequest {
   bool enable_slurm_compatible_env = 31;
   uint32 thread_pool_size = 32;
 
+  // Parsed node configuration for this step, keyed by canonical CranedId.
+  map<string, string> craned_id_to_node_hostname = 33;
+  map<string, string> craned_id_to_node_addr = 34;
+
   bool tracing_enabled = 41;
   optional string traceparent = 42;  // W3C traceparent for distributed tracing
   string trace_level = 43;

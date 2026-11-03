@@ -130,7 +130,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   pmix_proc->set_rank(rank);
 
   request.set_local_namespace(pmix_namespace);
-  request.set_craned_id(m_pmix_step_info_.hostname);
+  request.set_craned_id(m_pmix_step_info_.craned_id);
 
   auto stub = m_pmix_client_->GetPmixStub(craned_id);
   if (!stub) {

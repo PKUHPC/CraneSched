@@ -39,6 +39,9 @@ struct Config {
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
+  CranedId CranedIdOfThisNode;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;
+  std::unordered_map<CranedId, std::string> CranedIdToNodeAddr;
   bool EnableSlurmCompatibleEnv{false};
 };
 
@@ -49,9 +52,12 @@ struct PmixStepInfo {
   step_id_t step_id{0};
 
   std::string nspace;
-  std::string hostname;
-  std::vector<std::string> node_list;
-  std::vector<std::string> peer_node_list;
+  CranedId craned_id;
+  // Collective membership and port exchange use canonical IDs. PMIx's
+  // hostname metadata uses the configured names in the same node order.
+  std::vector<CranedId> node_list;
+  std::vector<CranedId> peer_node_list;
+  std::vector<std::string> node_hostnames;
   std::string node_list_str;
   uint32_t node_id{};
   uint32_t node_num{1};
