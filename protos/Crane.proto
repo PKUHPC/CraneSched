@@ -107,7 +107,7 @@ message CranedRegisterReply {
 
 message CranedPingRequest {
   string craned_id = 1;
-  optional uint32 cpu_load = 2; // Five-minute load in hundredths.
+  optional uint32 cpu_load = 2;  // Five-minute load in hundredths.
   optional uint64 free_memory_mb = 3;
 }
 

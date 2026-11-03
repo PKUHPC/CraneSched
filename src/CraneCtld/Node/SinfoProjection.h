@@ -10,12 +10,12 @@
 namespace Ctld {
 
 inline void RecordSinfoDownReason(CranedMeta& node, uint32_t uid,
-                                 absl::Time when) {
+                                  absl::Time when) {
   if (node.power_state != crane::grpc::CRANE_POWER_ACTIVE &&
       node.power_state != crane::grpc::CRANE_POWER_IDLE)
     return;
-  std::string reason = node.sinfo_down_reason ? node.sinfo_down_reason->text
-                                            : node.state_reason;
+  std::string reason =
+      node.sinfo_down_reason ? node.sinfo_down_reason->text : node.state_reason;
   if (reason.empty())
     reason = "Not responding";
   else if (reason.find(" : Not responding") == std::string::npos)

@@ -1036,7 +1036,6 @@ bool CtldClient::CranedRegister_(
   grpc_meta->mutable_node_topo_info()->set_sockets(
       g_config.node_topo_info.sockets);
 
-
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
   grpc_sys_rel_info->set_name(sys_info.name);

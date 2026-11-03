@@ -607,7 +607,8 @@ void ParseConfig(int argc, char** argv) {
                   g_config.GresOrder.end())
                 g_config.GresOrder.push_back(device_name);
               Ctld::Config::Node::GresResource resource_order{device_name,
-                                                       device_type, {}};
+                                                              device_type,
+                                                              {}};
               if (gres_node["DeviceFileRegex"]) {
                 std::list<std::string> device_path_list;
                 if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),

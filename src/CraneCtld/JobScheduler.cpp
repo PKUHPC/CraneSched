@@ -4999,7 +4999,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     auto persisted = request;
     persisted.set_creation_order(creation_order);
     ok = g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name,
-                                                    persisted);
+                                                     persisted);
     if (!ok) {
       CRANE_ERROR("Failed to insert reservation {} to resv DB", resv_name);
     }
@@ -6884,8 +6884,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
 crane::grpc::QuerySinfoInfoReply JobScheduler::QuerySinfoInfo(
     bool reservations_only) {
-  if (reservations_only)
-    return g_meta_container->QuerySinfoInfo(true, {});
+  if (reservations_only) return g_meta_container->QuerySinfoInfo(true, {});
 
   // Match the scheduler's existing lock order: running jobs before node and
   // reservation metadata. Keep allocation-ending facts and node resource

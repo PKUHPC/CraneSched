@@ -567,9 +567,8 @@ void CranedMetaContainer::UpdateNodeTelemetry(
     const crane::grpc::CranedPingRequest& request) {
   auto meta = GetCranedMetaPtr(request.craned_id());
   if (!meta || !meta->alive) return;
-  meta->remote_meta.cpu_load = request.has_cpu_load()
-                                   ? std::optional{request.cpu_load()}
-                                   : std::nullopt;
+  meta->remote_meta.cpu_load =
+      request.has_cpu_load() ? std::optional{request.cpu_load()} : std::nullopt;
   meta->remote_meta.free_memory_mb =
       request.has_free_memory_mb() ? std::optional{request.free_memory_mb()}
                                    : std::nullopt;
