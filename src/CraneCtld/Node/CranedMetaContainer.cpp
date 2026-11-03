@@ -579,7 +579,6 @@ void CranedMetaContainer::UpdateNodeTelemetry(
 crane::grpc::QuerySinfoInfoReply CranedMetaContainer::QuerySinfoInfo(
     bool reservations_only, const AllocationCleanupMap& cleanup_jobs) {
   crane::grpc::QuerySinfoInfoReply reply;
-  reply.set_schema_version(2);
   reply.set_cluster_name(g_config.CraneClusterName);
   const auto now = absl::Now();
   reply.mutable_observed_at()->set_seconds(absl::ToUnixSeconds(now));

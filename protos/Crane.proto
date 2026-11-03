@@ -24,6 +24,7 @@ option go_package = "CraneFrontEnd/generated/protos";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
+import "Compat.proto";
 
 message StepStatusChangeRequest {
   uint32 job_id = 1;
@@ -314,56 +315,6 @@ message QueryPartitionInfoRequest {
 
 message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info_list = 1;
-}
-
-// Read-only data for Slurm-compatible clients. Reuses native records and adds
-// the allocation lifecycle facts that must be read under the scheduler locks.
-message QuerySinfoInfoRequest {
-  uint32 uid = 1;
-  bool reservations_only = 2;
-}
-
-message SinfoNodeInfo {
-  CranedInfo node = 1;
-  reserved 2 to 12, 14;
-  reserved "responding", "port", "reason", "reason_uid", "reason_time", "scheduling_topology", "active_reservations",
-      "completing", "active_allocated_resources", "cpu_load", "free_memory_mb", "has_registered";
-  // Configured resource/type order and device order; protobuf maps lose both.
-  repeated SinfoGresResource gres_order = 13;
-  // Resources still held by ending allocations, included in node.res_alloc.
-  ResourceInNodeV3 cleanup_resources = 15;
-  // This node still owns unfinished work in an ending allocation.
-  bool cleanup_pending = 16;
-  // Exact holdings for subtraction: native node.res_alloc CPU counts are
-  // rounded for display. cleanup_resources also retains exact CPU precision.
-  optional double allocated_cpus = 17;
-}
-
-message SinfoGresResource {
-  string name = 1;
-  string type = 2;
-  repeated string devices = 3;
-}
-
-message SinfoPartitionInfo {
-  PartitionInfo partition = 1;
-  bool is_default = 2;
-  uint32 priority_job_factor = 3;
-  reserved 4, 5;
-  reserved "accepts_jobs", "time_limit_unlimited";
-  PreemptMode preempt_mode = 6;
-}
-
-message QuerySinfoInfoReply {
-  // Version of this data contract, not the Slurm compatibility target.
-  uint32 schema_version = 1;
-  string cluster_name = 2;
-  repeated SinfoNodeInfo nodes = 3;
-  // Declaration order is significant for clients' default sorting.
-  repeated SinfoPartitionInfo partitions = 4;
-  repeated ReservationInfo reservations = 5;
-  // Controller observation time for evaluating reservation intervals.
-  google.protobuf.Timestamp observed_at = 6;
 }
 
 message QueryReservationInfoRequest {

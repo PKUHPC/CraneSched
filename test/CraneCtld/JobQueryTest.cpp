@@ -553,7 +553,6 @@ TEST_F(NodeQueryTest, SnapshotPreservesExactCleanupAndNativeHoldings) {
   Ctld::AllocationCleanupMap ending{{2, {"n1"}}};
   const auto reply = nodes_.QuerySinfoInfo(false, ending);
   ASSERT_EQ(reply.nodes_size(), 1);
-  EXPECT_EQ(reply.schema_version(), 2);
   EXPECT_TRUE(reply.has_observed_at());
   const auto& node = reply.nodes(0);
   EXPECT_TRUE(node.cleanup_pending());
