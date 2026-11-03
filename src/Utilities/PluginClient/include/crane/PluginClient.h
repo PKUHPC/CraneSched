@@ -19,6 +19,7 @@
 #pragma once
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/synchronization/notification.h>
 #include <concurrentqueue/concurrentqueue.h>
 #include <google/protobuf/message.h>
 #include <grpcpp/channel.h>
@@ -74,6 +75,7 @@ class PluginClient {
   void InitChannelAndStub(
       const std::string& endpoint,
       size_t trace_hook_max_request_bytes = kDefaultTraceHookMaxRequestBytes);
+  void Shutdown();
   bool DrainTraceHooks(std::chrono::microseconds timeout) noexcept;
 
   // These functions are used to add HookEvent into the event queue.
@@ -126,6 +128,7 @@ class PluginClient {
                               google::protobuf::Message* msg);
 
   void AsyncSendThread_();
+  void EnqueueHook_(HookEvent event);
   void MarkTraceHookCompleted_(const HookEvent& event);
   void MarkTraceHooksCompleted_(size_t count);
   static size_t CountTraceHookEvents_(const std::list<HookEvent>& events);
@@ -134,7 +137,11 @@ class PluginClient {
   std::unique_ptr<CranePluginD::Stub> m_stub_;
 
   std::thread m_async_send_thread_;
-  std::atomic<bool> m_thread_stop_{false};
+  std::once_flag m_shutdown_once_;
+  absl::Notification m_stop_notification_;
+  std::mutex m_rpc_mutex_;
+  grpc::ClientContext* m_active_context_{nullptr};  // Guarded by m_rpc_mutex_.
+  std::atomic<std::chrono::system_clock::time_point> m_shutdown_deadline_{};
 
   ConcurrentQueue<HookEvent> m_event_queue_;
   size_t m_trace_hook_max_request_bytes_{kDefaultTraceHookMaxRequestBytes};

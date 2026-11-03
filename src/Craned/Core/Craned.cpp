@@ -1761,6 +1761,7 @@ void WaitForStopAndDoGvarFini() {
 
   g_thread_pool.reset();
 
+  if (g_plugin_client) g_plugin_client->Shutdown();
 #ifdef CRANE_ENABLE_TRACING
   crane::TracerManager::GetInstance().Shutdown();
 #endif
