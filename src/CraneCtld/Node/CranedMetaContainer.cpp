@@ -454,115 +454,62 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
 crane::grpc::QueryPartitionInfoReply
 CranedMetaContainer::QueryAllPartitionInfo() {
   crane::grpc::QueryPartitionInfoReply reply;
-  auto* list = reply.mutable_partition_info_list();
-
-  auto partition_map = partition_meta_map_.GetMapConstSharedPtr();
-
-  for (auto&& [part_name, part_meta_ptr] : *partition_map) {
-    auto* part_info = list->Add();
-    auto part_meta = part_meta_ptr.GetExclusivePtr();
-
-    part_info->set_name(part_meta->partition_global_meta.name);
-    part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
-    part_info->set_alive_nodes(
-        part_meta->partition_global_meta.alive_craned_cnt);
-    auto* allowed_accounts = part_info->mutable_allowed_accounts();
-    for (const auto& account_name :
-         part_meta->partition_global_meta.allowed_accounts) {
-      allowed_accounts->Add()->assign(account_name);
-    }
-
-    auto* denied_accounts = part_info->mutable_denied_accounts();
-    for (const auto& account_name :
-         part_meta->partition_global_meta.denied_accounts) {
-      denied_accounts->Add()->assign(account_name);
-    }
-
-    *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
-        part_meta->partition_global_meta.res_total);
-    part_info->mutable_res_total()->set_cpu_count(ConvertCpuCountForClient(
-        part_meta->partition_global_meta.res_total.GetCpuCount()));
-    *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
-        part_meta->partition_global_meta.res_avail);
-    part_info->mutable_res_avail()->set_cpu_count(ConvertCpuCountForClient(
-        part_meta->partition_global_meta.res_avail.GetCpuCount()));
-    *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
-        part_meta->partition_global_meta.res_in_use);
-    part_info->mutable_res_alloc()->set_cpu_count(ConvertCpuCountForClient(
-        part_meta->partition_global_meta.res_in_use.GetCpuCount()));
-    part_info->set_default_mem_per_cpu(
-        g_config.Partitions[part_name].default_mem_per_cpu);
-    part_info->set_max_mem_per_cpu(
-        g_config.Partitions[part_name].max_mem_per_cpu);
-    part_info->set_default_mem_per_node(
-        g_config.Partitions[part_name].default_mem_per_node);
-    part_info->set_max_mem_per_node(
-        g_config.Partitions[part_name].max_mem_per_node);
-
-    if (part_meta->partition_global_meta.alive_craned_cnt > 0)
-      part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
-    else
-      part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
-
-    part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
+  auto partitions = partition_meta_map_.GetMapConstSharedPtr();
+  for (const auto& name : g_config.PartitionOrder) {
+    auto meta = partitions->at(name).GetExclusivePtr();
+    SetGrpcPartitionInfoByPartitionMeta_(*meta,
+                                         reply.add_partition_info_list());
   }
-
   return reply;
 }
 
 crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
     const PartitionId& partition_name) {
   crane::grpc::QueryPartitionInfoReply reply;
-  auto* list = reply.mutable_partition_info_list();
+  auto meta = partition_meta_map_.GetValueExclusivePtr(partition_name);
+  if (meta)
+    SetGrpcPartitionInfoByPartitionMeta_(*meta,
+                                         reply.add_partition_info_list());
+  return reply;
+}
 
-  if (!partition_meta_map_.Contains(partition_name)) return reply;
-
-  auto part_meta = partition_meta_map_.GetValueExclusivePtr(partition_name);
-
-  auto* part_info = list->Add();
-  part_info->set_name(part_meta->partition_global_meta.name);
-  part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
-  part_info->set_alive_nodes(part_meta->partition_global_meta.alive_craned_cnt);
+void CranedMetaContainer::SetGrpcPartitionInfoByPartitionMeta_(
+    const PartitionMeta& partition, crane::grpc::PartitionInfo* part_info) {
+  const auto& meta = partition.partition_global_meta;
+  const auto& config = g_config.Partitions.at(meta.name);
+  part_info->set_name(meta.name);
+  part_info->set_total_nodes(meta.node_cnt);
+  part_info->set_alive_nodes(meta.alive_craned_cnt);
   auto* allowed_accounts = part_info->mutable_allowed_accounts();
-  for (const auto& account_name :
-       part_meta->partition_global_meta.allowed_accounts) {
+  for (const auto& account_name : meta.allowed_accounts) {
     allowed_accounts->Add()->assign(account_name);
   }
   auto* denied_accounts = part_info->mutable_denied_accounts();
-  for (const auto& account_name :
-       part_meta->partition_global_meta.denied_accounts) {
+  for (const auto& account_name : meta.denied_accounts) {
     denied_accounts->Add()->assign(account_name);
   }
-  if (part_meta->partition_global_meta.alive_craned_cnt > 0)
+  if (meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
   else
     part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
-  part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
+  part_info->set_hostlist(meta.nodelist_str);
 
-  part_info->set_default_mem_per_cpu(
-      g_config.Partitions[partition_name].default_mem_per_cpu);
-  part_info->set_max_mem_per_cpu(
-      g_config.Partitions[partition_name].max_mem_per_cpu);
-  part_info->set_default_mem_per_node(
-      g_config.Partitions[partition_name].default_mem_per_node);
-  part_info->set_max_mem_per_node(
-      g_config.Partitions[partition_name].max_mem_per_node);
+  part_info->set_default_mem_per_cpu(config.default_mem_per_cpu);
+  part_info->set_max_mem_per_cpu(config.max_mem_per_cpu);
+  part_info->set_default_mem_per_node(config.default_mem_per_node);
+  part_info->set_max_mem_per_node(config.max_mem_per_node);
 
-  *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
-      part_meta->partition_global_meta.res_total);
-  part_info->mutable_res_total()->set_cpu_count(ConvertCpuCountForClient(
-      part_meta->partition_global_meta.res_total.GetCpuCount()));
-  *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
-      part_meta->partition_global_meta.res_avail);
-  part_info->mutable_res_avail()->set_cpu_count(ConvertCpuCountForClient(
-      part_meta->partition_global_meta.res_avail.GetCpuCount()));
-  *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
-      part_meta->partition_global_meta.res_in_use);
-  part_info->mutable_res_alloc()->set_cpu_count(ConvertCpuCountForClient(
-      part_meta->partition_global_meta.res_in_use.GetCpuCount()));
+  *part_info->mutable_res_total() =
+      static_cast<crane::grpc::ResourceView>(meta.res_total);
+  *part_info->mutable_res_avail() =
+      static_cast<crane::grpc::ResourceView>(meta.res_avail);
+  *part_info->mutable_res_alloc() =
+      static_cast<crane::grpc::ResourceView>(meta.res_in_use);
 
-  return reply;
+  part_info->set_is_default(meta.name == g_config.DefaultPartition);
+  part_info->set_priority(config.priority);
+  part_info->set_preempt_mode(g_config.Preempt.PreemptMode);
 }
 
 void CranedMetaContainer::UpdateNodeTelemetry(
@@ -574,60 +521,6 @@ void CranedMetaContainer::UpdateNodeTelemetry(
   meta->remote_meta.free_memory_mb =
       request.has_free_memory_mb() ? std::optional{request.free_memory_mb()}
                                    : std::nullopt;
-}
-
-crane::grpc::QuerySinfoInfoReply CranedMetaContainer::QuerySinfoInfo(
-    bool reservations_only, const AllocationCleanupMap& cleanup_jobs) {
-  crane::grpc::QuerySinfoInfoReply reply;
-  reply.set_cluster_name(g_config.CraneClusterName);
-  const auto now = absl::Now();
-  reply.mutable_observed_at()->set_seconds(absl::ToUnixSeconds(now));
-  reply.mutable_observed_at()->set_nanos(absl::ToInt64Nanoseconds(
-      now - absl::FromUnixSeconds(absl::ToUnixSeconds(now))));
-  // Copy each domain under its existing locks; this is not a cross-domain
-  // atomic snapshot. Allocation cleanup and ownership share the running lock.
-  auto reservations = QueryAllResvInfo();
-  reply.mutable_reservations()->Swap(
-      reservations.mutable_reservation_info_list());
-  if (reservations_only) return reply;
-
-  for (const auto& name : g_config.PartitionOrder) {
-    auto native = QueryPartitionInfo(name);
-    if (native.partition_info_list().empty()) continue;
-    auto* part = reply.add_partitions();
-    *part->mutable_partition() = native.partition_info_list(0);
-    part->set_is_default(name == g_config.DefaultPartition);
-    part->set_priority_job_factor(g_config.Partitions.at(name).priority);
-    part->set_preempt_mode(g_config.Preempt.PreemptMode);
-  }
-
-  auto nodes = craned_meta_map_.GetMapConstSharedPtr();
-  for (const auto& name : g_config.NodeOrder) {
-    auto meta = nodes->at(name).GetExclusivePtr();
-    auto* node = reply.add_nodes();
-    SetGrpcCranedInfoByCranedMeta_(*meta, node->mutable_node());
-    ResourceInNodeV3 cleanup_resources;
-    for (const auto& [id, resources] : meta->rn_job_res_map) {
-      const auto cleanup = cleanup_jobs.find(id);
-      if (cleanup == cleanup_jobs.end()) continue;
-      cleanup_resources += resources;
-      if (cleanup->second.contains(name)) node->set_cleanup_pending(true);
-    }
-    *node->mutable_cleanup_resources() =
-        static_cast<crane::grpc::ResourceInNodeV3>(cleanup_resources);
-    node->set_allocated_cpus(
-        static_cast<double>(meta->res_in_use.GetCpuSet().cpu_count));
-    for (const auto& resource_name : g_config.GresOrder)
-      for (const auto& resource : g_config.Nodes.at(name)->gres_order) {
-        if (resource.name != resource_name) continue;
-        auto* ordered = node->add_gres_order();
-        ordered->set_name(resource.name);
-        ordered->set_type(resource.type);
-        for (const auto& device : resource.devices)
-          ordered->add_devices(device);
-      }
-  }
-  return reply;
 }
 
 crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryAllResvInfo() {
@@ -692,161 +585,59 @@ void CranedMetaContainer::SetGrpcReservationInfoByResvMeta_(
 }
 
 crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
-    const crane::grpc::QueryClusterInfoRequest& request) {
+    const crane::grpc::QueryClusterInfoRequest& request,
+    const AllocationCleanupMap& cleanup_jobs) {
   crane::grpc::QueryClusterInfoReply reply;
-  auto* partition_list = reply.mutable_partitions();
-
-  std::unordered_set<std::string> filter_partitions_set(
-      request.filter_partitions().begin(), request.filter_partitions().end());
-  bool no_partition_constraint = request.filter_partitions().empty();
-  auto partition_rng_filter_name = [no_partition_constraint,
-                                    &filter_partitions_set](auto& it) {
-    auto part_meta = it.second.GetExclusivePtr();
-    return no_partition_constraint ||
-           filter_partitions_set.contains(
-               part_meta->partition_global_meta.name);
-  };
-
-  std::string hosts = absl::StrJoin(request.filter_nodes(), ",");
-  std::list<std::string> hosts_list;
-  util::ParseHostList(hosts, &hosts_list);
-  std::unordered_set<std::string> req_nodes;
-  for (auto& host : hosts_list) req_nodes.insert(ResolveCranedIdAlias(host));
-
-  bool no_craned_hostname_constraint = request.filter_nodes().empty();
-  auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
-    auto craned_meta = it->second.GetExclusivePtr();
-    return no_craned_hostname_constraint ||
-           req_nodes.contains(craned_meta->static_meta.hostname);
-  };
-
-  if (request.filter_craned_control_states().empty() ||
-      request.filter_craned_resource_states().empty() ||
-      request.filter_craned_power_states().empty()) {
-    reply.set_ok(true);
-    return reply;
-  }
-
-  const int control_state_num = crane::grpc::CranedControlState_ARRAYSIZE;
-  bool control_filters[control_state_num] = {false};
-  for (const auto& it : request.filter_craned_control_states())
-    control_filters[static_cast<int>(it)] = true;
-
-  const int resource_state_num = crane::grpc::CranedResourceState_ARRAYSIZE;
-  bool resource_filters[resource_state_num] = {false};
-  for (const auto& it : request.filter_craned_resource_states())
-    resource_filters[static_cast<int>(it)] = true;
-
-  const int power_state_num = crane::grpc::CranedPowerState_ARRAYSIZE;
-  bool power_filters[power_state_num] = {false};
-  for (const auto& it : request.filter_craned_power_states())
-    power_filters[static_cast<int>(it)] = true;
-
-  // Ensure that the map global read lock is held during the following filtering
-  // operations and partition_meta_map_ must be locked before craned_meta_map_
-  auto partition_map = partition_meta_map_.GetMapConstSharedPtr();
-  auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
-
-  auto partition_rng =
-      *partition_map | ranges::views::filter(partition_rng_filter_name);
-  ranges::for_each(partition_rng, [&](auto& it) {
-    PartitionId part_id = it.first;
-
-    auto* part_info = partition_list->Add();
-
-    // we make a copy of these craned ids to lower overall latency.
-    // The amortized cost is 1 copy for each craned node.
-    // Although an extra copying cost is introduced,
-    // the time of accessing partition_meta_map_ is minimized and
-    // the copying cost is taken only by this grpc thread handling
-    // cinfo request.
-    // Since we assume the number of cpu cores is sufficient on the
-    // machine running CraneCtld, it's ok to pay 1 core cpu time
-    // for overall low latency.
-    std::unordered_set<CranedId> craned_ids;
-    {
-      auto part_meta = it.second.GetExclusivePtr();
-      std::string partition_name = part_meta->partition_global_meta.name;
-      if (partition_name == g_config.DefaultPartition) {
-        partition_name.append("*");
-      }
-      part_info->set_name(std::move(partition_name));
-
-      part_info->set_state(part_meta->partition_global_meta.alive_craned_cnt > 0
-                               ? crane::grpc::PartitionState::PARTITION_UP
-                               : crane::grpc::PartitionState::PARTITION_DOWN);
-      craned_ids = part_meta->craned_ids;
-    }
-    std::map<std::string, std::vector<std::string>>
-        craned_name_lists[control_state_num][resource_state_num]
-                         [power_state_num];
-    auto craned_rng =
-        craned_ids |
-        ranges::views::transform(
-            [&](CranedId const& craned_id) -> CranedMetaRawMap::const_iterator {
-              return craned_map->find(craned_id);
-            }) |
-        ranges::views::filter(craned_rng_filter_hostname);
-
-    ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
-      auto craned_meta = it->second.GetExclusivePtr();
-
-      auto& res_total = craned_meta->res_total;
-      auto& res_in_use = craned_meta->res_in_use;
-      auto& res_avail = craned_meta->res_avail;
-
-      crane::grpc::CranedControlState control_state;
-      if (craned_meta->drain) {
-        control_state = crane::grpc::CranedControlState::CRANE_DRAIN;
-      } else {
-        control_state = crane::grpc::CranedControlState::CRANE_NONE;
-      }
-      crane::grpc::CranedResourceState resource_state;
-      if (craned_meta->alive) {
-        if (res_in_use.IsZero()) {
-          resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
-        } else if (res_avail.IsExhausted()) {
-          resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
-        } else {
-          resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
-        }
-      } else {
-        resource_state = crane::grpc::CranedResourceState::CRANE_DOWN;
-      }
-      if (control_filters[static_cast<int>(control_state)] &&
-          resource_filters[static_cast<int>(resource_state)] &&
-          power_filters[static_cast<int>(craned_meta->power_state)]) {
-        craned_name_lists[static_cast<int>(control_state)][static_cast<int>(
-            resource_state)][static_cast<int>(craned_meta->power_state)]
-                         [craned_meta->state_reason]
-                             .emplace_back(craned_meta->static_meta.hostname);
-      }
-    });
-
-    auto* craned_lists = part_info->mutable_craned_lists();
-    for (int i = 0; i < control_state_num; i++) {
-      for (int j = 0; j < resource_state_num; j++) {
-        for (int k = 0; k < power_state_num; k++) {
-          if (craned_name_lists[i][j][k].size() > 0) {
-            for (const auto& [key, value] : craned_name_lists[i][j][k]) {
-              auto* craned_list = craned_lists->Add();
-              craned_list->set_control_state(
-                  crane::grpc::CranedControlState(i));
-              craned_list->set_resource_state(
-                  crane::grpc::CranedResourceState(j));
-              craned_list->set_power_state(crane::grpc::CranedPowerState(k));
-              craned_list->set_count(value.size());
-              craned_list->set_craned_list_regex(
-                  util::HostNameListToStr(value));
-              craned_list->set_reason(key);
-            }
-          }
-        }
-      }
-    }
-  });
-
   reply.set_ok(true);
+  reply.set_cluster_name(g_config.CraneClusterName);
+  const auto now = absl::Now();
+  reply.mutable_observed_at()->set_seconds(absl::ToUnixSeconds(now));
+  reply.mutable_observed_at()->set_nanos(absl::ToInt64Nanoseconds(
+      now - absl::FromUnixSeconds(absl::ToUnixSeconds(now))));
+  // Each domain uses its own locks; this is not a cross-domain atomic snapshot.
+  if (request.include_reservations()) {
+    auto reservations = QueryAllResvInfo();
+    reply.mutable_reservations()->Swap(
+        reservations.mutable_reservation_info_list());
+  }
+  std::unordered_set<std::string> parts(request.filter_partitions().begin(),
+                                        request.filter_partitions().end());
+  if (request.include_partitions()) {
+    auto partitions = partition_meta_map_.GetMapConstSharedPtr();
+    for (const auto& name : g_config.PartitionOrder) {
+      if (!parts.empty() && !parts.contains(name)) continue;
+      auto meta = partitions->at(name).GetExclusivePtr();
+      SetGrpcPartitionInfoByPartitionMeta_(*meta, reply.add_partitions());
+    }
+  }
+  if (!request.include_nodes()) return reply;
+
+  std::list<std::string> hosts;
+  util::ParseHostList(absl::StrJoin(request.filter_nodes(), ","), &hosts);
+  std::unordered_set<std::string> selected;
+  for (const auto& host : hosts) selected.insert(ResolveCranedIdAlias(host));
+  auto nodes = craned_meta_map_.GetMapConstSharedPtr();
+  for (const auto& name : g_config.NodeOrder) {
+    if (!request.filter_nodes().empty() && !selected.contains(name)) continue;
+    auto meta = nodes->at(name).GetExclusivePtr();
+    if (!parts.empty() &&
+        !ranges::any_of(meta->static_meta.partition_ids,
+                        [&](const auto& part) { return parts.contains(part); }))
+      continue;
+    auto* node = reply.add_nodes();
+    SetGrpcCranedInfoByCranedMeta_(*meta, node);
+    if (request.include_allocation_cleanup()) {
+      ResourceInNodeV3 cleanup_resources;
+      for (const auto& [id, resources] : meta->rn_job_res_map) {
+        const auto cleanup = cleanup_jobs.find(id);
+        if (cleanup == cleanup_jobs.end()) continue;
+        cleanup_resources += resources;
+        if (cleanup->second.contains(name)) node->set_cleanup_pending(true);
+      }
+      *node->mutable_cleanup_resources() =
+          static_cast<crane::grpc::ResourceInNodeV3>(cleanup_resources);
+    }
+  }
   return reply;
 }
 
@@ -1126,16 +917,10 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
 
   *craned_info->mutable_res_total() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_total);
-  craned_info->mutable_res_total()->set_cpu_count(
-      ConvertCpuCountForClient(craned_meta.res_total.GetCpuSet().cpu_count));
   *craned_info->mutable_res_avail() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_avail);
-  craned_info->mutable_res_avail()->set_cpu_count(
-      ConvertCpuCountForClient(craned_meta.res_avail.GetCpuSet().cpu_count));
   *craned_info->mutable_res_alloc() =
       static_cast<crane::grpc::ResourceInNodeV3>(craned_meta.res_in_use);
-  craned_info->mutable_res_alloc()->set_cpu_count(
-      ConvertCpuCountForClient(craned_meta.res_in_use.GetCpuSet().cpu_count));
 
   craned_info->set_state_reason(craned_meta.state_reason);
   if (craned_meta.state_reason_uid)
@@ -1158,6 +943,15 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
   craned_info->set_configured_sockets(
       g_config.Nodes.at(craned_meta.static_meta.hostname)
           ->node_topo_info.sockets);
+
+  for (const auto& resource_name : g_config.GresOrder)
+    for (const auto& resource : g_config.Nodes.at(craned_index)->gres_order) {
+      if (resource.name != resource_name) continue;
+      auto* ordered = craned_info->add_gres_order();
+      ordered->set_name(resource.name);
+      ordered->set_type(resource.type);
+      for (const auto& device : resource.devices) ordered->add_devices(device);
+    }
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
   craned_info->set_node_hostname(craned_meta.static_meta.node_hostname);

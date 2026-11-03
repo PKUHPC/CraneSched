@@ -551,26 +551,108 @@ TEST_F(NodeQueryTest, SnapshotPreservesExactCleanupAndNativeHoldings) {
     meta->static_meta.node_topo_info.sockets = 8;
   }
   Ctld::AllocationCleanupMap ending{{2, {"n1"}}};
-  const auto reply = nodes_.QuerySinfoInfo(false, ending);
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  request.set_include_allocation_cleanup(true);
+  const auto reply = nodes_.QueryClusterInfo(request, ending);
   ASSERT_EQ(reply.nodes_size(), 1);
   EXPECT_TRUE(reply.has_observed_at());
   const auto& node = reply.nodes(0);
   EXPECT_TRUE(node.cleanup_pending());
-  EXPECT_DOUBLE_EQ(node.allocated_cpus(), 66.0 / 256);
   EXPECT_DOUBLE_EQ(node.cleanup_resources().cpu_count(), 1.0 / 256);
   EXPECT_EQ(node.cleanup_resources().memory_bytes(), 4000);
-  EXPECT_DOUBLE_EQ(node.node().res_alloc().cpu_count(), 0.26);
-  EXPECT_EQ(node.node().res_alloc().memory_bytes(), 5000);
-  EXPECT_EQ(node.node().configured_sockets(), 2);
-  EXPECT_EQ(node.node().node_topo_info().sockets(), 8);
+  EXPECT_DOUBLE_EQ(node.res_alloc().cpu_count(), 66.0 / 256);
+  EXPECT_EQ(node.res_alloc().memory_bytes(), 5000);
+  EXPECT_EQ(node.configured_sockets(), 2);
+  EXPECT_EQ(node.node_topo_info().sockets(), 8);
   ending.at(2).clear();
-  auto finished = nodes_.QuerySinfoInfo(false, ending).nodes(0);
+  auto finished = nodes_.QueryClusterInfo(request, ending).nodes(0);
   EXPECT_FALSE(finished.cleanup_pending());
   EXPECT_EQ(finished.cleanup_resources().memory_bytes(), 4000);
   nodes_.CranedDown("n1");
   // The native query keeps the observed sample; clients decide how to display
   // it.
   EXPECT_EQ(ReadNode().cpu_load(), 731);
+}
+
+TEST_F(NodeQueryTest, ClusterQueryScopesPreserveOrderMembershipAndTotals) {
+  g_config.Nodes.emplace(
+      "n2", std::make_shared<Ctld::Config::Node>(*g_config.Nodes.at("n1")));
+  g_config.NodeOrder = {"n2", "n1"};
+  g_config.CranedIdByAlias.emplace("alias2", "n2");
+  g_config.Partitions["batch"].nodes.emplace("n2");
+  g_config.Partitions["batch"].nodelist_str = "n[1-2]";
+  g_config.Partitions["shared"].nodes = {"n1", "n2"};
+  g_config.Partitions["empty"] = {};
+  g_config.PartitionOrder = {"shared", "batch", "empty"};
+  g_config.DefaultPartition = "batch";
+  g_config.Partitions["batch"].priority = 7;
+  Ctld::CranedMetaContainer nodes;
+  nodes.InitFromConfig(g_config);
+  nodes.CranedUp("n1", {});
+  nodes.CranedUp("n2", {});
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  request.set_include_partitions(true);
+  auto reply = nodes.QueryClusterInfo(request);
+  ASSERT_EQ(reply.nodes_size(), 2);
+  EXPECT_EQ(reply.nodes(0).hostname(), "n2");
+  EXPECT_EQ(reply.nodes(1).hostname(), "n1");
+  EXPECT_EQ(reply.nodes(0).partition_names_size(), 2);
+  EXPECT_FALSE(reply.nodes(0).has_cleanup_resources());
+  ASSERT_EQ(reply.partitions_size(), 3);
+  EXPECT_EQ(reply.partitions(0).name(), "shared");
+  EXPECT_EQ(reply.partitions(1).name(), "batch");
+  EXPECT_TRUE(reply.partitions(1).is_default());
+  EXPECT_EQ(reply.partitions(1).priority(), 7);
+  EXPECT_EQ(reply.partitions(2).total_nodes(), 0);
+
+  request.add_filter_nodes("alias2");
+  request.add_filter_partitions("batch");
+  reply = nodes.QueryClusterInfo(request);
+  ASSERT_EQ(reply.nodes_size(), 1);
+  EXPECT_EQ(reply.nodes(0).hostname(), "n2");
+  EXPECT_EQ(reply.nodes(0).partition_names_size(), 2);
+  ASSERT_EQ(reply.partitions_size(), 1);
+  EXPECT_EQ(reply.partitions(0).total_nodes(), 2);
+  EXPECT_EQ(reply.partitions(0).hostlist(), "n[1-2]");
+
+  request.clear_filter_nodes();
+  request.add_filter_nodes("missing");
+  reply = nodes.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  ASSERT_EQ(reply.partitions_size(), 1);
+  EXPECT_EQ(reply.partitions(0).total_nodes(), 2);
+  request.clear_filter_partitions();
+  request.add_filter_partitions("missing");
+  request.clear_filter_nodes();
+  reply = nodes.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  EXPECT_TRUE(reply.partitions().empty());
+}
+
+TEST_F(NodeQueryTest, ClusterQueryIncludesOnlyRequestedDomains) {
+  Ctld::ResvMeta reservation;
+  reservation.name = "test";
+  reservation.start_time = absl::FromUnixSeconds(100);
+  reservation.end_time = absl::FromUnixSeconds(200);
+  {
+    auto reservations = nodes_.GetResvMetaMapExclusivePtr();
+    reservations->emplace(reservation.name, std::move(reservation));
+  }
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  auto reply = nodes_.QueryClusterInfo(request);
+  EXPECT_EQ(reply.nodes_size(), 1);
+  EXPECT_TRUE(reply.partitions().empty());
+  EXPECT_TRUE(reply.reservations().empty());
+  request.set_include_nodes(false);
+  request.set_include_reservations(true);
+  reply = nodes_.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  EXPECT_TRUE(reply.partitions().empty());
+  EXPECT_EQ(reply.reservations_size(), 1);
+  EXPECT_TRUE(reply.ok());
 }
 
 TEST_F(NodeQueryTest, AllAndSingleReservationQueriesExposeActualAllocation) {

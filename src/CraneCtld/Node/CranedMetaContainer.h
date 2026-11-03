@@ -81,16 +81,14 @@ class CranedMetaContainer final {
 
   crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo();
 
-  crane::grpc::QuerySinfoInfoReply QuerySinfoInfo(
-      bool reservations_only, const AllocationCleanupMap& cleanup_jobs);
-
   void UpdateNodeTelemetry(const crane::grpc::CranedPingRequest& request);
 
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const PartitionId& partition_name);
 
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
-      const crane::grpc::QueryClusterInfoRequest& request);
+      const crane::grpc::QueryClusterInfoRequest& request,
+      const AllocationCleanupMap& cleanup_jobs = {});
 
   crane::grpc::ModifyCranedStateReply ChangeNodeState(
       const crane::grpc::ModifyCranedStateRequest& request);
@@ -224,6 +222,9 @@ class CranedMetaContainer final {
 
   void SetGrpcCranedInfoByCranedMeta_(const CranedMeta& craned_meta,
                                       crane::grpc::CranedInfo* craned_info);
+
+  void SetGrpcPartitionInfoByPartitionMeta_(const PartitionMeta& meta,
+                                            crane::grpc::PartitionInfo* info);
 
   void SetGrpcReservationInfoByResvMeta_(const ResvMeta& meta,
                                          crane::grpc::ReservationInfo* info);

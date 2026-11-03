@@ -790,6 +790,9 @@ message PartitionInfo {
   uint64 max_mem_per_cpu = 12;
   uint64 default_mem_per_node = 13;
   uint64 max_mem_per_node = 14;
+  bool is_default = 15;
+  uint32 priority = 16;
+  PreemptMode preempt_mode = 17;
 }
 
 // An unexpected loss of contact, retained until an explicit state update or
@@ -797,6 +800,13 @@ message PartitionInfo {
 message NodeOutage {
   uint32 uid = 1;
   google.protobuf.Timestamp time = 2;
+}
+
+// Configured resource/type/device order, which protobuf maps cannot preserve.
+message GresResource {
+  string name = 1;
+  string type = 2;
+  repeated string devices = 3;
 }
 
 message CranedInfo {
@@ -835,6 +845,12 @@ message CranedInfo {
   optional uint64 free_memory_mb = 28;
   // Configured scheduling capacity, independent of reported physical sockets.
   uint32 configured_sockets = 29;
+  repeated GresResource gres_order = 30;
+  // Optional query detail: resources held by ending allocations, included in
+  // res_alloc. Resource CPU counts retain their exact scheduler precision.
+  ResourceInNodeV3 cleanup_resources = 31;
+  // Unfinished work on this node, distinct from resources awaiting release.
+  bool cleanup_pending = 32;
 }
 
 message ReservationInfo {
@@ -855,21 +871,6 @@ message ReservationInfo {
   // Unformatted allocation membership and stable controller creation order.
   repeated string allocated_nodes = 13;
   uint64 creation_order = 14;
-}
-
-message TrimmedPartitionInfo {
-  message TrimmedCranedInfo {
-    CranedResourceState resource_state = 1;
-    CranedControlState control_state = 2;
-    CranedPowerState power_state = 3;
-    uint32 count = 4;
-    string craned_list_regex = 5;
-    string reason = 6;
-  }
-
-  string name = 1;
-  PartitionState state = 2;
-  repeated TrimmedCranedInfo craned_lists = 3;
 }
 
 message RichError {

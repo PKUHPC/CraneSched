@@ -6882,9 +6882,10 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   if (has_more) m_clean_job_status_change_handle_->send();
 }
 
-crane::grpc::QuerySinfoInfoReply JobScheduler::QuerySinfoInfo(
-    bool reservations_only) {
-  if (reservations_only) return g_meta_container->QuerySinfoInfo(true, {});
+crane::grpc::QueryClusterInfoReply JobScheduler::QueryClusterInfo(
+    const crane::grpc::QueryClusterInfoRequest& request) {
+  if (!request.include_nodes() || !request.include_allocation_cleanup())
+    return g_meta_container->QueryClusterInfo(request);
 
   // Match the scheduler's existing lock order: running jobs before node and
   // reservation metadata. Keep allocation-ending facts and node resource
@@ -6894,7 +6895,7 @@ crane::grpc::QuerySinfoInfoReply JobScheduler::QuerySinfoInfo(
   for (const auto& [id, job] : m_running_job_map_)
     if (auto nodes = job->AllocationCleanupNodes(); nodes)
       completing_jobs.emplace(id, std::move(*nodes));
-  return g_meta_container->QuerySinfoInfo(false, completing_jobs);
+  return g_meta_container->QueryClusterInfo(request, completing_jobs);
 }
 
 void JobScheduler::QueryJobsInRam(

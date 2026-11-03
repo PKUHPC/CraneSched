@@ -1087,21 +1087,6 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QuerySinfoInfo(
-    grpc::ServerContext* context,
-    const crane::grpc::QuerySinfoInfoRequest* request,
-    crane::grpc::QuerySinfoInfoReply* response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-
-  // Reservation metadata is public to authenticated clients of this API.
-  // Permissions to create, modify, delete or use reservations are unchanged.
-  *response = g_job_scheduler->QuerySinfoInfo(request->reservations_only());
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryReservationInfoRequest* request,
@@ -2929,7 +2914,17 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  *response = g_meta_container->QueryClusterInfo(*request);
+  // Preserve public node/partition reads, including clients without a Crane
+  // account. Additional reservation/cleanup facts require caller identity;
+  // management and allocation permissions belong to their respective RPCs.
+  if (request->include_reservations() ||
+      request->include_allocation_cleanup()) {
+    if (!request->has_uid())
+      return {grpc::StatusCode::INVALID_ARGUMENT, "uid is required"};
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  }
+  *response = g_job_scheduler->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
 

@@ -1259,7 +1259,8 @@ class JobScheduler {
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map,
       size_t num_limit);
 
-  crane::grpc::QuerySinfoInfoReply QuerySinfoInfo(bool reservations_only);
+  crane::grpc::QueryClusterInfoReply QueryClusterInfo(
+      const crane::grpc::QueryClusterInfoRequest& request);
 
   void QueryQueueStateSummary(
       const crane::grpc::QueryQueueStateSummaryRequest* request,
