@@ -603,6 +603,12 @@ void ParseConfig(int argc, char** argv) {
               const auto& gres_node = gres_it->as<YAML::Node>();
               const auto& device_name = gres_node["name"].as<std::string>();
               const auto& device_type = gres_node["type"].as<std::string>();
+              if (std::ranges::find(g_config.GresOrder, device_name) ==
+                  g_config.GresOrder.end())
+                g_config.GresOrder.push_back(device_name);
+              Ctld::Config::Node::GresResource resource_order{device_name,
+                                                              device_type,
+                                                              {}};
               if (gres_node["DeviceFileRegex"]) {
                 std::list<std::string> device_path_list;
                 if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
@@ -613,6 +619,7 @@ void ParseConfig(int argc, char** argv) {
                   std::exit(1);
                 }
                 for (const auto& device_path : device_path_list) {
+                  resource_order.devices.push_back(device_path);
                   resourceInNode.name_type_slots_map[device_name][device_type]
                       .emplace(device_path);
                 }
@@ -646,8 +653,10 @@ void ParseConfig(int argc, char** argv) {
                   }
                   resourceInNode.name_type_slots_map[device_name][device_type]
                       .emplace(device_path_list.front());
+                  resource_order.devices.push_back(device_path_list.front());
                 }
               }
+              node_ptr->gres_order.push_back(std::move(resource_order));
             }
           }
 
@@ -658,6 +667,8 @@ void ParseConfig(int argc, char** argv) {
             node_config->node_hostname = *hostname_it++;
             node_config->node_addr = *addr_it++;
             node_config->dedicated_resource = resourceInNode;
+            if (!g_config.Nodes.contains(node_id))
+              g_config.NodeOrder.emplace_back(node_id);
             g_config.Nodes[node_id] = node_config;
           }
         }
@@ -830,6 +841,7 @@ void ParseConfig(int argc, char** argv) {
               part.default_mem_per_node / B2MB, part.max_mem_per_cpu / B2MB,
               part.max_mem_per_node / B2MB);
 
+          g_config.PartitionOrder.emplace_back(name);
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
       }

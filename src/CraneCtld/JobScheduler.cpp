@@ -1104,7 +1104,18 @@ bool JobScheduler::Init() {
 
   if (!resv_req_map.empty()) {
     CRANE_INFO("{} reservation(s) recovered.", resv_req_map.size());
-    for (auto&& [resv_id, reservation_req] : resv_req_map) {
+    std::vector<ResvId> reservation_order;
+    for (const auto& [id, request] : resv_req_map)
+      reservation_order.push_back(id);
+    // Old databases have no creation order. Give their existing reservations
+    // a deterministic name order once, ahead of subsequently created entries.
+    std::ranges::sort(reservation_order, [&](const auto& a, const auto& b) {
+      const auto left = resv_req_map.at(a).creation_order();
+      const auto right = resv_req_map.at(b).creation_order();
+      return left == right ? a < b : left < right;
+    });
+    for (const auto& resv_id : reservation_order) {
+      const auto& reservation_req = resv_req_map.at(resv_id);
       auto res = CreateResv_(reservation_req);
       if (res) continue;
 
@@ -4745,6 +4756,7 @@ crane::grpc::CreateReservationReply JobScheduler::CreateResv(
 
 std::expected<void, std::string> JobScheduler::CreateResv_(
     const crane::grpc::CreateReservationRequest& request) {
+  uint64_t creation_order{0};
   std::vector<std::string> validation_errors;
 
   std::unordered_set<std::string> allowed_accounts;
@@ -4919,6 +4931,12 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     }
   }
 
+  // Keep the selected membership, not the partition's candidate set. Recovery
+  // must restore the same nodes instead of running node selection again.
+  craned_ids.clear();
+  for (const auto& id : allocated_res.EachNodeResMap() | std::views::keys)
+    craned_ids.push_back(id);
+
   const ResvId& resv_name = request.reservation_name();
   {
     auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
@@ -4943,7 +4961,9 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     g_meta_container->AddResReduceEventsAndUnlock(
         {std::make_pair(start_time, std::move(affected_nodes_vec))});
 
+    creation_order = ++m_reservation_creation_order_;
     ResvMeta resv{.name = resv_name,
+                  .creation_order = creation_order,
                   .part_id = partition,
                   .start_time = start_time,
                   .end_time = end_time,
@@ -4978,8 +4998,12 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     bool ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
     if (!ok) CRANE_ERROR("Failed to begin txn for reservation {}.", resv_name);
 
-    ok =
-        g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name, request);
+    auto persisted = request;
+    persisted.set_creation_order(creation_order);
+    persisted.set_craned_regex(util::HostNameListToStr(craned_ids));
+    persisted.set_node_num(craned_ids.size());
+    ok = g_embedded_db_client->UpdateReservationInfo(txn_id, resv_name,
+                                                     persisted);
     if (!ok) {
       CRANE_ERROR("Failed to insert reservation {} to resv DB", resv_name);
     }
@@ -6860,6 +6884,22 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   const bool has_more =
       m_job_status_change_queue_size_.load(std::memory_order_relaxed) > 0;
   if (has_more) m_clean_job_status_change_handle_->send();
+}
+
+crane::grpc::QueryClusterInfoReply JobScheduler::QueryClusterInfo(
+    const crane::grpc::QueryClusterInfoRequest& request) {
+  if (!request.include_nodes() || !request.include_allocation_cleanup())
+    return g_meta_container->QueryClusterInfo(request);
+
+  // Match the scheduler's existing lock order: running jobs before node and
+  // reservation metadata. Keep allocation-ending facts and node resource
+  // ownership in the same lifetime, including when a job ID is requeued.
+  LockGuard running_guard(&m_running_job_map_mtx_);
+  AllocationCleanupMap completing_jobs;
+  for (const auto& [id, job] : m_running_job_map_)
+    if (auto nodes = job->AllocationCleanupNodes(); nodes)
+      completing_jobs.emplace(id, std::move(*nodes));
+  return g_meta_container->QueryClusterInfo(request, completing_jobs);
 }
 
 void JobScheduler::QueryJobsInRam(

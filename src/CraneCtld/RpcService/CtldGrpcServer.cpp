@@ -183,6 +183,7 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
     return grpc::Status::OK;
   }
   stub->UpdateLastActiveTime();
+  g_meta_container->UpdateNodeTelemetry(*request);
   response->set_ok(true);
 
   return grpc::Status::OK;
@@ -2939,7 +2940,17 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  *response = g_meta_container->QueryClusterInfo(*request);
+  // Preserve public node/partition reads, including clients without a Crane
+  // account. Additional reservation/cleanup facts require caller identity;
+  // management and allocation permissions belong to their respective RPCs.
+  if (request->include_reservations() ||
+      request->include_allocation_cleanup()) {
+    if (!request->has_uid())
+      return {grpc::StatusCode::INVALID_ARGUMENT, "uid is required"};
+    if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+      return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  }
+  *response = g_job_scheduler->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
 

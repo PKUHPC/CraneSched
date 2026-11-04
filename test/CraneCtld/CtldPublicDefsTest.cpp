@@ -25,6 +25,57 @@
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
 
+TEST(AllocationLifecycle, CommonStepCleanupDoesNotEndAllocation) {
+  Ctld::JobInCtld job;
+  auto primary = std::make_unique<Ctld::CommonStepInCtld>();
+  primary->SetStatus(crane::grpc::Running);
+  primary->SetRunningNodes({"n1", "n2"});
+  job.SetPrimaryStep(std::move(primary));
+  auto common = std::make_unique<Ctld::CommonStepInCtld>();
+  common->type = crane::grpc::Interactive;
+  common->SetStepId(2);
+  common->SetStatus(crane::grpc::Completing);
+  common->SetRunningNodes({"n1"});
+  job.AddStep(std::move(common));
+  EXPECT_FALSE(job.AllocationCleanupNodes().has_value());
+}
+
+TEST(AllocationLifecycle, PrimaryCleanupIncludesDaemonThenTracksEachNode) {
+  Ctld::JobInCtld job;
+  auto primary = std::make_unique<Ctld::CommonStepInCtld>();
+  primary->SetStatus(crane::grpc::Completing);
+  primary->SetRunningNodes({"n1"});
+  job.SetPrimaryStep(std::move(primary));
+  auto daemon = std::make_unique<Ctld::DaemonStepInCtld>();
+  daemon->SetStatus(crane::grpc::Running);
+  daemon->SetRunningNodes({"n1", "n2"});
+  job.SetDaemonStep(std::move(daemon));
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
+            (std::unordered_set<CranedId>{"n1", "n2"}));
+
+  job.PrimaryStep()->SetStatus(crane::grpc::Completed);
+  job.SetPrimaryStepStatus(crane::grpc::Completed);
+  job.DaemonStep()->SetStatus(crane::grpc::Completing);
+  job.DaemonStep()->StepOnNodeFinish("n1");
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
+            (std::unordered_set<CranedId>{"n2"}));
+  job.DaemonStep()->StepOnNodeFinish("n2");
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_TRUE(job.AllocationCleanupNodes()->empty());
+}
+
+TEST(AllocationLifecycle, EarlyDaemonFailureEndsAllocationWithoutPrimary) {
+  Ctld::JobInCtld job;
+  auto daemon = std::make_unique<Ctld::DaemonStepInCtld>();
+  daemon->SetStatus(crane::grpc::Completing);
+  daemon->SetRunningNodes({"n1"});
+  job.SetDaemonStep(std::move(daemon));
+  ASSERT_TRUE(job.AllocationCleanupNodes().has_value());
+  EXPECT_EQ(*job.AllocationCleanupNodes(),
+            (std::unordered_set<CranedId>{"n1"}));
+}
+
 TEST(CtldPublicDefs, ResolvesCranedIdAliases) {
   auto original_aliases = std::move(g_config.CranedIdByAlias);
   g_config.CranedIdByAlias = {

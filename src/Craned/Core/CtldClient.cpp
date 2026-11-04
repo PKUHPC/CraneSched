@@ -18,6 +18,10 @@
 
 #include "CtldClient.h"
 
+#include <sys/sysinfo.h>
+
+#include <cstdint>
+#include <optional>
 #include <random>
 
 #include "CranedServer.h"
@@ -32,6 +36,23 @@ namespace Craned {
 using namespace std::chrono_literals;
 
 namespace {
+
+struct NodeTelemetry {
+  uint32_t cpu_load;
+  uint64_t free_memory_mb;
+};
+
+std::optional<NodeTelemetry> ReadNodeTelemetry() {
+  struct sysinfo sample{};
+  if (sysinfo(&sample) != 0) return std::nullopt;
+  // The sinfo contract uses the five-minute load in hundredths and Linux
+  // MemFree, not available memory or unallocated scheduler capacity.
+  const float load =
+      static_cast<float>(sample.loads[1]) / (1U << SI_LOAD_SHIFT);
+  return NodeTelemetry{.cpu_load = static_cast<uint32_t>(load * 100.0),
+                       .free_memory_mb = uint64_t{sample.freeram} *
+                                         sample.mem_unit / (1U << 20)};
+}
 
 int64_t NowUnixMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1022,6 +1043,10 @@ bool CtldClient::CranedRegister_(
   *ready_request.mutable_token() = token;
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
+  if (auto sample = ReadNodeTelemetry()) {
+    grpc_meta->set_cpu_load(sample->cpu_load);
+    grpc_meta->set_free_memory_mb(sample->free_memory_mb);
+  }
   auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
@@ -1358,6 +1383,10 @@ bool CtldClient::Ping_() {
 
   crane::grpc::CranedPingRequest req;
   req.set_craned_id(m_craned_id_);
+  if (auto sample = ReadNodeTelemetry()) {
+    req.set_cpu_load(sample->cpu_load);
+    req.set_free_memory_mb(sample->free_memory_mb);
+  }
   crane::grpc::CranedPingReply reply;
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                      "Sending CranedPing request to CraneCtlD.");

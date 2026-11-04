@@ -464,3 +464,231 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                {"job_id", "type", "delay_seconds"});
 }
 }  // namespace
+
+namespace {
+class NodeQueryTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    original_config_ = std::move(g_config);
+    g_config = Ctld::Config{};
+    auto node = std::make_shared<Ctld::Config::Node>();
+    node->cpu = 4;
+    node->memory_bytes = 8192;
+    node->node_topo_info.sockets = 2;
+    g_config.Nodes.emplace("n1", node);
+    g_config.NodeOrder = {"n1"};
+    g_config.CranedIdByAlias.emplace("n1", "n1");
+    g_config.Partitions["batch"].nodes.emplace("n1");
+    g_config.PartitionOrder = {"batch"};
+    nodes_.InitFromConfig(g_config);
+    nodes_.CranedUp("n1", {});
+  }
+  void TearDown() override { g_config = std::move(original_config_); }
+  crane::grpc::CranedInfo ReadNode() {
+    return nodes_.QueryCranedInfo("n1").craned_info_list(0);
+  }
+  Ctld::Config original_config_;
+  Ctld::CranedMetaContainer nodes_;
+};
+
+TEST_F(NodeQueryTest, NativeOutageRetainsEventWithoutFormattingReason) {
+  crane::grpc::ModifyCranedStateRequest request;
+  request.add_craned_ids("n1");
+  request.set_uid(1000);
+  request.set_new_state(crane::grpc::CRANE_DRAIN);
+  request.set_reason("maintenance");
+  nodes_.ChangeNodeState(request);
+  nodes_.CranedDown("n1");
+  auto down = ReadNode();
+  EXPECT_EQ(down.state_reason(), "maintenance");
+  EXPECT_EQ(down.state_reason_uid(), 1000);
+  ASSERT_TRUE(down.has_outage());
+  EXPECT_EQ(down.outage().uid(), getuid());
+  EXPECT_FALSE(down.responding());
+  EXPECT_TRUE(down.has_registered());
+  nodes_.CranedUp("n1", {});
+  EXPECT_TRUE(ReadNode().responding());
+  EXPECT_TRUE(google::protobuf::util::MessageDifferencer::Equals(
+      down.outage(), ReadNode().outage()));
+  // Updating the reason while still drained acknowledges the previous outage.
+  request.set_reason("new maintenance");
+  nodes_.ChangeNodeState(request);
+  EXPECT_FALSE(ReadNode().has_outage());
+  nodes_.CranedDown("n1");
+  nodes_.CranedUp("n1", {});
+  ASSERT_TRUE(ReadNode().has_outage());
+  request.set_new_state(crane::grpc::CRANE_NONE);
+  nodes_.ChangeNodeState(request);
+  EXPECT_FALSE(ReadNode().has_outage());
+  EXPECT_TRUE(ReadNode().state_reason().empty());
+  EXPECT_FALSE(ReadNode().has_state_reason_uid());
+  nodes_.CranedDown("n1");
+  ASSERT_TRUE(ReadNode().has_outage());
+  nodes_.CranedUp("n1", {});
+  EXPECT_FALSE(ReadNode().has_outage());
+}
+
+TEST_F(NodeQueryTest, ExpectedPowerDisconnectHasNoOutageEvent) {
+  {
+    auto meta = nodes_.GetCranedMetaPtr("n1");
+    meta->power_state = crane::grpc::CRANE_POWER_POWERING_OFF;
+  }
+  nodes_.CranedDown("n1");
+  EXPECT_FALSE(ReadNode().has_outage());
+}
+
+TEST_F(NodeQueryTest, SnapshotPreservesExactCleanupAndNativeHoldings) {
+  ResourceInNodeV3 held, cleanup;
+  held.GetCpuSet().cpu_count = cpu_t::from_raw_value(66);
+  held.SetMemoryBytes(5000);
+  cleanup.GetCpuSet().cpu_count = cpu_t::from_raw_value(1);
+  cleanup.SetMemoryBytes(4000);
+  {
+    auto meta = nodes_.GetCranedMetaPtr("n1");
+    meta->res_in_use = held;
+    meta->rn_job_res_map.emplace(2, cleanup);
+    meta->remote_meta.cpu_load = 731;
+    meta->static_meta.node_topo_info.sockets = 8;
+  }
+  Ctld::AllocationCleanupMap ending{{2, {"n1"}}};
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  request.set_include_allocation_cleanup(true);
+  const auto reply = nodes_.QueryClusterInfo(request, ending);
+  ASSERT_EQ(reply.nodes_size(), 1);
+  EXPECT_TRUE(reply.has_observed_at());
+  const auto& node = reply.nodes(0);
+  EXPECT_TRUE(node.cleanup_pending());
+  EXPECT_DOUBLE_EQ(node.cleanup_resources().cpu_count(), 1.0 / 256);
+  EXPECT_EQ(node.cleanup_resources().memory_bytes(), 4000);
+  EXPECT_DOUBLE_EQ(node.res_alloc().cpu_count(), 66.0 / 256);
+  EXPECT_EQ(node.res_alloc().memory_bytes(), 5000);
+  EXPECT_EQ(node.configured_sockets(), 2);
+  EXPECT_EQ(node.node_topo_info().sockets(), 8);
+  ending.at(2).clear();
+  auto finished = nodes_.QueryClusterInfo(request, ending).nodes(0);
+  EXPECT_FALSE(finished.cleanup_pending());
+  EXPECT_EQ(finished.cleanup_resources().memory_bytes(), 4000);
+  nodes_.CranedDown("n1");
+  // The native query keeps the observed sample; clients decide how to display
+  // it.
+  EXPECT_EQ(ReadNode().cpu_load(), 731);
+}
+
+TEST_F(NodeQueryTest, ClusterQueryScopesPreserveOrderMembershipAndTotals) {
+  g_config.Nodes.emplace(
+      "n2", std::make_shared<Ctld::Config::Node>(*g_config.Nodes.at("n1")));
+  g_config.NodeOrder = {"n2", "n1"};
+  g_config.CranedIdByAlias.emplace("alias2", "n2");
+  g_config.Partitions["batch"].nodes.emplace("n2");
+  g_config.Partitions["batch"].nodelist_str = "n[1-2]";
+  g_config.Partitions["shared"].nodes = {"n1", "n2"};
+  g_config.Partitions["empty"] = {};
+  g_config.PartitionOrder = {"shared", "batch", "empty"};
+  g_config.DefaultPartition = "batch";
+  g_config.Partitions["batch"].priority = 7;
+  Ctld::CranedMetaContainer nodes;
+  nodes.InitFromConfig(g_config);
+  nodes.CranedUp("n1", {});
+  nodes.CranedUp("n2", {});
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  request.set_include_partitions(true);
+  auto reply = nodes.QueryClusterInfo(request);
+  ASSERT_EQ(reply.nodes_size(), 2);
+  EXPECT_EQ(reply.nodes(0).hostname(), "n2");
+  EXPECT_EQ(reply.nodes(1).hostname(), "n1");
+  EXPECT_EQ(reply.nodes(0).partition_names_size(), 2);
+  EXPECT_FALSE(reply.nodes(0).has_cleanup_resources());
+  ASSERT_EQ(reply.partitions_size(), 3);
+  EXPECT_EQ(reply.partitions(0).name(), "shared");
+  EXPECT_EQ(reply.partitions(1).name(), "batch");
+  EXPECT_TRUE(reply.partitions(1).is_default());
+  EXPECT_EQ(reply.partitions(1).priority(), 7);
+  EXPECT_EQ(reply.partitions(2).total_nodes(), 0);
+
+  request.add_filter_nodes("alias2");
+  request.add_filter_partitions("batch");
+  reply = nodes.QueryClusterInfo(request);
+  ASSERT_EQ(reply.nodes_size(), 1);
+  EXPECT_EQ(reply.nodes(0).hostname(), "n2");
+  EXPECT_EQ(reply.nodes(0).partition_names_size(), 2);
+  ASSERT_EQ(reply.partitions_size(), 1);
+  EXPECT_EQ(reply.partitions(0).total_nodes(), 2);
+  EXPECT_EQ(reply.partitions(0).hostlist(), "n[1-2]");
+
+  request.clear_filter_nodes();
+  request.add_filter_nodes("missing");
+  reply = nodes.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  ASSERT_EQ(reply.partitions_size(), 1);
+  EXPECT_EQ(reply.partitions(0).total_nodes(), 2);
+  request.clear_filter_partitions();
+  request.add_filter_partitions("missing");
+  request.clear_filter_nodes();
+  reply = nodes.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  EXPECT_TRUE(reply.partitions().empty());
+}
+
+TEST_F(NodeQueryTest, ClusterQueryIncludesOnlyRequestedDomains) {
+  Ctld::ResvMeta reservation;
+  reservation.name = "test";
+  reservation.start_time = absl::FromUnixSeconds(100);
+  reservation.end_time = absl::FromUnixSeconds(200);
+  {
+    auto reservations = nodes_.GetResvMetaMapExclusivePtr();
+    reservations->emplace(reservation.name, std::move(reservation));
+  }
+  crane::grpc::QueryClusterInfoRequest request;
+  request.set_include_nodes(true);
+  auto reply = nodes_.QueryClusterInfo(request);
+  EXPECT_EQ(reply.nodes_size(), 1);
+  EXPECT_TRUE(reply.partitions().empty());
+  EXPECT_TRUE(reply.reservations().empty());
+  request.set_include_nodes(false);
+  request.set_include_reservations(true);
+  reply = nodes_.QueryClusterInfo(request);
+  EXPECT_TRUE(reply.nodes().empty());
+  EXPECT_TRUE(reply.partitions().empty());
+  EXPECT_EQ(reply.reservations_size(), 1);
+  EXPECT_TRUE(reply.ok());
+}
+
+TEST_F(NodeQueryTest, AllAndSingleReservationQueriesExposeActualAllocation) {
+  Ctld::ResvMeta reservation;
+  reservation.name = "test";
+  reservation.part_id = "batch";
+  reservation.creation_order = 19;
+  reservation.start_time = absl::FromUnixSeconds(100);
+  reservation.end_time = absl::FromUnixSeconds(200);
+  reservation.craned_ids = {"n1", "n2", "n3"};
+  ResourceInNodeV3 capacity;
+  capacity.GetCpuSet().cpu_count = cpu_t{4};
+  reservation.res_total.AddResourceInNode("n2", capacity);
+  reservation.res_avail = reservation.res_total;
+  reservation.accounts = {"account"};
+  reservation.users_black_list = true;
+  reservation.users = {"excluded"};
+  {
+    auto reservations = nodes_.GetResvMetaMapExclusivePtr();
+    reservations->emplace(reservation.name, std::move(reservation));
+  }
+  const auto all = nodes_.QueryAllResvInfo();
+  const auto one = nodes_.QueryResvInfo("test");
+  ASSERT_EQ(all.reservation_info_list_size(), 1);
+  ASSERT_EQ(one.reservation_info_list_size(), 1);
+  EXPECT_TRUE(google::protobuf::util::MessageDifferencer::Equals(all, one));
+  const auto& info = one.reservation_info_list(0);
+  EXPECT_EQ(info.creation_order(), 19);
+  EXPECT_EQ(info.craned_regex(), "n2");
+  ASSERT_EQ(info.allocated_nodes_size(), 1);
+  EXPECT_EQ(info.allocated_nodes(0), "n2");
+  EXPECT_EQ(info.res_total().cpu_count(), 4);
+  EXPECT_EQ(info.res_avail().cpu_count(), 4);
+  EXPECT_EQ(info.res_alloc().cpu_count(), 0);
+  EXPECT_EQ(info.allowed_accounts(0), "account");
+  EXPECT_EQ(info.denied_users(0), "excluded");
+  EXPECT_EQ(nodes_.QueryResvInfo("absent").reservation_info_list_size(), 0);
+}
+}  // namespace

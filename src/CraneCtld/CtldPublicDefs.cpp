@@ -1739,6 +1739,26 @@ void CommonStepInCtld::SetFieldsOfStepInfo(
       static_cast<crane::grpc::ResourceView>(m_allocated_res_.View());
 }
 
+std::optional<std::unordered_set<CranedId>> JobInCtld::AllocationCleanupNodes()
+    const {
+  const auto completing = [](const StepInCtld* step) {
+    return step && step->Status() == crane::grpc::Completing;
+  };
+  if (!completing(PrimaryStep()) && !completing(DaemonStep()) &&
+      !IsFinishedStepStatus(PrimaryStepStatus()))
+    return std::nullopt;
+
+  std::unordered_set<CranedId> nodes;
+  const auto append = [&nodes](const StepInCtld* step) {
+    if (step && !IsFinishedStepStatus(step->Status()))
+      nodes.insert(step->RunningNodes().begin(), step->RunningNodes().end());
+  };
+  append(DaemonStep());
+  append(PrimaryStep());
+  for (const auto& [id, step] : m_steps_) append(step.get());
+  return nodes;
+}
+
 bool JobInCtld::IsX11() const {
   if (!IsInteractive()) return false;
   auto const& ia_meta = this->job_to_ctld.interactive_meta();
