@@ -1,0 +1,14 @@
+[Unit]
+Description=CraneSched - Cfored
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+ExecStart=@PREFIX@/bin/cfored
+ExecReload=@PREFIX@/bin/cfored --reload
+KillSignal=SIGINT
+ReloadSignal=SIGUSR2
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

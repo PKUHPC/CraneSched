@@ -1,0 +1,1293 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package crane.grpc;
+option go_package = "CraneFrontEnd/generated/protos";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// All the definitions in this proto file can be found in PublicHeader.h
+// They are just protobuf version definitions.
+
+message CranedId {
+  uint32 partition_id = 1;
+  uint32 craned_index = 2;
+}
+
+message Slots {
+  repeated string slots = 1;
+}
+
+message DeviceTypeSlotsMap {
+  map<string /*Type*/, Slots /*index of slot*/> type_slots_map = 1;
+}
+
+message DedicatedResourceInNode {
+  map<string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
+}
+
+message GresCount {
+  uint64 total = 1;
+  map<string, uint64> specified = 2;
+}
+
+message GresMap {
+  map<string, GresCount> name_gres_map = 1;
+}
+
+message ResourceView {
+  double cpu_count = 1;
+  uint64 memory_bytes = 2;
+  uint64 memory_sw_bytes = 3;
+  GresMap gres_map = 4;
+}
+
+message ResourceInNodeV3 {
+  repeated uint32 cpu_ids = 1;
+  double cpu_count = 2;
+  uint64 memory_bytes = 3;
+  uint64 memory_sw_bytes = 4;
+  DedicatedResourceInNode gres = 5;
+}
+
+message ResourceV3 {
+  map<string, ResourceInNodeV3> each_node_res_map = 1;
+}
+
+enum PartitionState {
+  PARTITION_UP = 0;
+  PARTITION_DOWN = 1;
+}
+
+enum CranedResourceState {
+  CRANE_IDLE = 0;
+  CRANE_MIX = 1;
+  CRANE_ALLOC = 2;
+  CRANE_DOWN = 3;
+}
+
+enum CranedPowerState {
+  CRANE_POWER_ACTIVE = 0;
+  CRANE_POWER_IDLE = 1;
+  CRANE_POWER_SLEEPING = 2;
+  CRANE_POWER_POWEREDOFF = 3;
+  CRANE_POWER_TO_SLEEPING = 4;
+  CRANE_POWER_WAKING_UP = 5;
+  CRANE_POWER_POWERING_ON = 6;
+  CRANE_POWER_POWERING_OFF = 7;
+}
+
+enum CranedControlState {
+  CRANE_NONE = 0;
+  CRANE_DRAIN = 1;
+  CRANE_POWEROFF = 2;
+  CRANE_SLEEP = 3;
+  CRANE_WAKE = 4;
+  CRANE_POWERON = 5;
+  CRANE_UNREGISTER_POWER = 6;
+}
+
+enum JobStatus {
+  Pending = 0;
+  Running = 1;
+  Completed = 2;
+  Failed = 3;
+  ExceedTimeLimit = 4;
+  Cancelled = 5;
+  OutOfMemory = 6;
+  Configuring = 7;
+  Starting = 8;
+  Completing = 9;
+  Suspended = 10;
+  Deadline = 11;
+
+  Invalid = 15;
+}
+
+enum JobType {
+  Interactive = 0;
+  Batch = 1;
+  Container = 2;
+}
+
+enum InteractiveJobType {
+  Calloc = 0;
+  Crun = 1;
+}
+
+enum DependencyType {
+  AFTER = 0;
+  AFTER_ANY = 1;
+  AFTER_OK = 2;
+  AFTER_NOT_OK = 3;
+}
+
+message DependencyCondition {
+  uint32 job_id = 1;
+  DependencyType type = 2;
+  uint64 delay_seconds = 3;
+}
+
+message Dependencies {
+  repeated DependencyCondition deps = 1;
+  bool is_or = 2;
+}
+
+message ArraySpec {
+  uint32 start = 1;
+  uint32 end = 2;
+  optional uint32 stride = 3;
+  optional uint32 max_concurrent = 4;
+}
+
+message ArrayTaskIdentity {
+  uint32 array_job_id = 1;
+  uint32 task_id = 2;
+}
+
+message DependencyStatus {
+  repeated DependencyCondition pending = 1;
+  bool is_or = 2;
+
+  oneof ready_time_type {
+    google.protobuf.Timestamp ready_time = 3;
+    bool infinite_future = 4;
+    bool infinite_past = 5;
+  }
+}
+
+message Signal {
+  int32 signal_number = 1;
+  uint32 signal_time = 2;  // seconds_before_kill
+  enum SignalFlag {
+    NONE = 0;
+    // (B) Send the signal only to the batch shell, not to other job steps.
+    BATCH_ONLY = 1;
+    // (R) Allow this job to overlap with a reservation that has MaxStartDelay
+    // set
+    RESERVATION_OVERLAP = 2;
+  }
+  SignalFlag signal_flag = 3;
+}
+
+message JobToCtld {
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+
+  string partition_name = 2;
+
+  JobType type = 4;
+
+  uint32 uid = 5;
+  string account = 6;
+  string name = 7;
+  string qos = 8;
+  uint32 node_num_min = 9;
+  uint32 ntasks_per_node = 10;
+  uint32 ntasks = 17;
+
+  bool requeue_if_failed = 12;
+  bool get_user_env = 13;
+
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 14;
+
+  Dependencies dependencies = 15;
+
+  oneof payload {
+    BatchJobAdditionalMeta batch_meta = 21;
+    InteractiveJobAdditionalMeta interactive_meta = 22;
+  }
+
+  // cbatch --pod: Pod
+  // ccon (standalone): Pod + Container
+  // ccon (nested): Container (StepToCtld only)
+  optional PodJobAdditionalMeta pod_meta = 23;
+  optional ContainerJobAdditionalMeta container_meta = 24;
+  IoMeta io_meta = 25;
+  string sh_script = 26;  // Crun and cbatch script content
+
+  string extra_attr = 30;
+
+  string cmd_line = 31;
+  string cwd = 32;  // Current working directory
+  map<string, string> env = 33;
+
+  string excludes = 34;
+  string nodelist = 35;
+
+  string reservation = 36;
+  bool exclusive = 37;
+
+  bool hold = 38;
+  google.protobuf.Timestamp begin_time = 39;
+
+  message License {
+    string key = 1;
+    uint32 count = 2;
+  }
+  repeated License licenses_count = 40;
+  bool is_licenses_or = 41;
+  optional string wckey = 42;
+  string submit_hostname = 43;
+  string submit_dir = 44;
+  optional uint64 mem_per_cpu = 45;
+
+  string task_prolog = 46;
+  string task_epilog = 47;
+  repeated Signal signals = 48;
+  google.protobuf.Timestamp deadline_time = 49;
+  optional double cpus_per_task = 50;
+  optional uint64 mem_per_node = 51;
+  optional GresMap gres_per_node = 52;
+  bool no_requeue = 53;
+  uint32 node_num_max = 54;
+
+  // Array submission spec for this job. Child identity is runtime-only.
+  ArraySpec array_spec = 58;
+}
+
+message JobInEmbeddedDb {
+  RuntimeAttrOfJob runtime_attr = 1;
+  JobToCtld job_to_ctld = 2;
+}
+
+message RuntimeAttrOfJob {
+  // Fields that won't change after this job is accepted.
+  uint32 job_id = 1;
+  int64 job_db_id = 3;
+  string username = 5;
+
+  // Fields that will change after this job is accepted.
+  int32 requeue_count = 11;
+  repeated string craned_ids = 12;
+  JobStatus status = 13;
+  uint32 exit_code = 14;
+
+  google.protobuf.Timestamp submit_time = 15;
+  google.protobuf.Timestamp start_time = 16;
+  google.protobuf.Timestamp end_time = 17;
+
+  bool held = 18;
+  ResourceV3 allocated_res = 19;
+  double cached_priority = 20;
+
+  JobStatus primary_step_status = 21;
+  uint32 primary_step_exit_code = 22;
+  map<string, uint32> actual_licenses = 23;
+
+  // Wall-clock time when the job was suspended.
+  // Used to extend end_time upon resume so that suspended time
+  // does not count toward the execution timeout.
+  google.protobuf.Timestamp suspend_time = 24;
+
+  bool requeue_requested = 25;
+
+  // For array children: the materialized array-task identity.
+  ArrayTaskIdentity array_task = 26;
+
+  // For array parents: whether child jobs have been materialized.
+  optional bool array_children_expanded = 28;
+
+  repeated uint32 task_node_list = 29;
+
+  // Normalized query request, retained for recovery archival.
+  GresMap requested_gres = 30;
+}
+
+message StepToCtld {
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+  // account, qos from job
+  uint32 job_id = 2;
+
+  JobType type = 5;
+  uint32 uid = 6;  // Only for authorization
+  string name = 7;
+
+  uint32 node_num = 8;
+  uint32 ntasks_per_node = 9;
+
+  bool requeue_if_failed = 12;
+  bool get_user_env = 13;
+
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 14;
+
+  uint32 ntasks = 15;
+
+  oneof payload {
+    BatchJobAdditionalMeta batch_meta = 21;
+    InteractiveJobAdditionalMeta interactive_meta = 22;
+  }
+
+  // Step <-> Container
+  optional ContainerJobAdditionalMeta container_meta = 24;
+
+  IoMeta io_meta = 25;
+  string sh_script = 26;
+
+  string task_prolog = 27;
+  string task_epilog = 28;
+
+  string extra_attr = 30;
+
+  string cmd_line = 31;
+  string cwd = 32;  // Current working directory
+  map<string, string> env = 33;
+
+  string excludes = 34;
+  string nodelist = 35;
+
+  optional uint64 mem_per_cpu = 36;
+  optional double cpus_per_task = 37;
+  optional uint64 mem_per_node = 38;
+  optional GresMap gres_per_node = 39;
+  google.protobuf.Timestamp deadline_time = 40;
+  // Launcher step that reuses the parent job allocation (Slurm external launcher).
+  bool external_launcher = 41;
+}
+
+message RuntimeAttrOfStep {
+  // Fields that won't change after this step is accepted.
+  uint32 step_id = 1;
+  int64 step_db_id = 2;
+  StepType step_type = 3;
+
+  // Fields that will change after this step is accepted.
+  int32 requeue_count = 11;
+  ResourceV3 allocated_res = 12;
+
+  repeated string craned_ids = 15;
+  repeated string execution_nodes = 16;
+  repeated string configuring_nodes = 17;
+  repeated string running_nodes = 18;
+  repeated string completing_nodes = 19;
+
+  google.protobuf.Timestamp submit_time = 25;
+  google.protobuf.Timestamp start_time = 26;
+  google.protobuf.Timestamp end_time = 27;
+
+  JobStatus pending_final_status = 30;
+  JobStatus status = 31;
+  uint32 pending_final_exit_code = 32;
+  uint32 exit_code = 33;
+
+  bool held = 35;
+
+  // Normalized query request, retained for recovery archival.
+  GresMap requested_gres = 36;
+}
+
+message StepNextIdInEmbeddedDb {
+  map<uint32, uint32> job_id_next_step_id_map = 1;
+}
+
+message StepInEmbeddedDb {
+  RuntimeAttrOfStep runtime_attr = 1;
+  StepToCtld step_to_ctld = 2;
+}
+
+message JobToD {
+  uint32 job_id = 1;
+  uint32 uid = 2;
+  ResourceInNodeV3 res = 4;
+
+  string partition = 5;
+  string account = 6;
+  string qos = 7;
+  StepToD daemon_step = 8;
+
+  string name = 9;
+
+  optional string traceparent = 10;  // W3C traceparent for distributed tracing
+  optional ArrayTaskIdentity array_task = 16;
+}
+
+enum StepType {
+  INVALID = 0;
+  DAEMON = 1;
+  PRIMARY = 2;
+  COMMON = 3;
+}
+
+message StepToD {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  ResourceInNodeV3 res = 3;
+  JobType type = 4;
+  StepType step_type = 5;
+
+  uint32 uid = 6;
+  // Ordered execution groups: effective GID first, supplementary groups after.
+  repeated uint32 gids = 7;
+  map<uint32 /*task id*/, ResourceInNodeV3> task_res_map = 8;
+
+  // For execution step
+  optional BatchJobAdditionalMeta batch_meta = 9;
+  optional InteractiveJobAdditionalMeta interactive_meta = 10;
+  optional PodJobAdditionalMeta pod_meta = 11;
+  optional ContainerJobAdditionalMeta container_meta = 12;
+
+  // If this step is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this step is RUNNING, start_time is the actual starting time.
+  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
+  google.protobuf.Duration time_limit = 16;
+
+  map<string, string> env = 17;
+  string cwd = 18;
+  string name = 19;
+
+  repeated string nodelist = 20;
+
+  uint32 node_num = 22;
+  uint32 ntasks = 21;
+  uint32 ntasks_per_node = 23;
+  double cpus_per_task = 24;
+
+  bool get_user_env = 25;
+  string submit_hostname = 26;
+  uint32 total_gpus = 27;
+  string submit_dir = 28;
+
+  // Not used now.
+  string extra_attr = 29;
+
+  string task_prolog = 30;
+  string task_epilog = 31;
+  repeated Signal signals = 32;
+  google.protobuf.Timestamp deadline_time = 33;
+
+  // task_node_list[task_id] = index of the node in nodelist that owns this
+  // task. Size equals ntasks. Provides the authoritative task_id -> node_idx
+  // mapping.
+  repeated uint32 task_node_list = 34;
+
+  IoMeta io_meta = 35;
+  string sh_script = 36;
+
+  optional ArrayTaskIdentity array_task = 39;
+  bool external_launcher = 40;
+}
+
+message JobStepsToD {
+  JobToD job = 1;
+  map<uint32, StepToD> steps = 2;
+  map<uint32, JobStatus> step_status = 3;
+}
+
+message JobStepIds {
+  repeated uint32 steps = 1;
+}
+
+message JobIdSelector {
+  uint32 job_id = 1;
+  optional uint32 array_task_id = 2;
+  repeated uint32 steps = 3;
+}
+
+message IoMeta {
+  // Append mode for output and error files
+  optional bool open_mode_append = 1;
+  string input_file_pattern = 2;
+  string output_file_pattern = 3;
+  string error_file_pattern = 4;
+
+  // For crun only
+  optional uint32 input_task_id = 5;
+  optional uint32 output_task_id = 6;
+}
+
+message BatchJobAdditionalMeta {
+  string interpreter = 1;
+}
+
+message X11Meta {
+  string target = 1;
+  uint32 port = 2;
+  string cookie = 3;
+
+  bool enable_forwarding = 4;
+}
+
+message TerminalSize {
+  uint32 rows = 1;
+  uint32 columns = 2;
+}
+
+message InteractiveJobAdditionalMeta {
+  string cfored_name = 1;
+  string term_env = 3;
+  InteractiveJobType interactive_type = 4;
+
+  bool pty = 5;
+
+  bool x11 = 6;
+  X11Meta x11_meta = 7;
+
+  // Task ID to forward crun input to
+  optional uint32 input_task_id = 8;
+
+  string mpi = 9;
+
+  TerminalSize terminal_size = 10;
+}
+
+message PodJobAdditionalMeta {
+  string name = 1;  // Pod name, will use to generate hostname
+
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  enum NamespaceMode {
+    POD = 0;
+    CONTAINER = 1;
+    NODE = 2;
+    TARGET = 3;
+  }
+
+  message NamespaceOption {
+    NamespaceMode network = 1;
+    NamespaceMode pid = 2;
+    NamespaceMode ipc = 3;
+    string target_id = 4;
+    // UserNamespace userns_options = 5;
+    // NOTE: UserNamespace is handled by backend only.
+  }
+
+  NamespaceOption namespace = 4;
+
+  // Runtimes only support userns in Pod level.
+  // RunAsUser and RunAsGroup is also limited to Pod.
+  // (But can be extended to Container level)
+  bool userns = 5;
+  uint32 run_as_user = 6;
+  uint32 run_as_group = 7;
+
+  message PortMapping {
+    enum Protocol {
+      TCP = 0;
+      UDP = 1;
+      SCTP = 2;
+    }
+
+    Protocol protocol = 1;
+    int32 container_port = 2;
+    int32 host_port = 3;
+    string host_ip = 4;
+  }
+
+  repeated PortMapping ports = 11;
+
+  // User-specified DNS servers; prepended before system defaults.
+  // Full DNSConfig (searches/options) is handled by backend only.
+  repeated string dns_servers = 12;
+}
+
+message ContainerJobAdditionalMeta {
+  string name = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  message ImageInfo {
+    string image = 1;
+    string username = 2;
+    string password = 3;
+    string server_address = 4;
+    string pull_policy = 5;
+    optional int64 pull_timeout_sec = 7;
+  }
+
+  ImageInfo image = 6;
+
+  string command = 11;
+  repeated string args = 12;
+  string workdir = 13;
+  map<string, string> env = 14;  // env in container
+
+  bool detached = 15;
+  bool tty = 16;
+  bool stdin = 17;
+  bool stdin_once = 18;
+
+  map<string, string> mounts = 24;
+
+  // CDI fully-qualified names for devices allocated to this container.
+  // Populated by craned at step dispatch time; NOT persisted to database.
+  repeated string cdi_devices = 25;
+}
+
+// Visibility of this query result, not a persisted job attribute.
+enum QueryVisibility {
+  QUERY_VISIBILITY_UNSPECIFIED = 0;
+  QUERY_VISIBILITY_PUBLIC = 1;
+  QUERY_VISIBILITY_DETAILS = 2;
+}
+
+message JobInfo {
+  // Static job information
+  JobType type = 1;
+  uint32 job_id = 2;
+  string name = 3;
+  string partition = 4;
+
+  uint32 uid = 5;
+  uint32 gid = 6;
+
+  google.protobuf.Duration time_limit = 7;
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+  google.protobuf.Timestamp submit_time = 10;
+
+  string account = 11;
+  uint32 node_num = 12;
+  string cmd_line = 13;
+  string cwd = 14;
+  string username = 15;
+  string qos = 16;
+  ResourceView req_total_res_view = 17;
+  map<string, uint32> licenses_count = 18;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
+
+  string extra_attr = 21;
+  string reservation = 22;
+
+  // This is only used when querying Container jobs.
+  // For other types of jobs, this field is ignored.
+  optional PodJobAdditionalMeta pod_meta = 23;
+  repeated StepInfo step_info_list = 24;
+  /* 25-28 Reserved */
+
+  // Dynamic job information
+  optional DependencyStatus dependency_status = 29;
+  bool held = 30;
+  JobStatus status = 31;
+
+  uint32 exit_code = 33;
+  uint32 priority = 34;
+  oneof pending_reason_or_craned_list {
+    string pending_reason = 35;
+    string craned_list = 36;
+  }
+
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a job is calculated on the CraneCtld side.
+  google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
+  bool exclusive = 39;
+  ResourceView allocated_res_view = 40;
+  string wckey = 41;
+  map<string, string> env = 42;
+  string submit_hostname = 43;
+  // Requested task count; absent for historical records without this field.
+  optional uint32 ntasks = 44;
+  google.protobuf.Timestamp deadline_time = 45;
+  int32 requeue_count = 46;
+  bool requeue_if_failed = 47;
+
+  ArraySpec array_spec = 50;
+  ArrayTaskIdentity array_task = 51;
+  QueryVisibility query_visibility = 52;
+}
+
+message StepInfo {
+  // Static step information
+  JobType type = 1;
+  StepType step_type = 2;
+  uint32 job_id = 3;
+  uint32 step_id = 4;
+  string name = 5;
+
+  uint32 uid = 6;
+  repeated uint32 gid = 7;
+
+  google.protobuf.Duration time_limit = 8;
+  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp end_time = 10;
+  google.protobuf.Timestamp submit_time = 11;
+
+  uint32 node_num = 12;
+  string cmd_line = 13;
+  string cwd = 14;
+  // Requested task count; absent for historical records without this field.
+  optional uint32 ntasks = 15;
+  ResourceView req_total_res_view = 17;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
+
+  string extra_attr = 21;
+
+  // Public queries preserve presence with empty contents to identify containers.
+  optional ContainerJobAdditionalMeta container_meta = 23;
+  /* 24-29 Reserved */
+
+  // Dynamic step information
+  bool held = 30;
+  JobStatus status = 31;
+
+  uint32 exit_code = 33;
+  string craned_list = 36;
+
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a step is calculated on the CraneCtld side.
+  google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
+  ResourceView allocated_res_view = 40;
+  google.protobuf.Timestamp deadline_time = 41;
+  QueryVisibility query_visibility = 42;
+}
+
+// Physical CPU topology of a node or job topology constraint.
+message NodeTopoInfo {
+  uint32 boards = 1;
+  uint32 sockets = 2;
+  uint32 cores_per_socket = 3;
+  uint32 threads_per_core = 4;
+  uint32 total_cpus = 5;
+}
+
+message PartitionInfo {
+  string hostlist = 1;
+  PartitionState state = 2;
+  string name = 3;
+
+  uint32 total_nodes = 4;
+  uint32 alive_nodes = 5;
+
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
+
+  repeated string allowed_accounts = 9;
+  repeated string denied_accounts = 10;
+
+  uint64 default_mem_per_cpu = 11;
+  uint64 max_mem_per_cpu = 12;
+  uint64 default_mem_per_node = 13;
+  uint64 max_mem_per_node = 14;
+  bool is_default = 15;
+  uint32 priority = 16;
+  PreemptMode preempt_mode = 17;
+}
+
+// An unexpected loss of contact, retained until an explicit state update or
+// a successful registration outside drain. Text presentation belongs to clients.
+message NodeOutage {
+  uint32 uid = 1;
+  google.protobuf.Timestamp time = 2;
+}
+
+// Configured resource/type/device order, which protobuf maps cannot preserve.
+message GresResource {
+  string name = 1;
+  string type = 2;
+  repeated string devices = 3;
+}
+
+message CranedInfo {
+  string hostname = 1;  // Canonical NodeName.
+  CranedResourceState resource_state = 2;
+  CranedControlState control_state = 3;
+  CranedPowerState power_state = 4;
+
+  ResourceInNodeV3 res_total = 5;
+  ResourceInNodeV3 res_avail = 6;
+  ResourceInNodeV3 res_alloc = 7;
+
+  repeated string partition_names = 10;
+  uint32 running_job_num = 11;
+
+  string craned_version = 12;
+  string system_desc = 13;
+  google.protobuf.Timestamp craned_start_time = 14;
+  google.protobuf.Timestamp system_boot_time = 15;
+  google.protobuf.Timestamp last_busy_time = 16;
+
+  // Physical CPU topology of this node.
+  NodeTopoInfo node_topo_info = 17;
+
+  string node_hostname = 18;  // Configured NodeHostname.
+  string node_addr = 19;      // Configured NodeAddr.
+
+  string state_reason = 20;
+  optional uint32 state_reason_uid = 21;
+  google.protobuf.Timestamp state_reason_time = 22;
+  NodeOutage outage = 23;
+  bool responding = 24;
+  bool has_registered = 25;
+  uint32 port = 26;
+  optional uint32 cpu_load = 27;
+  optional uint64 free_memory_mb = 28;
+  // Configured scheduling capacity, independent of reported physical sockets.
+  uint32 configured_sockets = 29;
+  repeated GresResource gres_order = 30;
+  // Optional query detail: resources held by ending allocations, included in
+  // res_alloc. Resource CPU counts retain their exact scheduler precision.
+  ResourceInNodeV3 cleanup_resources = 31;
+  // Unfinished work on this node, distinct from resources awaiting release.
+  bool cleanup_pending = 32;
+}
+
+message ReservationInfo {
+  string reservation_name = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Duration duration = 3;
+  string partition = 4;
+  string craned_regex = 5;  // Actual allocated nodes, for existing clients.
+
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
+
+  repeated string allowed_accounts = 9;
+  repeated string denied_accounts = 10;
+  repeated string allowed_users = 11;
+  repeated string denied_users = 12;
+  // Unformatted allocation membership and stable controller creation order.
+  repeated string allocated_nodes = 13;
+  uint64 creation_order = 14;
+}
+
+message RichError {
+  ErrCode code = 1;
+  string description = 2;
+}
+
+enum ErrCode {
+  SUCCESS = 0;  // Success
+
+  ERR_INVALID_UID = 1;      // Invalid UID passed
+  ERR_INVALID_OP_USER = 2;  // Invalid operation user
+  ERR_INVALID_USER = 3;     // Invalid user
+  ERR_PERMISSION_USER = 4;  // User permissions too low, no permission to operate
+
+  ERR_BLOCKED_USER = 5;
+  ERR_USER_ALREADY_EXISTS = 6;            // User duplicate account insertion
+  ERR_USER_ACCESS_TO_ACCOUNT_DENIED = 7;  // User does not have permission for the account
+  ERR_INVALID_ADMIN_LEVEL = 8;            // Invalid permission level
+  ERR_USER_ACCOUNT_MISMATCH = 9;          // User does not belong to the account
+
+  ERR_NO_ACCOUNT_SPECIFIED = 10;
+  ERR_INVALID_ACCOUNT = 11;         // Invalid account
+  ERR_ACCOUNT_ALREADY_EXISTS = 12;  // Duplicate account insertion
+  ERR_INVALID_PARENT_ACCOUNT = 13;  // Invalid parent account
+  ERR_ACCOUNT_HAS_CHILDREN = 14;    // Account has child nodes，cannot be deleted.
+
+  ERR_BLOCKED_ACCOUNT = 15;
+  ERR_INVALID_PARTITION = 16;                 // Invalid partition, partition does not exist
+  ERR_PARTITION_MISSING = 17;                 // Account/user does not include this partition
+  ERR_PARTITION_ALREADY_EXISTS = 18;          // Account/user duplicate insertion
+  ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19;  // Parent account does not include this partition
+
+  ERR_USER_EMPTY_PARTITION = 20;  // Cannot add QoS when user has no partition
+  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as child nodes contain this partition.
+  ERR_HAS_NO_QOS_IN_PARTITION = 22;
+  ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
+  ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
+
+  ERR_DB_QOS_ALREADY_EXISTS = 25;  // Duplicate QoS insertion in the database.
+  ERR_QOS_REFERENCES_EXIST = 26;   // QoS reference count is not zero.
+  ERR_CONVERT_TO_INTEGER = 27;     // String to integer conversion failed
+  ERR_TIME_LIMIT = 28;             // Invalid time value
+  ERR_QOS_MISSING = 29;            // Account/user does not include this QoS.
+
+  ERR_QOS_ALREADY_EXISTS = 30;          // Account/user duplicate insertion.
+  ERR_PARENT_ACCOUNT_QOS_MISSING = 31;  // Parent account does not include this QoS.
+  ERR_SET_ALLOWED_QOS = 32;             // QoS is the default QoS, but not found in the new QoS list.
+  ERR_DEFAULT_QOS_NOT_INHERITED = 33;   // Default QoS is not in the allowed QoS list
+  ERR_DUPLICATE_DEFAULT_QOS = 34;       // Duplicate default QoS setting
+
+  ERR_CHILD_HAS_DEFAULT_QOS = 35;  // Failed to delete the account QoS as child nodes have set it as the default QoS.
+  ERR_SET_ACCOUNT_QOS = 36;        // QoS is used by some descendant node or itself of the account.
+  ERR_SET_DEFAULT_QOS = 37;        // Qos not in allowed qos list or is already the default qos
+  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  //  // QoS cannot be directly deleted when it is set as the default QoS.
+  ERR_UPDATE_DATABASE = 39;                  // Database update failed
+
+  ERR_GENERIC_FAILURE = 40;
+  ERR_NO_RESOURCE = 41;
+  ERR_NON_EXISTENT = 42;
+  ERR_INVALID_NODE_NUM = 43;
+  ERR_INVALID_NODE_LIST = 44;
+
+  ERR_INVALID_EX_NODE_LIST = 45;
+  ERR_TIME_TIMIT_BEYOND = 46;
+  ERR_CPUS_PER_TASK_BEYOND = 47;
+  ERR_NO_ENOUGH_NODE = 48;
+  ERR_SYSTEM_ERR = 49;
+
+  ERR_EXISTING_JOB = 50;
+  ERR_BEYOND_JOB_ID = 51;
+  ERR_INVALID_PARAM = 52;
+  ERR_STOP = 53;
+  ERR_PERMISSION_DENIED = 54;
+
+  ERR_CONNECTION_TIMEOUT = 55;
+  ERR_CONNECTION_ABORTED = 56;
+  ERR_RPC_FAILURE = 57;
+  ERR_TOKEN_REQUEST_FAILURE = 58;
+  ERR_STREAM_BROKEN = 59;
+
+  ERR_INVALID_STUB = 60;
+  ERR_CGROUP = 61;
+  ERR_PROTOBUF = 62;
+  ERR_LIB_EVENT = 63 [deprecated = true];
+  ERR_NO_AVAIL_NODE = 64;
+
+  ERR_MAX_JOB_COUNT_PER_USER = 65;
+  ERR_USER_NO_PRIVILEGE = 66;
+  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
+  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
+  ERR_EBPF = 69;
+
+  ERR_SUPERVISOR = 70;
+  ERR_SHUTTING_DOWN = 71;
+  ERR_SIGN_CERTIFICATE = 72;
+  ERR_DUPLICATE_CERTIFICATE = 73;
+  ERR_REVOKE_CERTIFICATE = 74;
+
+  ERR_IDENTITY_MISMATCH = 75;
+  ERR_NOT_FORCE = 76;
+  ERR_INVALID_USERNAME = 77;
+  ERR_LICENSE_LEGAL_FAILED = 78;
+  ERR_INVALID_JOB_ID = 79;
+
+  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job/step is pending or container is not ready.
+  ERR_CRI_MULTIPLE_NODES = 83;       // Requested CRI operation is not supported in multi-node steps.
+
+  ERR_INVALID_MEM_FORMAT = 84;  // Invalid mem format when parsing mem
+  ERR_STEP_RES_BEYOND = 85;     // Step resource request exceeds job resource.
+
+  ERR_INVALID_WCKEY = 86;
+  ERR_WCKEY_ALREADY_EXISTS = 87;
+  ERR_INVALID_CLUSTER = 88;
+  ERR_DEL_DEFAULT_WCKEY = 89;
+  ERR_NO_DEFAULT_WCKEY = 90;
+
+  ERR_MISSING_DEPENDENCY = 91;
+  ERR_DB_INSERT_FAILED = 92;
+  ERR_LUA_FAILED = 93;
+  ERR_RESOURCE_NOT_FOUND = 94;
+  ERR_INVALID_ARGUMENT = 95;
+
+  ERR_RESOURCE_ALREADY_EXIST = 96;
+  ERR_MAX_JOB_COUNT_PER_ACCOUNT = 97;
+  ERR_USER_HAS_JOB = 98;
+  ERR_INVALID_RESOURCE = 99;
+  ERR_QOS_JOB_COUNT_EXCEEDED = 100;
+
+  ERR_CONVERT_TO_RESOURCE_VIEW = 101;
+  ERR_MAX_TRES_PER_USER_BEYOND = 102;
+  ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
+  ERR_TRES_PER_JOB_BEYOND = 104;
+  ERR_INVALID_DEADLINE = 105;
+  ERR_PMIX_ERR = 106;                               // PMIx initialization or runtime error
+  ERR_PARTITION_TRES_PER_JOB_BEYOND = 107;          // Partition max_tres_per_job exceeded
+  ERR_PARTITION_TIME_BEYOND = 108;                  // Partition max_wall_duration_per_job exceeded
+  ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 109;     // Partition max_submit_jobs exceeded (user dimension)
+  ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT = 110;  // Partition max_submit_jobs exceeded (account dimension)
+  ERR_REQUESTED_NODES_NOT_IN_PARTITION = 111;       // Requested nodes are not in the partition
+}
+
+enum EntityType {
+  Account = 0;
+  User = 1;
+}
+
+enum TerminateSource {
+  TERMINATE_SOURCE_USER_CANCEL = 0;
+  TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
+  TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
+  TERMINATE_SOURCE_PREEMPT = 3;
+}
+
+enum OperationType {
+  Overwrite = 0;
+  Add = 1;
+  Delete = 2;
+}
+
+enum PreemptType {
+  PREEMPT_NONE = 0;
+  PREEMPT_QOS = 1;
+  PREEMPT_PARTITION = 2;
+}
+
+enum PreemptMode {
+  PREEMPT_MODE_OFF = 0;
+  PREEMPT_MODE_CANCEL = 1;
+  PREEMPT_MODE_REQUEUE = 2;
+  PREEMPT_MODE_SUSPEND = 3;
+}
+
+enum ModifyField {
+  // user and account
+  Partition = 0;
+  Qos = 1;
+  DefaultQos = 2;
+  Description = 3;  // account and qos
+  // user
+  AdminLevel = 4;
+  DefaultAccount = 5;
+  // qos
+  Priority = 6;
+  MaxJobsPerUser = 7;
+  MaxCpusPerUser = 8;
+  MaxTimeLimitPerJob = 9;
+  MaxJobsPerAccount = 10;
+  MaxSubmitJobsPerUser = 11;
+  MaxSubmitJobsPerAccount = 12;
+  MaxJobs = 13;
+  MaxSubmitJobs = 14;
+  MaxWall = 15;
+  MaxTres = 16;
+  MaxTresPerUser = 17;
+  MaxTresPerAccount = 18;
+  Flags = 19;
+  Preempt = 20;
+  ModifyPreemptMode = 21;
+
+  //  account/user-partition
+  MaxTresPerJob = 22;
+  MaxWallDurationPerJob = 23;
+
+  // wckey
+  DefaultWckey = 40;
+}
+
+message PartitionResourceLimit {
+  ResourceView max_tres = 1;
+  ResourceView max_tres_per_job = 2;
+  uint32 max_jobs = 3;
+  uint32 max_submit_jobs = 4;
+  uint64 max_wall = 5;
+  uint64 max_wall_duration_per_job = 6;
+}
+
+message AccountInfo {
+  string name = 1;
+  string description = 2;
+  repeated string users = 3;
+  repeated string child_accounts = 4;
+  string parent_account = 5;
+  repeated string allowed_partitions = 6;
+  string default_qos = 7;
+  repeated string allowed_qos_list = 8;
+  repeated string coordinators = 9;
+  bool blocked = 10;
+  map<string, PartitionResourceLimit> partition_resource_limit = 11;
+}
+
+// Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
+//       and is ONLY used for communication between CraneCtld and cacctmgr command.
+//       If an user belongs to multiple accounts, There will be multiple `UserInfo`
+//       messages with `account` pointing to each account.
+//       For example, if a user (uid=1) belongs to accounts `1,2,3`,
+//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2),
+//       (uid=1, account=3).
+//       The c++ code and database representation use a Map<account name, AttrsInAccount> to contain
+//       in ONE UserInfo message all the information belonging to different accounts.
+message UserInfo {
+  enum AdminLevel {
+    None = 0;
+    Operator = 1;
+    Admin = 2;
+    Root = 3;
+  };
+  message AllowedPartitionQos {
+    string partition_name = 1;
+    repeated string qos_list = 2;
+    string default_qos = 3;
+  }
+  message PartitionToResourceLimit {
+    map<string, PartitionResourceLimit> partition_resource_limit = 1;
+  }
+
+  uint32 uid = 1;
+  string name = 2;
+  string account = 3;
+  bool blocked = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 5;
+  repeated string coordinator_accounts = 6;
+  AdminLevel admin_level = 7;
+  map<string, PartitionToResourceLimit> account_to_partition_limit = 8;
+}
+
+message QosInfo {
+  string name = 1;
+  string description = 2;
+  uint32 priority = 3;
+  uint32 max_jobs_per_user = 4;
+  double max_cpus_per_user = 5;
+  uint64 max_time_limit_per_job = 6;
+  uint32 max_jobs_per_account = 7;
+  uint32 max_submit_jobs_per_user = 8;
+  uint32 max_submit_jobs_per_account = 9;
+  uint32 max_jobs = 10;
+  uint32 max_submit_jobs = 11;
+  uint64 max_wall = 12;
+  ResourceView max_tres = 13;
+  ResourceView max_tres_per_user = 14;
+  ResourceView max_tres_per_account = 15;
+  uint32 flags = 16;
+  repeated string preempt = 17;
+  PreemptMode preempt_mode = 18;
+}
+
+message QueryWckeyInfo {
+  string name = 1;
+  string cluster = 2;
+  string user_name = 3;
+  bool is_default = 4;
+}
+
+message WckeyInfo {
+  string name = 1;
+  string user_name = 2;
+  bool is_default = 3;
+}
+
+message TimeInterval {
+  google.protobuf.Timestamp lower_bound = 1;
+  google.protobuf.Timestamp upper_bound = 2;
+}
+
+message SystemRelInfo {
+  string name = 1;
+  string release = 2;
+  string version = 3;
+}
+
+message NetworkInterface {
+  string name = 1;
+  string mac_address = 2;
+  repeated string ipv4_addresses = 3;
+  repeated string ipv6_addresses = 4;
+}
+
+message CranedRemoteMeta {
+  DedicatedResourceInNode dres_in_node = 1;
+  SystemRelInfo sys_rel_info = 2;
+  string craned_version = 3;
+  google.protobuf.Timestamp craned_start_time = 4;
+  google.protobuf.Timestamp system_boot_time = 5;
+  message Steps {
+    repeated uint32 steps = 1;
+  }
+  map<uint32, Steps> lost_steps = 6;
+  repeated uint32 lost_jobs = 7;
+  repeated NetworkInterface network_interfaces = 8;
+  uint32 config_crc = 9;
+  NodeTopoInfo node_topo_info = 10;
+  optional uint32 cpu_load = 12;
+  optional uint64 free_memory_mb = 13;
+}
+
+enum TxnAction {
+  AddAccount = 0;
+  ModifyAccount = 1;
+  DeleteAccount = 2;
+  AddUser = 3;
+  ModifyUser = 4;
+  DeleteUser = 5;
+  AddQos = 6;
+  ModifyQos = 7;
+  DeleteQos = 8;
+}
+
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 free = 4;
+  uint32 reserved = 5;
+  bool remote = 6;
+  uint32 last_consumed = 7;
+  uint32 last_deficit = 8;
+  int64 last_update = 9;
+}
+
+message LicenseResourceInfo {
+  string resource_name = 1;
+  map<string, uint32> cluster_resource_info = 2;
+  uint32 count = 3;
+  string server = 4;
+  string server_type = 5;
+  LicenseResource.Type type = 6;
+  string description = 7;
+  uint32 last_consumed = 8;
+  uint32 allocated = 9;
+  uint32 flags = 10;
+}
+
+message LicenseResource {
+  enum Type {
+    NotSet = 0;
+    License = 1;
+  }
+
+  enum Field {
+    Count = 0;
+    Allowed = 1;
+    LastConsumed = 2;
+    Description = 3;
+    Flags = 4;
+    ServerType = 5;
+    ResourceType = 6;
+  }
+
+  enum Flag {
+    None = 0;
+    Absolute = 1;
+  }
+}
+
+message JobSummaryItem {
+  string cluster = 1;
+  string account = 2;
+  string username = 3;
+  string qos = 4;
+  string wckey = 5;
+  double total_cpu_time = 6;
+  int64 total_count = 7;
+}
+
+message JobSizeSummaryItem {
+  string cluster = 1;
+  string account = 2;
+  string wckey = 3;
+  uint32 cpus_alloc = 4;
+  double total_cpu_time = 5;
+  int64 total_count = 6;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=CraneSched - Cplugind
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+ExecStart=@PREFIX@/bin/cplugind
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+# Configuration file for the mail plugin
+
+# Sender address of the mail notification
+SenderAddr: example@example.com
+
+# If true, the mail will have a subject only
+SubjectOnly: false

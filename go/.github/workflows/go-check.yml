@@ -1,0 +1,69 @@
+name: Go Code Quality Check
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  go-check:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      id: setup-go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26.10'
+        cache: true
+    
+    - name: Cache apt packages
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: protobuf-compiler
+        version: 1.0
+    
+    - name: Cache protobuf tools
+      uses: actions/cache@v4
+      id: cache-protobuf-tools
+      with:
+        path: ~/go/bin
+        key: ${{ runner.os }}-go-${{ steps.setup-go.outputs.go-version }}-protobuf-tools-v1
+    
+    - name: Install Go protobuf plugins
+      if: steps.cache-protobuf-tools.outputs.cache-hit != 'true'
+      run: |
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+    
+    - name: Add Go bin to PATH
+      run: echo "$HOME/go/bin" >> $GITHUB_PATH
+    
+    - name: Generate protobuf files
+      run: make protos
+    
+    - name: Check go mod tidy
+      run: |
+        go mod tidy
+        if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+          echo "go.mod or go.sum is not tidy"
+          git diff go.mod go.sum
+          exit 1
+        fi
+    
+    - name: Check Go formatting
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "The following files are not properly formatted:"
+          gofmt -l .
+          echo "Please run 'gofmt -w .' to fix the formatting"
+          exit 1
+        fi
+    
+    - name: Run go vet
+      run: go vet ./...
