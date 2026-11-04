@@ -80,9 +80,10 @@ var gpuConfigs = map[string]struct {
 }
 
 type GlobalMonitor struct {
-	config       *config.Config
-	monitor      *monitor.Monitor
-	queryService *QueryService
+	config         *config.Config
+	monitor        *monitor.Monitor
+	queryService   *QueryService
+	hostConfigPath string
 }
 
 var globalMonitor GlobalMonitor
@@ -98,8 +99,9 @@ func (p MonitorPlugin) Version() string {
 }
 
 func (p MonitorPlugin) SetHostConfigPath(path string) {
+	globalMonitor.hostConfigPath = path
 	if globalMonitor.queryService != nil {
-		globalMonitor.queryService.hostConfigPath = path
+		globalMonitor.queryService.SetHostConfigPath(path)
 	}
 }
 
@@ -237,6 +239,10 @@ func (p MonitorPlugin) ensureInitialized() error {
 
 	if globalMonitor.queryService == nil {
 		globalMonitor.queryService = NewQueryService(globalMonitor.config)
+	}
+
+	if globalMonitor.hostConfigPath != "" {
+		globalMonitor.queryService.SetHostConfigPath(globalMonitor.hostConfigPath)
 	}
 
 	return nil

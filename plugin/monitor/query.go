@@ -30,6 +30,13 @@ func NewQueryService(cfg *config.Config) *QueryService {
 	}
 }
 
+// SetHostConfigPath updates the source path and invalidates the lazily parsed
+// config so subsequent queries use the new CraneSched configuration.
+func (s *QueryService) SetHostConfigPath(path string) {
+	s.hostConfigPath = path
+	s.craneConfig = nil
+}
+
 func (s *QueryService) QueryJobEfficiency(ctx context.Context, req *protos.QueryJobEfficiencyRequest) (*protos.QueryJobEfficiencyReply, error) {
 	log.Infof("QueryService received QueryJobEfficiency request from UID %d for jobs: %v", req.Uid, req.JobIds)
 
