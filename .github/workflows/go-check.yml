@@ -9,14 +9,17 @@ on:
 jobs:
   go-check:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     
     steps:
     - uses: actions/checkout@v4
     
     - name: Set up Go
+      id: setup-go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'
+        go-version: '1.26.10'
         cache: true
     
     - name: Cache apt packages
@@ -30,7 +33,7 @@ jobs:
       id: cache-protobuf-tools
       with:
         path: ~/go/bin
-        key: ${{ runner.os }}-protobuf-tools-v1
+        key: ${{ runner.os }}-go-${{ steps.setup-go.outputs.go-version }}-protobuf-tools-v1
     
     - name: Install Go protobuf plugins
       if: steps.cache-protobuf-tools.outputs.cache-hit != 'true'
