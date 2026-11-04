@@ -254,7 +254,7 @@ Flags:
                                 %h/%Held               - Display the hold state of the job. (For jobs only)
                                 %i/%StepId             - Display the ID of the step (format: jobId.stepId). (For steps only)
                                                                Materialized array steps use jobId_arrayTaskId.stepId.
-                                %j/%JobID              - Display the logical queue ID (or parent job ID for steps).
+                                %j/%JobID              - Display the logical job ID for the job/step.
                                                                Materialized array tasks use jobId_arrayTaskId; active array parents use jobId_[range%maxConcurrent] when limited.
                                 %k/%Comment            - Display the comment of the job. (For jobs only)
                                 %K/%Wckey              - Display the wckey of the job.
