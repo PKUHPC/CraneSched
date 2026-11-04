@@ -13,8 +13,8 @@ A chained CNI plugin that registers pod DNS records in etcd for CoreDNS.
 ## Build
 
 ```sh
-make tool
-sudo install -m 0755 build/tool/dns-register /opt/cni/bin/dns-register
+make -C go tool
+sudo install -m 0755 go/build/tool/dns-register /opt/cni/bin/dns-register
 ```
 
 ## Configuration
@@ -52,4 +52,4 @@ receive the FQDN annotation from the container runtime.
 ```
 
 For a complete chained configuration, see
-`../../../etc/cni/00-crane-calico.conf`.
+`etc/cni/00-crane-calico.conf`.

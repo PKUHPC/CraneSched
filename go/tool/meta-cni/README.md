@@ -22,18 +22,18 @@ supports both static pipelines (always executed) and template pipelines
 
 ## Build and install
 
-Build with the top-level Makefile:
+From the repository root, build with the Go module Makefile:
 
 ```sh
-make tool
+make -C go tool
 ```
 
-The binary will be at `build/tool/meta-cni`. For CNI to discover it, place the
+The binary will be at `go/build/tool/meta-cni`. For CNI to discover it, place the
 binary in your CNI_PATH and name it to match the `type` field in your config
 (`type` is the plugin binary name). For example:
 
 ```sh
-sudo install -m 0755 build/tool/meta-cni /opt/cni/bin/crane-meta
+sudo install -m 0755 go/build/tool/meta-cni /opt/cni/bin/crane-meta
 ```
 
 ## Configuration
@@ -158,6 +158,6 @@ Manipulator expression syntax:
 
 ## Example
 
-See `../../../etc/cni/00-crane-calico.conf` for a single-pipeline Calico setup, and
-`config/00-meta.example.conf` for a multi-pipeline example with both static
+See `etc/cni/00-crane-calico.conf` for a single-pipeline Calico setup, and
+`etc/cni/00-meta.example.conf` for a multi-pipeline example with both static
 Ethernet and template RDMA pipelines.
