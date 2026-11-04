@@ -4,9 +4,12 @@ import (
 	"CraneFrontEnd/generated/protos"
 	"CraneFrontEnd/internal/util"
 	"bytes"
+	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,53 +27,69 @@ type FlattenedData struct {
 	PowerState      protos.CranedPowerState
 	CranedListCount uint64
 	HasNodes        bool
+	Reason          string
 }
 
-func GetFlattenedData(
-	partitionCraned *protos.TrimmedPartitionInfo,
-	commonCranedStateList *protos.TrimmedPartitionInfo_TrimmedCranedInfo) FlattenedData {
-	return FlattenedData{
-		PartitionName:   partitionCraned.Name,
-		Avail:           strings.ToLower(strings.TrimPrefix(partitionCraned.State.String(), "PARTITION_")),
-		CranedListRegex: commonCranedStateList.CranedListRegex,
-		ResourceState:   commonCranedStateList.ResourceState,
-		ControlState:    commonCranedStateList.ControlState,
-		PowerState:      commonCranedStateList.PowerState,
-		CranedListCount: uint64(commonCranedStateList.Count),
-		HasNodes:        true,
+// groupClusterNodes owns cinfo's fixed native state/reason grouping. Partition
+// totals and membership in the protobuf reply remain complete after filtering.
+func groupClusterNodes(reply *protos.QueryClusterInfoReply) map[string][]FlattenedData {
+	type stateKey struct {
+		control  protos.CranedControlState
+		resource protos.CranedResourceState
+		power    protos.CranedPowerState
+		reason   string
 	}
-}
-func GetValidFlattenedData(partitionCraned *protos.TrimmedPartitionInfo) FlattenedData {
-	return FlattenedData{
-		PartitionName:   partitionCraned.Name,
-		Avail:           strings.ToLower(strings.TrimPrefix(partitionCraned.State.String(), "PARTITION_")),
-		CranedListRegex: "",
-		CranedListCount: 0,
-		HasNodes:        false,
+	groups := make(map[string]map[stateKey][]string, len(reply.Partitions))
+	for _, part := range reply.Partitions {
+		groups[part.Name] = make(map[stateKey][]string)
 	}
-}
-
-// Flatten the nested structure into a one-dimensional array
-func FlattenReplyData(reply *protos.QueryClusterInfoReply) []FlattenedData {
-	var flattened []FlattenedData
-	var partitionInValid []FlattenedData
-	var partitionFilterValid bool
-
-	for _, partitionCraned := range reply.Partitions {
-		partitionFilterValid = false
-		for _, commonCranedStateList := range partitionCraned.CranedLists {
-			if commonCranedStateList.Count > 0 {
-				partitionFilterValid = true
-				flattened = append(flattened, GetFlattenedData(partitionCraned, commonCranedStateList))
+	for _, node := range reply.Nodes {
+		key := stateKey{node.ControlState, node.ResourceState, node.PowerState, node.StateReason}
+		for _, part := range node.PartitionNames {
+			if group, ok := groups[part]; ok {
+				group[key] = append(group[key], node.Hostname)
 			}
 		}
-		if !partitionFilterValid {
-			partitionInValid = append(partitionInValid, GetValidFlattenedData(partitionCraned))
+	}
+	rows := make(map[string][]FlattenedData, len(reply.Partitions))
+	for _, part := range reply.Partitions {
+		name := part.Name
+		if part.IsDefault {
+			name += "*"
+		}
+		base := FlattenedData{PartitionName: name, Avail: strings.ToLower(strings.TrimPrefix(part.State.String(), "PARTITION_"))}
+		keys := slices.SortedFunc(maps.Keys(groups[part.Name]), func(a, b stateKey) int {
+			return cmp.Or(cmp.Compare(a.control, b.control), cmp.Compare(a.resource, b.resource),
+				cmp.Compare(a.power, b.power), cmp.Compare(a.reason, b.reason))
+		})
+		for _, key := range keys {
+			row := base
+			hosts := groups[part.Name][key]
+			row.ResourceState, row.ControlState, row.PowerState = key.resource, key.control, key.power
+			row.Reason, row.HasNodes = key.reason, true
+			row.CranedListCount, row.CranedListRegex = uint64(len(hosts)), util.HostNameListToStr(hosts)
+			rows[part.Name] = append(rows[part.Name], row)
+		}
+		if len(keys) == 0 {
+			rows[part.Name] = []FlattenedData{base}
 		}
 	}
+	return rows
+}
 
-	flattened = append(flattened, partitionInValid...)
-	return flattened
+func FlattenReplyData(reply *protos.QueryClusterInfoReply) []FlattenedData {
+	var populated, empty []FlattenedData
+	groups := groupClusterNodes(reply)
+	for _, part := range reply.Partitions {
+		for _, row := range groups[part.Name] {
+			if row.HasNodes {
+				populated = append(populated, row)
+			} else {
+				empty = append(empty, row)
+			}
+		}
+	}
+	return append(populated, empty...)
 }
 
 type FieldProcessor struct {
@@ -115,32 +134,7 @@ func ProcessNodes(flattened []FlattenedData, tableOutputCell [][]string) {
 // State
 func ProcessState(flattened []FlattenedData, tableOutputCell [][]string) {
 	for idx, data := range flattened {
-		if !data.HasNodes {
-			tableOutputCell[idx] = append(tableOutputCell[idx], "n/a")
-			continue
-		}
-
-		if util.IsSlurmOutputMode() {
-			tableOutputCell[idx] = append(tableOutputCell[idx],
-				util.FormatSlurmNodeState(data.ResourceState, data.ControlState, data.PowerState))
-			continue
-		}
-
-		stateStr := strings.ToLower(strings.TrimPrefix(data.ResourceState.String(), "CRANE_"))
-		if data.ControlState != protos.CranedControlState_CRANE_NONE {
-			controlState := strings.ToLower(strings.TrimPrefix(data.ControlState.String(), "CRANE_"))
-			stateStr += "(" + controlState + ")"
-		}
-
-		if data.ResourceState == protos.CranedResourceState_CRANE_DOWN &&
-			(data.PowerState == protos.CranedPowerState_CRANE_POWER_IDLE ||
-				data.PowerState == protos.CranedPowerState_CRANE_POWER_ACTIVE) {
-			stateStr += "[failed]"
-		} else {
-			powerState := strings.ToLower(strings.TrimPrefix(data.PowerState.String(), "CRANE_"))
-			stateStr += "[" + powerState + "]"
-		}
-		tableOutputCell[idx] = append(tableOutputCell[idx], stateStr)
+		tableOutputCell[idx] = append(tableOutputCell[idx], BuildStateString(data))
 	}
 }
 
@@ -240,21 +234,10 @@ func FormatData(reply *protos.QueryClusterInfoReply) (header []string, tableData
 	return formattedHeader, formattedData, nil
 }
 
-func GetInvalidMsg(partitionCraned *protos.TrimmedPartitionInfo) []string {
-	row := []string{
-		partitionCraned.Name,
-		strings.ToLower(strings.TrimPrefix(partitionCraned.State.String(), "PARTITION_")),
-		"0",
-		"n/a",
-		"",
+func BuildStateString(cranedList FlattenedData) string {
+	if !cranedList.HasNodes {
+		return "n/a"
 	}
-	if FlagListReason {
-		row = append(row, "")
-	}
-	return row
-}
-
-func BuildStateString(cranedList *protos.TrimmedPartitionInfo_TrimmedCranedInfo) string {
 	if util.IsSlurmOutputMode() {
 		return util.FormatSlurmNodeState(
 			cranedList.ResourceState, cranedList.ControlState, cranedList.PowerState)
@@ -277,43 +260,16 @@ func BuildStateString(cranedList *protos.TrimmedPartitionInfo_TrimmedCranedInfo)
 	return stateStr
 }
 
-func CreateValidPartitionRow(partition *protos.TrimmedPartitionInfo, cranedList *protos.TrimmedPartitionInfo_TrimmedCranedInfo) []string {
-	stateStr := BuildStateString(cranedList)
-	row := []string{
-		partition.Name,
-		strings.ToLower(strings.TrimPrefix(partition.State.String(), "PARTITION_")),
-		strconv.FormatUint(uint64(cranedList.Count), 10),
-		stateStr,
-		cranedList.CranedListRegex,
-	}
-	if FlagListReason {
-		row = append(row, cranedList.Reason)
-	}
-	return row
-}
-
-func PartitionDeal(partitionCraned *protos.TrimmedPartitionInfo, tableData *[][]string) bool {
-	hasValidCraned := false
-	for _, cranedList := range partitionCraned.CranedLists {
-		if cranedList.Count > 0 {
-			hasValidCraned = true
-			*tableData = append(*tableData, CreateValidPartitionRow(partitionCraned, cranedList))
-		}
-	}
-
-	return hasValidCraned
-}
-
 func FindTableDataByReply(reply *protos.QueryClusterInfoReply) [][]string {
-	var partitionInValid [][]string
 	var tableData [][]string
-	for _, partitionCraned := range reply.Partitions {
-		if hasValid := PartitionDeal(partitionCraned, &tableData); !hasValid {
-			partitionInValid = append(partitionInValid, GetInvalidMsg(partitionCraned))
+	for _, data := range FlattenReplyData(reply) {
+		row := []string{data.PartitionName, data.Avail, strconv.FormatUint(data.CranedListCount, 10),
+			BuildStateString(data), data.CranedListRegex}
+		if FlagListReason {
+			row = append(row, data.Reason)
 		}
+		tableData = append(tableData, row)
 	}
-	tableData = append(tableData, partitionInValid...)
-
 	return tableData
 }
 
@@ -348,24 +304,11 @@ func FillTable(reply *protos.QueryClusterInfoReply, table *tablewriter.Table) er
 }
 
 func GetFoundedNodes(reply *protos.QueryClusterInfoReply) map[string]bool {
-	replyNodes := ""
-	for _, partitionCraned := range reply.Partitions {
-		for _, commonCranedStateList := range partitionCraned.CranedLists {
-			if commonCranedStateList.Count > 0 {
-				if replyNodes != "" {
-					replyNodes += ","
-				}
-				replyNodes += commonCranedStateList.CranedListRegex
-			}
-		}
+	found := make(map[string]bool, len(reply.Nodes))
+	for _, node := range reply.Nodes {
+		found[node.Hostname] = true
 	}
-	replyNodes_, _ := util.ParseHostList(replyNodes)
-
-	foundedNodes := make(map[string]bool)
-	for _, node := range replyNodes_ {
-		foundedNodes[node] = true
-	}
-	return foundedNodes
+	return found
 }
 
 func GetNodeList() []string {

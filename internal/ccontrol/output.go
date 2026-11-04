@@ -310,9 +310,9 @@ func formatNodeState(node *protos.CranedInfo) string {
 // Cpu
 func formatCpuInfo(node *protos.CranedInfo) string {
 	return fmt.Sprintf("CPU=%.2f AllocCPU=%.2f FreeCPU=%.2f",
-		node.ResTotal.CpuCount,
-		math.Abs(node.ResAlloc.CpuCount),
-		math.Abs(node.ResAvail.CpuCount),
+		math.Round(node.ResTotal.CpuCount*100)/100,
+		math.Round(math.Abs(node.ResAlloc.CpuCount)*100)/100,
+		math.Round(math.Abs(node.ResAvail.CpuCount)*100)/100,
 	)
 }
 
@@ -418,9 +418,9 @@ func formatAccountsInfo(partition *protos.PartitionInfo) string {
 }
 
 func formatCpuResources(partition *protos.PartitionInfo) string {
-	total := math.Abs(partition.ResTotal.CpuCount)
-	avail := math.Abs(partition.ResAvail.CpuCount)
-	alloc := math.Abs(partition.ResAlloc.CpuCount)
+	total := math.Round(math.Abs(partition.ResTotal.CpuCount)*100) / 100
+	avail := math.Round(math.Abs(partition.ResAvail.CpuCount)*100) / 100
+	alloc := math.Round(math.Abs(partition.ResAlloc.CpuCount)*100) / 100
 	return fmt.Sprintf("TotalCPU=%.2f AvailCPU=%.2f AllocCPU=%.2f", total, avail, alloc)
 }
 func formatMemoryResources(partition *protos.PartitionInfo) string {

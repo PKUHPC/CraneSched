@@ -154,6 +154,38 @@ nfpms:
     deb:
       compression: zstd
 
+  # The Slurm-compatible name has its own opt-in package. Do not add Replaces
+  # or force-overwrite metadata: an installed Slurm client may own this path.
+  - id: cranesched-slurm-compat
+    package_name: cranesched-slurm-compat
+    meta: true
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
+    vendor: "Peking University"
+    homepage: "https://github.com/PKUHPC/CraneSched-FrontEnd"
+    maintainer: "CraneSched <service@csjstt.com>"
+    description: |
+      CraneSched standalone Slurm-compatible commands, connected to Crane.
+      sinfo targets the Slurm 26.05.4 command interface. Package versions
+      identify the actual CraneSched frontend build.
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    contents:
+      - src: build/bin/sinfo
+        dst: /usr/bin/sinfo
+        file_info:
+          mode: 0755
+      - src: LICENSE
+        dst: /usr/share/doc/cranesched-slurm-compat/LICENSE
+        file_info:
+          mode: 0644
+    rpm:
+      group: System Environment/Daemons
+      compression: zstd
+    deb:
+      compression: zstd
+
   # Plugin package: cranesched-plugin
   - id: cranesched-plugin
     package_name: cranesched-plugin

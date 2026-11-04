@@ -49,23 +49,27 @@ func formatSlurmClusterJSON(reply *protos.QueryClusterInfoReply) (string, error)
 		OK:         reply.Ok,
 		Partitions: make([]slurmPartitionInfo, 0, len(reply.Partitions)),
 	}
-	for _, partition := range reply.Partitions {
-		if partition == nil {
+	for _, part := range reply.Partitions {
+		if part == nil {
 			return "", fmt.Errorf("partition list contains a nil partition")
 		}
+	}
+	groups := groupClusterNodes(reply)
+	for _, partition := range reply.Partitions {
 		item := slurmPartitionInfo{
 			Name:      partition.Name,
 			State:     strings.ToLower(strings.TrimPrefix(partition.State.String(), "PARTITION_")),
-			NodeLists: make([]slurmNodeList, 0, len(partition.CranedLists)),
+			NodeLists: make([]slurmNodeList, 0, len(groups[partition.Name])),
 		}
-		for _, nodes := range partition.CranedLists {
-			if nodes == nil {
-				return "", fmt.Errorf("node list contains a nil entry")
+		for _, nodes := range groups[partition.Name] {
+			item.Name = nodes.PartitionName
+			if !nodes.HasNodes {
+				continue
 			}
 			item.NodeLists = append(item.NodeLists, slurmNodeList{
 				State: util.FormatSlurmNodeState(
 					nodes.ResourceState, nodes.ControlState, nodes.PowerState),
-				Count:    nodes.Count,
+				Count:    uint32(nodes.CranedListCount),
 				NodeList: nodes.CranedListRegex,
 				Reason:   nodes.Reason,
 			})

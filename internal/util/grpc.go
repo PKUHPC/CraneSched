@@ -334,8 +334,11 @@ func GetStubToCtldForInternalByConfig(config *Config) (*grpc.ClientConn, protos.
 }
 
 func UpdateTLSConfig(config *Config) (*tls.Config, error) {
+	return UpdateTLSConfigContext(context.Background(), config)
+}
 
-	if err := SignAndSaveUserCertificate(config); err != nil {
+func UpdateTLSConfigContext(ctx context.Context, config *Config) (*tls.Config, error) {
+	if err := SignAndSaveUserCertificateContext(ctx, config); err != nil {
 		caCert, err := os.ReadFile(config.TlsConfig.CaFilePath)
 		if err != nil {
 			return nil, err

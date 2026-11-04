@@ -26,7 +26,6 @@ import (
 	"CraneFrontEnd/internal/ccancel"
 	"CraneFrontEnd/internal/ccontrol"
 	"CraneFrontEnd/internal/ceff"
-	"CraneFrontEnd/internal/cinfo"
 	"CraneFrontEnd/internal/cqueue"
 	"CraneFrontEnd/internal/creport"
 	"CraneFrontEnd/internal/crun"
@@ -84,7 +83,6 @@ func (w SlurmWrapper) SubCommands() []*cobra.Command {
 		scancel(),
 		scontrol(),
 		seff(),
-		sinfo(),
 		squeue(),
 		sreport(),
 		srun(),
@@ -94,7 +92,7 @@ func (w SlurmWrapper) SubCommands() []*cobra.Command {
 func (w SlurmWrapper) HasCommand(cmd string) bool {
 	return slices.Contains([]string{
 		"sacct", "sacctmgr", "salloc", "sbatch", "scancel",
-		"scontrol", "seff", "sinfo", "squeue", "sreport", "srun",
+		"scontrol", "seff", "squeue", "sreport", "srun",
 	}, cmd)
 }
 
@@ -1021,51 +1019,6 @@ func seff() *cobra.Command {
 			return ceff.RootCmd.Execute()
 		},
 	}
-
-	return cmd
-}
-
-func sinfo() *cobra.Command {
-	var FlagVerbose bool
-	cmd := &cobra.Command{
-		Use:     "sinfo",
-		Short:   "View node and partition information",
-		Long:    "",
-		GroupID: "slurm",
-		Version: util.Version(),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if FlagVerbose {
-				log.Warning("The feature --verbose/-v is not yet supported by Crane, the use is ignored.")
-			}
-			cinfo.RootCmd.PersistentPreRun(cmd, args)
-			return cinfo.RootCmd.RunE(cmd, args)
-		},
-	}
-	cmd.SetVersionTemplate(util.VersionTemplate())
-	// Slurm uses -V for version and -v for verbose.
-	cmd.Flags().BoolP("version", "V", false, "version for sinfo")
-	cmd.Flags().BoolVar(&FlagVerbose, "verbose", false, "")
-
-	addConfigPathFlag(cmd, &cinfo.FlagConfigFilePath)
-	// cmd.Flags().BoolVarP(&cinfo.FlagSummarize, "summarize", "s", false,
-	// 	"List only a partition state summary with no node state details.")
-	cmd.Flags().BoolVarP(&cinfo.FlagListReason, "list-reasons", "R", false,
-		"List reasons nodes are in the down, drained, fail or failing state.")
-
-	cmd.Flags().BoolVarP(&cinfo.FlagFilterDownOnly, "dead", "d", false,
-		"If set, only report state information for non-responding (dead) nodes.")
-	cmd.Flags().BoolVarP(&cinfo.FlagFilterRespondingOnly, "responding", "r", false,
-		"If set only report state information for responding nodes.")
-	cmd.Flags().StringSliceVarP(&cinfo.FlagFilterPartitions, "partition", "p", nil,
-		"Print information about the node(s) in the specified partition(s). \nMultiple partitions are separated by commas.")
-	cmd.Flags().StringSliceVarP(&cinfo.FlagFilterNodes, "nodes", "n", nil,
-		"Print information about the specified node(s). \nMultiple nodes are separated by commas.")
-	cmd.Flags().StringSliceVarP(&cinfo.FlagFilterCranedStates, "states", "t", nil,
-		"List nodes only having the given state(s). Multiple states may be comma separated.")
-
-	cmd.Flags().Uint64VarP(&cinfo.FlagIterate, "iterate", "i", 0,
-		"Print the state on a periodic basis. Sleep for the indicated number of seconds between reports.")
-	cmd.Flags().BoolVar(&cinfo.FlagJson, "json", false, "Output in JSON format")
 
 	return cmd
 }

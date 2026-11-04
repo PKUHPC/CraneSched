@@ -23,6 +23,7 @@ import (
 	"CraneFrontEnd/internal/util"
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -147,7 +148,7 @@ func BuildFilteredStringList(items []string, warnMsg string) []string {
 	return list
 }
 
-func FillReqByFilterFlag() (*protos.QueryClusterInfoRequest, error) {
+func parseStateFilter() (func(*protos.CranedInfo) bool, error) {
 	resourceStateList, err := ConvertToResourceStates()
 	if err != nil {
 		return nil, err
@@ -165,32 +166,29 @@ func FillReqByFilterFlag() (*protos.QueryClusterInfoRequest, error) {
 	controlStateList = ApplyControlStateDefaults(controlStateList)
 	powerStateList = ApplyPowerStateDefaults(powerStateList)
 
-	nodeList := BuildFilteredStringList(FlagFilterNodes, "Empty node name is ignored.")
-	partList := BuildFilteredStringList(FlagFilterPartitions, "Empty partition name is ignored.")
-
-	req := &protos.QueryClusterInfoRequest{
-		FilterPartitions:           partList,
-		FilterNodes:                nodeList,
-		FilterCranedResourceStates: resourceStateList,
-		FilterCranedControlStates:  controlStateList,
-		FilterCranedPowerStates:    powerStateList,
-	}
-
-	return req, nil
+	return func(node *protos.CranedInfo) bool {
+		return slices.Contains(resourceStateList, node.ResourceState) &&
+			slices.Contains(controlStateList, node.ControlState) &&
+			slices.Contains(powerStateList, node.PowerState)
+	}, nil
 }
 
 func queryClusterInfo(config *util.Config) (*protos.QueryClusterInfoReply, error) {
-	stub := util.GetStubToCtldByConfig(config)
-
-	req, err := FillReqByFilterFlag()
+	matches, err := parseStateFilter()
 	if err != nil {
-		return &protos.QueryClusterInfoReply{}, err
+		return nil, err
 	}
+	req := &protos.QueryClusterInfoRequest{
+		IncludeNodes: true, IncludePartitions: true,
+		FilterNodes:      BuildFilteredStringList(FlagFilterNodes, "Empty node name is ignored."),
+		FilterPartitions: BuildFilteredStringList(FlagFilterPartitions, "Empty partition name is ignored."),
+	}
+	stub := util.GetStubToCtldByConfig(config)
 	reply, err := stub.QueryClusterInfo(context.Background(), req)
 	if err != nil {
 		return nil, util.NewCraneErrFromGrpc(util.ErrorNetwork, err, "Failed to query cluster information")
 	}
-
+	reply.Nodes = slices.DeleteFunc(reply.Nodes, func(node *protos.CranedInfo) bool { return !matches(node) })
 	return reply, nil
 }
 

@@ -307,6 +307,8 @@ message RuntimeAttrOfJob {
   // For array parents: whether child jobs have been materialized.
   optional bool array_children_expanded = 28;
 
+  repeated uint32 task_node_list = 29;
+
   // Normalized query request, retained for recovery archival.
   GresMap requested_gres = 30;
 }
@@ -384,9 +386,9 @@ message RuntimeAttrOfStep {
   google.protobuf.Timestamp start_time = 26;
   google.protobuf.Timestamp end_time = 27;
 
-  JobStatus error_status = 30;
+  JobStatus pending_final_status = 30;
   JobStatus status = 31;
-  uint32 error_exit_code = 32;
+  uint32 pending_final_exit_code = 32;
   uint32 exit_code = 33;
 
   bool held = 35;
@@ -788,6 +790,23 @@ message PartitionInfo {
   uint64 max_mem_per_cpu = 12;
   uint64 default_mem_per_node = 13;
   uint64 max_mem_per_node = 14;
+  bool is_default = 15;
+  uint32 priority = 16;
+  PreemptMode preempt_mode = 17;
+}
+
+// An unexpected loss of contact, retained until an explicit state update or
+// a successful registration outside drain. Text presentation belongs to clients.
+message NodeOutage {
+  uint32 uid = 1;
+  google.protobuf.Timestamp time = 2;
+}
+
+// Configured resource/type/device order, which protobuf maps cannot preserve.
+message GresResource {
+  string name = 1;
+  string type = 2;
+  repeated string devices = 3;
 }
 
 message CranedInfo {
@@ -814,6 +833,24 @@ message CranedInfo {
 
   string node_hostname = 18;  // Configured NodeHostname.
   string node_addr = 19;      // Configured NodeAddr.
+
+  string state_reason = 20;
+  optional uint32 state_reason_uid = 21;
+  google.protobuf.Timestamp state_reason_time = 22;
+  NodeOutage outage = 23;
+  bool responding = 24;
+  bool has_registered = 25;
+  uint32 port = 26;
+  optional uint32 cpu_load = 27;
+  optional uint64 free_memory_mb = 28;
+  // Configured scheduling capacity, independent of reported physical sockets.
+  uint32 configured_sockets = 29;
+  repeated GresResource gres_order = 30;
+  // Optional query detail: resources held by ending allocations, included in
+  // res_alloc. Resource CPU counts retain their exact scheduler precision.
+  ResourceInNodeV3 cleanup_resources = 31;
+  // Unfinished work on this node, distinct from resources awaiting release.
+  bool cleanup_pending = 32;
 }
 
 message ReservationInfo {
@@ -821,7 +858,7 @@ message ReservationInfo {
   google.protobuf.Timestamp start_time = 2;
   google.protobuf.Duration duration = 3;
   string partition = 4;
-  string craned_regex = 5;
+  string craned_regex = 5;  // Actual allocated nodes, for existing clients.
 
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
@@ -831,21 +868,9 @@ message ReservationInfo {
   repeated string denied_accounts = 10;
   repeated string allowed_users = 11;
   repeated string denied_users = 12;
-}
-
-message TrimmedPartitionInfo {
-  message TrimmedCranedInfo {
-    CranedResourceState resource_state = 1;
-    CranedControlState control_state = 2;
-    CranedPowerState power_state = 3;
-    uint32 count = 4;
-    string craned_list_regex = 5;
-    string reason = 6;
-  }
-
-  string name = 1;
-  PartitionState state = 2;
-  repeated TrimmedCranedInfo craned_lists = 3;
+  // Unformatted allocation membership and stable controller creation order.
+  repeated string allocated_nodes = 13;
+  uint64 creation_order = 14;
 }
 
 message RichError {
@@ -982,8 +1007,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
   ERR_INVALID_DEADLINE = 105;
-
-  ERR_PMIX_ERR = 106;  // PMIx initialization or runtime error
+  ERR_PMIX_ERR = 106;                               // PMIx initialization or runtime error
   ERR_PARTITION_TRES_PER_JOB_BEYOND = 107;          // Partition max_tres_per_job exceeded
   ERR_PARTITION_TIME_BEYOND = 108;                  // Partition max_wall_duration_per_job exceeded
   ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER = 109;     // Partition max_submit_jobs exceeded (user dimension)
@@ -1181,6 +1205,8 @@ message CranedRemoteMeta {
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
   NodeTopoInfo node_topo_info = 10;
+  optional uint32 cpu_load = 12;
+  optional uint64 free_memory_mb = 13;
 }
 
 enum TxnAction {
