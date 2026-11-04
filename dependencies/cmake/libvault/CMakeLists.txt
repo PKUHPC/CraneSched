@@ -31,3 +31,4 @@ FetchContent_Declare(libvault
 
 set(ENABLE_TEST OFF)
 FetchContent_MakeAvailable(libvault)
+target_link_libraries(vault PRIVATE PkgConfig::libcurl)
