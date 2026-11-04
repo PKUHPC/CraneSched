@@ -19,6 +19,8 @@
 # Native product entry points. Configure the CMake tree before using cpp targets.
 CMAKE_BUILD_DIR ?= build
 BUILD_JOBS ?= 4
+PREFIX ?= /usr
+export PREFIX
 
 .PHONY: all cpp go test test-cpp test-go install install-cpp install-go package package-cpp package-go
 
