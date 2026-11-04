@@ -262,7 +262,7 @@ grpc::Status CranedServiceImpl::AllocJobs(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           context->deadline() - std::chrono::system_clock::now())
           .count();
-  CRANE_DEBUG(
+  CRANE_TRACE(
       "AllocJobsServerDiag event=handler_enter job_count={} first_job_id={} "
       "last_job_id={} deadline_remaining_ms={}",
       job_count, first_job_id, last_job_id, deadline_remaining_ms);
@@ -302,7 +302,7 @@ grpc::Status CranedServiceImpl::AllocJobs(
         job_count, first_job_id, last_job_id, deadline_remaining_ms,
         vector_build_ms, job_mgr_ms, total_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "AllocJobsServerDiag event=handler_exit job_count={} first_job_id={} "
         "last_job_id={} deadline_remaining_ms={} vector_build_ms={} "
         "job_mgr_ms={} total_ms={}",
@@ -388,7 +388,7 @@ grpc::Status CranedServiceImpl::FreeJobs(
         request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
         enqueue_elapsed_ms);
   } else {
-    CRANE_DEBUG(
+    CRANE_TRACE(
         "FreeJobsServerDiag job_count={} deadline_remaining_ms={} "
         "handler_elapsed_ms={} enqueue_elapsed_ms={}",
         request->job_id_list_size(), deadline_remaining_ms, handler_elapsed_ms,
