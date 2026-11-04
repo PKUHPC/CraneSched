@@ -19,8 +19,8 @@
 ```bash
 # 复制控制节点二进制文件
 ssh cranectl "mkdir -p /etc/crane"
-scp CraneSched-1.1.2-Linux-x86_64-cranectld.rpm cranectl:/tmp
-ssh cranectl "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm"
+scp CraneSched-2.0.0-Linux-x86_64-cranectld.rpm cranectl:/tmp
+ssh cranectl "rpm -ivh /tmp/CraneSched-2.0.0-Linux-x86_64-cranectld.rpm"
 scp /etc/crane/config.yaml cranectl:/etc/crane/
 scp /etc/crane/database.yaml cranectl:/etc/crane/
 ```
@@ -30,8 +30,8 @@ scp /etc/crane/database.yaml cranectl:/etc/crane/
 ```bash
 # 复制计算节点二进制文件
 ssh crane02 "mkdir -p /etc/crane"
-scp CraneSched-1.1.2-Linux-x86_64-craned.rpm crane02:/tmp
-ssh crane02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
+scp CraneSched-2.0.0-Linux-x86_64-craned.rpm crane02:/tmp
+ssh crane02 "rpm -ivh /tmp/CraneSched-2.0.0-Linux-x86_64-craned.rpm"
 scp /etc/crane/config.yaml crane02:/etc/crane/
 ```
 
@@ -57,8 +57,8 @@ yum install -y pdsh
 
 ```bash
 # 复制并安装 cranectld
-pdcp -w cranectl CraneSched-1.1.2-Linux-x86_64-cranectld.rpm /tmp
-pdsh -w cranectl "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm"
+pdcp -w cranectl CraneSched-2.0.0-Linux-x86_64-cranectld.rpm /tmp
+pdsh -w cranectl "rpm -ivh /tmp/CraneSched-2.0.0-Linux-x86_64-cranectld.rpm"
 
 # 复制配置文件
 pdcp -w cranectl /etc/crane/config.yaml /etc/crane/
@@ -74,8 +74,8 @@ pdsh -w cranectl "systemctl start cranectld"
 
 ```bash
 # 复制并安装 craned
-pdcp -w crane[01-04] CraneSched-1.1.2-Linux-x86_64-craned.rpm /tmp
-pdsh -w crane[01-04] "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
+pdcp -w crane[01-04] CraneSched-2.0.0-Linux-x86_64-craned.rpm /tmp
+pdsh -w crane[01-04] "rpm -ivh /tmp/CraneSched-2.0.0-Linux-x86_64-craned.rpm"
 
 # 复制配置文件
 pdcp -w crane[01-04] /etc/crane/config.yaml /etc/crane/
