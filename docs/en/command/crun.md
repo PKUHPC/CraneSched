@@ -474,7 +474,7 @@ crun -c 1 "your_program --your_args"
   ```
 
 - `CRANE_PMIX_DIRECT_CONN_UCX=true|false`  
-  Enable UCX-based PMIx direct connection so that PMIx metadata exchanges (modex, fence) are transported via UCX to reduce latency. Requires UCX support compiled into CraneSched (detectable via `pkg-config --libs ucx`). Example:
+  Enable UCX-based PMIx direct connection so that PMIx metadata exchanges (modex, fence) are transported via UCX to reduce latency. Requires a CraneSched build configured with `CRANE_ENABLE_UCX=ON` and a compatible UCX SDK. Example:
   ```bash
   export CRANE_PMIX_DIRECT_CONN_UCX=true
   crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program

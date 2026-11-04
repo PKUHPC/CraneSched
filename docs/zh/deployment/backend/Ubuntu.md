@@ -190,11 +190,14 @@ apt install -y \
     libcurl4-openssl-dev \
     libpam0g-dev \
     zlib1g-dev \
+    libpmix-dev \
     libaio-dev \
     libsystemd-dev \
     libelf-dev \
     libsubid-dev
 ```
+
+PMIx 默认开启；关闭功能或选择自定义 SDK 的方式统一见 [PMIx 指南](../configuration/pmix.md)。
 
 !!! info
     在 Ubuntu 22.04 及以下版本中， `libsubid-dev` 不可用。请参考：[https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/) 构建并安装 shadow 4.0 或更高版本。

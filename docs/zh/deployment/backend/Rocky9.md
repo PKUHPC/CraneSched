@@ -126,12 +126,15 @@ dnf install -y \
     curl-devel \
     pam-devel \
     zlib-devel \
+    pmix-devel \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
     shadow-utils-subid-devel
 ```
+
+PMIx 默认开启；关闭功能或选择自定义 SDK 的方式统一见 [PMIx 指南](../configuration/pmix.md)。
 
 默认打包构建会获取并静态链接固定版本的 Lua。仅在使用
 `-DCRANE_USE_SYSTEM_LUA=ON` 时安装 `lua-devel`。

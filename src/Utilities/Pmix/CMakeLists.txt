@@ -38,8 +38,16 @@ target_link_libraries(Utility_Pmix PUBLIC
         crane_proto_lib
         fmt::fmt
         Utility_PublicHeader
-        $<$<BOOL:${PMIx_FOUND}>:PMIx::pmix>
         phmap
         uvw
-        $<$<BOOL:${UCX_FOUND}>:PkgConfig::UCX>
 )
+
+if (CRANE_ENABLE_PMIX)
+    target_compile_definitions(Utility_Pmix PUBLIC HAVE_PMIX)
+    target_link_libraries(Utility_Pmix PUBLIC PMIx::pmix)
+endif ()
+
+if (CRANE_ENABLE_UCX)
+    target_compile_definitions(Utility_Pmix PUBLIC HAVE_UCX)
+    target_link_libraries(Utility_Pmix PUBLIC PkgConfig::UCX)
+endif ()

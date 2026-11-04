@@ -21,6 +21,9 @@ endif ()
 
 # Always use -g for BPF CO-RE
 list(APPEND BPF_COMPILE_OPTIONS -O2 -g)
+foreach (include_dir IN LISTS LIBBPF_INCLUDE_DIR)
+    list(APPEND BPF_COMPILE_OPTIONS "-I${include_dir}")
+endforeach ()
 
 # When compiling with -target bpf clang does not add the multiarch include path,
 # so explicitly provide it to make sure asm/* headers (pulled by linux/types.h)
@@ -34,11 +37,17 @@ endif ()
 
 add_custom_command(
         OUTPUT ${BPF_OBJECT_FILE}
-        COMMAND ${BPF_COMPILER} -target bpf ${BPF_COMPILE_OPTIONS} -D${BPF_ARCH} -c ${BPF_SOURCE_FILE} -o ${BPF_OBJECT_FILE}
+        COMMAND ${BPF_COMPILER} -target bpf ${BPF_COMPILE_OPTIONS} -D${BPF_ARCH}
+                -MD -MF ${BPF_OBJECT_FILE}.d -c ${BPF_SOURCE_FILE} -o ${BPF_OBJECT_FILE}
         DEPENDS ${BPF_SOURCE_FILE}
+        DEPFILE ${BPF_OBJECT_FILE}.d
         COMMENT "Building BPF object: ${BPF_OBJECT_FILE}"
 )
 
 add_custom_target(crane_ebpf ALL
         DEPENDS ${BPF_OBJECT_FILE}
 )
+
+if (TARGET libbpf_ep)
+    add_dependencies(crane_ebpf libbpf_ep)
+endif ()

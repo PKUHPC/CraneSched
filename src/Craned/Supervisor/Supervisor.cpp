@@ -104,6 +104,11 @@ int InitFromStdin(int argc, char** argv) {
   g_config.StepId = msg.step_id();
   g_config.StepSpec = msg.step_spec();
   g_config.CranedIdOfThisNode = msg.craned_id();
+  g_config.CranedIdToNodeHostname.insert(
+      msg.craned_id_to_node_hostname().begin(),
+      msg.craned_id_to_node_hostname().end());
+  g_config.CranedIdToNodeAddr.insert(msg.craned_id_to_node_addr().begin(),
+                                     msg.craned_id_to_node_addr().end());
   g_config.TaskCount = 1;
   g_config.SupervisorDebugLevel = msg.debug_level();
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();

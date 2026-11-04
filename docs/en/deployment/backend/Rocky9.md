@@ -125,12 +125,15 @@ dnf install -y \
     curl-devel \
     pam-devel \
     zlib-devel \
+    pmix-devel \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
     elfutils-libelf-devel \
     shadow-utils-subid-devel
 ```
+
+PMIx support is enabled by default; disabling it or using a custom SDK is documented in the [PMIx guide](../configuration/pmix.md).
 
 The default package build fetches and statically links the pinned Lua runtime.
 Install `lua-devel` only when configuring with `-DCRANE_USE_SYSTEM_LUA=ON`.

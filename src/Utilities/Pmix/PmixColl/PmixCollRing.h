@@ -124,12 +124,6 @@ class PmixCollRing : public Coll,
       const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
       const std::string& msg);
 
-  struct CbData {
-    std::shared_ptr<PmixCollRing> coll;
-    CollRingCtx* coll_ring_ctx;
-    uint32_t seq;
-  };
-
   PmixStepInfo m_pmix_step_info_;
   PmixClient* m_pmix_client_{nullptr};      // injected, not owned
   CranedClient* m_craned_client_{nullptr};  // injected, not owned

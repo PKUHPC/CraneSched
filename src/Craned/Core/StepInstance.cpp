@@ -254,6 +254,12 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step_to_d);
+    for (const auto& craned_id : step_to_d.nodelist()) {
+      (*init_req.mutable_craned_id_to_node_hostname())[craned_id] =
+          g_config.CranedIdToNodeHostname.at(craned_id);
+      (*init_req.mutable_craned_id_to_node_addr())[craned_id] =
+          g_config.CranedIdToNodeAddr.at(craned_id);
+    }
     init_req.set_log_dir(g_config.Supervisor.LogDir);
     init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
     init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);

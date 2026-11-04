@@ -202,9 +202,9 @@ Both version commands must report `14.x`, and `command -v` must point to `/usr/l
 !!! tip
     The Binutils version supplied by CentOS 7 is old. A normal build can usually proceed, but GCC requires Binutils 2.35+ for reliable LTO support. If CMake reports IPO/LTO or linker errors, install a newer release such as Binutils 2.41 under a separate prefix and reconfigure. LLDB is not required for a normal GCC build.
 
-## 5. Optional: Install PMIx and UCX
+## 5. Install PMIx; Optionally Enable UCX
 
-PMIx is needed only to launch MPI jobs with `crun --mpi=pmix`. UCX is an optional direct-connection optimization for high-speed networks such as InfiniBand or RoCE.
+The default build enables PMIx and requires its SDK. Set `CRANE_ENABLE_PMIX=OFF` explicitly to build without it. UCX is an optional direct-connection optimization for high-speed networks such as InfiniBand or RoCE.
 
 Install the OpenPMIx build dependencies on CentOS 7:
 
@@ -215,7 +215,7 @@ yum install -y libevent-devel hwloc-devel
 See the [PMIx Guide](../configuration/pmix.md) for versions, the Open MPI build, and UCX configuration. Also follow these rules:
 
 1. Install PMIx, MPI, and UCX at a stable path visible to every runtime node, or install them separately on every node.
-2. Set UCX's `PKG_CONFIG_PATH` before configuring CraneSched and verify it with `pkg-config --libs ucx`; otherwise UCX support will not be compiled.
+2. Set UCX's `PKG_CONFIG_PATH` before configuring CraneSched and verify it with `pkg-config --libs ucx`; also set `CRANE_ENABLE_UCX=ON` to compile UCX support.
 3. For custom shared-library paths, add `-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON` and verify library resolution with `ldd` on every runtime node.
 4. OpenPMIx does not replace an MPI implementation. MPI programs still require a PMIx-capable implementation such as Open MPI 4.1+.
 
@@ -240,7 +240,7 @@ cmake --build build -j"$(nproc)"
 Adjust `SUBID_LIBRARY` if `libsubid.so` was installed under `/usr/local/lib64`. If PMIx is enabled, also add:
 
 ```bash
--DWITH_PMIX=/path/to/pmix \
+-DCRANE_ENABLE_PMIX=ON -DPMIx_ROOT=/path/to/pmix \
 -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON
 ```
 
@@ -250,7 +250,7 @@ Adjust `SUBID_LIBRARY` if `libsubid.so` was installed under `/usr/local/lib64`. 
 Check the important configuration values and shared libraries before installing:
 
 ```bash
-cmake -LA -N build | grep -E 'CMAKE_(C|CXX)_COMPILER|CRANE_ENABLE_CGROUP_V2|CRANE_NATIVE_ARCH_OPT|WITH_PMIX'
+cmake -LA -N build | grep -E 'CMAKE_(C|CXX)_COMPILER|CRANE_ENABLE_CGROUP_V2|CRANE_NATIVE_ARCH_OPT|CRANE_ENABLE_PMIX|CRANE_ENABLE_UCX|PMIx_ROOT'
 ldd build/src/CraneCtld/cranectld | grep 'not found' && exit 1 || true
 ldd build/src/Craned/craned | grep 'not found' && exit 1 || true
 ```

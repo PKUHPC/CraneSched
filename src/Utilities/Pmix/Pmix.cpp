@@ -152,10 +152,16 @@ PmixServer::~PmixServer() {
 
   util::os::DeleteFolders(m_pmix_step_info_.server_tmpdir);
 
-  // Deregister the errhandler using the stored ref from registration.
+  // A null callback makes deregistration synchronous, so it completes before
+  // PMIx is finalized and needs no BlockingCounter callback data.
   if (PmixServerCallbacks::s_errhandler_ref != 0) {
-    PMIx_Deregister_event_handler(PmixServerCallbacks::s_errhandler_ref,
-                                  OpCbWrapper, nullptr);
+    const pmix_status_t rc = PMIx_Deregister_event_handler(
+        PmixServerCallbacks::s_errhandler_ref, nullptr, nullptr);
+    if (rc != PMIX_SUCCESS) {
+      CRANE_ERROR("Failed to deregister PMIx event handler: {}",
+                  PMIx_Error_string(rc));
+    }
+    PmixServerCallbacks::s_errhandler_ref = 0;
   }
 
   // Drain all active collectives and pending dmodex requests before destroying
@@ -428,35 +434,41 @@ bool PmixServer::InfoSet_(const Config& config,
   // Use the actual total task count, NOT node_tasks * node_num,
   // because tasks may not be evenly distributed across nodes.
   m_pmix_step_info_.task_num = step.task_node_list().size();
-  std::string hostname(HOST_NAME_MAX + 1, '\0');
-  if (gethostname(hostname.data(), hostname.size()) == 0) {
-    hostname.resize(strlen(hostname.c_str()));
-  } else {
-    CRANE_ERROR("Failed to get hostname");
-    return false;
-  }
-  m_pmix_step_info_.hostname = hostname;
+  m_pmix_step_info_.craned_id = config.CranedIdOfThisNode;
   m_pmix_step_info_.node_list =
       std::vector<std::string>(step.nodelist().begin(), step.nodelist().end());
   m_pmix_step_info_.node_list_str =
       absl::StrJoin(m_pmix_step_info_.node_list, ",");
 
   auto it = std::ranges::find(m_pmix_step_info_.node_list,
-                              m_pmix_step_info_.hostname);
+                              m_pmix_step_info_.craned_id);
   if (it == m_pmix_step_info_.node_list.end()) {
     CRANE_ERROR(
-        "[Step#{}.{}] Current hostname '{}' is not in the node list [{}] "
+        "[Step#{}.{}] Current CranedId '{}' is not in the node list [{}] "
         "assigned to this step.",
         m_pmix_step_info_.job_id, m_pmix_step_info_.step_id,
-        m_pmix_step_info_.hostname, m_pmix_step_info_.node_list_str);
+        m_pmix_step_info_.craned_id, m_pmix_step_info_.node_list_str);
     return false;
   }
 
   m_pmix_step_info_.node_id =
       std::ranges::distance(m_pmix_step_info_.node_list.begin(), it);
 
+  m_pmix_step_info_.node_hostnames.clear();
+  for (const auto& craned_id : m_pmix_step_info_.node_list) {
+    const auto hostname = config.CranedIdToNodeHostname.find(craned_id);
+    const auto address = config.CranedIdToNodeAddr.find(craned_id);
+    if (hostname == config.CranedIdToNodeHostname.end() ||
+        address == config.CranedIdToNodeAddr.end() ||
+        hostname->second.empty() || address->second.empty()) {
+      CRANE_ERROR("Missing PMIx node configuration for CranedId {}", craned_id);
+      return false;
+    }
+    m_pmix_step_info_.node_hostnames.push_back(hostname->second);
+  }
+
   m_pmix_step_info_.peer_node_list = std::vector(m_pmix_step_info_.node_list);
-  std::erase(m_pmix_step_info_.peer_node_list, m_pmix_step_info_.hostname);
+  std::erase(m_pmix_step_info_.peer_node_list, m_pmix_step_info_.craned_id);
 
   // Build task_map: task_map[rank] = node_id (block order).
   // tasks_per_node_list[i] is the number of tasks on nodelist[i].
@@ -482,7 +494,7 @@ bool PmixServer::InfoSet_(const Config& config,
 
   m_pmix_step_info_.server_tmpdir =
       (std::filesystem::path(config.CraneBaseDir) /
-       fmt::format("pmix.crane.{}", m_pmix_step_info_.hostname) /
+       fmt::format("pmix.crane.{}", m_pmix_step_info_.craned_id) /
        fmt::format("pmix.{}.{}", m_pmix_step_info_.job_id,
                    m_pmix_step_info_.step_id))
           .string();
@@ -582,16 +594,20 @@ bool PmixServer::PmixInit_() {
   pmix_status_t rc;
 
   pmix_info_t* server_info;
-  int server_info_size = 1;
-  if (PMIX_VERSION_MAJOR < 5) server_info_size = 2;
+  int server_info_size = 2;
+  if (PMIX_VERSION_MAJOR < 5) server_info_size = 3;
 
   PMIX_INFO_CREATE(server_info, server_info_size);
   if (PMIX_VERSION_MAJOR < 5)
     PMIX_INFO_LOAD(&server_info[0], PMIX_USERID, &m_pmix_step_info_.uid,
                    PMIX_UINT32);
 
-  PMIX_INFO_LOAD(&server_info[server_info_size - 1], PMIX_SERVER_TMPDIR,
+  PMIX_INFO_LOAD(&server_info[server_info_size - 2], PMIX_SERVER_TMPDIR,
                  m_pmix_step_info_.server_tmpdir.c_str(), PMIX_STRING);
+  PMIX_INFO_LOAD(
+      &server_info[server_info_size - 1], PMIX_HOSTNAME,
+      m_pmix_step_info_.node_hostnames[m_pmix_step_info_.node_id].c_str(),
+      PMIX_STRING);
   rc = PMIx_server_init(&s_crane_pmix_module, server_info, server_info_size);
   PMIX_INFO_FREE(server_info, server_info_size);
   if (PMIX_SUCCESS != rc) {
@@ -667,7 +683,7 @@ bool PmixServer::JobSet_() {
     // correct hostname/node_id for that rank.
     uint32_t rank_node_id = m_pmix_step_info_.task_map[rank];
     const std::string& rank_hostname =
-        m_pmix_step_info_.node_list[rank_node_id];
+        m_pmix_step_info_.node_hostnames[rank_node_id];
 
     /* this rank is local, store local info about it */
     if (rank_node_id == m_pmix_step_info_.node_id) {
@@ -712,10 +728,12 @@ bool PmixServer::JobSet_() {
     info_list.emplace_back(
         InfoLoad_(PMIX_USERID, m_pmix_step_info_.uid, PMIX_UINT32));
 
-  // node_list node1,node2,node3
+  // PMIx node-map names must match each rank's PMIX_HOSTNAME. Canonical IDs
+  // remain in node_list for Crane's collective routing and job environment.
   std::unique_ptr<char, decltype(&free)> regex(nullptr, &free);
   char* raw_regex = nullptr;
-  rc = PMIx_generate_regex(m_pmix_step_info_.node_list_str.c_str(), &raw_regex);
+  const auto hostnames = absl::StrJoin(m_pmix_step_info_.node_hostnames, ",");
+  rc = PMIx_generate_regex(hostnames.c_str(), &raw_regex);
   regex.reset(raw_regex);
   if (rc != PMIX_SUCCESS) {
     CRANE_ERROR("Error: PMIx_generate_regex. {}", PMIx_Error_string(rc));
@@ -752,7 +770,7 @@ bool PmixServer::JobSet_() {
   std::string ranks_str = absl::StrJoin(local_ranks, ",");
   if (local_ranks.empty()) {
     CRANE_ERROR("No local PMIx ranks assigned on node {}",
-                m_pmix_step_info_.hostname);
+                m_pmix_step_info_.craned_id);
     for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }

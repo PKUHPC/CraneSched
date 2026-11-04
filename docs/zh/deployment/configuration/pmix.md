@@ -14,60 +14,37 @@ Open MPI | 4.1+ | 支持 PMIx 的 MPI 实现（推荐 4.1.6）|
 UCX（可选）| 1.12+	| 启用高性能直连模式（需要 InfiniBand/RoCE 等） |
 
 ### 1.2 安装 OpenPMIx
-从源码编译（生产环境推荐），建议参考OpenPmix官方文档安装
-```bash
-sudo dnf install libevent-devel
-sudo dnf install hwloc-devel
-## 推荐安装在共享目录，如/nfs
-cd /nfs/software/pmix/src
-wget https://github.com/openpmix/openpmix/releases/download/v3.1.7/pmix-3.1.7.tar.gz
-tar -xzf pmix-3.1.7.tar.gz
-cd pmix-3.1.7
 
-# 注意：使用独立路径，不影响系统
-./configure --prefix=/nfs/software/pmix/3.1.7 \
-            --enable-embedded-libevent \
-            --enable-embedded-hwloc \
-            --disable-docs \
-            --enable-shared
+CraneSched 默认开启 PMIx，构建需要 PMIx 3 或更新版本的开发包；运行节点需要匹配的运行库。
+优先使用发行版软件包：Rocky Linux 9/10 安装 `pmix-devel`，Ubuntu 安装 `libpmix-dev`，
+由包管理器准备 libevent、hwloc 等依赖。Rocky Linux 8 的 PMIx 2.2.5 不满足要求，需要维护的较新版本。
+系统包不足时，按 [OpenPMIx 官方安装说明](https://docs.openpmix.org/en/latest/installing-pmix/index.html)
+构建并交付依赖，确保运行节点也能安装对应版本；仅在构建机安装不能满足运行要求。
 
-make -j$(nproc)
-make install
-
-```
+自定义安装通过 `PMIx_ROOT` 或 `CMAKE_PREFIX_PATH` 提供前缀。使用自定义共享库目录时可设置
+`CMAKE_INSTALL_RPATH_USE_LINK_PATH=ON`，安装后检查实际加载路径。不能把同名 SONAME 当成版本兼容证明。
 
 ### 1.3 安装启用了 PMIx 支持的 MPI 实现
-**Open MPI（推荐）**
 
-以 Open MPI 4.1.6 + 系统 PMIx 为例。建议参考OpenMpi官方文档安装
+构建 CraneSched 的 PMIx 支持本身不需要 Open MPI。运行 MPI 程序时，还需要支持 PMIx 的 MPI 实现，
+可使用发行版 Open MPI，或按 [Open MPI 安装说明](https://docs.open-mpi.org/en/main/installing-open-mpi/index.html)
+安装匹配版本。核对 MPI 客户端与 PMIx 服务端互操作，以及 libevent/hwloc 等支持库的一致性；
+实际执行 MPI 作业，而不只检查版本命令。`crun --mpi=pmix` 直接启动 MPI 进程，不需要再套一层 `mpirun`。
+
+### 1.4 配置 CraneSched PMIx 支持
+
+功能开关为 `CRANE_ENABLE_PMIX`，默认 ON；启用时缺少兼容依赖会在 CMake 配置阶段失败。
+系统安装自动发现，自定义前缀示例如下：
+
 ```bash
-## 推荐安装在共享目录，如/nfs
-cd /nfs/software/openmpi/src
-wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-4.1.6.tar.gz
-tar -xzf openmpi-4.1.6.tar.gz
-cd openmpi-4.1.6
-
-./configure --prefix=/nfs/software/openmpi/4.1.6 \
-            --with-pmix=/nfs/software/pmix/3.1.7 \
-            --enable-mpi-fortran=yes \
-            --enable-mpi-cxx=yes \
-            --enable-shared \
-            --with-slurm \
-            --enable-orterun-prefix-by-default
-
-make -j$(nproc)
-make install
+cmake -S . -B build -DCRANE_ENABLE_PMIX=ON -DPMIx_ROOT=/opt/pmix
+cmake --build build --parallel 4
 ```
 
-### 1.4 确认 CraneSched 已启用 PMIx 支持
-PMIx 支持需在编译 CraneSched 时通过 CMake 选项开启。请联系集群管理员确认。
-```bash
-# 管理员启用方式：
-cmake -DWITH_PMIX=/nfs/software/pmix/3.1.7（pmix安装目录） [其他选项] ..
-# 若同时安装了 UCX，系统会通过 pkg-config 自动检测并启用高性能直连模式：
-# 检查是否同时支持 UCX
-pkg-config --libs ucx
-```
+不需要 PMIx 时显式设置 `-DCRANE_ENABLE_PMIX=OFF`。路径提示不承担启停功能。
+UCX 传输默认关闭；安装 UCX 开发包后，通过 `-DCRANE_ENABLE_UCX=ON` 显式启用，要求 PMIx 同时开启
+且 pkg-config 能找到 UCX 1.12 或更新版本。仅安装 UCX 不会自动改变构建功能。
+
 ---
 ## 二、快速上手
 以下示例在 2 个节点、每节点 4 个 MPI 进程（共 8 个 rank）上运行 MPI 程序：
@@ -158,6 +135,17 @@ crun --ntasks-per-node=8 --mpi=pmix ./main_solver
 ```
 
 ## 四、高级配置
+### 节点身份、连接地址与 TLS
+
+PMIx 使用[节点配置](config.md)中已解析的 `name`（规范 CranedId）、`NodeHostname` 和 `NodeAddr`。
+本机身份由 Craned 传入 Supervisor；端口交换、peer 查找和 tree/ring 成员匹配均使用规范 ID，
+不再把系统 `gethostname()` 的返回值直接当作节点 ID。PMIx 对客户端公布的主机名和节点映射使用 `NodeHostname`。
+
+gRPC 连接目的地为 `NodeAddr`，启用 TLS 时按 `NodeHostname` 校验证书，与控制端连接 Craned 的规则一致。
+未配置 `NodeHostname` 时使用 `name`；未配置 `NodeAddr` 时使用 `NodeHostname`，由现有配置解析统一补齐。
+`NodeAddr` 不作为节点别名。PMIx 不拼接 `TLS.DomainSuffix`，也不要求逻辑 ID 能被 DNS 解析。
+证书需覆盖实际配置的 `NodeHostname`；非 TLS 路径仍使用相同的连接地址映射。
+
 通过在作业脚本中设置环境变量，可以调整 CraneSched PMIx 服务端的行为。
 请在 `crun` 命令前导出这些变量，并确保其 `--export` 策略包含它们。完整输入列表、注入任务的变量和节点列表作用域见[作业环境变量](../../reference/job_env_vars.md)。
 
@@ -199,7 +187,7 @@ crun --nodes=8 --ntasks-per-node=16 --mpi=pmix ./my_program
 export CRANE_PMIX_DIRECT_CONN_UCX=true
 crun --nodes=16 --ntasks-per-node=8 --mpi=pmix ./my_program
 ```
-**该选项需要 CraneSched 在编译时检测到 UCX（pkg-config --libs ucx 成功）。若 CraneSched 未编译 UCX 支持，任务启动失败。**
+**该选项需要 CraneSched 设置 `CRANE_ENABLE_UCX=ON` 并找到兼容 UCX。若 CraneSched 未编译 UCX 支持，任务启动失败。**
 仅精确值 `true` 启用该模式，其他值使用 gRPC。
 
 ### 4.3 超时与客户端临时目录
@@ -289,12 +277,6 @@ echo "Simulation completed at $(date)"
 
 **Q1：提交时提示 `PMIx support is not compiled in.`**
 
-原因：当前集群的 CraneSched 编译时未启用 PMIx 支持（即未使用 `-DWITH_PMIX`）。
+原因：当前集群的 CraneSched 编译时设置了 `CRANE_ENABLE_PMIX=OFF`，或使用了未启用 PMIx 的旧产物。
 
-解决方法：联系集群管理员确认并重新编译 CraneSched：
-
-管理员重新编译（示例）
-```bash
-cmake -DWITH_PMIX=/opt/pmix -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-```
+解决方法：联系集群管理员，按[配置 CraneSched PMIx 支持](#14-配置-cranesched-pmix-支持)重新构建。
