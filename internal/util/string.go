@@ -284,6 +284,41 @@ func ParseArrayRangeSpec(spec string) (*protos.ArraySpec, error) {
 	return arraySpec, nil
 }
 
+// FormatArraySpec renders an ArraySpec using the syntax accepted by --array.
+func FormatArraySpec(arraySpec *protos.ArraySpec, includeMaxConcurrent bool) string {
+	if arraySpec == nil {
+		return ""
+	}
+
+	spec := strconv.FormatUint(uint64(arraySpec.GetStart()), 10)
+	if arraySpec.GetStart() != arraySpec.GetEnd() {
+		spec = fmt.Sprintf("%s-%d", spec, arraySpec.GetEnd())
+	}
+	if arraySpec.GetStride() > 1 {
+		spec = fmt.Sprintf("%s:%d", spec, arraySpec.GetStride())
+	}
+	if includeMaxConcurrent && arraySpec.GetMaxConcurrent() > 0 {
+		spec = fmt.Sprintf("%s%%%d", spec, arraySpec.GetMaxConcurrent())
+	}
+	return spec
+}
+
+func IsArrayParent(job *protos.JobInfo) bool {
+	return job != nil && job.GetArraySpec() != nil && job.GetArrayTask() == nil
+}
+
+func IsPendingArrayParent(job *protos.JobInfo) bool {
+	return IsArrayParent(job) && job.GetStatus() == protos.JobStatus_Pending
+}
+
+func FormatPendingArrayJobID(job *protos.JobInfo) string {
+	if !IsPendingArrayParent(job) {
+		return ""
+	}
+	return fmt.Sprintf("%d_[%s]", job.GetJobId(),
+		FormatArraySpec(job.GetArraySpec(), true))
+}
+
 func FormatJobId(jobId uint32, arrayTask *protos.ArrayTaskIdentity) string {
 	if arrayTask != nil {
 		return fmt.Sprintf("%d_%d", arrayTask.ArrayJobId, arrayTask.TaskId)

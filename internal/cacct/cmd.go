@@ -135,8 +135,7 @@ Supported format identifiers or string, string case insensitive:
                              If the exit code is based on a specific base (e.g., kCraneExitCodeBase),
                              it formats as "0:<code>" or "<code>:0" based on the condition.
 	%h/%Held              - Display the hold status of the job.
-	%j/%JobID             - Display the ID of the job.
-                             Array jobs use jobid_arraytaskid; steps use jobid_arraytaskid.stepid.
+	%j/%JobID             - Display the raw job ID; a pending array parent uses jobid_[range]; steps use jobid.stepid.
 	%K/%Wckey             - Display the wckey of the job.
 	%k/%Comment           - Display the comment of the job.
 	%L/%NodeList          - Display the list of nodes the job is running on.

@@ -84,7 +84,7 @@ func QueryStepsTableOutput(reply *protos.QueryJobsInfoReply) error {
 			stepInfo := stepData.stepInfo
 			job := stepData.job
 
-			stepIdStr := util.FormatStepId(stepInfo.JobId, job.ArrayTask, stepInfo.StepId)
+			stepIdStr := ProcessStepId(stepData)
 
 			name := stepInfo.Name
 
@@ -165,7 +165,14 @@ func ProcessStepNodeList(stepData StepData) string {
 }
 
 func ProcessStepState(stepData StepData) string {
-	return stepData.stepInfo.Status.String()
+	if util.IsSlurmOutputMode() {
+		return FormatSlurmJobState(stepData.stepInfo.GetStatus())
+	}
+	return stepData.stepInfo.GetStatus().String()
+}
+
+func ProcessStepStateCompact(stepData StepData) string {
+	return FormatSlurmJobStateCompact(stepData.stepInfo.GetStatus())
 }
 
 func ProcessStepTimeLimit(stepData StepData) string {
@@ -192,7 +199,7 @@ func ProcessStepCommand(stepData StepData) string {
 }
 
 func ProcessStepJobId(stepData StepData) string {
-	return util.FormatJobId(stepData.job.JobId, stepData.job.ArrayTask)
+	return FormatQueueJobID(stepData.job)
 }
 
 type StepFieldProcessor struct {
@@ -226,8 +233,9 @@ var stepFieldMap = map[string]StepFieldProcessor{
 	"L":        {"NodeList", ProcessStepNodeList},
 	"nodelist": {"NodeList", ProcessStepNodeList},
 
-	"t":     {"State", ProcessStepState},
-	"state": {"State", ProcessStepState},
+	"t":            {"State", ProcessStepState},
+	"state":        {"State", ProcessStepState},
+	"statecompact": {"ST", ProcessStepStateCompact},
 
 	"l":         {"TimeLimit", ProcessStepTimeLimit},
 	"timelimit": {"TimeLimit", ProcessStepTimeLimit},

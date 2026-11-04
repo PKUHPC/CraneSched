@@ -61,7 +61,7 @@ func ProcessHeld(job *protos.JobInfo) string {
 
 // 'j' group
 func ProcessJobId(job *protos.JobInfo) string {
-	return util.FormatJobId(job.JobId, job.ArrayTask)
+	return FormatQueueJobID(job)
 }
 
 // 'k'wckey
@@ -175,7 +175,11 @@ func ProcessStartTime(job *protos.JobInfo) string {
 
 // 't' group
 func ProcessState(job *protos.JobInfo) string {
-	return job.Status.String()
+	return FormatQueueState(job)
+}
+
+func ProcessStateCompact(job *protos.JobInfo) string {
+	return FormatSlurmJobStateCompact(job.GetStatus())
 }
 
 func ProcessJobType(job *protos.JobInfo) string {
@@ -285,10 +289,11 @@ var fieldMap = map[string]FieldProcessor{
 	"starttime":  {"StartTime", ProcessStartTime},
 
 	// 't' group
-	"t":       {"State", ProcessState},
-	"state":   {"State", ProcessState},
-	"T":       {"JobType", ProcessJobType},
-	"jobtype": {"JobType", ProcessJobType},
+	"t":            {"State", ProcessState},
+	"state":        {"State", ProcessState},
+	"statecompact": {"ST", ProcessStateCompact},
+	"T":            {"JobType", ProcessJobType},
+	"jobtype":      {"JobType", ProcessJobType},
 
 	// 'u' group
 	"u":    {"User", ProcessUser},

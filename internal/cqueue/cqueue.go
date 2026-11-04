@@ -36,7 +36,11 @@ var (
 )
 
 func FillReqByCobraFlags() (*protos.QueryJobsInfoRequest, error) {
-	req := protos.QueryJobsInfoRequest{OptionIncludeCompletedJobs: false}
+	req := protos.QueryJobsInfoRequest{
+		OptionIncludeCompletedJobs: false,
+		Mode:                       protos.QueryJobsInfoMode_QUERY_JOBS_INFO_QUEUE,
+		OptionQueryStepsOnly:       FlagStep,
+	}
 
 	processors := []FilterProcessor{
 		&StatesFilterProcessor{},

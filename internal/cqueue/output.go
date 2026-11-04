@@ -39,6 +39,85 @@ func GetReasonInfo(job *protos.JobInfo) string {
 	return job.GetCranedList()
 }
 
+func FormatQueueJobID(job *protos.JobInfo) string {
+	if pendingID := util.FormatPendingArrayJobID(job); pendingID != "" {
+		return pendingID
+	}
+	return util.FormatJobId(job.GetJobId(), job.GetArrayTask())
+}
+
+func FormatQueueState(job *protos.JobInfo) string {
+	if util.IsSlurmOutputMode() {
+		return FormatSlurmJobState(job.GetStatus())
+	}
+	return job.GetStatus().String()
+}
+
+func FormatSlurmJobState(status protos.JobStatus) string {
+	switch status {
+	case protos.JobStatus_Pending:
+		return "PENDING"
+	case protos.JobStatus_Running:
+		return "RUNNING"
+	case protos.JobStatus_Completed:
+		return "COMPLETED"
+	case protos.JobStatus_Failed:
+		return "FAILED"
+	case protos.JobStatus_ExceedTimeLimit:
+		return "TIMEOUT"
+	case protos.JobStatus_Cancelled:
+		return "CANCELLED"
+	case protos.JobStatus_OutOfMemory:
+		return "OUT_OF_MEMORY"
+	case protos.JobStatus_Configuring, protos.JobStatus_Starting:
+		return "CONFIGURING"
+	case protos.JobStatus_Completing:
+		return "COMPLETING"
+	case protos.JobStatus_Suspended:
+		return "SUSPENDED"
+	case protos.JobStatus_Deadline:
+		return "DEADLINE"
+	default:
+		return "?"
+	}
+}
+
+func FormatSlurmJobStateCompact(status protos.JobStatus) string {
+	switch status {
+	case protos.JobStatus_Pending:
+		return "PD"
+	case protos.JobStatus_Running:
+		return "R"
+	case protos.JobStatus_Completed:
+		return "CD"
+	case protos.JobStatus_Failed:
+		return "F"
+	case protos.JobStatus_ExceedTimeLimit:
+		return "TO"
+	case protos.JobStatus_Cancelled:
+		return "CA"
+	case protos.JobStatus_OutOfMemory:
+		return "OOM"
+	case protos.JobStatus_Configuring, protos.JobStatus_Starting:
+		return "CF"
+	case protos.JobStatus_Completing:
+		return "CG"
+	case protos.JobStatus_Suspended:
+		return "S"
+	case protos.JobStatus_Deadline:
+		return "DL"
+	default:
+		return "?"
+	}
+}
+
+func FormatDefaultQueueState(job *protos.JobInfo) string {
+	if util.IsSlurmOutputMode() {
+		return FormatSlurmJobStateCompact(job.GetStatus())
+	}
+	return job.GetStatus().String()
+}
+
 func FormatTimeLimit(seconds int64) string {
 	if seconds >= util.InvalidDuration().Seconds {
 		return "unlimited"
@@ -47,12 +126,16 @@ func FormatTimeLimit(seconds int64) string {
 }
 
 func GenerateTableConfig() TableConfig {
+	stateHeader := "Status"
+	if util.IsSlurmOutputMode() {
+		stateHeader = "ST"
+	}
 	if FlagFull {
 		return TableConfig{
 			Header: []string{
 				"JobId", "JobName", "UserName", "Partition", "Account",
 				"NodeNum", "ReqCPUs", "ReqMemPerNode", "AllocCPUs", "AllocMemPerNode",
-				"Status", "Time", "TimeLimit", "StartTime", "SubmitTime",
+				stateHeader, "Time", "TimeLimit", "StartTime", "SubmitTime",
 				"Type", "Qos", "Exclusive", "Held", "Priority", "NodeList/Reason", "Deadline",
 			},
 			RowMapper: func(job *protos.JobInfo) []string {
@@ -61,7 +144,7 @@ func GenerateTableConfig() TableConfig {
 					timeLimit = FormatTimeLimit(job.TimeLimit.Seconds)
 				}
 				return []string{
-					util.FormatJobId(job.JobId, job.ArrayTask),
+					FormatQueueJobID(job),
 					job.Name,
 					job.Username,
 					job.Partition,
@@ -71,7 +154,7 @@ func GenerateTableConfig() TableConfig {
 					ProcessReqMemPerNode(job),
 					ProcessAllocCpus(job),
 					ProcessAllocMemPerNode(job),
-					job.Status.String(),
+					FormatDefaultQueueState(job),
 					GetElapsedTime(job),
 					timeLimit,
 					FormatTime(job.StartTime, "unknown"),
@@ -90,16 +173,16 @@ func GenerateTableConfig() TableConfig {
 		return TableConfig{
 			Header: []string{
 				"JobId", "Partition", "Name", "User", "Account",
-				"Status", "Type", "Time", "TimeLimit", "Nodes", "NodeList/Reason",
+				stateHeader, "Type", "Time", "TimeLimit", "Nodes", "NodeList/Reason",
 			},
 			RowMapper: func(job *protos.JobInfo) []string {
 				return []string{
-					util.FormatJobId(job.JobId, job.ArrayTask),
+					FormatQueueJobID(job),
 					job.Partition,
 					job.Name,
 					job.Username,
 					job.Account,
-					job.Status.String(),
+					FormatDefaultQueueState(job),
 					job.Type.String(),
 					GetElapsedTime(job),
 					FormatTimeLimit(job.TimeLimit.Seconds),

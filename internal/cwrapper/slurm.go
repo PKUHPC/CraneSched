@@ -1078,6 +1078,13 @@ func squeue() *cobra.Command {
 		GroupID:            "slurm",
 		DisableFlagParsing: true,
 		Run: func(cmd *cobra.Command, args []string) {
+			if slices.Contains(args, "--help") {
+				if err := cmd.Help(); err != nil {
+					log.Error(err)
+				}
+				return
+			}
+
 			cqueue.RootCmd.Use = "squeue [flags]"
 			// Slurm uses -V for version and -v for verbose.
 			cqueue.RootCmd.Flags().BoolP("version", "V", false, "version for squeue")
@@ -1149,40 +1156,47 @@ func squeue() *cobra.Command {
 	Fields are identified by a percent sign (%) followed by a character or string. 
 	Use a dot (.) and a number between % and the format character or string to specify a minimum width for the field.
 	
-Supported format identifiers or string, string case insensitive:
+Supported Slurm format identifiers:
 	%a/%Account            - Display the account associated with the job.
-	%C/%ReqCpus            - Display the cpus requested to the job.
-	%c/%AllocCpus          - Display the cpus allocated to the job.
-	%e/%ElapsedTime        - Display the elapsed time from the start of the job. 
-	%h/%Held               - Display the hold state of the job.
-	%j/%JobID              - Display the ID of the job (array jobs use jobid_arraytaskid).
+	%C/%ReqCpus            - Display the cpus requested by the job.
+	%D/%NodeNum            - Display the number of nodes requested by the job.
+	%i/%JobID              - Display the logical job ID.
+	                          Materialized array tasks use jobId_arrayTaskId; active array parents use jobId_[range%maxConcurrent] when limited.
+	%j/%Name               - Display the name of the job.
 	%k/%Comment            - Display the comment of the job.
-	%L/%NodeList           - Display the list of nodes the job is running on.
 	%l/%TimeLimit          - Display the time limit for the job.
-	%M/%ReqMemPerNode      - Display the requested mem per node of the job.
-	%m/%AllocMemPerNode    - Display the requested mem per node of the job.
-	%N/%NodeNum            - Display the number of nodes requested by the job.
-	%n/%Name               - Display the name of the job.
+	%M/%ElapsedTime        - Display the elapsed time from the start of the job.
+	%m/%ReqMemPerNode      - Display the requested memory per node.
+	%N/%NodeList           - Display the nodes allocated to the job.
+	%n/%ReqNodes           - Display the requested nodes.
 	%o/%Command            - Display the command line of the job.
 	%P/%Partition          - Display the partition the job is running in.
 	%p/%Priority           - Display the priority of the job.
-	%Q/%ReqCpuPerNode      - Display the requested cpu per node of the job.
 	%q/%QoS                - Display the Quality of Service level for the job.
-	%R/%Reason             - Display the reason of pending.
-	%r/%ReqNodes           - Display the reqnodes of the job.
+	%r/%Reason             - Display the pending reason.
 	%S/%StartTime          - Display the start time of the job.
-	%s/%SubmitTime         - Display the submission time of the job.
-	%t/%State              - Display the current state of the job.
-	%T/%JobType            - Display the job type.
-	%U/%Uid                - Display the uid of the job.
+	%t/%StateCompact       - Display the compact state of the job.
+	%T/%State              - Display the full state of the job.
 	%u/%User               - Display the user who submitted the job.
-	%X/%Exclusive          - Display the exclusive status of the job.
-	%x/%ExcludeNodes       - Display the exclude nodes of the job.
+	%U/%Uid                - Display the uid of the job.
+	%V/%SubmitTime         - Display the submission time of the job.
+
+Supported Crane extension identifiers (long form only):
+	%AllocCpus             - Display the cpus allocated to the job.
+	%AllocMemPerNode       - Display the memory allocated per node.
+	%Deadline              - Display the deadline time of the job.
+	%ExcludeNodes          - Display the excluded nodes.
+	%Exclusive             - Display the exclusive status of the job.
+	%Held                  - Display the hold state of the job.
+	%JobType               - Display the job type.
+	%ReqCpuPerTask         - Display the requested cpus per task.
+	%StepId                - Display the step ID (for steps only).
+	%Wckey                 - Display the wckey of the job.
 Each format specifier or string can be modified with a width specifier (e.g., "%.5j").
 If the width is specified, the field will be formatted to at least that width. 
 If the format is invalid or unrecognized, the program will terminate with an error message.
 
-Example: --format "%.5jobid %.20n %t" would output the job's ID with a minimum width of 5,
+Example: --format "%.5i %.20j %t" would output the job's ID with a minimum width of 5,
          Name with a minimum width of 20, and the State.
 `)
 	return cmd
@@ -1190,31 +1204,30 @@ Example: --format "%.5jobid %.20n %t" would output the job's ID with a minimum w
 
 var squeueFormatSpecRegex = regexp.MustCompile(`%(\.?\d*)([a-zA-Z]+)`)
 
-// Slurm single-letter format specifiers that cqueue supports with the same
-// meaning, mapped to their cqueue specifiers.
+// Maps Slurm squeue format specifiers to cqueue equivalents.
 var squeueFormatSpecMapping = map[string]string{
-	"a": "a", // account
-	"C": "C", // requested cpus
-	"D": "N", // number of nodes
-	"i": "j", // job id
-	"j": "n", // job name
-	"k": "k", // comment
-	"l": "l", // time limit
-	"M": "e", // elapsed time
-	"m": "M", // requested memory per node
-	"N": "L", // node list
-	"n": "r", // requested nodes
-	"o": "o", // command
-	"P": "P", // partition
-	"p": "p", // priority
-	"q": "q", // qos
-	"r": "R", // reason
-	"S": "S", // start time
-	"T": "t", // job state
-	"t": "t", // state
-	"u": "u", // user
-	"U": "U", // user id
-	"V": "s", // submit time
+	"a": "a",
+	"C": "C",
+	"D": "N",
+	"i": "j",
+	"j": "n",
+	"k": "k",
+	"l": "l",
+	"M": "e",
+	"m": "M",
+	"N": "L",
+	"n": "r",
+	"o": "o",
+	"P": "P",
+	"p": "p",
+	"q": "q",
+	"r": "R",
+	"S": "S",
+	"T": "state",
+	"t": "statecompact",
+	"u": "u",
+	"U": "U",
+	"V": "s",
 }
 
 // convertSqueueFormat rewrites the Slurm single-letter format specifiers in a

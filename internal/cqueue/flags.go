@@ -140,8 +140,13 @@ func (p *JobIDsProcessor) Process(req *protos.QueryJobsInfoRequest) error {
 
 	req.FilterJobIds = selectors
 	if !FlagStep {
-		// Count total number of requested jobs/tasks, not just unique parent IDs
 		req.NumLimit = uint32(len(selectors))
+		for _, selector := range selectors {
+			if selector.ArrayTaskId == nil {
+				req.NumLimit = 0
+				break
+			}
+		}
 	} else {
 		req.NumLimit = 0
 	}
