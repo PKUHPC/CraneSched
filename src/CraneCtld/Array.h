@@ -219,8 +219,8 @@ class ArrayManager {
 
   std::optional<crane::grpc::ArraySpec> RemainingTaskSpec(
       job_id_t array_job_id) const;
-  std::optional<job_id_t> MaterializedChildJobId(
-      job_id_t array_job_id, array_task_id_t task_id) const;
+  std::optional<job_id_t> MaterializedChildJobId(job_id_t array_job_id,
+                                                 array_task_id_t task_id) const;
   std::vector<std::pair<array_task_id_t, job_id_t>> MaterializedChildren(
       job_id_t array_job_id) const;
 

@@ -7100,8 +7100,8 @@ void JobScheduler::QueryJobsInRam(
     }
   };
 
-  auto build_job_info = [&](JobInCtld* job_ptr)
-      -> std::optional<crane::grpc::JobInfo> {
+  auto build_job_info =
+      [&](JobInCtld* job_ptr) -> std::optional<crane::grpc::JobInfo> {
     JobInCtld& job = *job_ptr;
     std::optional<crane::grpc::ArraySpec> remaining_array_spec;
     if (job.IsArrayParent()) {
@@ -7180,8 +7180,8 @@ void JobScheduler::QueryJobsInRam(
   ranges::any_view<JobInCtld*, ranges::category::forward> id_filtered_job_rng =
       no_ids_constraint ? all_job_rng : filtered_job_rng;
 
-  std::priority_queue<crane::grpc::JobInfo,
-                      std::vector<crane::grpc::JobInfo>, JobInfoDisplayOrder>
+  std::priority_queue<crane::grpc::JobInfo, std::vector<crane::grpc::JobInfo>,
+                      JobInfoDisplayOrder>
       top_jobs;
   for (JobInCtld* job : id_filtered_job_rng) {
     auto job_info = build_job_info(job);

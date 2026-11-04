@@ -723,8 +723,8 @@ void MongodbClient::AppendJobIdSelectorClause_(
       request->mode() == crane::grpc::QUERY_JOBS_INFO_QUEUE ||
       request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
 
-  filter.append(kvp("$or", [request, expand_array_parent_selector](
-                                  sub_array or_array) {
+  filter.append(kvp("$or", [request,
+                            expand_array_parent_selector](sub_array or_array) {
     for (const auto& selector : request->filter_job_ids()) {
       if (selector.has_array_task_id()) {
         or_array.append([&](sub_document match_doc) {
@@ -738,20 +738,20 @@ void MongodbClient::AppendJobIdSelectorClause_(
 
       if (!expand_array_parent_selector) {
         or_array.append([&](sub_document match_doc) {
-          match_doc.append(kvp(
-              "job_id", static_cast<std::int32_t>(selector.job_id())));
+          match_doc.append(
+              kvp("job_id", static_cast<std::int32_t>(selector.job_id())));
         });
       } else {
         or_array.append([&](sub_document match_doc) {
-          match_doc.append(kvp(
-              "$or", [job_id = selector.job_id()](sub_array id_or_array) {
+          match_doc.append(
+              kvp("$or", [job_id = selector.job_id()](sub_array id_or_array) {
                 id_or_array.append([job_id](sub_document job_id_doc) {
                   job_id_doc.append(
                       kvp("job_id", static_cast<std::int32_t>(job_id)));
                 });
                 id_or_array.append([job_id](sub_document array_job_id_doc) {
-                  array_job_id_doc.append(kvp(
-                      "array_job_id", static_cast<std::int32_t>(job_id)));
+                  array_job_id_doc.append(
+                      kvp("array_job_id", static_cast<std::int32_t>(job_id)));
                 });
               }));
         });
@@ -1010,10 +1010,10 @@ bool MongodbClient::FetchJobRecords(
     AppendLatestJobDocumentStages_(pipeline, m_job_collection_name_);
   }
   pipeline.match(filter.view());
-  pipeline.sort(make_document(kvp("state", 1), kvp("priority", -1),
-                              kvp("job_id", -1)));
-  const size_t mongo_limit = std::min(
-      limit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+  pipeline.sort(
+      make_document(kvp("state", 1), kvp("priority", -1), kvp("job_id", -1)));
+  const size_t mongo_limit =
+      std::min(limit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
   pipeline.limit(static_cast<int32_t>(mongo_limit));
 
   mongocxx::options::aggregate aggregate_options;

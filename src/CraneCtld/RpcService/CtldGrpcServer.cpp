@@ -1837,7 +1837,8 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
       request->mode() == crane::grpc::QUERY_JOBS_INFO_ACCOUNTING;
 
   if (accounting_query) {
-    // Over-fetch to offset live records removed during raw-job-ID deduplication.
+    // Over-fetch to offset live records removed during raw-job-ID
+    // deduplication.
     size_t db_limit = probe_limit;
     if (job_info_map.size() <= std::numeric_limits<size_t>::max() - db_limit) {
       db_limit += job_info_map.size();
