@@ -1,12 +1,12 @@
 package ccon
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/testutil"
-	"CraneFrontEnd/internal/util"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/testutil"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"strings"
 	"testing"
 

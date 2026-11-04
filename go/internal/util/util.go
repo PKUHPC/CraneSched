@@ -19,7 +19,7 @@
 package util
 
 import (
-	"CraneFrontEnd/api"
+	"github.com/PKUHPC/CraneSched/go/api"
 	"time"
 )
 

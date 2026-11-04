@@ -19,11 +19,11 @@
 package cqueue
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"strconv"
 	"time"
 

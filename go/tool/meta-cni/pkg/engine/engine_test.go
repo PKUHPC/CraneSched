@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	metatypes "CraneFrontEnd/tool/meta-cni/pkg/types"
+	metatypes "github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/types"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cnitypes "github.com/containernetworking/cni/pkg/types"

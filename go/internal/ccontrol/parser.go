@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"

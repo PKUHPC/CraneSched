@@ -1,8 +1,8 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 )
 
 // ValidateContainerIdentity checks container IDs against the submitting process's

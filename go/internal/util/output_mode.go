@@ -19,7 +19,7 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"strings"
 )
 

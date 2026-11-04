@@ -1,11 +1,11 @@
 package ccontrol
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/testutil"
-	"CraneFrontEnd/internal/util"
 	"context"
 	"errors"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/testutil"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"path/filepath"
 	"strings"

@@ -5,8 +5,8 @@
 package main
 
 import (
-	"CraneFrontEnd/compat/sinfo"
 	"context"
+	"github.com/PKUHPC/CraneSched/go/compat/sinfo"
 	"os"
 )
 

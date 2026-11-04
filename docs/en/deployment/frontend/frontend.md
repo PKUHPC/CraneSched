@@ -36,9 +36,9 @@ A brief overview of the main frontend components you will install and run:
 
 Frontend components are deployed through RPM/DEB packages by default.
 
-If you do not yet have `cranesched-frontend` and `cranesched-plugin` packages, follow the [Packaging Guide](../packaging.md) to install the build dependencies and generate them.
+If you do not yet have `cranesched-client` and `cranesched-plugin` packages, follow the [Packaging Guide](../packaging.md) to install the build dependencies and generate them.
 
-Install `cranesched-frontend` on login nodes and any other nodes that need CLI tools. Install `cranesched-plugin` only on nodes that need plugin functionality.
+Install `cranesched-client` on login nodes and any other nodes that need CLI tools. Install `cranesched-plugin` only on nodes that need plugin functionality.
 
 !!! note "Other installation methods"
     The project's GitHub Action uploads RPM/DEB artifacts after every master build. These artifacts have not been fully tested and are only suitable for quick validation.
@@ -51,13 +51,13 @@ Distribute the generated packages to the target nodes, then install them with th
 
 ```bash
 # RPM systems: install CLI tools and cfored on login nodes
-sudo dnf install /tmp/cranesched-frontend-*.rpm
+sudo dnf install /tmp/cranesched-client-*.rpm
 
 # RPM systems: install only on nodes that need plugin functionality
 sudo dnf install /tmp/cranesched-plugin-*.rpm
 
 # DEB systems: install CLI tools and cfored on login nodes
-sudo apt install ./cranesched-frontend_*.deb
+sudo apt install ./cranesched-client_*.deb
 
 # DEB systems: install only on nodes that need plugin functionality
 sudo apt install ./cranesched-plugin_*.deb
@@ -114,8 +114,8 @@ Note: cwrapper aliases only offer **basic compatibility**. To access advanced fe
 Source installation is intended for development and quick validation. See the [Packaging Guide](../packaging.md) for the build dependencies and tool installation. After preparing the environment, run:
 
 ```bash
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
+git clone https://github.com/PKUHPC/CraneSched.git
+cd CraneSched/go
 make
 make install
 ```

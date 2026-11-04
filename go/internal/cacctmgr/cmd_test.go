@@ -5,9 +5,9 @@
 package cacctmgr
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
 	"errors"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"testing"
 
 	"google.golang.org/grpc"

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

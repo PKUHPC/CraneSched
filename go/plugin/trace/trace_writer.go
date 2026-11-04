@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 )
 
 const (

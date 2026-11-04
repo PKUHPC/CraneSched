@@ -11,8 +11,8 @@
 package crun
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"sync"
 )
 

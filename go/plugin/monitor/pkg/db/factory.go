@@ -3,7 +3,7 @@ package db
 import (
 	"sync"
 
-	"CraneFrontEnd/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
 )
 
 var (

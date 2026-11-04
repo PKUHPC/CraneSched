@@ -1,8 +1,8 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"encoding/json"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/protobuf/proto"
 	"testing"
 )

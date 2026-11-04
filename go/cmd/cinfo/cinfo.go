@@ -19,7 +19,7 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/cinfo"
+	"github.com/PKUHPC/CraneSched/go/internal/cinfo"
 )
 
 func main() {

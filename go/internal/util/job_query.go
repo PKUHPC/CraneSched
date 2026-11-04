@@ -5,8 +5,8 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"os"
 
 	"google.golang.org/grpc/codes"

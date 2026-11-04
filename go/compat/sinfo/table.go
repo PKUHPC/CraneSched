@@ -5,8 +5,8 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/utils"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
 	"os/user"
 	"strconv"

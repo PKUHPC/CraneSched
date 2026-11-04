@@ -7,7 +7,7 @@ import (
 
 	logrus "github.com/sirupsen/logrus"
 
-	"CraneFrontEnd/plugin/monitor/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/types"
 )
 
 var log = logrus.WithField("component", "GPU")

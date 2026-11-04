@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"

@@ -1,4 +1,4 @@
-module CraneFrontEnd
+module github.com/PKUHPC/CraneSched/go
 
 go 1.26.10
 

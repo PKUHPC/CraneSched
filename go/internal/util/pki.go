@@ -1,7 +1,6 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"math"
 	"os"
 	"path/filepath"

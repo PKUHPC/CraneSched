@@ -1,7 +1,7 @@
 package ccontrol
 
 import (
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"testing"
 )
 

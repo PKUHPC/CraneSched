@@ -19,7 +19,7 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/calloc"
+	"github.com/PKUHPC/CraneSched/go/internal/calloc"
 )
 
 func main() {

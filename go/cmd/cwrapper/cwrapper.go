@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/cwrapper"
+import "github.com/PKUHPC/CraneSched/go/internal/cwrapper"
 
 func main() {
 	cwrapper.ParseCmdArgs()

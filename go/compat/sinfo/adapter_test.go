@@ -5,10 +5,10 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"net"
 	"os"
 	"path/filepath"

@@ -19,9 +19,9 @@
 package cwrapper
 
 import (
-	"CraneFrontEnd/internal/util"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"strings"
 

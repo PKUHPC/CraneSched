@@ -19,9 +19,9 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"encoding/json"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )

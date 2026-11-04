@@ -19,8 +19,8 @@
 package cbatch
 
 import (
-	"CraneFrontEnd/internal/util"
 	"errors"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"strings"
 

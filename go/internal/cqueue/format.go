@@ -1,9 +1,9 @@
 package cqueue
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"regexp"
 	"strconv"
 	"strings"

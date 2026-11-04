@@ -19,11 +19,11 @@
 package cacctmgr
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"math"
 	"os"
 	"sort"

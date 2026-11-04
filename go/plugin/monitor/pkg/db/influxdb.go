@@ -10,9 +10,9 @@ import (
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	logrus "github.com/sirupsen/logrus"
 
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/plugin/monitor/pkg/config"
-	"CraneFrontEnd/plugin/monitor/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/types"
 )
 
 var log = logrus.WithField("component", "InfluxDB")

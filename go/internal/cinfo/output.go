@@ -1,11 +1,11 @@
 package cinfo
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"bytes"
 	"cmp"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"maps"
 	"os"
 	"regexp"

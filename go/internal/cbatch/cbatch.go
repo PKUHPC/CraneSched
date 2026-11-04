@@ -19,11 +19,11 @@
 package cbatch
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"path/filepath"
 	"regexp"

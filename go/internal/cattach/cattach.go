@@ -19,12 +19,12 @@
 package cattach
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"io"
 	"os"
 	"os/signal"

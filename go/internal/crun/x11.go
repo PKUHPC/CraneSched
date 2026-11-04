@@ -19,10 +19,10 @@
 package crun
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"io"
 	"net"
 	"sync"

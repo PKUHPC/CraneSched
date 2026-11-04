@@ -25,8 +25,8 @@ import (
 	"path"
 	"runtime"
 
-	"CraneFrontEnd/api"
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/api"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
 	logrus "github.com/sirupsen/logrus"

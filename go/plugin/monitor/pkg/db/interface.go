@@ -1,8 +1,8 @@
 package db
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/plugin/monitor/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/types"
 )
 
 type DBInterface interface {

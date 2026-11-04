@@ -29,8 +29,10 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
                 ARGS --grpc_out "${OUTDIR}" --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR}
                 -I ${SYSTEM_PROTO_DIR}
                 --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+                --dependency_out "${OUTDIR}/${FIL_WE}.d"
                 ${ABS_FIL}
                 DEPENDS ${ABS_FIL}
+                DEPFILE "${OUTDIR}/${FIL_WE}.d"
                 COMMENT "Running gRPC C++ protocol buffer compiler on ${FIL}"
         )
     endforeach ()

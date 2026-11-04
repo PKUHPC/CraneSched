@@ -28,11 +28,11 @@ import (
 	"strconv"
 	"strings"
 
-	"CraneFrontEnd/api"
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/plugin/monitor/pkg/config"
-	"CraneFrontEnd/plugin/monitor/pkg/db"
-	"CraneFrontEnd/plugin/monitor/pkg/monitor"
+	"github.com/PKUHPC/CraneSched/go/api"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/db"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/monitor"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
 	logrus "github.com/sirupsen/logrus"

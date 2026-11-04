@@ -5,9 +5,9 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/utils"
 	"cmp"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"sort"
 	"strconv"
 	"strings"

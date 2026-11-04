@@ -19,14 +19,14 @@
 package cwrapper
 
 import (
-	"CraneFrontEnd/internal/cacct"
-	"CraneFrontEnd/internal/cbatch"
-	"CraneFrontEnd/internal/ccancel"
-	"CraneFrontEnd/internal/cinfo"
-	"CraneFrontEnd/internal/cqueue"
-	"CraneFrontEnd/internal/util"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/cacct"
+	"github.com/PKUHPC/CraneSched/go/internal/cbatch"
+	"github.com/PKUHPC/CraneSched/go/internal/ccancel"
+	"github.com/PKUHPC/CraneSched/go/internal/cinfo"
+	"github.com/PKUHPC/CraneSched/go/internal/cqueue"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"regexp"
 	"slices"

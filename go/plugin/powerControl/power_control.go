@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"CraneFrontEnd/api"
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/api"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 
 	log "github.com/sirupsen/logrus"
 )

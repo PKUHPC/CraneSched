@@ -18,8 +18,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 )
 
 const (

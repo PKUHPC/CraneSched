@@ -8,14 +8,15 @@
 
 ### 软件包概览
 
-鹤思提供四个主要软件包：
+鹤思提供以下组件软件包：
 
 | 软件包 | 组件 | 描述 | 构建系统 |
 |--------|------|------|----------|
 | **cranectld** | 后端 | 管理节点的控制守护进程 | CPack (CMake) |
 | **craned** | 后端 | 计算节点的执行守护进程 | CPack (CMake) |
-| **cranesched-frontend** | 前端 | CLI 工具和 cfored 守护进程 | GoReleaser |
-| **cranesched-plugin** | 前端 | 插件守护进程和插件库 | GoReleaser |
+| **cranesched-client** | 前端 | CLI 工具和 cfored 守护进程 | GoReleaser |
+| **cranesched-plugin** | Go | 插件守护进程和官方 SO | GoReleaser |
+| **cranesched-slurm-compat** | Go | 可选的独立 Slurm 兼容命令 | GoReleaser |
 
 ### 安装路径
 
@@ -83,10 +84,10 @@ ls -lh *.rpm *.deb
 
 预期输出：
 ```
-CraneSched-1.1.2-Linux-x86_64-cranectld.rpm
-CraneSched-1.1.2-Linux-x86_64-craned.rpm
-CraneSched-1.1.2-Linux-x86_64-cranectld.deb
-CraneSched-1.1.2-Linux-x86_64-craned.deb
+CraneSched-2.0.0-Linux-x86_64-cranectld.rpm
+CraneSched-2.0.0-Linux-x86_64-craned.rpm
+CraneSched-2.0.0-Linux-x86_64-cranectld.deb
+CraneSched-2.0.0-Linux-x86_64-craned.deb
 ```
 
 ### 安装
@@ -179,58 +180,14 @@ sudo systemctl daemon-reload
 
 #### 前置条件
 
-构建前端软件包需要 Golang 1.24+、Protoc 30.2+ 和 GoReleaser v2。以下命令以 x86-64 环境为例；ARM64 环境需要将下载文件名中的架构改为 `arm64` 或 `aarch_64`。
-
-安装 Golang 和 Protocol Buffers 的 Go 代码生成插件：
-
-```bash
-GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
-curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
-rm -rf /usr/local/go
-tar -C /usr/local -xzf /tmp/go.tar.gz
-rm /tmp/go.tar.gz
-
-cat > /etc/profile.d/go.sh <<'EOF'
-export GOPATH=/root/go
-export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
-EOF
-source /etc/profile.d/go.sh
-
-go env -w GO111MODULE=on
-go env -w GOPROXY=https://goproxy.cn,direct
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-```
-
-安装 Protoc：
-
-```bash
-PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
-curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
-unzip /tmp/protoc.zip -d /usr/local
-rm /tmp/protoc.zip /usr/local/readme.txt
-```
-
-安装 GoReleaser：
-
-```bash
-go install github.com/goreleaser/goreleaser/v2@latest
-```
-
-确认工具均可用：
-
-```bash
-go version
-protoc --version
-goreleaser --version
-```
+在目标发行版容器中构建产品，Go 版本遵循 `go/go.mod` 并设置 `GOTOOLCHAIN=local`，使用 protoc 23.2、protoc-gen-go v1.36.5、protoc-gen-go-grpc v1.5.1 和 GoReleaser 2.12.0。cplugind 与全部官方 SO 使用同一编译器和参数。构建需要完整仓库，Go module 会读取根 Proto、VERSION、LICENSE 和配置输入。
 
 #### 构建过程
 
 ```bash
-# 克隆前端仓库
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
+# 克隆产品仓库
+git clone https://github.com/PKUHPC/CraneSched.git
+cd CraneSched/go
 
 # 构建软件包
 make package
@@ -243,17 +200,17 @@ ls build/dist/*.rpm build/dist/*.deb
 
 预期输出：
 ```
-cranesched-frontend_1.1.2_amd64.rpm
-cranesched-plugin_1.1.2_amd64.rpm
-cranesched-frontend_1.1.2_amd64.deb
-cranesched-plugin_1.1.2_amd64.deb
+cranesched-client_2.0.0_amd64.rpm
+cranesched-plugin_2.0.0_amd64.rpm
+cranesched-client_2.0.0_amd64.deb
+cranesched-plugin_2.0.0_amd64.deb
 ```
 
 软件包版本由仓库根目录中的 `VERSION` 文件确定。
 
 ### 软件包内容
 
-#### cranesched-frontend 软件包
+#### cranesched-client 软件包
 
 - `/usr/bin/` 中的 CLI 工具：
     - `cacct`、`cacctmgr`、`calloc`、`cbatch`、`ccancel`、`ccon`、`ccontrol`

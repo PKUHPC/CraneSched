@@ -7,9 +7,9 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/utils"
 	_ "embed"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
 	"strconv"
 	"strings"

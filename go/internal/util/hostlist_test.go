@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

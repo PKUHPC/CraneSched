@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"CraneFrontEnd/tool/meta-cni/pkg/result"
-	metatemplate "CraneFrontEnd/tool/meta-cni/pkg/template"
-	metatypes "CraneFrontEnd/tool/meta-cni/pkg/types"
-	"CraneFrontEnd/tool/meta-cni/pkg/utils"
+	"github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/result"
+	metatemplate "github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/template"
+	metatypes "github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/utils"
 
 	"github.com/containernetworking/cni/pkg/invoke"
 	"github.com/containernetworking/cni/pkg/skel"

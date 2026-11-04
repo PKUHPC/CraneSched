@@ -19,9 +19,9 @@
 package cplugind
 
 import (
-	"CraneFrontEnd/api"
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/api"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"path/filepath"
 	"plugin"
 

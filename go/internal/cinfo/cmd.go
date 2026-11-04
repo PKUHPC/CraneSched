@@ -19,7 +19,7 @@
 package cinfo
 
 import (
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	"github.com/spf13/cobra"
 )

@@ -156,21 +156,21 @@ RuntimeApiVersion:  v1
 
 #### 鹤思 CNI 套件
 
-在 CraneSched-FrontEnd 根目录下，执行 `make tool` 可构建鹤思 CNI 套件中的插件，编译后的产物在 `build/tool/` 下。
+在 CraneSched 根目录下，执行 `make tool` 可构建鹤思 CNI 套件中的插件，编译后的产物在 `build/tool/` 下。
 
 以下是鹤思 CNI 套件中各组件的功能说明：
 
 === "Meta CNI"
     鹤思 Meta CNI 本身不进行网络配置，仅作为桥梁连接鹤思系统与实际的 CNI 插件。Meta CNI 是鹤思系统中所有 CNI 的统一入口，其他 CNI 插件由 Meta CNI 负责编排、调用。不同的集群、不同的插件，需要不同的 Meta CNI 配置。
 
-    请参阅 [Meta CNI README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/README.md) 了解完整的配置说明与示例。
+    请参阅 [Meta CNI README](https://github.com/PKUHPC/CraneSched/blob/master/tool/meta-cni/README.md) 了解完整的配置说明与示例。
 
 === "DNS CNI"
     鹤思 DNS CNI 插件（dns-register）负责在容器创建时，将容器的 FQDN 和 IP 注册到 etcd，供 CoreDNS 查询。
 
     使用 dns-register 前，您需要部署 [CoreDNS + etcd 插件](https://coredns.io/plugins/etcd/)，并确保 CoreDNS Corefile 中的 etcd `path` 设置为 `/coredns`（dns-register 写入记录的前缀）。
 
-    请参阅 [dns-register README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/dns-register/README.md) 了解完整的配置说明。
+    请参阅 [dns-register README](https://github.com/PKUHPC/CraneSched/blob/master/tool/dns-register/README.md) 了解完整的配置说明。
 
 #### 示例：Calico
 
@@ -182,7 +182,7 @@ RuntimeApiVersion:  v1
 以下是 Meta CNI + Calico + dns-register + Port Mapping + Bandwidth 配置，请将其写入 `/etc/cni/net.d/00-crane-calico.conf`。如没有更优先的配置文件，该配置将在下一次启动容器时生效。
 
 ??? "示例配置"
-    参见 [实例配置文件](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico.conf)。
+    参见 [实例配置文件](https://github.com/PKUHPC/CraneSched/blob/master/tool/meta-cni/config/00-crane-calico.conf)。
 
     该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
 
@@ -227,7 +227,7 @@ RuntimeApiVersion:  v1
 
 ??? "Meta CNI 配置示例"
     RDMA VF 网络示例配置可参考：
-    [tool/meta-cni/config/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico-sriov.conf)。
+    [tool/meta-cni/config/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched/blob/master/tool/meta-cni/config/00-crane-calico-sriov.conf)。
 
     该示例中包含两类网络：
 

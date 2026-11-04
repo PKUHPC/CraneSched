@@ -75,7 +75,7 @@ ccontrol show node
 ccontrol show node crane01
 ```
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol show node
+[root@CraneProject CraneSched]# ccontrol show node
 NodeName=CraneProject State=idle[power_idle] CPU=2.00 AllocCPU=0.00 FreeCPU=2.00
     RealMemory=2048M AllocMem=0 FreeMem=2048M
     Gres=None AllocGres=None FreeGres=None
@@ -105,7 +105,7 @@ ccontrol show partition
 ccontrol show partition CPU
 ```
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol show partition
+[root@CraneProject CraneSched]# ccontrol show partition
 PartitionName=CPU State=UP
     AllowedAccounts=ALL DeniedAccounts=None
     TotalNodes=1 AliveNodes=1
@@ -139,7 +139,7 @@ ccontrol show job 12345
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol show job
+[root@CraneProject CraneSched]# ccontrol show job
 JobId=12345 JobName=Test_Job
         User=root(0) GroupId=root(0) Account=ROOT
         JobState=Running RunTime=00:00:05 TimeLimit=00:03:01 SubmitTime=2026-03-18 20:16:12
@@ -229,7 +229,7 @@ ccontrol show reservation my_reservation
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol show reservation
+[root@CraneProject CraneSched]# ccontrol show reservation
 No reservation is available.
 ```
 
@@ -328,7 +328,7 @@ ccontrol update nodename=crane01 state=resume
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol update nodename=test_node state=drain reason="test"
+[root@CraneProject CraneSched]# ccontrol update nodename=test_node state=drain reason="test"
 Failed to modify node: test_node. Reason: Invalid node name specified..
 ERRO[0000] change node state failed:                     
 ERRO[0000] command execution failed
@@ -367,7 +367,7 @@ ccontrol update jobid=11 mailuser=user@example.com mailtype=END
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol update jobid=11 priority=1 timelimit=01:00:00
+[root@CraneProject CraneSched]# ccontrol update jobid=11 priority=1 timelimit=01:00:00
 Failed to modify job: 11. Reason: Task #11 was not found in pending queue..
 ERRO[0000] change task priority failed:
 Failed to modify job: 11. Reason: Task #11 was not found in running or pending queue..
@@ -401,7 +401,7 @@ ccontrol update partition=CPU deniedaccounts=guest
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol update partitionName=test accounts=test_user
+[root@CraneProject CraneSched]# ccontrol update partitionName=test accounts=test_user
 ERRO[0000] Modify partition test failed: The entered account does not exist.
 ERRO[0000] command execution failed
 ```
@@ -430,7 +430,7 @@ ccontrol hold 1
 ccontrol hold 1 timelimit=01:00:00
 ```
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol hold 1 timelimit=01:00:00
+[root@CraneProject CraneSched]# ccontrol hold 1 timelimit=01:00:00
 Failed to modify job: 1. Reason: Task #1 was not found in pending queue..
 ERRO[0000] hold jobs failed:
 ERRO[0000] command execution failed
@@ -450,7 +450,7 @@ ccontrol release 1
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol release 1
+[root@CraneProject CraneSched]# ccontrol release 1
 Failed to modify job: 1. Reason: Task #1 was not found in pending queue..
 ERRO[0000] release jobs failed:
 ERRO[0000] command execution failed
@@ -487,7 +487,7 @@ ccontrol create reservation test_reservation startTime=2024-12-01T14:00:00 durat
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
+[root@CraneProject CraneSched]# ccontrol create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
 ERRO[0000] missing required fields: starttime          
 ERRO[0000] command execution failed
 ```
@@ -506,7 +506,7 @@ ccontrol delete reservation my_reservation
 ```
 
 ```text
-[root@CraneProject CraneSched-FrontEnd]# ccontrol delete reservation test_reservation
+[root@CraneProject CraneSched]# ccontrol delete reservation test_reservation
 ERRO[0000] Failed to delete reservation: Reservation test_reservation not found.
 ERRO[0000]
 ERRO[0000] command execution failed

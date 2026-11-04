@@ -5,11 +5,11 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/utils"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
 	"strings"
 	"time"

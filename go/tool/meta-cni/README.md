@@ -158,6 +158,6 @@ Manipulator expression syntax:
 
 ## Example
 
-See `config/00-crane-calico.conf` for a single-pipeline Calico setup, and
+See `../../../etc/cni/00-crane-calico.conf` for a single-pipeline Calico setup, and
 `config/00-meta.example.conf` for a multi-pipeline example with both static
 Ethernet and template RDMA pipelines.

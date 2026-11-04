@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/cfored"
+import "github.com/PKUHPC/CraneSched/go/internal/cfored"
 
 func main() {
 	cfored.ParseCmdArgs()

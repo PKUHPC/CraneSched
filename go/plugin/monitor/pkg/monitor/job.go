@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"CraneFrontEnd/plugin/monitor/pkg/cgroup"
-	"CraneFrontEnd/plugin/monitor/pkg/config"
-	"CraneFrontEnd/plugin/monitor/pkg/db"
-	"CraneFrontEnd/plugin/monitor/pkg/gpu"
-	"CraneFrontEnd/plugin/monitor/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/cgroup"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/db"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/gpu"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/types"
 )
 
 type JobMonitor struct {

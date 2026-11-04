@@ -19,7 +19,7 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/cattach"
+	"github.com/PKUHPC/CraneSched/go/internal/cattach"
 )
 
 func main() {

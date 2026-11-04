@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/ccon"
+import "github.com/PKUHPC/CraneSched/go/internal/ccon"
 
 func main() {
 	ccon.ParseCmdArgs()

@@ -123,7 +123,7 @@ Plugin:
   PlugindDebugLevel: "trace"
   Plugins:
     - Name: "powerControl"
-      Path: "/root/CraneSched-FrontEnd/build/plugin/powerControl.so"
+      Path: "/root/CraneSched/go/build/plugin/powerControl.so"
       Config: "/etc/crane/powerControl.yaml"
 ```
 
@@ -136,7 +136,7 @@ Plugin:
     ```yaml
     PowerControl:
       # 活跃节点数量预测器脚本路径
-      PredictorScript: "/root/CraneSched-FrontEnd/plugin/powerControl/predictor/predictor.py"
+      PredictorScript: "/root/CraneSched/go/plugin/powerControl/predictor/predictor.py"
       # 是否允许睡眠
       EnableSleep: false
       # 节点睡眠超出此阈值后执行关机（单位：秒）
@@ -225,7 +225,7 @@ Plugin:
   PlugindDebugLevel: "trace"
   Plugins:
     - Name: "energy"
-      Path: "/root/CraneSched-FrontEnd/build/plugin/energy.so"
+      Path: "/root/CraneSched/go/build/plugin/energy.so"
       Config: "/etc/crane/energy.yaml"
 ```
 

@@ -19,8 +19,8 @@
 package ceff
 
 import (
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	"github.com/spf13/cobra"
 )

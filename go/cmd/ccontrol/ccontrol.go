@@ -19,7 +19,7 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/ccontrol"
+	"github.com/PKUHPC/CraneSched/go/internal/ccontrol"
 	"os"
 )
 

@@ -6,11 +6,11 @@ import (
 
 	logrus "github.com/sirupsen/logrus"
 
-	"CraneFrontEnd/plugin/monitor/pkg/config"
-	"CraneFrontEnd/plugin/monitor/pkg/gpu"
-	"CraneFrontEnd/plugin/monitor/pkg/ipmi"
-	"CraneFrontEnd/plugin/monitor/pkg/rapl"
-	"CraneFrontEnd/plugin/monitor/pkg/sysload"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/gpu"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/ipmi"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/rapl"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/sysload"
 )
 
 var log = logrus.WithField("component", "Monitor")

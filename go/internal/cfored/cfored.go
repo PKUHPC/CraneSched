@@ -30,8 +30,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"

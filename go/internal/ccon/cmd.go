@@ -19,8 +19,8 @@
 package ccon
 
 import (
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

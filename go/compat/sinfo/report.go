@@ -5,9 +5,9 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/protocol/v45"
-	"CraneFrontEnd/compat/utils"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/protocol/v45"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
 	"math"
 	"os"

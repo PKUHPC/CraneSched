@@ -81,7 +81,7 @@ Parameter description:
 
 ### 3. Build cplugind and trace plugin
 
-In the CraneSched-FrontEnd repository:
+In the CraneSched repository:
 
 ```bash
 make build   # Build cplugind and CLI tools

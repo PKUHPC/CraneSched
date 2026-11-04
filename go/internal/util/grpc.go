@@ -19,11 +19,11 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"io/fs"
 	"math"
 	"net"

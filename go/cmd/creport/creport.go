@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/creport"
+import "github.com/PKUHPC/CraneSched/go/internal/creport"
 
 func main() {
 	creport.ParseCmdArgs()

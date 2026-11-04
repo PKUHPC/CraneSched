@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"CraneFrontEnd/internal/cacctmgr"
+	"github.com/PKUHPC/CraneSched/go/internal/cacctmgr"
 )
 
 func TestNormalizeSacctmgrArgsAcceptsNameFilters(t *testing.T) {

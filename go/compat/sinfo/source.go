@@ -5,11 +5,11 @@
 package sinfo
 
 import (
-	"CraneFrontEnd/compat/utils"
-	"CraneFrontEnd/generated/protos"
 	"cmp"
 	"context"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"math"
 	"slices"
 	"strings"

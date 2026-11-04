@@ -5,9 +5,9 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"context"
 	"encoding/json"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"os"
 	"testing"
 

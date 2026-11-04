@@ -19,8 +19,8 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"math"
 	"net"
 	"os"

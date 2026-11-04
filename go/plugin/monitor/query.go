@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
-	"CraneFrontEnd/plugin/monitor/pkg/config"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/config"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"

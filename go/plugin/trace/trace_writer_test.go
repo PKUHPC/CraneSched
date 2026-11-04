@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 )
 
 type fakeTraceDB struct {

@@ -19,7 +19,7 @@
 package ccancel
 
 import (
-	"CraneFrontEnd/internal/util"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"regexp"
 
 	"github.com/spf13/cobra"

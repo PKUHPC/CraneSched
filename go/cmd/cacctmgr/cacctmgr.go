@@ -21,7 +21,7 @@ package main
 import (
 	"os"
 
-	cacctmgr "CraneFrontEnd/internal/cacctmgr"
+	cacctmgr "github.com/PKUHPC/CraneSched/go/internal/cacctmgr"
 )
 
 func main() {

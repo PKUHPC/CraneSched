@@ -1,8 +1,8 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 
 	log "github.com/sirupsen/logrus"

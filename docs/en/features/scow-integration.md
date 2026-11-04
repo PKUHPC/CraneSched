@@ -147,5 +147,5 @@ Since 2024, a chip design company (approximately 200 employees) has adopted the 
 |---------|------|
 | SCOW Open-source Repository | <https://github.com/PKUHPC/OPENSCOW> |
 | CraneSched Backend Repository | <https://github.com/PKUHPC/CraneSched> |
-| CraneSched Frontend Repository | <https://github.com/PKUHPC/CraneSched-FrontEnd> |
+| CraneSched Frontend Repository | <https://github.com/PKUHPC/CraneSched> |
 | Jianshan Tatu Official Website | <https://csjstt.com> |

@@ -27,7 +27,12 @@
 GIT_COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null)
 LAST_COMMIT_EPOCH := $(shell git log -1 --format=%ct 2>/dev/null)
 
-VERSION_FILE := VERSION
+GO_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT := $(abspath $(GO_DIR)/..)
+GO_MODULE := $(shell sed -n 's/^module //p' "$(GO_DIR)/go.mod")
+PROTO_DIR := $(REPO_ROOT)/protos
+PROTO_FILES := PublicDefs.proto Crane.proto Plugin.proto Supervisor.proto
+VERSION_FILE := $(REPO_ROOT)/VERSION
 VERSION := $(shell if [ -f "$(VERSION_FILE)" ]; then cat "$(VERSION_FILE)"; else echo "unknown"; fi)
 VERSION_DISPLAY := $(VERSION)
 ifneq ($(strip $(GIT_COMMIT_HASH)),)
@@ -58,12 +63,12 @@ STRIP ?= false
 # LDFLAGS adjustments based on STRIP
 ifeq ($(STRIP), true)
 	LDFLAGS := -ldflags \
-				"-s -w -X 'CraneFrontEnd/internal/util.VERSION=$(VERSION_DISPLAY)' \
-				-X 'CraneFrontEnd/internal/util.SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)'"
+				"-s -w -X '$(GO_MODULE)/internal/util.VERSION=$(VERSION_DISPLAY)' \
+				-X '$(GO_MODULE)/internal/util.SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)'"
 else
 	LDFLAGS := -ldflags \
-				"-X 'CraneFrontEnd/internal/util.VERSION=$(VERSION_DISPLAY)' \
-				-X 'CraneFrontEnd/internal/util.SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)'"
+				"-X '$(GO_MODULE)/internal/util.VERSION=$(VERSION_DISPLAY)' \
+				-X '$(GO_MODULE)/internal/util.SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)'"
 endif
 
 # Installation paths
@@ -74,8 +79,7 @@ BIN_DIR := build/bin
 PLUGIN_DIR := build/plugin
 TOOL_DIR := build/tool
 
-SERVICE_TEMPLATES := $(wildcard etc/*.service.in)
-SERVICE_NAMES := $(patsubst etc/%.service.in,%,$(SERVICE_TEMPLATES))
+SERVICE_NAMES := cfored cplugind
 SERVICE_OUTPUT_DIR := build/etc
 
 GO ?= go
@@ -102,13 +106,13 @@ endif
 
 all: build plugin service
 
-# FIXME: This is a workaround for sub-packages in proto files
-# We have to refactor the proto layout and CMakeLists in future
+# Generate Go packages directly from the shared product protocols.
 protos:
 	@echo "- Generating Protobuf files..."
-	@mkdir -p ./generated/protos
-	@protoc --go_out=paths=source_relative:generated/protos --go-grpc_out=paths=source_relative:generated/protos --proto_path=protos protos/*.proto
-	@mkdir -p ./generated/protos/supervisor && mv generated/protos/Supervisor*.go ./generated/protos/supervisor
+	@rm -rf generated/protos
+	@mkdir -p generated/protos
+	@protoc --proto_path="$(PROTO_DIR)" --go_out=. --go_opt=module=$(GO_MODULE) \
+		--go-grpc_out=. --go-grpc_opt=module=$(GO_MODULE) $(addprefix $(PROTO_DIR)/,$(PROTO_FILES))
 	@echo "  - Summary:"
 	@echo "    - Protobuf files generated in ./generated/protos/"
 
@@ -181,14 +185,9 @@ tool: protos
 service:
 	@echo "- Rendering systemd service files with PREFIX=$(PREFIX)..."
 	@mkdir -p $(SERVICE_OUTPUT_DIR)
-	@if [ -z "$(SERVICE_NAMES)" ]; then \
-		echo "  - No templates found under etc/*.service.in"; \
-	else \
-		for svc in $(SERVICE_NAMES); do \
-			echo "  - $$svc.service"; \
-			sed "s|@PREFIX@|$(PREFIX)|g" etc/$$svc.service.in > $(SERVICE_OUTPUT_DIR)/$$svc.service; \
-		done; \
-	fi
+	@set -e; for svc in $(SERVICE_NAMES); do \
+		sed "s|@PREFIX@|$(PREFIX)|g" "$(REPO_ROOT)/etc/$$svc.service.in" > "$(SERVICE_OUTPUT_DIR)/$$svc.service"; \
+	done
 
 clean:
 	@echo "Cleaning up..."
@@ -222,7 +221,7 @@ check-goreleaser:
 	@echo "- Checking packaging dependencies..."
 	@command -v goreleaser >/dev/null 2>&1 || { \
 		echo "  - ERROR: goreleaser not found. Install it with:"; \
-		echo "     go install github.com/goreleaser/goreleaser/v2@latest"; \
+		echo "     go install github.com/goreleaser/goreleaser/v2@v2.12.0"; \
 		exit 1; \
 	}
 	@echo "  - All packaging dependencies satisfied"
@@ -245,7 +244,7 @@ endif
 	@$(MAKE) PREFIX=/usr service
 	@echo "- Building packages with GoReleaser..."
 	@export GORELEASER_CURRENT_TAG=$(PKG_VERSION) && \
-	goreleaser release --snapshot --clean
+	goreleaser release --snapshot --clean --skip=archive
 	@echo "  - Summary:"
 	@echo "    - Packages are in ./build/dist/"
 	@echo "    - Version: $(PKG_VERSION)"

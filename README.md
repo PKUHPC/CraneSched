@@ -20,7 +20,7 @@
 
 CraneSched分为前端和后端，前端主要是用Go开发，后端主要是用C++开发，欢迎开发者一起加入。
 
-**CraneSched 前端开源地址**：[CraneSched-FrontEnd](https://github.com/PKUHPC/CraneSched-FrontEnd)
+**源码布局**：C++ 服务位于 `src/`，Go 命令、服务和官方插件位于 [`go/`](go/)，共享协议位于 `protos/`。
 
 **CraneSched 后端开源地址**：[CraneSched](https://github.com/PKUHPC/CraneSched )
 

@@ -1,5 +1,7 @@
 # 插件指南
 
+官方插件配置示例统一位于仓库根 `etc/plugins/`。启用插件前，将所需示例配置到 `plugin.yaml` 指定的 `/etc/crane/` 路径。
+
 ## 概述
 
 鹤思插件系统是模块化的，默认情况下处于禁用状态。必须在每个节点上运行 `cplugind` daemon 才能启用插件功能。插件和 `cplugind` 版本严格耦合，必须一起更新。
@@ -41,7 +43,7 @@
 
 ## 安装 cplugind
 
-`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。您可以通过软件包或从源代码构建安装它。
+`cplugind` 守护进程是 CraneSched 仓库的一部分。您可以通过软件包或从源代码构建安装它。
 
 ### 通过软件包管理器（推荐）
 
@@ -70,7 +72,7 @@ systemctl enable --now cplugind
 
 ### 从源代码构建
 
-有关从源代码构建的说明，请参阅[前端部署指南](frontend.md)。构建后，插件文件将位于 `build/plugin/` 目录中。
+有关从源代码构建的说明，请参阅[前端部署指南](frontend.md)。构建后，插件文件将位于 `go/build/plugin/` 目录中。
 
 手动启动 `cplugind` 或通过 systemd：
 
@@ -179,7 +181,7 @@ Plugins:
   - Name: "monitor"
     Path: "/usr/lib/crane/plugin/monitor.so"  # 软件包安装
     # Path: "/usr/local/lib/crane/plugin/monitor.so"  # 源代码安装（默认）
-    # Path: "/path/to/build/plugin/monitor.so"  # 开发/构建目录
+    # Path: "/path/to/CraneSched/go/build/plugin/monitor.so"  # 开发/构建目录
     Config: "/etc/crane/monitor.yaml"
 ```
 

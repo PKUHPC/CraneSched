@@ -3,7 +3,7 @@ package cgroup
 import (
 	"fmt"
 
-	"CraneFrontEnd/plugin/monitor/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/plugin/monitor/pkg/types"
 )
 
 type CgroupReader interface {

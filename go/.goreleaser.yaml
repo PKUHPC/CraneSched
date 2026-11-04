@@ -1,7 +1,7 @@
 version: 2
 
 # Project name
-project_name: CraneSched-FrontEnd
+project_name: CraneSched
 
 # Dummy build to satisfy nfpm requirement
 # See: https://goreleaser.com/customization/prebuilt/
@@ -16,9 +16,9 @@ builds:
 
 # Package configuration using nfpm
 nfpms:
-  # Main package: cranesched-frontend
-  - id: cranesched-frontend
-    package_name: cranesched-frontend
+  # Main package: cranesched-client
+  - id: cranesched-client
+    package_name: cranesched-client
 
     # Use meta mode to not depend on builds
     meta: true
@@ -28,10 +28,10 @@ nfpms:
 
     # Package metadata
     vendor: "Peking University"
-    homepage: "https://github.com/PKUHPC/CraneSched-FrontEnd"
+    homepage: "https://github.com/PKUHPC/CraneSched"
     maintainer: "CraneSched <service@csjstt.com>"
     description: |
-      CraneSched Frontend - Command-line tools for CraneSched cluster scheduler.
+      CraneSched Client - Command-line tools for CraneSched cluster scheduler.
       This package contains all user-facing command-line tools for job submission,
       monitoring, and cluster management.
     license: "AGPL-3.0"
@@ -126,22 +126,22 @@ nfpms:
           mode: 0755
 
       # CNI plugin configurations (reference only, user must copy to /etc/cni/net.d/)
-      - src: tool/meta-cni/config/00-crane-calico.conf
+      - src: ../etc/cni/00-crane-calico.conf
         dst: /usr/share/doc/crane/cni/00-crane-calico.conf
         file_info:
           mode: 0644
-      - src: tool/meta-cni/config/00-crane-calico-sriov.conf
+      - src: ../etc/cni/00-crane-calico-sriov.conf
         dst: /usr/share/doc/crane/cni/00-crane-calico-sriov.conf
         file_info:
           mode: 0644
-      - src: tool/meta-cni/config/00-meta.example.conf
+      - src: ../etc/cni/00-meta.example.conf
         dst: /usr/share/doc/crane/cni/00-meta.example.conf
         file_info:
           mode: 0644
 
       # Documentation
-      - src: LICENSE
-        dst: /usr/share/doc/cranesched-frontend/LICENSE
+      - src: ../LICENSE
+        dst: /usr/share/doc/cranesched-client/LICENSE
         file_info:
           mode: 0644
 
@@ -161,12 +161,12 @@ nfpms:
     meta: true
     file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
     vendor: "Peking University"
-    homepage: "https://github.com/PKUHPC/CraneSched-FrontEnd"
+    homepage: "https://github.com/PKUHPC/CraneSched"
     maintainer: "CraneSched <service@csjstt.com>"
     description: |
       CraneSched standalone Slurm-compatible commands, connected to Crane.
       sinfo targets the Slurm 26.05.4 command interface. Package versions
-      identify the actual CraneSched frontend build.
+      identify the actual CraneSched build.
     license: "AGPL-3.0"
     formats:
       - rpm
@@ -176,7 +176,7 @@ nfpms:
         dst: /usr/bin/sinfo
         file_info:
           mode: 0755
-      - src: LICENSE
+      - src: ../LICENSE
         dst: /usr/share/doc/cranesched-slurm-compat/LICENSE
         file_info:
           mode: 0644
@@ -197,7 +197,7 @@ nfpms:
 
     # Package metadata
     vendor: "Peking University"
-    homepage: "https://github.com/PKUHPC/CraneSched-FrontEnd"
+    homepage: "https://github.com/PKUHPC/CraneSched"
     maintainer: "CraneSched <service@csjstt.com>"
     description: |
       CraneSched Plugins - Plugin daemon and shared objects for CraneSched.
@@ -250,7 +250,7 @@ nfpms:
           mode: 0644
 
       # Documentation
-      - src: LICENSE
+      - src: ../LICENSE
         dst: /usr/share/doc/cranesched-plugin/LICENSE
         file_info:
           mode: 0644

@@ -19,7 +19,7 @@
 package main
 
 import (
-	"CraneFrontEnd/internal/ccancel"
+	"github.com/PKUHPC/CraneSched/go/internal/ccancel"
 )
 
 func main() {

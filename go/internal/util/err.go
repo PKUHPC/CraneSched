@@ -19,9 +19,9 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"errors"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"os"
 	"strings"
 

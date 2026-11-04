@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"CraneFrontEnd/tool/meta-cni/pkg/engine"
-	metatypes "CraneFrontEnd/tool/meta-cni/pkg/types"
-	"CraneFrontEnd/tool/meta-cni/pkg/utils"
+	"github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/engine"
+	metatypes "github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/types"
+	"github.com/PKUHPC/CraneSched/go/tool/meta-cni/pkg/utils"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	cnitypes "github.com/containernetworking/cni/pkg/types"

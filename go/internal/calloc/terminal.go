@@ -19,8 +19,8 @@
 package calloc
 
 import (
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"os"
 	"os/exec"
 	"os/signal"

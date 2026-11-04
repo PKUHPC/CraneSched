@@ -1,7 +1,6 @@
 package util
 
 import (
-	"CraneFrontEnd/generated/protos"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -13,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"math/big"
 	"net"
 	"os"

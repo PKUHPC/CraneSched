@@ -19,8 +19,8 @@
 package cacctmgr
 
 import (
-	"CraneFrontEnd/internal/util"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 )
 
 func showHelp() {

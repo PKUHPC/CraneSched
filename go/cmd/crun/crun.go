@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/crun"
+import "github.com/PKUHPC/CraneSched/go/internal/crun"
 
 func main() {
 	crun.ParseCmdArgs()

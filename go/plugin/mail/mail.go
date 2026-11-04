@@ -19,8 +19,8 @@
 package main
 
 import (
-	"CraneFrontEnd/api"
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/api"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"os"
 
 	"bytes"

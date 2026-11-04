@@ -52,4 +52,4 @@ receive the FQDN annotation from the container runtime.
 ```
 
 For a complete chained configuration, see
-`tool/meta-cni/config/00-crane-calico.conf`.
+`../../../etc/cni/00-crane-calico.conf`.

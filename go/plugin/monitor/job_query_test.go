@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"CraneFrontEnd/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

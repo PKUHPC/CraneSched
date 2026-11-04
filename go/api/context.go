@@ -18,9 +18,6 @@
 
 package api
 
-// This file should be refactored for a better public/private separation,
-// after we have a separate repo for plugind.
-
 import (
 	"context"
 	"sync"

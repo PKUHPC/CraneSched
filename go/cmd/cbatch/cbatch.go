@@ -18,7 +18,7 @@
 
 package main
 
-import "CraneFrontEnd/internal/cbatch"
+import "github.com/PKUHPC/CraneSched/go/internal/cbatch"
 
 func main() {
 	cbatch.ParseCmdArgs()

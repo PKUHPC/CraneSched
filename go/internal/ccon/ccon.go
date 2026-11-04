@@ -19,10 +19,10 @@
 package ccon
 
 import (
-	"CraneFrontEnd/generated/protos"
-	"CraneFrontEnd/internal/util"
 	"encoding/json"
 	"fmt"
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"github.com/PKUHPC/CraneSched/go/internal/util"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
