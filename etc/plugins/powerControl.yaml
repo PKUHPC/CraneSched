@@ -1,0 +1,43 @@
+
+PowerControl:
+  PredictorScript: YOUR_PREDICTOR_SCRIPT
+  EnableSleep: true
+  SleepTimeThresholdSeconds: 70     
+  IdleReserveRatio: 0.2               
+  CheckIntervalSeconds: 60   
+  NodeStateCheckIntervalSeconds: 30
+  PowerControlLogFile: "YOUR_LOG_FILE_PATH"
+  NodeStateChangeFile: "YOUR_NODE_STATE_CHANGE_FILE_PATH"
+  ClusterStateFile: "YOUR_CLUSTER_STATE_FILE_PATH"
+
+Predictor:
+  Debug: true
+  URL: "http://localhost:5000"   
+  PredictorLogFile: "YOUR_LOG_FILE_PATH"    
+  CheckpointFile: "YOUR_CHECKPOINT_PATH"
+  ScalersFile: "YOUR_SCALERS_PATH"                      
+  ForecastMinutes: 240               
+  LookbackMinutes: 30                
+
+InfluxDB:
+  URL: "http://localhost:8086"
+  Token: "YOUR_INFLUXDB_TOKEN"
+  Org: "YOUR_ORG"
+  Bucket: "YOUR_BUCKET"
+
+IPMI:
+  User: "YOUR_IPMI_USER"                       
+  Password: "YOUR_IPMI_PASSWORD"
+  MaxNodesPerBatch: 10       
+  BatchIntervalSeconds: 60    
+  NodeBMCMapping:                 
+    craned1: "10.129.227.172"
+    craned2: "10.129.227.189"
+  ExcludeNodes:                    
+    - "craned[2-10]"
+    - "craned3"
+
+SSH:
+  User: "YOUR_SSH_USER"
+  Password: "YOUR_SSH_PASSWORD"
+  

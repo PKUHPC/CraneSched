@@ -123,7 +123,7 @@ Plugin:
   PlugindDebugLevel: "trace"
   Plugins:
     - Name: "powerControl"
-      Path: "/root/CraneSched-FrontEnd/build/plugin/powerControl.so"
+      Path: "/root/CraneSched/go/build/plugin/powerControl.so"
       Config: "/etc/crane/powerControl.yaml"
 ```
 
@@ -136,7 +136,7 @@ Create `/etc/crane/powerControl.yaml` with the following reference content:
     ```yaml
     PowerControl:
       # Path to the active node count predictor script
-      PredictorScript: "/root/CraneSched-FrontEnd/plugin/powerControl/predictor/predictor.py"
+      PredictorScript: "/root/CraneSched/go/plugin/powerControl/predictor/predictor.py"
       # Whether to allow sleep mode
       EnableSleep: false
       # Power off nodes after sleeping beyond this threshold (seconds)
@@ -226,7 +226,7 @@ Plugin:
   PlugindDebugLevel: "trace"
   Plugins:
     - Name: "energy"
-      Path: "/root/CraneSched-FrontEnd/build/plugin/energy.so"
+      Path: "/root/CraneSched/go/build/plugin/energy.so"
       Config: "/etc/crane/energy.yaml"
 ```
 

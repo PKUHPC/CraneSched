@@ -36,9 +36,9 @@
 
 前端组件默认通过 RPM/DEB 软件包部署。
 
-如果还没有 `cranesched-frontend` 和 `cranesched-plugin` 软件包，请先按照[打包指南](../packaging.md)完成构建依赖安装并生成软件包。
+如果还没有 `cranesched-client` 和 `cranesched-plugin` 软件包，请先按照[打包指南](../packaging.md)完成构建依赖安装并生成软件包。
 
-`cranesched-frontend` 应安装在登录节点以及其他需要 CLI 工具的节点。`cranesched-plugin` 仅安装在需要运行插件的节点。
+`cranesched-client` 应安装在登录节点以及其他需要 CLI 工具的节点。`cranesched-plugin` 仅安装在需要运行插件的节点。
 
 !!! note "其他安装方式"
     项目的 GitHub Action 会在每次 master 构建后上传 RPM/DEB 工件。这些工件未经过完整测试，仅适用于快速验证。
@@ -51,13 +51,13 @@
 
 ```bash
 # RPM 系统：在登录节点安装 CLI 工具和 cfored
-sudo dnf install /tmp/cranesched-frontend-*.rpm
+sudo dnf install /tmp/cranesched-client-*.rpm
 
 # RPM 系统：仅在需要插件功能的节点安装
 sudo dnf install /tmp/cranesched-plugin-*.rpm
 
 # DEB 系统：在登录节点安装 CLI 工具和 cfored
-sudo apt install ./cranesched-frontend_*.deb
+sudo apt install ./cranesched-client_*.deb
 
 # DEB 系统：仅在需要插件功能的节点安装
 sudo apt install ./cranesched-plugin_*.deb
@@ -114,8 +114,8 @@ pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 源码安装适用于开发和快速验证。构建依赖与工具的安装方法参见[打包指南](../packaging.md)。准备好环境后执行：
 
 ```bash
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
+git clone https://github.com/PKUHPC/CraneSched.git
+cd CraneSched/go
 make
 make install
 ```

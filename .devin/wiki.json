@@ -1,7 +1,7 @@
 {
   "repo_notes": [
     {
-      "content": "(English prompting supported) 本仓库是 CraneSched 后端，包含 CraneCtld（控制器）、Craned（节点代理）、Supervisor（任务监管进程）三个 C++ 守护进程，以及它们共享的 Utilities 公共库和 protos 中的 gRPC 协议定义。前端命令行工具（cbatch/crun/cqueue 等）位于独立仓库 CraneSched-FrontEnd。Wiki 采用循序渐进的组织方式，先建立项目全貌与运行环境认知，再按 daemon 深入各自代码，最后以横切主题与前端客户端收尾。"
+      "content": "(English prompting supported) 本仓库是 CraneSched 统一产品源码，包含 CraneCtld（控制器）、Craned（节点代理）、Supervisor（任务监管进程）三个 C++ 守护进程，以及它们共享的 Utilities 公共库和 protos 中的 gRPC 协议定义。Go 命令、cfored、cplugind、官方 SO 和辅助工具位于 go/，与 C++ 共享根 protos、VERSION 和 LICENSE。Wiki 采用循序渐进的组织方式，先建立项目全貌与运行环境认知，再按 daemon 深入各自代码，最后以横切主题与前端客户端收尾。"
     }
   ],
   "pages": [
@@ -261,7 +261,7 @@
     },
     {
       "title": "前端客户端介绍",
-      "purpose": "概述 CraneSched-FrontEnd 仓库中的 Go 客户端工具集，及其与后端 CraneCtld gRPC 接口的对应关系；本章节不深入前端代码细节，仅作为使用入口",
+      "purpose": "概述本仓 go/ 中的 Go 命令、服务和官方插件，及其与后端 CraneCtld gRPC 接口的对应关系；本章节不深入前端代码细节，仅作为使用入口",
       "page_notes": [
         {
           "content": ""

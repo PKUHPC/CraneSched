@@ -68,7 +68,7 @@ influx setup --force \
 
 ### 3. 构建 cplugind 和 trace 插件
 
-在 CraneSched-FrontEnd 仓库中：
+在 CraneSched 仓库中：
 
 ```bash
 make build   # 构建 cplugind 及 CLI 工具

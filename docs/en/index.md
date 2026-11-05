@@ -246,7 +246,7 @@ CraneSched is deployed and in production across **8 provinces and cities** and *
 
 - Demo cluster: <https://hpc.pku.edu.cn/demo/cranesched>
 - Backend repository: <https://github.com/PKUHPC/CraneSched>
-- Frontend repository: <https://github.com/PKUHPC/CraneSched-FrontEnd>
+- Frontend repository: <https://github.com/PKUHPC/CraneSched>
 - SCOW computing platform: <https://github.com/PKUHPC/OPENSCOW>
 
 ---

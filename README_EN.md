@@ -16,7 +16,7 @@
 
 We welcome community contributions.
 
-**Frontend**: [CraneSched-FrontEnd](https://github.com/PKUHPC/CraneSched-FrontEnd)
+**Source layout**: C++ services live in `src/`; Go commands, services and official plugins live in [`go/`](go/); shared protocols live in `protos/`.
 
 **Backend**: [CraneSched](https://github.com/PKUHPC/CraneSched)
 

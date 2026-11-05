@@ -225,21 +225,21 @@ The third-party CNI plugins that have passed compatibility testing include: **Ca
 
 #### Crane CNI Tools
 
-In the CraneSched-FrontEnd root directory, run `make tool` to build the Crane CNI tools. The build outputs are located in `build/tool/`.
+In the CraneSched root directory, run `make -C go tool` to build the Crane CNI tools. The build outputs are located in `go/build/tool/`.
 
 Below are the descriptions of each component in the Crane CNI tools:
 
 === "Meta CNI"
     Crane Meta CNI does not perform network configuration itself. It serves as a bridge between CraneSched and the actual CNI plugins. Meta CNI is the unified entry point for all CNI plugins in CraneSched; other CNI plugins are orchestrated and invoked by Meta CNI. Different clusters and different plugins require different Meta CNI configurations.
 
-    Refer to the [Meta CNI README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/README.md) for complete configuration instructions and examples.
+    Refer to the [Meta CNI README](https://github.com/PKUHPC/CraneSched/blob/master/go/tool/meta-cni/README.md) for complete configuration instructions and examples.
 
 === "DNS CNI"
     Crane DNS CNI plugin (dns-register) registers the container's FQDN and IP in etcd during container creation, for CoreDNS to query.
 
     Before using dns-register, you need to deploy [CoreDNS + etcd plugin](https://coredns.io/plugins/etcd/) and ensure the etcd `path` in the CoreDNS Corefile is set to `/coredns` (the prefix used by dns-register for writing records).
 
-    Refer to the [dns-register README](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/dns-register/README.md) for complete configuration instructions.
+    Refer to the [dns-register README](https://github.com/PKUHPC/CraneSched/blob/master/go/tool/dns-register/README.md) for complete configuration instructions.
 
 #### Example: Calico
 
@@ -251,7 +251,7 @@ Below are the descriptions of each component in the Crane CNI tools:
 The following is a Meta CNI + Calico + dns-register + Port Mapping + Bandwidth configuration. Write it to `/etc/cni/net.d/00-crane-calico.conf`. If there is no higher-priority configuration file, it will take effect on the next container startup.
 
 ??? "Example configuration"
-    Refer to the [example configuration file](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico.conf).
+    Refer to the [example configuration file](https://github.com/PKUHPC/CraneSched/blob/master/etc/cni/00-crane-calico.conf).
 
     Some fields in this configuration file depend on your actual cluster deployment. Adjust them as needed.
 
@@ -300,7 +300,7 @@ corresponding Meta CNI configuration.
 
 ??? "Meta CNI Configuration Example"
     For an RDMA VF network example, refer to:
-    [tool/meta-cni/config/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched-FrontEnd/blob/master/tool/meta-cni/config/00-crane-calico-sriov.conf).
+    [etc/cni/00-crane-calico-sriov.conf](https://github.com/PKUHPC/CraneSched/blob/master/etc/cni/00-crane-calico-sriov.conf).
 
     This example contains two classes of network interfaces:
 

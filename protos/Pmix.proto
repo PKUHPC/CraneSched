@@ -19,7 +19,7 @@
 syntax = "proto3";
 
 package crane.grpc.pmix;
-option go_package = "CraneFrontEnd/generated/protos/pmix";
+option go_package = "github.com/PKUHPC/CraneSched/go/generated/protos/pmix";
 
 import "PublicDefs.proto";
 

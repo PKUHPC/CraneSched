@@ -1,0 +1,23 @@
+# IDE generated files
+.idea/
+.vscode/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+
+# Protobuf generated files
+generated
+
+# Makefile generated files
+build
+out
+bin
+
+# Testing
+testcase
+*.out
+*.bak
+test/
+
+# Git worktrees
+.worktrees/

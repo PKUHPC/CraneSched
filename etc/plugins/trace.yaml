@@ -1,0 +1,21 @@
+Tracing:
+  LogPath: "/var/log/crane/trace.log"
+
+Database:
+  Type: "influxdb"
+  Influxdb:
+    Url: "http://localhost:8086"
+    Token: "your_token"
+    Org: "your_organization"
+    TraceBucket: "crane_trace"
+    TraceCoreBucket: "crane_trace_core"
+    TraceDetailBucket: "crane_trace_detail"
+    TraceErrorBucket: "crane_trace_error"
+    TraceShardBuckets: []
+  TraceWriter:
+    Shards: 4
+    BatchSpans: 1024
+    QueueBatches: 8192
+    FlushIntervalMs: 50
+    RetryBackoffMs: 200
+    MaxRetryBackoffMs: 5000

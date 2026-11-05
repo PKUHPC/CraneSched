@@ -246,7 +246,7 @@ hide:
 
 - 演示集群：<https://hpc.pku.edu.cn/demo/cranesched>
 - 后端仓库：<https://github.com/PKUHPC/CraneSched>
-- 前端仓库：<https://github.com/PKUHPC/CraneSched-FrontEnd>
+- 前端仓库：<https://github.com/PKUHPC/CraneSched>
 - SCOW 算力平台：<https://github.com/PKUHPC/OPENSCOW>
 
 ---

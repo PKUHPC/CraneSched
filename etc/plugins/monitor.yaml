@@ -1,0 +1,32 @@
+Monitor:
+  SamplePeriod: 5s
+  LogPath: "/var/log/crane/monitor.log"
+  GPUType: "nvidia"
+
+  Enabled:
+    Job: true
+    Ipmi: true
+    Gpu: true
+    Rapl: true
+    System: true
+    Event: true
+
+Cgroup:
+  CPU: "/sys/fs/cgroup/cpuacct/%j/cpuacct.usage"
+  Memory: "/sys/fs/cgroup/memory/%j/memory.usage_in_bytes"
+  ProcList: "/sys/fs/cgroup/memory/%j/cgroup.procs"
+
+Database:
+  Type: "influxdb"
+  Influxdb:
+    Url: "http://localhost:8086"
+    Token: "your_token"
+    Org: "your_organization"
+    NodeBucket: "your_node_bucket_name"
+    JobBucket: "your_job_bucket_name"
+    ClusterBucket: "your_cluster_bucket_name"
+    EventMeasurement: "NodeEvents"
+    ResourceMeasurement: "ResourceUsage"
+
+Interval: 1000
+BufferSize: 32

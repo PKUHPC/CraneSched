@@ -19,7 +19,7 @@
 syntax = "proto3";
 
 package crane.grpc.supervisor;
-option go_package = "CraneFrontEnd/generated/protos/supervisor";
+option go_package = "github.com/PKUHPC/CraneSched/go/generated/protos/supervisor";
 
 import "PublicDefs.proto";
 

@@ -147,5 +147,5 @@ SCOW 独立于各家厂商，帮助算力中心打破供应商锁定。发起并
 |------|------|
 | SCOW 开源仓库 | <https://github.com/PKUHPC/OPENSCOW> |
 | 鹤思后端仓库 | <https://github.com/PKUHPC/CraneSched> |
-| 鹤思前端仓库 | <https://github.com/PKUHPC/CraneSched-FrontEnd> |
+| 鹤思前端仓库 | <https://github.com/PKUHPC/CraneSched> |
 | 塔图官网 | <https://csjstt.com> |

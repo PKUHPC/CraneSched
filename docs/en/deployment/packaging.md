@@ -8,14 +8,15 @@ CraneSched provides pre-built packages for easy deployment on production systems
 
 ### Package Overview
 
-CraneSched provides four main packages:
+CraneSched provides the following component packages:
 
 | Package | Component | Description | Build System |
 |---------|-----------|-------------|--------------|
 | **cranectld** | Backend | Control daemon for management nodes | CPack (CMake) |
 | **craned** | Backend | Execution daemon for compute nodes | CPack (CMake) |
-| **cranesched-frontend** | Frontend | CLI tools and cfored daemon | GoReleaser |
-| **cranesched-plugin** | Frontend | Plugin daemon and plugin libraries | GoReleaser |
+| **cranesched-client** | Frontend | CLI tools and cfored daemon | GoReleaser |
+| **cranesched-plugin** | Go | Plugin daemon and official SO libraries | GoReleaser |
+| **cranesched-slurm-compat** | Go | Optional standalone Slurm-compatible commands | GoReleaser |
 
 ### Installation Paths
 
@@ -83,10 +84,10 @@ ls -lh *.rpm *.deb
 
 Expected output:
 ```
-CraneSched-1.1.2-Linux-x86_64-cranectld.rpm
-CraneSched-1.1.2-Linux-x86_64-craned.rpm
-CraneSched-1.1.2-Linux-x86_64-cranectld.deb
-CraneSched-1.1.2-Linux-x86_64-craned.deb
+CraneSched-2.0.0-Linux-x86_64-cranectld.rpm
+CraneSched-2.0.0-Linux-x86_64-craned.rpm
+CraneSched-2.0.0-Linux-x86_64-cranectld.deb
+CraneSched-2.0.0-Linux-x86_64-craned.deb
 ```
 
 ### Installing
@@ -179,58 +180,14 @@ The frontend packages contain CLI tools and plugins written in Golang.
 
 #### Prerequisites
 
-Building the frontend packages requires Golang 1.24+, Protoc 30.2+, and GoReleaser v2. The commands below target x86-64. On ARM64, change the architecture in the downloaded file names to `arm64` or `aarch_64`.
-
-Install Golang and the Protocol Buffers Go code generators:
-
-```bash
-GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
-curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
-rm -rf /usr/local/go
-tar -C /usr/local -xzf /tmp/go.tar.gz
-rm /tmp/go.tar.gz
-
-cat > /etc/profile.d/go.sh <<'EOF'
-export GOPATH=/root/go
-export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
-EOF
-source /etc/profile.d/go.sh
-
-go env -w GO111MODULE=on
-go env -w GOPROXY=https://goproxy.cn,direct
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-```
-
-Install Protoc:
-
-```bash
-PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
-curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
-unzip /tmp/protoc.zip -d /usr/local
-rm /tmp/protoc.zip /usr/local/readme.txt
-```
-
-Install GoReleaser:
-
-```bash
-go install github.com/goreleaser/goreleaser/v2@latest
-```
-
-Verify that all tools are available:
-
-```bash
-go version
-protoc --version
-goreleaser --version
-```
+Run product builds in a container for the target distribution. Use the Go version required by `go/go.mod` with `GOTOOLCHAIN=local`, protoc 23.2, protoc-gen-go v1.36.5, protoc-gen-go-grpc v1.5.1 and GoReleaser 2.12.0. Build cplugind and all official SO plugins with the same compiler and options. The complete repository is required because the Go module reads the root Proto, VERSION, LICENSE and configuration inputs.
 
 #### Build Process
 
 ```bash
-# Clone the frontend repository
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
+# Clone the product repository
+git clone https://github.com/PKUHPC/CraneSched.git
+cd CraneSched/go
 
 # Build packages
 make package
@@ -243,17 +200,17 @@ ls build/dist/*.rpm build/dist/*.deb
 
 Expected output:
 ```
-cranesched-frontend_1.1.2_amd64.rpm
-cranesched-plugin_1.1.2_amd64.rpm
-cranesched-frontend_1.1.2_amd64.deb
-cranesched-plugin_1.1.2_amd64.deb
+cranesched-client_2.0.0_amd64.rpm
+cranesched-plugin_2.0.0_amd64.rpm
+cranesched-client_2.0.0_amd64.deb
+cranesched-plugin_2.0.0_amd64.deb
 ```
 
 The package version is determined by the `VERSION` file in the repository root.
 
 ### Package Contents
 
-#### cranesched-frontend Package
+#### cranesched-client Package
 
 - CLI tools in `/usr/bin/`:
     - `cacct`, `cacctmgr`, `calloc`, `cbatch`, `ccancel`, `ccon`, `ccontrol`
@@ -275,9 +232,11 @@ The package version is determined by the `VERSION` file in the repository root.
 
 After generating the packages, follow the [Frontend Components Deployment Guide](./frontend/frontend.md) to install them on the appropriate nodes and enable the `cfored` and `cplugind` services.
 
-## Downloading Pre-built Packages
+## Slurm-compatible commands
 
-You can download pre-built packages from GitHub Action Artifacts. These CI-generated packages are intended for testing purposes only; for production environments we recommend building the packages yourself to ensure compatibility.
+The optional `cranesched-slurm-compat` RPM/DEB installs `sinfo`. Install this package only where the Crane implementation of the Slurm command name is required. It is separate from `cranesched-client`. All packages are built from the same product version.
+
+Service templates are read from the root `etc/`; CNI samples come from `etc/cni/` and package licenses from the root `LICENSE`. Run GoReleaser from `go/`; outputs remain in `go/build/dist/`. Official plugin YAML examples are in `etc/plugins/` and are supplied as deployment examples rather than automatically installed configuration.
 
 ## Next Steps
 

@@ -1,0 +1,279 @@
+version: 2
+
+# Project name
+project_name: CraneSched
+
+# Dummy build to satisfy nfpm requirement
+# See: https://goreleaser.com/customization/prebuilt/
+builds:
+  - id: nfpm-sentinel
+    main: cmd/cacct/cacct.go
+    binary: cacct
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+# Package configuration using nfpm
+nfpms:
+  # Main package: cranesched-client
+  - id: cranesched-client
+    package_name: cranesched-client
+
+    # Use meta mode to not depend on builds
+    meta: true
+
+    # Version from git tag or GORELEASER_CURRENT_TAG env
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
+
+    # Package metadata
+    vendor: "Peking University"
+    homepage: "https://github.com/PKUHPC/CraneSched"
+    maintainer: "CraneSched <service@csjstt.com>"
+    description: |
+      CraneSched Client - Command-line tools for CraneSched cluster scheduler.
+      This package contains all user-facing command-line tools for job submission,
+      monitoring, and cluster management.
+    license: "AGPL-3.0"
+
+    # Target formats and architectures
+    formats:
+      - rpm
+      - deb
+
+    # Explicitly specify architectures since we're not using builds
+    archlinux:
+      packager: "CraneSched <service@csjstt.com>"
+
+    # File mappings
+    contents:
+      # Binaries (excluding cplugind which goes to plugin package)
+      - src: build/bin/cacct
+        dst: /usr/bin/cacct
+        file_info:
+          mode: 0755
+      - src: build/bin/cacctmgr
+        dst: /usr/bin/cacctmgr
+        file_info:
+          mode: 0755
+      - src: build/bin/calloc
+        dst: /usr/bin/calloc
+        file_info:
+          mode: 0755
+      - src: build/bin/cbatch
+        dst: /usr/bin/cbatch
+        file_info:
+          mode: 0755
+      - src: build/bin/ccancel
+        dst: /usr/bin/ccancel
+        file_info:
+          mode: 0755
+      - src: build/bin/ccon
+        dst: /usr/bin/ccon
+        file_info:
+          mode: 0755
+      - src: build/bin/ccontrol
+        dst: /usr/bin/ccontrol
+        file_info:
+          mode: 0755
+      - src: build/bin/ceff
+        dst: /usr/bin/ceff
+        file_info:
+          mode: 0755
+      - src: build/bin/cfored
+        dst: /usr/bin/cfored
+        file_info:
+          mode: 0755
+      - src: build/bin/cinfo
+        dst: /usr/bin/cinfo
+        file_info:
+          mode: 0755
+      - src: build/bin/cqueue
+        dst: /usr/bin/cqueue
+        file_info:
+          mode: 0755
+      - src: build/bin/creport
+        dst: /usr/bin/creport
+        file_info:
+          mode: 0755
+      - src: build/bin/crun
+        dst: /usr/bin/crun
+        file_info:
+          mode: 0755
+      - src: build/bin/cattach
+        dst: /usr/bin/cattach
+        file_info:
+          mode: 0755
+      - src: build/bin/cwrapper
+        dst: /usr/bin/cwrapper
+        file_info:
+          mode: 0755
+
+      # systemd service for cfored
+      - src: build/etc/cfored.service
+        dst: /usr/lib/systemd/system/cfored.service
+        file_info:
+          mode: 0644
+
+      # CNI plugin binaries
+      - src: build/tool/meta-cni
+        dst: /opt/cni/bin/crane-meta
+        file_info:
+          mode: 0755
+      - src: build/tool/dns-register
+        dst: /opt/cni/bin/dns-register
+        file_info:
+          mode: 0755
+
+      # CNI plugin configurations (reference only, user must copy to /etc/cni/net.d/)
+      - src: ../etc/cni/00-crane-calico.conf
+        dst: /usr/share/doc/crane/cni/00-crane-calico.conf
+        file_info:
+          mode: 0644
+      - src: ../etc/cni/00-crane-calico-sriov.conf
+        dst: /usr/share/doc/crane/cni/00-crane-calico-sriov.conf
+        file_info:
+          mode: 0644
+      - src: ../etc/cni/00-meta.example.conf
+        dst: /usr/share/doc/crane/cni/00-meta.example.conf
+        file_info:
+          mode: 0644
+
+      # Documentation
+      - src: ../LICENSE
+        dst: /usr/share/doc/cranesched-client/LICENSE
+        file_info:
+          mode: 0644
+
+    # RPM-specific settings
+    rpm:
+      group: System Environment/Daemons
+      compression: zstd
+
+    # DEB-specific settings
+    deb:
+      compression: zstd
+
+  # The Slurm-compatible name has its own opt-in package. Do not add Replaces
+  # or force-overwrite metadata: an installed Slurm client may own this path.
+  - id: cranesched-slurm-compat
+    package_name: cranesched-slurm-compat
+    meta: true
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
+    vendor: "Peking University"
+    homepage: "https://github.com/PKUHPC/CraneSched"
+    maintainer: "CraneSched <service@csjstt.com>"
+    description: |
+      CraneSched standalone Slurm-compatible commands, connected to Crane.
+      sinfo targets the Slurm 26.05.4 command interface. Package versions
+      identify the actual CraneSched build.
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    contents:
+      - src: build/bin/sinfo
+        dst: /usr/bin/sinfo
+        file_info:
+          mode: 0755
+      - src: ../LICENSE
+        dst: /usr/share/doc/cranesched-slurm-compat/LICENSE
+        file_info:
+          mode: 0644
+    rpm:
+      group: System Environment/Daemons
+      compression: zstd
+    deb:
+      compression: zstd
+
+  # Plugin package: cranesched-plugin
+  - id: cranesched-plugin
+    package_name: cranesched-plugin
+
+    # Use meta mode to not depend on builds
+    meta: true
+
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
+
+    # Package metadata
+    vendor: "Peking University"
+    homepage: "https://github.com/PKUHPC/CraneSched"
+    maintainer: "CraneSched <service@csjstt.com>"
+    description: |
+      CraneSched Plugins - Plugin daemon and shared objects for CraneSched.
+      This package contains the plugin daemon (cplugind) and all plugin shared objects.
+      The plugin daemon and plugins are version-locked and must be installed together.
+    license: "AGPL-3.0"
+
+    formats:
+      - rpm
+      - deb
+
+    # Explicitly specify architectures since we're not using builds
+    archlinux:
+      packager: "CraneSched <service@csjstt.com>"
+
+    # Plugin package contents
+    contents:
+      # cplugind daemon (version-locked with plugins)
+      - src: build/bin/cplugind
+        dst: /usr/bin/cplugind
+        file_info:
+          mode: 0755
+
+      # Plugin shared objects
+      - src: build/plugin/dummy.so
+        dst: /usr/lib/crane/plugin/dummy.so
+        file_info:
+          mode: 0755
+      - src: build/plugin/mail.so
+        dst: /usr/lib/crane/plugin/mail.so
+        file_info:
+          mode: 0755
+      - src: build/plugin/monitor.so
+        dst: /usr/lib/crane/plugin/monitor.so
+        file_info:
+          mode: 0755
+      - src: build/plugin/trace.so
+        dst: /usr/lib/crane/plugin/trace.so
+        file_info:
+          mode: 0755
+      - src: build/plugin/powerControl.so
+        dst: /usr/lib/crane/plugin/powerControl.so
+        file_info:
+          mode: 0755
+
+      # systemd service for cplugind
+      - src: build/etc/cplugind.service
+        dst: /usr/lib/systemd/system/cplugind.service
+        file_info:
+          mode: 0644
+
+      # Documentation
+      - src: ../LICENSE
+        dst: /usr/share/doc/cranesched-plugin/LICENSE
+        file_info:
+          mode: 0644
+
+    rpm:
+      group: System Environment/Daemons
+      compression: zstd
+
+    deb:
+      compression: zstd
+
+# Output directory
+dist: build/dist
+
+# Snapshot configuration (for development builds)
+snapshot:
+  version_template: "{{ .Version }}"
+
+# Changelog configuration
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'

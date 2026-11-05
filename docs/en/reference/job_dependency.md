@@ -2,7 +2,7 @@
 
 ## Overview
 
-The dependency feature in CraneSched-FrontEnd allows jobs to control their execution timing based on the status of other jobs, enabling job dependency management. Through dependency relationships, you can build complex workflows to ensure jobs execute in the correct order.
+The dependency feature in CraneSched allows jobs to control their execution timing based on the status of other jobs, enabling job dependency management. Through dependency relationships, you can build complex workflows to ensure jobs execute in the correct order.
 
 ## Supported Commands
 

@@ -1,5 +1,7 @@
 # Plugin Guide
 
+Official plugin configuration examples are maintained in the repository root `etc/plugins/`. Copy the required example to its configured `/etc/crane/` path before enabling that plugin.
+
 ## Overview
 
 The CraneSched plugin system is modular and disabled by default. The `cplugind` daemon must be running on each node to enable plugin functionality. Plugins and `cplugind` versions are strictly coupled and must be updated together.
@@ -40,7 +42,7 @@ CraneSched currently provides the following plugins:
 
 ## Installing cplugind
 
-The `cplugind` daemon is part of the CraneSched-FrontEnd repository. You can install it via packages or build from source.
+The `cplugind` daemon is part of the CraneSched repository. You can install it via packages or build from source.
 
 ### Via Package Manager (Recommended)
 
@@ -69,7 +71,7 @@ systemctl enable --now cplugind
 
 ### From Source
 
-Refer to the [Frontend Deployment Guide](frontend.md) for instructions on building from source. After building, the plugin files will be located in the `build/plugin/` directory.
+Refer to the [Frontend Deployment Guide](frontend.md) for instructions on building from source. After building, the plugin files will be located in the `go/build/plugin/` directory.
 
 Start `cplugind` manually or via systemd:
 
@@ -178,7 +180,7 @@ Plugins:
   - Name: "monitor"
     Path: "/usr/lib/crane/plugin/monitor.so"  # Package installation
     # Path: "/usr/local/lib/crane/plugin/monitor.so"  # Source installation (default)
-    # Path: "/path/to/build/plugin/monitor.so"  # Development/build directory
+    # Path: "/path/to/CraneSched/go/build/plugin/monitor.so"  # Development/build directory
     Config: "/etc/crane/monitor.yaml"
 ```
 
