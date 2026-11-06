@@ -38,6 +38,7 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+                "CRANE_ENABLE_TESTS": "ON",
                 "CRANE_MIN_LOG_LEVEL": "TRACE",
                 "CRANE_NATIVE_ARCH_OPT": "OFF",
                 "CRANE_ENABLE_TRACING": "ON",
@@ -49,7 +50,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/cmake-build-ci-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_NATIVE_ARCH_OPT": "OFF",

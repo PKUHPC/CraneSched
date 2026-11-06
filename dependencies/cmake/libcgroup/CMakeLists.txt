@@ -49,7 +49,7 @@ ExternalProject_Add(
         libcgroup
         SOURCE_DIR ${libcgroup_SOURCE_DIR}
         CONFIGURE_COMMAND autoreconf --force && ./configure --prefix=${libcgroup_BINARY_DIR}/
-        BUILD_COMMAND make -j
+        BUILD_COMMAND make -j1
         INSTALL_COMMAND make install
         BUILD_IN_SOURCE 1
         BUILD_BYPRODUCTS ${LIBCGROUP_BUILD_PRODUCTS} ${libcgroup_BINARY_DIR}/include/

@@ -79,6 +79,8 @@ BIN_DIR := build/bin
 PLUGIN_DIR := build/plugin
 TOOL_DIR := build/tool
 
+COMMAND_NAMES := $(notdir $(patsubst %/,%,$(wildcard cmd/*/)))
+PLUGIN_NAMES := $(notdir $(patsubst %/,%,$(wildcard plugin/*/)))
 SERVICE_NAMES := cfored cplugind
 SERVICE_OUTPUT_DIR := build/etc
 
@@ -118,12 +120,12 @@ protos:
 
 test: protos
 	@echo "- Running Go tests..."
-	@$(GO) test ./...
+	@$(GO) test -count=1 ./...
 
 build: protos
 	@echo "- Building executables with $(GO_VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	@for dir in cmd/*/ ; do \
+	@for dir in $(addprefix cmd/,$(COMMAND_NAMES)); do \
 		echo "  - Building $$dir"; \
 		(cd $$dir && $(GO) build $(BUILD_FLAGS) $(LDFLAGS) \
 			-o ../../$(BIN_DIR)/$$(basename $$dir)) || exit 1; \
@@ -161,7 +163,7 @@ plugin-trace: protos
 plugin-other: protos
 	@echo "- Building other plugins..."
 	@mkdir -p $(PLUGIN_DIR)
-	@for dir in plugin/*/ ; do \
+	@for dir in $(addprefix plugin/,$(PLUGIN_NAMES)); do \
 		if [ "$$(basename $$dir)" != "monitor" ] && [ "$$(basename $$dir)" != "trace" ]; then \
 			echo "  - Building: $$(basename $$dir).so"; \
 			(cd $$dir && $(GO) build $(BUILD_FLAGS) $(LDFLAGS) \
@@ -205,13 +207,13 @@ install: build plugin service
 	fi
 	@echo "  - Installing binaries to $(DESTDIR)$(PREFIX)/bin/"
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
-	@cp $(BIN_DIR)/* $(DESTDIR)$(PREFIX)/bin/
+	@cp $(addprefix $(BIN_DIR)/,$(COMMAND_NAMES)) $(DESTDIR)$(PREFIX)/bin/
 	@echo "  - Installing plugins to $(DESTDIR)$(PREFIX)/lib/crane/plugin/"
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib/crane/plugin
-	@cp $(PLUGIN_DIR)/*.so $(DESTDIR)$(PREFIX)/lib/crane/plugin/
+	@cp $(addprefix $(PLUGIN_DIR)/,$(addsuffix .so,$(PLUGIN_NAMES))) $(DESTDIR)$(PREFIX)/lib/crane/plugin/
 	@echo "  - Installing systemd service files to $(DESTDIR)/usr/lib/systemd/system/"
 	@mkdir -p $(DESTDIR)/usr/lib/systemd/system
-	@cp $(SERVICE_OUTPUT_DIR)/*.service $(DESTDIR)/usr/lib/systemd/system/
+	@cp $(addprefix $(SERVICE_OUTPUT_DIR)/,$(addsuffix .service,$(SERVICE_NAMES))) $(DESTDIR)/usr/lib/systemd/system/
 	@if [ -z "$(DESTDIR)" ]; then \
 		echo "  - You may need to reload systemd daemons: 'systemctl daemon-reload'"; \
 	fi
