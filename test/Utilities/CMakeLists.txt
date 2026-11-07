@@ -20,3 +20,9 @@ target_link_libraries(utilities_test
         Utility_PublicHeader
         )
 gtest_discover_tests(utilities_test)
+
+add_executable(prolog_epilog_test PrologEpilog_test.cpp)
+target_link_libraries(prolog_epilog_test
+        GTest::gtest_main
+        Utility_PrologEpilogExecutor)
+gtest_discover_tests(prolog_epilog_test PROPERTIES TIMEOUT 15)
