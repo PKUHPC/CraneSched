@@ -11,9 +11,14 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因
 | 参数                           | 位置                | 调用者       | 用户                   | 执行时机    |
 |------------------------------|-------------------|-----------|----------------------|--------------|
 | Prolog（config.yaml）          | 计算节点              | craned    | CranedUser（通常为 root） | 该节点首次启动作业步骤时 |
-| CraneCtldProlog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业分配时   |
+| CranectldProlog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | cranectld 服务用户     | 作业分配时   |
 | Epilog（config.yaml）          | 计算节点              | craned    | CranedUser（通常为 root） | 作业结束时   |
-| CraneCtldEpilog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业结束时   |
+| CranectldEpilog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | cranectld 服务用户     | 作业结束时   |
+
+`CranectldProlog` 和 `CranectldEpilog` 使用 `cranectld` 进程自身的 UID/GID
+执行。默认 systemd 服务以 `crane:crane` 运行，因此这两个脚本也以该身份运行；
+如果 `cranectld` 以 root 运行，脚本也以 root 运行。服务用户需要对脚本及其路径
+具有相应的访问和执行权限，并具有脚本操作所需的文件或资源权限。
 
 下表说明了在作业步骤分配时可用的 `prolog` 和 `epilog` 及其运行的时间和位置。
 
