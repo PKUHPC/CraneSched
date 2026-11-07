@@ -23,6 +23,7 @@
 #include <grp.h>
 #include <poll.h>
 #include <pwd.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -648,6 +649,19 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       return;
     }
 
+    // Keep the child behind a barrier while the parent performs setup that
+    // may use locks or RPC threads. EOF or a failure byte prevents exec.
+    int setup_socket[2] = {-1, -1};
+    const bool needs_parent_setup = static_cast<bool>(args.at_parent_setup_cb);
+    if (needs_parent_setup &&
+        socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, setup_socket) != 0) {
+      CRANE_ERROR("Failed to create setup socket for script '{}': {}", script,
+                  strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      return;
+    }
+
     // -------------------------------------------------------------------------
     // Fork the child process.
     //
@@ -690,6 +704,10 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
         // fork() itself failed (errno is already logged inside the hook).
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        if (needs_parent_setup) {
+          close(setup_socket[0]);
+          close(setup_socket[1]);
+        }
         result = std::unexpected(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         return;
@@ -713,6 +731,10 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
             RunPrologEpilogStatus{.exit_code = 1, .signal_num = 0});
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        if (needs_parent_setup) {
+          close(setup_socket[0]);
+          close(setup_socket[1]);
+        }
         return;
       }
     }
@@ -721,6 +743,7 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
     // Child process
     // =========================================================================
     if (pid == 0) {
+      if (needs_parent_setup) close(setup_socket[0]);
       // The child only writes to the pipe; close the read end immediately.
       close(stdout_pipe[0]);
 
@@ -734,28 +757,30 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       }
       close(stdout_pipe[1]);  // original fd no longer needed after dup2
 
-      // Close every fd >= 3 to avoid leaking parent file descriptors into
-      // the script (e.g. sockets, log files, gRPC channels).
-#if defined(__linux__) && defined(SYS_close_range)
-      syscall(SYS_close_range, 3, UINT_MAX, 0);  // 单次系统调用
-#else
-      CloseFdFrom(3);
-#endif
-
       // Place the child in its own process group so KillPg() can send
       // signals to the entire group (child + any grandchildren it spawns).
       setpgid(0, 0);
 
-      // Optional caller-supplied callback executed in the child context
-      // (e.g., to move the child into a cgroup before exec).
-      // TODO: move to parent
-      if (args.at_child_setup_cb) {
-        if (!args.at_child_setup_cb(getpid())) {
-          const char msg[] = "[Subprocess] child setup callback failed\n";
+      if (needs_parent_setup) {
+        unsigned char setup_ok = 0;
+        ssize_t n;
+        do {
+          n = read(setup_socket[1], &setup_ok, sizeof(setup_ok));
+        } while (n == -1 && errno == EINTR);
+        close(setup_socket[1]);
+        if (n != sizeof(setup_ok) || setup_ok != 1) {
+          const char msg[] = "[Subprocess] parent setup failed\n";
           write(STDERR_FILENO, msg, sizeof(msg) - 1);
           _exit(EXIT_FAILURE);
         }
       }
+
+      // Close inherited descriptors only after consuming the setup result.
+#if defined(__linux__) && defined(SYS_close_range)
+      syscall(SYS_close_range, 3, UINT_MAX, 0);
+#else
+      CloseFdFrom(3);
+#endif
 
       // Drop to the requested group and user credentials before executing
       // the script.  Group must be dropped first (setgid fails after setuid
@@ -788,6 +813,21 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // The parent only reads from the pipe; close the write end so that
       // EOF (end_event) is triggered when the child closes its write end.
       close(stdout_pipe[1]);
+
+      if (needs_parent_setup) {
+        close(setup_socket[1]);
+        // Establish the process group before setup, even if the child has
+        // not been scheduled yet, so timeout cleanup can always reach it.
+        setpgid(pid, pid);
+        bool setup_ok = args.at_parent_setup_cb(pid);
+        setup_ok = setup_ok && steady_clock::now() - start_time < timeout;
+        const unsigned char reply = setup_ok ? 1 : 0;
+        ssize_t n;
+        do {
+          n = send(setup_socket[0], &reply, sizeof(reply), MSG_NOSIGNAL);
+        } while (n == -1 && errno == EINTR);
+        close(setup_socket[0]);
+      }
 
       // Create a dedicated libuv event loop for this script.
       // Using a fresh loop per script keeps state isolated and avoids
