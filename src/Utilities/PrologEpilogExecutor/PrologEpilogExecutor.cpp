@@ -18,6 +18,7 @@
 
 #include "crane/PrologEpilogExecutor.h"
 
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -174,6 +175,19 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
     return;
   }
 
+  int setup_socket[2] = {-1, -1};
+  const bool needs_parent_setup =
+      static_cast<bool>(run.args.at_parent_setup_cb);
+  if (needs_parent_setup &&
+      socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, setup_socket) != 0) {
+    CRANE_ERROR("Failed to create setup socket for script '{}': {}", script,
+                strerror(errno));
+    close(stdout_pipe[0]);
+    close(stdout_pipe[1]);
+    FailRun_(run_id, 1, 0, false, script);
+    return;
+  }
+
   std::vector<std::string> env_storage;
   std::vector<char*> envp;
   env_storage.reserve(run.args.envs.size());
@@ -190,11 +204,16 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
     CRANE_ERROR("Failed to fork for script '{}': {}", script, strerror(errno));
     close(stdout_pipe[0]);
     close(stdout_pipe[1]);
+    if (needs_parent_setup) {
+      close(setup_socket[0]);
+      close(setup_socket[1]);
+    }
     FailRun_(run_id, 1, 0, false, script);
     return;
   }
 
   if (pid == 0) {
+    if (needs_parent_setup) close(setup_socket[0]);
     close(stdout_pipe[0]);
     if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 ||
         dup2(stdout_pipe[1], STDERR_FILENO) == -1) {
@@ -203,16 +222,25 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
       write(STDERR_FILENO, msg, sizeof(msg) - 1);
     }
 
-    CloseFdInChild_();
     setpgid(0, 0);
 
-    if (run.args.at_child_setup_cb) {
-      if (!run.args.at_child_setup_cb(getpid())) {
-        const char msg[] = "[Subprocess] child setup callback failed\n";
+    // Do not call into the parent's C++/RPC state after fork. Wait for the
+    // parent to complete setup before closing descriptors and executing.
+    if (needs_parent_setup) {
+      unsigned char setup_ok = 0;
+      ssize_t n;
+      do {
+        n = read(setup_socket[1], &setup_ok, sizeof(setup_ok));
+      } while (n == -1 && errno == EINTR);
+      close(setup_socket[1]);
+      if (n != sizeof(setup_ok) || setup_ok != 1) {
+        const char msg[] = "[Subprocess] parent setup failed\n";
         write(STDERR_FILENO, msg, sizeof(msg) - 1);
         _exit(EXIT_FAILURE);
       }
     }
+
+    CloseFdInChild_();
 
     if (setgid(run.args.run_gid) != 0) {
       const char msg[] = "[Subprocess] setgid failed\n";
@@ -232,6 +260,20 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
   }
 
   close(stdout_pipe[1]);
+
+  if (needs_parent_setup) {
+    close(setup_socket[1]);
+    setpgid(pid, pid);
+    bool setup_ok = run.args.at_parent_setup_cb(pid);
+    setup_ok =
+        setup_ok && std::chrono::steady_clock::now() - run.start_time < timeout;
+    const unsigned char reply = setup_ok ? 1 : 0;
+    ssize_t n;
+    do {
+      n = send(setup_socket[0], &reply, sizeof(reply), MSG_NOSIGNAL);
+    } while (n == -1 && errno == EINTR);
+    close(setup_socket[0]);
+  }
 
   run.pid = pid;
   run.child_exited = false;
@@ -321,7 +363,12 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
         if (!handle.closing()) handle.close();
         run.timeout_timer.reset();
       });
-  run.timeout_timer->start(timeout - elapsed, std::chrono::milliseconds(0));
+  const auto elapsed_after_setup =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - run.start_time);
+  run.timeout_timer->start(
+      std::max(timeout - elapsed_after_setup, std::chrono::milliseconds(0)),
+      std::chrono::milliseconds(0));
 }
 
 void PrologEpilogExecutor::PollChildren_() {
