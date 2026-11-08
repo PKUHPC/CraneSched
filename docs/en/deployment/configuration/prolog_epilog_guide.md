@@ -10,15 +10,9 @@ Crane supports multiple `prolog` and `epilog` programs. Note that for security r
 | Parameter               | Location              | Invoked by | User                        | Execution Timing                                                              |
 |-------------------------|-----------------------|------------|------------------------------|-------------------------------------------------------------------------------|
 | Prolog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | When a job step first starts on the node (default); |
-| CranectldProlog (config.yaml)| Controller node       | cranectld  | cranectld service user       | At job allocation                                                              |
+| CranectldProlog (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job allocation                                                              |
 | Epilog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | At job completion                                                              |
-| CranectldEpilog (config.yaml)| Controller node       | cranectld  | cranectld service user       | At job completion                                                              |
-
-`CranectldProlog` and `CranectldEpilog` run with the UID/GID of the `cranectld`
-process. The default systemd service runs as `crane:crane`, so both hooks use that
-identity. If `cranectld` runs as root, its hooks also run as root. The service user
-needs access to the script's path, permission to execute the script, and any file
-or resource permissions required by the script's operations.
+| CranectldEpilog (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job completion                                                              |
 
 The table below describes the prolog and epilog programs available during job step execution, including when and where they run.
 

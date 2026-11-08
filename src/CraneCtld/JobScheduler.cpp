@@ -5773,7 +5773,6 @@ void JobScheduler::StartCraneCtldPrologThread(JobInCtld* job) {
     // TODO: cbatch job must be requeue
     job->DaemonStep()->SetCtldPrologPending(true);
     const job_id_t job_id = job->JobId();
-    // Controller hooks run as the cranectld service user.
     RunPrologEpilogArgs run_prolog_args{
         .scripts = g_config.JobLifecycleHook.CranectldPrologs,
         .envs = job->env,
@@ -6284,7 +6283,6 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
           if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
             const job_id_t job_id = job->JobId();
-            // Controller hooks run as the cranectld service user.
             RunPrologEpilogArgs run_epilog_ctld_args{
                 .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
                 .envs = job->env,
