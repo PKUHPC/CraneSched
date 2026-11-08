@@ -22,7 +22,7 @@ set(CRANE_UNIT_TEST_TARGETS
     misc_pam_util_test
 )
 if (CRANE_ENABLE_PMI2)
-    list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test)
+    list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test pmi2_client_test)
 endif ()
 if (TARGET misc_tracer_manager_test)
     list(APPEND CRANE_UNIT_TEST_TARGETS misc_tracer_manager_test)

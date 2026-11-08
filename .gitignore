@@ -7,8 +7,6 @@ site/
 
 CMakeUserPresets.json
 third_party/*
-# This standalone client is vendored source, not a generated dependency.
-!third_party/pmi2/
 
 # Header only
 !dependencies/cmake
