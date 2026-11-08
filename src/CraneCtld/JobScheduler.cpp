@@ -7889,10 +7889,6 @@ void SchedulerAlgo::NodeSelect(
           auto it =
               resv_craned_meta.emplace(craned_id, NodeState(craned_id, res));
         }
-        auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
-        for (auto& [craned_id, node_state] : resv_craned_meta) {
-          resv_node_info.emplace_back(&node_state);
-        }
       } else {
         for (const auto& [craned_id, res] :
              resv_meta->res_total.EachNodeResMap()) {
@@ -7903,6 +7899,16 @@ void SchedulerAlgo::NodeSelect(
           }
         }
       }
+    }
+  }
+
+  // Offline nodes, including unmapped FUTURE nodes, are not candidates in
+  // this round, so reservation jobs keep pending until the nodes are up.
+  for (auto& [resv_id, resv_info] : resv_node_state_map) {
+    auto& resv_node_info = resv_node_state_ptrs_map[resv_id];
+    for (auto& [craned_id, node_state] : resv_info.second) {
+      if (g_meta_container->CheckCranedOnline(craned_id))
+        resv_node_info.emplace_back(&node_state);
     }
   }
 
@@ -8552,9 +8558,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job,
                                            "Invalid --nodelist value '{}'",
                                            job->JobToCtld().nodelist()));
 
-    job->included_nodes.clear();
-    for (auto&& node : nodes)
-      job->included_nodes.emplace(ResolveCranedIdAlias(node));
+    job->included_nodes = nodes | std::ranges::to<std::unordered_set>();
   }
 
   if (!job->JobToCtld().excludes().empty()) {
@@ -8565,12 +8569,15 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job,
           CraneErrCode::ERR_INVALID_EX_NODE_LIST,
           "Invalid --exclude value '{}'", job->JobToCtld().excludes()));
 
-    job->excluded_nodes.clear();
-    for (auto&& node : nodes)
-      job->excluded_nodes.emplace(ResolveCranedIdAlias(node));
+    job->excluded_nodes = nodes | std::ranges::to<std::unordered_set>();
   }
-  CanonicalizeCranedIdSet(&job->included_nodes);
-  CanonicalizeCranedIdSet(&job->excluded_nodes);
+  // Persisted IDs were canonicalized on submission. Resolving them again on
+  // recovery may turn a deleted NodeName into the node now using it as its
+  // NodeHostname.
+  if (!is_recovery) {
+    CanonicalizeCranedIdSet(&job->included_nodes);
+    CanonicalizeCranedIdSet(&job->excluded_nodes);
+  }
   job->MutableJobToCtld()->set_nodelist(
       util::HostNameListToStr(job->included_nodes));
   job->MutableJobToCtld()->set_excludes(
@@ -9049,9 +9056,7 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step,
     bool ok = util::ParseHostList(step->StepToCtld().nodelist(), &nodes);
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
 
-    step->included_nodes.clear();
-    for (auto&& node : nodes)
-      step->included_nodes.emplace(ResolveCranedIdAlias(node));
+    step->included_nodes = nodes | std::ranges::to<std::unordered_set>();
   }
 
   if (!step->StepToCtld().excludes().empty()) {
@@ -9059,12 +9064,15 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step,
     bool ok = util::ParseHostList(step->StepToCtld().excludes(), &nodes);
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
 
-    step->excluded_nodes.clear();
-    for (auto&& node : nodes)
-      step->excluded_nodes.emplace(ResolveCranedIdAlias(node));
+    step->excluded_nodes = nodes | std::ranges::to<std::unordered_set>();
   }
-  CanonicalizeCranedIdSet(&step->included_nodes);
-  CanonicalizeCranedIdSet(&step->excluded_nodes);
+  // Persisted IDs were canonicalized on submission. Resolving them again on
+  // recovery may turn a deleted NodeName into the node now using it as its
+  // NodeHostname.
+  if (!is_recovery) {
+    CanonicalizeCranedIdSet(&step->included_nodes);
+    CanonicalizeCranedIdSet(&step->excluded_nodes);
+  }
   step->MutableStepToCtld()->set_nodelist(
       util::HostNameListToStr(step->included_nodes));
   step->MutableStepToCtld()->set_excludes(

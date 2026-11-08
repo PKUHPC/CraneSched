@@ -227,8 +227,10 @@ class CranedMetaContainer final {
       const crane::grpc::DynamicNodeDefinition& definition);
   void InsertDynamicNode_(const crane::grpc::DynamicNodeDefinition& definition);
   // The keeper lifecycle lock must be held throughout the batch operation.
-  std::string DeleteOrResetNode_(const CranedId& craned_id,
-                                 bool reset_to_future);
+  // Returns one error per id, empty on success.
+  std::vector<std::string> DeleteOrResetNodes_(
+      const google::protobuf::RepeatedPtrField<std::string>& ids,
+      bool reset_to_future);
   bool SaveNodeState_(const crane::grpc::NodeStateSnapshot& snapshot);
   void RestoreNodeState_();
 

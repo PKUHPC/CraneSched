@@ -865,15 +865,16 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   crane::grpc::ModifyCranedStateReply reply;
   if (request.new_state() == crane::grpc::CRANE_RESET_TO_FUTURE) {
     auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
-    for (const auto& craned_id : request.craned_ids()) {
-      auto error = DeleteOrResetNode_(craned_id, true);
-      if (error.empty()) {
+    auto errors = DeleteOrResetNodes_(request.craned_ids(), true);
+    for (int i = 0; i < request.craned_ids_size(); ++i) {
+      const auto& craned_id = request.craned_ids(i);
+      if (errors[i].empty()) {
         reply.add_modified_nodes(craned_id);
         CRANE_INFO("User {} reset node {} to FUTURE.", request.uid(),
                    craned_id);
       } else {
         reply.add_not_modified_nodes(craned_id);
-        reply.add_not_modified_reasons(error);
+        reply.add_not_modified_reasons(errors[i]);
       }
     }
     return reply;
@@ -1273,111 +1274,140 @@ crane::grpc::DeleteNodesReply CranedMetaContainer::DeleteNodes(
     const crane::grpc::DeleteNodesRequest& request) {
   auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
   crane::grpc::DeleteNodesReply reply;
-  for (const auto& id : request.node_names()) {
-    auto error = DeleteOrResetNode_(id, false);
-    if (error.empty()) {
+  auto errors = DeleteOrResetNodes_(request.node_names(), false);
+  for (int i = 0; i < request.node_names_size(); ++i) {
+    const auto& id = request.node_names(i);
+    if (errors[i].empty()) {
       reply.add_deleted_nodes(id);
       CRANE_INFO("User {} deleted node {}.", request.uid(), id);
     } else {
       reply.add_not_deleted_nodes(id);
-      reply.add_not_deleted_reasons(error);
+      reply.add_not_deleted_reasons(errors[i]);
     }
   }
   return reply;
 }
 
-std::string CranedMetaContainer::DeleteOrResetNode_(const CranedId& id,
-                                                    bool reset_to_future) {
+std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
+    const google::protobuf::RepeatedPtrField<std::string>& ids,
+    bool reset_to_future) {
+  std::vector<std::string> errors(ids.size());
+  TreeSet<CranedId> node_ids;
+  TreeSet<PartitionId> part_ids;
+  for (int i = 0; i < ids.size(); ++i) {
+    if (!node_ids.emplace(ids[i]).second) {
+      errors[i] = "Duplicate node name in request.";
+      continue;
+    }
+    for (const auto& part_id : GetNodePartitions_(ids[i]))
+      part_ids.emplace(part_id);
+  }
+
   LockResReduceEvents();
-  std::string error;
+  HashSet<CranedId> changed_ids;
   {
-    auto part_ids = GetNodePartitions_(id);
+    // Lock partitions and nodes in sorted order, then save one snapshot for
+    // the whole batch.
     auto partitions = partition_meta_map_.GetMapSharedPtr();
-    std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr>
+    HashMap<PartitionId, util::Synchronized<PartitionMeta>::ExclusivePtr>
         partition_locks;
     for (const auto& part_id : part_ids)
-      partition_locks.emplace_back(partitions->at(part_id).GetExclusivePtr());
-    auto node_meta = craned_meta_map_[id];
-    if (!node_meta)
-      error = "Unknown node.";
-    else {
-      auto& node = *node_meta;
-      if (reset_to_future && !node.static_meta.flags[NodeFlags::Future])
-        error = "Only FUTURE nodes can have their machine binding reset.";
-      else if (!reset_to_future && !node.static_meta.flags[NodeFlags::Dynamic])
-        error = "Only manually created nodes can be deleted.";
-      else if (!node.rn_job_res_map.empty())
-        error = "Node has allocated or completing jobs.";
-      else if (!node.resv_in_node_map.empty())
-        error = "Node belongs to a reservation.";
-      else {
-        if (reset_to_future && !node.future_mapped) {
-          UnlockResReduceEvents();
-          return {};
+      partition_locks.emplace(part_id,
+                              partitions->at(part_id).GetExclusivePtr());
+    HashMap<CranedId, CranedMetaPtr> nodes;
+    for (const auto& id : node_ids) nodes.emplace(id, craned_meta_map_[id]);
+
+    for (int i = 0; i < ids.size(); ++i) {
+      if (!errors[i].empty()) continue;
+      auto& node = nodes.at(ids[i]);
+      if (!node)
+        errors[i] = "Unknown node.";
+      else if (reset_to_future && !node->static_meta.flags[NodeFlags::Future])
+        errors[i] = "Only FUTURE nodes can have their machine binding reset.";
+      else if (!reset_to_future && !node->static_meta.flags[NodeFlags::Dynamic])
+        errors[i] = "Only manually created nodes can be deleted.";
+      else if (!node->rn_job_res_map.empty())
+        errors[i] = "Node has allocated or completing jobs.";
+      else if (!node->resv_in_node_map.empty())
+        errors[i] = "Node belongs to a reservation.";
+      else if (!reset_to_future || node->future_mapped)
+        changed_ids.emplace(ids[i]);
+    }
+
+    if (!changed_ids.empty()) {
+      auto snapshot = m_node_state_;
+      auto* states = snapshot.mutable_nodes();
+      for (auto it = states->begin(); it != states->end();) {
+        if (!changed_ids.contains(it->definition().name())) {
+          ++it;
+        } else if (reset_to_future && it->dynamic()) {
+          it->clear_node_hostname();
+          it->clear_node_addr();
+          ++it;
+        } else {
+          it = states->erase(it);
         }
-        auto snapshot = m_node_state_;
-        auto* states = snapshot.mutable_nodes();
-        for (int i = 0; i < states->size(); ++i) {
-          if (states->Get(i).definition().name() != id) continue;
-          if (reset_to_future && node.static_meta.flags[NodeFlags::Dynamic]) {
-            states->Mutable(i)->clear_node_hostname();
-            states->Mutable(i)->clear_node_addr();
-          } else {
-            states->DeleteSubrange(i, 1);
-          }
-          break;
+      }
+      if (!SaveNodeState_(snapshot)) {
+        for (int i = 0; i < ids.size(); ++i) {
+          if (errors[i].empty() && changed_ids.contains(ids[i]))
+            errors[i] = reset_to_future ? "Failed to persist FUTURE node reset."
+                                        : "Failed to persist node deletion.";
         }
-        if (!SaveNodeState_(snapshot))
-          error = reset_to_future ? "Failed to persist FUTURE node reset."
-                                  : "Failed to persist node deletion.";
-        else {
-          g_craned_keeper->RetireCraned(id);
-          if (node.static_meta.node_hostname != id) {
-            util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
-            g_config.CranedIdByAlias.erase(node.static_meta.node_hostname);
-          }
-          for (auto& partition : partition_locks) {
-            auto& global = partition->partition_global_meta;
-            if (node.future_mapped) {
-              global.res_total -= node.res_total;
-              if (node.alive) global.res_avail -= node.res_avail;
-              global.res_total_inc_dead -= node.static_meta.res;
-            }
-            if (node.alive) --global.alive_craned_cnt;
-            if (!reset_to_future) {
-              partition->craned_ids.erase(id);
-              global.node_cnt = partition->craned_ids.size();
-              global.nodelist_str =
-                  util::HostNameListToStr(partition->craned_ids);
-            }
-          }
-          if (reset_to_future) {
-            CranedMeta future_node;
-            future_node.static_meta = std::move(node.static_meta);
-            future_node.static_meta.node_hostname = id;
-            future_node.static_meta.node_addr = id;
-            future_node.res_total = future_node.static_meta.res;
-            future_node.res_avail = future_node.static_meta.res;
-            future_node.remote_meta.craned_version = "unknown";
-            future_node.remote_meta.sys_rel_info.name = "unknown";
-            node = std::move(future_node);
-          } else {
-            node.alive = false;
-          }
-          m_node_state_ = std::move(snapshot);
+        changed_ids.clear();
+      } else {
+        m_node_state_ = std::move(snapshot);
+      }
+    }
+
+    for (const auto& id : changed_ids) {
+      auto& node = *nodes.at(id);
+      g_craned_keeper->RetireCraned(id);
+      if (node.static_meta.node_hostname != id) {
+        util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
+        g_config.CranedIdByAlias.erase(node.static_meta.node_hostname);
+      }
+      for (const auto& part_id : node.static_meta.partition_ids) {
+        auto& partition = partition_locks.at(part_id);
+        auto& global = partition->partition_global_meta;
+        if (node.future_mapped) {
+          global.res_total -= node.res_total;
+          if (node.alive) global.res_avail -= node.res_avail;
+          global.res_total_inc_dead -= node.static_meta.res;
         }
+        if (node.alive) --global.alive_craned_cnt;
+        if (!reset_to_future) {
+          partition->craned_ids.erase(id);
+          global.node_cnt = partition->craned_ids.size();
+          global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
+        }
+      }
+      if (reset_to_future) {
+        CranedMeta future_node;
+        future_node.static_meta = std::move(node.static_meta);
+        future_node.static_meta.node_hostname = id;
+        future_node.static_meta.node_addr = id;
+        future_node.res_total = future_node.static_meta.res;
+        future_node.res_avail = future_node.static_meta.res;
+        future_node.remote_meta.craned_version = "unknown";
+        future_node.remote_meta.sys_rel_info.name = "unknown";
+        node = std::move(future_node);
+      } else {
+        node.alive = false;
       }
     }
   }
-  if (error.empty()) {
-    // Erasing takes the node map write lock; release metadata locks first.
-    if (!reset_to_future) craned_meta_map_.Erase(id);
-    AddResReduceEventsAndUnlock(
-        {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{id})});
-  } else {
+  if (changed_ids.empty()) {
     UnlockResReduceEvents();
+    return errors;
   }
-  return error;
+  // Erasing takes the node map write lock; release metadata locks first.
+  if (!reset_to_future)
+    for (const auto& id : changed_ids) craned_meta_map_.Erase(id);
+  AddResReduceEventsAndUnlock({std::make_pair(
+      absl::InfinitePast(),
+      std::vector<CranedId>(changed_ids.begin(), changed_ids.end()))});
+  return errors;
 }
 
 std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
@@ -1469,13 +1499,10 @@ std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
     return selected_id;
   }
 
-  // Pick the matching node with the smallest hostname for deterministic
-  // mapping.
+  std::vector<CranedId> candidates;
   {
     auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
     for (const auto& [craned_id, craned_meta_ptr] : *craned_map) {
-      if (!selected_id.empty() && craned_id >= selected_id) continue;
-
       auto craned_meta = craned_meta_ptr.GetExclusivePtr();
       const auto& static_meta = craned_meta->static_meta;
       if (!static_meta.flags[NodeFlags::Future] || craned_meta->future_mapped)
@@ -1495,20 +1522,28 @@ std::expected<CranedId, std::string> CranedMetaContainer::MatchFutureNode(
           static_cast<double>(static_meta.res.GetMemoryBytes()) / kBytesPerGB;
       if (real_mem_gb + kMemoryToleranceGB < config_mem_gb) continue;
 
-      selected_id = craned_id;
+      candidates.emplace_back(craned_id);
     }
   }
 
-  if (selected_id.empty()) {
+  if (candidates.empty()) {
     return std::unexpected(
         fmt::format("No matching unmapped FUTURE node (cpu: {}, mem: {:.3f}GB, "
                     "feature: '{}').",
                     request.cpu(), real_mem_gb, request.feature()));
   }
 
-  if (NodeHostnameConflicts_(selected_id, request.hostname()))
+  // Pick the matching node with the smallest hostname for deterministic
+  // mapping, skipping nodes whose NodeHostname would conflict with another
+  // node. If the hostname is a NodeName, only that node itself can be chosen.
+  std::ranges::sort(candidates);
+  auto candidate_it = std::ranges::find_if(candidates, [&](const auto& id) {
+    return !NodeHostnameConflicts_(id, request.hostname());
+  });
+  if (candidate_it == candidates.end())
     return std::unexpected(fmt::format("Hostname {} is used by another node.",
                                        request.hostname()));
+  selected_id = *candidate_it;
 
   if (!persist_mapping(selected_id))
     return std::unexpected("Failed to persist FUTURE mapping.");

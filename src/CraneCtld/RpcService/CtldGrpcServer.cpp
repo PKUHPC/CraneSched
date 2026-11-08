@@ -1960,6 +1960,19 @@ crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
   response.set_ok(true);
   return response;
 }
+
+// A node filter matches the logical NodeName itself and, if it is a
+// NodeHostname, the node currently using it. Keeping the original name lets
+// history recorded under a deleted NodeName stay queryable after the name is
+// reused as another node's NodeHostname.
+void AddCranedIdsOfAliases(
+    google::protobuf::RepeatedPtrField<std::string>* nodes) {
+  const int size = nodes->size();
+  for (int i = 0; i < size; ++i) {
+    auto craned_id = ResolveCranedIdAlias(nodes->Get(i));
+    if (craned_id != nodes->Get(i)) nodes->Add(std::move(craned_id));
+  }
+}
 }  // namespace
 
 grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
@@ -1990,8 +2003,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
                                                      : request->num_limit();
   const size_t probe_limit = num_limit + 1;
   auto normalized_request = *request;
-  for (auto& node : *normalized_request.mutable_filter_nodename_list())
-    node = ResolveCranedIdAlias(node);
+  AddCranedIdsOfAliases(normalized_request.mutable_filter_nodename_list());
   request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
@@ -3475,10 +3487,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
 
   crane::grpc::QueryJobSizeSummaryRequest normalized_request = *request;
-  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
-    normalized_request.set_filter_nodename_list(
-        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
-  }
+  AddCranedIdsOfAliases(normalized_request.mutable_filter_nodename_list());
 
   bool ok = g_db_client->QueryJobSizeSummary(&normalized_request, writer);
   if (!ok) {
