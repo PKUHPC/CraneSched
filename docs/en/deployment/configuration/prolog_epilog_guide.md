@@ -73,7 +73,7 @@ Configuration Example:
 JobLifecycleHook:
   Prolog: /path/to/prolog.sh
   PrologTimeout: 60
-  # PrologFlags: Contain  # Contain, RunInJob, Serial
+  # PrologFlags: RunInJob  # Contain (compatibility flag), RunInJob, Serial
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
@@ -90,14 +90,19 @@ JobLifecycleHook:
 # Prolog Flags
 
 ### **Contain**
-Runs Prolog inside job cgroup at allocation time.
+Retained for configuration compatibility. Setting this flag alone has the same
+behavior as setting no flags. Crane always creates a daemon step for each job;
+with PAM configured, SSH and other external processes can be adopted into the
+daemon step's user-process cgroup. These capabilities do not depend on this flag.
+`Contain` does not change when or where Prolog/Epilog runs and does not migrate
+Prolog into the job cgroup. Use `RunInJob` to execute these scripts within the job.
 
 [//]: # (### **ForceRequeueOnFail**)
 
 [//]: # (Requeue batch jobs that fail due to Prolog errors, even if not requested.)
 
 ### **RunInJob**
-Runs Prolog/Epilog inside extern csupervisor, included in job cgroup.  
+Runs Prolog/Epilog through the daemon step's csupervisor, within the job cgroup.
 Implies **Contain**.
 
 ### **Serial**

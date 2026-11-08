@@ -87,7 +87,7 @@ echo "print This message has been printed with TaskProlog"
 JobLifecycleHook:
   Prolog: /path/to/prolog.sh
   PrologTimeout: 60
-  # PrologFlags: Contain #Contain, RunInJob, Serial
+  # PrologFlags: RunInJob # Contain（兼容标志）、RunInJob、Serial
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60 
   PrologEpilogTimeout: 120
@@ -103,14 +103,18 @@ JobLifecycleHook:
 用于控制 Prolog 行为的标志。默认情况下没有设置任何标志。可以用逗号分隔的列表指定多个标志。目前支持的选项包括：
 
 - **Contain**  
-  在作业分配时，Prolog 脚本会在作业的cgroup下执行。
+  为配置兼容性保留的标志，单独设置它与不设置标志的行为相同。
+  Crane 始终为作业创建 daemon step；配置 PAM 后，SSH 等外部进程可被接管到
+  daemon step 的用户进程 cgroup，这些能力不依赖此标志。
+  `Contain` 不改变 Prolog/Epilog 的执行时机或执行位置，也不会将 Prolog
+  迁移到作业 cgroup。需要在作业内执行这些脚本时，请使用 `RunInJob`。
 
 [//]: # (- **ForceRequeueOnFail**  )
 
 [//]: # (  当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。)
 
 - **RunInJob**  
-  使 Prolog/Epilog 在 extern csupervisor 进程中运行。
+  使 Prolog/Epilog 由 daemon step 的 csupervisor 执行。
   这将把其包含为作业的进程之一。
   如果配置了 cgroup，则会被包含在 cgroup 中。
   设置 RunInJob 标志会隐式地设置 Contain 标志。

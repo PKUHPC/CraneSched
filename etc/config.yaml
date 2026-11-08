@@ -140,6 +140,8 @@ EnableSlurmCompatibleEnv: false
 #JobLifecycleHook:
 #  Prolog: /path/to/prolog.sh
 #  PrologTimeout: 60
+#  # Contain is accepted for compatibility; daemon/PAM behavior is unchanged.
+#  # Use RunInJob to execute Prolog/Epilog in the daemon supervisor.
 #  PrologFlags: Contain
 #  Epilog: /path/to/epilog.sh
 #  EpilogTimeout: 60
