@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <mutex>
 #include <thread>
 
@@ -88,76 +89,38 @@ class PrologEpilogRunnerTest : public PrologEpilogTest,
   }
 };
 
-TEST_P(PrologEpilogRunnerTest, ParentSetupCompletesBeforeEveryScript) {
-  auto script = Script("check.sh",
-                       "read ready < \"$MARKER\"\n"
-                       "[ \"$ready\" = \"$$\" ] || exit 7\n"
-                       "printf 'ready\\n'");
-  auto args = Args({script, script});
-  auto marker = m_dir_ / "ready";
-  args.envs.emplace("MARKER", marker.string());
-  const pid_t parent = getpid();
-  std::vector<pid_t> children;
-  args.at_parent_setup_cb = [&](pid_t pid) {
-    // This fails promptly with the old child-side callback, without using
-    // the child's inherited C++ runtime or requiring a running cluster.
-    if (getpid() != parent || pid == parent) return false;
-    children.push_back(pid);
-    std::this_thread::sleep_for(30ms);
-    std::ofstream file(marker);
-    file << pid << '\n';
-    file.close();
-    return file.good();
-  };
+TEST_P(PrologEpilogRunnerTest, InheritsCallerCgroup) {
+  std::ifstream cgroup_file("/proc/self/cgroup");
+  ASSERT_TRUE(cgroup_file.is_open());
+  std::string caller_cgroup{std::istreambuf_iterator<char>(cgroup_file),
+                            std::istreambuf_iterator<char>()};
+  auto args = Args({Script("cgroup.sh", "exec /bin/cat /proc/self/cgroup")});
 
   auto result = Run(std::move(args));
 
   ASSERT_TRUE(result.ok);
-  EXPECT_EQ(result.output, "ready\nready\n");
-  ASSERT_EQ(children.size(), 2);
-  for (pid_t pid : children) {
-    int status;
-    EXPECT_EQ(waitpid(pid, &status, WNOHANG), -1);
-    EXPECT_EQ(errno, ECHILD);
-  }
+  EXPECT_EQ(result.output, caller_cgroup);
 }
 
-TEST_P(PrologEpilogRunnerTest, SetupFailurePreventsExecAndRemainingScripts) {
-  auto marker = m_dir_ / "executed";
-  auto script = Script("record.sh", ": > \"$MARKER\"");
-  auto args = Args({script, script});
+TEST_P(PrologEpilogRunnerTest, RunsScriptsInOrder) {
+  auto marker = m_dir_ / "ready";
+  auto first = Script("first.sh",
+                      "printf 'ready\\n' > \"$MARKER\"\n"
+                      "printf 'first\\n'");
+  auto second = Script("second.sh",
+                       "read ready < \"$MARKER\"\n"
+                       "[ \"$ready\" = ready ] || exit 7\n"
+                       "printf 'second\\n'");
+  auto args = Args({first, second});
   args.envs.emplace("MARKER", marker.string());
-  int calls = 0;
-  args.at_parent_setup_cb = [&](pid_t) {
-    ++calls;
-    return false;
-  };
 
   auto result = Run(std::move(args));
 
-  EXPECT_FALSE(result.ok);
-  EXPECT_EQ(result.exit_code, EXIT_FAILURE);
-  EXPECT_EQ(calls, 1);
-  EXPECT_FALSE(std::filesystem::exists(marker));
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.output, "first\nsecond\n");
 }
 
-TEST_P(PrologEpilogRunnerTest, SetupConsumesTimeoutBudgetAndPreventsLateExec) {
-  auto marker = m_dir_ / "executed";
-  auto args = Args({Script("record.sh", ": > \"$MARKER\"")});
-  args.envs.emplace("MARKER", marker.string());
-  args.timeout_sec = 1;
-  args.at_parent_setup_cb = [](pid_t) {
-    std::this_thread::sleep_for(1100ms);
-    return true;
-  };
-
-  auto result = Run(std::move(args));
-
-  EXPECT_FALSE(result.ok);
-  EXPECT_FALSE(std::filesystem::exists(marker));
-}
-
-TEST_P(PrologEpilogRunnerTest, NoSetupPreservesEnvironmentAndOutput) {
+TEST_P(PrologEpilogRunnerTest, PreservesEnvironmentAndOutput) {
   auto args = Args({Script("output.sh",
                            "printf '%s' \"$VALUE\"\n"
                            "printf ' stderr' >&2")});
@@ -169,55 +132,41 @@ TEST_P(PrologEpilogRunnerTest, NoSetupPreservesEnvironmentAndOutput) {
   EXPECT_EQ(result.output, "prolog-output stderr");
 }
 
-TEST_P(PrologEpilogRunnerTest, ScriptFailurePreservesExitStatus) {
-  auto args = Args({Script("failure.sh", "exit 7")});
-  args.at_parent_setup_cb = [](pid_t) { return true; };
+TEST_P(PrologEpilogRunnerTest, ScriptFailureStopsRemainingScripts) {
+  auto marker = m_dir_ / "executed";
+  auto args = Args(
+      {Script("failure.sh", "exit 7"), Script("record.sh", ": > \"$MARKER\"")});
+  args.envs.emplace("MARKER", marker.string());
 
   auto result = Run(std::move(args));
 
   EXPECT_FALSE(result.ok);
   EXPECT_EQ(result.exit_code, 7);
   EXPECT_EQ(result.signal_num, 0);
+  EXPECT_FALSE(std::filesystem::exists(marker));
 }
 
 TEST_P(PrologEpilogRunnerTest, ScriptTimeoutStillReapsChild) {
-  auto args = Args({Script("wait.sh", "exec /bin/sleep 10")});
+  auto pid_file = m_dir_ / "pid";
+  auto args = Args({Script("wait.sh",
+                           "printf '%s\\n' \"$$\" > \"$PID_FILE\"\n"
+                           "exec /bin/sleep 10")});
+  args.envs.emplace("PID_FILE", pid_file.string());
   args.timeout_sec = 1;
-  pid_t child = -1;
-  args.at_parent_setup_cb = [&](pid_t pid) {
-    child = pid;
-    return true;
-  };
 
   auto result = Run(std::move(args));
 
   EXPECT_FALSE(result.ok);
   EXPECT_NE(result.signal_num, 0);
+  pid_t child = -1;
+  std::ifstream(pid_file) >> child;
   ASSERT_GT(child, 0);
   int status;
   EXPECT_EQ(waitpid(child, &status, WNOHANG), -1);
   EXPECT_EQ(errno, ECHILD);
 }
 
-TEST_P(PrologEpilogRunnerTest, ChildExitDuringSetupDoesNotRaiseSigpipe) {
-  auto marker = m_dir_ / "executed";
-  auto args = Args({Script("record.sh", ": > \"$MARKER\"")});
-  args.envs.emplace("MARKER", marker.string());
-  args.at_parent_setup_cb = [](pid_t pid) {
-    kill(pid, SIGKILL);
-    // Let the child close its socket before the parent sends the reply.
-    std::this_thread::sleep_for(50ms);
-    return true;
-  };
-
-  auto result = Run(std::move(args));
-
-  EXPECT_FALSE(result.ok);
-  EXPECT_EQ(result.signal_num, SIGKILL);
-  EXPECT_FALSE(std::filesystem::exists(marker));
-}
-
-TEST_F(PrologEpilogTest, CranedWatcherDeliversExitAfterParentSetup) {
+TEST_F(PrologEpilogTest, CranedWatcherDeliversExit) {
   auto args = Args({Script("success.sh", "printf 'done'")});
   ChildExitWatcher watcher;
   std::mutex fork_reap_mutex;
@@ -233,11 +182,6 @@ TEST_F(PrologEpilogTest, CranedWatcherDeliversExitAfterParentSetup) {
     auto future = watcher.Watch(pid);
     child.store(pid);
     return std::make_pair(pid, std::move(future));
-  };
-  args.at_parent_setup_cb = [&](pid_t pid) {
-    // Setup must execute after fork-and-watch releases the reaper's lock.
-    std::unique_lock lock(fork_reap_mutex);
-    return pid == child.load();
   };
   std::thread reaper([&] {
     while (!stop.load()) {
