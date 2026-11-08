@@ -337,6 +337,11 @@ EnvMap StepInstance::GetStepProcessEnv() const {
     env_map.emplace("SHELL", pwd.Shell());
   }
 
+  if (IsPrimary() && (IsBatch() || m_step_to_supv_.has_batch_meta())) {
+    env_map.insert_or_assign("ENVIRONMENT", "BATCH");
+    env_map.insert_or_assign("HOSTNAME", g_config.CranedIdOfThisNode);
+  }
+
   int64_t time_limit_sec = m_step_to_supv_.time_limit().seconds();
   int64_t hours = time_limit_sec / 3600;
   int64_t minutes = (time_limit_sec % 3600) / 60;
@@ -372,6 +377,7 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 
   // SLURM
   if (g_config.EnableSlurmCompatibleEnv) {
+    if (pwd.Valid()) env_map.insert_or_assign("SLURM_JOB_USER", pwd.Username());
     const auto slurm_nodelist = absl::StrJoin(m_step_to_supv_.nodelist(), ",");
     ResourceInNodeV3 step_res(m_step_to_supv_.res());
     const cpu_t cpus_on_node = step_res.GetCpuSet().cpu_count;
@@ -687,6 +693,9 @@ void ProcInstance::InitEnvMap() {
   }
   m_env_.insert_or_assign("CRANE_PROCID", std::to_string(task_id));
   m_env_.insert_or_assign("CRANE_PROC_ID", std::to_string(task_id));
+
+  if (g_config.EnableSlurmCompatibleEnv)
+    m_env_.insert_or_assign("SLURM_TASK_PID", std::to_string(getpid()));
 
   if (m_parent_step_inst_->IsCrun() &&
       m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
