@@ -8,11 +8,10 @@ PMIx 仍通过 `--mpi=pmix` 选择。协议取决于 MPI 的实际构建配置�
 `CRANE_ENABLE_PMI2` 默认 ON，与 `CRANE_ENABLE_PMIX` 独立。关闭时提交 PMI-2 作业或 step 会在准入阶段报错。
 控制端、计算端和 `crun` 应部署支持该协议的同一产品版本；新增内部 RPC 不代表旧版本支持 PMI-2。
 
-`craned` 软件包包含 PMI-2 客户端及其许可文件。构建会生成只导出 `PMI2_*` 的 `libpmi2.so`，安装在
+`craned` 软件包包含 CraneSched 自有的 PMI-2 客户端。构建会生成只导出标准 PMI-2 接口的 `libpmi2.so`，安装在
 `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/crane/pmi2/`。
 例如 `/usr` 前缀和 `lib64` 目录对应 `/usr/lib64/crane/pmi2/libpmi2.so`。
-头文件在 `${prefix}/include/crane/pmi2/pmi2.h`；来源与许可随安装产物保存。
-该库使用独立的私有目录，无需替换系统 PMI 库，也不依赖 Slurm 守护进程。
+头文件在 `${prefix}/include/crane/pmi2/pmi2.h`。该库使用独立的私有目录，无需替换系统 PMI 库，也不依赖 Slurm 守护进程。
 
 ## 使用
 

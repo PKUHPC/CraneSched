@@ -9,10 +9,9 @@ A disabled protocol is rejected when submitting a job or step. Deploy matching
 controller, compute and frontend versions; older versions do not gain PMI-2
 support merely because the internal RPC additions are wire compatible.
 
-The `craned` package includes the PMI-2 client and license notices. The build installs `libpmi2.so`, exporting only `PMI2_*`, under
+The `craned` package includes CraneSched's native PMI-2 client. The build installs `libpmi2.so`, exporting the standard PMI-2 interface, under
 `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/crane/pmi2/`, and the public
-header under `${prefix}/include/crane/pmi2/`. Source and license notices are
-installed as well. This private directory preserves system PMI installations;
+header under `${prefix}/include/crane/pmi2/`. This private directory preserves system PMI installations;
 no Slurm daemon is required.
 
 Compile with the intended MPI wrapper, deploy its runtime libraries to every
