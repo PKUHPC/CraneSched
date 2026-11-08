@@ -1,0 +1,51 @@
+/**
+ * Copyright (c) 2026 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.pmi2;
+
+// These messages are supervisor-to-supervisor control traffic. Application
+// ranks use the standard PMI-2 socket protocol, not this internal transport.
+message FenceRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  uint64 epoch = 3;
+  string craned_id = 4;
+  map<string, string> kvs = 5;
+}
+
+message FenceReply {
+  bool ok = 1;
+  map<string, string> kvs = 2;
+}
+
+message AbortRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  string craned_id = 3;
+}
+
+message AbortReply {
+  bool ok = 1;
+}
+
+service Pmi2 {
+  rpc Fence(FenceRequest) returns (FenceReply);
+  rpc Abort(AbortRequest) returns (AbortReply);
+}

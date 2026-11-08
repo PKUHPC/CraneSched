@@ -42,7 +42,7 @@ crane_enable_ipo(cranectld)
 
 # Admission must advertise the same PMIx capability as CSupervisor, without
 # linking the PMIx server library into the controller.
-target_compile_definitions(cranectld PRIVATE $<$<BOOL:${CRANE_ENABLE_PMIX}>:HAVE_PMIX>)
+target_compile_definitions(cranectld PRIVATE $<$<BOOL:${CRANE_ENABLE_PMIX}>:HAVE_PMIX> $<$<BOOL:${CRANE_ENABLE_PMI2}>:HAVE_PMI2>)
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 

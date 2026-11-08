@@ -202,6 +202,9 @@ class CtldClient {
   void BroadcastPmixPort(const crane::grpc::BroadcastPmixPortRequest& request,
                          crane::grpc::BroadcastPmixPortReply* response);
 
+  void BroadcastPmi2Port(const crane::grpc::BroadcastPmi2PortRequest& request,
+                         crane::grpc::BroadcastPmi2PortReply* response);
+
   // Convenience method for reporting status changes
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,

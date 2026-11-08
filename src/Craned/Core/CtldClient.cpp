@@ -969,6 +969,20 @@ void CtldClient::BroadcastPmixPort(
   }
 }
 
+void CtldClient::BroadcastPmi2Port(
+    const crane::grpc::BroadcastPmi2PortRequest& request,
+    crane::grpc::BroadcastPmi2PortReply* response) {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+
+  grpc::Status status = m_stub_->BroadcastPmi2Port(&context, request, response);
+  if (!status.ok()) {
+    CRANE_ERROR("BroadcastPmi2Port failed: {}, {}",
+                static_cast<int>(status.error_code()), status.error_message());
+  }
+}
+
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                                        crane::grpc::JobStatus new_status,
                                        uint32_t exit_code,

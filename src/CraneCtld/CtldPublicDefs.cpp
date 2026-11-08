@@ -1698,6 +1698,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
 
+    if (this->IsPmi2()) {
+      g_job_scheduler->GetPmi2PortsMetaMap().erase({job_id, step_id});
+    }
     if (this->IsPmix()) {
       g_job_scheduler->GetPmixPortsMetaMap().erase({job_id, step_id});
       CRANE_DEBUG("[Step #{}.{}] Erased PMIx port meta for this step.", job_id,

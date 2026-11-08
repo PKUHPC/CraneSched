@@ -24,7 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
-#include "Pmix.h"
+#include "Mpi.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
@@ -101,7 +101,7 @@ class StepInstance {
 
   crane::ManualSpan execute_span_;
   crane::ManualSpan& ExecuteSpan() { return execute_span_; }
-  std::unique_ptr<pmix::PmixServer> pmix_server;
+  std::unique_ptr<mpi::Runtime> mpi_runtime;
 
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
@@ -564,6 +564,8 @@ class ProcInstance : public ITaskInstance {
   std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
 
+  std::optional<mpi::LaunchInfo> m_mpi_launch_;
+
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
   std::vector<std::string> m_arguments_;  // NOTE: Not used currently.
 };
@@ -580,6 +582,9 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void SupervisorFinishInit(StepStatus status);
+
+  bool ReceivePmi2Port(
+      const crane::grpc::supervisor::ReceivePmi2PortRequest& request);
 
   bool ReceivePmixPort(
       const crane::grpc::supervisor::ReceivePmixPortRequest& request);

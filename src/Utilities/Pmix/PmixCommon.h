@@ -27,23 +27,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Mpi.h"
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
 
 namespace pmix {
 
-struct Config {
-  bool UseTls{false};
-  TlsCertificates TlsCerts;
-  bool CompressedRpc;
-  std::filesystem::path CraneBaseDir;
-  std::filesystem::path CraneScriptDir;
-  std::filesystem::path CranedUnixSocketPath;
-  CranedId CranedIdOfThisNode;
-  std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;
-  std::unordered_map<CranedId, std::string> CranedIdToNodeAddr;
-  bool EnableSlurmCompatibleEnv{false};
-};
+using Config = mpi::Config;
 
 struct PmixStepInfo {
   uint32_t uid{};

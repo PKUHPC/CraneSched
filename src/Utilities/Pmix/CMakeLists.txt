@@ -31,7 +31,7 @@ add_library(Utility_Pmix
         ReverseTree.h
         ReverseTree.cpp)
 
-target_include_directories(Utility_Pmix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(Utility_Pmix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../Mpi)
 target_link_libraries(Utility_Pmix PUBLIC
         concurrentqueue
         spdlog::spdlog

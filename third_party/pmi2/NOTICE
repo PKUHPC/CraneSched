@@ -1,0 +1,7 @@
+PMI2 client library from SchedMD Slurm, tag slurm-25-11-8-1,
+commit c318b34c93dcb1e797e8ecf4e68d9250bff962c9, contribs/pmi2/.
+Upstream: https://github.com/SchedMD/slurm
+
+The source files and headers retain their original notices. See COPYRIGHT for
+the Argonne National Laboratory license. The client library is built separately
+and does not link to Slurm libraries or require a Slurm daemon.
