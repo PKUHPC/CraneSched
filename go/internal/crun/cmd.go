@@ -185,5 +185,5 @@ func init() {
 	RootCmd.Flags().StringVarP(&FlagTaskProlog, "task-prolog", "", "", "Task prolog of the job")
 	RootCmd.Flags().StringVarP(&FlagTaskEpilog, "task-epilog", "", "", "Task epilog of the job")
 	RootCmd.Flags().StringVarP(&FlagSignal, "signal", "s", "", "Send signal when time limit within time seconds, format: [{R}:]<sig_num>[@sig_time]")
-	RootCmd.Flags().StringVarP(&FlagMpi, "mpi", "", "", "MPI used for the job")
+	RootCmd.Flags().StringVarP(&FlagMpi, "mpi", "", "", "MPI process management protocol: pmix or pmi2 (default: disabled)")
 }

@@ -271,6 +271,32 @@ CraneErrCode SupervisorStub::ReceivePmixPort(
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode SupervisorStub::ReceivePmi2Port(
+    const std::vector<std::pair<CranedId, std::string>>& pmi2_ports) {
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(5));
+  crane::grpc::supervisor::ReceivePmi2PortRequest request;
+  crane::grpc::supervisor::ReceivePmi2PortReply reply;
+
+  auto pmi2_port_list = request.mutable_pmi2_ports();
+  for (const auto& pmi2_port : pmi2_ports) {
+    auto pmi2_port_req = pmi2_port_list->Add();
+    pmi2_port_req->set_craned_id(pmi2_port.first);
+    pmi2_port_req->set_port(pmi2_port.second);
+  }
+
+  auto ok = m_stub_->ReceivePmi2Port(&context, request, &reply);
+  if (!ok.ok() || !reply.ok()) {
+    CRANE_ERROR("ReceivePmi2Port failed: reply {},{}, request size {}, ok {}",
+                reply.ok(), ok.error_message(), request.pmi2_ports().size(),
+                ok.ok());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 void SupervisorStub::InitChannelAndStub_(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.

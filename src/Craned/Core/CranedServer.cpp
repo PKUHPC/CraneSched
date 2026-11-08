@@ -715,6 +715,21 @@ grpc::Status CranedServiceImpl::BroadcastPmixPort(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::BroadcastPmi2Port(
+    grpc::ServerContext *context,
+    const crane::grpc::BroadcastPmi2PortRequest *request,
+    crane::grpc::BroadcastPmi2PortReply *response) {
+  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  g_ctld_client->BroadcastPmi2Port(*request, response);
+
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::ReceivePmixPort(
     grpc::ServerContext *context,
     const crane::grpc::ReceivePmixPortRequest *request,
@@ -736,11 +751,33 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
               request->job_id(), request->step_id(), pmix_ports.size());
   bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(),
                                        request->step_id());
-  if (!ok) {
-    response->set_ok(false);
-  } else {
-    response->set_ok(true);
+  response->set_ok(ok);
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ReceivePmi2Port(
+    grpc::ServerContext *context,
+    const crane::grpc::ReceivePmi2PortRequest *request,
+    crane::grpc::ReceivePmi2PortReply *response) {
+  std::vector<std::pair<CranedId, std::string>> pmi2_ports;
+  for (const auto &pmi2_port : request->pmi2_ports()) {
+    if (pmi2_port.craned_id() == g_config.CranedIdOfThisNode) {
+      CRANE_TRACE(
+          "[Step{}.{}] ReceivePmi2Port: Ignore pmi2 port {} for self craned id "
+          "{}",
+          request->job_id(), request->step_id(), pmi2_port.port(),
+          pmi2_port.craned_id());
+      continue;
+    }
+    pmi2_ports.emplace_back(pmi2_port.craned_id(), pmi2_port.port());
   }
+
+  CRANE_TRACE("[Step{}.{}] Delivering {} pmi2 ports to supervisor",
+              request->job_id(), request->step_id(), pmi2_ports.size());
+  bool ok = g_job_mgr->ReceivePmi2Port(pmi2_ports, request->job_id(),
+                                       request->step_id());
+  response->set_ok(ok);
 
   return Status::OK;
 }

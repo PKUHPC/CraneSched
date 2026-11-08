@@ -1,6 +1,9 @@
 add_subdirectory(CraneCtld)
 add_subdirectory(Craned)
 add_subdirectory(Utilities)
+if (CRANE_ENABLE_PMI2)
+    add_subdirectory(Pmi2)
+endif ()
 add_subdirectory(Misc)
 # Tests are intentionally excluded from the default build.  Keep one explicit
 # aggregate target so CI can build every registered unit-test executable
@@ -18,6 +21,9 @@ set(CRANE_UNIT_TEST_TARGETS
     misc_cgroup_v2_fs_test
     misc_pam_util_test
 )
+if (CRANE_ENABLE_PMI2)
+    list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test)
+endif ()
 if (TARGET misc_tracer_manager_test)
     list(APPEND CRANE_UNIT_TEST_TARGETS misc_tracer_manager_test)
 endif ()

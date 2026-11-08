@@ -118,6 +118,16 @@ grpc::Status SupervisorServiceImpl::ReceivePmixPort(
   return Status::OK;
 }
 
+grpc::Status SupervisorServiceImpl::ReceivePmi2Port(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::ReceivePmi2PortRequest* request,
+    crane::grpc::supervisor::ReceivePmi2PortReply* response) {
+  CRANE_TRACE("Received ReceivePmi2Port gRPC with {} pmi2 ports.",
+              request->pmi2_ports().size());
+  response->set_ok(g_task_mgr->ReceivePmi2Port(*request));
+  return Status::OK;
+}
+
 grpc::Status SupervisorServiceImpl::MigrateSshProcToCgroup(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::MigrateSshProcToCgroupRequest* request,
