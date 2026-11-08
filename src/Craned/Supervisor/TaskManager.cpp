@@ -1351,6 +1351,9 @@ CraneErrCode ProcInstance::SetChildProcEnv_() const {
       fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
                  name, value);
 
+  if (setenv("TMPDIR", "/tmp", 0) != 0)
+    fmt::print(stderr, "[Subprocess] Warning: setenv() for TMPDIR failed.\n");
+
   return CraneErrCode::SUCCESS;
 }
 
