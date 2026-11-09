@@ -746,17 +746,6 @@ std::expected<std::string, RunPrologEpilogStatus> RunPrologOrEpiLog(
       // signals to the entire group (child + any grandchildren it spawns).
       setpgid(0, 0);
 
-      // Optional caller-supplied callback executed in the child context
-      // (e.g., to move the child into a cgroup before exec).
-      // TODO: move to parent
-      if (args.at_child_setup_cb) {
-        if (!args.at_child_setup_cb(getpid())) {
-          const char msg[] = "[Subprocess] child setup callback failed\n";
-          write(STDERR_FILENO, msg, sizeof(msg) - 1);
-          _exit(EXIT_FAILURE);
-        }
-      }
-
       // Drop to the requested group and user credentials before executing
       // the script.  Group must be dropped first (setgid fails after setuid
       // on most Linux configurations).

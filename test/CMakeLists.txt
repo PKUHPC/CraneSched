@@ -14,6 +14,7 @@ set(CRANE_UNIT_TEST_TARGETS
     ctld_public_defs_test
     dedicated_resource_test
     public_header_test
+    prolog_epilog_test
     misc_unqlite_test
     misc_cgroup_v2_fs_test
     misc_pam_util_test

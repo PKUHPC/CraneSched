@@ -1754,12 +1754,8 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
       return std::make_pair(pid, m_exit_watcher_.Watch(pid));
     };
 
-    if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-      args.at_child_setup_cb = [this, job_id](pid_t pid) {
-        return MigrateProcToCgroupOfJob(pid, job_id);
-      };
-    }
-
+    // Contain is a compatibility flag: daemon steps already provide external
+    // process adoption. Only RunInJob moves hook execution to the supervisor.
     if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
       args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
 

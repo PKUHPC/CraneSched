@@ -206,14 +206,6 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
     CloseFdInChild_();
     setpgid(0, 0);
 
-    if (run.args.at_child_setup_cb) {
-      if (!run.args.at_child_setup_cb(getpid())) {
-        const char msg[] = "[Subprocess] child setup callback failed\n";
-        write(STDERR_FILENO, msg, sizeof(msg) - 1);
-        _exit(EXIT_FAILURE);
-      }
-    }
-
     if (setgid(run.args.run_gid) != 0) {
       const char msg[] = "[Subprocess] setgid failed\n";
       write(STDERR_FILENO, msg, sizeof(msg) - 1);
