@@ -84,4 +84,11 @@ class Runtime {
 
 std::unique_ptr<Runtime> CreateRuntime(std::string_view protocol);
 
+// Remove inherited identity values from an enclosing MPI allocation and apply
+// the per-task values produced by the selected runtime. MPI implementation
+// settings supplied by a module (for example I_MPI_* or OMPI_MCA_*) are
+// intentionally preserved.
+void MergeLaunchEnvironment(std::unordered_map<std::string, std::string>& env,
+                            const LaunchInfo& launch);
+
 }  // namespace mpi

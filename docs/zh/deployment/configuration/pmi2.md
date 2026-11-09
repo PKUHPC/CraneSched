@@ -29,6 +29,12 @@ export I_MPI_PMI_LIBRARY=/usr/lib64/crane/pmi2/libpmi2.so
 crun -N 2 -n 4 --ntasks-per-node=2 --mpi=pmi2 ./intel_mpi_application
 ```
 
+`--mpi=pmi2` 选择的是 CraneSched 的 PMI-2 服务端协议，不会识别 MPI 厂商，也不会自动设置
+`I_MPI_PMI2` 或 `OMPI_MCA_ess`。Intel MPI 2017/2018 还需要显式选择 PMI-2 路径；WM1 测试镜像通过
+Environment Modules 提供 `intel-pmi2` profile，设置 `I_MPI_PMI2=1` 和匹配的客户端库。Open MPI 4
+的 PMI-2 构建通过 `openmpi-pmi2` profile 设置 `OMPI_MCA_ess=pmi`。每次更换 MPI 实现前执行
+`module purge`，测试后卸载当前 module；不要把两个实现的库路径混合到同一 shell。
+
 必须对实际安装的 Intel MPI 版本、客户端加载路径和网络 transport 做端到端验证。
 MPICH 需要以 PMI-2 构建。Open MPI 4 的 PMI 直接启动组件需要在构建时包含 PMI-2，
 必要时通过 `OMPI_MCA_ess=pmi` 选择；仅含 PMIx 的发行版构建应继续使用 `--mpi=pmix`。
