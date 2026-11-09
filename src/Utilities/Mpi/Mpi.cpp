@@ -19,6 +19,8 @@
 #include "Mpi.h"
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 
 #include "Pmix.h"
 #ifdef HAVE_PMI2
@@ -28,6 +30,19 @@
 
 namespace mpi {
 namespace {
+
+bool IsInheritedIdentityVariable(std::string_view name) {
+  static constexpr std::array<std::string_view, 12> kPmiIdentityVariables{
+      "PMI_FD",         "PMI_RANK",       "PMI_SIZE",       "PMI_JOBID",
+      "PMI_LOCAL_RANK", "PMI_LOCAL_SIZE", "PMI_PORT",       "PMI_SPAWNED",
+      "PMI_ID",         "PMIX_NAMESPACE", "PMIX_RANK",      "PMIX_SERVER_URI"};
+  return std::ranges::any_of(
+      kPmiIdentityVariables, [name](std::string_view prefix) {
+        return name == prefix ||
+               (prefix == "PMIX_SERVER_URI" && name.starts_with(prefix));
+      });
+}
+
 class PmixRuntime final : public Runtime {
  public:
   bool Init(const Config& config, const crane::grpc::StepToD& step) override {
@@ -136,5 +151,14 @@ std::unique_ptr<Runtime> CreateRuntime(std::string_view protocol) {
   if (protocol == kMpiTypePmi2) return std::make_unique<Pmi2Runtime>();
 #endif
   return nullptr;
+}
+
+void MergeLaunchEnvironment(std::unordered_map<std::string, std::string>& env,
+                            const LaunchInfo& launch) {
+  std::erase_if(env, [](const auto& item) {
+    return IsInheritedIdentityVariable(item.first);
+  });
+  for (const auto& [name, value] : launch.env)
+    env.insert_or_assign(name, value);
 }
 }  // namespace mpi

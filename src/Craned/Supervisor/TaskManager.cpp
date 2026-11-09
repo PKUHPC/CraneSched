@@ -703,17 +703,7 @@ void ProcInstance::InitEnvMap() {
   if (g_config.EnableSlurmCompatibleEnv)
     m_env_.insert_or_assign("SLURM_TASK_PID", std::to_string(getpid()));
 
-  if (m_mpi_launch_) {
-    // Keep tuning variables such as PMIX_MCA_*; discard only inherited
-    // connection/identity values belonging to the enclosing allocation.
-    std::erase_if(m_env_, [](const auto& item) {
-      const auto& key = item.first;
-      return key.starts_with("PMI_") || key == "PMIX_NAMESPACE" ||
-             key == "PMIX_RANK" || key.starts_with("PMIX_SERVER_URI");
-    });
-    for (const auto& [key, value] : m_mpi_launch_->env)
-      m_env_.insert_or_assign(key, value);
-  }
+  if (m_mpi_launch_) mpi::MergeLaunchEnvironment(m_env_, *m_mpi_launch_);
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,

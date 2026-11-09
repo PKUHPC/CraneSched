@@ -20,6 +20,7 @@ set(CRANE_UNIT_TEST_TARGETS
     misc_unqlite_test
     misc_cgroup_v2_fs_test
     misc_pam_util_test
+    mpi_environment_test
 )
 if (CRANE_ENABLE_PMI2)
     list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test pmi2_client_test)
